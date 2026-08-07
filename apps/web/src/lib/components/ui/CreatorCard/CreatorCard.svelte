@@ -4,13 +4,36 @@
   Displays a creator's profile. Three variants:
   - default: horizontal card with avatar, name, bio, social links
   - compact: minimal row layout for lists
-  - showcase: photo-dominant portrait card for creator directories
+  - showcase: one cell of a creators contact sheet
+
+  ## The showcase variant is a contact-sheet cell, not a hero
+
+  It used to be a 3:4 photo-dominant card that measured 444×858 in a two-column
+  grid — twelve creators made a 5,700px page and one creator per screen on
+  mobile. It is now a compact square cell so a directory reads as a directory:
+  many people at once, uniform rows, one glance.
+
+  Three things were deliberately REMOVED rather than restyled:
+
+  - **The content thumbnail strip.** Three 16:9 stills under a portrait make the
+    card read as a content card with an author attached — and on a somatic-
+    practice org one of those stills is itself a face, competing with the
+    portrait. Stills belong in the drawer, where they already live.
+  - **The per-type badges.** They were derived from `recentContent`, which the
+    service caps at four rows, so a creator with 22 videos rendered "4". The card
+    now states the true `contentCount` or says nothing.
+  - **The owner's featured treatment.** It swapped `aspect-ratio` 3:4 → 4:5,
+    which put sibling names 36px out of alignment in the same row (measured
+    nameTop 747 vs 783). Role belongs in the drawer's badge, not in geometry.
+
+  Every text row reserves its height, so the cell has a deterministic size and
+  uniform rows are a guarantee rather than a coincidence.
 
   @prop {string} username - Creator's unique username
   @prop {string} displayName - Creator's display name
-  @prop {string} avatar - Avatar image URL (lg variant used for showcase photo)
+  @prop {string} avatar - Avatar image URL
   @prop {string} bio - Optional biography text
-  @prop {number} contentCount - Number of content items
+  @prop {number} contentCount - Number of published items in this org
   @prop {{ website?: string; twitter?: string; youtube?: string; instagram?: string }} socialLinks - Social media links
   @prop {Snippet} actions - Action buttons snippet
   @prop {'default' | 'compact' | 'showcase'} variant - Display variant
@@ -19,17 +42,15 @@
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
   import type { Snippet } from 'svelte';
-  import type { ContentItem, SocialLinks } from './types';
+  import type { SocialLinks } from './types';
   import * as m from '$paraglide/messages';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
+  import CreatorPortrait from './CreatorPortrait.svelte';
   import {
     GlobeIcon,
     TwitterIcon,
     YoutubeIcon,
     InstagramIcon,
-    FilmIcon,
-    MicIcon,
-    FileTextIcon,
   } from '$lib/components/ui/Icon';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -38,11 +59,9 @@
     avatar?: string | null;
     bio?: string | null;
     contentCount?: number;
-    /** Creator's role in the org — 'owner' gets featured treatment */
+    /** Creator's role in the org. Surfaced by the drawer, not by the card. */
     role?: string;
     socialLinks?: SocialLinks | null;
-    /** Recent content items (showcase: shown as thumbnail strip on card) */
-    recentContent?: ContentItem[];
     /** Override profile link URL (for cross-subdomain navigation) */
     profileUrl?: string;
     /** Click handler — used by showcase variant to open drawer */
@@ -59,7 +78,6 @@
     contentCount,
     role,
     socialLinks,
-    recentContent = [],
     profileUrl,
     onclick,
     actions,
@@ -70,102 +88,55 @@
 
   const profileHref = $derived(profileUrl ?? `/@${username}`);
   const initial = $derived(displayName.charAt(0).toUpperCase());
-  const isOwner = $derived(role === 'owner');
-
-  /** Content type breakdown from recentContent for type icons */
-  const contentTypes = $derived.by(() => {
-    if (!recentContent.length) return [];
-    const counts = new Map<string, number>();
-    // Use recentContent to infer types, but base on total contentCount
-    for (const item of recentContent) {
-      counts.set(item.contentType, (counts.get(item.contentType) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).map(([type, count]) => ({ type, count }));
-  });
-
-  /** Up to 3 thumbnails for the card surface */
-  const cardThumbnails = $derived(
-    recentContent
-      .filter((item) => item.thumbnailUrl)
-      .slice(0, 3)
-  );
 </script>
 
 {#if variant === 'showcase'}
   <!-- ══════════════════════════════════════════════════════════
-       SHOWCASE: Soft padded card with photo, details, thumbnails
+       SHOWCASE: one contact-sheet cell
+       An <article> rather than a <li> so the component stays usable
+       outside a list; the directory supplies the <li> wrapper.
        ══════════════════════════════════════════════════════════ -->
-  <button
-    type="button"
-    class="showcase {className ?? ''}"
-    class:showcase--featured={isOwner}
-    onclick={onclick}
-  >
-    <!-- Photo area (3:4 portrait) -->
-    <div class="showcase__photo">
-      {#if avatar}
-        <img
-          src={avatar}
-          alt={displayName}
-          class="showcase__photo-img"
-          loading="lazy"
-          decoding="async"
-        />
-      {:else}
-        <div class="showcase__photo-fallback">
-          <span class="showcase__photo-initial">{initial}</span>
-        </div>
-      {/if}
-    </div>
+  <article class="showcase {className ?? ''}" {...rest}>
+    <CreatorPortrait src={avatar} name={displayName} />
 
-    <!-- Details below photo -->
     <div class="showcase__details">
-      <h3 class="showcase__name">{displayName}</h3>
+      <!--
+        The slot reserves two lines and BOTTOM-aligns the name inside them. The
+        reservation is what keeps every bio and count row in a grid row on the
+        same baseline; bottom-aligning is what stops a one-line name from leaving
+        a hole between itself and the bio. The slack lands above the name
+        instead, between two visually separate blocks, where it reads as spacing.
+        The extra element exists because `-webkit-line-clamp` requires
+        `display: -webkit-box`, which cannot also do the alignment.
+      -->
+      <div class="showcase__name-slot">
+        <!--
+          A real heading, outside the button. It used to be an <h3> INSIDE the
+          <button>, which is an invalid content model (button takes phrasing
+          content), flattened the heading out of the accessibility tree, and made
+          the button's accessible name the whole card read as one sentence.
+        -->
+        <h2 class="showcase__name">{displayName}</h2>
+      </div>
 
-      {#if username}
-        <p class="showcase__username">@{username}</p>
-      {/if}
+      <p class="showcase__practice">{bio ?? ''}</p>
 
-      {#if bio}
-        <p class="showcase__bio">{bio}</p>
-      {/if}
-
-      <!-- Content type breakdown with icons -->
-      {#if contentTypes.length > 0}
-        <div class="showcase__types">
-          {#each contentTypes as { type, count } (type)}
-            <span class="showcase__type-badge">
-              {#if type === 'video'}
-                <FilmIcon size={12} />
-              {:else if type === 'audio'}
-                <MicIcon size={12} />
-              {:else}
-                <FileTextIcon size={12} />
-              {/if}
-              {count}
-            </span>
-          {/each}
-        </div>
-      {:else if contentCount !== undefined && contentCount > 0}
-        <p class="showcase__count">{m.creator_content_count({ count: contentCount })}</p>
-      {/if}
+      <p class="showcase__count">
+        {#if contentCount !== undefined && contentCount > 0}
+          {m.creator_content_count({ count: contentCount })}
+        {/if}
+      </p>
     </div>
 
-    <!-- Content thumbnails strip -->
-    {#if cardThumbnails.length > 0}
-      <div class="showcase__thumbs">
-        {#each cardThumbnails as item (item.slug)}
-          <img
-            src={item.thumbnailUrl}
-            alt=""
-            class="showcase__thumb"
-            loading="lazy"
-            decoding="async"
-          />
-        {/each}
-      </div>
-    {/if}
-  </button>
+    <!-- Stretched hit area. Last in DOM so the heading is read first. -->
+    <button
+      type="button"
+      class="showcase__hit"
+      aria-haspopup="dialog"
+      aria-label={m.creator_view_profile({ name: displayName })}
+      onclick={onclick}
+    ></button>
+  </article>
 
 {:else}
   <!-- ══════════════════════════════════════════════════════════
@@ -266,169 +237,115 @@
 
 <style>
   /* ═══════════════════════════════════════════════════════════
-     SHOWCASE VARIANT — Soft, padded portrait card
-     Photo inset with rounded corners, soft background tint
+     SHOWCASE VARIANT — one contact-sheet cell
      ═══════════════════════════════════════════════════════════ */
   .showcase {
+    position: relative;
     display: flex;
     flex-direction: column;
-    background: var(--color-surface-secondary);
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    padding: var(--space-3);
-    text-align: left;
-    font: inherit;
-    color: inherit;
-    border: none;
-    width: 100%;
-    gap: var(--space-4);
-    transition:
-      box-shadow var(--duration-normal) var(--ease-default),
-      transform var(--duration-normal) var(--ease-default);
-  }
-
-  .showcase:hover {
-    box-shadow: var(--shadow-lg);
-    transform: translateY(calc(-1 * var(--space-0-5)));
-  }
-
-  .showcase:focus-visible {
-    outline: 2px solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
-  /* ── Photo area — inset with rounded corners ── */
-  .showcase__photo {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    overflow: hidden;
+    gap: var(--space-3);
+    /* Transparent until hovered. The repo convention is that cards carry no
+       surface at rest — and here it is also the only honest option:
+       --color-surface-secondary measures 1.07:1 against this org's background,
+       so a resting tile is a tile nobody can see. */
+    background: transparent;
     border-radius: var(--radius-lg);
-    background: var(--color-surface);
+    transition: background-color var(--duration-normal) var(--ease-default);
   }
 
-  .showcase__photo-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center 20%;
-    transition: transform var(--duration-slow) var(--ease-default);
+  /* :focus-within, not just :hover — a keyboard user tabbing to the hit area
+     gets the same photo response a pointer user gets. */
+  .showcase:hover,
+  .showcase:focus-within {
+    background: var(--color-surface-secondary);
+    --creator-portrait-scale: 1.04;
+    --creator-portrait-rule: 1;
   }
 
-  .showcase:hover .showcase__photo-img {
-    transform: scale(1.03);
-  }
-
-  .showcase__photo-fallback {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--color-surface);
-  }
-
-  .showcase__photo-initial {
-    font-size: var(--text-4xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text-muted);
-    user-select: none;
-    opacity: var(--opacity-30, 0.3);
-  }
-
-  /* ── Details — below photo, inside the padded card ── */
+  /* ── Text stack ──
+     Each row reserves its own height so a creator with no bio and no content
+     occupies exactly as much space as one with both. That is what makes the
+     grid rows uniform and lets the skeleton match the loaded card exactly. */
   .showcase__details {
-    padding: 0 var(--space-2) var(--space-2);
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+    padding-inline: var(--space-1);
+  }
+
+  .showcase__name-slot {
+    display: flex;
+    align-items: flex-end;
+    font-size: var(--text-lg);
+    min-block-size: calc(2 * var(--leading-snug) * 1em);
   }
 
   .showcase__name {
     margin: 0;
-    font-size: var(--text-base);
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
     font-weight: var(--font-semibold);
-    color: var(--color-text);
     line-height: var(--leading-snug);
-  }
-
-  .showcase__meta {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    display: flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    flex-wrap: wrap;
-  }
-
-  .showcase__username {
-    color: var(--color-text-secondary);
-  }
-
-  .showcase__dot {
-    font-size: var(--text-xs);
-  }
-
-  .showcase__bio {
-    margin: var(--space-1) 0 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-text);
+    /* Names are user data: a 38-character double-barrelled name and a 19-
+       character unbroken token both have to land inside a ~13rem track. */
+    overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .showcase__count {
-    margin: var(--space-1) 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  /* ── Content type badges ── */
-  .showcase__types {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .showcase__type-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-0-5) var(--space-2);
-    font-size: var(--text-xs);
+  .showcase__practice {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
     color: var(--color-text-secondary);
-    background: var(--color-surface);
-    border-radius: var(--radius-full);
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-block-size: calc(var(--leading-snug) * 1em);
   }
 
-  /* ── Content thumbnail strip ── */
-  .showcase__thumbs {
-    display: flex;
-    gap: var(--space-1-5);
-    padding: 0 var(--space-2) var(--space-1);
+  .showcase__count {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    line-height: var(--leading-snug);
+    letter-spacing: var(--tracking-wide);
+    text-transform: var(--text-transform-label);
+    /* Secondary, not muted: muted measures 2.42:1 on a plain-brand org and
+       3.78:1 here, and this is 12px text so 4.5:1 applies. */
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-block-size: calc(var(--leading-snug) * 1em);
   }
 
-  .showcase__thumb {
-    flex: 1;
-    min-width: 0;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
+  /* ── Stretched hit area ── */
+  .showcase__hit {
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-radius: inherit;
   }
 
-  /* ── Featured owner card ── */
-  .showcase--featured {
-    border: var(--border-width) var(--border-style) var(--color-brand-primary-subtle, var(--color-border));
+  .showcase__hit:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--focus-offset);
   }
 
-  .showcase--featured .showcase__photo {
-    aspect-ratio: 4 / 5;
+  @media (prefers-reduced-motion: reduce) {
+    .showcase {
+      transition: none;
+    }
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -520,7 +437,8 @@
   .creator-card__count {
     margin: var(--space-1) 0 0;
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    /* Secondary, not muted — muted fails 4.5:1 at this size in both themes. */
+    color: var(--color-text-secondary);
   }
 
   .creator-card__social {

@@ -25,6 +25,7 @@
     "db:seed": "pnpm exec tsx scripts/seed-data.ts",
     "db:seed:templates": "pnpm exec tsx scripts/seed-email-templates.ts",
     "db:seed:portals": "pnpm exec tsx scripts/seed-portals.ts",
+    "db:seed:creators": "pnpm exec tsx scripts/seed-creators.ts",
     "backfill:stripe-customer-ids": "pnpm exec tsx scripts/backfill-stripe-customer-ids.ts",
     "db:dry-run": "pnpm exec tsx scripts/neon-dry-run.ts",
     "db:studio": "pnpm exec tsx scripts/db-commands.ts studio",
