@@ -97,6 +97,17 @@
   --space-20: calc(var(--space-unit) * 20);
   --space-24: calc(var(--space-unit) * 24);
 
+  /* App chrome widths are derived from the spacing scale, so they must be
+     re-declared here for the same reason the scale itself is. `layout.css`
+     declares `--app-sidebar-width: var(--space-16)` on :root, where the var()
+     resolves against :root's --space-unit ONCE; descendants inherit the
+     already-substituted px. So without this line the SidebarRail keeps its
+     density-1 width of 64px while everything inside it — item min-height,
+     padding, gaps — rescales with the org's density. The padding then devours
+     the fixed-width rail and flex-shrinks the nav icons: measured 3px wide at
+     density 1.5. */
+  --app-sidebar-width: var(--space-16);
+
   /* ─── TYPOGRAPHY ────────────────────────────────────────────────────── */
   --font-body: var(--brand-font-body, var(--font-sans));
   --font-heading: var(--brand-font-heading, var(--font-sans));
@@ -162,6 +173,21 @@
   /* ─── CARD INTERACTION ──────────────────────────────────────────── */
   --card-hover-scale: var(--brand-card-hover-scale, 1.02);
   --card-image-hover-scale: var(--brand-card-image-hover-scale, 1.05);
+}
+
+/* Mirror layout.css's mobile rail collapse at org scope.
+
+   layout.css collapses --app-sidebar-width to 0 below md, because the rail is
+   display:none there and consumers (the `main` offset, full-bleed calcs) must
+   reclaim the full viewport. That override lives on `:root`, which has the same
+   (0,1,0) specificity as `[data-org-brand]` — and org-brand.css is imported
+   AFTER layout.css, so the org-scope re-declaration above would otherwise win
+   even inside the media query and leave `main` with a phantom 64px margin
+   against an invisible rail. Keep these two in lockstep. */
+@media (--below-md) {
+  [data-org-brand] {
+    --app-sidebar-width: 0px;
+  }
 }
 
 /* Typography weight overrides — re-declare the weight tokens at org scope

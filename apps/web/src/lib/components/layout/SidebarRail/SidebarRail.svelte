@@ -137,7 +137,7 @@
 		onclick={() => onSearchClick?.()}
 		aria-label={m.sidebar_search()}
 	>
-		<SearchIcon size={20} />
+		<SearchIcon />
 		{#if expanded}
 			<span class="rail-search-btn__label">{m.sidebar_search()}</span>
 			<kbd class="rail-search-btn__kbd">&#8984;K</kbd>
@@ -172,7 +172,7 @@
 			class="rail-studio-btn"
 			aria-label={m.nav_studio()}
 		>
-			<LayoutDashboardIcon size={22} />
+			<LayoutDashboardIcon />
 			{#if expanded}
 				<span class="rail-studio-btn__label">{m.nav_studio()}</span>
 			{/if}
@@ -197,6 +197,13 @@
 		--rail-width-expanded: var(--app-sidebar-width-expanded);
 		--rail-glass-bg: color-mix(in oklch, var(--color-surface) 75%, transparent);
 		--rail-glass-border: color-mix(in oklch, var(--color-border) 50%, transparent);
+		/* Nav glyph size, inherited by SidebarRailItem (which falls back to the
+		   same token when used standalone). A density-scaled token rather than a
+		   literal `size={22}` prop, so glyphs grow with the rail instead of
+		   staying pinned while the org's density inflates everything around them.
+		   --space-5-5 IS 22px at density 1, so default rendering is unchanged.
+		   Row rules derive their inline padding from this to centre the glyph. */
+		--rail-glyph: var(--space-5-5);
 
 		position: fixed;
 		left: 0;
@@ -333,10 +340,21 @@
 
 	/* Search button — prominent at top */
 	.rail-search-btn {
+		/* Search reads one step smaller than the nav glyphs by design. */
+		--rail-glyph: var(--space-5);
+
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
-		padding: var(--space-2) var(--space-3);
+		padding-block: var(--space-2);
+		/* Derived, not literal — see the identical rule in SidebarRailItem for
+		   why: a literal --space-3 only centres the glyph at density 1. max()
+		   guards --app-sidebar-width collapsing to 0px below md, which would
+		   otherwise make this negative and drop the declaration. */
+		padding-inline: max(
+			0px,
+			calc((var(--app-sidebar-width) - 2 * var(--space-2) - var(--rail-glyph)) / 2)
+		);
 		margin: 0 var(--space-2);
 		border-radius: var(--radius-md);
 		color: var(--color-text-secondary);
@@ -351,6 +369,22 @@
 		overflow: hidden;
 		min-height: var(--space-10);
 		text-align: left;
+	}
+
+	/* Glyphs are sized here rather than via a `size` prop so they track density.
+	   CSS width/height outrank the SVG's width/height presentation attributes, so
+	   this wins over IconBase's default without any prop.
+	   `flex-shrink: 0` matters as much as the size: an SVG with a width attribute
+	   is still a shrinkable flex item, so before --app-sidebar-width scaled with
+	   density the growing padding squeezed the glyph instead of the rail. */
+	.rail-search-btn :global(svg),
+	.rail-studio-btn :global(svg) {
+		flex-shrink: 0;
+		/* See SidebarRailItem: reset.css's `max-width: 100%` on svg would cap the
+		   width at the content box while height obeys, squashing the glyph. */
+		max-width: none;
+		width: var(--rail-glyph);
+		height: var(--rail-glyph);
 	}
 
 	.rail-search-btn:hover {
@@ -403,7 +437,12 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
-		padding: var(--space-2) var(--space-3);
+		padding-block: var(--space-2);
+		/* Derived, not literal — see SidebarRailItem for the rationale. */
+		padding-inline: max(
+			0px,
+			calc((var(--app-sidebar-width) - 2 * var(--space-2) - var(--rail-glyph)) / 2)
+		);
 		margin: 0 var(--space-2);
 		border-radius: var(--radius-md);
 		color: var(--color-text-secondary);
@@ -444,6 +483,20 @@
 	/* Theme toggle */
 	.rail-theme-toggle {
 		margin: 0 var(--space-2);
+	}
+
+	/* ThemeToggle is passed `showLabel` so the label can fade in when the rail
+	   hover-expands, but that label is ~80px of nowrap text inside a 64px
+	   collapsed rail. The toggle's glyph defaulted to flex-shrink: 1, so it lost
+	   the space fight to the unshrinkable text and computed to width: 0 — the
+	   theme icon was simply invisible in the rail at every density. Pin the glyph
+	   and let the label be the thing that overflows (it is clipped until
+	   expanded, which is the intended behaviour). */
+	.rail-theme-toggle :global(svg) {
+		flex-shrink: 0;
+		max-width: none;
+		width: var(--rail-glyph);
+		height: var(--rail-glyph);
 	}
 
 	.rail-theme-toggle :global(.theme-toggle__label) {

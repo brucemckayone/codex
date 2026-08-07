@@ -20,12 +20,48 @@ html {
   /* NOTE: scrollbar-gutter: stable was removed — it creates a visible
      gap with the root background color that can't inherit org branding
      (org brand scopes to [data-org-brand], not :root). */
+
 }
 
 body {
   font-size: var(--text-base);
   font-weight: var(--font-normal);
   min-height: 100vh;
+}
+
+/* Suppress phantom horizontal scrolling.
+
+   Document-level horizontal scrolling is never intentional in this app — every
+   sideways-scrolling surface (carousels, rails, wide tables) is its own
+   `overflow-x: auto` container. A document-level horizontal scrollbar therefore
+   only ever means a decorative full-bleed surface has escaped its parent, and
+   it is actively harmful: the page scrolls a few px sideways while in-flow
+   backgrounds (the org landing `.content-area` gradient and its backdrop blur)
+   stay viewport-width, exposing an unpainted strip down the edge.
+
+   Why the pixels can't just be calc'd away: full-bleed breakouts are built on
+   `vw`, and EVERY viewport unit (`vw`/`dvw`/`svw`/`lvw`) counts the classic
+   scrollbar gutter. No CSS unit means "viewport minus scrollbar", so a
+   `vw`-based breakout is always scrollbar-width too wide. Breakouts that CAN be
+   expressed structurally should be — see SubscribeCTA, which derives its own
+   from --app-sidebar-width and needs none of this. What remains is
+   StickyToolbar's `inset-inline: calc(50% - 50vw)` pseudo-elements, which
+   additionally sit off-centre because their container is inset by the fixed
+   SidebarRail, so no symmetric inset can ever reach both viewport edges.
+
+   `clip`, not `hidden`: `hidden` makes the element a scroll container, which
+   would break the `position: sticky` toolbars nested inside. `clip` pairs
+   legally with `overflow-y: visible` (the "one axis forces the other to auto"
+   rule covers hidden/scroll/auto, not clip), so both boxes stay
+   non-scrolling and sticky keeps working.
+
+   BOTH selectors are required — do not split this rule. `html` is the
+   scrolling element (`document.scrollingElement`), and measured in Chromium:
+   `body` alone still scrolls 40px, `html` alone still scrolls 40px, together
+   they scroll 0. */
+html,
+body {
+  overflow-x: clip;
 }
 
 /* ========================================
