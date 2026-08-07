@@ -37,6 +37,7 @@
     updateCategoryForm,
     uploadCategoryCoverForm,
   } from '$lib/remote/categories.remote';
+  import * as m from '$paraglide/messages';
   import type { StudioCategory } from '$lib/remote/categories.types';
   import CategoryList from '$lib/components/studio/categories/CategoryList.svelte';
   import TopicCard from '$lib/components/topic/TopicCard.svelte';
@@ -277,13 +278,14 @@
 </script>
 
 <svelte:head>
-  <title>Categories | {data.org?.name ?? 'Studio'}</title>
+  <title>{m.categories_title()} | {data.org?.name ?? 'Studio'}</title>
 </svelte:head>
 
 <div class="cats">
   <PageHeader
-    title="Categories"
-    description="Curate the topics that power your landing page's Browse by topic rail."
+    kicker={m.studio_section_catalogue()}
+    title={m.categories_title()}
+    description={m.categories_description()}
   />
 
   {#if categoriesQuery.error}
@@ -535,10 +537,6 @@
     flex-direction: column;
     gap: var(--space-6);
     width: 100%;
-    /* --container-studio is intentionally unset in tokens → resolves to
-       max-width:none = full studio width, matching the dashboard/content and
-       journeys pages. The old 800px cap left this surface as a narrow column. */
-    max-width: var(--container-studio);
   }
 
   /* ── Two-pane workspace ── */

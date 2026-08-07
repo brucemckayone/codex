@@ -16,6 +16,7 @@
   import type { Snippet } from 'svelte';
   import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { PageHeader } from '$lib/components/ui';
 
   const { children }: { children: Snippet } = $props();
 
@@ -57,9 +58,12 @@
 </script>
 
 <div class="monetisation-hub">
-  <header class="monetisation-hub__header">
-    <h1 class="page-title">{m.monetisation_title()}</h1>
-  </header>
+  <PageHeader
+    kicker={m.studio_section_money()}
+    title={m.monetisation_title()}
+    description={m.monetisation_description()}
+    divider={false}
+  />
 
   <nav class="monetisation-hub__tabs" aria-label={m.monetisation_title()}>
     <div class="tabs-list" role="tablist">
@@ -89,22 +93,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
-  }
-
-  .monetisation-hub__header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
   }
 
   .monetisation-hub__tabs {

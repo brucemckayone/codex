@@ -12,6 +12,7 @@
   import type { Snippet } from 'svelte';
   import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
+  import { PageHeader } from '$lib/components/ui';
   import type { LayoutData } from './$types';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
@@ -48,9 +49,12 @@
 </svelte:head>
 
 <div class="settings-layout">
-  <header class="settings-header">
-    <h1 class="settings-title">{m.settings_title()}</h1>
-  </header>
+  <PageHeader
+    kicker={m.studio_section_organisation()}
+    title={m.settings_title()}
+    description={m.settings_description()}
+    divider={false}
+  />
 
   <nav class="settings-tabs" aria-label={m.settings_title()}>
     <div class="tabs-list" role="tablist">
@@ -80,22 +84,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
-  }
-
-  .settings-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .settings-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
+    /* Tier-2 FORM measure, not a layout cap. This subtree is form-dense and
+       its inputs carry `max-width: none`, so at the studio's default column
+       width a "Platform Name" field renders ~1758px wide. The cap is
+       deliberately narrower than --container-studio for that reason; do not
+       remove it without giving `.field-input` a measure of its own first. */
+    max-width: var(--container-max);
   }
 
   .settings-tabs {

@@ -5,7 +5,8 @@
   import Input from '$lib/components/ui/Input/Input.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
-  import { EmptyState } from '$lib/components/ui';
+  import * as m from '$paraglide/messages';
+  import { EmptyState, PageHeader } from '$lib/components/ui';
   import { Skeleton } from '$lib/components/ui/Skeleton';
   import {
     PlusIcon,
@@ -124,15 +125,22 @@
 </script>
 
 <div class="faq-editor">
-  <div class="faq-editor-header">
-    <h2>Pricing FAQ</h2>
-    {#if items.length > 0}
-      <Button variant="secondary" size="sm" onclick={addItem}>
-        <PlusIcon size={14} />
-        Add Item
-      </Button>
-    {/if}
-  </div>
+  <PageHeader
+    variant="compact"
+    kicker={m.monetisation_title()}
+    kickerHref="/studio/monetisation"
+    title={m.monetisation_pricing_faq_title()}
+    description={m.monetisation_pricing_faq_description()}
+  >
+    {#snippet actions()}
+      {#if items.length > 0}
+        <Button variant="secondary" size="sm" onclick={addItem}>
+          <PlusIcon size={14} />
+          Add Item
+        </Button>
+      {/if}
+    {/snippet}
+  </PageHeader>
 
   {#if loading}
     <div class="faq-loading">
@@ -263,20 +271,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-  }
-
-  .faq-editor-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .faq-editor-header h2 {
-    font-family: var(--font-heading);
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
   }
 
   .faq-list {

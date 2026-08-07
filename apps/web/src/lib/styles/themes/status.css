@@ -1,0 +1,114 @@
+/* status.css — semantic status surfaces derived from the page's own material
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * WHY THIS FILE EXISTS
+ * The raw status palette in tokens/colors.css (--color-error-50 … -700 and
+ * peers) is fixed light-mode sRGB hex declared at :root only. It is the one
+ * colour family with neither a [data-theme] remap (themes/light.css,
+ * themes/dark.css) nor a [data-org-brand] derivation (tokens/org-brand.css)
+ * above it. Any component consuming those steps therefore paints identical
+ * pixels on a white platform page, a cream #F6EFE6 org page, and a #200000
+ * dark org page — the -50 tints invert into the brightest thing on screen in
+ * dark theme, and the -600/-700 steps used as foreground never lighten
+ * (--color-error-700 as body text measures 2.34:1 on the dark platform
+ * surface, an outright WCAG AA failure).
+ *
+ * The 12 tokens below fix both halves at once by deriving every status
+ * SURFACE from the page it sits on:
+ *
+ *   fill   = status hue mixed into --color-surface, at --status-fill-mix
+ *   border = status hue 55% into --color-border
+ *   text   = status hue 40% into --color-text
+ *
+ * Statuses keep their own hues — nothing here is brand-derived or recoloured.
+ * The signal lives in the border and the ink; the fill only whispers.
+ *
+ * ── SELECTORS ARE LOAD-BEARING ─────────────────────────────────────────────
+ * Custom properties substitute at COMPUTED-VALUE TIME, so a :root-only
+ * declaration bakes in :root's --color-surface and every descendant inherits
+ * the already-substituted value. Verified in Chrome on of-blood-and-bones
+ * (--brand-bg: #F6EFE6), reading the computed value INSIDE .org-layout:
+ *
+ *   declared on `:root` only          → color-mix(…, #ef4444 10%, #ffffff)
+ *                                       org background IGNORED
+ *   declared on `:root, [data-org-brand]` → color-mix(…, #ef4444 10%, #F6EFE6)
+ *                                       org background HONOURED
+ *
+ * So: DO NOT drop [data-org-brand] from the 12-token rule. The tokens still
+ * resolve without it, which is why the regression is invisible — every org
+ * silently reverts to mixing against #ffffff, i.e. exactly the bug this file
+ * exists to fix. Same mechanism org-brand.css documents for
+ * --app-sidebar-width and re-declares for --media-scrim.
+ *
+ * Conversely: DO NOT add [data-org-brand] to the --status-fill-mix rule. The
+ * knob must be declared on a selector set that EXCLUDES org scope, or the org
+ * layer re-declares 10% on .org-layout and clobbers the 16% it inherits from
+ * <html> in dark mode — silently reverting dark fills to light strength on
+ * every org page.
+ *
+ * And DO NOT "fix" the apparently-missing dark values by duplicating these 12
+ * declarations into dark.css. Only the knob differs between themes; a
+ * duplicated block would drift, and it would land on [data-theme='dark']
+ * (0,1,0) where it can lose to the org rule on .org-layout.
+ *
+ * ── CONTRAST (computed from browser-produced hexes, not eyeballed) ─────────
+ * All 16 theme × org × variant pairs clear AAA (7:1). Worst text-on-fill
+ * 7.57:1 (dark platform info); worst text-on-surface 8.21:1 (light platform
+ * warning). For comparison, the palette-token version this replaces measured
+ * 4.79:1 (success) and 4.84:1 (warning) in light and failed AA outright in
+ * dark.
+ *
+ * Safe tuning range for the taste dial: --status-fill-mix 6–20% light,
+ * 10–24% dark keeps the worst text-on-fill pair ≥ 4.9:1 throughout.
+ *
+ * Known gap (pre-existing, not introduced here): the [data-org-bg] text
+ * derivation in org-brand.css has a discontinuity at its
+ * clamp(0.05, (0.6 - l) * 1000, 0.9) hinge. A mid-grey org background such as
+ * #7a7a7a already yields 3.19:1 body text before any status token is
+ * involved; the recipe below inherits that and lands ~3.9:1 there. Fix the
+ * derivation, not this file.
+ *
+ * `in oklab` (rectangular) is deliberate — `in oklch` would rotate hue
+ * through intermediate values and muddy the tint. No new browser floor:
+ * org-brand.css already requires relative colour syntax, which is newer than
+ * color-mix().
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Per-theme fill strength ────────────────────────────────────────────────
+   MUST NOT include [data-org-brand] — see the header warning. The dark
+   selector list mirrors the gate in tokens/org-brand.css exactly, including
+   the brand editor's scoped dark preview ([data-editing-theme] lands on
+   .org-layout so the editor can preview dark without mutating
+   <html data-theme>). Dark must follow light in source order: both rules are
+   (0,1,0) and land on the same element, so order decides. */
+:root,
+[data-theme='light'] {
+  --status-fill-mix: 10%;
+}
+
+[data-theme='dark'],
+.dark,
+[data-editing-theme='dark'] {
+  --status-fill-mix: 16%;
+}
+
+/* ── The 12 consumer tokens ─────────────────────────────────────────────────
+   [data-org-brand] is required, not decorative — see the header warning. */
+:root,
+[data-org-brand] {
+  --color-status-error-surface: color-mix(in oklab, var(--color-error) var(--status-fill-mix), var(--color-surface));
+  --color-status-error-border: color-mix(in oklab, var(--color-error) 55%, var(--color-border));
+  --color-status-error-text: color-mix(in oklab, var(--color-error) 40%, var(--color-text));
+
+  --color-status-success-surface: color-mix(in oklab, var(--color-success) var(--status-fill-mix), var(--color-surface));
+  --color-status-success-border: color-mix(in oklab, var(--color-success) 55%, var(--color-border));
+  --color-status-success-text: color-mix(in oklab, var(--color-success) 40%, var(--color-text));
+
+  --color-status-warning-surface: color-mix(in oklab, var(--color-warning) var(--status-fill-mix), var(--color-surface));
+  --color-status-warning-border: color-mix(in oklab, var(--color-warning) 55%, var(--color-border));
+  --color-status-warning-text: color-mix(in oklab, var(--color-warning) 40%, var(--color-text));
+
+  --color-status-info-surface: color-mix(in oklab, var(--color-info) var(--status-fill-mix), var(--color-surface));
+  --color-status-info-border: color-mix(in oklab, var(--color-info) 55%, var(--color-border));
+  --color-status-info-text: color-mix(in oklab, var(--color-info) 40%, var(--color-text));
+}

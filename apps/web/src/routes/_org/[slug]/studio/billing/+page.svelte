@@ -13,7 +13,7 @@
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
-  import { Alert, Card, EmptyState } from '$lib/components/ui';
+  import { Alert, Card, EmptyState, PageHeader } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { portalSessionForm, getOrgRevenue, getTopContent } from '$lib/remote/billing.remote';
   import { formatPriceCompact } from '$lib/utils/format';
@@ -58,9 +58,11 @@
   <!-- Redirecting... -->
 {:else}
 <div class="billing">
-  <header class="billing-header">
-    <h1 class="billing-title">{m.billing_title()}</h1>
-  </header>
+  <PageHeader
+    kicker={m.studio_section_money()}
+    title={m.billing_title()}
+    description={m.billing_description()}
+  />
 
   <!-- Revenue Summary Cards -->
   <section class="stats-grid" aria-label={m.billing_title()}>
@@ -157,22 +159,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
-  }
-
-  .billing-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .billing-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
   }
 
   .stats-grid {

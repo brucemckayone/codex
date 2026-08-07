@@ -110,7 +110,7 @@ test.describe('Studio Stripe Connect Onboarding', () => {
     // Generous timeout: studio layout cold-start can be 15s+ when SvelteKit
     // dev server is freshly started (Stripe webhook + branding + perf logs
     // visible in `pnpm test:e2e` output show 5-15s on first request).
-    await expect(page.locator('h1.page-title')).toBeVisible({
+    await expect(page.locator('h1.page-header__title')).toBeVisible({
       timeout: 30_000,
     });
 
@@ -142,7 +142,7 @@ test.describe('Studio Stripe Connect Onboarding', () => {
     await page.goto(
       buildOrgUrl(page, freshOwner.organization.slug, '/studio/monetisation')
     );
-    await expect(page.locator('h1.page-title')).toBeVisible({
+    await expect(page.locator('h1.page-header__title')).toBeVisible({
       timeout: 30_000,
     });
 
@@ -233,7 +233,7 @@ test.describe('Studio Stripe Connect Onboarding', () => {
     await page.goto(
       buildOrgUrl(page, STUDIO_ALPHA.slug, '/studio/monetisation')
     );
-    await expect(page.locator('h1.page-title')).toBeVisible({
+    await expect(page.locator('h1.page-header__title')).toBeVisible({
       timeout: 30_000,
     });
 

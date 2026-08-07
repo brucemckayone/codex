@@ -30,6 +30,8 @@
   import ProposeAgreementDialog from '$lib/components/agreements/ProposeAgreementDialog.svelte';
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
   import type { RevenueSplitSlice } from '$lib/components/agreements/types';
+  import * as m from '$paraglide/messages';
+  import { PageHeader } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -461,21 +463,20 @@
 </script>
 
 <svelte:head>
-  <title>Revenue share | {data.org?.name ?? ''} Studio</title>
+  <title>{m.monetisation_revenue_share_title()} | {data.org?.name ?? ''} Studio</title>
 </svelte:head>
 
 {#if !isAuthorized}
   <!-- Redirecting via $effect -->
 {:else}
   <div class="revenue-share-page">
-    <header class="revenue-share-page__intro">
-      <h2 class="revenue-share-page__heading">Team revenue share</h2>
-      <p class="revenue-share-page__lede">
-        Negotiate per-creator splits on subscription and content-purchase revenue.
-        All shares are calculated against <strong>post-platform revenue</strong> —
-        the platform fee is taken first, and the share applies to what remains.
-      </p>
-    </header>
+    <PageHeader
+      variant="compact"
+      kicker={m.monetisation_title()}
+      kickerHref="/studio/monetisation"
+      title={m.monetisation_revenue_share_title()}
+      description={m.monetisation_revenue_share_description()}
+    />
 
     <!-- ─── Section 1: Team Budget pie ─────────────────────────────────── -->
     <section class="revenue-share-page__section" aria-labelledby="team-budget-heading">
@@ -681,34 +682,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-8);
-    max-width: 1200px;
     container-type: inline-size;
-  }
-
-  .revenue-share-page__intro {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .revenue-share-page__heading {
-    margin: 0;
-    font-family: var(--font-heading);
-    font-size: var(--text-xl);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-  }
-
-  .revenue-share-page__lede {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    max-width: 60ch;
-    line-height: var(--leading-relaxed);
-  }
-
-  .revenue-share-page__lede strong {
-    color: var(--color-text);
   }
 
   .revenue-share-page__section {

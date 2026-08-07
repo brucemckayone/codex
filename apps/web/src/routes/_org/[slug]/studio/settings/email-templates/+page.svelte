@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import * as m from '$paraglide/messages';
 	import { Card as CardNs, PageHeader } from '$lib/components/ui';
 	const Card = CardNs.Root;
 
@@ -30,13 +31,16 @@
 </script>
 
 <svelte:head>
-	<title>Email Templates | Studio Settings</title>
+	<title>{m.settings_email_templates_title()} | {m.settings_title()}</title>
 </svelte:head>
 
 {#if isAuthorized}
 	<PageHeader
-		title="Email Templates"
-		description="Manage email templates for your organisation. Global templates provide defaults that you can customise."
+		variant="compact"
+		kicker={m.settings_title()}
+		kickerHref="/studio/settings"
+		title={m.settings_email_templates_title()}
+		description={m.settings_email_templates_description()}
 	/>
 
 	<div class="templates-page">

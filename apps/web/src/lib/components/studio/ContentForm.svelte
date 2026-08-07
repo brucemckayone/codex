@@ -8,7 +8,8 @@
   - Inline ReadinessPanel at bottom + DangerZone for edit mode.
 
   No right sidebar — every control is visible without scrolling through a
-  stacked aside. Full-width on wide screens via --container-studio.
+  stacked aside. The studio shell owns the content-column width — this form
+  declares no outer max-width of its own.
 
   @prop {ContentWithRelations} [content] - Existing content (edit mode) or undefined (create mode)
   @prop {string} organizationId - Organization UUID
@@ -680,7 +681,6 @@
 
 <style>
   .content-page {
-    max-width: var(--container-studio);
     width: 100%;
   }
 

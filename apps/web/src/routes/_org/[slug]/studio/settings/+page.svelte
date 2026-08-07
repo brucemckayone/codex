@@ -15,7 +15,7 @@
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { getContactSettings, updateContactForm } from '$lib/remote/settings.remote';
-  import { Alert, Card, PageHeader, Select } from '$lib/components/ui';
+  import { Alert, Card, Select } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
   let { data } = $props();
@@ -117,7 +117,6 @@
   <!-- Redirecting... -->
 {:else if contactQuery?.loading}
 <div class="general-page">
-  <PageHeader title={m.settings_general_title()} />
   <div class="settings-skeleton">
     <div class="settings-skeleton-card">
       <div class="settings-skeleton-title">
@@ -146,8 +145,6 @@
 </div>
 {:else}
 <div class="general-page">
-  <PageHeader title={m.settings_general_title()} />
-
   <!-- Success message -->
   {#if showSuccess}
     <Alert variant="success">

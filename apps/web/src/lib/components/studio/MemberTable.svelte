@@ -280,6 +280,14 @@
     gap: var(--space-2);
   }
 
+  /* The role Select carries no width of its own — `.select-container` is
+     `width: 100%` — so in a full-width studio column it stretches across the
+     cell and reads as unconsidered. Cap it to the inline-control measure.
+     `:global` is required: the class belongs to Select's own style scope. */
+  .actions :global(.select-container) {
+    max-width: var(--control-width-md);
+  }
+
   .rev-cell {
     display: flex;
     align-items: center;

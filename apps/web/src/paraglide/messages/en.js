@@ -3455,7 +3455,7 @@ export const monetisation_title = () => `Monetisation`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_description = () => `Manage subscription tiers and Stripe Connect.`
+export const monetisation_description = () => `Connect Stripe, switch subscriptions on, and set the tiers your audience can join. Nothing can be charged until Stripe confirms that both charges and payouts are enabled.`
 
 
 /**
@@ -7071,7 +7071,7 @@ export const settings_saved = () => `Settings updated successfully.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const team_title = () => `Team Management`
+export const team_title = () => `Team`
 
 
 /**
@@ -9968,3 +9968,187 @@ export const email_payout_released_subject = () => `Your payout is on its way`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const email_payout_released_body = () => `Your pending earnings have been transferred to your Stripe account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_section_catalogue = () => `Catalogue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_section_audience = () => `Audience`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_section_money = () => `Money`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_section_organisation = () => `Organisation`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_description = () => `The people who can sign in to this studio. Invite collaborators, choose what each of them is allowed to change, and remove access when someone moves on.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const settings_description = () => `The details your audience sees and the address your emails come from — your organisation name, support email, timezone and social links.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const settings_email_templates_title = () => `Email templates`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const settings_email_templates_description = () => `Branded defaults for every transactional and marketing email your organisation sends. Global templates handle these today; per-organisation overrides land here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_customers_description = () => `Everyone who has bought from you, what they have spent, and when they joined. Open a customer to see their purchase history or to grant complimentary access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_title = () => `Subscribers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_description = () => `Everyone on a recurring plan, grouped by the tier they joined. Show cancelled subscribers to see who has lapsed and when.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sales_title = () => `Sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sales_description = () => `Every purchase and subscription payment taken in the selected period, including refunds and disputes. Your share is what reaches the organisation after platform fees.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_title = () => `Payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const payouts_description = () => `Every transfer Stripe has made on your behalf, plus anything still in transit. Each subscription invoice splits into an organisation fee and one creator-share row per beneficiary.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const billing_description = () => `What your catalogue has earned all-time, and where your own Codex subscription is billed. Open the Stripe portal to update your card or download invoices.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const categories_title = () => `Categories`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const categories_description = () => `Curate the topics that power the Browse by topic rail on your landing page. They appear in the order you set here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revenue_share_title = () => `Team revenue share`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revenue_share_description = () => `Negotiate per-creator splits on subscription and content-purchase revenue. Every share is calculated against post-platform revenue — the platform fee is taken first, and the share applies to what remains.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_pricing_faq_title = () => `Pricing FAQ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_pricing_faq_description = () => `The questions answered on your public pricing page, in the order visitors read them. Reorder or rewrite them to match how you actually sell.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_meta_members = (params) => `${params.count} members`

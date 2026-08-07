@@ -9,11 +9,13 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import * as m from '$paraglide/messages';
   import {
     Alert,
     Badge,
     Button,
     EmptyState,
+    PageHeader,
     Skeleton,
   } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
@@ -230,7 +232,7 @@
 </script>
 
 <svelte:head>
-  <title>Subscribers | {data.org.name}</title>
+  <title>{m.subscribers_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -238,21 +240,20 @@
   <!-- redirecting -->
 {:else}
   <div class="subscribers">
-    <header class="subscribers-header">
-      <div class="header-text">
-        <h1 class="subscribers-title">Subscribers</h1>
-        <p class="subscribers-subtitle">
-          Everyone currently subscribed to this organisation, broken down by
-          tier. Toggle "Show cancelled" to include past subscribers.
-        </p>
-      </div>
-      {#if items.length > 0}
-        <Button variant="secondary" size="sm" onclick={exportCsv}>
-          <DownloadIcon size={14} />
-          Export CSV
-        </Button>
-      {/if}
-    </header>
+    <PageHeader
+      kicker={m.studio_section_audience()}
+      title={m.subscribers_title()}
+      description={m.subscribers_description()}
+    >
+      {#snippet actions()}
+        {#if items.length > 0}
+          <Button variant="secondary" size="sm" onclick={exportCsv}>
+            <DownloadIcon size={14} />
+            Export CSV
+          </Button>
+        {/if}
+      {/snippet}
+    </PageHeader>
 
     <Card.Root>
       <Card.Header>
@@ -455,38 +456,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
-  }
-
-  .subscribers-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-  }
-
-  .header-text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .subscribers-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .subscribers-subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
-    max-width: 720px;
-    margin: 0;
   }
 
   .filters {

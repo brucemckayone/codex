@@ -251,7 +251,11 @@
 
 <div class="customers-page">
   {#if customersQuery?.loading}
-    <PageHeader title={m.studio_customers_title()} />
+    <PageHeader
+      kicker={m.studio_section_audience()}
+      title={m.studio_customers_title()}
+      description={m.studio_customers_description()}
+    />
     <div class="table-skeleton">
       <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
       {#each Array(5) as _}
@@ -268,11 +272,17 @@
     {@const totalPages = Math.max(1, pagination.totalPages ?? 0)}
     {@const hasCustomers = rawItems.length > 0 || currentPage > 1}
 
-    <PageHeader title={m.studio_customers_title()}>
-      {#snippet actions()}
+    <PageHeader
+      kicker={m.studio_section_audience()}
+      title={m.studio_customers_title()}
+      description={m.studio_customers_description()}
+    >
+      {#snippet meta()}
         {#if hasCustomers && totalCustomers > 0}
-          <span class="count-badge">{totalCustomers}</span>
+          <span>{m.studio_customers_stat_total_customers()}: {totalCustomers}</span>
         {/if}
+      {/snippet}
+      {#snippet actions()}
         {#if rawItems.length > 0}
           <Button variant="secondary" size="sm" onclick={exportCsv}>
             <DownloadIcon size={14} />
@@ -377,20 +387,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-  }
-
-  .count-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: var(--space-6);
-    height: var(--space-6);
-    padding: 0 var(--space-2);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-secondary);
-    background: var(--color-surface-secondary);
-    border-radius: var(--radius-full, 9999px);
   }
 
   /* ── Stats bar ────────────────────────────────────────────────────── */
