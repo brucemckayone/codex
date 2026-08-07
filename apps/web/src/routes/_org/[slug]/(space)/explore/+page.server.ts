@@ -35,6 +35,7 @@ async function fetchAuthContent(
   sort: string,
   q: string | undefined,
   contentType: string | undefined,
+  category: string | undefined,
   page: number,
   creatorId: string | undefined
 ) {
@@ -43,6 +44,12 @@ async function fetchAuthContent(
   params.set('status', 'published');
   if (q) params.set('search', q);
   if (contentType) params.set('contentType', contentType);
+  // `category` is part of contentQuerySchema, so the browse endpoint honours
+  // it. Omitting it here meant a signed-in user on an auth-only sort got a
+  // URL and a chip claiming a category filter over a completely unfiltered
+  // result set. `featured` is NOT in that schema — see the sort downgrade in
+  // `load` for how that combination is kept honest instead.
+  if (category) params.set('category', category);
   if (creatorId) params.set('creatorId', creatorId);
   params.set('sortBy', AUTH_SORT_MAP[sort].sortBy);
   params.set('sortOrder', AUTH_SORT_MAP[sort].sortOrder);
@@ -136,6 +143,18 @@ export const load: PageServerLoad = async ({
     sort = 'newest';
   }
 
+  // The authenticated browse endpoint (contentQuerySchema) has no `featured`
+  // filter, so a popular/top-selling sort could not honour one — it silently
+  // returned the whole catalogue while the URL and the chip both claimed
+  // "Featured". Between the two intents the FILTER is the explicit ask, so the
+  // sort yields: we fall through to the public branch, which does filter by
+  // featured. `filters.sort` below returns the downgraded value, so the drawer
+  // shows the sort that was actually applied rather than the one that wasn't.
+  // Widening the browse schema + service is the real fix (cross-package).
+  if (AUTH_ONLY_SORTS.has(sort) && featured) {
+    sort = 'newest';
+  }
+
   const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
 
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
@@ -160,7 +179,9 @@ export const load: PageServerLoad = async ({
       const cache = new VersionedCache({
         kv: platform.env.CACHE_KV as KVNamespace,
       });
-      const dataType = `content:auth:${sort}:${contentType ?? 'all'}:${page}`;
+      // Every param that varies the RESULT must vary the key, or two filter
+      // combinations read each other's cached payload.
+      const dataType = `content:auth:${sort}:${contentType ?? 'all'}:${category ?? 'all'}:${page}`;
       contentResult = await cache.get(
         CacheType.COLLECTION_ORG_CONTENT(org.id),
         dataType,
@@ -171,6 +192,7 @@ export const load: PageServerLoad = async ({
             sort,
             q,
             contentType,
+            category,
             page,
             creator?.id
           ),
@@ -183,6 +205,7 @@ export const load: PageServerLoad = async ({
         sort,
         q,
         contentType,
+        category,
         page,
         creator?.id
       );

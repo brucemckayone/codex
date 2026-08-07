@@ -84,28 +84,44 @@
       <h3 class="filter-drawer__heading" id="efd-sort-heading">
         {m.explore_sort_heading()}
       </h3>
-      <ul class="filter-drawer__list" role="listbox" aria-label={m.explore_sort_heading()}>
+      <!--
+        A11Y: `role="group"` + `aria-pressed` buttons — deliberately NOT
+        `listbox`/`option`, which is what this was.
+
+        Two things were wrong with `<ul role="listbox"><li><button
+        role="option">`. It interposed a wrapper between a role with required
+        owned elements and the elements it owns, and — worse — `listbox`
+        PROMISES arrow-key navigation that was never implemented: ArrowDown,
+        ArrowUp and End were all dead, and every option was its own tab stop,
+        where the contract wants exactly one per group.
+
+        `group` has no required owned elements and promises no keyboard model
+        beyond what buttons already give you, so Tab + Enter/Space — which
+        always worked — is now the whole contract, honestly stated. This also
+        matches the Featured toggle below and the category pills on the explore
+        page itself. A full APG radiogroup (roving tabindex + arrows + Home/End)
+        is the richer alternative; precedents live in pricing's
+        `handleBillingKey` and FilterBar's `handlePillKey` if this grows.
+      -->
+      <div class="filter-drawer__list" role="group" aria-label={m.explore_sort_heading()}>
         {#each sortOptions as opt (opt.value)}
           {@const active = viewSort === opt.value}
-          <li>
-            <button
-              type="button"
-              class="filter-drawer__option"
-              class:is-active={active}
-              role="option"
-              aria-selected={active}
-              onclick={() => setSort(opt.value)}
-            >
-              <span class="filter-drawer__option-label">{opt.label}</span>
-              {#if active}
-                <span class="filter-drawer__option-check" aria-hidden="true">
-                  <CheckIcon size={14} />
-                </span>
-              {/if}
-            </button>
-          </li>
+          <button
+            type="button"
+            class="filter-drawer__option"
+            class:is-active={active}
+            aria-pressed={active}
+            onclick={() => setSort(opt.value)}
+          >
+            <span class="filter-drawer__option-label">{opt.label}</span>
+            {#if active}
+              <span class="filter-drawer__option-check" aria-hidden="true">
+                <CheckIcon size={14} />
+              </span>
+            {/if}
+          </button>
         {/each}
-      </ul>
+      </div>
     </section>
 
     <!-- ── Type (pills) ────────────────────────────────────────── -->
@@ -113,15 +129,14 @@
       <h3 class="filter-drawer__heading" id="efd-type-heading">
         {m.explore_filter_type_heading()}
       </h3>
-      <div class="filter-drawer__pills" role="listbox" aria-label={m.explore_filter_type_heading()}>
+      <div class="filter-drawer__pills" role="group" aria-label={m.explore_filter_type_heading()}>
         {#each typeOptions as opt (opt.value)}
           {@const active = view.type === opt.value}
           <button
             type="button"
             class="filter-drawer__pill"
             class:is-active={active}
-            role="option"
-            aria-selected={active}
+            aria-pressed={active}
             onclick={() => setFilter('type', opt.value)}
           >
             {opt.label}
@@ -135,26 +150,24 @@
       <h3 class="filter-drawer__heading" id="efd-featured-heading">
         {m.explore_filter_featured_heading()}
       </h3>
-      <ul class="filter-drawer__list">
-        <li>
-          <button
-            type="button"
-            class="filter-drawer__option"
-            class:is-active={view.featured}
-            aria-pressed={view.featured}
-            onclick={() => setFilter('featured', !view.featured)}
-          >
-            <span class="filter-drawer__option-label">
-              {m.explore_filter_featured_only()}
+      <div class="filter-drawer__list">
+        <button
+          type="button"
+          class="filter-drawer__option"
+          class:is-active={view.featured}
+          aria-pressed={view.featured}
+          onclick={() => setFilter('featured', !view.featured)}
+        >
+          <span class="filter-drawer__option-label">
+            {m.explore_filter_featured_only()}
+          </span>
+          {#if view.featured}
+            <span class="filter-drawer__option-check" aria-hidden="true">
+              <CheckIcon size={14} />
             </span>
-            {#if view.featured}
-              <span class="filter-drawer__option-check" aria-hidden="true">
-                <CheckIcon size={14} />
-              </span>
-            {/if}
-          </button>
-        </li>
-      </ul>
+          {/if}
+        </button>
+      </div>
     </section>
   {/snippet}
 </FilterDrawer>

@@ -36,6 +36,15 @@
    * would visibly regress every studio page. */
   --container-studio: 120rem; /* 1920px */
 
+  /* Edge-panel drawer cap (FilterDrawer and any future right-edge panel).
+   * FilterDrawer referenced `var(--container-drawer, 24rem)` while the token
+   * was defined NOWHERE, so the fallback was always the real value — and it
+   * never even applied, because Dialog's scoped `.dialog-content[data-size]`
+   * rule outranked the drawer's `:global()` override and rendered the panel at
+   * the 42rem modal width. Declaring it here makes the intent a token rather
+   * than a fallback nobody could find. */
+  --container-drawer: 24rem;  /* 384px */
+
   /* ========================================
    * CONTROL WIDTHS
    * ========================================

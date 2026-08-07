@@ -1,8 +1,9 @@
 <!--
   @component FilterDrawer
 
-  Generic chrome for a "Filters & Sort" drawer. Right-edge panel on desktop
-  (≥40rem); bottom sheet on mobile (<40rem). Owns the responsive geometry,
+  Generic chrome for a "Filters & Sort" drawer. Right-edge panel at `sm` and
+  up; bottom sheet below it (the `--below-sm` breakpoint, matched in JS by
+  MOBILE_QUERY so CSS and behaviour flip together). Owns the responsive geometry,
   slide animations, grip handle, header, body, footer, prefers-reduced-motion,
   and the hybrid commit model:
 
@@ -25,6 +26,7 @@
   import type { Snippet } from 'svelte';
   import * as Dialog from '$lib/components/ui/Dialog';
   import { SlidersIcon } from '$lib/components/ui/Icon';
+  import * as m from '$paraglide/messages';
 
   type FacetKey = keyof TFacets;
 
@@ -84,10 +86,14 @@
   const badgeLabel = $derived(activeCount > 9 ? '9+' : String(activeCount));
 
   // ── Responsive mode detection ───────────────────────────────────────
+  // Matches the `--below-sm` custom-media the CSS below uses. The old
+  // `40rem` was 1px wider than every other breakpoint in the app, so at
+  // exactly 640px this drawer became a bottom sheet while nothing else moved.
+  const MOBILE_QUERY = '(max-width: 39.9375rem)';
   let isMobile = $state(false);
   $effect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
-    const mql = window.matchMedia('(max-width: 40rem)');
+    const mql = window.matchMedia(MOBILE_QUERY);
     isMobile = mql.matches;
     const onChange = (e: MediaQueryListEvent) => {
       isMobile = e.matches;
@@ -224,7 +230,10 @@
         </span>
         <Dialog.Title>{title}</Dialog.Title>
         {#if activeCount > 0}
-          <span class="filter-drawer__badge" aria-label={`${activeCount} active`}>
+          <span
+            class="filter-drawer__badge"
+            aria-label={m.filters_active_count({ count: activeCount })}
+          >
             {badgeLabel}
           </span>
         {/if}
@@ -290,14 +299,24 @@
     }
   }
 
-  /* ── Desktop: floating-glass right-edge panel ──────────────────── */
-  :global(.dialog-content.filter-drawer) {
+  /* ── Desktop: floating-glass right-edge panel ──────────────────────
+     SPECIFICITY: the `[data-size]` qualifier is load-bearing, not decoration.
+     DialogContent's own rule is `.dialog-content[data-size='md']`, which
+     Svelte's scoping hash lifts to (0,3,0) — outranking a plain
+     `:global(.dialog-content.filter-drawer)` at (0,2,0). The panel therefore
+     rendered at the 42rem modal width instead of the 24rem rail this rule
+     asks for: ~350px of dead space under the last section, a 622px sweep
+     between each sort label and its check glyph, and 87% of the viewport
+     covered at 768px. Matching on `[data-size]` (any value) takes this rule to
+     (0,4,0) so it wins outright rather than tying and depending on
+     stylesheet order. */
+  :global(.dialog-content.filter-drawer[data-size]) {
     position: fixed;
     top: var(--space-3);
     right: var(--space-3);
     bottom: var(--space-3);
     left: auto;
-    max-width: var(--container-drawer, 24rem);
+    max-width: var(--container-drawer);
     width: calc(100% - var(--space-6));
     height: auto;
     max-height: calc(100dvh - var(--space-6));
@@ -315,8 +334,8 @@
   }
 
   /* ── Mobile: floating-glass bottom sheet ─────────────────────────── */
-  @media (max-width: 40rem) {
-    :global(.dialog-content.filter-drawer) {
+  @media (--below-sm) {
+    :global(.dialog-content.filter-drawer[data-size]) {
       top: auto;
       left: var(--space-2);
       right: var(--space-2);
@@ -347,7 +366,7 @@
   .filter-drawer__grip {
     display: none;
   }
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     .filter-drawer__grip {
       display: block;
       width: var(--space-10);
@@ -365,7 +384,7 @@
     border-bottom: var(--border-width) var(--border-style) var(--color-border);
     background: transparent;
   }
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     :global(.filter-drawer__head) {
       padding-block-start: max(var(--space-1), env(safe-area-inset-top, 0));
       padding-inline: var(--space-5);
@@ -421,7 +440,7 @@
     gap: 0; /* dividers do the spacing work, mirroring MobileBottomSheet */
     background: transparent;
   }
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     :global(.filter-drawer__body) {
       padding-inline: var(--space-4);
       padding-block-start: var(--space-4);
@@ -446,7 +465,16 @@
     border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 
-  :global(.filter-drawer__heading) {
+  /* SPECIFICITY: scoping through `.filter-drawer` is load-bearing. Dialog's
+     `forwardBrandTokens` copies `data-org-brand` onto the portal container so
+     the brand derivation engine works inside the dialog — which also
+     re-activates org-brand.css's `[data-org-brand] :is(h1..h6) { color:
+     var(--color-heading) }` at (0,2,0), beating a bare
+     `:global(.filter-drawer__heading)` at (0,1,0). The result was that on
+     EVERY branded org these quiet uppercase micro-labels computed to exactly
+     the same colour as the dialog title, flattening the hierarchy — and it
+     only showed up on branded orgs, so a default-theme review never saw it. */
+  :global(.filter-drawer .filter-drawer__heading) {
     margin: 0;
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
@@ -490,7 +518,7 @@
     position: absolute;
     inset-block: var(--space-2);
     inset-inline-start: 0;
-    width: 3px;
+    width: var(--border-width-thick);
     border-radius: var(--radius-full);
     background: transparent;
     transition: background-color var(--duration-fast) var(--ease-out);
@@ -528,8 +556,14 @@
     flex-wrap: wrap;
     gap: var(--space-2);
   }
+  /* --space-11 (44px at density 1) is the WCAG 2.5.8 / platform minimum touch
+     target, and it applies at every width — the option rows already use it, and
+     pointer accuracy on a laptop trackpad is not meaningfully better than a
+     thumb. Measured at 390 wide before this: pills 40px, Apply 40px, Clear
+     37px. Because --space-* is density-scaled, a tighter brand density pushed
+     them lower still. */
   :global(.filter-drawer__pill) {
-    min-height: var(--space-10);
+    min-height: var(--space-11);
     padding: var(--space-2) var(--space-4);
     background: transparent;
     /* border-strong: --color-border is invisible against --color-surface-elevated
@@ -559,8 +593,14 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset, 1px);
   }
+  /* --color-text-on-brand, NOT --color-text-inverse: `inverse` flips with the
+     THEME, `on-brand` is derived from the brand fill this pill is painted
+     with. In dark theme they diverge, so the active pill took near-black text
+     while the Apply button beside it — same brand fill — took white. On a blue
+     brand in dark theme that was black-on-#2563EB at 3.53:1, a WCAG AA fail;
+     on-brand gives 5.9:1. */
   :global(.filter-drawer__pill.is-active) {
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-brand);
     background: var(--color-interactive);
     border-color: var(--color-interactive);
   }
@@ -580,7 +620,7 @@
     background: transparent;
     border-top: var(--border-width) var(--border-style) var(--color-border);
   }
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     :global(.dialog-footer.filter-drawer__foot) {
       padding-inline: var(--space-4);
       padding-block-end: max(var(--space-3), env(safe-area-inset-bottom, 0));
@@ -588,6 +628,9 @@
   }
 
   .filter-drawer__clear {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--space-11);
     padding: var(--space-2) var(--space-3);
     background: transparent;
     border: 0;
@@ -612,7 +655,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: var(--space-10);
+    min-height: var(--space-11);
     padding: var(--space-2) var(--space-5);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -642,7 +685,7 @@
     outline-offset: var(--focus-offset, 1px);
   }
 
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     .filter-drawer__btn--primary {
       min-width: var(--space-32);
       padding-inline: var(--space-6);

@@ -219,6 +219,14 @@ export function journeyViewEntry(
  * `CourseCardSummary` (the public /explore rail read) → tile props. Fully
  * public: no entitlement, so never a progress bar. `guideName` becomes the meta
  * line, matching the credit the rail carried before.
+ *
+ * NOTE: this mapper passes no `stats`, so the /explore card omits the single
+ * most portal-defining fact — "N stages · M practices" — which its landing-page
+ * sibling `journeyViewEntry` does show. That is a DTO gap, not a mapper gap:
+ * `CourseCardSummary` carries no count fields and `listPublishedCourses`
+ * (packages/access) doesn't select them. Closing it needs two correlated
+ * subqueries plus widening the type in `packages/shared-types` (including the
+ * barrel re-export), so it is deliberately a follow-up rather than faked here.
  */
 export function courseSummaryEntry(
   journey: CourseCardSummary,
@@ -235,7 +243,10 @@ export function courseSummaryEntry(
     badge: 'Portal',
     priceCents: journey.priceCents,
     membershipLabel: 'Free',
-    cta: 'See the journey',
+    // 'View portal' — matches the badge this same mapper sets and the
+    // landing-page mapper's default. It previously read 'See the journey',
+    // so the explore card wore a PORTAL badge above journey copy.
+    cta: 'View portal',
   };
 }
 

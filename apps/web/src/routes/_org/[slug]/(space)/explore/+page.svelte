@@ -1,12 +1,17 @@
 <!--
   @component OrgExplorePage
 
-  Organization explore page with search, type filtering, category pills, sorting,
-  filter chips, content grid, and pagination.
+  Organization explore page: a Portals rail over a searchable, filterable
+  content grid with category pills, sorting, filter chips and pagination.
 
-  Type and category filters are client-side (instant, no network request) via
-  useLiveQuery + contentCollection. Search and sort remain server-side via URL params.
-  Pagination is server-driven.
+  EVERY facet is URL-backed and server-applied — search, type, category, sort,
+  featured, creator, page. Type and category used to filter client-side over
+  whichever page of 12 items happened to be loaded, which undercounted (3 of 5
+  videos on a 22-item org), made the pager lie, and was wiped by any sibling
+  URL write. One source of truth removes all four failures and makes every
+  filter combination shareable, bookmarkable and reload-safe.
+
+  URL writes are BATCHED through `updateFilters` — see its comment for why.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -25,9 +30,10 @@
   import type { CourseCardSummary } from '$lib/journeys/types';
   import type { ContentWithRelations } from '$lib/types';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
+  import { applyFilterPatch } from '$lib/utils/filter-url';
   import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
-  import { ViewToggle } from '$lib/components/ui/ViewToggle';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
   import { BackToTop } from '$lib/components/ui/BackToTop';
   import { StickyToolbar } from '$lib/components/ui/StickyToolbar';
   import { SearchPill } from '$lib/components/ui/SearchPill';
@@ -36,7 +42,6 @@
     ActiveFiltersStrip,
     type ActiveFilterChip,
   } from '$lib/components/ui/ActiveFiltersStrip';
-  import { useViewMode } from '$lib/utils/view-mode.svelte';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
   import { StructuredData } from '$lib/components/seo';
   import ExploreFilterDrawer from '$lib/components/explore/ExploreFilterDrawer.svelte';
@@ -61,12 +66,6 @@
     isFollowing: followingStore.get(data.org.id),
     orgId: data.org.id,
   }));
-
-  // Client-side filter state for instant type/category filtering
-  // svelte-ignore state_referenced_locally — user-controlled filters, reset explicitly on server data change
-  let localType = $state(data.filters.type || '');
-  // svelte-ignore state_referenced_locally
-  let localCategory = $state(data.filters.category || '');
 
   // The server load is the source of truth for /explore. Always overwrite
   // the org-scoped ['content', orgId] cache on mount with the SSR payload
@@ -99,8 +98,6 @@
         currentItems
       );
       prevSignature = currentSignature;
-      localType = data.filters.type || '';
-      localCategory = data.filters.category || '';
     }
   });
 
@@ -123,7 +120,9 @@
   const contentQuery = useLiveQuery(
     (q) => q.from({ item: orgContentCollection }),
     [() => data.org?.id],
-    // svelte-ignore state_referenced_locally — ssrData is only used for initial SSR render
+    // ssrData is only read for the initial SSR render, so a one-time snapshot
+    // is the intent here rather than a tracked dependency.
+    // svelte-ignore state_referenced_locally
     { ssrData: (data.content?.items ?? []) as ExploreItem[] }
   );
 
@@ -154,16 +153,17 @@
   const limit = $derived(data.limit ?? 12);
   const isAuthenticated = $derived(!!data.user);
 
-  // ── Journeys rail (SPEC §8.5) ─────────────────────────────────────
+  // ── Portals rail (SPEC §8.5) ──────────────────────────────────────
   // The org's PUBLISHED courses, loaded server-side (public read). A distinct
-  // discovery surface ABOVE the content grid. `viewScope` toggles between
-  // browsing everything and journeys only — the prototype's All / Journeys row.
+  // discovery surface ABOVE the content grid, hosted in the shared `Carousel`
+  // primitive — the same treatment the org landing page gives these same
+  // portals. It used to render into `.content-grid`, the 1→2→3-column grid
+  // utility, so five portals produced a ragged 3+2 row 1269px tall (141% of a
+  // 1440×900 viewport) and pushed the first content card 1.94 viewports down.
+  // A rail shows every portal in 520px and scrolls its own track.
   const journeys = $derived<CourseCardSummary[]>(data.journeys ?? []);
 
-  // Client-only view toggle between browsing everything and journeys only.
-  let viewScope = $state<'all' | 'journeys'>('all');
-
-  // Search narrows journeys client-side by title/kicker/lede (mirrors the
+  // Search narrows portals client-side by title/kicker/lede (mirrors the
   // prototype's title match); the content grid is narrowed server-side.
   const filteredJourneys = $derived.by(() => {
     const q = filters.q?.trim().toLowerCase();
@@ -176,9 +176,19 @@
     );
   });
 
-  const hasJourneys = $derived(journeys.length > 0);
   const showJourneysRail = $derived(filteredJourneys.length > 0);
-  const showContent = $derived(viewScope !== 'journeys');
+  // Plurals follow the shipped `_one` / `_other` key convention rather than
+  // ICU, matching discover_result_count_* elsewhere in the app.
+  const portalsCountLabel = $derived(
+    filteredJourneys.length === 1
+      ? m.explore_portals_count_one()
+      : m.explore_portals_count_other({ count: filteredJourneys.length })
+  );
+  const resultsCountLabel = $derived(
+    total === 1
+      ? m.explore_results_count_one()
+      : m.explore_results_count_other({ count: String(total) })
+  );
 
   // Link by the SELL PAGE, not the course (Codex-xzwl5). `/journeys/:slug`
   // resolves `landing_pages.slug`, so linking by `courses.slug` — which drifts
@@ -197,22 +207,22 @@
     );
   }
 
-  // Category extraction from loaded items (before type filtering, so all categories show)
-  const categories = $derived(
-    [...new Set(items.map((item: { category?: string | null }) => item.category).filter(Boolean))]
-      .sort((a, b) => (a as string).localeCompare(b as string)) as string[]
-  );
-
-  // Client-side filtered items — instant type + category filtering
-  const displayItems = $derived.by(() => {
-    let filtered = items;
-    if (localType) {
-      filtered = filtered.filter((item: { contentType?: string }) => item.contentType === localType);
+  // Category options come from the loaded page. Because `category` is now a
+  // server filter, selecting one narrows the result set to that category —
+  // which would collapse the strip and strand the user's own selection with no
+  // way back to `All`. Union the active category in so the strip is always
+  // navigable out of the state it put you in.
+  // Plain array + `includes` rather than a Set: at most a dozen categories,
+  // and the autofixer (rightly) objects to a bare mutable `Set` inside a rune
+  // file — the alternative would be importing SvelteSet for a value that never
+  // escapes this derivation.
+  const categories = $derived.by(() => {
+    const out: string[] = [];
+    for (const item of items as { category?: string | null }[]) {
+      if (item.category && !out.includes(item.category)) out.push(item.category);
     }
-    if (localCategory) {
-      filtered = filtered.filter((item: { category?: string | null }) => item.category === localCategory);
-    }
-    return filtered;
+    if (filters.category && !out.includes(filters.category)) out.push(filters.category);
+    return out.sort((a, b) => a.localeCompare(b));
   });
 
   const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
@@ -228,92 +238,103 @@
     ] : []),
   ]);
 
-  // Filter chips — type/category use local state; search/sort use URL params.
-  // Removal dispatches via `removeChip` keyed by chip.key.
+  // Filter chips — every facet is URL-backed, so every chip reads from
+  // `filters` (or `data.creator`) and removes itself with one URL write.
   const activeFilterChips = $derived.by<ActiveFilterChip[]>(() => {
     const chips: ActiveFilterChip[] = [];
 
     if (filters.q) {
-      chips.push({ key: 'q', label: `Search: "${filters.q}"` });
+      chips.push({ key: 'q', label: m.explore_chip_search({ query: filters.q }) });
     }
-    if (localType) {
-      const typeLabel = typeOptions.find((o) => o.value === localType)?.label ?? localType;
-      chips.push({ key: 'type', label: `Type: ${typeLabel}` });
+    if (filters.type) {
+      const typeLabel = typeOptions.find((o) => o.value === filters.type)?.label ?? filters.type;
+      chips.push({ key: 'type', label: m.explore_chip_type({ value: typeLabel }) });
     }
-    if (localCategory) {
-      chips.push({ key: 'category', label: `Category: ${localCategory}` });
+    if (filters.category) {
+      chips.push({ key: 'category', label: m.explore_chip_category({ value: filters.category }) });
     }
     if (filters.sort && filters.sort !== 'newest') {
       const sortLabel = sortOptions.find((o) => o.value === filters.sort)?.label ?? filters.sort;
-      chips.push({ key: 'sort', label: `Sort: ${sortLabel}` });
+      chips.push({ key: 'sort', label: m.explore_chip_sort({ value: sortLabel }) });
     }
     if (data.creator) {
-      chips.push({ key: 'creator', label: `Creator: ${data.creator.name}` });
+      chips.push({ key: 'creator', label: m.explore_chip_creator({ value: data.creator.name }) });
     }
     if (filters.featured === true) {
-      chips.push({ key: 'featured', label: m.explore_filter_featured() });
+      chips.push({ key: 'featured', label: m.explore_chip_featured() });
     }
 
     return chips;
   });
 
   function removeChip(chip: ActiveFilterChip) {
-    switch (chip.key) {
-      case 'q':
-        updateFilter('q', null);
-        break;
-      case 'type':
-        localType = '';
-        break;
-      case 'category':
-        localCategory = '';
-        break;
-      case 'sort':
-        updateFilter('sort', null);
-        break;
-      case 'creator':
-        updateFilter('creator', null);
-        break;
-      case 'featured':
-        updateFilter('featured', null);
-        break;
-    }
+    updateFilters({ [chip.key]: null });
   }
 
   const hasActiveFilters = $derived(
-    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest') || !!data.creator || filters.featured === true
+    !!filters.q ||
+      !!filters.type ||
+      !!filters.category ||
+      filters.sort !== 'newest' ||
+      !!data.creator ||
+      filters.featured === true
   );
 
-  function updateFilter(key: string, value: string | null) {
-    const url = new URL(page.url);
-    if (value) {
-      url.searchParams.set(key, value);
-    } else {
-      url.searchParams.delete(key);
+  // ── Batched URL writes ────────────────────────────────────────────
+  // Rebuilding the next URL from `page.url` per write LOSES facets whenever
+  // two writes happen before the router has advanced. The drawer's mobile
+  // Apply does exactly that — `onFilterChange` then `onSortChange` in one tick
+  // — so staging "A-Z" + "Featured only" committed `?sort=title` and silently
+  // dropped `featured`. Two rapid desktop clicks hit the same class of loss.
+  //
+  // So writes accumulate on ONE pending URL and flush once per microtask, and
+  // that pending URL stays authoritative while its navigation is in flight so
+  // a write arriving mid-flight builds on it rather than on a stale
+  // `page.url`. One gesture → one navigation carrying every facet it touched.
+  // The merge rules live in `applyFilterPatch` so they can be unit-tested.
+  let pendingUrl: URL | null = null;
+  let flushScheduled = false;
+
+  function updateFilters(patch: Record<string, string | null>) {
+    applyFilterPatch((pendingUrl ??= new URL(page.url)), patch);
+
+    if (!flushScheduled) {
+      flushScheduled = true;
+      queueMicrotask(flushFilterUrl);
     }
-    if (key !== 'page') {
-      url.searchParams.delete('page');
+  }
+
+  async function flushFilterUrl() {
+    flushScheduled = false;
+    const url = pendingUrl;
+    if (!url) return;
+    const dispatched = url.search;
+    try {
+      await goto(url.toString(), { replaceState: true, noScroll: true });
+    } finally {
+      // Release the pending base only if nothing mutated it while we
+      // navigated. `finally` so a rejected navigation cannot leave a stale
+      // base that every later write would build on.
+      if (pendingUrl && pendingUrl.search === dispatched) pendingUrl = null;
     }
-    goto(url.toString(), { replaceState: true, noScroll: true });
   }
 
   function handleSearchSubmit(value: string) {
     const trimmed = value.trim();
-    updateFilter('q', trimmed || null);
+    updateFilters({ q: trimmed || null });
   }
 
+  /** Page-wide clear — every facet, including the ones the drawer doesn't own. */
   function clearFilters() {
-    localType = '';
-    localCategory = '';
-    const url = new URL(page.url);
-    url.searchParams.delete('q');
-    url.searchParams.delete('type');
-    url.searchParams.delete('sort');
-    url.searchParams.delete('category');
-    url.searchParams.delete('creator');
-    url.searchParams.delete('featured');
-    url.searchParams.delete('page');
-    goto(url.toString(), { replaceState: true });
+    updateFilters({
+      q: null,
+      type: null,
+      sort: null,
+      category: null,
+      creator: null,
+      featured: null,
+      page: null,
+    });
   }
 
   const paginationBaseUrl = $derived.by(() => {
@@ -329,14 +350,9 @@
     { value: 'written', label: m.explore_filter_article() },
   ] as const;
 
-  const { viewMode, handleViewChange } = useViewMode();
-
   // Featured filter — backend publicContentQuerySchema supports `featured: boolean`.
   // Toggle exposes creator-flagged featured items only.
   const featuredActive = $derived(filters.featured === true);
-  function toggleFeatured() {
-    updateFilter('featured', featuredActive ? null : 'true');
-  }
 
   // ── Filter drawer ─────────────────────────────────────────────────
   // Drawer holds Sort + Type + Featured. Search stays in the toolbar;
@@ -347,25 +363,34 @@
     drawerOpen = next;
   }
 
-  // Drawer callbacks route to the existing write paths:
-  //   • type is client-side (localType, instant)
-  //   • featured is URL-driven (updateFilter, navigation)
-  //   • sort is URL-driven (updateFilter)
+  // Both drawer callbacks route through the batched writer, so the two the
+  // shell fires back-to-back on mobile Apply commit as ONE navigation.
   function handleDrawerFilterChange(next: { type: string; featured: boolean }) {
-    if (next.type !== localType) localType = next.type;
-    if (next.featured !== featuredActive) {
-      updateFilter('featured', next.featured ? 'true' : null);
-    }
+    updateFilters({
+      type: next.type || null,
+      featured: next.featured ? 'true' : null,
+    });
   }
   function handleDrawerSortChange(value: string | undefined) {
-    updateFilter('sort', value ?? null);
+    updateFilters({ sort: value ?? null });
+  }
+
+  /**
+   * In-drawer "Clear filters" resets only what the drawer owns. The page-wide
+   * `clearFilters` also wiped `q` and `creator`, so the toolbar search box
+   * visibly emptied while the drawer sat open over facets it doesn't show.
+   * This also matches the shell's own mobile behaviour, which resets to
+   * `defaultFilters` / `defaultSort` — i.e. drawer facets only.
+   */
+  function clearDrawerFilters() {
+    updateFilters({ type: null, featured: null, sort: null, page: null });
   }
 
   // Filter button shows a dot when ANY non-default facet is active.
   // (Search, category, creator are also non-default but they have their
   // own UI; the dot reflects the in-drawer facet state specifically.)
   const drawerActiveCount = $derived(
-    (localType ? 1 : 0) +
+    (filters.type ? 1 : 0) +
       (featuredActive ? 1 : 0) +
       (filters.sort !== 'newest' ? 1 : 0)
   );
@@ -375,11 +400,14 @@
   // category, creator) that represent distinct indexable collections.
   // Drop transient params (q, sort, page) which would otherwise explode
   // into thousands of low-value URL variants and dilute crawl budget.
+  // `featured` is dropped too: it's a re-ordering of the same catalogue, so
+  // indexing it would create a near-duplicate of the unfiltered page.
   const canonicalUrl = $derived.by(() => {
     const url = new URL(page.url);
     url.searchParams.delete('q');
     url.searchParams.delete('sort');
     url.searchParams.delete('page');
+    url.searchParams.delete('featured');
     return `${url.origin}${url.pathname}${url.search}`;
   });
 
@@ -456,7 +484,7 @@
       role={data.creator.role}
       contentCount={data.creator.contentCount}
       socialLinks={data.creator.socialLinks}
-      onClear={() => updateFilter('creator', null)}
+      onClear={() => updateFilters({ creator: null })}
     />
   {/if}
 
@@ -464,18 +492,12 @@
   <header class="explore__header">
     <h1 class="explore__title">{m.explore_title()}</h1>
     {#if total > 0}
-      <p class="explore__count">
-        {#if localType || localCategory}
-          {m.explore_showing_filtered({ count: String(displayItems.length), total: String(total) })}
-        {:else}
-          {m.explore_results_count({ count: String(total) })}
-        {/if}
-      </p>
+      <p class="explore__count">{resultsCountLabel}</p>
     {/if}
   </header>
 
-  <!-- Sticky command bar: search + filter trigger + view toggle. Type,
-       Featured, and Sort live inside the drawer. -->
+  <!-- Sticky command bar: search + filter trigger. Type, Featured and Sort
+       live inside the drawer. -->
   <StickyToolbar>
     <SearchPill
       value={filters.q ?? ''}
@@ -487,90 +509,73 @@
       activeCount={drawerActiveCount}
       onClick={() => setDrawerOpen(true)}
       expanded={drawerOpen}
-      ariaLabel={`${m.explore_filters_and_sort()}${drawerActiveCount > 0 ? ` (${drawerActiveCount} active)` : ''}`}
+      ariaLabel={drawerActiveCount > 0
+        ? `${m.explore_filters_and_sort()} (${m.filters_active_count({ count: drawerActiveCount })})`
+        : m.explore_filters_and_sort()}
       title={m.explore_filters_and_sort()}
     />
-
-    <div class="explore__view-toggle">
-      <ViewToggle value={viewMode} onchange={handleViewChange} />
-    </div>
   </StickyToolbar>
 
-  <!-- Scope chips: All / Journeys — the prototype's discovery row. Only shown
-       when the org has published journeys, so a journey-less org is unchanged. -->
-  {#if hasJourneys}
-    <nav class="explore__scope" aria-label="Browse scope">
-      <button
-        type="button"
-        class="explore__scope-chip"
-        class:explore__scope-chip--active={viewScope === 'all'}
-        onclick={() => { viewScope = 'all'; }}
-        aria-pressed={viewScope === 'all'}
-      >
-        All
-      </button>
-      <button
-        type="button"
-        class="explore__scope-chip"
-        class:explore__scope-chip--active={viewScope === 'journeys'}
-        onclick={() => { viewScope = 'journeys'; }}
-        aria-pressed={viewScope === 'journeys'}
-      >
-        Journeys
-      </button>
-    </nav>
-  {/if}
+  <!--
+    Portals rail (SPEC §8.5) — the org's published courses as sales-linked
+    discovery cards, above the content grid.
 
-  <!-- Journeys rail (SPEC §8.5) — the org's published courses as sales-linked
-       discovery cards, above the content grid. -->
+    The <section> is deliberately UNNAMED: `Carousel` emits its own
+    role="region" with an accessible name, and naming the section too would
+    announce two nested landmarks with near-identical names. An unnamed
+    <section> is not a landmark, so this leaves exactly one. The h2 still
+    anchors the heading outline.
+  -->
   {#if showJourneysRail}
-    <section class="explore__journeys" aria-labelledby="journeys-heading">
+    <section class="explore__journeys">
       <div class="explore__journeys-head">
-        <h2 id="journeys-heading" class="explore__journeys-title">Journeys</h2>
-        <span class="explore__journeys-count">
-          {filteredJourneys.length}
-          {filteredJourneys.length === 1 ? 'guided journey' : 'guided journeys'}
-        </span>
+        <h2 class="explore__journeys-title">{m.explore_portals_title()}</h2>
+        <span class="explore__journeys-count">{portalsCountLabel}</span>
       </div>
       {#if filteredJourneys.length > 1}
-        <p class="explore__journeys-pathline">
-          Each journey stands on its own — begin wherever you feel the pull.
-        </p>
+        <p class="explore__journeys-pathline">{m.explore_portals_pathline()}</p>
       {/if}
-      <div class="content-grid">
-        {#each filteredJourneys as journey (journey.id)}
+      <Carousel
+        items={filteredJourneys}
+        itemMinWidth="17rem"
+        ariaLabel={m.explore_portals_rail_label()}
+      >
+        {#snippet renderItem(journey)}
           <JourneyRailCard {journey} href={journeyHref(journey)} />
-        {/each}
-      </div>
+        {/snippet}
+      </Carousel>
     </section>
   {/if}
 
-  <!-- Content section ("Browse everything") — hidden when the scope is
-       narrowed to journeys only. -->
-  {#if showContent}
-    {#if hasJourneys}
-      <div class="explore__browse-head">
-        <h2 class="explore__browse-title">Browse everything</h2>
-      </div>
-    {/if}
+  <!-- Content section. The heading only earns its place in CONTRAST to the
+       rail above it — with no rail rendered there is nothing for "everything"
+       to be distinguished from, so it is gated on the rail, not on the org
+       merely having portals. -->
+  {#if showJourneysRail}
+    <div class="explore__browse-head">
+      <h2 class="explore__browse-title">{m.explore_browse_everything()}</h2>
+    </div>
+  {/if}
 
   <!-- Category Strip -->
-  {#if categories.length >= 2}
-    <nav class="explore__categories" aria-label="Filter by category">
+  {#if categories.length >= 2 || filters.category}
+    <nav class="explore__categories" aria-label={m.explore_category_filter_label()}>
       <button
+        type="button"
         class="explore__category-pill"
-        class:explore__category-pill--active={!localCategory}
-        onclick={() => { localCategory = ''; }}
-        aria-pressed={!localCategory}
+        class:explore__category-pill--active={!filters.category}
+        onclick={() => updateFilters({ category: null })}
+        aria-pressed={!filters.category}
       >
         {m.explore_filter_all()}
       </button>
       {#each categories as cat (cat)}
         <button
+          type="button"
           class="explore__category-pill"
-          class:explore__category-pill--active={localCategory === cat}
-          onclick={() => { localCategory = cat; }}
-          aria-pressed={localCategory === cat}
+          class:explore__category-pill--active={filters.category === cat}
+          onclick={() => updateFilters({ category: cat })}
+          aria-pressed={filters.category === cat}
         >
           {cat}
         </button>
@@ -588,13 +593,13 @@
   />
 
   <!-- Content Grid -->
-  {#if displayItems.length > 0}
-    <div class="content-grid explore__grid" data-view={viewMode}>
-      {#each displayItems as item (item.id)}
+  {#if items.length > 0}
+    <div class="content-grid">
+      {#each items as item (item.id)}
         <ContentCard
-          variant={viewMode === 'list' ? 'list' : 'grid'}
-          shape={viewMode === 'list' ? undefined : '3:4'}
-          titleInCover={viewMode === 'list' ? undefined : true}
+          variant="grid"
+          shape="3:4"
+          titleInCover={true}
           chrome="transparent"
           id={item.id}
           title={item.title}
@@ -633,7 +638,7 @@
   {:else if hasActiveFilters}
     <EmptyState title={m.explore_no_results()} icon={SearchXIcon}>
       {#snippet action()}
-        <button class="explore__clear-btn" onclick={clearFilters}>
+        <button type="button" class="explore__clear-btn" onclick={clearFilters}>
           {m.explore_clear_filters()}
         </button>
       {/snippet}
@@ -641,28 +646,19 @@
   {:else}
     <EmptyState title={m.explore_no_content()} description={m.explore_no_content_description()} icon={FileIcon} />
   {/if}
-  {:else if !showJourneysRail}
-    <!-- Scope is journeys-only but a search emptied the rail. -->
-    <EmptyState title={m.explore_no_results()} icon={SearchXIcon}>
-      {#snippet action()}
-        <button class="explore__clear-btn" onclick={clearFilters}>
-          {m.explore_clear_filters()}
-        </button>
-      {/snippet}
-    </EmptyState>
-  {/if}
 </div>
 
 <ExploreFilterDrawer
   open={drawerOpen}
   onOpenChange={setDrawerOpen}
-  filters={{ type: localType, featured: featuredActive }}
+  filters={{ type: filters.type, featured: featuredActive }}
   sort={filters.sort}
   {sortOptions}
   {typeOptions}
   onFilterChange={handleDrawerFilterChange}
   onSortChange={handleDrawerSortChange}
-  onClearAll={clearFilters}
+  onClearAll={clearDrawerFilters}
+  activeCount={drawerActiveCount}
 />
 
 <BackToTop />
@@ -686,54 +682,12 @@
     gap: var(--space-6);
   }
 
-  /* ── Scope chips (All / Journeys) ── */
-  .explore__scope {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .explore__scope-chip {
-    padding: var(--space-1-5) var(--space-4);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-    background: transparent;
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    transition:
-      background-color var(--duration-fast) var(--ease-default),
-      color var(--duration-fast) var(--ease-default),
-      border-color var(--duration-fast) var(--ease-default);
-  }
-
-  .explore__scope-chip:hover {
-    color: var(--color-text);
-    background: var(--color-surface-secondary);
-  }
-
-  .explore__scope-chip:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--focus-offset, 1px);
-  }
-
-  .explore__scope-chip--active {
-    color: var(--color-text-on-brand);
-    background: var(--color-brand-primary);
-    border-color: var(--color-brand-primary);
-  }
-
-  .explore__scope-chip--active:hover {
-    background: var(--color-brand-primary);
-  }
-
-  /* ── Journeys rail ── */
+  /* ── Portals rail ── */
   .explore__journeys {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+    margin-block: var(--space-6);
   }
 
   .explore__journeys-head {
@@ -766,10 +720,7 @@
     max-width: 60ch;
   }
 
-  /* The journeys rail reuses the shared `.content-grid` utility so journey
-     cards share the exact column rhythm of the content cards below. */
-
-  /* ── Browse-everything section heading (only when journeys present) ── */
+  /* ── Browse-everything section heading (only when portals present) ── */
   .explore__browse-head {
     display: flex;
     align-items: baseline;
@@ -795,10 +746,6 @@
     flex-wrap: wrap;
   }
 
-  .explore__journeys {
-    margin-block: var(--space-6);
-  }
-
   .explore__title {
     margin: 0;
     font-size: var(--text-3xl);
@@ -811,13 +758,6 @@
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-  }
-
-  /* Push the view toggle to the trailing edge of the sticky bar row. */
-  .explore__view-toggle {
-    display: inline-flex;
-    align-items: center;
-    margin-inline-start: auto;
   }
 
   /* ── Category Strip ── */
@@ -882,11 +822,6 @@
     background: var(--color-surface-elevated);
   }
 
-  /* List view layout is handled by the ContentCard `variant="list"` treatment
-     (horizontal row) — see the viewMode-driven props above. The grid container
-     collapses to a single column via the shared `.content-grid[data-view='list']`
-     utility, so no page-level card overrides are needed here. */
-
   /* ── Pagination ── */
   .explore__pagination {
     display: flex;
@@ -913,6 +848,14 @@
     color: var(--color-text-on-brand);
   }
 
+  /* R14 — this was the only interactive element on the page with no
+     focus-visible rule, so keyboard users had whatever the UA happened to
+     draw over a brand-coloured outline (often nothing). */
+  .explore__clear-btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--focus-offset, 1px);
+  }
+
   /* ── Responsive ── */
   @media (--below-sm) {
     .explore {
@@ -921,12 +864,6 @@
 
     .explore__title {
       font-size: var(--text-2xl);
-    }
-
-    /* Mobile: hide ViewToggle — the drawer is the all-in-one surface,
-       grid is the default. */
-    .explore__view-toggle {
-      display: none;
     }
   }
 </style>

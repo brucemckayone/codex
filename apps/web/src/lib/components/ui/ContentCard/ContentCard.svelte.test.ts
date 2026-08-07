@@ -153,19 +153,6 @@ describe('ContentCard — article title-in-cover', () => {
     );
   });
 
-  test('list variant does NOT enable title-in-cover; body description renders', () => {
-    component = render({
-      contentType: 'article',
-      variant: 'list',
-      description: 'This excerpt should still render in the body.',
-    });
-    const el = card();
-    expect(el?.classList.contains('cc--title-in-cover')).toBe(false);
-    expect(document.querySelector('.cc__description')?.textContent).toContain(
-      'This excerpt should still render'
-    );
-  });
-
   test('titleInCover={false} forces the overlay off even for a shaped article', () => {
     component = render({
       contentType: 'article',

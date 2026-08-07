@@ -136,22 +136,79 @@ describe('explore +page.server.ts — cache wiring', () => {
       const [idArg, typeArg] = cacheGetMock.mock.calls[0];
       // Shared version key — one per org — is what `publish` bumps.
       expect(idArg).toBe(CacheType.COLLECTION_ORG_CONTENT(ORG_ID));
-      // Per-combo type carries sort + contentType + page.
+      // Per-combo type carries sort + contentType + category + page.
       expect(typeArg).toMatch(/^content:auth:popular:/);
     });
 
-    it('includes sort + contentType + page in the cache type', async () => {
+    it('includes sort + contentType + category + page in the cache type', async () => {
       const { load } = await import('../+page.server');
 
       await load(
         baseInput({
           user: { id: 'user-1' },
-          url: 'http://lvh.me:3000/explore?sort=top-selling&type=video&page=3',
+          url: 'http://lvh.me:3000/explore?sort=top-selling&type=video&category=ritual&page=3',
         })
       );
 
       const [, typeArg] = cacheGetMock.mock.calls[0];
-      expect(typeArg).toBe('content:auth:top-selling:video:3');
+      expect(typeArg).toBe('content:auth:top-selling:video:ritual:3');
+    });
+
+    it('varies the cache type by category so two filter combos cannot collide', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=ritual',
+        })
+      );
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=breath',
+        })
+      );
+
+      const [, firstType] = cacheGetMock.mock.calls[0];
+      const [, secondType] = cacheGetMock.mock.calls[1];
+      expect(firstType).toBe('content:auth:popular:all:ritual:1');
+      expect(secondType).toBe('content:auth:popular:all:breath:1');
+    });
+
+    it('forwards category to the browse endpoint (it is part of contentQuerySchema)', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&category=ritual',
+        })
+      );
+
+      const params = browseMock.mock.calls[0][0] as URLSearchParams;
+      expect(params.get('category')).toBe('ritual');
+    });
+
+    it('downgrades an auth-only sort to newest when `featured` is requested', async () => {
+      // The browse endpoint has no `featured` filter, so honouring the sort
+      // would silently return the whole catalogue behind a "Featured" chip.
+      // The filter is the explicit ask, so the sort yields and we fall through
+      // to the public branch, which does filter by featured.
+      const { load } = await import('../+page.server');
+
+      const result = await load(
+        baseInput({
+          user: { id: 'user-1' },
+          url: 'http://lvh.me:3000/explore?sort=popular&featured=true',
+        })
+      );
+
+      expect(browseMock).not.toHaveBeenCalled();
+      expect(getPublicContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ featured: true, sort: 'newest' })
+      );
+      expect(result.filters.sort).toBe('newest');
     });
 
     it('uses 180s TTL for auth-sort cache entries', async () => {

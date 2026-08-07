@@ -175,6 +175,14 @@ export const common_loading = () => `Loading...`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const common_error = () => `Something went wrong`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const common_or = () => `or`
 
 
@@ -1747,14 +1755,6 @@ export const explore_sort_top_selling = () => `Top Selling`
 
 
 /**
- * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const explore_showing_filtered = (params) => `Showing ${params.count} of ${params.total} results`
-
-
-/**
  * 
  * @returns {string}
  */
@@ -1811,11 +1811,131 @@ export const explore_done = () => `Done`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_results_count_one = () => `1 result`
+
+
+/**
  * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const explore_results_count = (params) => `${params.count} results`
+export const explore_results_count_other = (params) => `${params.count} results`
+
+
+/**
+ * @param {{ query: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_search = (params) => `Search: “${params.query}”`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_type = (params) => `Type: ${params.value}`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_category = (params) => `Category: ${params.value}`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_sort = (params) => `Sort: ${params.value}`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_creator = (params) => `Creator: ${params.value}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_chip_featured = () => `Featured`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_portals_title = () => `Portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_portals_rail_label = () => `Guided portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_portals_count_one = () => `1 guided portal`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_portals_count_other = (params) => `${params.count} guided portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_portals_pathline = () => `Each portal stands on its own — begin wherever you feel the pull.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_browse_everything = () => `Browse everything`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_category_filter_label = () => `Filter by category`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const filters_active_count = (params) => `${params.count} active`
 
 
 /**
@@ -9064,30 +9184,6 @@ export const table_select_all = () => `Select all rows`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const table_select_row = () => `Select row`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const view_toggle_label = () => `View mode`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const view_toggle_grid = () => `Grid view`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const view_toggle_list = () => `List view`
 
 
 /**
