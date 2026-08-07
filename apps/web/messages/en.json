@@ -1266,5 +1266,5 @@
   "monetisation_revenue_share_description": "Negotiate per-creator splits on subscription and content-purchase revenue. Every share is calculated against post-platform revenue — the platform fee is taken first, and the share applies to what remains.",
   "monetisation_pricing_faq_title": "Pricing FAQ",
   "monetisation_pricing_faq_description": "The questions answered on your public pricing page, in the order visitors read them. Reorder or rewrite them to match how you actually sell.",
-  "team_meta_members": "{count} members"
+  "team_meta_members": "Members"
 }

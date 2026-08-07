@@ -61,6 +61,20 @@
  * Safe tuning range for the taste dial: --status-fill-mix 6–20% light,
  * 10–24% dark keeps the worst text-on-fill pair ≥ 4.9:1 throughout.
  *
+ * SCOPE OF THAT AUDIT: it covers the 12 tokens below and nothing else. It is
+ * not a statement about the NEUTRAL text tokens that surround a status
+ * surface, which have their own failures and their own owners:
+ *   --color-text-muted    2.42:1 light / 3.78:1 dark at :root — unfit for any
+ *                         real text at any size. Chrome/Lighthouse flag every
+ *                         consumer. Do not reach for it for copy; it needs an
+ *                         app-wide audit of its ~416 consumers before its
+ *                         value can move (tracked separately).
+ *   --color-text-secondary safe at :root (7.49:1 / 12.09:1) AND under
+ *                         [data-org-bg] since the derivation there was
+ *                         switched from an absolute-lightness recipe to a mix
+ *                         back towards the page — see tokens/org-brand.css.
+ *                         It used to be 2.83:1 on a cream org background.
+ *
  * Known gap (pre-existing, not introduced here): the [data-org-bg] text
  * derivation in org-brand.css has a discontinuity at its
  * clamp(0.05, (0.6 - l) * 1000, 0.9) hinge. A mid-grey org background such as

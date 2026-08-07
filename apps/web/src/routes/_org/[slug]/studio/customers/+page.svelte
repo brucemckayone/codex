@@ -279,7 +279,7 @@
     >
       {#snippet meta()}
         {#if hasCustomers && totalCustomers > 0}
-          <span>{m.studio_customers_stat_total_customers()}: {totalCustomers}</span>
+          <li>{m.studio_customers_stat_total_customers()}: {totalCustomers}</li>
         {/if}
       {/snippet}
       {#snippet actions()}

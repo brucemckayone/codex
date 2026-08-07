@@ -23,8 +23,13 @@
   @prop {string} [description] - A LEDE: one to two full sentences saying what
     the page is for. Not microcopy. Capped at `--measure-lede`.
   @prop {Snippet} [meta] - Lightweight inline facts (counts, status, period
-    label) as bare `<span>`s; the container owns the typography and the dot
-    separators. NOT for KPI/StatCard grids — those stay their own section.
+    label). The container is a `<ul>`, so the snippet MUST emit `<li>`s — one
+    per fact. That is not decoration: the dot separator between facts is a
+    CSS-generated glyph, and generated content conveys nothing to the
+    accessibility tree, so without list semantics two adjacent facts read as
+    one run of text ("4 members Last 30 days"). The container owns the
+    typography and the separators; the `<li>`s carry only content.
+    NOT for KPI/StatCard grids — those stay their own section.
   @prop {Snippet} [actions] - Buttons for the header row.
   @prop {'default'|'compact'} [variant='default'] - `compact` is for pages
     nested below a top-level studio destination: smaller title, no hairline —
@@ -104,9 +109,13 @@
     {/if}
   </div>
   {#if meta}
-    <div class="page-header__meta">
+    <!-- `{#if meta}` tests whether the SNIPPET was supplied, not whether it
+         renders anything — every real call site guards its own contents on a
+         loaded/non-empty condition, so the passed-but-empty case is the
+         common one. `.page-header__meta:empty` collapses it. -->
+    <ul class="page-header__meta">
       {@render meta()}
-    </div>
+    </ul>
   {/if}
 </header>
 
@@ -153,9 +162,17 @@
     min-width: 0;
   }
 
-  /* Byte-for-byte the `.studio-rail__brand-kicker` treatment, so the rail
-     reads "STUDIO / Of Blood and Bones" and the page reads "MONEY / Payouts"
-     in one visual language. */
+  /* The `.studio-rail__brand-kicker` treatment, so the rail reads
+     "STUDIO / Of Blood and Bones" and the page reads "MONEY / Payouts" in one
+     visual language — size, weight, tracking and case all match.
+     The INK deliberately does not: the rail shipped `--color-text-muted`,
+     which is `--color-neutral-400` in light theme and measures 2.42:1 on the
+     studio content column (and 3.78:1 dark). This is 12–13px at weight 500,
+     so it is not large text and 4.5:1 applies — muted fails both themes.
+     `--color-text-secondary` measures 7.49:1 light / 12.09:1 dark on the
+     platform, and 8.66:1 / 5.86:1 on an org background after the
+     [data-org-bg] derivation fix. It still reads quiet, because the size,
+     weight, tracking and uppercase treatment already do that work. */
   .page-header__kicker {
     display: inline-flex;
     align-items: center;
@@ -167,7 +184,7 @@
     line-height: var(--leading-none);
     letter-spacing: var(--tracking-wide);
     text-transform: var(--text-transform-label);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   /* The one place brand ink enters studio chrome. A decorative rule carries no
@@ -231,17 +248,29 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-1) var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
 
+  /* A `display: none` flex item leaves the layout entirely, so the parent's
+     `gap` collapses with it — an empty meta row costs nothing. Svelte's
+     `{#if}` anchors are comment nodes, which `:empty` ignores. */
+  .page-header__meta:empty {
+    display: none;
+  }
+
   /* `:global` is unavoidable here — the snippet's markup is authored at the
      call site, outside this component's style scope. Keep it to this one
-     separator rule; do not reach for :global for anything else. */
+     separator rule; do not reach for :global for anything else.
+     No `color` override: the dot inherits the row's own ink, which keeps the
+     delimiter as legible as the facts it separates (it was
+     `--color-text-muted`, 2.42:1 — a near-invisible separator). */
   .page-header__meta > :global(:not(:first-child))::before {
     content: '·';
     margin-inline-end: var(--space-2);
-    color: var(--color-text-muted);
   }
 
   .page-header__actions {

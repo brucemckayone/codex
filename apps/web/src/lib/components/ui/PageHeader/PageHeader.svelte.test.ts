@@ -5,6 +5,7 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import PageHeader from './PageHeader.svelte';
+import PageHeaderHarness from './PageHeaderHarness.test.svelte';
 
 /**
  * PageHeader unit tests.
@@ -19,6 +20,9 @@ import PageHeader from './PageHeader.svelte';
 
 const span = (text: string) =>
   createRawSnippet(() => ({ render: () => `<span>${text}</span>` }));
+
+const listItem = (text: string) =>
+  createRawSnippet(() => ({ render: () => `<li>${text}</li>` }));
 
 describe('PageHeader', () => {
   let component: ReturnType<typeof mount> | null = null;
@@ -78,72 +82,131 @@ describe('PageHeader', () => {
   });
 
   test('renders the description when passed', () => {
-    render({ title: 'Sales', description: 'Every purchase taken this period.' });
+    render({
+      title: 'Sales',
+      description: 'Every purchase taken this period.',
+    });
 
-    expect(document.querySelector('.page-header__description')?.textContent).toBe(
-      'Every purchase taken this period.'
-    );
+    expect(
+      document.querySelector('.page-header__description')?.textContent
+    ).toBe('Every purchase taken this period.');
   });
 
   test('renders meta and actions into their own containers', () => {
     render({
       title: 'Team',
-      meta: span('4 members'),
+      meta: listItem('Members: 4'),
       actions: span('Invite'),
     });
 
     expect(document.querySelector('.page-header__meta')?.textContent).toContain(
-      '4 members'
+      'Members: 4'
     );
-    expect(document.querySelector('.page-header__actions')?.textContent).toContain(
-      'Invite'
-    );
+    expect(
+      document.querySelector('.page-header__actions')?.textContent
+    ).toContain('Invite');
+  });
+
+  // The dot separator between facts is CSS-generated, so it conveys nothing to
+  // the accessibility tree. List semantics are what keep two adjacent facts
+  // from reading as one run of text.
+  test('meta is a list so each fact stays a discrete item', () => {
+    render({ title: 'Team', meta: listItem('Members: 4') });
+
+    const meta = document.querySelector('.page-header__meta');
+    expect(meta?.tagName.toLowerCase()).toBe('ul');
+    expect(meta?.querySelectorAll('li')).toHaveLength(1);
+  });
+
+  // Guards the `{#if meta}`/renders-nothing seam through a real snippet with
+  // its own `{#if}`, which is the shape both call sites use. The container has
+  // to end up child-free so `.page-header__meta:empty { display: none }` can
+  // collapse it — an empty flex item would otherwise still consume the
+  // parent's `gap` and the header would gain a phantom row.
+  test('leaves the meta container child-free when the snippet renders nothing', () => {
+    component = mount(PageHeaderHarness, {
+      target: document.body,
+      props: { hasFacts: false },
+    });
+
+    const meta = document.querySelector('.page-header__meta');
+    expect(meta).not.toBeNull();
+    expect(meta?.children).toHaveLength(0);
+    expect(meta?.textContent?.trim()).toBe('');
+  });
+
+  test('keeps every fact a discrete item when the snippet does render', () => {
+    component = mount(PageHeaderHarness, {
+      target: document.body,
+      props: { hasFacts: true },
+    });
+
+    const items = document.querySelectorAll('.page-header__meta > li');
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toBe('Members: 4');
+    expect(items[1].textContent).toBe('Last 30 days');
   });
 
   test('reflects variant on data-variant and defaults to "default"', () => {
-    expect(render({ title: 'Team' })?.getAttribute('data-variant')).toBe('default');
+    expect(render({ title: 'Team' })?.getAttribute('data-variant')).toBe(
+      'default'
+    );
     unmount(component!);
     component = null;
     document.body.innerHTML = '';
 
-    expect(render({ title: 'Team', variant: 'compact' })?.getAttribute('data-variant')).toBe(
-      'compact'
-    );
+    expect(
+      render({ title: 'Team', variant: 'compact' })?.getAttribute(
+        'data-variant'
+      )
+    ).toBe('compact');
   });
 
   test('compact drops to an h2 so a layout keeps the only h1', () => {
     render({ title: 'Team revenue share', variant: 'compact' });
 
-    expect(document.querySelector('.page-header__title')?.tagName.toLowerCase()).toBe('h2');
+    expect(
+      document.querySelector('.page-header__title')?.tagName.toLowerCase()
+    ).toBe('h2');
   });
 
   test('headingLevel overrides the variant default in both directions', () => {
     render({ title: 'Nested', variant: 'compact', headingLevel: 1 });
-    expect(document.querySelector('.page-header__title')?.tagName.toLowerCase()).toBe('h1');
+    expect(
+      document.querySelector('.page-header__title')?.tagName.toLowerCase()
+    ).toBe('h1');
 
     unmount(component!);
     component = null;
     document.body.innerHTML = '';
 
     render({ title: 'Top level', headingLevel: 2 });
-    expect(document.querySelector('.page-header__title')?.tagName.toLowerCase()).toBe('h2');
+    expect(
+      document.querySelector('.page-header__title')?.tagName.toLowerCase()
+    ).toBe('h2');
   });
 
   test('reflects divider on data-divider and defaults to true', () => {
-    expect(render({ title: 'Team' })?.getAttribute('data-divider')).toBe('true');
+    expect(render({ title: 'Team' })?.getAttribute('data-divider')).toBe(
+      'true'
+    );
     unmount(component!);
     component = null;
     document.body.innerHTML = '';
 
-    expect(render({ title: 'Settings', divider: false })?.getAttribute('data-divider')).toBe(
-      'false'
-    );
+    expect(
+      render({ title: 'Settings', divider: false })?.getAttribute(
+        'data-divider'
+      )
+    ).toBe('false');
   });
 
   test('forwards a class prop', () => {
-    expect(render({ title: 'Team', class: 'custom-header' })?.classList.contains('custom-header')).toBe(
-      true
-    );
+    expect(
+      render({ title: 'Team', class: 'custom-header' })?.classList.contains(
+        'custom-header'
+      )
+    ).toBe(true);
   });
 
   // R13 regression guard: `class="page-header {className}"` would emit the
@@ -156,7 +219,11 @@ describe('PageHeader', () => {
   });
 
   test('passes through HTML attributes to the header element', () => {
-    const header = render({ title: 'Team', id: 'team-header', 'data-testid': 'ph' });
+    const header = render({
+      title: 'Team',
+      id: 'team-header',
+      'data-testid': 'ph',
+    });
 
     expect(header?.getAttribute('id')).toBe('team-header');
     expect(header?.getAttribute('data-testid')).toBe('ph');

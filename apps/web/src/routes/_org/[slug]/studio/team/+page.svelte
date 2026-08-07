@@ -128,7 +128,10 @@
   >
     {#snippet meta()}
       {#if !membersQuery?.loading && teamMembers.length > 0}
-        <span>{m.team_meta_members({ count: teamMembers.length })}</span>
+        <!-- Labelled stat, not "{n} members": paraglide-js 1.x has no plural
+             form (zero ICU plurals repo-wide), so an interpolated noun would
+             read "1 members". Matches the customers header's shape. -->
+        <li>{m.team_meta_members()}: {teamMembers.length}</li>
       {/if}
     {/snippet}
     {#snippet actions()}

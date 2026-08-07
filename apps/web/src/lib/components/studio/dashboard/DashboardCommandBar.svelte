@@ -53,10 +53,17 @@
         <span class="identity-initials">{initials}</span>
       {/if}
     </span>
-    <span class="identity-text">
+    <!-- The org name is the dashboard's `<h1>`. The dashboard is the studio's
+         front door and this bar is its masthead, so without a heading here it
+         was the one studio destination with no announced name and no entry in
+         a screen reader's heading list — every sibling page gets one from
+         PageHeader. A heading is not phrasing content, so `.identity-text`
+         has to be a `<div>`; both elements carry explicit type, size and
+         weight, so this is a semantics-only change. -->
+    <div class="identity-text">
       <span class="identity-eyebrow">{eyebrow}</span>
-      <span class="identity-name" title={orgName}>{orgName}</span>
-    </span>
+      <h1 class="identity-name" title={orgName}>{orgName}</h1>
+    </div>
   </div>
 
   <p class="bar-narrative" aria-live="polite">
@@ -167,7 +174,10 @@
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-text-muted);
+    /* Not --color-text-muted: at --text-xs that is 2.42:1 light / 3.78:1 dark
+       (measured), and this is real wayfinding copy, not decoration. Same
+       correction as `.page-header__kicker`. */
+    color: var(--color-text-secondary);
   }
 
   .identity-name {

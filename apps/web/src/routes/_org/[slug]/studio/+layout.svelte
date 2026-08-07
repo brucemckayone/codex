@@ -168,7 +168,14 @@
        max-content (measured 1012px instead of 1920px at a 2560 viewport).
        This is a border-box cap (global box-sizing), so content resolves to
        120rem − 2 × --space-6; do NOT "fix" that with content-box, which
-       breaks the padding contract. */
+       breaks the padding contract.
+
+       ONE sanctioned exception, and it is not a layout cap: the settings
+       subtree caps to a READING/FORM measure because its inputs carry
+       `max-width: none` and would otherwise render ~1758px wide — see
+       `studio/settings/+layout.svelte`'s `.settings-layout`, which
+       cross-references this rule. Anything that is a second opinion about
+       the COLUMN width belongs here instead. */
     width: 100%;
     max-width: var(--container-studio);
     margin-inline: auto;

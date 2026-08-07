@@ -10147,8 +10147,8 @@ export const monetisation_pricing_faq_description = () => `The questions answere
 
 
 /**
- * @param {{ count: NonNullable<unknown> }} params
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const team_meta_members = (params) => `${params.count} members`
+export const team_meta_members = () => `Members`

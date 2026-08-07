@@ -88,7 +88,13 @@
        its inputs carry `max-width: none`, so at the studio's default column
        width a "Platform Name" field renders ~1758px wide. The cap is
        deliberately narrower than --container-studio for that reason; do not
-       remove it without giving `.field-input` a measure of its own first. */
+       remove it without giving `.field-input` a measure of its own first.
+
+       This is the ONE exception to "studio pages MUST NOT declare an outer
+       max-width" in `studio/+layout.svelte`'s `.studio-layout__main`, which
+       names it. The shell still owns the COLUMN; this owns the FORM measure
+       inside it. If `.field-input` ever gets its own `--measure-*`, delete
+       this line and the exception in the shell comment together. */
     max-width: var(--container-max);
   }
 
