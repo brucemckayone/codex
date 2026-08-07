@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'svelte';
 import { afterEach, describe, expect, test } from 'vitest';
 import { mount, unmount } from '$tests/utils/component-test-utils.svelte';
 import CreatorPortrait from './CreatorPortrait.svelte';
@@ -30,7 +31,14 @@ describe('CreatorPortrait', () => {
     document.body.innerHTML = '';
   });
 
-  const render = (props: Record<string, unknown>) => {
+  /**
+   * Typed as the component's real props, not `Record<string, unknown>`. The
+   * loose shape does not satisfy the required `name`, so `mount` reported
+   * `TS2345` under `svelte-check` while `vitest` and `pnpm build` both stayed
+   * green — the same blind spot that hid the `Props extends HTMLAttributes`
+   * clash in `CreatorCard.svelte`.
+   */
+  const render = (props: ComponentProps<typeof CreatorPortrait>) => {
     component = mount(CreatorPortrait, { target: document.body, props });
     return document.querySelector('.portrait') as HTMLElement;
   };

@@ -8,12 +8,22 @@
   The hero photo sits at the top with the creator's name + role overlaid on a
   gradient fade; bio, social links, latest content and the profile link follow.
 
-  ## Three measured defects this fixes
+  ## Measured defects this fixes
 
   1. **The panel was 672px, not the 448px it declared.** Its own
      `max-width: 28rem` never applied — `.dialog-content[data-size='md']` wins on
      specificity and source order. Passing `size="sm"` gets the intended width
      from the primitive instead of fighting it with `:global()`.
+
+     `[data-size]` outranks a two-class `:global()` in BOTH directions, which is
+     the trap this fix first walked into: with `size="sm"` the primitive's
+     `.dialog-content[data-size='sm']` — (0,3,0) once Svelte appends its scoping
+     class — also beat the mobile override's `.dialog-content.creator-drawer`
+     at (0,2,0), so the bottom sheet's `max-width: 100%` was dead CSS and the
+     sheet clamped to 448px on any viewport between 448px and 640px. Fixed with
+     `min-inline-size` rather than a bigger selector: min-width wins the
+     used-width constraint resolution regardless of which `max-width` cascaded,
+     so the sheet is full-bleed without a specificity arms race.
   2. **It opened scrolled 630px down.** The dialog moves initial focus to the
      first focusable descendant, which used to be a social link deep in the body,
      and the browser scrolled it into view — so you opened a person's profile and
@@ -24,13 +34,26 @@
      scrollTop 630 it measured y=-618 — off-screen, with Esc and overlay-click the
      only ways out, and no visible dismiss at all on the mobile sheet. This drawer
      supplies its own sticky one and hides the primitive's.
+  4. **The panel had no accessible name.** Melt's dialog builder emits
+     `aria-labelledby={titleId}` on the content element unconditionally, and this
+     was the only one of the app's `Dialog.Content` consumers that never rendered
+     a `Dialog.Title` — so the reference dangled, there was no `aria-label`, and
+     `role="dialog"` does not permit name-from-content. The hero name now renders
+     THROUGH `Dialog.Title`, which wires it to that id.
+  5. **Focus was not restored on close.** Fixing initial focus (defect 2) left
+     the other half open: this drawer is opened programmatically from a card's
+     hit area, never from a `Dialog.Trigger`, so Melt had no restore target and
+     Escape dropped focus to `<body>`. The caller passes the triggering element
+     through `closeFocus`.
 
   @prop {boolean} open - Whether the drawer is open (bindable)
   @prop {CreatorDrawerData | null} creator - Creator data to display
   @prop {string} orgSlug - Organization slug (for content links)
   @prop {(open: boolean) => void} [onOpenChange] - Callback when open state changes
+  @prop {CreateDialogProps['closeFocus']} [closeFocus] - Element/getter to refocus on close
 -->
 <script lang="ts">
+  import type { CreateDialogProps } from '@melt-ui/svelte';
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
@@ -55,6 +78,12 @@
     creator: CreatorDrawerData | null;
     orgSlug: string;
     onOpenChange?: (open: boolean) => void;
+    /**
+     * Where focus goes when the drawer closes. This drawer is always opened
+     * programmatically, so Melt has no trigger to restore to — see the docblock's
+     * defect 5. Pass a getter, not an element: the trigger changes per open.
+     */
+    closeFocus?: CreateDialogProps['closeFocus'];
   }
 
   let {
@@ -62,6 +91,7 @@
     creator,
     orgSlug,
     onOpenChange,
+    closeFocus,
   }: Props = $props();
 
   function handleOpenChange(isOpen: boolean) {
@@ -93,7 +123,7 @@
   });
 </script>
 
-<Dialog.Root bind:open onOpenChange={handleOpenChange}>
+<Dialog.Root bind:open onOpenChange={handleOpenChange} {closeFocus}>
   <Dialog.Content class="creator-drawer" size="sm">
     {#if creator}
       <!--
@@ -136,9 +166,13 @@
         size="lg"
         eager
       >
-        <!-- Gradient overlay with name -->
+        <!-- Gradient overlay with name.
+             `Dialog.Title`, not a bare <h2>: it renders the same <h2> but wires
+             it to `use:melt={$title}`, which is the id Melt already points the
+             panel's `aria-labelledby` at. Without it that reference dangles and
+             the dialog has no accessible name at all. -->
         <div class="drawer-hero__overlay">
-          <h2 class="drawer-hero__name">{displayName}</h2>
+          <Dialog.Title class="drawer-hero__name">{displayName}</Dialog.Title>
           <div class="drawer-hero__meta">
             {#if creator.username}
               <span class="drawer-hero__username">@{creator.username}</span>
@@ -226,15 +260,26 @@
             <h3 class="drawer-orgs__heading">Also on</h3>
             <div class="drawer-orgs__row">
               {#each creator.organizations as org (org.slug)}
+                <!--
+                  `aria-label`, not `title`. These tiles are logo-or-initial, so
+                  name-from-content gave a logo-less org a link whose entire
+                  accessible name was one letter, and `title` is pointer-only
+                  disclosure that accname never reaches once there is content to
+                  read (WCAG 2.4.4). An explicit label outranks both, so the logo
+                  is then decorative — `alt=""` keeps it from announcing twice.
+                -->
                 <a
                   href={buildOrgUrl(page.url, org.slug, '/')}
                   class="drawer-orgs__item"
+                  aria-label={org.name}
                   title={org.name}
                 >
                   {#if org.logoUrl}
-                    <img src={org.logoUrl} alt={org.name} class="drawer-orgs__logo" />
+                    <img src={org.logoUrl} alt="" class="drawer-orgs__logo" />
                   {:else}
-                    <span class="drawer-orgs__initial">{org.name.charAt(0)}</span>
+                    <span class="drawer-orgs__initial" aria-hidden="true">
+                      {org.name.charAt(0)}
+                    </span>
                   {/if}
                 </a>
               {/each}
@@ -361,13 +406,21 @@
     animation: drawer-slide-in-right var(--duration-slower) var(--ease-out) both;
   }
 
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     :global(.dialog-content.creator-drawer) {
       top: auto;
       right: 0;
       bottom: 0;
       left: 0;
-      max-width: 100%;
+      /* `min-inline-size`, not `max-width`. `size="sm"` puts
+         `.dialog-content[data-size='sm'] { max-width: 28rem }` on this element at
+         (0,3,0) once Svelte appends its scoping class, which outranks this
+         two-class `:global()` at (0,2,0) — media queries add no specificity — so
+         a local `max-width: 100%` here was dead CSS and the sheet clamped to
+         448px across the whole 448–640px band. min-width wins the used-width
+         constraint resolution (`max(min-width, min(max-width, width))`) whatever
+         max-width cascaded, so this is full-bleed without a specificity fight. */
+      min-inline-size: 100%;
       width: 100%;
       height: auto;
       max-height: 90vh;
@@ -439,7 +492,7 @@
     z-index: 3;
   }
 
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     .drawer-handle {
       display: flex;
     }
@@ -491,7 +544,14 @@
     animation-delay: var(--duration-normal);
   }
 
-  .drawer-hero__name {
+  /* `:global()` + three classes, both deliberate. `Dialog.Title` owns this
+     element, so Svelte does not stamp this component's scoping class onto it —
+     hence `:global()`. And DialogTitle's own `.dialog-title` rule is (0,2,0)
+     with its scoping class, so a one-class `:global(.drawer-hero__name)` at
+     (0,1,0) would lose and the name would render at --text-xl in --color-text.
+     `.dialog-content.creator-drawer` is (0,3,0) and mirrors the panel selectors
+     above, so it wins without depending on stylesheet order. */
+  :global(.dialog-content.creator-drawer .drawer-hero__name) {
     margin: 0;
     font-family: var(--font-heading);
     font-size: var(--text-3xl);
@@ -504,6 +564,10 @@
     color: var(--color-player-text);
     line-height: var(--leading-tight);
     text-shadow: 0 var(--border-width) var(--space-1) var(--color-player-overlay);
+    /* `.dialog-title` reserves a gutter for the primitive's absolute close
+       button. This panel hides that button and floats its own sticky one in a
+       zero-height bar, so the gutter would just shove the name off-centre. */
+    padding-inline-end: 0;
   }
 
   .drawer-hero__meta {
@@ -530,7 +594,7 @@
     animation-delay: calc(var(--duration-slow) * 1.17);
   }
 
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     .drawer-body {
       padding: var(--space-5);
       padding-bottom: var(--space-8);
@@ -717,6 +781,7 @@
     line-height: var(--leading-snug);
     display: -webkit-box;
     -webkit-line-clamp: 1;
+    line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

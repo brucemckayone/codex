@@ -141,6 +141,31 @@ describe('CreatorCard (showcase)', () => {
     expect(onclick).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * The event is contract, not incidental. The directory's drawer is opened
+   * programmatically, so Melt has no trigger to restore focus to on close — the
+   * caller recovers the restore target from `event.currentTarget`. Swallow the
+   * event and Escape drops focus to `<body>` (WCAG 2.4.3).
+   *
+   * `currentTarget` is read INSIDE the handler, which is the only place it is
+   * ever valid. Per DOM §2.9 the dispatcher resets it to `null` when dispatch
+   * finishes, so asserting on a retained `mock.calls[0][0].currentTarget` after
+   * `.click()` has returned reads null in every conforming implementation, jsdom
+   * included — it would fail while the production path (which reads it
+   * synchronously in the handler, as here) is perfectly correct.
+   */
+  test('forwards the click event so the caller can capture the trigger', () => {
+    let capturedDuringDispatch: EventTarget | null = null;
+    const onclick = vi.fn<(event: MouseEvent) => void>((event) => {
+      capturedDuringDispatch = event.currentTarget;
+    });
+    const root = render({ onclick });
+    const hit = root.querySelector('.showcase__hit') as HTMLButtonElement;
+    hit.click();
+    expect(onclick).toHaveBeenCalledTimes(1);
+    expect(capturedDuringDispatch).toBe(hit);
+  });
+
   test('renders a monogram when the creator has no avatar', () => {
     render({ avatar: null });
     expect(document.querySelector('img')).toBeNull();

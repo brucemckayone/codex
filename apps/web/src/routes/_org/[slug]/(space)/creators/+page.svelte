@@ -49,7 +49,22 @@
   let selectedCreator = $state<CreatorDrawerData | null>(null);
   let drawerOpen = $state(false);
 
-  function openCreator(creator: typeof items[number]) {
+  /**
+   * The cell whose hit area opened the drawer.
+   *
+   * Deliberately NOT `$state` — nothing renders from it. It exists only so the
+   * drawer can hand it to Melt's `closeFocus`: the drawer is opened
+   * programmatically rather than through a `Dialog.Trigger`, so Melt has no
+   * restore target of its own and Escape used to drop focus to `<body>`, making
+   * a keyboard user re-tab the entire page (WCAG 2.4.3).
+   */
+  let drawerTrigger: HTMLElement | null = null;
+
+  function openCreator(
+    creator: typeof items[number],
+    event: MouseEvent & { currentTarget: HTMLButtonElement }
+  ) {
+    drawerTrigger = event.currentTarget;
     selectedCreator = {
       name: creator.name,
       username: creator.username ?? null,
@@ -158,7 +173,7 @@
             bio={creator.bio}
             contentCount={creator.contentCount}
             role={creator.role}
-            onclick={() => openCreator(creator)}
+            onclick={(event) => openCreator(creator, event)}
           />
         </li>
       {/each}
@@ -182,11 +197,15 @@
   {/if}
 </div>
 
-<!-- Profile Drawer -->
+<!-- Profile Drawer.
+     `closeFocus` is a getter, not the element: this one component serves every
+     cell, so the restore target changes on each open and has to be read at close
+     time. -->
 <CreatorProfileDrawer
   bind:open={drawerOpen}
   creator={selectedCreator}
   orgSlug={data.org?.slug ?? ''}
+  closeFocus={() => drawerTrigger}
 />
 
 <style>

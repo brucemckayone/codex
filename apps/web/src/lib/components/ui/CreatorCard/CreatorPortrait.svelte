@@ -34,7 +34,9 @@
   than the plain `src` it replaced. So the size is chosen explicitly per consumer
   instead — `md` for a contact-sheet cell, `lg` for the drawer hero.
 
-  @prop {'sm' | 'md' | 'lg'} [size='md'] - Which stored variant to request.
+  There is deliberately no `sizes` prop either: `sizes` only means anything
+  alongside a `srcset`, so accepting one would be a promise this component
+  cannot keep. `CreatorPortrait.svelte.test.ts` pins the absence of `srcset`.
 
   ## Hover / focus is driven from the parent
 
@@ -47,10 +49,11 @@
   | `--creator-portrait-scale`    | `1`     | Photo zoom                        |
   | `--creator-portrait-rule`     | `0`     | 0–1 draw of the brand rule        |
 
-  @prop {string | null} src - Thumbnail URL; `md` variant + srcset are derived.
+  @prop {string | null} src - Thumbnail URL; the requested variant comes from
+    `size`. No `srcset` — see above.
   @prop {string} name - Used for the monogram only. The image is decorative.
   @prop {'square' | 'portrait'} [aspect='square'] - Frame ratio.
-  @prop {string} [sizes] - `sizes` attribute; pass the real rendered width.
+  @prop {'sm' | 'md' | 'lg'} [size='md'] - Which stored variant to request.
   @prop {boolean} [eager=false] - Skip lazy-loading (above-the-fold heroes).
   @prop {Snippet} [children] - Overlay content stacked on the photo.
 -->

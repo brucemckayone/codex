@@ -61,8 +61,11 @@
  *
  * ## Content: reassigned, never created
  *
- * All 29 of-blood-and-bones items belong to the owner. This script reassigns 14
- * of the 22 NON-course-only published items instead of inserting new ones. The
+ * Of the 29 of-blood-and-bones items, 22 are non-course-only and published, and
+ * as seeded they are all owner-held — but that is an OBSERVATION, not an
+ * assumption the code leans on: the pool query filters on `creator_id = owner`
+ * so the numbers below stay right even on an org where it is false. This script
+ * reassigns 14 of those 22 instead of inserting new ones. The
  * catalogue's item set, counts, ordering and pagination stay byte-identical —
  * only the byline changes — so the explore page and the org landing are
  * untouched. Creating 14 new published rows would move explore from 29 to 43
@@ -77,15 +80,44 @@
  * Items are only ever assigned to personas that HAVE a username, because
  * content cards elsewhere build creator links from the byline.
  *
- * `--revert` puts every reassigned id back on the owner.
+ * The pool is filtered to OWNER-HELD items. The hand-back above runs first and
+ * is unconditional, so that filter costs nothing here — but it is what stops the
+ * script from ever consuming a row it does not own, and what makes `--revert` a
+ * true inverse on an org where the owner does NOT hold the whole back catalogue.
+ * `content.creator_id` has no history column, so a wrong hand-back would be
+ * unrecoverable. Same instinct as `seed-portals.ts`' `notInArray(…, attachedIds)`.
  *
- * ## Cross-org memberships use role='member' on purpose
+ * ## A default run writes into THREE orgs, not one
  *
- * The drawer's "Also on" row is fed by a query that filters on
- * `status = 'active'` and nothing else — it does NOT require a creator role. So
- * a `member` membership lights that row while leaving the other org's public
- * directory completely unchanged. studio-alpha and studio-beta therefore stay
- * at exactly 2 creators each and remain usable as sparse plain-brand controls.
+ * `--org=` names the org that gets creators. The `alsoOn` lists in `PERSONAS`
+ * are hardcoded slugs, so a default run ALSO inserts `organization_memberships`
+ * rows into studio-beta and studio-alpha. That is the only write that leaves
+ * `--org=`; pass `--no-also-on` to suppress it, at the cost of leaving the
+ * drawer's "Also on" row unrenderable.
+ *
+ * Role is `member` ON PURPOSE. The drawer's "Also on" row is fed by a query that
+ * filters on `status = 'active'` and nothing else — it does NOT require a creator
+ * role. So a `member` membership lights that row while leaving the other org's
+ * public directory completely unchanged. studio-alpha and studio-beta therefore
+ * stay at exactly 2 creators each and remain usable as sparse plain-brand
+ * controls.
+ *
+ * ## What `--revert` actually does
+ *
+ * It is an undo of the two things that are VISIBLE, and it skips the seed's
+ * primary write rather than performing it:
+ *
+ *   - `upsertPeople` does not run (it used to, before the revert branch was ever
+ *     reached — so `--revert` was mostly a re-seed).
+ *   - every reassigned content id goes back to the owner.
+ *   - every seeded membership — the org-side creator rows AND the cross-org
+ *     `member` rows — is set to `status = 'inactive'`. Never a DELETE; this
+ *     table has no `deletedAt`, and `'inactive'` is what every public predicate
+ *     filters out. A later re-run reconciles them back to `'active'`.
+ *
+ * The `users` and `accounts` rows are left in place. They are inert without an
+ * active membership, and soft-deleting a user is a much larger blast radius than
+ * this script should own.
  *
  * ## Ordering is load-bearing
  *
@@ -98,7 +130,7 @@
  *
  * ## Persist path
  *
- * The only non-database write is the KV cache bump, and KV is FILESYSTEM state.
+ * The only non-database writes are the KV cache bumps, and KV is FILESYSTEM state.
  * `wrangler dev` was started from a particular checkout with
  * `--persist-to ../../.wrangler/state`; bumping a different checkout's
  * `.wrangler/state` succeeds silently against a namespace nothing reads, and the
@@ -115,7 +147,11 @@
  *   --org=<slug>        target organization        (default of-blood-and-bones)
  *   --count=<n>         how many personas to seed  (default 14, max 14)
  *   --persist-to=<path> wrangler local state dir   (default <repo>/.wrangler/state)
- *   --revert            hand every reassigned content item back to the owner
+ *   --no-also-on        skip the cross-org `member` rows — the only write that
+ *                       leaves `--org=`. Costs the drawer's "Also on" row.
+ *   --revert            skip `upsertPeople`, hand every reassigned content item
+ *                       back to the owner, and set every seeded membership
+ *                       (org-side and cross-org) to `status='inactive'`
  */
 
 import { execSync } from 'node:child_process';
@@ -430,6 +466,12 @@ const COUNT = Math.min(
 const PERSIST_TO =
   flag('persist-to') ?? path.resolve(__dirname, '../../../.wrangler/state');
 const REVERT = bool('revert');
+/**
+ * Cross-org memberships are the ONE write that leaves `--org=`, so it is
+ * opt-outable. On by default because the drawer's "Also on" row has no other
+ * data source and would otherwise stay dead code, as it was before this seed.
+ */
+const ALSO_ON = !bool('no-also-on');
 
 const userId = (handle: string) => seedTextId(`${NS}-user-${handle}`);
 const accountId = (handle: string) => seedTextId(`${NS}-account-${handle}`);
@@ -563,7 +605,14 @@ async function upsertPeople(
     // "Also on" query filters on active status only, so this lights that row
     // WITHOUT adding a creator to the other org's public directory — which is
     // what keeps studio-alpha and studio-beta usable as sparse controls.
-    for (const otherSlug of p.alsoOn ?? []) {
+    for (const otherSlug of ALSO_ON ? (p.alsoOn ?? []) : []) {
+      // `membershipId` is keyed on (handle, slug), so a persona whose `alsoOn`
+      // list happens to name the org being seeded would derive the SAME uuid
+      // twice and the second upsert — sharing the (org, user) conflict target —
+      // would downgrade to `role: 'member'` the creator membership written seven
+      // statements earlier. Reachable via `--org=studio-alpha`.
+      if (otherSlug === ORG_SLUG) continue;
+
       const other = await dbWs.query.organizations.findFirst({
         where: and(
           eq(organizations.slug, otherSlug),
@@ -671,6 +720,17 @@ async function reassignContent(
     .where(
       and(
         eq(content.organizationId, organizationId),
+        // OWNER-HELD ONLY, and this is the invariant that makes `--revert`
+        // honest. The hand-back above is unconditional and writes
+        // `creatorId = ownerUserId`, so every row this script has ever touched
+        // is owner-held by the time the pool is read — the slice set for
+        // of-blood-and-bones is unchanged. Without the filter the pool is "every
+        // published item in the org", so the first time a REAL creator publishes
+        // here their row can fall inside a slice, and `--revert` then hands it
+        // to the owner permanently. `content.creator_id` has no history column,
+        // so that attribution would be unrecoverable. `--org=` invites reuse on
+        // orgs where the owner does not hold the whole back catalogue.
+        eq(content.creatorId, ownerUserId),
         eq(content.status, 'published'),
         eq(content.courseOnly, false),
         isNull(content.deletedAt)
@@ -704,29 +764,90 @@ async function reassignContent(
 }
 
 /**
+ * Undo the membership half of the seed.
+ *
+ * `status = 'inactive'`, never a DELETE — the same soft-delete reasoning the
+ * platform applies to `deletedAt` elsewhere, and this table has no `deletedAt`
+ * of its own. `'inactive'` is one of the three values `check_membership_status`
+ * permits, and it is enough: every public surface that counts a creator or
+ * lights the drawer's "Also on" row filters on `status = 'active'`. A later
+ * re-run reconciles the rows straight back to `'active'`, so this is a genuine
+ * round trip rather than a one-way door.
+ *
+ * Scoped to the seeded user ids and NOT to one organization, on purpose: the
+ * cross-org rows this script writes into other orgs are exactly what needs
+ * clearing. Those ids are sha256 of `bones-collective-user-<handle>`, so a real
+ * membership cannot be caught by this.
+ */
+async function deactivateMemberships(): Promise<number> {
+  const seededIds = PERSONAS.map((p) => userId(p.handle));
+
+  const rows = await dbWs
+    .update(organizationMemberships)
+    .set({ status: 'inactive' })
+    .where(inArray(organizationMemberships.userId, seededIds))
+    .returning({ id: organizationMemberships.id });
+
+  return rows.length;
+}
+
+/**
  * Bust the org's KV cache.
  *
- * `ORG_CONFIG`, `ORG_STATS` and every `ORG_CREATORS:<page>:<limit>` entry are
- * keyed on the slug with a 30-minute TTL, and `VersionedCache` derives its key
- * from `cache:version:<id>` — so bumping one version key busts all three for
- * this org and nothing else. Preferred over `flushDevKv()`, which wipes the
- * whole namespace and needlessly cold-starts every other org.
+ * TWO version keys, because the mutated data lives behind both.
+ *
+ * `cache:version:<slug>` covers `ORG_CONFIG`, `ORG_STATS` and every
+ * `ORG_CREATORS:<page>:<limit>` entry — all three call `cache.get(slug, …)` in
+ * `workers/organization-api/src/routes/organizations.ts`, and `buildVersionKey`
+ * is `cache:version:<id>`, so one bump busts all three.
+ *
+ * The public content list is NOT under that key. `workers/content-api`'s
+ * `public-cache.ts` caches it under `CacheType.COLLECTION_ORG_CONTENT(orgId)`,
+ * i.e. `cache:version:org:<orgId>:content`, and that DTO embeds the `creator`
+ * object — which is precisely what `reassignContent` rewrites. Bumping only the
+ * slug key leaves explore and the org landing showing the OLD byline for up to
+ * the TTL, which reproduces the "the seed appears not to have worked" trap this
+ * file's Persist-path note warns about.
+ *
+ * Both are preferred over `flushDevKv()`, which wipes the whole namespace and
+ * needlessly cold-starts every other org.
  *
  * `--binding` resolves from a worker's own wrangler config, hence the cwd.
  */
-function bumpCacheVersion(slug: string): void {
+function bumpCacheVersion(slug: string, orgId: string): void {
+  bumpKey(`cache:version:${slug}`);
+  bumpKey(`cache:version:org:${orgId}:content`);
+}
+
+function bumpSlugVersion(slug: string): void {
+  bumpKey(`cache:version:${slug}`);
+}
+
+function bumpKey(key: string): void {
   const cwd = path.resolve(__dirname, '../../../workers/organization-api');
   try {
     run(
-      `npx wrangler kv key put "cache:version:${slug}" "${Date.now()}" --binding CACHE_KV --local --persist-to "${PERSIST_TO}"`,
+      `npx wrangler kv key put "${key}" "${Date.now()}" --binding CACHE_KV --local --persist-to "${PERSIST_TO}"`,
       cwd
     );
-    console.log('  ✓ bumped cache:version — reads are live immediately');
+    console.log(`  ✓ bumped ${key}`);
   } catch (error) {
     console.log(
-      `  ! cache bump failed (${short(error)}) — the directory may lag by up to 30 min`
+      `  ! bump of ${key} failed (${short(error)}) — that surface may lag by up to 30 min`
     );
   }
+}
+
+/** The other orgs a default run writes into. Empty under `--no-also-on`. */
+function crossOrgSlugs(): string[] {
+  if (!ALSO_ON && !REVERT) return [];
+  const slugs = new Set<string>();
+  for (const p of PERSONAS) {
+    for (const slug of p.alsoOn ?? []) {
+      if (slug !== ORG_SLUG) slugs.add(slug);
+    }
+  }
+  return [...slugs];
 }
 
 function run(command: string, cwd?: string): void {
@@ -747,17 +868,35 @@ async function main(): Promise<void> {
 
   const org = await resolveOrg(ORG_SLUG);
   const owner = await resolveOwner(org.id);
-  const avatars = await resolveAvatarSources();
 
-  await upsertPeople(org.id, personas, owner.createdAt, avatars);
-  console.log(
-    `  ✓ ${personas.length} users + accounts + memberships reconciled (${avatars.size} avatar sources)`
-  );
+  // `upsertPeople` is the seed's PRIMARY write, so `--revert` must not reach it.
+  // It used to run unconditionally — reconciling all 14 users, their credential
+  // accounts and every membership including the cross-org ones — before the
+  // revert branch inside `reassignContent` was ever evaluated, which made
+  // `--revert` mostly a re-seed.
+  if (!REVERT) {
+    const avatars = await resolveAvatarSources();
+    await upsertPeople(org.id, personas, owner.createdAt, avatars);
+    console.log(
+      `  ✓ ${personas.length} users + accounts + memberships reconciled (${avatars.size} avatar sources)`
+    );
+  }
 
   const moved = await reassignContent(org.id, owner.userId, personas);
   if (!REVERT) console.log(`  ✓ ${moved} content items reassigned`);
 
-  bumpCacheVersion(ORG_SLUG);
+  if (REVERT) {
+    const deactivated = await deactivateMemberships();
+    console.log(
+      `  ↩ ${deactivated} seeded memberships set to status='inactive' (org-side and cross-org)`
+    );
+  }
+
+  bumpCacheVersion(ORG_SLUG, org.id);
+
+  // The cross-org writes touch other orgs' membership rows, so their slug-keyed
+  // ORG_CONFIG/ORG_STATS entries are stale too. Cheap to bump; silent to skip.
+  for (const slug of crossOrgSlugs()) bumpSlugVersion(slug);
 
   const [{ creators } = { creators: 0 }] = await dbWs
     .select({ creators: sql<number>`count(*)::int` })

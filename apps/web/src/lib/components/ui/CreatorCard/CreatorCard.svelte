@@ -37,7 +37,9 @@
   @prop {{ website?: string; twitter?: string; youtube?: string; instagram?: string }} socialLinks - Social media links
   @prop {Snippet} actions - Action buttons snippet
   @prop {'default' | 'compact' | 'showcase'} variant - Display variant
-  @prop {() => void} onclick - Click handler (showcase: opens drawer)
+  @prop {(event: MouseEvent & { currentTarget: HTMLButtonElement }) => void} onclick -
+    Click handler (showcase: opens the drawer). The event is forwarded rather than
+    swallowed so the caller can keep `event.currentTarget` as a focus-restore target.
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
@@ -53,7 +55,18 @@
     InstagramIcon,
   } from '$lib/components/ui/Icon';
 
-  interface Props extends HTMLAttributes<HTMLDivElement> {
+  /**
+   * `onclick` is Omit-ed from the inherited attributes before being redeclared.
+   *
+   * `HTMLAttributes<HTMLDivElement>` types it as `MouseEventHandler<HTMLDivElement>`,
+   * i.e. `currentTarget: EventTarget & HTMLDivElement`. Narrowing that to the
+   * `HTMLButtonElement` this component actually attaches the handler to is not an
+   * assignable refinement in either direction, so redeclaring it on an interface
+   * that still extends the original is `TS2430: incorrectly extends`. Vite does
+   * not typecheck `.svelte` TS, so that error is invisible to
+   * `pnpm build` and only `svelte-check` / `pnpm --filter web check` sees it.
+   */
+  interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onclick'> {
     username: string;
     displayName: string;
     avatar?: string | null;
@@ -64,8 +77,14 @@
     socialLinks?: SocialLinks | null;
     /** Override profile link URL (for cross-subdomain navigation) */
     profileUrl?: string;
-    /** Click handler — used by showcase variant to open drawer */
-    onclick?: () => void;
+    /**
+     * Click handler — used by the showcase variant to open the drawer.
+     *
+     * The event is forwarded, not swallowed: a drawer opened this way has no
+     * `Dialog.Trigger`, so the caller needs `event.currentTarget` to restore
+     * focus to this cell's hit area on close.
+     */
+    onclick?: (event: MouseEvent & { currentTarget: HTMLButtonElement }) => void;
     actions?: Snippet;
     variant?: 'default' | 'compact' | 'showcase';
   }
@@ -430,6 +449,7 @@
     line-height: var(--leading-normal);
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
