@@ -377,8 +377,6 @@
   <!-- Redirecting... -->
 {:else}
 <div class="monetisation">
-  <p class="page-description">{m.monetisation_description()}</p>
-
   <!-- Stripe Connect Card -->
   <Card.Root>
     <Card.Header>
@@ -733,28 +731,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
-  }
-
-  .page-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .page-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .page-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0;
   }
 
   .card-header-row {

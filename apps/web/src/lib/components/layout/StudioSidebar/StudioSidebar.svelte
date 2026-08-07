@@ -555,10 +555,15 @@
     transform: translateX(0);
   }
 
+  /* --color-text-secondary, not --color-text-muted: muted resolves to
+     --color-neutral-400 in light theme and measures 2.42:1 against the rail
+     surface (3.78:1 dark). At 12–13px / weight 500 this is not large text, so
+     4.5:1 applies. Kept in step with `.page-header__kicker`, which carries
+     the same treatment on the page side. */
   .studio-rail__brand-kicker {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wide);
     line-height: var(--leading-none);
@@ -614,12 +619,14 @@
     gap: var(--space-0-5);
   }
 
+  /* See `.studio-rail__brand-kicker` — same muted-token contrast failure, and
+     these are the rail's ADMIN / OWNER group labels, i.e. real wayfinding. */
   .studio-rail__section-label {
     display: block;
     padding: var(--space-2) var(--space-5) var(--space-1);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wide);
     opacity: 0;

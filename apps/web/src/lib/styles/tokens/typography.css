@@ -20,6 +20,12 @@
   --text-5xl: clamp(1.75rem, 1rem + 2.5vw, 2.75rem);
   --text-display: clamp(2.75rem, 1rem + 4.5vw, 5rem);
 
+  /* Measures — readable line lengths for prose blocks.
+     `ch` already tracks the element's own font-size, so these need no
+     [data-org-brand] re-declaration (unlike every --text-* step, which is
+     multiplied by --brand-text-scale at org scope). */
+  --measure-lede: 64ch;   /* page-header ledes and standfirst copy */
+
   /* Font Weights */
   --font-normal: 400;
   --font-medium: 500;

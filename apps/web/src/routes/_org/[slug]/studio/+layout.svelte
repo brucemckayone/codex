@@ -161,6 +161,24 @@
     grid-row: 1;
     min-width: 0;
     padding: var(--space-4);
+    /* The shell owns the studio content width — exactly once. Studio pages
+       MUST NOT declare an outer max-width; the cap and the centring live
+       here. `width: 100%` is load-bearing: auto inline margins remove a grid
+       item's default `stretch`, so without it the column collapses to
+       max-content (measured 1012px instead of 1920px at a 2560 viewport).
+       This is a border-box cap (global box-sizing), so content resolves to
+       120rem − 2 × --space-6; do NOT "fix" that with content-box, which
+       breaks the padding contract.
+
+       ONE sanctioned exception, and it is not a layout cap: the settings
+       subtree caps to a READING/FORM measure because its inputs carry
+       `max-width: none` and would otherwise render ~1758px wide — see
+       `studio/settings/+layout.svelte`'s `.settings-layout`, which
+       cross-references this rule. Anything that is a second opinion about
+       the COLUMN width belongs here instead. */
+    width: 100%;
+    max-width: var(--container-studio);
+    margin-inline: auto;
     /* `clip` (Baseline Widely) clips horizontally without creating a
        scroll container. `overflow-x: hidden` would promote overflow-y
        to `auto` and break `position: sticky` on children that expect

@@ -47,6 +47,13 @@
     isAuthorized ? getOrgMembers({ orgId: data.org.id, limit: 50 }) : null
   );
 
+  // Subscribers are not team members — the table filters them out, so the
+  // header count must too. Named `member` rather than `m` so it does not
+  // shadow the paraglide namespace inside the callback.
+  const teamMembers = $derived(
+    (membersQuery?.current?.items ?? []).filter((member) => member.role !== 'subscriber')
+  );
+
   // Revenue-share lives in the owner-only Monetisation hub, so the per-member
   // status column + entry point are owner-gated too (Codex-dhxjz).
   const isOwner = $derived(data.userRole === 'owner');
@@ -114,7 +121,19 @@
   <!-- Redirecting... -->
 {:else}
 <div class="team-page">
-  <PageHeader title={m.team_title()}>
+  <PageHeader
+    kicker={m.studio_section_organisation()}
+    title={m.team_title()}
+    description={m.team_description()}
+  >
+    {#snippet meta()}
+      {#if !membersQuery?.loading && teamMembers.length > 0}
+        <!-- Labelled stat, not "{n} members": paraglide-js 1.x has no plural
+             form (zero ICU plurals repo-wide), so an interpolated noun would
+             read "1 members". Matches the customers header's shape. -->
+        <li>{m.team_meta_members()}: {teamMembers.length}</li>
+      {/if}
+    {/snippet}
     {#snippet actions()}
       {#if isOwner}
         <a class="btn btn-secondary" href="/studio/monetisation/revenue-share">
@@ -143,7 +162,7 @@
       </div>
     {:else}
       <MemberTable
-        members={(membersQuery?.current?.items ?? []).filter((m) => m.role !== 'subscriber')}
+        members={teamMembers}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
         {revenueShareByUser}
@@ -165,7 +184,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
   }
   .members-section {
     background-color: var(--color-surface);

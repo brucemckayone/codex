@@ -11,11 +11,13 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import * as m from '$paraglide/messages';
   import {
     Alert,
     Badge,
     Button,
     EmptyState,
+    PageHeader,
     Skeleton,
   } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
@@ -249,7 +251,7 @@
 </script>
 
 <svelte:head>
-  <title>Sales | {data.org.name}</title>
+  <title>{m.sales_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -257,22 +259,20 @@
   <!-- redirecting -->
 {:else}
   <div class="sales">
-    <header class="sales-header">
-      <div class="header-text">
-        <h1 class="sales-title">Sales</h1>
-        <p class="sales-subtitle">
-          Every sale that landed on this organisation in the selected period,
-          including refunds and disputes. "Your share" is the net to the org
-          after platform fees.
-        </p>
-      </div>
-      {#if items.length > 0}
-        <Button variant="secondary" size="sm" onclick={exportCsv}>
-          <DownloadIcon size={14} />
-          Export CSV
-        </Button>
-      {/if}
-    </header>
+    <PageHeader
+      kicker={m.studio_section_money()}
+      title={m.sales_title()}
+      description={m.sales_description()}
+    >
+      {#snippet actions()}
+        {#if items.length > 0}
+          <Button variant="secondary" size="sm" onclick={exportCsv}>
+            <DownloadIcon size={14} />
+            Export CSV
+          </Button>
+        {/if}
+      {/snippet}
+    </PageHeader>
 
     <!-- KPI tiles -->
     <div class="kpi-grid">
@@ -471,10 +471,6 @@
     flex-direction: column;
     gap: var(--space-6);
     width: 100%;
-    /* --container-studio is intentionally unset in tokens → resolves to
-       max-width:none = full studio width, matching the dashboard/content
-       pages. Replaces a hardcoded 1200px cap (design-token violation). */
-    max-width: var(--container-studio);
   }
 
   .empty-actions {
@@ -487,37 +483,6 @@
   .empty-link {
     text-decoration: none;
     color: inherit;
-  }
-
-  .sales-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-  }
-
-  .header-text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .sales-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .sales-subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
-    max-width: 720px;
-    margin: 0;
   }
 
   .kpi-grid {
@@ -547,8 +512,10 @@
 
   :global(.range-filter),
   :global(.status-filter) {
-    min-width: 180px;
-    max-width: 240px;
+    /* One answer for "how wide is an inline studio filter" — see
+       --control-width-md in tokens/layout.css. */
+    min-width: var(--control-width-md);
+    max-width: var(--control-width-md);
   }
 
   .table-wrapper {
@@ -631,7 +598,9 @@
     align-items: center;
     gap: var(--space-1);
     font-size: var(--text-xs);
-    color: var(--color-error-700);
+    /* Was --color-error-700 (#b91c1c): a fixed light-mode step that never
+       re-maps, so this text measured 1.60–3.06:1 in dark theme. */
+    color: var(--color-status-error-text);
   }
 
   .refund-note {

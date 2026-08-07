@@ -125,8 +125,16 @@ test.describe('Agreements — Multi-creator pie math', () => {
       // The page-level lede explicitly says "post-platform revenue" (per
       // Decision Q1). The team-budget section itself only references
       // "platform fee", so we assert against the page header instead.
+      // `.page-header__description` is PageHeader's lede — the hand-rolled
+      // `.revenue-share-page__lede` it replaced no longer exists. The
+      // `[data-variant='compact']` scope is required, not cosmetic: the
+      // monetisation LAYOUT renders its own default-variant PageHeader above
+      // this page, so a bare `.page-header__description` resolves to two
+      // elements and trips Playwright's strict mode (verified in-browser).
       await expect(
-        ownerPage.locator('.revenue-share-page__lede')
+        ownerPage.locator(
+          ".page-header[data-variant='compact'] .page-header__description"
+        )
       ).toContainText(/post-platform revenue/i);
 
       // The active-agreements quick-action list contains all three.

@@ -26,6 +26,25 @@
   --container-xl: var(--breakpoint-xl);
   --container-max: 80rem;    /* 1280px max content width */
 
+  /* Studio content-column cap. The studio shell
+   * (routes/_org/[slug]/studio/+layout.svelte) is the ONLY consumer — studio
+   * pages MUST NOT redeclare an outer max-width. Deliberately generous: at a
+   * 1920px viewport the column measures ~1808px, so this cap does not engage
+   * until ~1984px. It exists purely to stop data-table rows spanning an
+   * ultrawide monitor. Do NOT "align" it with --container-max (80rem) — that
+   * is narrower than the column the studio already renders at 1440px and
+   * would visibly regress every studio page. */
+  --container-studio: 120rem; /* 1920px */
+
+  /* ========================================
+   * CONTROL WIDTHS
+   * ========================================
+   * Inline form/filter control cap — stops selects, filters and other
+   * bare controls stretching to fill a full-width studio column. Sits
+   * between --container-sm and the spacing scale, neither of which has a
+   * step in the 240–260px control range. */
+  --control-width-md: 16rem;  /* 256px */
+
   /* ========================================
    * APP CHROME WIDTHS
    * ========================================

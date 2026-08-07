@@ -280,6 +280,14 @@
     gap: var(--space-2);
   }
 
+  /* The role Select carries no width of its own — `.select-container` is
+     `width: 100%` — so in a full-width studio column it stretches across the
+     cell and reads as unconsidered. Cap it to the inline-control measure.
+     `:global` is required: the class belongs to Select's own style scope. */
+  .actions :global(.select-container) {
+    max-width: var(--control-width-md);
+  }
+
   .rev-cell {
     display: flex;
     align-items: center;
@@ -309,22 +317,29 @@
     border-radius: var(--radius-sm);
   }
 
+  /* Status family, not the raw --color-error-* palette: those steps are fixed
+     light-mode sRGB declared at :root only, so `--color-error-600` painted
+     #dc2626 on `.members-section`'s dark `--color-surface` — 3.13:1, measured.
+     The --color-status-error-* triple derives from the surface it sits on, so
+     it follows both the theme and the org background. Declared on
+     `:root, [data-org-brand]` in styles/themes/status.css, so it is safe even
+     though this table can render outside .org-layout. */
   .remove-btn {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
+    border: var(--border-width) var(--border-style) var(--color-status-error-border);
     background-color: transparent;
-    color: var(--color-error-600);
+    color: var(--color-status-error-text);
     cursor: pointer;
     transition: var(--transition-colors);
     white-space: nowrap;
   }
 
   .remove-btn:hover {
-    background-color: var(--color-error-50);
-    border-color: var(--color-error-300);
+    background-color: var(--color-status-error-surface);
+    border-color: var(--color-status-error-text);
   }
 
   .remove-btn:focus-visible {

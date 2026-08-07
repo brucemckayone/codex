@@ -143,7 +143,7 @@ test.describe('Studio Tier CRUD', () => {
     );
     // Generous timeout: studio layout cold-start can be 15s+ when SvelteKit
     // dev server is freshly started.
-    await expect(page.locator('h1.page-title')).toBeVisible({
+    await expect(page.locator('h1.page-header__title')).toBeVisible({
       timeout: 30_000,
     });
 

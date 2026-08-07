@@ -23,7 +23,8 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Alert, Badge, EmptyState, Skeleton } from '$lib/components/ui';
+  import * as m from '$paraglide/messages';
+  import { Alert, Badge, EmptyState, PageHeader, Skeleton } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
   import * as Table from '$lib/components/ui/Table';
   import Select from '$lib/components/ui/Select/Select.svelte';
@@ -386,7 +387,7 @@
 </script>
 
 <svelte:head>
-  <title>Payouts | {data.org.name}</title>
+  <title>{m.payouts_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -394,14 +395,11 @@
   <!-- Redirecting to /studio… -->
 {:else}
   <div class="payouts">
-    <header class="payouts-header">
-      <h1 class="payouts-title">Payouts</h1>
-      <p class="payouts-subtitle">
-        Every transfer Stripe makes on your organisation's behalf.
-        Subscription invoices split into an organisation fee plus one
-        creator-share row per beneficiary.
-      </p>
-    </header>
+    <PageHeader
+      kicker={m.studio_section_money()}
+      title={m.payouts_title()}
+      description={m.payouts_description()}
+    />
 
     <div class="payouts-grid">
     <div class="payouts-main">
@@ -718,10 +716,6 @@
     flex-direction: column;
     gap: var(--space-6);
     width: 100%;
-    /* --container-studio is intentionally unset in tokens → resolves to
-       max-width:none = full studio width, matching the dashboard/content
-       pages. Replaces a hardcoded 1280px cap (design-token violation). */
-    max-width: var(--container-studio);
   }
 
   /* Two-column shell: main content on the left (KPIs + filters +
@@ -756,29 +750,6 @@
     }
   }
 
-  .payouts-header {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .payouts-title {
-    font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    margin: 0;
-    line-height: var(--leading-tight);
-  }
-
-  .payouts-subtitle {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: var(--leading-normal);
-    max-width: 720px;
-    margin: 0;
-  }
-
   .kpi-row {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -808,8 +779,10 @@
   .filters :global(.status-filter),
   .filters :global(.source-filter),
   .filters :global(.range-filter) {
-    min-width: 200px;
-    max-width: 260px;
+    /* One answer for "how wide is an inline studio filter" — see
+       --control-width-md in tokens/layout.css. */
+    min-width: var(--control-width-md);
+    max-width: var(--control-width-md);
   }
 
   .type-cell {
@@ -926,7 +899,9 @@
   }
 
   .reason-cell--failed {
-    color: var(--color-error-700);
+    /* Was --color-error-700 (#b91c1c): a fixed light-mode step that never
+       re-maps, so this text measured 2.34:1 on the dark platform surface. */
+    color: var(--color-status-error-text);
   }
 
   .pagination {
