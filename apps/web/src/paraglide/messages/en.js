@@ -4063,6 +4063,206 @@ export const pricing_manage_plan = () => `Manage plan`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_eyebrow = () => `Inside the library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_title = () => `A catalogue you'll never finish.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_subtitle = () => `Video, audio and writing from every creator here, gathered in one library.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_marquee_label = () => `A sample of the catalogue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_kind_video = () => `Video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_kind_audio = () => `Audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_kind_written = () => `Writing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stats_label = () => `Library at a glance`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_titles_one = () => `Title`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_titles_other = () => `Titles`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_creators_one = () => `Creator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_creators_other = () => `Creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_hours_one = () => `Hour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_hours_other = () => `Hours`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_minutes_one = () => `Minute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_stat_minutes_other = () => `Minutes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_topics_label = () => `Topics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_catalogue_cta = () => `Browse the catalogue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_portals_title = () => `Guided portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_portals_subtitle = () => `Structured journeys with a beginning, a middle and an end — each one has its own page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_portals_rail_label = () => `Guided portals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_stop_paying_q = () => `What happens to my access if I stop paying?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_stop_paying_a = () => `You keep everything through to the end of the period you have already paid for. After that, titles unlocked by your membership lock again — but anything you bought outright stays yours permanently, membership or not.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_not_included_q = () => `Does a membership include everything?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_faq_not_included_a = () => `Not always. Creators can price individual titles and portals separately, and some titles are free to everyone. Every title shows its own access on its page, so you can see what your plan covers before you commit.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const subscription_badge = () => `Subscriber`
 
 

@@ -16,6 +16,10 @@
     XIcon,
   } from '$lib/components/ui/Icon';
   import * as Accordion from '$lib/components/ui/Accordion';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import JourneyRailCard from '$lib/components/explore/JourneyRailCard.svelte';
+  import ContentMarquee from '$lib/components/pricing/ContentMarquee.svelte';
+  import CataloguePreviewTile from '$lib/components/pricing/CataloguePreviewTile.svelte';
   import { invalidate, invalidateAll } from '$app/navigation';
   import {
     changeSubscriptionTier,
@@ -28,9 +32,10 @@
   import { invalidateCollection } from '$lib/collections';
   import { getPricingFaq } from '$lib/remote/branding.remote';
   import type { SubscriptionTier, TierChangePreview } from '$lib/types';
+  import type { CourseCardSummary } from '$lib/journeys/types';
   import type { PricingFaqItem } from '@codex/validation';
   import { formatDate, formatPrice } from '$lib/utils/format';
-  import { buildPlatformUrl } from '$lib/utils/subdomain';
+  import { buildJourneyUrl, buildPlatformUrl } from '$lib/utils/subdomain';
   import {
     getEffectiveStatus,
     type SubscriptionStatus,
@@ -87,19 +92,69 @@
   // ── Feature Flag ──────────────────────────────────────────────────
   const enableSubscriptions = $derived(data.enableSubscriptions ?? true);
 
-  // ── Resolved Streamed Data ────────────────────────────────────────
-  let tiers = $state<SubscriptionTier[]>([]);
-  let currentTierId = $state<string | null>(null);
-  let currentStatus = $state<SubscriptionStatus | null>(null);
-  let currentCancelAtPeriodEnd = $state(false);
-  let currentPeriodEnd = $state<string | null>(null);
-  let currentBillingInterval = $state<'month' | 'year' | null>(null);
-  let pricingLoading = $state(true);
-  // True while we don't yet know the user's subscription state because the
-  // API errored. Until this resolves false, the CTA is disabled and a retry
-  // alert is shown — previously the catch() swallowed the error and a
-  // subscribed user saw "Subscribe", clicked it, and hit AlreadySubscribedError.
-  let subscriptionLoadError = $state(false);
+  // ── Tiers ─────────────────────────────────────────────────────────
+  // `data.tiers` is AWAITED in the load, so this renders during SSR. It used
+  // to be a streamed promise unwrapped in an `$effect`; `$effect` never runs
+  // on the server, so the pricing page's server HTML contained a shimmering
+  // skeleton and zero prices for crawlers, link previews and JS-less clients.
+  // Never mutated locally, so it is `$derived`, not `$state`.
+  const tiers = $derived<SubscriptionTier[]>(data.tiers ?? []);
+
+  // ── Current subscription ──────────────────────────────────────────
+  // Also awaited. Held as `$state` rather than `$derived` because the
+  // reactivate / resume / switch-tier handlers flip it OPTIMISTICALLY before
+  // the server confirms, and a derived value cannot be written to.
+  type SubscriptionEnvelope = {
+    data: {
+      tierId?: string;
+      status?: SubscriptionStatus | string;
+      cancelAtPeriodEnd?: boolean;
+      currentPeriodEnd?: string | Date;
+      billingInterval?: 'month' | 'year' | string;
+    } | null;
+    loadError: boolean;
+  };
+
+  /**
+   * Normalise one server envelope into the flat local state shape. Shared by
+   * the initial seed and the re-sync effect so the two can never drift.
+   */
+  function readSubscription(envelope: SubscriptionEnvelope | undefined) {
+    const sub = envelope?.data ?? null;
+    const rawStatus = (sub?.status as SubscriptionStatus | undefined) ?? null;
+    const periodEnd = sub?.currentPeriodEnd;
+    const interval = sub?.billingInterval;
+    return {
+      loadError: envelope?.loadError ?? false,
+      tierId: sub?.tierId ?? null,
+      status: (rawStatus ?? (sub ? 'active' : null)) as SubscriptionStatus | null,
+      cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
+      periodEnd:
+        periodEnd instanceof Date
+          ? periodEnd.toISOString()
+          : (periodEnd ?? null),
+      billingInterval:
+        interval === 'month' || interval === 'year' ? interval : null,
+    };
+  }
+
+  // `untrack` because this reads the INITIAL payload only, deliberately: it
+  // seeds MUTABLE state, and re-seeding on a fresh payload is the job of the
+  // identity-guarded effect below. Without it the compiler (correctly) warns
+  // that a bare `data.x` in a non-reactive position captures one value.
+  const seed = untrack(() => readSubscription(data.currentSubscription));
+  let currentTierId = $state<string | null>(seed.tierId);
+  let currentStatus = $state<SubscriptionStatus | null>(seed.status);
+  let currentCancelAtPeriodEnd = $state(seed.cancelAtPeriodEnd);
+  let currentPeriodEnd = $state<string | null>(seed.periodEnd);
+  let currentBillingInterval = $state<'month' | 'year' | null>(
+    seed.billingInterval
+  );
+  // True when we don't know the user's subscription state because the API
+  // errored. While set, the CTA is disabled and a retry alert is shown —
+  // previously the catch() swallowed the error and a subscribed user saw
+  // "Subscribe", clicked it, and hit AlreadySubscribedError.
+  let subscriptionLoadError = $state(seed.loadError);
 
   // Reactivate / payment-update / resume flow state
   let reactivateLoading = $state(false);
@@ -122,57 +177,26 @@
   let tierChangePreviewLoading = $state(false);
   let tierChangePreviewError = $state('');
 
-  let resolvedTiersPromise: Promise<unknown> | null = null;
+  // Re-sync when a genuinely NEW server payload arrives — an `invalidateAll()`
+  // after TIER_NOT_FOUND, or a client-side navigation back to this route.
+  // Identity-guarded and `untrack`ed so a re-run against the SAME payload
+  // cannot clobber the optimistic flips above; without the guard, a
+  // reactivate would visibly snap back to "cancelling" on the next flush.
+  let syncedEnvelope: SubscriptionEnvelope | undefined = untrack(
+    () => data.currentSubscription
+  );
   $effect(() => {
-    const promise = data.tiers;
+    const envelope = data.currentSubscription;
     untrack(() => {
-      if (promise && promise !== resolvedTiersPromise) {
-        pricingLoading = true;
-        resolvedTiersPromise = promise;
-        Promise.resolve(promise).then((result) => {
-          if (resolvedTiersPromise === promise) {
-            tiers = (result as SubscriptionTier[]) ?? [];
-            pricingLoading = false;
-          }
-        });
-      }
-    });
-  });
-
-  let resolvedSubPromise: Promise<unknown> | null = null;
-  $effect(() => {
-    const promise = data.currentSubscription;
-    untrack(() => {
-      if (promise && promise !== resolvedSubPromise) {
-        resolvedSubPromise = promise;
-        Promise.resolve(promise).then((result) => {
-          if (resolvedSubPromise !== promise) return;
-          const envelope = result as {
-            data: {
-              tierId?: string;
-              status?: SubscriptionStatus | string;
-              cancelAtPeriodEnd?: boolean;
-              currentPeriodEnd?: string | Date;
-              billingInterval?: 'month' | 'year' | string;
-            } | null;
-            loadError: boolean;
-          };
-          subscriptionLoadError = envelope.loadError;
-          const sub = envelope.data;
-          currentTierId = sub?.tierId ?? null;
-          const rawStatus = (sub?.status as SubscriptionStatus | undefined) ?? null;
-          currentStatus = rawStatus ?? (sub ? 'active' : null);
-          currentCancelAtPeriodEnd = sub?.cancelAtPeriodEnd ?? false;
-          const periodEnd = sub?.currentPeriodEnd;
-          currentPeriodEnd =
-            periodEnd instanceof Date
-              ? periodEnd.toISOString()
-              : (periodEnd ?? null);
-          const interval = sub?.billingInterval;
-          currentBillingInterval =
-            interval === 'month' || interval === 'year' ? interval : null;
-        });
-      }
+      if (envelope === syncedEnvelope) return;
+      syncedEnvelope = envelope;
+      const next = readSubscription(envelope);
+      subscriptionLoadError = next.loadError;
+      currentTierId = next.tierId;
+      currentStatus = next.status;
+      currentCancelAtPeriodEnd = next.cancelAtPeriodEnd;
+      currentPeriodEnd = next.periodEnd;
+      currentBillingInterval = next.billingInterval;
     });
   });
 
@@ -236,6 +260,23 @@
         'Every transaction is processed by Stripe, the same payment infrastructure used by Amazon, Shopify, and most of the internet. The creators never see your card details.',
       order: 3,
     },
+    // The two questions a buyer asks that the page could not previously
+    // answer: what a membership does NOT cover, and what happens to access
+    // when the payments stop. Both are material here because creators can
+    // price individual titles and portals outside the membership. This is the
+    // shipped default for every org that has not written its own pricing FAQ.
+    {
+      id: 'default-stop-paying',
+      question: m.pricing_faq_stop_paying_q(),
+      answer: m.pricing_faq_stop_paying_a(),
+      order: 4,
+    },
+    {
+      id: 'default-not-included',
+      question: m.pricing_faq_not_included_q(),
+      answer: m.pricing_faq_not_included_a(),
+      order: 5,
+    },
   ];
 
   let faqItems = $state<PricingFaqItem[]>(DEFAULT_FAQ);
@@ -256,9 +297,30 @@
       !trustStripInView &&
       !dismissedStickyCta &&
       tiers.length > 0 &&
-      !pricingLoading &&
       !currentTierId
   );
+
+  // ── Portals rail ──────────────────────────────────────────────────
+  // The org's PUBLISHED portals, streamed. Unlike a content item, each portal
+  // has a PUBLIC sales page — a conversion surface, not a paywall — which is
+  // why this rail is interactive (shared `Carousel` + `JourneyRailCard`,
+  // exactly as /explore renders the same DTO) while the catalogue band above
+  // it is not.
+  //
+  // Link by the SELL PAGE, not the course: `/journeys/:slug` resolves
+  // `landing_pages.slug`, so linking by `courses.slug` — which drifts from the
+  // page's after a rename — would resolve to a different URL than the org
+  // landing and /explore rails. Mirrors explore/+page.svelte.
+  function journeyHref(journey: CourseCardSummary): string {
+    return buildJourneyUrl(
+      page.url,
+      {
+        slug: journey.pageSlug ?? journey.slug,
+        id: journey.pageId ?? journey.id,
+      },
+      { surface: 'sales' }
+    );
+  }
 
   // ── Helpers ────────────────────────────────────────────────────────
   function savingsPercent(tier: SubscriptionTier): number {
@@ -271,11 +333,45 @@
     return billingInterval === 'month' ? tier.priceMonthly : tier.priceAnnual;
   }
 
-  function formatHoursShort(totalSeconds: number): string {
-    if (totalSeconds <= 0) return '0';
+  /**
+   * The runtime stat, split into a bare NUMBER and the unit that names it.
+   *
+   * The previous `formatHoursShort` returned a value that carried its own unit
+   * ("55m") and was rendered under a hardcoded "Hours" label, so the flagship
+   * org's pricing page read literally "55m / HOURS". Under an hour the unit is
+   * now minutes and the label says so; the caller renders `unit`, never a
+   * fixed word.
+   */
+  function formatDurationStat(totalSeconds: number): {
+    value: string;
+    unit: 'hours' | 'minutes';
+  } {
     const hours = totalSeconds / 3600;
-    if (hours < 1) return `${Math.round(totalSeconds / 60)}m`;
-    return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
+    if (hours < 1) {
+      return {
+        value: String(Math.max(1, Math.round(totalSeconds / 60))),
+        unit: 'minutes',
+      };
+    }
+    return {
+      value: hours % 1 === 0 ? String(Math.round(hours)) : hours.toFixed(1),
+      unit: 'hours',
+    };
+  }
+
+  /** Label for the runtime stat — singular only at exactly one whole unit. */
+  function durationStatLabel(stat: {
+    value: string;
+    unit: 'hours' | 'minutes';
+  }): string {
+    if (stat.unit === 'minutes') {
+      return stat.value === '1'
+        ? m.pricing_catalogue_stat_minutes_one()
+        : m.pricing_catalogue_stat_minutes_other();
+    }
+    return stat.value === '1'
+      ? m.pricing_catalogue_stat_hours_one()
+      : m.pricing_catalogue_stat_hours_other();
   }
 
   function handleCheckoutRetry() {
@@ -572,13 +668,11 @@
 
   // ── Lifecycle ──────────────────────────────────────────────────────
   onMount(() => {
+    // Post-login return: `tiers` is resolved server-side now, so the tier the
+    // visitor clicked before being sent to /login is available synchronously.
     if (restoredTierId && data.isAuthenticated) {
-      Promise.resolve(data.tiers).then((resolved) => {
-        const tier = (resolved as SubscriptionTier[] | null)?.find(
-          (t) => t.id === restoredTierId
-        );
-        if (tier) handleSubscribe(tier);
-      });
+      const tier = tiers.find((t) => t.id === restoredTierId);
+      if (tier) handleSubscribe(tier);
     }
 
     getPricingFaq(data.org.id).then((result) => {
@@ -628,7 +722,7 @@
 
     const unwatch = $effect.root(() => {
       $effect(() => {
-        if (!pricingLoading && tierCardsRef) setupTierObserver();
+        if (tierCardsRef) setupTierObserver();
       });
       $effect(() => {
         if (trustStripRef) setupTrustObserver();
@@ -659,17 +753,22 @@
 
     // Initial sweep picks up static sections (faq, trust).
     observeReveals();
-    // Re-sweep after streamed sections land in the DOM (preview).
+    // Re-sweep after each STREAMED section lands in the DOM. `.reveal` starts
+    // at `opacity: 0` and is only ever cleared by this observer, so a streamed
+    // section that no sweep covers renders permanently invisible — every
+    // promise the template gates a `[data-reveal]` element on must appear here.
     // `tick()` waits for Svelte to flush the post-promise DOM update so the
-    // `<section class="preview">` element exists when observeReveals runs.
-    Promise.resolve(data.contentPreview).finally(async () => {
-      await tick();
-      observeReveals();
-    });
-    Promise.resolve(data.stats).finally(async () => {
-      await tick();
-      observeReveals();
-    });
+    // element exists by the time observeReveals runs.
+    for (const streamed of [
+      data.contentPreview,
+      data.stats,
+      data.portals,
+    ]) {
+      Promise.resolve(streamed).finally(async () => {
+        await tick();
+        observeReveals();
+      });
+    }
 
     return () => {
       mq.removeEventListener('change', handleMq);
@@ -736,8 +835,19 @@
             tabindex={billingInterval === 'year' ? 0 : -1}
           >
             {m.pricing_annual()}
+            <!--
+              aria-hidden keeps the radio's ACCESSIBLE NAME stable. The pill
+              only renders while monthly is selected, so without this the
+              Annual option announced as "Annual Save 20%" and then, once
+              chosen, as "Annual" — a control whose name changes when you
+              operate it. The saving itself is not lost to AT: every tier card
+              repeats it ("Save N% when billed annually"), and the selected
+              annual card shows "−N%".
+            -->
             {#if billingInterval === 'month' && maxAnnualSavings > 0}
-              <span class="savings-pill">Save {maxAnnualSavings}%</span>
+              <span class="savings-pill" aria-hidden="true">
+                {m.pricing_save_percent({ percent: maxAnnualSavings })}
+              </span>
             {/if}
           </button>
         </div>
@@ -790,31 +900,10 @@
       </div>
     {/if}
 
-    {#if pricingLoading}
-      <div class="tier-stage" aria-busy="true" aria-label="Loading subscription plans">
-        {#each Array(3) as _, i}
-          <div
-            class="card-shell"
-            class:card-shell--featured={i === 1}
-            style:--card-index={i}
-          >
-            <div class="skeleton skeleton--title"></div>
-            <div class="skeleton skeleton--desc"></div>
-            <div class="skeleton skeleton--price"></div>
-            <div class="skeleton skeleton--helper"></div>
-            <div class="card-shell__features">
-              {#each Array(3) as _}
-                <div class="card-shell__feature">
-                  <div class="skeleton skeleton--feature-icon"></div>
-                  <div class="skeleton skeleton--feature"></div>
-                </div>
-              {/each}
-            </div>
-            <div class="skeleton skeleton--cta"></div>
-          </div>
-        {/each}
-      </div>
-    {:else if tiers.length === 0}
+    <!-- Tiers arrive resolved from the server load, so there is no pending
+         state to skeleton here any more — the cards are in the first byte of
+         HTML. The former `.card-shell` shimmer grid was deleted with it. -->
+    {#if tiers.length === 0}
       <EmptyState title={m.pricing_no_tiers()} />
     {:else}
       <section
@@ -1102,79 +1191,150 @@
       </section>
     {/if}
 
-    <!-- ═══ CONTENT PREVIEW ═══ -->
-    {#await data.contentPreview then items}
-      {@const withThumbs = items?.filter((i) => i.thumbnailUrl) ?? []}
+    <!-- ═══ CATALOGUE BAND ═══════════════════════════════════════════════
+         Was a 4-tile "magazine spread" whose photographs were blurred 4px,
+         desaturated, scaled 1.08 and covered by a 55%-opacity multiply scrim,
+         inside slots (1.33:1 hero, 2.26:1 supporting) that matched no source
+         aspect ratio in any org — so a 4:5 portrait showed its middle third
+         and two different items rendered as the same grey cloud, told apart
+         only by a text pill. It then claimed "29 Titles" 200px below four
+         tiles.
+
+         Now: a continuously drifting band of SHARP 3:4 tiles, each carrying
+         its own title and a per-type flair, drawn from an 18-item sample. The
+         band is non-interactive on purpose — see ContentMarquee.
+         ═══════════════════════════════════════════════════════════════════ -->
+    {#await data.contentPreview}
+      <!-- Pending branch. The band is streamed and the catalogue read is the
+           slowest call on this page; without a placeholder of the RIGHT height
+           the section popped in and shoved the FAQ down the page. -->
+      <div class="preview__band-pending" aria-hidden="true">
+        {#each Array(6) as _, i (i)}
+          <div class="preview__band-pending-tile"></div>
+        {/each}
+      </div>
+    {:then items}
       {#if (items?.length ?? 0) > 0}
-        {@const tiles = withThumbs.slice(0, 4)}
-        {@const spreadVariant = tiles.length === 1 ? 'solo' : tiles.length === 2 ? 'pair' : tiles.length === 3 ? 'trio' : 'magazine'}
         <section class="preview reveal" data-reveal aria-labelledby="preview-title">
           <header class="preview__lede">
-            <p class="preview__eyebrow">Inside the library</p>
+            <p class="preview__eyebrow">{m.pricing_catalogue_eyebrow()}</p>
             <span class="preview__rule" aria-hidden="true"></span>
-            <h2 id="preview-title" class="preview__title">A catalogue you'll never finish.</h2>
-            <p class="preview__subtitle">
-              Video, audio, and writing from every creator — included with every membership.
-            </p>
+            <h2 id="preview-title" class="preview__title">
+              {m.pricing_catalogue_title()}
+            </h2>
+            <!-- This line used to end "— included with every membership",
+                 which is not true of an org-wide catalogue: creators price
+                 individual titles and portals outside the membership, and the
+                 "N Titles" stat below is the ORG total, not the tier's. The
+                 FAQ now answers what a membership does and does not cover. -->
+            <p class="preview__subtitle">{m.pricing_catalogue_subtitle()}</p>
           </header>
 
-          {#if tiles.length > 0}
-            <div class="preview__spread preview__spread--{spreadVariant}">
-              {#each tiles as item, i (item.id)}
-                {@const typeLabel = item.contentType === 'audio' ? 'Audio' : item.contentType === 'written' ? 'Article' : 'Video'}
-                <div class="preview__tile preview__tile--{i}">
-                  <img src={item.thumbnailUrl} alt="" loading="lazy" />
-                  <div class="preview__tile-shade" aria-hidden="true"></div>
-                  <span class="preview__badge">{typeLabel}</span>
-                  {#if i === 0}
-                    <span class="preview__tile-title">{item.title}</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
+          <ContentMarquee
+            {items}
+            itemWidth="13rem"
+            ariaLabel={m.pricing_catalogue_marquee_label()}
+          >
+            {#snippet renderItem(item)}
+              <CataloguePreviewTile
+                id={item.id}
+                title={item.title}
+                contentType={item.contentType}
+                thumbnailUrl={item.thumbnailUrl}
+              />
+            {/snippet}
+          </ContentMarquee>
 
           {#await data.stats then stats}
             <footer class="preview__footer">
               <div
                 class="preview__stats"
                 role="list"
-                aria-label="Library at a glance"
+                aria-label={m.pricing_catalogue_stats_label()}
               >
                 {#if stats?.content?.total}
                   <div class="preview__stat" role="listitem">
                     <span class="preview__stat-number">{stats.content.total}</span>
-                    <span class="preview__stat-label">{stats.content.total === 1 ? 'Title' : 'Titles'}</span>
+                    <span class="preview__stat-label">
+                      {stats.content.total === 1
+                        ? m.pricing_catalogue_stat_titles_one()
+                        : m.pricing_catalogue_stat_titles_other()}
+                    </span>
                   </div>
                 {/if}
                 {#if (stats?.creators ?? 0) > 0}
                   <div class="preview__stat" role="listitem">
                     <span class="preview__stat-number">{stats.creators}</span>
-                    <span class="preview__stat-label">{stats.creators === 1 ? 'Creator' : 'Creators'}</span>
+                    <span class="preview__stat-label">
+                      {stats.creators === 1
+                        ? m.pricing_catalogue_stat_creators_one()
+                        : m.pricing_catalogue_stat_creators_other()}
+                    </span>
                   </div>
                 {/if}
                 {#if (stats?.totalDurationSeconds ?? 0) > 0}
+                  {@const runtime = formatDurationStat(stats.totalDurationSeconds)}
                   <div class="preview__stat" role="listitem">
-                    <span class="preview__stat-number">{formatHoursShort(stats.totalDurationSeconds)}</span>
-                    <span class="preview__stat-label">Hours</span>
+                    <span class="preview__stat-number">{runtime.value}</span>
+                    <span class="preview__stat-label">
+                      {durationStatLabel(runtime)}
+                    </span>
                   </div>
                 {/if}
               </div>
 
               {#if (stats?.categories?.length ?? 0) > 1}
-                <ul class="preview__categories" aria-label="Topics">
-                  {#each stats.categories.slice(0, 6) as cat}
+                <ul
+                  class="preview__categories"
+                  aria-label={m.pricing_catalogue_topics_label()}
+                >
+                  {#each stats.categories.slice(0, 6) as cat (cat.name)}
                     <li>{cat.name}</li>
                   {/each}
                 </ul>
               {/if}
 
               <a href="/explore" class="preview__cta">
-                <span>Browse the catalogue</span>
+                <span>{m.pricing_catalogue_cta()}</span>
                 <span class="preview__cta-arrow" aria-hidden="true">→</span>
               </a>
             </footer>
           {/await}
+        </section>
+      {/if}
+    {/await}
+
+    <!-- ═══ PORTALS RAIL ═════════════════════════════════════════════════
+         The org's published portals. Interactive, unlike the band above,
+         because every portal has a PUBLIC sales page. Rendered with the same
+         `Carousel` + `JourneyRailCard` pair /explore uses, at the same 17rem
+         item width, so the two surfaces read as one system. Absent entirely
+         for an org with no published portals.
+         ═══════════════════════════════════════════════════════════════════ -->
+    {#await data.portals then portals}
+      {#if (portals?.length ?? 0) > 0}
+        <!--
+          The <section> is deliberately UNNAMED: `Carousel` emits its own
+          role="region" with an accessible name, and naming the section too
+          would announce two nested landmarks with near-identical names. The h2
+          still anchors the heading outline.
+        -->
+        <section class="portals reveal" data-reveal>
+          <header class="portals__lede">
+            <h2 class="portals__title">{m.pricing_portals_title()}</h2>
+            {#if portals.length > 1}
+              <p class="portals__subtitle">{m.pricing_portals_subtitle()}</p>
+            {/if}
+          </header>
+          <Carousel
+            items={portals}
+            itemMinWidth="17rem"
+            ariaLabel={m.pricing_portals_rail_label()}
+          >
+            {#snippet renderItem(journey)}
+              <JourneyRailCard {journey} href={journeyHref(journey)} />
+            {/snippet}
+          </Carousel>
         </section>
       {/if}
     {/await}
@@ -2149,27 +2309,36 @@
      Toggled via [data-reveal] + .reveal--visible (added by JS observer).
      ══════════════════════════════════════════════════════════════════ */
 
-  .reveal {
-    opacity: 0;
-    transform: translateY(var(--space-5));
-    transition:
-      opacity var(--duration-slower) var(--ease-smooth),
-      transform var(--duration-slower) var(--ease-smooth);
+  /* The hidden state is gated on SCRIPTING because only the JS
+     IntersectionObserver ever clears it. With JS off, every `.reveal` section
+     stayed at `opacity: 0` while still occupying its space and keeping its
+     children tab-reachable — a keyboard user tabbed into four invisible FAQ
+     accordion buttons. `scripting: enabled` fails safe: a browser that does
+     not know the feature simply skips the rule, so the content is VISIBLE and
+     only loses its entrance animation. */
+  @media (scripting: enabled) {
+    .reveal {
+      opacity: 0;
+      transform: translateY(var(--space-5));
+      transition:
+        opacity var(--duration-slower) var(--ease-smooth),
+        transform var(--duration-slower) var(--ease-smooth);
+    }
+
+    /* Child-rule scale-expand — echoes the hero's heroRuleExpand,
+       delayed slightly so the section lifts first, then the rule draws. */
+    .reveal .preview__rule,
+    .reveal .faq__rule,
+    .reveal .trust__rule {
+      transform: scaleX(0.3);
+      transform-origin: center;
+      transition: transform var(--duration-slower) var(--ease-smooth) calc(var(--duration-fast) * 1.5);
+    }
   }
 
   :global(.reveal.reveal--visible) {
     opacity: 1;
     transform: translateY(0);
-  }
-
-  /* Child-rule scale-expand — echoes the hero's heroRuleExpand,
-     delayed slightly so the section lifts first, then the rule draws. */
-  .reveal .preview__rule,
-  .reveal .faq__rule,
-  .reveal .trust__rule {
-    transform: scaleX(0.3);
-    transform-origin: center;
-    transition: transform var(--duration-slower) var(--ease-smooth) calc(var(--duration-fast) * 1.5);
   }
 
   :global(.reveal.reveal--visible) .preview__rule,
@@ -2254,182 +2423,38 @@
     text-wrap: pretty;
   }
 
-  /* Magazine spread — base + count-adaptive variants (solo/pair/trio/magazine).
-     Default is the 4-tile magazine layout; narrower variants keep the editorial
-     feel at sparse-content orgs without looking underfilled. */
-  .preview__spread {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-2);
-    border-radius: var(--radius-lg);
+  /* ── Catalogue band ───────────────────────────────────────────────────
+     The band itself is `ContentMarquee`; the tiles are `CataloguePreviewTile`.
+     Both own their own CSS, so all this section needs is the pending
+     placeholder. Everything the old magazine spread carried — the grid
+     variants, the blur/saturate/scale filters, the multiply shade layer and
+     the type badge — is gone with the markup. */
+
+  .preview__band-pending {
+    display: flex;
+    gap: var(--space-4);
     overflow: hidden;
-    box-shadow: var(--shadow-md);
   }
 
-  /* Solo (1 tile): single cinematic hero */
-  .preview__spread--solo {
-    grid-template-columns: 1fr;
-  }
-  .preview__spread--solo .preview__tile--0 {
-    aspect-ratio: 16 / 9;
-  }
-
-  /* Trio (3 tiles): mobile = 1 wide hero + 2 side-by-side below */
-  .preview__spread--trio .preview__tile--0 {
-    grid-column: 1 / -1;
-    aspect-ratio: 16 / 9;
-  }
-
-  /* md+: full magazine layouts */
-  @media (--breakpoint-md) {
-    .preview__spread--magazine {
-      grid-template-columns: 1.8fr 1fr;
-      grid-template-rows: repeat(3, 1fr);
-      aspect-ratio: 5 / 2.4;
-      gap: var(--space-1);
-    }
-    .preview__spread--magazine .preview__tile--0 { grid-column: 1; grid-row: 1 / 4; }
-    .preview__spread--magazine .preview__tile--1 { grid-column: 2; grid-row: 1; }
-    .preview__spread--magazine .preview__tile--2 { grid-column: 2; grid-row: 2; }
-    .preview__spread--magazine .preview__tile--3 { grid-column: 2; grid-row: 3; }
-
-    .preview__spread--solo {
-      grid-template-columns: 1fr;
-      aspect-ratio: 16 / 7;
-      gap: 0;
-    }
-    .preview__spread--solo .preview__tile--0 {
-      aspect-ratio: auto;
-    }
-
-    .preview__spread--pair {
-      grid-template-columns: 1fr 1fr;
-      aspect-ratio: 16 / 7;
-      gap: var(--space-1);
-    }
-
-    .preview__spread--trio {
-      grid-template-columns: 1.8fr 1fr;
-      grid-template-rows: repeat(2, 1fr);
-      aspect-ratio: 5 / 3;
-      gap: var(--space-1);
-    }
-    .preview__spread--trio .preview__tile--0 {
-      grid-column: 1;
-      grid-row: 1 / 3;
-      aspect-ratio: auto;
-    }
-    .preview__spread--trio .preview__tile--1 { grid-column: 2; grid-row: 1; }
-    .preview__spread--trio .preview__tile--2 { grid-column: 2; grid-row: 2; }
-  }
-
-  .preview__tile {
-    position: relative;
-    overflow: hidden;
-    aspect-ratio: 4 / 3;
-    border-radius: var(--radius-sm);
-  }
-
-  @media (--breakpoint-md) {
-    .preview__tile {
-      aspect-ratio: auto;
-      border-radius: 0;
+  /* Without JS the streamed promise is never resolved client-side, so the
+     `{#await}` pending branch is the FINAL state — six grey boxes forever,
+     which reads as a broken page rather than a loading one. Hide it there and
+     let the section be simply absent, as it was before this branch. Fails safe:
+     a browser that does not know `scripting` keeps today's behaviour. */
+  @media (scripting: none) {
+    .preview__band-pending {
+      display: none;
     }
   }
 
-  .preview__tile img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(var(--blur-sm)) saturate(0.85);
-    transform: scale(1.08);
-    transition:
-      filter calc(var(--duration-slower) * 1.2) var(--ease-smooth),
-      transform calc(var(--duration-slower) * 1.2) var(--ease-smooth);
-  }
-
-  /* Hero tile: lighter blur so the composition reads */
-  .preview__tile--0 img {
-    filter: blur(calc(var(--blur-sm) / 2)) saturate(0.92);
-  }
-
-  .preview__tile:hover img {
-    filter: blur(calc(var(--blur-sm) / 2)) saturate(1);
-    transform: scale(1.1);
-  }
-
-  .preview__tile--0:hover img {
-    filter: blur(1px) saturate(1);
-  }
-
-  .preview__tile-shade {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      transparent 42%,
-      color-mix(in oklch, var(--color-brand-primary) 18%, var(--color-neutral-900)) 100%
-    );
-    opacity: var(--opacity-55);
-    mix-blend-mode: multiply;
-  }
-
-  .preview__badge {
-    position: absolute;
-    top: var(--space-3);
-    right: var(--space-3);
-    display: inline-flex;
-    align-items: center;
-    padding: var(--space-0-5) var(--space-2);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label);
-    color: var(--color-neutral-0);
-    background: color-mix(in srgb, var(--color-neutral-900) 40%, transparent);
-    backdrop-filter: blur(var(--blur-md));
-    -webkit-backdrop-filter: blur(var(--blur-md));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-neutral-0) 28%, transparent);
-    border-radius: var(--radius-full);
-    z-index: 2;
-  }
-
-  /* Hero tile title — gives one concrete piece of content a name,
-     while supporting tiles stay as teaser-blurs. Signal over noise. */
-  .preview__tile-title {
-    position: absolute;
-    left: var(--space-5);
-    right: var(--space-5);
-    bottom: var(--space-4);
-    z-index: 2;
-    font-family: var(--font-heading);
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-neutral-0);
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-snug);
-    text-shadow:
-      0 var(--border-width) var(--space-2) color-mix(in srgb, var(--color-neutral-900) 70%, transparent),
-      0 0 var(--space-1) color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
-    text-wrap: balance;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    pointer-events: none;
-    max-width: 22ch;
-  }
-
-  @media (--below-md) {
-    .preview__tile-title {
-      font-size: var(--text-base);
-      left: var(--space-3);
-      right: var(--space-3);
-      bottom: var(--space-3);
-    }
+  .preview__band-pending-tile {
+    /* Same 13rem × 3:4 box the real tile occupies, so the section reserves its
+       final height before the streamed items land. Without this the band pops
+       in and shoves the FAQ down — a CLS regression, not just a flicker. */
+    flex: 0 0 13rem;
+    aspect-ratio: 3 / 4;
+    border-radius: var(--radius-xl);
+    background: color-mix(in srgb, var(--color-surface-secondary) 70%, transparent);
   }
 
   /* Footer: stats → categories → CTA */
@@ -2547,6 +2572,49 @@
 
   .preview__cta:hover .preview__cta-arrow {
     transform: translateX(var(--space-1));
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PORTALS RAIL — the interactive counterpart to the catalogue band.
+     The cards and the scroll track are `JourneyRailCard` + `Carousel`;
+     only the heading block is local.
+     ══════════════════════════════════════════════════════════════════ */
+
+  .portals {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .portals__lede {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    text-align: center;
+    max-width: 44rem;
+    margin: 0 auto;
+  }
+
+  .portals__title {
+    font-family: var(--font-heading);
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-text);
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .portals__subtitle {
+    font-size: var(--text-base);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+    margin: 0;
+    max-width: 52ch;
+    text-wrap: pretty;
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -3109,109 +3177,18 @@
     }
   }
 
-  /* ── SKELETON ─────────────────────────────────────────────────────── */
-
-  .card-shell {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-8) var(--space-6);
-    background: color-mix(in srgb, var(--color-surface) 85%, transparent);
-    backdrop-filter: blur(var(--blur-xl));
-    -webkit-backdrop-filter: blur(var(--blur-xl));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-lg);
-    box-shadow:
-      var(--shadow-md),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 10%, transparent);
-    opacity: 0;
-    animation: cardReveal calc(var(--duration-slower) * 1.1) var(--ease-smooth) forwards;
-    animation-delay: calc(120ms * var(--card-index));
-  }
-
-  /* Middle shell hints at the featured tier — matches card--featured tint */
-  .card-shell--featured {
-    padding-top: var(--space-10);
-    background: linear-gradient(
-      180deg,
-      color-mix(in oklch, var(--color-brand-primary) 6%, var(--color-surface)),
-      color-mix(in oklch, var(--color-brand-primary) 1%, var(--color-surface))
-    );
-    border-color: color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
-  }
-
-  .card-shell__features {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-2) 0 0;
-    margin-top: var(--space-2);
-    border-top: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 40%, transparent);
-    flex: 1;
-  }
-
-  .card-shell__feature {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) 0;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .card-shell { opacity: 1; animation: none; }
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      color-mix(in srgb, var(--color-surface-secondary) 60%, var(--color-surface)) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer calc(var(--duration-slower) * 3.6) ease-in-out infinite;
-    border-radius: var(--radius-sm);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .skeleton { animation: none; }
-  }
-
-  .skeleton--title         { width: 50%; height: var(--space-6); }
-  .skeleton--desc          { width: 80%; height: var(--space-4); }
-  .skeleton--price         { width: 45%; height: var(--space-10); }
-  .skeleton--helper        { width: 60%; height: var(--space-3); }
-  .skeleton--feature       { flex: 1; height: var(--space-3); }
-  .skeleton--feature-icon  {
-    width: var(--space-6);
-    height: var(--space-6);
-    border-radius: var(--radius-full);
-    flex-shrink: 0;
-  }
-  .skeleton--cta           { width: 100%; height: var(--space-12); margin-top: auto; border-radius: var(--radius-md); }
-
-  @keyframes shimmer {
-    0%   { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-
   /* ══════════════════════════════════════════════════════════════════
      BACKDROP-FILTER FALLBACK — for browsers without support
      ══════════════════════════════════════════════════════════════════ */
 
   @supports not (backdrop-filter: blur(1px)) {
     .card__inner,
-    .card-shell,
     .billing-toggle,
     .sticky-bar__inner {
       background: var(--color-surface);
     }
-    .card--featured .card__inner,
-    .card-shell--featured {
+    .card--featured .card__inner {
       background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
-    }
-    .preview__badge {
-      background: color-mix(in srgb, var(--color-neutral-900) 70%, transparent);
     }
   }
 
@@ -3223,7 +3200,6 @@
 
   @media print {
     .pricing-hero__backdrop,
-    .preview__tile-shade,
     .card__glow,
     .sticky-bar,
     .card__ribbon::after {
@@ -3237,8 +3213,7 @@
     .pricing-hero {
       padding: var(--space-6) 0;
     }
-    .card,
-    .card-shell {
+    .card {
       break-inside: avoid;
       page-break-inside: avoid;
     }
@@ -3263,21 +3238,14 @@
 
   @media (prefers-reduced-transparency: reduce) {
     .card__inner,
-    .card-shell,
     .billing-toggle,
     .sticky-bar__inner {
       background: var(--color-surface);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
-    .card--featured .card__inner,
-    .card-shell--featured {
+    .card--featured .card__inner {
       background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
-    }
-    .preview__badge {
-      background: color-mix(in srgb, var(--color-neutral-900) 78%, transparent);
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
     }
   }
 
@@ -3300,11 +3268,24 @@
       var(--color-surface-secondary) 100%
     );
     background-size: 200% 100%;
-    animation: tier-change-shimmer 1.4s ease-in-out infinite;
+    /* Was a raw `1.4s` — the last hardcoded duration on the page. Derived from
+       the token so the global reduced-motion collapse reaches it at all. */
+    animation: tier-change-shimmer calc(var(--duration-slower) * 2.8)
+      ease-in-out infinite;
   }
 
   .tier-change-skeleton__row--short {
     width: 60%;
+  }
+
+  /* The global collapse only sets `animation-duration: 0.01ms !important`; the
+     animation itself keeps running. This shimmers inside a modal while the
+     user reads a proration charge, so it is a vestibular issue rather than a
+     nicety — stop it outright. */
+  @media (prefers-reduced-motion: reduce) {
+    .tier-change-skeleton__row {
+      animation: none;
+    }
   }
 
   @keyframes tier-change-shimmer {
