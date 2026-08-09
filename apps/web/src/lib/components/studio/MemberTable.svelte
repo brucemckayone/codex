@@ -150,6 +150,9 @@
           <Table.Head>{m.team_col_role()}</Table.Head>
           <Table.Head>{m.team_col_joined()}</Table.Head>
           {#if showRevenueShare}
+            <!-- TODO(i18n): `team_col_revenue_share` = "Revenue share". Every
+                 other header on this table goes through paraglide; en.json is
+                 owned by another worktree this round. -->
             <Table.Head>Revenue share</Table.Head>
           {/if}
           <Table.Head>{m.team_col_actions()}</Table.Head>
@@ -216,11 +219,27 @@
               {@const rs = revenueShareByUser?.get(member.userId)}
               <Table.Cell>
                 <div class="rev-cell">
+                  <!-- Per-row accessible names, same reason as Remove below.
+                       Every one of these links points at a DIFFERENT member's
+                       agreement (`?focus=<userId>`), but the visible text is
+                       identical on every row — seven "Set up" entries on
+                       studio-alpha, fifteen on of-blood-and-bones. The only
+                       distinguishing context is the name in the first cell,
+                       which is a <td>, not a <th scope="row">, so it is not
+                       programmatically determined context under WCAG 2.4.4:
+                       a links-list (NVDA Insert+F7 / VO rotor) shows N
+                       indistinguishable entries that deep-link to different
+                       people.
+                       TODO(i18n): `team_rev_manage_for` = "Manage revenue share
+                       for {name}", `team_rev_setup_for` = "Set up revenue share
+                       for {name}". Listed for the orchestrator; en.json belongs
+                       to another worktree this round. -->
                   {#if rs?.active}
                     <Badge variant="success">{rs.label}</Badge>
                     <a
                       class="rev-link"
                       href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
+                      aria-label={`Manage revenue share for ${memberLabel}`}
                     >
                       Manage
                     </a>
@@ -234,6 +253,7 @@
                     <a
                       class="rev-link"
                       href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
+                      aria-label={`Set up revenue share for ${memberLabel}`}
                     >
                       Set up
                     </a>

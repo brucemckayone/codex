@@ -144,6 +144,53 @@ test.describe('Studio Settings - General Mutations', () => {
     const success = page.locator('[role="status"]');
     await expect(success).toBeVisible({ timeout: 15000 });
   });
+
+  /**
+   * REGRESSION GUARD for the defect this page was rewritten to fix: schema
+   * failures short-circuit before the handler and land in the form's `issues`,
+   * which nothing read, while `novalidate` suppressed the browser's own
+   * bubbles — so an invalid save produced no role=alert, no aria-invalid and no
+   * message, and shipped unnoticed. Asserting the PROGRAMMATIC signals
+   * (aria-invalid + a resolving aria-describedby), not just visible text, is
+   * what makes this catch a recurrence: a page could show red text and still
+   * tell assistive tech nothing.
+   */
+  test('a rejected save surfaces the error on the field and in a summary', async ({
+    page,
+  }) => {
+    const member = await setupStudioUser(page, { orgRole: 'owner' });
+
+    await navigateToStudioPage(page, member.organization.slug, '/settings');
+
+    const email = page.getByRole('textbox', { name: 'Support Email' });
+    await email.fill('definitely-not-an-email');
+
+    // Direct DOM click — see the note in the success test above: the studio
+    // rail expands on any cursor movement and intercepts pointer events.
+    const saveBtn = page.getByRole('button', { name: 'Save Changes' });
+    await saveBtn.evaluate((el: HTMLElement) => el.click());
+
+    // Assertive summary above the form (Alert derives role="alert" for error).
+    await expect(page.locator('[role="alert"]')).toBeVisible({
+      timeout: 15000,
+    });
+
+    // The field itself must be marked invalid and must POINT at its message.
+    await expect(email).toHaveAttribute('aria-invalid', 'true');
+    const describedBy = await email.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    await expect(page.locator(`#${describedBy}`)).toBeVisible();
+
+    // The typed value survives a rejected submit — the query is neither
+    // refetched nor mutated, so nothing re-seeds the field.
+    await expect(email).toHaveValue('definitely-not-an-email');
+
+    // Platform Name is genuinely required (schema `.min(1)`), so it must say so
+    // before submission rather than only after a round-trip (WCAG 3.3.2).
+    await expect(
+      page.getByRole('textbox', { name: /Platform Name/ })
+    ).toHaveAttribute('required', '');
+  });
 });
 
 test.describe('Studio Settings - no tab strip', () => {

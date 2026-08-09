@@ -30,9 +30,11 @@
   @prop data - orgId from settings layout + org/userRole from studio layout
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { goto } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { getContactSettings, updateContactForm } from '$lib/remote/settings.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
   import { Alert, Button, Card, Label, Select } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
@@ -62,14 +64,39 @@
   const contact = $derived(contactQuery?.current);
 
   /**
+   * A FAILED query never leaves `current === undefined`. Verified against
+   * SvelteKit 2.55's `Query` class: `#current` short-circuits to `undefined`
+   * while `#ready` is false, and `#ready` is set ONLY in the resolve path —
+   * the `.catch()` sets `#error` and clears `#loading` but leaves `#ready`
+   * false (runtime/client/remote-functions/query.svelte.js). So after a
+   * failure `loading` is false, `current` is `undefined` permanently, and
+   * reading `current` does not throw, which means `+error.svelte` never fires
+   * either. A gate of "no value yet" alone therefore renders the skeleton
+   * FOREVER on a failed load. Read the rejection instead, via
+   * `queryErrorMessage` — never `error?.message`, which is always undefined
+   * for the `HttpError` SvelteKit rejects with (Codex-xo3bl).
+   */
+  const contactError = $derived(queryErrorMessage(contactQuery?.error));
+
+  /**
+   * No data AND a rejection — the form cannot be shown, because its inputs
+   * would all be blank and saving them would overwrite live settings with
+   * empty strings.
+   */
+  const loadFailed = $derived(isAuthorized && contact === undefined && contactError !== null);
+
+  /**
    * FIRST-LOAD gate, not `contactQuery.loading`. `form()` invalidates every
    * live query after a successful submit, so a loading-gated skeleton replaced
    * the whole populated form with grey blocks on every save (measured
    * `hasForm:false, hasSkeleton:true` at t≈1.5s of a real save) and then
    * rebuilt it. `current` retains the previous value across a refresh, so
-   * gating on "no value yet" shows the skeleton exactly once.
+   * gating on "no value yet" shows the skeleton exactly once — and, per
+   * `loadFailed` above, only while the load is genuinely still in flight.
    */
-  const showSkeleton = $derived(isAuthorized && contact === undefined);
+  const showSkeleton = $derived(
+    isAuthorized && contact === undefined && contactError === null
+  );
 
   const fields = $derived(updateContactForm.fields);
 
@@ -102,20 +129,56 @@
    */
   const allIssues = $derived(fields.allIssues() ?? []);
 
+  /** Wrapper around the submit button, so focus can be put back after a save. */
+  let actionsEl = $state<HTMLDivElement | null>(null);
+
   /**
-   * Enhanced purely to SUPPRESS the automatic form reset. An un-enhanced
-   * `form()` resets the <form> after a successful submit, and because these
-   * values are driven by `fields.set(...)` rather than by `value` attributes,
-   * reset() blanked every input to its empty default — measured: every field
-   * read "" for ~1s after a save, until the invalidated query refetched and
-   * re-seeded them. `enhance` does not auto-reset (we simply never call
-   * `form.element.reset()`), so the values stay put. `submit()` performs the
-   * identical submission, so validation issues, `result` and the single-flight
-   * query invalidation all behave exactly as before.
+   * `ui/Button` computes `disabled={disabled || loading}`, and every browser
+   * discards focus from an element that becomes disabled. Measured timeline of
+   * a real save: t=0 activeElement is the Save button, t≈100ms disabled=true and
+   * activeElement=BODY, t≈609ms disabled=false and activeElement STILL BODY. So
+   * a keyboard user who pressed Enter on Save was returned to the top of the
+   * document and had to tab through the skip link and the whole studio rail to
+   * get back.
+   *
+   * Two things this must not do. It must not read `document.activeElement`
+   * inside the enhance callback to decide whether focus "was" here: SvelteKit
+   * increments `pending` and then awaits the preflight schema BEFORE invoking
+   * the callback, so Svelte has already flushed the disable and dropped focus by
+   * the time our code runs (that is why the first attempt silently did nothing).
+   * And it must not focus while the button is still disabled, because `focus()`
+   * is a no-op there — hence the bounded rAF poll.
+   *
+   * `<body>` is the fingerprint of a discarded focus. A user who deliberately
+   * moved to another control during the round-trip leaves `activeElement` on
+   * THAT control, so this can never steal focus from them.
+   */
+  function restoreFocusToSave(attempt = 0): void {
+    const btn = actionsEl?.querySelector('button');
+    if (!btn || attempt > 20) return;
+    if (btn.disabled) {
+      requestAnimationFrame(() => restoreFocusToSave(attempt + 1));
+      return;
+    }
+    if (document.activeElement === document.body) btn.focus();
+  }
+
+  /**
+   * Enhanced purely to SUPPRESS the automatic form reset (and now also to put
+   * focus back). An un-enhanced `form()` resets the <form> after a successful
+   * submit, and because these values are driven by `fields.set(...)` rather than
+   * by `value` attributes, reset() blanked every input to its empty default —
+   * measured: every field read "" for ~1s after a save, until the invalidated
+   * query refetched and re-seeded them. `enhance` does not auto-reset (we simply
+   * never call `form.element.reset()`), so the values stay put. `submit()`
+   * performs the identical submission, so validation issues, `result` and the
+   * single-flight query invalidation all behave exactly as before.
    */
   const enhanced = $derived(
     updateContactForm.enhance(async ({ submit }) => {
       await submit();
+      await tick();
+      restoreFocusToSave();
     })
   );
 
@@ -177,6 +240,13 @@
 <!--
   One labelled text control plus its server-side issue. `id` does triple duty:
   label association, the issue node's id, and the `aria-describedby` target.
+
+  `required` is a real constraint, not decoration: it must be declared wherever
+  the schema will reject an empty value, or the only way to learn the field is
+  mandatory is to submit and be told (WCAG 3.3.2). The `required` attribute is
+  safe alongside the form's deliberate `novalidate` — novalidate suppresses the
+  browser's own bubbles while still exposing the state to assistive tech, so the
+  server schema stays the single source of truth for the MESSAGE.
 -->
 {#snippet textField(f: {
   id: string;
@@ -185,14 +255,20 @@
   issues: readonly { message: string }[] | undefined;
   placeholder?: string;
   maxlength?: number;
+  required?: boolean;
 })}
   <div class="form-field">
-    <Label for={f.id}>{f.label}</Label>
+    <Label for={f.id}>
+      {f.label}{#if f.required}<span class="field-required" aria-hidden="true"
+          >*</span
+        >{/if}
+    </Label>
     <input
       id={f.id}
       class="field-input"
       placeholder={f.placeholder}
       maxlength={f.maxlength}
+      required={f.required}
       aria-describedby={f.issues && f.issues.length > 0
         ? `${f.id}-error`
         : undefined}
@@ -206,6 +282,19 @@
 
 {#if !isAuthorized}
   <!-- Redirecting... -->
+{:else if loadFailed}
+  <!-- The load rejected and there is nothing to edit. Rendering the form here
+       would offer eight blank inputs whose Save would wipe the live settings. -->
+  <div class="settings-form">
+    <Alert variant="error">
+      {contactError}
+    </Alert>
+    <div class="form-actions">
+      <Button variant="secondary" onclick={() => contactQuery?.refresh()}>
+        {m.common_try_again()}
+      </Button>
+    </div>
+  </div>
 {:else if showSkeleton}
   <div class="settings-form settings-skeleton">
     <div class="settings-skeleton-card">
@@ -253,9 +342,12 @@
 
     <!-- Schema failure. Alert derives role="alert" for the error variant, so
          this announces assertively — a rejected save is not a status update.
-         No `{#each}` key: two URL fields rejected together produce two
-         identical "Invalid URL" messages, and a duplicate key is a runtime
-         error in Svelte 5.
+         The `{#each}` key is COMPOUND (`path|message`) because two URL fields
+         rejected together produce two identical "Invalid URL" messages, and a
+         duplicate key is a runtime error in Svelte 5 — the path disambiguates
+         them. Safe because `RemoteFormIssue.path` is non-optional and
+         `updateContactFormSchema` is a flat `z.object` with no root-level
+         `.refine()`, so every issue carries a non-empty path.
          TODO(i18n): `settings_validation_summary` = "Some changes could not be
          saved". Listed for the orchestrator; en.json is owned by another
          worktree this round. -->
@@ -280,12 +372,19 @@
       </Card.Header>
       <Card.Content>
         <div class="form-fields">
+          <!-- REQUIRED. `settings.remote.ts` declares
+               `.trim().min(1, 'Platform name is required').optional()`, and
+               `.optional()` never applies to a text input because an input
+               always submits its key — so an empty value is rejected, not
+               skipped. Verified: saving a single space returns role="alert"
+               "Platform name is required" with aria-invalid on the field. -->
           {@render textField({
             id: 'platformName',
             label: m.settings_platform_name(),
             attrs: fields.platformName.as('text'),
             issues: fields.platformName.issues(),
             maxlength: 100,
+            required: true,
           })}
 
           {@render textField({
@@ -358,11 +457,16 @@
       </Card.Content>
     </Card.Root>
 
-    <div class="form-actions">
+    <div class="form-actions" bind:this={actionsEl}>
       <!-- ui/Button, not a hand-rolled `.btn`: it supplies aria-busy + the
            spinner from `loading`, which the previous submit button had no
-           equivalent of. -->
-      <Button type="submit" loading={submitting}>
+           equivalent of.
+           `aria-label` is not redundant here: Button hides `.button-content`
+           with `visibility: hidden` while loading, which also removes it from
+           the accessibility tree — so mid-flight the control would otherwise be
+           an unnamed button reporting aria-busy. The label pins the name across
+           both states; the text is identical, so nothing diverges. -->
+      <Button type="submit" loading={submitting} aria-label={m.settings_save()}>
         {m.settings_save()}
       </Button>
     </div>
@@ -414,6 +518,15 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  /* The required marker is DECORATION — `aria-hidden` on the glyph, with the
+     `required` attribute carrying the semantics — so it must not be the only
+     signal, and it must not be a colour-only one either. Inherits the label's
+     ink for that reason; a red asterisk on a field with no error would read as
+     a failure. */
+  .field-required {
+    margin-inline-start: var(--space-1);
   }
 
   .field-input {
