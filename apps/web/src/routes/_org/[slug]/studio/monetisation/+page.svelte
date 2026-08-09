@@ -1,25 +1,35 @@
 <!--
   @component StudioMonetisation
 
-  Studio monetisation dashboard for org owners.
-  Uses client-side queries (SPA pattern) — page renders instantly with
-  skeletons, data streams in from remote functions.
+  The Subscriptions tab of the monetisation hub: the Stripe account payouts land
+  in, and the tiers people can join. Client-side queries (SPA pattern) — the page
+  renders instantly with skeletons and data streams in from remote functions.
 
-  Sections:
+  Sections, in the order a creator needs them:
+  - Compact masthead (an <h2>; the hub layout owns the <h1>)
+  - One money-readiness prompt, ABOVE the cards, so a blocked org is told even
+    when its lists are full (see MoneySetupPrompt)
   - Stripe Connect status + onboarding
   - Enable/disable subscriptions toggle
-  - Subscription tier CRUD
-  - Subscriber stats
+  - Subscriber summary, linked through to the actual people
+  - Subscription tier CRUD, each row carrying its own subscriber count
+
+  This page used to render four mutually exclusive stories at once: badge "Not
+  connected", an Alert saying tiers need Connect, two existing tiers, and stats
+  reading 2 subscribers / £9.98 MRR — all flat, none ranked. The readiness
+  prompt now states the precedence explicitly.
 -->
 <script lang="ts">
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import StatCard from '$lib/components/studio/StatCard.svelte';
+  import MoneySetupPrompt from '$lib/components/studio/MoneySetupPrompt.svelte';
+  import MoneyStatBand from '$lib/components/studio/MoneyStatBand.svelte';
+  import type { MoneyStat } from '$lib/components/studio/money-stat';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Card from '$lib/components/ui/Card';
   import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert, Badge, EmptyState } from '$lib/components/ui';
+  import { Alert, Badge, EmptyState, PageHeader } from '$lib/components/ui';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
@@ -43,7 +53,7 @@
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
-  import { isConnectReady } from '$lib/utils/connect-readiness';
+  import { isConnectReady, moneyReadiness } from '$lib/utils/connect-readiness';
   import type { ConnectRequirements, SubscriptionTier } from '$lib/types';
 
   /** Shape returned by SvelteKit's query() when called client-side */
@@ -82,8 +92,10 @@
       isConnected: boolean; accountId: string | null;
       chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
       requirements: ConnectRequirements | null;
+      requirementsFetchFailed?: boolean;
     }> | null)?.current ?? {
       isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null, requirements: null,
+      requirementsFetchFailed: false,
     }
   );
 
@@ -140,6 +152,73 @@
     || (settingsQuery as QueryResult<unknown> | null)?.loading
   );
 
+  /**
+   * The one money-readiness verdict for this page. `showTierPrompt` stays off in
+   * the prompt below because the Tiers card owns its own empty state — saying
+   * "add a tier" twice on one screen is the duplication this pass removed.
+   */
+  const readiness = $derived(
+    moneyReadiness(connectStatus, {
+      hasTiers: tiers.length > 0,
+      subscriberCount: stats.activeSubscribers,
+    })
+  );
+
+  /**
+   * On THIS page the Connect card already carries the badge, the requirements
+   * list and the onboarding button, so the prompt only earns its place for the
+   * two things that card cannot express:
+   *
+   *   - money is already arriving with nowhere to land (studio-alpha: two active
+   *     subscriptions, zero Connect rows) — the card shows a neutral badge and
+   *     says nothing about the stranded revenue;
+   *   - we never reached Stripe, so the card's "all clear" is unverified.
+   *
+   * Every other blocking state is fully described 200px below. Rendering the
+   * prompt for those too would restate it — the duplication this pass removes.
+   */
+  const showReadinessPrompt = $derived(
+    (readiness.blocking && readiness.hasSubscribers) ||
+      readiness.state === 'stripe_unknown'
+  );
+
+  /** Per-tier subscriber counts, so each row carries its own number instead of
+      a second card restating the whole stats grid. */
+  const subscribersByTier = $derived.by(() => {
+    const map = new Map<string, { count: number; mrrCents: number }>();
+    for (const row of stats.tierBreakdown as Array<{
+      tierId: string; subscriberCount: number; mrrCents: number;
+    }>) {
+      map.set(row.tierId, {
+        count: row.subscriberCount,
+        mrrCents: row.mrrCents,
+      });
+    }
+    return map;
+  });
+
+  const statBand = $derived<MoneyStat[]>([
+    {
+      label: m.monetisation_stats_total(),
+      value: stats.totalSubscribers,
+      href: '/studio/subscribers',
+    },
+    {
+      label: m.monetisation_stats_active(),
+      value: stats.activeSubscribers,
+      href: '/studio/subscribers',
+    },
+    { label: m.monetisation_stats_mrr(), value: formatPrice(stats.mrrCents) },
+  ]);
+
+  /** Annual vs 12× monthly, as a whole-percent saving. Nothing said this before —
+      a creator pricing a tier could not see whether the annual price was a deal. */
+  function annualSavingPercent(tier: SubscriptionTier): number | null {
+    const twelveMonths = tier.priceMonthly * 12;
+    if (!twelveMonths || tier.priceAnnual >= twelveMonths) return null;
+    return Math.round(((twelveMonths - tier.priceAnnual) / twelveMonths) * 100);
+  }
+
   // ─── State ──────────────────────────────────────────────────────────────
 
   let tierDialogOpen = $state(false);
@@ -163,6 +242,13 @@
   let connectLoading = $state(false);
   let connectError = $state('');
   let connectSyncing = $state(false);
+  /** Set when Stripe bounced us back to `refreshUrl` — the operator abandoned
+      onboarding, so the account exists but is incomplete. */
+  let connectSetupAbandoned = $state(false);
+  /** Set after a `?connect=success` sync lands a fully-active account. Drives
+      the "payments are live — add your first tier" hand-off. */
+  let connectJustWentLive = $state(false);
+  let recheckingStatus = $state(false);
 
   // Auto-sync Connect status when returning from Stripe onboarding.
   // Without a webhook tunnel, the account.updated event never arrives in local dev.
@@ -178,29 +264,76 @@
   //   2. Strip `?connect=success` after sync resolves so a refresh /
   //      back-button doesn't re-trigger the sync (and the same race) on
   //      every visit.
+  //   3. `refreshUrl` points BACK here with `?connect=refresh`, which Stripe uses
+  //      when its onboarding link expires or the operator abandons the flow.
+  //      That branch was unhandled: the creator landed on a stale "Not connected"
+  //      page with the param stuck in the URL and no way to resume. It gets an
+  //      explicit prompt instead — and it must NOT sync, because nothing changed
+  //      at Stripe.
   onMount(() => {
     const connectParam = page.url.searchParams.get('connect');
-    if (connectParam !== 'success' || !orgId) return;
+    if (!connectParam || !orgId) return;
+
+    function stripParam() {
+      const url = new URL(page.url);
+      url.searchParams.delete('connect');
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    if (connectParam === 'refresh') {
+      connectSetupAbandoned = true;
+      stripParam();
+      return;
+    }
+
+    if (connectParam !== 'success') return;
 
     connectSyncing = true;
     syncConnectStatus({ organizationId: orgId })
       .then(() => getConnectStatus(orgId).refresh())
+      .then(() => {
+        // Read the freshly-synced status, not the pre-sync snapshot.
+        if (isConnectReady(connectStatus) && tiers.length === 0) {
+          connectJustWentLive = true;
+        }
+      })
       .catch(() => {})
       .finally(() => {
         connectSyncing = false;
-        const url = new URL(page.url);
-        url.searchParams.delete('connect');
-        window.history.replaceState({}, '', url.toString());
+        stripParam();
       });
   });
 
+  /**
+   * Re-check status against Stripe. Only ever on an explicit click — this hits
+   * the live Stripe API, so firing it on load would turn every page view into a
+   * third-party round trip.
+   */
+  async function handleRecheckStatus() {
+    if (!orgId) return;
+    recheckingStatus = true;
+    try {
+      await syncConnectStatus({ organizationId: orgId });
+      await getConnectStatus(orgId).refresh();
+    } catch {
+      connectError = m.monetisation_connect_dashboard_error();
+    } finally {
+      recheckingStatus = false;
+    }
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────────────
 
+  // `disabled` has an explicit case. Without one it fell through to the
+  // neutral "Not connected" label — while `isConnected` stayed true, so the
+  // button beside it read "Continue Setup". Badge and button contradicted each
+  // other on the one surface that owns this state machine.
   function connectStatusLabel(status: string | null): string {
     switch (status) {
       case 'active': return m.monetisation_connect_active();
       case 'onboarding': return m.monetisation_connect_onboarding();
       case 'restricted': return m.monetisation_connect_restricted();
+      case 'disabled': return m.monetisation_connect_disabled();
       default: return m.monetisation_connect_not_connected();
     }
   }
@@ -210,6 +343,7 @@
       case 'active': return 'success';
       case 'onboarding': return 'warning';
       case 'restricted': return 'error';
+      case 'disabled': return 'error';
       default: return 'neutral';
     }
   }
@@ -271,7 +405,7 @@
       tierDialogOpen = false;
       await invalidateAll();
     } catch (error) {
-      tierFormError = error instanceof Error ? error.message : 'Failed to save tier';
+      tierFormError = error instanceof Error ? error.message : m.monetisation_tier_save_error();
     } finally {
       tierFormLoading = false;
     }
@@ -287,7 +421,7 @@
       deletingTier = null;
       await invalidateAll();
     } catch (error) {
-      deleteError = error instanceof Error ? error.message : 'Failed to delete tier';
+      deleteError = error instanceof Error ? error.message : m.monetisation_tier_delete_error();
     } finally {
       deleteLoading = false;
     }
@@ -305,7 +439,7 @@
       await updateSubscriptionFeature({ orgId, enabled: newValue });
       await invalidateAll();
     } catch (error) {
-      featureToggleError = error instanceof Error ? error.message : 'Failed to update setting';
+      featureToggleError = error instanceof Error ? error.message : m.monetisation_feature_toggle_error();
     } finally {
       featureToggleLoading = false;
     }
@@ -324,11 +458,11 @@
       await invalidateAll();
       toast.success(
         tier.isRecommended
-          ? 'Removed recommended status'
-          : `${tier.name} set as recommended`
+          ? m.monetisation_tier_recommended_removed({ name: tier.name })
+          : m.monetisation_tier_recommended_set({ name: tier.name })
       );
     } catch {
-      toast.error('Failed to update tier');
+      toast.error(m.monetisation_tier_update_error());
     }
   }
 
@@ -347,7 +481,7 @@
       });
       window.location.href = result.onboardingUrl;
     } catch (error) {
-      connectError = error instanceof Error ? error.message : 'Failed to start Connect onboarding';
+      connectError = error instanceof Error ? error.message : m.monetisation_connect_onboard_error();
       connectLoading = false;
     }
   }
@@ -359,9 +493,9 @@
       const result = await getConnectDashboardLink({ organizationId: orgId });
       window.location.href = result.url;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Failed to open dashboard';
+      const msg = error instanceof Error ? error.message : m.monetisation_connect_dashboard_error();
       connectError = msg.includes('test') || msg.includes('seed') || msg === 'API Error'
-        ? 'Stripe dashboard is unavailable for seed/test accounts. Connect a real Stripe account to access the dashboard.'
+        ? m.monetisation_connect_dashboard_test_error()
         : msg;
       connectLoading = false;
     }
@@ -377,13 +511,66 @@
   <!-- Redirecting... -->
 {:else}
 <div class="monetisation">
+  <!-- Compact masthead: an <h2>. The hub layout owns the <h1> and the tab
+       track, and per that layout's contract a leaf carries no kicker. -->
+  <PageHeader
+    variant="compact"
+    title={m.monetisation_subscriptions_title()}
+    description={m.monetisation_subscriptions_description()}
+  />
+
+  <!-- Returned from Stripe without finishing. `refreshUrl` has always pointed
+       here, but only `success` was handled — this used to be a dead end. -->
+  {#if connectSetupAbandoned}
+    <Alert variant="info">
+      <div class="return-alert">
+        <div class="return-alert__text">
+          <p class="return-alert__title">{m.money_setup_refresh_title()}</p>
+          <p class="return-alert__description">{m.money_setup_refresh_description()}</p>
+        </div>
+        <Button variant="secondary" size="sm" onclick={handleConnectOnboard} loading={connectLoading}>
+          {m.money_setup_refresh_cta()}
+        </Button>
+      </div>
+    </Alert>
+  {/if}
+
+  <!-- Stripe just verified the account and there is nothing to sell yet. -->
+  {#if connectJustWentLive}
+    <Alert variant="success">
+      <div class="return-alert">
+        <div class="return-alert__text">
+          <p class="return-alert__title">{m.money_setup_live_title()}</p>
+          <p class="return-alert__description">{m.money_setup_live_description()}</p>
+        </div>
+        <Button variant="secondary" size="sm" onclick={openCreateTier}>
+          {m.money_setup_no_tiers_cta()}
+        </Button>
+      </div>
+    </Alert>
+  {/if}
+
+  <!-- Readiness prompt, but ONLY for what the Connect card below cannot say:
+       that money is already coming in with nowhere to land, or that we never
+       reached Stripe to check. Rendering it for plain "not connected" would
+       restate the badge + button 200px below it, which is the duplication this
+       pass exists to remove. -->
+  {#if !dataLoading && showReadinessPrompt}
+    <MoneySetupPrompt
+      {readiness}
+      subscriberCount={stats.activeSubscribers}
+      onAction={readiness.state === 'stripe_unknown' ? handleRecheckStatus : handleConnectOnboard}
+      actionLoading={readiness.state === 'stripe_unknown' ? recheckingStatus : connectLoading}
+    />
+  {/if}
+
   <!-- Stripe Connect Card -->
   <Card.Root>
     <Card.Header>
       <div class="card-header-row">
-        <Card.Title level={2}>{m.monetisation_connect_title()}</Card.Title>
+        <Card.Title level={3}>{m.monetisation_connect_title()}</Card.Title>
         {#if dataLoading}
-          <Skeleton width="80px" height="var(--space-6)" class="skeleton-circle" />
+          <Skeleton width="var(--space-20)" height="var(--space-6)" class="skeleton-circle" />
         {:else}
           <Badge
             variant={connectStatusVariant(connectStatus.status)}
@@ -478,19 +665,29 @@
     </Card.Content>
   </Card.Root>
 
-  <!-- Feature Toggle -->
+  <!-- Feature Toggle.
+       The switch sits BESIDE its label, not at the far edge of the column: it
+       used to be pushed 1404px away by `justify-content: space-between`, so at
+       1920 the control had lost all association with the thing it controls. -->
   <Card.Root>
     <Card.Content>
       <div class="feature-toggle-row">
-        <div class="feature-toggle-text">
-          <span class="feature-toggle-label">{m.monetisation_feature_toggle()}</span>
-          <span class="feature-toggle-description">{m.monetisation_feature_toggle_description()}</span>
-        </div>
         <Switch
+          id="enable-subscriptions"
           checked={dataLoading ? false : enableSubscriptionsFromServer}
           disabled={dataLoading || featureToggleLoading || !connectStatus.isConnected || connectStatus.status !== 'active'}
           onclick={() => handleFeatureToggle(!enableSubscriptionsFromServer)}
+          aria-labelledby="enable-subscriptions-label"
         />
+        <div class="feature-toggle-text">
+          <!-- `aria-labelledby`, not a `<label for>`: the Switch root is a Melt
+               `<button role="switch">`, and pairing label-activation with Melt's
+               own click handling is a needless interaction to reason about. -->
+          <span class="feature-toggle-label" id="enable-subscriptions-label">
+            {m.monetisation_feature_toggle()}
+          </span>
+          <span class="feature-toggle-description">{m.monetisation_feature_toggle_description()}</span>
+        </div>
       </div>
       {#if featureToggleError}
         <Alert variant="error" style="margin-top: var(--space-3)">{featureToggleError}</Alert>
@@ -501,22 +698,12 @@
     </Card.Content>
   </Card.Root>
 
-  <!-- Subscriber Stats -->
+  <!-- Subscriber summary. Two of the three tiles link through to the people
+       behind the number — there was previously no path at all from the stats to
+       /studio/subscribers. Treatment matches studio/customers' band rather than
+       StatCard, which measures visibly flatter on a dark page. -->
   {#if stats.totalSubscribers > 0}
-    <section class="stats-grid" aria-label={m.monetisation_stats_title()}>
-      <StatCard
-        label={m.monetisation_stats_total()}
-        value={stats.totalSubscribers}
-      />
-      <StatCard
-        label={m.monetisation_stats_active()}
-        value={stats.activeSubscribers}
-      />
-      <StatCard
-        label={m.monetisation_stats_mrr()}
-        value={formatPrice(stats.mrrCents)}
-      />
-    </section>
+    <MoneyStatBand stats={statBand} label={m.monetisation_stats_title()} />
   {/if}
 
   <!-- Subscription Tiers -->
@@ -524,7 +711,7 @@
     <Card.Header>
       <div class="card-header-row">
         <div>
-          <Card.Title level={2}>{m.monetisation_tiers_title()}</Card.Title>
+          <Card.Title level={3}>{m.monetisation_tiers_title()}</Card.Title>
           <Card.Description>{m.monetisation_tiers_description()}</Card.Description>
         </div>
         <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
@@ -540,46 +727,78 @@
         </Alert>
       {/if}
       {#if dataLoading}
+        <!-- Shaped like the row it replaces — rank, name/description, the
+             recommended control, two prices, two actions. It used to promise a
+             three-part row and deliver a six-part one. -->
         <div class="tier-list">
-          {#each Array(2) as _}
-            <div class="tier-item-skeleton">
+          {#each Array(2) as _, i (i)}
+            <div class="tier-item tier-item--skeleton">
               <Skeleton width="var(--space-8)" height="var(--space-8)" class="skeleton-circle" />
-              <div style="flex: 1; display: flex; flex-direction: column; gap: var(--space-1);">
-                <Skeleton width="120px" height="var(--text-sm)" />
-                <Skeleton width="200px" height="var(--text-xs)" />
+              <div class="tier-details">
+                <Skeleton width="var(--space-24)" height="var(--text-sm)" />
+                <Skeleton width="var(--space-32)" height="var(--text-xs)" />
               </div>
-              <Skeleton width="80px" height="var(--text-sm)" />
+              <Skeleton width="var(--space-11)" height="var(--space-6)" />
+              <div class="tier-prices">
+                <Skeleton width="var(--space-16)" height="var(--text-sm)" />
+                <Skeleton width="var(--space-16)" height="var(--text-sm)" />
+              </div>
+              <div class="tier-actions">
+                <Skeleton width="var(--space-8)" height="var(--space-8)" />
+                <Skeleton width="var(--space-8)" height="var(--space-8)" />
+              </div>
             </div>
           {/each}
         </div>
       {:else if tiers.length === 0}
         <EmptyState
+          size="lg"
           title={m.monetisation_tiers_empty()}
           description={m.monetisation_tiers_empty_description()}
         />
       {:else}
+        <!-- Grid, not flex-with-`flex:1`. The name used to sit 1255px from the
+             recommended switch and 1535px from its own actions, because
+             `.tier-info { flex: 1 }` absorbed every pixel of an 1808px column.
+             Now the meaning-bearing clusters pack together on the left and only
+             the row ACTIONS take the conventional right edge. -->
         <div class="tier-list">
           {#each tiers as tier, i (tier.id)}
+            {@const tierStats = subscribersByTier.get(tier.id)}
+            {@const saving = annualSavingPercent(tier)}
             <div class="tier-item">
-              <div class="tier-info">
-                <div class="tier-rank">{i + 1}</div>
-                <div class="tier-details">
-                  <div class="tier-name-row">
-                    <span class="tier-name">{tier.name}</span>
-                    {#if tier.isRecommended}
-                      <Badge variant="success">Recommended</Badge>
-                    {/if}
-                  </div>
-                  {#if tier.description}
-                    <span class="tier-description">{tier.description}</span>
-                  {/if}
-                </div>
+              <div class="tier-rank">{i + 1}</div>
+              <div class="tier-details">
+                <span class="tier-name">{tier.name}</span>
+                {#if tier.description}
+                  <span class="tier-description">{tier.description}</span>
+                {/if}
+                {#if tierStats && tierStats.count > 0}
+                  <!-- Per-tier count, folded in from the separate breakdown card
+                       that restated the stats band verbatim. -->
+                  <a class="tier-subscribers" href="/studio/subscribers?tierId={tier.id}">
+                    {tierStats.count === 1
+                      ? m.monetisation_tier_subscribers_one()
+                      : m.monetisation_tier_subscribers({ count: String(tierStats.count) })}
+                    <span class="tier-subscribers-mrr">
+                      {formatPrice(tierStats.mrrCents)}/{m.monetisation_tier_monthly()}
+                    </span>
+                  </a>
+                {/if}
               </div>
+              <!-- The switch had NO accessible name at all — no `aria-label`, no
+                   `aria-labelledby`, no visible label — and duplicated a
+                   `Recommended` Badge rendered ~1250px away for the same
+                   boolean. One control now, named, beside the tier it marks. -->
               <div class="tier-recommended">
                 <Switch
                   checked={tier.isRecommended}
                   onclick={() => handleToggleRecommended(tier)}
+                  aria-label={m.monetisation_tier_recommended_toggle({ name: tier.name })}
                 />
+                <span class="tier-recommended-label" aria-hidden="true">
+                  {m.monetisation_tier_recommended()}
+                </span>
               </div>
               <div class="tier-prices">
                 <span class="tier-price">
@@ -587,6 +806,9 @@
                 </span>
                 <span class="tier-price tier-price-secondary">
                   {formatPrice(tier.priceAnnual)}<span class="tier-interval">/{m.monetisation_tier_annual()}</span>
+                  {#if saving !== null}
+                    <span class="tier-saving">{m.monetisation_tier_annual_saving({ percent: String(saving) })}</span>
+                  {/if}
                 </span>
               </div>
               <div class="tier-actions">
@@ -604,25 +826,12 @@
     </Card.Content>
   </Card.Root>
 
-  <!-- Tier Breakdown Table -->
-  {#if stats.tierBreakdown.length > 0}
-    <Card.Root>
-      <Card.Header>
-        <Card.Title level={2}>{m.monetisation_stats_title()}</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <div class="breakdown-grid">
-          {#each stats.tierBreakdown as tb (tb.tierId)}
-            <div class="breakdown-item">
-              <span class="breakdown-name">{tb.tierName}</span>
-              <span class="breakdown-count">{tb.subscriberCount} subscribers</span>
-              <span class="breakdown-mrr">{formatPrice(tb.mrrCents)}/mo</span>
-            </div>
-          {/each}
-        </div>
-      </Card.Content>
-    </Card.Root>
-  {/if}
+  <!-- The tier-breakdown card that used to sit here is gone. It carried
+       `m.monetisation_stats_title()` as its Card.Title — the SAME message key
+       already used as the stats band's accessible name — and then restated the
+       band's numbers verbatim ("Standard · 2 subscribers · £9.98/mo" beside
+       "Total Subscribers 2 / Active 2 / MRR £9.98"). The per-tier counts now
+       live on the tier rows themselves, where the tier they describe is. -->
 </div>
 
 <!-- Create/Edit Tier Dialog -->
@@ -641,7 +850,7 @@
           <Input
             id="tier-name"
             bind:value={tierName}
-            placeholder="e.g. Basic, Pro, Premium"
+            placeholder={m.monetisation_tier_name_placeholder()}
             required
             maxlength={100}
           />
@@ -652,7 +861,7 @@
           <TextArea
             id="tier-description"
             bind:value={tierDescription}
-            placeholder="What subscribers get at this tier"
+            placeholder={m.monetisation_tier_description_placeholder()}
             rows={3}
             maxlength={500}
           />
@@ -740,17 +949,46 @@
     gap: var(--space-4);
   }
 
-  /* Stats grid */
-  .stats-grid {
+  /* Return-from-Stripe / readiness alerts: text and CTA side by side, the CTA
+     immediately after the prose rather than at the far edge of the column. */
+  .return-alert {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-4);
+    gap: var(--space-3);
+    align-items: start;
   }
 
   @media (--breakpoint-sm) {
-    .stats-grid {
-      grid-template-columns: repeat(3, 1fr);
+    .return-alert {
+      grid-template-columns: minmax(0, auto) auto;
+      justify-content: start;
+      align-items: center;
+      column-gap: var(--space-5);
     }
+  }
+
+  .return-alert__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    max-width: var(--measure-lede);
+    min-width: 0;
+  }
+
+  /* Weight, not opacity — fading `inherit` would cut the Alert variant's
+     verified contrast. */
+  .return-alert__title {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: inherit;
+  }
+
+  .return-alert__description {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    color: inherit;
+    text-wrap: pretty;
   }
 
   /* Connect */
@@ -838,18 +1076,23 @@
     gap: var(--space-1);
   }
 
-  /* Feature toggle */
+  /* Feature toggle.
+     `justify-content: space-between` here was the mechanism behind a measured
+     1404px gap between "Enable Subscriptions" and the switch that enables it.
+     The switch now leads the row and the label follows it, so the pair reads as
+     one control at any studio width. */
   .feature-toggle-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
+    gap: var(--space-3);
   }
 
   .feature-toggle-text {
     display: flex;
     flex-direction: column;
     gap: var(--space-0-5);
+    max-width: var(--measure-lede);
+    min-width: 0;
   }
 
   .feature-toggle-label {
@@ -876,11 +1119,36 @@
     gap: var(--space-2);
   }
 
-  .tier-item,
-  .tier-item-skeleton {
-    display: flex;
+  /* Explicit grid: rank · details · recommended · prices · [spacer] · actions.
+     The spacer is the ONLY elastic track, so every meaning-bearing cluster packs
+     against the one before it and only the row actions take the right edge —
+     which is where row actions conventionally live and therefore the one
+     position that needs no label to be understood.
+
+     `--measure-lede` caps the details column so a long description wraps into a
+     readable block instead of stretching one line across the column. A `ch`
+     measure, so it tracks the row's own font-size and the org's text scale. This
+     is a COLUMN constraint inside a card, not a page cap — the studio shell
+     still owns the content width. */
+  .tier-item {
+    display: grid;
+    /* rank · details · recommended · prices · actions · slack.
+       The slack track is LAST, so every cluster packs against the one before it
+       and the trailing space falls at the row's right edge. An earlier revision
+       put the slack before the actions to pin them right, which still measured
+       ~900px of empty row between a tier's name and the buttons that edit it —
+       the same defect in a smaller size. Trailing whitespace inside a bordered
+       row reads as breathing room; a 900px interior gap reads as broken. */
+    grid-template-columns:
+      auto
+      minmax(0, var(--measure-lede))
+      auto
+      auto
+      auto
+      1fr;
     align-items: center;
-    gap: var(--space-4);
+    column-gap: var(--space-5);
+    row-gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -891,28 +1159,24 @@
     background-color: var(--color-surface-secondary);
   }
 
-  /* On phones the single row overflows: the fixed toggle + prices + actions
-     squeeze .tier-info to 0 width, so the tier name spills over the toggle.
-     Wrap the row — name/description take the full first line, and the toggle,
-     prices and actions flow onto a second line. */
-  @media (--below-sm) {
-    .tier-item {
-      flex-wrap: wrap;
-      row-gap: var(--space-3);
-    }
-    /* Descendant selector raises specificity above the base `.tier-info`
-       rule's `flex: 1` (flex-basis: 0%), which otherwise wins on source order. */
-    .tier-item .tier-info {
-      flex-basis: 100%;
-    }
+  .tier-item--skeleton:hover {
+    background-color: transparent;
   }
 
-  .tier-info {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    flex: 1;
-    min-width: 0;
+  /* Phones: one column, rank and details on the first line, the controls
+     stacked under them. The old flex-wrap version squeezed the details to zero
+     width and the tier name spilled over the toggle. */
+  @media (--below-sm) {
+    .tier-item {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .tier-recommended,
+    .tier-prices,
+    .tier-actions {
+      grid-column: 1 / -1;
+    }
+
   }
 
   .tier-rank {
@@ -942,30 +1206,74 @@
     color: var(--color-text);
   }
 
+  /* Wraps. `white-space: nowrap` + ellipsis truncated the description at every
+     viewport — including the 1808px one with room for all of it. */
   .tier-description {
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    text-wrap: pretty;
   }
 
-  .tier-name-row {
-    display: flex;
-    align-items: center;
+  /* Per-tier subscriber count, folded in from the deleted breakdown card. Links
+     to the filtered subscriber list — a number you can walk into. */
+  .tier-subscribers {
+    display: inline-flex;
+    align-items: baseline;
     gap: var(--space-2);
+    align-self: flex-start;
+    margin-top: var(--space-0-5);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    border-bottom: var(--border-width) var(--border-style) transparent;
+    transition: var(--transition-colors);
+  }
+
+  .tier-subscribers:hover {
+    color: var(--color-text);
+    border-bottom-color: var(--color-border-strong, var(--color-border));
+  }
+
+  .tier-subscribers:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  .tier-subscribers-mrr {
+    font-variant-numeric: tabular-nums;
   }
 
   .tier-recommended {
     display: flex;
     align-items: center;
+    gap: var(--space-2);
     flex-shrink: 0;
+  }
+
+  /* `aria-hidden` in the markup: the Switch already carries the full
+     "Mark <tier> as recommended" accessible name, so exposing this too would
+     make a screen reader announce the word twice for one control. It exists for
+     sighted users, who had no label at all. */
+  .tier-recommended-label {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
   }
 
   .tier-prices {
     display: flex;
+    align-items: baseline;
     gap: var(--space-4);
     flex-shrink: 0;
+  }
+
+  .tier-saving {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
   }
 
   .tier-price {
@@ -989,45 +1297,6 @@
     display: flex;
     gap: var(--space-1);
     flex-shrink: 0;
-  }
-
-  /* Breakdown */
-  .breakdown-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .breakdown-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-2) 0;
-    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
-  }
-
-  .breakdown-item:last-child {
-    border-bottom: none;
-  }
-
-  .breakdown-name {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
-    flex: 1;
-  }
-
-  .breakdown-count {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .breakdown-mrr {
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    font-variant-numeric: tabular-nums;
   }
 
   /* Tier form */

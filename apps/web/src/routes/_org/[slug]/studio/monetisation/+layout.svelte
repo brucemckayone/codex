@@ -10,6 +10,20 @@
   - Revenue share  → /studio/monetisation/revenue-share (creator agreements)
   - Pricing FAQ    → /studio/monetisation/pricing-faq   (public pricing-page FAQ)
 
+  MASTHEAD CONTRACT — this layout and its three leaves used to fight over the
+  role, stacking 402px of wayfinding before the first content on revenue-share
+  (kicker MONEY → h1 Monetisation → active tab → kicker ‹MONETISATION → h2).
+  The division now is:
+
+    layout : kicker + the single <h1> + a ONE-LINE hub lede + the tab track
+    leaf   : PageHeader variant="compact" (an <h2>) + its own lede, NO kicker
+
+  A leaf must not render a `kicker`/`kickerHref`. The back-link pointed at
+  `/studio/monetisation` — the tab strip 24px above it — so it was a fourth
+  device restating what the active tab already says. And all THREE leaves carry
+  the compact masthead: the Subscriptions tab used to render none, so moving
+  between tabs shifted the page structure under the reader.
+
   @prop {Snippet} children - Child route content
 -->
 <script lang="ts">
@@ -38,23 +52,23 @@
           : null
   );
 
-  const tabs = [
+  const tabs = $derived([
     {
       value: 'subscriptions',
       href: '/studio/monetisation',
-      label: 'Subscriptions',
+      label: m.monetisation_subscriptions_title(),
     },
     {
       value: 'revenue-share',
       href: '/studio/monetisation/revenue-share',
-      label: 'Revenue share',
+      label: m.monetisation_revenue_share_title(),
     },
     {
       value: 'pricing-faq',
       href: '/studio/monetisation/pricing-faq',
-      label: 'Pricing FAQ',
+      label: m.monetisation_pricing_faq_title(),
     },
-  ];
+  ]);
 </script>
 
 <div class="monetisation-hub">
