@@ -86,7 +86,14 @@
     <div class="creator-card__identity">
       <span class="creator-card__name">{displayName}</span>
       {#if breakdown.isOrgOwner}
-        <Badge variant="info">
+        <!-- `neutral`, not `info`: org-owner is an identity fact, not an
+             informational status — the same correction the team page's owner
+             badge already had. It also keeps the rail agreeing with the table
+             now that the table's info taxonomy chips are gone; left on `info`
+             this would be the only coloured ring on the page. Neutral's
+             ink-on-fill is higher in every org × theme combo measured
+             (11.72→16.87 bones light, 7.57→9.93 platform dark). -->
+        <Badge variant="neutral">
           <span class="creator-card__owner-badge">
             <SparkleIcon size={12} />
             Org owner
@@ -236,7 +243,12 @@
   }
 
   .creator-card__count--alert {
-    color: var(--color-error-700);
+    /* Was --color-error-700 (#b91c1c): a fixed light-mode palette step with no
+       [data-theme] remap, so on --color-surface-card it measured 2.67:1 on
+       of-blood-and-bones dark and 1.60:1 on the platform dark surface — an
+       outright WCAG AA failure on the one string in the rail that says
+       something is wrong. Light passed (6.46), which is why it survived. */
+    color: var(--color-status-error-text);
   }
 
   .creator-card__last-paid {

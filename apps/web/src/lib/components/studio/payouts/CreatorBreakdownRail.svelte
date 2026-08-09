@@ -106,10 +106,8 @@
     </div>
   {:else if breakdown.length === 0}
     <p class="rail__empty">
-      This breaks payouts down by creator. No creators have been paid under
-      these filters yet — as the sole creator you're your own beneficiary, so
-      your share lands here once your first invoice is paid. Invite other
-      creators via revenue-share to see the split across the team.
+      No creator has been paid under these filters yet. Each creator's share
+      appears here once Stripe settles the charge.
     </p>
   {:else}
     <div class="rail__list">
@@ -165,12 +163,14 @@
     border-radius: var(--radius-lg);
   }
 
+  /* Left-aligned, not centred: this sits in a 320px rail, and centred running
+     text at that measure is the least readable configuration available. */
   .rail__empty {
     margin: 0;
     padding: var(--space-4);
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    text-align: center;
+    text-align: start;
     background-color: var(--color-surface-secondary);
     border-radius: var(--radius-md);
   }
