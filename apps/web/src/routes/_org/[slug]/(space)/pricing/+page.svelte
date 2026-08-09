@@ -92,6 +92,19 @@
   // ── Feature Flag ──────────────────────────────────────────────────
   const enableSubscriptions = $derived(data.enableSubscriptions ?? true);
 
+  /**
+   * ONE source of truth for the catalogue band's cell width. Three consumers
+   * have to agree on it and they cannot all read a CSS variable:
+   *   1. `ContentMarquee itemWidth` — sets the flex basis of a real cell.
+   *   2. `CataloguePreviewTile sizes` — an `<img sizes>` ATTRIBUTE, so it has
+   *      to be a literal length; `var()` is not allowed there.
+   *   3. `.preview__band-pending-tile` — must reserve the identical box or the
+   *      band pops and shoves the FAQ down when the stream lands.
+   * It reaches (3) as an inline custom property rather than a hardcoded copy in
+   * the stylesheet, so changing this constant moves all three together.
+   */
+  const CATALOGUE_CELL_WIDTH = '13rem';
+
   // ── Tiers ─────────────────────────────────────────────────────────
   // `data.tiers` is AWAITED in the load, so this renders during SSR. It used
   // to be a streamed promise unwrapped in an `$effect`; `$effect` never runs
@@ -383,12 +396,22 @@
   // ARIA radiogroup pattern: arrow keys navigate + select the adjacent radio.
   // Roving tabindex is set inline on each button so Tab only lands once on
   // the group (on the currently-checked radio).
+  // `Home` / `End` jump to the first / last option. Two options mean the arrows
+  // already reach both, so this is not reachability — it is the contract
+  // 05-accessibility.md §4 states for a hand-rolled radiogroup and names THIS
+  // function as the canonical in-repo implementation to copy. A canonical
+  // example that fails the contract printed four lines above it propagates the
+  // gap into every group ported from it.
   function handleBillingKey(e: KeyboardEvent) {
     const next = ['ArrowRight', 'ArrowDown'].includes(e.key);
     const prev = ['ArrowLeft', 'ArrowUp'].includes(e.key);
-    if (!next && !prev) return;
+    const first = e.key === 'Home';
+    const last = e.key === 'End';
+    if (!next && !prev && !first && !last) return;
     e.preventDefault();
-    billingInterval = billingInterval === 'month' ? 'year' : 'month';
+    if (first) billingInterval = 'month';
+    else if (last) billingInterval = 'year';
+    else billingInterval = billingInterval === 'month' ? 'year' : 'month';
     // Shift focus to the newly-checked option on the next microtask after
     // Svelte updates aria-checked + tabindex.
     const targetIdx = billingInterval === 'month' ? 0 : 1;
@@ -667,6 +690,13 @@
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────
+  /**
+   * Set by `onMount` once the reveal `IntersectionObserver` exists, cleared on
+   * unmount. Plain `let`, not `$state`: only the `$effect` below calls it and it
+   * must not itself be a reactive dependency of anything.
+   */
+  let sweepReveals: (() => void) | null = null;
+
   onMount(() => {
     // Post-login return: `tiers` is resolved server-side now, so the tier the
     // visitor clicked before being sent to /login is available synchronously.
@@ -744,7 +774,9 @@
       { threshold: 0.12, rootMargin: '0px 0px -8% 0px' }
     );
 
-    const observeReveals = () => {
+    // Published so the `$effect` below can re-sweep. The observer itself is
+    // owned by this mount so it is created and torn down exactly once.
+    sweepReveals = () => {
       const revealEls = document.querySelectorAll<HTMLElement>(
         '[data-reveal]:not(.reveal--visible)'
       );
@@ -752,30 +784,48 @@
     };
 
     // Initial sweep picks up static sections (faq, trust).
-    observeReveals();
-    // Re-sweep after each STREAMED section lands in the DOM. `.reveal` starts
-    // at `opacity: 0` and is only ever cleared by this observer, so a streamed
-    // section that no sweep covers renders permanently invisible — every
-    // promise the template gates a `[data-reveal]` element on must appear here.
-    // `tick()` waits for Svelte to flush the post-promise DOM update so the
-    // element exists by the time observeReveals runs.
-    for (const streamed of [
-      data.contentPreview,
-      data.stats,
-      data.portals,
-    ]) {
-      Promise.resolve(streamed).finally(async () => {
-        await tick();
-        observeReveals();
-      });
-    }
+    sweepReveals();
 
     return () => {
       mq.removeEventListener('change', handleMq);
       tierObserver?.disconnect();
       trustObserver?.disconnect();
       revealObserver.disconnect();
+      sweepReveals = null;
       unwatch();
+    };
+  });
+
+  /**
+   * Re-sweep after each STREAMED section lands in the DOM. `.reveal` starts at
+   * `opacity: 0` and is only ever cleared by the reveal observer, so a streamed
+   * section that no sweep covers renders permanently invisible while still
+   * occupying its layout box.
+   *
+   * This is an `$effect`, not a one-shot loop in `onMount`, because the promises
+   * are RE-MINTED: `invalidateAll()` runs on `TIER_NOT_FOUND` in both
+   * `handleSubscribe` and `handleSwitchTier`, which hands the template three new
+   * promise identities. Each `{#await}` then tears its `then` branch down and
+   * builds fresh nodes — nodes a mount-time loop has long since stopped caring
+   * about, which left the catalogue band and the portals rail invisible for the
+   * rest of the session. Reading the three promises here registers them as
+   * dependencies, so a new identity re-runs the sweep.
+   *
+   * Per-promise rather than `allSettled` so the fastest section reveals first,
+   * and `tick()` waits for Svelte to flush the post-promise DOM update so the
+   * element exists by the time the sweep runs.
+   */
+  $effect(() => {
+    const streamed = [data.contentPreview, data.stats, data.portals];
+    let stale = false;
+    for (const promise of streamed) {
+      Promise.resolve(promise).finally(async () => {
+        await tick();
+        if (!stale) sweepReveals?.();
+      });
+    }
+    return () => {
+      stale = true;
     };
   });
 </script>
@@ -1208,7 +1258,11 @@
       <!-- Pending branch. The band is streamed and the catalogue read is the
            slowest call on this page; without a placeholder of the RIGHT height
            the section popped in and shoved the FAQ down the page. -->
-      <div class="preview__band-pending" aria-hidden="true">
+      <div
+        class="preview__band-pending"
+        aria-hidden="true"
+        style:--_pending-cell-width={CATALOGUE_CELL_WIDTH}
+      >
         {#each Array(6) as _, i (i)}
           <div class="preview__band-pending-tile"></div>
         {/each}
@@ -1232,7 +1286,7 @@
 
           <ContentMarquee
             {items}
-            itemWidth="13rem"
+            itemWidth={CATALOGUE_CELL_WIDTH}
             ariaLabel={m.pricing_catalogue_marquee_label()}
           >
             {#snippet renderItem(item)}
@@ -1241,47 +1295,63 @@
                 title={item.title}
                 contentType={item.contentType}
                 thumbnailUrl={item.thumbnailUrl}
+                sizes={CATALOGUE_CELL_WIDTH}
               />
             {/snippet}
           </ContentMarquee>
 
           {#await data.stats then stats}
+            <!-- The load `.catch(() => null)`s this read, so a failed stats call
+                 is INDISTINGUISHABLE from an org with nothing to count. The
+                 guard therefore has to sit on the CONTAINER, not only on the
+                 three children: `.preview__stats` carries a top AND a bottom
+                 border plus `--space-6` of block padding, so an empty one paints
+                 two horizontal rules bracketing 50px of nothing — and, being
+                 `role="list"` with an `aria-label`, announces itself to AT as a
+                 named list with no items. -->
+            {@const hasStats = !!(
+              stats?.content?.total ||
+              (stats?.creators ?? 0) > 0 ||
+              (stats?.totalDurationSeconds ?? 0) > 0
+            )}
             <footer class="preview__footer">
-              <div
-                class="preview__stats"
-                role="list"
-                aria-label={m.pricing_catalogue_stats_label()}
-              >
-                {#if stats?.content?.total}
-                  <div class="preview__stat" role="listitem">
-                    <span class="preview__stat-number">{stats.content.total}</span>
-                    <span class="preview__stat-label">
-                      {stats.content.total === 1
-                        ? m.pricing_catalogue_stat_titles_one()
-                        : m.pricing_catalogue_stat_titles_other()}
-                    </span>
-                  </div>
-                {/if}
-                {#if (stats?.creators ?? 0) > 0}
-                  <div class="preview__stat" role="listitem">
-                    <span class="preview__stat-number">{stats.creators}</span>
-                    <span class="preview__stat-label">
-                      {stats.creators === 1
-                        ? m.pricing_catalogue_stat_creators_one()
-                        : m.pricing_catalogue_stat_creators_other()}
-                    </span>
-                  </div>
-                {/if}
-                {#if (stats?.totalDurationSeconds ?? 0) > 0}
-                  {@const runtime = formatDurationStat(stats.totalDurationSeconds)}
-                  <div class="preview__stat" role="listitem">
-                    <span class="preview__stat-number">{runtime.value}</span>
-                    <span class="preview__stat-label">
-                      {durationStatLabel(runtime)}
-                    </span>
-                  </div>
-                {/if}
-              </div>
+              {#if hasStats}
+                <div
+                  class="preview__stats"
+                  role="list"
+                  aria-label={m.pricing_catalogue_stats_label()}
+                >
+                  {#if stats?.content?.total}
+                    <div class="preview__stat" role="listitem">
+                      <span class="preview__stat-number">{stats.content.total}</span>
+                      <span class="preview__stat-label">
+                        {stats.content.total === 1
+                          ? m.pricing_catalogue_stat_titles_one()
+                          : m.pricing_catalogue_stat_titles_other()}
+                      </span>
+                    </div>
+                  {/if}
+                  {#if (stats?.creators ?? 0) > 0}
+                    <div class="preview__stat" role="listitem">
+                      <span class="preview__stat-number">{stats.creators}</span>
+                      <span class="preview__stat-label">
+                        {stats.creators === 1
+                          ? m.pricing_catalogue_stat_creators_one()
+                          : m.pricing_catalogue_stat_creators_other()}
+                      </span>
+                    </div>
+                  {/if}
+                  {#if (stats?.totalDurationSeconds ?? 0) > 0}
+                    {@const runtime = formatDurationStat(stats.totalDurationSeconds)}
+                    <div class="preview__stat" role="listitem">
+                      <span class="preview__stat-number">{runtime.value}</span>
+                      <span class="preview__stat-label">
+                        {durationStatLabel(runtime)}
+                      </span>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
 
               {#if (stats?.categories?.length ?? 0) > 1}
                 <ul
@@ -2431,6 +2501,16 @@
      the type badge — is gone with the markup. */
 
   .preview__band-pending {
+    /* `width: 100%` is LOAD-BEARING. `.pricing-page` is a centred column flex
+       container, so a child that does not claim the full width is sized by
+       `fit-content` — and because the six tiles are `flex-shrink: 0`, this
+       row's min-content width is 6 × 13rem + 5 gaps ≈ 1328px. It therefore
+       resolved WIDER than the 1104px content column and centred on the
+       viewport, so the placeholder ignored the page gutter and then jumped
+       112px right (desktop) / 492px right at 390px when the stream landed. The
+       reserved HEIGHT was always right; the horizontal position was not.
+       With this it measures pixel-identical to the real band's box. */
+    width: 100%;
     display: flex;
     gap: var(--space-4);
     overflow: hidden;
@@ -2448,10 +2528,13 @@
   }
 
   .preview__band-pending-tile {
-    /* Same 13rem × 3:4 box the real tile occupies, so the section reserves its
+    /* Same cell × 3:4 box the real tile occupies, so the section reserves its
        final height before the streamed items land. Without this the band pops
-       in and shoves the FAQ down — a CLS regression, not just a flicker. */
-    flex: 0 0 13rem;
+       in and shoves the FAQ down — a CLS regression, not just a flicker.
+       The width comes from `CATALOGUE_CELL_WIDTH` via an inline custom property
+       on the container, so it cannot drift from the `itemWidth` handed to
+       `ContentMarquee`; the literal here is only the no-JS fallback. */
+    flex: 0 0 var(--_pending-cell-width, 13rem);
     aspect-ratio: 3 / 4;
     border-radius: var(--radius-xl);
     background: color-mix(in srgb, var(--color-surface-secondary) 70%, transparent);

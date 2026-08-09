@@ -9403,6 +9403,22 @@ export const carousel_scroll_right = () => `Scroll right`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const marquee_pause = () => `Pause the moving row`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const marquee_resume = () => `Resume the moving row`
+
+
+/**
  * @param {{ selected: NonNullable<unknown>, total: NonNullable<unknown> }} params
  * @returns {string}
  */

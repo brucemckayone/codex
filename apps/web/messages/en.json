@@ -1173,6 +1173,8 @@
   "carousel_default_label": "Content carousel",
   "carousel_scroll_left": "Scroll left",
   "carousel_scroll_right": "Scroll right",
+  "marquee_pause": "Pause the moving row",
+  "marquee_resume": "Resume the moving row",
   "table_selected_count": "{selected} of {total} selected",
   "table_select_all": "Select all rows",
   "table_select_row": "Select row",

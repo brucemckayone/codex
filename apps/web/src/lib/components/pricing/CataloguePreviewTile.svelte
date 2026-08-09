@@ -32,10 +32,14 @@
   @prop {string} title - Rendered inside the cover over the scrim.
   @prop {'video' | 'audio' | 'written'} contentType - Drives the flair + kind line.
   @prop {string | null} thumbnailUrl - Cover image; null paints the brand plate.
+  @prop {string} sizes - The tile's REAL rendered width, for `<img sizes>`. The
+        caller owns the cell width, so only the caller can state this.
+  @prop {string} class - Forwarded to the root so a caller can place or size the
+        tile without reaching in with `:global()`.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
-  import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
+  import { getThumbnailSrcset } from '$lib/utils/image';
   import { PlayIcon } from '$lib/components/ui/Icon';
   import AudioWaveform from '$lib/components/ui/ContentCard/AudioWaveform.svelte';
 
@@ -44,9 +48,34 @@
     title: string;
     contentType: 'video' | 'audio' | 'written';
     thumbnailUrl?: string | null;
+    sizes?: string;
+    class?: string;
   }
 
-  const { id, title, contentType, thumbnailUrl = null }: Props = $props();
+  const {
+    id,
+    title,
+    contentType,
+    thumbnailUrl = null,
+    /**
+     * NOT `DEFAULT_SIZES`. That declares `800px` above a 1024px viewport, but a
+     * band cell is a fixed 13rem (208px) at EVERY viewport, so the browser was
+     * picking `lg.webp` for a 208px slot. `sizes` must describe the SLOT, not
+     * the page (06-performance.md). ContentCard's use of DEFAULT_SIZES is not
+     * precedent here: its cells are fluid, this one is not.
+     *
+     * MEASURED on the live band at DPR 1 (dev CDN, one real thumbnail):
+     * `lg.webp` 67,008B → `md.webp` 44,940B, a 22KB saving per variant-bearing
+     * tile. Note md, not sm: `sm.webp` is 200w, just under the 208px slot, so
+     * 208 CSS px genuinely needs the 400w step. At DPR 3 both the old and the
+     * new `sizes` resolve to `lg`, so this is a desktop win only. The bigger
+     * cost is seed items with NO variant ladder at all (`getThumbnailSrcset`
+     * returns '' and the full original is fetched) — that is data, tracked as
+     * Codex-laytv, and no `sizes` value can fix it.
+     */
+    sizes = '13rem',
+    class: className,
+  }: Props = $props();
 
   /** First letter of the title, for the imageless written-item dropcap. */
   const coverInitial = $derived(title.trim().charAt(0).toUpperCase());
@@ -62,7 +91,7 @@
 
 <!-- `figcaption` must be a DIRECT child of `figure`, so the figure itself is
      the cover box rather than wrapping one. -->
-<figure class="cpt" data-content-type={contentType}>
+<figure class="cpt {className ?? ''}" data-content-type={contentType}>
   <!-- Brand plate is ALWAYS painted behind, so a 404 or a pre-hydration load
        error reveals the gradient with no handler required. -->
   <span class="cpt__plate" aria-hidden="true"></span>
@@ -70,7 +99,7 @@
     <img
       src={thumbnailUrl}
       srcset={getThumbnailSrcset(thumbnailUrl)}
-      sizes={DEFAULT_SIZES}
+      {sizes}
       alt=""
       loading="lazy"
       decoding="async"
@@ -281,5 +310,20 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     text-wrap: pretty;
+  }
+
+  /* The disc/ring are the only glass surfaces this tile has, and this section
+     replaced `.preview__badge` — which WAS covered by the pricing page's own
+     `prefers-reduced-transparency` block. Dropping the handling would be a net
+     regression on the one surface in the app that had it, so it moves here
+     rather than staying in the page: the tile then keeps the behaviour if it is
+     ever reused somewhere without that block (05-accessibility.md §6). */
+  @media (prefers-reduced-transparency: reduce) {
+    .cpt__flair-disc,
+    .cpt__flair-ring {
+      background: var(--media-scrim);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
   }
 </style>
