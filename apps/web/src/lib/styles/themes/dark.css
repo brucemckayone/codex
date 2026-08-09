@@ -33,6 +33,13 @@
   --color-interactive-active: var(--color-primary-200);
   --color-interactive-subtle: var(--color-primary-900);
 
+  /* See light.css for the derivation and why it is repeated in every scope that
+     declares --color-interactive. Note the dark platform fill is
+     --color-primary-400 (#f47d67, L 0.72) — LIGHTER than the 0.62 threshold, so
+     this hands back dark ink, where the hardcoded `--color-text-on-brand:
+     #ffffff` one rule up would have painted white on salmon. */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
   /* Focus */
   --color-focus: var(--color-primary-400);
   --color-focus-ring: var(--color-primary-800);

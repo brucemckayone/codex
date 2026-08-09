@@ -170,12 +170,13 @@
        120rem − 2 × --space-6; do NOT "fix" that with content-box, which
        breaks the padding contract.
 
-       ONE sanctioned exception, and it is not a layout cap: the settings
-       subtree caps to a READING/FORM measure because its inputs carry
-       `max-width: none` and would otherwise render ~1758px wide — see
-       `studio/settings/+layout.svelte`'s `.settings-layout`, which
-       cross-references this rule. Anything that is a second opinion about
-       the COLUMN width belongs here instead. */
+       NO exceptions any more. The settings subtree used to be one: it capped
+       `.settings-layout`, which also capped its MASTHEAD and left the settings
+       header 528px short of every sibling studio page's at 1920. That measure
+       now sits on the form itself (`.settings-form` in
+       `studio/settings/+page.svelte`). A measure applied to a form, a prose
+       column or a single control is fine at any depth; a second opinion about
+       the COLUMN width belongs here and only here. */
     width: 100%;
     max-width: var(--container-studio);
     margin-inline: auto;

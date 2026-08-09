@@ -36,6 +36,12 @@
   /* ─── TEXT ON BRAND ─────────────────────────────────────────────────── */
   --color-text-on-brand: oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
+  /* Ink for filled --color-interactive controls (ui/Button primary). Keyed to
+     --color-interactive rather than --brand-color so an org that overrides the
+     interactive token alone still gets a legible label; same step function.
+     See themes/light.css for why this is re-declared per scope. */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
   /* ─── LEGACY PRIMARY ────────────────────────────────────────────────── */
   --color-primary-500: var(--brand-color, var(--color-primary-500));
   --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
@@ -315,6 +321,9 @@
      wearing a label picked for #EA580C = 2.26:1, under the 4.5:1 AA floor.
      The step function is unchanged — only its input is corrected. */
   --color-text-on-brand: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* Same correction, one token over: --color-interactive is re-declared above
+     from the DARK brand, so re-deriving the ink here keeps the pair in step. */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-border-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
   --color-primary-600: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
 
