@@ -1,10 +1,10 @@
 <!--
   @component ContentCard
 
-  Unified content card for all contexts: browse grids, library lists, featured
-  sections, compact sidebars, and continue-watching carousels.
+  Unified content card for all contexts: browse grids, featured sections,
+  compact sidebars, and continue-watching carousels.
 
-  @prop {'grid' | 'list' | 'featured' | 'compact' | 'resume'} variant - Layout variant
+  @prop {'grid' | 'featured' | 'compact' | 'resume'} variant - Layout variant
   @prop {'default' | 'row'} layout - Layout mode override. 'row' is an
         additive horizontal-row treatment currently used by `contentType='audio'`
         cards to read as a music-app playlist row (album art left, title +
@@ -67,7 +67,7 @@
   }
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
-    variant?: 'grid' | 'list' | 'featured' | 'compact' | 'resume';
+    variant?: 'grid' | 'featured' | 'compact' | 'resume';
     /**
      * Additive horizontal "music playlist row" mode (album art left,
      * title + waveform + meta right). Audio-only; opt-in so existing
@@ -1266,39 +1266,6 @@
   }
 
   /* ═══════════════════════════════════════════
-     VARIANT: LIST
-     ═══════════════════════════════════════════ */
-
-  .cc[data-variant='list'] {
-    flex-direction: row;
-  }
-
-  .cc[data-variant='list'] .cc__thumb {
-    /* 180px — composed from space tokens so it scales with density */
-    width: calc(var(--space-24) + var(--space-20) + var(--space-1));
-    min-width: calc(var(--space-24) + var(--space-20) + var(--space-1));
-    aspect-ratio: auto;
-  }
-
-  .cc[data-variant='list'] .cc__body {
-    flex: 1;
-    min-width: 0;
-    padding: var(--space-3) var(--space-4);
-    gap: var(--space-1);
-  }
-
-  @media (--below-sm) {
-    .cc[data-variant='list'] {
-      flex-direction: column;
-    }
-
-    .cc[data-variant='list'] .cc__thumb {
-      width: 100%;
-      min-width: 0;
-    }
-  }
-
-  /* ═══════════════════════════════════════════
      VARIANT: FEATURED
      Image-dominant card with glass overlay body.
      The image fills the full card height; body
@@ -1612,8 +1579,7 @@
     }
   }
 
-  /* list/featured already override aspect-ratio; no article 3:2 bleed needed there */
-  .cc[data-variant='list'][data-content-type='article'] .cc__thumb,
+  /* featured already overrides aspect-ratio; no article 3:2 bleed needed there */
   .cc[data-variant='featured'][data-content-type='article'] .cc__thumb {
     aspect-ratio: auto;
     display: block;
@@ -1623,16 +1589,16 @@
      The `shape` prop drives `data-shape`; these rules win over the
      per-content-type defaults above by source order (equal specificity,
      declared later). NOTE: this selector is UNSCOPED — by source order it
-     also overrides the list / featured / compact aspect-ratio rules
-     declared earlier (only audio-row, declared later, still wins). This
-     comment used to call that harmless "because `shape` has no consumers
-     yet" — no longer true as of 2026-07-30: callers exist in
-     discover/+page.svelte, explore/+page.svelte, LibraryPageView.svelte and
-     the org landing page. So the unscoped override is LIVE wherever a caller
-     sets `shape` on a list / featured / compact card, and WP-11's scoping
-     work is now load-bearing rather than pre-emptive. `normalizeRatio` (deprecated)
-     resolves to shape='16:9' upstream, so the old mixed-row normalisation
-     lands here too. */
+     also overrides the featured / compact aspect-ratio rules declared
+     earlier (only audio-row, declared later, still wins). This comment used
+     to call that harmless "because `shape` has no consumers yet" — no longer
+     true as of 2026-07-30: callers exist in discover/+page.svelte,
+     explore/+page.svelte, LibraryPageView.svelte and the org landing page. So
+     the unscoped override is LIVE wherever a caller sets `shape` on a
+     featured / compact card, and WP-11's scoping work is now load-bearing
+     rather than pre-emptive. `normalizeRatio` (deprecated) resolves to
+     shape='16:9' upstream, so the old mixed-row normalisation lands here
+     too. */
   .cc[data-shape='16:9'] .cc__thumb {
     aspect-ratio: 16 / 9;
   }
