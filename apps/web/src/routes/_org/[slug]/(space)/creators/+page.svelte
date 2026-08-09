@@ -150,7 +150,11 @@
       <!-- One fact only. The page position already has a home: the Pagination
            control renders "Page 1 of 2" beneath the grid. -->
       {#if total > 0}
-        <li>{m.org_hero_creators_count({ count: total })}</li>
+        <li>
+          {total === 1
+            ? m.org_hero_creators_count_one()
+            : m.org_hero_creators_count({ count: total })}
+        </li>
       {/if}
     {/snippet}
   </PageHeader>

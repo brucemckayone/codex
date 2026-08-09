@@ -142,7 +142,13 @@
 
       <p class="showcase__count">
         {#if contentCount !== undefined && contentCount > 0}
-          {m.creator_content_count({ count: contentCount })}
+          <!-- paraglide-js 1.11.8 compiles messages to plain template literals and has
+               NO plural support, so an ICU `{count, plural, …}` would render its own
+               source on screen. Separate `_one` key + a call-site branch is the shape
+               this codebase can actually express. -->
+          {contentCount === 1
+            ? m.creator_content_count_one()
+            : m.creator_content_count({ count: contentCount })}
         {/if}
       </p>
     </div>
@@ -190,7 +196,9 @@
 
         {#if contentCount !== undefined}
           <p class="creator-card__count">
-            {m.creator_content_count({ count: contentCount })}
+            {contentCount === 1
+              ? m.creator_content_count_one()
+              : m.creator_content_count({ count: contentCount })}
           </p>
         {/if}
       </div>

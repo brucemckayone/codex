@@ -183,6 +183,14 @@ export const common_error = () => `Something went wrong`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const common_close = () => `Close`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const common_or = () => `or`
 
 
@@ -1432,6 +1440,14 @@ export const org_hero_items_count = (params) => `${params.count} items`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const org_hero_creators_count = (params) => `${params.count} creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_creators_count_one = () => `1 creator`
 
 
 /**
@@ -5159,6 +5175,14 @@ export const creator_content_count = (params) => `${params.count} content items`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const creator_content_count_one = () => `1 content item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const creator_drawer_latest = () => `Latest Release`
 
 
@@ -5192,6 +5216,22 @@ export const creator_drawer_joined = (params) => `Joined ${params.date}`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const creator_drawer_content_items = (params) => `${params.count} content items`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_content_items_one = () => `1 content item`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const creator_drawer_also_on = () => `Also on`
 
 
 /**

@@ -134,16 +134,16 @@
       -->
       <div class="drawer-bar">
         <!--
-          Literal "Close", matching `DialogContent.svelte`'s own hardcoded
-          `aria-label="Close"` verbatim. There is no `common_close` message yet;
-          inventing a second vocabulary for the same action would be worse than
-          mirroring the primitive this button stands in for. Swap both to
-          `m.common_close()` when that key lands.
+          `common_close` has now landed, so this reads from the message rather than
+          the literal it previously mirrored. `DialogContent.svelte` still hardcodes
+          its own `aria-label="Close"` — swapping a primitive with 14 consumers is
+          its own change, tracked separately, so the two agree in output today but
+          not yet in source.
         -->
         <button
           type="button"
           class="drawer-bar__close"
-          aria-label="Close"
+          aria-label={m.common_close()}
           onclick={() => handleOpenChange(false)}
         >
           <XIcon size={18} />
@@ -193,7 +193,9 @@
         <div class="drawer-stats">
           {#if creator.contentCount > 0}
             <span class="drawer-stats__item">
-              {m.creator_drawer_content_items({ count: creator.contentCount })}
+              {creator.contentCount === 1
+                ? m.creator_drawer_content_items_one()
+                : m.creator_drawer_content_items({ count: creator.contentCount })}
             </span>
           {/if}
           <span class="drawer-stats__item">
@@ -257,7 +259,7 @@
         <!-- Other Organizations -->
         {#if creator.organizations.length > 0}
           <div class="drawer-orgs">
-            <h3 class="drawer-orgs__heading">Also on</h3>
+            <h3 class="drawer-orgs__heading">{m.creator_drawer_also_on()}</h3>
             <div class="drawer-orgs__row">
               {#each creator.organizations as org (org.slug)}
                 <!--
