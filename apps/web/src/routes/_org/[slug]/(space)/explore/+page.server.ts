@@ -8,6 +8,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, VersionedCache } from '@codex/cache';
 import type { CourseCardSummary } from '$lib/journeys/types';
+import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
@@ -76,6 +77,13 @@ export const load: PageServerLoad = async ({
   const typeParam = url.searchParams.get('type');
   const sortParam = url.searchParams.get('sort');
   const pageParam = url.searchParams.get('page');
+  // `?category=` carries a category SLUG, never a display name. Both filter
+  // paths match `categories.slug` (content-service's membership subquery), and
+  // `publicContentQueryParamsSchema.category` only accepts the slug charset
+  // `^[\p{L}\p{N}-]+$` — a display name with a space or `&` ("Ancestral
+  // Medicine", "Sound & Vibration") makes the whole page 400. The category
+  // strip renders `categoryOptions` below, which carries name+slug pairs, so
+  // the label the user reads and the value the URL carries stay separate.
   const category = url.searchParams.get('category') ?? undefined;
   const creatorUsername = url.searchParams.get('creator') ?? undefined;
   const featuredParam = url.searchParams.get('featured');
@@ -156,6 +164,38 @@ export const load: PageServerLoad = async ({
   }
 
   const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
+
+  // ── Category strip options ────────────────────────────────────────
+  // The org's TAXONOMY, deliberately NOT scraped from the loaded items. Three
+  // defects came from deriving the strip from `item.category`:
+  //   1. `content.category` is a legacy free-text DISPLAY NAME, while both
+  //      filter paths match `categories.slug`. Writing the display name to
+  //      `?category=` returned zero results for every single-word category and
+  //      a full HTTP 400 error page for every one containing a space or `&`,
+  //      since `publicContentQueryParamsSchema.category` only accepts the slug
+  //      charset `^[\p{L}\p{N}-]+$`.
+  //   2. `items` is server-filtered BY category, so options derived from it
+  //      collapsed to just the active one on selection — moving from Ceremony
+  //      to Healing cost a round trip through "All".
+  //   3. Options only reflected the 12 items on the current page, so any
+  //      multi-page org under-reported its own taxonomy.
+  // `getPublicCategories` is the authority: org-scoped, KV-cached under
+  // CATEGORIES(orgId), ordered by the curator's `sortOrder`, restricted to
+  // categories with ≥1 published item, and it carries the name+slug pair the
+  // strip needs to LABEL with a name while WRITING a slug.
+  //
+  // Kicked off HERE, awaited at the bottom, so its round trip overlaps the
+  // content fetch instead of adding a serial hop to a public page's critical
+  // path. `.catch()` is attached AT CREATION, not only at the await: an awaited
+  // rejection would otherwise be in flight, unhandled, for the whole duration of
+  // the content fetch. A taxonomy failure degrades to no strip and can never
+  // fail the page — the content read owns that.
+  const categoryOptionsPromise: Promise<Array<{ name: string; slug: string }>> =
+    getPublicCategories(org.id)
+      .then((rows) =>
+        (rows ?? []).map((row) => ({ name: row.name, slug: row.slug }))
+      )
+      .catch(() => []);
 
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
   let contentResult: {
@@ -244,12 +284,19 @@ export const load: PageServerLoad = async ({
     journeys = [];
   }
 
+  // Awaited (not streamed) because the strip is page structure and the active
+  // chip's label resolves from it — a streamed strip would pop in after first
+  // paint and briefly render the slug instead of the name. The round trip was
+  // already started above, so this await costs only whatever is left of it.
+  const categoryOptions = await categoryOptionsPromise;
+
   return {
     content: {
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
     journeys,
+    categoryOptions,
     creator,
     filters: {
       q: q ?? '',

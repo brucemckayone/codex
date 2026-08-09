@@ -5,6 +5,7 @@ import {
   screen,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { MOBILE_QUERY } from './breakpoint';
 import FilterDrawerHarness from './FilterDrawerHarness.test.svelte';
 
 /**
@@ -20,9 +21,16 @@ import FilterDrawerHarness from './FilterDrawerHarness.test.svelte';
  *   • Clear-all: desktop calls onClearAll; mobile resets staged locally
  *     and does NOT call onClearAll.
  *
- * Drawer responsiveness is gated on window.matchMedia('(max-width: 40rem)').
- * jsdom returns matches=false by default → desktop. We stub matchMedia in
- * the mobile suite to flip the path.
+ * Drawer responsiveness is gated on `window.matchMedia(MOBILE_QUERY)`, imported
+ * from the same module the component reads — never re-typed here, because a
+ * hand-copied literal goes stale silently.
+ *
+ * The stub is deliberately QUERY-AWARE. It used to be `vi.fn(() => mql)`, one
+ * stub returned for ANY query string, which meant the mobile/desktop suites
+ * could not detect a breakpoint change at all: repointing the component at
+ * `--below-md` would have left all 65 tests green while the drawer flipped at
+ * the wrong width. Now an unrecognised query resolves to `matches: false`, so a
+ * drift makes the mobile suite fail loudly instead of passing vacuously.
  */
 
 // ── matchMedia helper ─────────────────────────────────────────────────
@@ -39,11 +47,24 @@ interface MqlStub {
   onchange: null | MqlListener;
 }
 
+function makeMql(media: string, matches: boolean): MqlStub {
+  return {
+    matches,
+    media,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true,
+    onchange: null,
+  };
+}
+
 function stubMatchMedia(initialMatches: boolean) {
   const listeners = new Set<MqlListener>();
   const mql: MqlStub = {
     matches: initialMatches,
-    media: '(max-width: 40rem)',
+    media: MOBILE_QUERY,
     addEventListener: (_type, cb) => listeners.add(cb),
     removeEventListener: (_type, cb) => listeners.delete(cb),
     addListener: (cb) => listeners.add(cb),
@@ -54,7 +75,12 @@ function stubMatchMedia(initialMatches: boolean) {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     writable: true,
-    value: vi.fn(() => mql),
+    // Only MOBILE_QUERY gets the live stub. Anything else answers
+    // `matches: false` so a component pointed at a different breakpoint fails
+    // the mobile suite rather than silently reusing this one.
+    value: vi.fn((query: string) =>
+      query === MOBILE_QUERY ? mql : makeMql(query, false)
+    ),
   });
   return {
     mql,
@@ -69,7 +95,7 @@ describe('FilterDrawer — desktop (default jsdom matchMedia)', () => {
   let component: ReturnType<typeof mount> | null = null;
 
   beforeEach(() => {
-    // Default desktop: max-width: 40rem does NOT match.
+    // Default desktop: MOBILE_QUERY does NOT match.
     stubMatchMedia(false);
   });
 
@@ -264,10 +290,13 @@ describe('FilterDrawer — desktop (default jsdom matchMedia)', () => {
 
 describe('FilterDrawer — mobile (matchMedia matches)', () => {
   let component: ReturnType<typeof mount> | null = null;
-  let mq: ReturnType<typeof stubMatchMedia>;
 
   beforeEach(() => {
-    mq = stubMatchMedia(true);
+    // MOBILE_QUERY matches → the staged commit path. The handle returned by
+    // stubMatchMedia (with its `setMatches` rotation helper) is deliberately not
+    // captured here: no test in this suite rotates the viewport, and the unused
+    // binding was left over from one that no longer exists.
+    stubMatchMedia(true);
   });
 
   afterEach(() => {

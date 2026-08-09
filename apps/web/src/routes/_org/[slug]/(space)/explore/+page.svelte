@@ -146,8 +146,54 @@
     const source = liveItems.length === 0 && ssrItems.length > 0
       ? ssrItems
       : liveItems;
-    return filterContentItemsByOrg(source, data.org?.id);
+    return sortToServerOrder(
+      filterContentItemsByOrg(source, data.org?.id),
+      ssrItems
+    );
   });
+
+  /**
+   * Re-impose the SERVER'S order on the live-query result.
+   *
+   * The live query reads the org-scoped TanStack DB collection, and a
+   * collection has no ORDER BY — it yields whatever internal order it happens
+   * to hold, which is NOT the `ORDER BY` the server applied. So the chosen sort
+   * was correct in SSR and then silently discarded the moment the client
+   * hydrated: `?type=video&sort=oldest` rendered exactly REVERSED (i.e.
+   * newest-first) and `?sort=title` was not alphabetical, nondeterministically
+   * between runs. Sorting is a server facet like every other one on this page,
+   * so the SSR payload's sequence is the authority.
+   *
+   * The SSR payload is exactly the page being displayed (the mount/navigate
+   * `hydrateCollection` overwrites the whole org cache with it), so this is a
+   * reindex rather than a re-sort. Anything the live query holds that SSR did
+   * not return keeps its relative order and lands after the known items, so a
+   * locally-inserted row can never be dropped.
+   *
+   * A plain id array + `indexOf` rather than a `Map`: the autofixer (rightly)
+   * objects to a bare mutable `Map` in a rune file, and importing `SvelteMap`
+   * for a value that never escapes this function would be worse. One page is
+   * `PAGE_LIMIT` = 12 rows, so the quadratic term is 144 string compares.
+   * Mirrors the same workaround the category derivation used for `Set`.
+   */
+  function sortToServerOrder(
+    list: ExploreItem[],
+    ssrItems: readonly ExploreItem[]
+  ): ExploreItem[] {
+    if (ssrItems.length === 0 || list.length < 2) return list;
+    const serverIds = ssrItems.map((item) => item.id);
+    const rankOf = (id: string) => {
+      const index = serverIds.indexOf(id);
+      return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    return list
+      .map((item, index) => ({ item, index }))
+      .sort(
+        (a, b) =>
+          rankOf(a.item.id) - rankOf(b.item.id) || a.index - b.index
+      )
+      .map((entry) => entry.item);
+  }
   const total = $derived(data.content?.total ?? 0);
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);
@@ -207,23 +253,47 @@
     );
   }
 
-  // Category options come from the loaded page. Because `category` is now a
-  // server filter, selecting one narrows the result set to that category —
-  // which would collapse the strip and strand the user's own selection with no
-  // way back to `All`. Union the active category in so the strip is always
-  // navigable out of the state it put you in.
-  // Plain array + `includes` rather than a Set: at most a dozen categories,
-  // and the autofixer (rightly) objects to a bare mutable `Set` inside a rune
-  // file — the alternative would be importing SvelteSet for a value that never
-  // escapes this derivation.
-  const categories = $derived.by(() => {
-    const out: string[] = [];
-    for (const item of items as { category?: string | null }[]) {
-      if (item.category && !out.includes(item.category)) out.push(item.category);
+  // ── Category strip options ────────────────────────────────────────
+  // The org's TAXONOMY, served by `+page.server.ts` — deliberately NOT scraped
+  // from the loaded items. Each option carries a `name` to render and a `slug`
+  // to put in the URL, because those are two different values and conflating
+  // them broke all three of the following at once:
+  //
+  //   • `item.category` is a legacy free-text DISPLAY NAME, while both filter
+  //     paths match `categories.slug`. Writing the name to `?category=` gave 0
+  //     results for single-word categories ("Somatics" → 0, "somatics" → 7) and
+  //     a full 400 error page for any containing a space or `&`, since
+  //     `publicContentQueryParamsSchema` only accepts the slug charset.
+  //   • `items` is server-filtered BY category, so options derived from it
+  //     collapsed to just the active one on selection — lateral movement
+  //     between categories cost a round trip through "All".
+  //   • Options only reflected the 12 items on the current page, so any
+  //     multi-page org under-reported its own taxonomy.
+  //
+  // Order is the curator's `sortOrder` (the endpoint applies it), so this
+  // deliberately does NOT re-sort. The active slug is unioned in as a
+  // last-resort escape hatch: if it isn't in the taxonomy (renamed or retired
+  // category still live in someone's bookmark) the strip must still offer a way
+  // back to "All" rather than hiding the state it's in.
+  const categoryOptions = $derived.by(() => {
+    const options = (data.categoryOptions ?? []).map((option) => ({
+      name: option.name,
+      slug: option.slug,
+    }));
+    if (
+      filters.category &&
+      !options.some((option) => option.slug === filters.category)
+    ) {
+      options.push({ name: filters.category, slug: filters.category });
     }
-    if (filters.category && !out.includes(filters.category)) out.push(filters.category);
-    return out.sort((a, b) => a.localeCompare(b));
+    return options;
   });
+
+  /** Display name for the active category slug — falls back to the raw slug. */
+  const activeCategoryName = $derived(
+    categoryOptions.find((option) => option.slug === filters.category)?.name ??
+      filters.category
+  );
 
   const totalPages = $derived(Math.max(1, Math.ceil(total / limit)));
 
@@ -251,7 +321,11 @@
       chips.push({ key: 'type', label: m.explore_chip_type({ value: typeLabel }) });
     }
     if (filters.category) {
-      chips.push({ key: 'category', label: m.explore_chip_category({ value: filters.category }) });
+      // The chip reads the DISPLAY NAME, not the slug the URL carries.
+      chips.push({
+        key: 'category',
+        label: m.explore_chip_category({ value: activeCategoryName }),
+      });
     }
     if (filters.sort && filters.sort !== 'newest') {
       const sortLabel = sortOptions.find((o) => o.value === filters.sort)?.label ?? filters.sort;
@@ -310,7 +384,22 @@
     if (!url) return;
     const dispatched = url.search;
     try {
-      await goto(url.toString(), { replaceState: true, noScroll: true });
+      // `keepFocus: true` is REQUIRED, not a nicety (WCAG 2.4.3). Without it
+      // SvelteKit's `reset_focus` runs after every client-side navigation
+      // whenever nothing moved focus during it (client.js:1874,
+      // `if (!keepfocus && !changed_focus)`) and, with no hash and no
+      // `[autofocus]`, re-points the sequential-focus start at the top of the
+      // document. Every facet on this page is now a URL write, so activating a
+      // category pill or a drawer sort row dropped `document.activeElement` on
+      // `<body>` — outside the still-open drawer and its focus trap — and the
+      // next Tab restarted at the page header. This is the house pattern: 11
+      // other URL-writing surfaces pass it, including `(platform)/discover`,
+      // the direct analogue.
+      await goto(url.toString(), {
+        replaceState: true,
+        noScroll: true,
+        keepFocus: true,
+      });
     } finally {
       // Release the pending base only if nothing mutated it while we
       // navigated. `finally` so a rejected navigation cannot leave a stale
@@ -421,7 +510,9 @@
   const pageDescription = $derived.by(() => {
     const parts: string[] = [];
     if (filters.type) parts.push(filters.type);
-    if (filters.category) parts.push(filters.category);
+    // The category's display name, not its URL slug — this is prose a human
+    // (and a SERP snippet) reads.
+    if (filters.category) parts.push(activeCategoryName);
     const scope = parts.length > 0 ? parts.join(' + ') : 'all';
     if (data.creator) {
       return `Content by ${data.creator.name} on ${orgName}`;
@@ -557,8 +648,8 @@
     </div>
   {/if}
 
-  <!-- Category Strip -->
-  {#if categories.length >= 2 || filters.category}
+  <!-- Category Strip — label is the display NAME, URL value is the SLUG. -->
+  {#if categoryOptions.length >= 2 || filters.category}
     <nav class="explore__categories" aria-label={m.explore_category_filter_label()}>
       <button
         type="button"
@@ -569,15 +660,16 @@
       >
         {m.explore_filter_all()}
       </button>
-      {#each categories as cat (cat)}
+      {#each categoryOptions as option (option.slug)}
+        {@const active = filters.category === option.slug}
         <button
           type="button"
           class="explore__category-pill"
-          class:explore__category-pill--active={filters.category === cat}
-          onclick={() => updateFilters({ category: cat })}
-          aria-pressed={filters.category === cat}
+          class:explore__category-pill--active={active}
+          onclick={() => updateFilters({ category: option.slug })}
+          aria-pressed={active}
         >
-          {cat}
+          {option.name}
         </button>
       {/each}
     </nav>
@@ -708,9 +800,14 @@
     line-height: var(--leading-tight);
   }
 
+  /* `--color-text-secondary`, not tertiary: under `[data-org-bg]` tertiary's
+     clamp saturates at L=0.6 on ANY light brand background, which measured
+     3.46:1 for this 14.26px line against the page — a WCAG 1.4.3 AA fail.
+     Secondary is the token org-brand.css documents as measured to clear AA at
+     both ends of the brand range. */
   .explore__journeys-count {
     font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
+    color: var(--color-text-secondary);
   }
 
   .explore__journeys-pathline {
@@ -781,11 +878,18 @@
     display: none;
   }
 
-  /* Ghost pills — transparent by default, subtle border, filled-on-active
-     uses surface-elevated rather than interactive so the strip whispers
-     and lets the content grid lead. */
+  /* Ghost pills — transparent by default with a hairline border, so the strip
+     whispers and lets the content grid lead. Only the ACTIVE pill takes a fill;
+     see the `--active` rule for why it has to be a real one.
+     `min-height: --space-11` (44px) matches the drawer's controls: these are the
+     page's only inline filter, six abreast in a horizontal scroller at 390 wide,
+     where a mis-tap scrolls the strip instead of selecting. Padding-block stays
+     at --space-1-5 so min-height grows the box without changing type rhythm. */
   .explore__category-pill {
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--space-11);
     padding: var(--space-1-5) var(--space-3);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -812,14 +916,36 @@
     outline-offset: var(--focus-offset, 1px);
   }
 
+  /* Active state uses the drawer's own recipe — `--color-interactive` fill with
+     `--color-text-on-brand` — for two reasons.
+     WCAG 1.4.11: the previous `--color-surface-elevated` fill is derived as
+     `calc(l + 0.02)` from the page background, so on any `[data-org-bg]` org it
+     is ~1:1 against the page BY CONSTRUCTION (measured 1.06:1 light, 1.12:1
+     dark), and `--color-border-strong` gave the outline only 1.49:1. A state
+     indicator needs 3:1, so the selected pill was effectively invisible — and
+     with `category` now a server facet, discovering that state costs a
+     navigation. The brand fill measures 4.90:1 for its text.
+     And the semibold step means state is not signalled by colour ALONE, which
+     the old rule's text-colour-only cue was. */
   .explore__category-pill--active {
-    color: var(--color-text);
-    background: var(--color-surface-elevated);
-    border-color: var(--color-border-strong);
+    color: var(--color-text-on-brand);
+    font-weight: var(--font-semibold);
+    background: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
+  /* The ACTIVE pill deliberately does NOT lighten on hover. `--color-text-on-brand`
+     is derived from `--color-interactive`, not from `--color-interactive-hover`
+     (dark theme lightens by `calc(l + 0.08)`), so hovering pushed the fill past
+     the point where white text still clears AA while the text colour stayed put:
+     measured 4.67:1 resting → 3.36:1 hovered on of-blood-and-bones dark. There
+     is also nothing for hover to communicate here — the pill is already
+     selected — so it holds its state instead. Mirrors the previous rule, which
+     likewise pinned the active background against hover. */
   .explore__category-pill--active:hover {
-    background: var(--color-surface-elevated);
+    color: var(--color-text-on-brand);
+    background: var(--color-interactive);
+    border-color: var(--color-interactive);
   }
 
   /* ── Pagination ── */

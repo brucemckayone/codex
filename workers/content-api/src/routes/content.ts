@@ -204,6 +204,42 @@ app.get(
 );
 
 /**
+ * GET /api/content/browse
+ * Browse content within an org (cross-creator).
+ *
+ * Multi-tenant boundary: organizationId is REQUIRED via the schema, and
+ * the service rejects browse-mode queries that lack it. Used by the
+ * authenticated /explore "popular" / "top-selling" sorts where the
+ * caller is browsing other creators' content within an org context.
+ *
+ * ROUTE ORDER IS LOAD-BEARING: this MUST stay above `GET /:id`. Hono resolves
+ * in registration order, so with `/:id` first every request to `/browse` was
+ * matched as `id = "browse"`, failed that route's UUID params schema, and
+ * returned 422 `{"code":"VALIDATION_ERROR","details":[{"path":"params.id",
+ * "message":"Invalid ID format"}]}` — which surfaced to signed-in users as a
+ * full-page 500 "Invalid request data" the moment they picked "Most Popular" or
+ * "Top Selling" on /explore. `/check-slug/:slug` sits above `/:id` for the same
+ * reason. Any future static child of this router belongs above `/:id` too.
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
+ */
+app.get(
+  '/browse',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentBrowseQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.content.list(
+        ctx.user.id,
+        ctx.input.query,
+        { scope: 'browse' }
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
  * GET /api/content/:id
  * Get content by ID
  *
@@ -298,33 +334,6 @@ app.get(
         ctx.user.id,
         ctx.input.query,
         { scope: 'studio' }
-      );
-      return new PaginatedResult(result.items, result.pagination);
-    },
-  })
-);
-
-/**
- * GET /api/content/browse
- * Browse content within an org (cross-creator).
- *
- * Multi-tenant boundary: organizationId is REQUIRED via the schema, and
- * the service rejects browse-mode queries that lack it. Used by the
- * authenticated /explore "popular" / "top-selling" sorts where the
- * caller is browsing other creators' content within an org context.
- *
- * Security: Authenticated users, API rate limit (100 req/min)
- */
-app.get(
-  '/browse',
-  procedure({
-    policy: { auth: 'required' },
-    input: { query: contentBrowseQuerySchema },
-    handler: async (ctx) => {
-      const result = await ctx.services.content.list(
-        ctx.user.id,
-        ctx.input.query,
-        { scope: 'browse' }
       );
       return new PaginatedResult(result.items, result.pagination);
     },

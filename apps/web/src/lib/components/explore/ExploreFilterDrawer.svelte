@@ -79,9 +79,23 @@
   clearLabel={m.explore_clear_filters()}
 >
   {#snippet sections({ filters: view, sort: viewSort, setFilter, setSort })}
+    <!--
+      A11Y — ONE name per section. Each `<section>` below is deliberately
+      UNNAMED. Naming it made it a `region` LANDMARK inside a dialog (landmarks
+      are a page-navigation affordance and are meaningless in a modal) AND
+      produced a THIRD announcement of the same string — Chrome's a11y tree read
+      `region "Sort by" → heading "Sort by" → group "Sort by" → button "Newest"`,
+      so a screen-reader user heard "Sort by" three times before the first
+      option. The name belongs on the `role="group"`: that is the container
+      announced when Tab lands on one of its buttons — fieldset/legend
+      semantics — while the `<h3>` still anchors the heading outline for
+      heading-based navigation. Mirrors the reasoning already applied on the
+      explore page itself, where the portals `<section>` is left unnamed so the
+      Carousel's `role="region"` is the only landmark.
+    -->
     <!-- ── Sort (rows, single-select) ──────────────────────────── -->
-    <section class="filter-drawer__section" aria-labelledby="efd-sort-heading">
-      <h3 class="filter-drawer__heading" id="efd-sort-heading">
+    <section class="filter-drawer__section">
+      <h3 class="filter-drawer__heading">
         {m.explore_sort_heading()}
       </h3>
       <!--
@@ -125,8 +139,8 @@
     </section>
 
     <!-- ── Type (pills) ────────────────────────────────────────── -->
-    <section class="filter-drawer__section" aria-labelledby="efd-type-heading">
-      <h3 class="filter-drawer__heading" id="efd-type-heading">
+    <section class="filter-drawer__section">
+      <h3 class="filter-drawer__heading">
         {m.explore_filter_type_heading()}
       </h3>
       <div class="filter-drawer__pills" role="group" aria-label={m.explore_filter_type_heading()}>
@@ -145,9 +159,11 @@
       </div>
     </section>
 
-    <!-- ── Featured (single toggle row) ────────────────────────── -->
-    <section class="filter-drawer__section" aria-labelledby="efd-featured-heading">
-      <h3 class="filter-drawer__heading" id="efd-featured-heading">
+    <!-- ── Featured (single toggle row) ──────────────────────────
+         One self-describing toggle ("Featured only"), so there is no group to
+         name here — the `<h3>` is outline structure only. -->
+    <section class="filter-drawer__section">
+      <h3 class="filter-drawer__heading">
         {m.explore_filter_featured_heading()}
       </h3>
       <div class="filter-drawer__list">

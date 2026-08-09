@@ -21,6 +21,7 @@ const {
   browseMock,
   getPublicContentMock,
   getPublicCreatorsMock,
+  getPublicCategoriesMock,
   listPublishedCoursesMock,
   cacheGetMock,
   VersionedCacheMock,
@@ -35,6 +36,7 @@ const {
     browseMock: vi.fn(),
     getPublicContentMock: vi.fn(),
     getPublicCreatorsMock: vi.fn(),
+    getPublicCategoriesMock: vi.fn(),
     listPublishedCoursesMock: vi.fn(),
     cacheGetMock,
     VersionedCacheMock,
@@ -59,6 +61,14 @@ vi.mock('$lib/remote/content.remote', () => ({
 
 vi.mock('$lib/remote/org.remote', () => ({
   getPublicCreators: getPublicCreatorsMock,
+}));
+
+// Category strip options. MUST be mocked: the real `query()` calls
+// `getRequestEvent()`, which has no app.hooks in a unit test, and the load's
+// try/catch would swallow the failure into an empty strip — a green suite over
+// a silently broken control.
+vi.mock('$lib/remote/categories.remote', () => ({
+  getPublicCategories: getPublicCategoriesMock,
 }));
 
 vi.mock('$lib/server/cache', () => ({
@@ -112,6 +122,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       pagination: { total: 0 },
     });
     getPublicCreatorsMock.mockResolvedValue({ items: [], pagination: {} });
+    getPublicCategoriesMock.mockResolvedValue([]);
     listPublishedCoursesMock.mockResolvedValue([]);
     // Default: cache.get passes through to the fetcher so list/getPublicContent
     // is called normally. Individual tests override to simulate hits.
@@ -462,6 +473,126 @@ describe('explore +page.server.ts — cache wiring', () => {
       // The content path throws before the journeys read is reached, so the
       // rail fetch never fires (and cannot mask the content error).
       expect(listPublishedCoursesMock).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Category strip options.
+   *
+   * Regression guard for the blocker where the strip was derived from
+   * `item.category` — a legacy free-text DISPLAY NAME — while both filter paths
+   * match `categories.slug`. Every pill returned 0 results ("Somatics" → 0,
+   * "somatics" → 7) and any category containing a space or `&` produced a full
+   * HTTP 400 page, because `publicContentQueryParamsSchema.category` only
+   * accepts `^[\p{L}\p{N}-]+$`.
+   *
+   * Falsifiability: the name/slug pairing test fails if the load stops
+   * returning `categoryOptions` or flattens it back to bare names, and the
+   * "space and ampersand" test fails if any writable value the strip could
+   * produce would be rejected by that regex.
+   */
+  describe('category strip options (taxonomy, not a scrape of the page)', () => {
+    const TAXONOMY = [
+      { id: 'c1', name: 'Ancestral Medicine', slug: 'ancestral-medicine' },
+      { id: 'c2', name: 'Sound & Vibration', slug: 'sound-vibration' },
+      { id: 'c3', name: 'Somatics', slug: 'somatics' },
+    ];
+
+    it('returns the org taxonomy as name+slug pairs, ordered as served', async () => {
+      getPublicCategoriesMock.mockResolvedValueOnce(TAXONOMY);
+      const { load } = await import('../+page.server');
+
+      const result = await load(baseInput({ user: null }));
+
+      expect(getPublicCategoriesMock).toHaveBeenCalledWith(ORG_ID);
+      // Order is the curator's `sortOrder`, already applied by the endpoint —
+      // the load must NOT re-sort it.
+      expect(result.categoryOptions).toEqual([
+        { name: 'Ancestral Medicine', slug: 'ancestral-medicine' },
+        { name: 'Sound & Vibration', slug: 'sound-vibration' },
+        { name: 'Somatics', slug: 'somatics' },
+      ]);
+    });
+
+    it('every slug the strip can write survives the public query schema charset', async () => {
+      // The exact guard from content.remote.ts. A display name would fail this
+      // for two of the three fixtures; a slug passes for all three.
+      const SLUG_CHARSET = /^[\p{L}\p{N}-]+$/u;
+      getPublicCategoriesMock.mockResolvedValueOnce(TAXONOMY);
+      const { load } = await import('../+page.server');
+
+      const result = await load(baseInput({ user: null }));
+
+      for (const option of result.categoryOptions) {
+        expect(option.slug).toMatch(SLUG_CHARSET);
+      }
+      // Sanity: the names these slugs render as would NOT have survived — this
+      // is the difference the fix turns on.
+      expect('Ancestral Medicine').not.toMatch(SLUG_CHARSET);
+      expect('Sound & Vibration').not.toMatch(SLUG_CHARSET);
+    });
+
+    it('forwards the ?category= slug to the public content query unchanged', async () => {
+      const { load } = await import('../+page.server');
+
+      await load(
+        baseInput({
+          user: null,
+          url: 'http://lvh.me:3000/explore?category=sound-vibration',
+        })
+      );
+
+      expect(getPublicContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ category: 'sound-vibration' })
+      );
+    });
+
+    it('degrades to an empty strip (never throws) when the taxonomy read fails', async () => {
+      getPublicCategoriesMock.mockRejectedValueOnce(
+        new Error('categories 500')
+      );
+      const { load } = await import('../+page.server');
+
+      const result = await load(baseInput({ user: null }));
+
+      expect(result.categoryOptions).toEqual([]);
+      // The content path is untouched by a taxonomy failure.
+      expect(result.content.items).toEqual([]);
+    });
+
+    it('starts the taxonomy read BEFORE the content fetch resolves (overlapping, not serial)', async () => {
+      // Guards the latency claim in the load: awaiting the taxonomy AFTER the
+      // content fetch added a serial upstream hop to a public page's critical
+      // path. Dispatch order is the observable part of "runs concurrently".
+      const order: string[] = [];
+      let releaseContent: (v: unknown) => void = () => {};
+      getPublicContentMock.mockImplementationOnce(() => {
+        order.push('content:start');
+        return new Promise((resolve) => {
+          releaseContent = () => {
+            order.push('content:end');
+            resolve({ items: [], pagination: { total: 0 } });
+          };
+        });
+      });
+      getPublicCategoriesMock.mockImplementationOnce(async () => {
+        order.push('categories:start');
+        return [];
+      });
+
+      const { load } = await import('../+page.server');
+      const pending = load(baseInput({ user: null }));
+      // Let the synchronous part of the load run and both requests dispatch.
+      await Promise.resolve();
+      await Promise.resolve();
+      releaseContent(null);
+      await pending;
+
+      // The taxonomy request must be in flight before the content fetch settles.
+      expect(order.indexOf('categories:start')).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf('categories:start')).toBeLessThan(
+        order.indexOf('content:end')
+      );
     });
   });
 

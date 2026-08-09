@@ -27,6 +27,7 @@
   import * as Dialog from '$lib/components/ui/Dialog';
   import { SlidersIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
+  import { MOBILE_QUERY } from './breakpoint';
 
   type FacetKey = keyof TFacets;
 
@@ -86,10 +87,12 @@
   const badgeLabel = $derived(activeCount > 9 ? '9+' : String(activeCount));
 
   // ── Responsive mode detection ───────────────────────────────────────
-  // Matches the `--below-sm` custom-media the CSS below uses. The old
-  // `40rem` was 1px wider than every other breakpoint in the app, so at
+  // MOBILE_QUERY matches the `--below-sm` custom-media the CSS below uses. The
+  // old `40rem` was 1px wider than every other breakpoint in the app, so at
   // exactly 640px this drawer became a bottom sheet while nothing else moved.
-  const MOBILE_QUERY = '(max-width: 39.9375rem)';
+  // It lives in `./breakpoint.ts` so the test asserts against the SAME string
+  // the component asks matchMedia for, instead of a hand-copied literal that
+  // silently drifts.
   let isMobile = $state(false);
   $effect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -114,7 +117,10 @@
   }
 
   // ── Staged snapshot (mobile-only path reads it) ─────────────────────
-  // svelte-ignore state_referenced_locally — seeded once from initial prop
+  // Seeded once from the initial props; the reseed effect below owns updates.
+  // (svelte-ignore lines carry the code ONLY — trailing prose on the same line
+  // parses as further ignore codes and is reported as unused.)
+  // svelte-ignore state_referenced_locally
   let staged = $state<TFacets>({ ...filters });
   // svelte-ignore state_referenced_locally
   let stagedSort = $state(sort);
@@ -300,17 +306,25 @@
   }
 
   /* ── Desktop: floating-glass right-edge panel ──────────────────────
-     SPECIFICITY: the `[data-size]` qualifier is load-bearing, not decoration.
-     DialogContent's own rule is `.dialog-content[data-size='md']`, which
-     Svelte's scoping hash lifts to (0,3,0) — outranking a plain
-     `:global(.dialog-content.filter-drawer)` at (0,2,0). The panel therefore
-     rendered at the 42rem modal width instead of the 24rem rail this rule
-     asks for: ~350px of dead space under the last section, a 622px sweep
+     SPECIFICITY: the doubled `[data-size][data-size]` qualifier is
+     load-bearing, not decoration. DialogContent's own rule is
+     `.dialog-content[data-size='md']`, which Svelte's scoping hash lifts to
+     `.dialog-content[data-size='md'].svelte-<hash>` = (0,3,0) — outranking a
+     plain `:global(.dialog-content.filter-drawer)` at (0,2,0). The panel
+     therefore rendered at the 42rem modal width instead of the 24rem rail this
+     rule asks for: ~350px of dead space under the last section, a 622px sweep
      between each sort label and its check glyph, and 87% of the viewport
-     covered at 768px. Matching on `[data-size]` (any value) takes this rule to
-     (0,4,0) so it wins outright rather than tying and depending on
-     stylesheet order. */
-  :global(.dialog-content.filter-drawer[data-size]) {
+     covered at 768px.
+
+     A single `[data-size]` was NOT enough: Svelte adds no hash to a wholly
+     `:global()` selector, so `:global(.dialog-content.filter-drawer[data-size])`
+     is also (0,3,0) — a TIE, resolved only by stylesheet order, which happened
+     to favour this rule because FilterDrawer imports Dialog and so DialogContent
+     is emitted first. Any chunking change that reversed that order would have
+     silently restored the 42rem width with no build error and no failing test.
+     Repeating the attribute takes this rule to (0,4,0) so it wins on
+     specificity, as claimed, independent of emission order. */
+  :global(.dialog-content.filter-drawer[data-size][data-size]) {
     position: fixed;
     top: var(--space-3);
     right: var(--space-3);
@@ -333,9 +347,11 @@
     animation: filter-drawer-slide-in-right var(--duration-slow) var(--ease-smooth) both;
   }
 
-  /* ── Mobile: floating-glass bottom sheet ─────────────────────────── */
+  /* ── Mobile: floating-glass bottom sheet ───────────────────────────
+     Same doubled-attribute (0,4,0) qualifier as the desktop rule above, for
+     the same reason — see that comment. */
   @media (--below-sm) {
-    :global(.dialog-content.filter-drawer[data-size]) {
+    :global(.dialog-content.filter-drawer[data-size][data-size]) {
       top: auto;
       left: var(--space-2);
       right: var(--space-2);
@@ -469,16 +485,34 @@
      `forwardBrandTokens` copies `data-org-brand` onto the portal container so
      the brand derivation engine works inside the dialog — which also
      re-activates org-brand.css's `[data-org-brand] :is(h1..h6) { color:
-     var(--color-heading) }` at (0,2,0), beating a bare
+     var(--color-heading) }` at (0,1,1), beating a bare
      `:global(.filter-drawer__heading)` at (0,1,0). The result was that on
      EVERY branded org these quiet uppercase micro-labels computed to exactly
      the same colour as the dialog title, flattening the hierarchy — and it
-     only showed up on branded orgs, so a default-theme review never saw it. */
+     only showed up on branded orgs, so a default-theme review never saw it.
+
+     COLOUR: `--color-text-secondary`, NOT `--color-text-tertiary`. Winning the
+     cascade is the first time this rule's colour has ever applied on a branded
+     org, and tertiary FAILS WCAG AA here. Under `[data-org-bg]` tertiary is
+     `oklch(from var(--brand-bg) clamp(0.35, abs(0.5 - l) + 0.35, 0.6) 0 0)`,
+     whose clamp SATURATES at L=0.6 — a flat mid-grey — for any light brand
+     background, so it is ~3.5:1 on every light org regardless of palette.
+     Measured on the composited glass panel at 13px/600 (which is NOT large
+     text: that needs ≥18.66px bold or ≥24px, so 4.5:1 applies): 3.79–4.09:1
+     with tertiary across of-blood-and-bones, studio-alpha and studio-beta in
+     both themes — three of six combos below AA. `--color-text-secondary` is
+     `color-mix(in oklab, var(--color-text) 62%, var(--color-background))`,
+     deliberately measured in org-brand.css to clear AA at both ends of the
+     brand range (7.56:1 worst light, 5.84:1 worst dark) — 6.38:1 against this
+     panel's glass. The hierarchy separation from the 18px dialog title is
+     carried by the 13px / uppercase / 0.08em treatment; it never needed the
+     colour drop. Do not reach for `--color-text-tertiary` on body-sized text
+     anywhere until that clamp ceiling is raised. */
   :global(.filter-drawer .filter-drawer__heading) {
     margin: 0;
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-text-tertiary);
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -533,8 +567,18 @@
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset-inset, -1px);
   }
+  /* The selected row's LABEL takes `--color-text`, not `--color-interactive`.
+     Brand ink on a brand tint is a contrast pair with no inverting side — both
+     derive from the same hue and lightness band — and it measured 3.81:1
+     (studio-beta dark) to 4.71:1 (studio-beta light) at 15px/600: five of six
+     org×theme combos below WCAG AA's 4.5:1. `--color-text` is the token that
+     inverts with the surface, so it clears AA at both ends by construction.
+     Brand identity is not lost: the tinted background, the `::before` brand rail
+     and the brand-coloured check glyph all still carry it, and each of those is
+     non-text (3:1 floor) rather than a 15px label (4.5:1). The semibold step
+     also means selection is not signalled by colour alone. */
   :global(.filter-drawer__option.is-active) {
-    color: var(--color-interactive);
+    color: var(--color-text);
     font-weight: var(--font-semibold);
     background: var(--color-interactive-subtle, var(--color-surface-secondary));
   }
