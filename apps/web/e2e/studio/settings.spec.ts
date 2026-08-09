@@ -12,15 +12,19 @@ import {
 /**
  * Studio Settings E2E Tests
  *
- * Tests the general settings form and the settings tab strip.
- * Owner role required for settings access.
+ * Tests the general settings form. Owner role required for settings access.
  *
- * NOTE: Settings tabs use role="tab" (link-based navigation, not Melt UI).
- * NOTE: Branding is NOT a settings tab. It moved to the unified /studio/brand
- * workspace (Codex-cijzb); `/studio/settings/branding` is now a 301 stub whose
- * only job is to forward old bookmarks. The brand workspace itself is covered
- * by studio/navigation.spec.ts and brand-editor-hero-effects.spec.ts — do not
- * re-test its contents here.
+ * NOTE: there is NO settings tab strip any more. It listed exactly one
+ * destination ("General") once branding moved to the unified /studio/brand
+ * workspace (Codex-cijzb), which made it a tablist you could neither leave nor
+ * act on — and whose active state painted raw org brand ink as 14px text
+ * (3.82:1 on studio-alpha dark, an AA failure). The two tests that asserted
+ * `getByRole('tab')).toHaveCount(1)` and its `aria-selected` were removed with
+ * it; the replacement below asserts the *absence* of a tablist, so a one-item
+ * strip cannot creep back in. `/studio/settings/branding` remains a 301 stub
+ * whose only job is to forward old bookmarks. The brand workspace itself is
+ * covered by studio/navigation.spec.ts and brand-editor-hero-effects.spec.ts —
+ * do not re-test its contents here.
  */
 
 test.describe('Studio Settings - General', () => {
@@ -142,7 +146,7 @@ test.describe('Studio Settings - General Mutations', () => {
   });
 });
 
-test.describe('Studio Settings - Tabs', () => {
+test.describe('Studio Settings - no tab strip', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedAuth: SharedStudioAuth;
@@ -159,31 +163,25 @@ test.describe('Studio Settings - Tabs', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('General is the only settings tab', async ({ page }) => {
+  test('settings has no tablist and exactly one h1', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/settings'
     );
 
-    await expect(page.getByRole('tab', { name: 'General' })).toBeVisible();
+    // Wait for the masthead the layout owns before asserting absence, so this
+    // cannot pass against an unrendered page.
+    await expect(page.locator('h1')).toContainText(/Settings/i);
 
-    // Assert the COUNT, not just the absence of 'Branding'. A stale name check
-    // would keep passing if a different tab were added, and the point of this
-    // assertion is that the strip has exactly one destination since branding
-    // moved to /studio/brand.
-    await expect(page.getByRole('tab')).toHaveCount(1);
-  });
+    // Replaces the old `toHaveCount(1)` tab assertion. A one-item tablist is a
+    // navigation with nowhere to go; assert the strip is gone rather than that
+    // it has one entry, so re-adding a single tab fails here.
+    await expect(page.getByRole('tablist')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveCount(0);
 
-  test('General tab is selected on settings root', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings'
-    );
-
-    const generalTab = page.getByRole('tab', { name: 'General' });
-    await expect(generalTab).toHaveAttribute('aria-selected', 'true');
+    // The layout owns the page's single <h1>; card headings are <h2>.
+    await expect(page.locator('h1')).toHaveCount(1);
   });
 });
 
@@ -221,8 +219,5 @@ test.describe('Studio Settings - legacy branding redirect', () => {
     // toHaveURL polls, so it tolerates the client-side hop. Per e2e/CLAUDE.md,
     // never waitForURL on an ssr=false route — there is no second load event.
     await expect(page).toHaveURL(/\/studio\/brand$/);
-
-    // The old path must leave no trace in the settings tab strip.
-    await expect(page.getByRole('tab', { name: 'Branding' })).toHaveCount(0);
   });
 });

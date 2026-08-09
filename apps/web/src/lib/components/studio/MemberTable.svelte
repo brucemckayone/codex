@@ -1,12 +1,24 @@
 <!--
   @component MemberTable
 
-  Displays a table of organization members for the studio team management page.
-  Shows name + avatar, email, role (colored badge), joined date, and actions.
+  Table of organisation members for the studio team page: name + avatar, email,
+  role, joined date, optional revenue-share summary, and Remove.
+
+  THE ROLE COLUMN IS THE ROLE CONTROL. It used to render a coloured badge while
+  the Actions column rendered a 256px-wide Select showing the same value, so
+  every row said "Creator" twice, two columns apart — 16 times over on
+  of-blood-and-bones, a wall of identical dropdowns down the right-hand side.
+  Collapsing them into one control per row removes the restatement, drops a
+  256px column's worth of width (which is what pushed Actions off-screen behind
+  an undiscoverable horizontal scroll at 390px), and leaves Actions holding the
+  one thing that is genuinely an action. The owner row keeps a plain badge:
+  its role is not editable.
 
   @prop {OrgMemberItem[]} members - Array of members to display
   @prop {(userId: string, role: string) => void} onChangeRole - Callback when role is changed
   @prop {(userId: string) => void} onRemove - Callback when member is removed
+  @prop {() => void} [onInvite] - Opens the invite flow from the empty state.
+    Omitted → the empty state renders without a call to action.
   @prop {boolean} loading - Whether the data is loading
   @prop {string} [class] - Optional class forwarded to the root element of each conditional branch
 -->
@@ -15,7 +27,7 @@
   import * as Table from '$lib/components/ui/Table';
   import Badge from '$lib/components/ui/Badge/Badge.svelte';
   import Select from '$lib/components/ui/Select/Select.svelte';
-  import { ConfirmDialog } from '$lib/components/ui';
+  import { Button, ConfirmDialog } from '$lib/components/ui';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { formatDate, getInitials } from '$lib/utils/format';
@@ -25,6 +37,7 @@
     members: OrgMemberItem[];
     onChangeRole?: (userId: string, role: string) => void;
     onRemove?: (userId: string) => void;
+    onInvite?: () => void;
     loading?: boolean;
     class?: string;
     /**
@@ -40,6 +53,7 @@
     members,
     onChangeRole,
     onRemove,
+    onInvite,
     loading = false,
     class: className = '',
     revenueShareByUser,
@@ -52,24 +66,6 @@
   // Confirm dialog state for member removal
   let showRemoveConfirm = $state(false);
   let pendingRemoveUserId = $state<string | null>(null);
-
-  /**
-   * Map role to Badge variant
-   */
-  function getRoleVariant(
-    role: string
-  ): 'success' | 'warning' | 'neutral' | 'info' {
-    switch (role) {
-      case 'owner':
-        return 'warning';
-      case 'admin':
-        return 'info';
-      case 'creator':
-        return 'success';
-      default:
-        return 'neutral';
-    }
-  }
 
   /**
    * Get localized role text
@@ -116,6 +112,13 @@
   }
 </script>
 
+<!-- Passed to EmptyState only when a caller supplied `onInvite`; EmptyState
+     renders its action wrapper whenever the SNIPPET is present, so gating
+     inside the snippet would leave an empty margin behind. -->
+{#snippet inviteAction()}
+  <Button size="sm" onclick={onInvite}>{m.team_invite()}</Button>
+{/snippet}
+
 {#if loading}
   <div class="loading-state {className}">
     <div class="skeleton-row"></div>
@@ -123,10 +126,21 @@
     <div class="skeleton-row"></div>
   </div>
 {:else if isEmpty}
+  <!-- Keep the `.empty-state` class: team.spec.ts locates it as one of the two
+       terminal states of the members query. The empty state now carries the
+       invite CTA — this is the one page whose entire purpose is inviting
+       people, and it previously offered nothing to click. -->
   <div class="empty-state {className}">
-    <EmptyState title={m.team_empty()} icon={UsersIcon} />
+    <EmptyState
+      title={m.team_empty()}
+      icon={UsersIcon}
+      action={onInvite ? inviteAction : undefined}
+    />
   </div>
 {:else}
+  <!-- No `overflow-x` here: Table.Root already emits `.table-container` with
+       `overflow: auto`, and this box sits inside `.members-section`'s
+       `overflow: hidden`, so the outer one could never scroll anyway. -->
   <div class="table-wrapper {className}">
     <Table.Root>
       <Table.Header>
@@ -143,6 +157,7 @@
       </Table.Header>
       <Table.Body>
         {#each members as member (member.userId)}
+          {@const memberLabel = member.name ?? member.email}
           <Table.Row>
             <Table.Cell>
               <div class="member-name-cell">
@@ -167,9 +182,32 @@
               {member.email}
             </Table.Cell>
             <Table.Cell>
-              <Badge variant={getRoleVariant(member.role)}>
-                {getRoleText(member.role)}
-              </Badge>
+              {#if member.role === 'owner'}
+                <!-- Neutral, not a status variant. The old mapping painted
+                     owner as `warning` and admin as `info`, which borrowed
+                     alert semantics for a role taxonomy: an amber "Owner"
+                     chip reads as a problem to fix. -->
+                <Badge variant="neutral">{getRoleText(member.role)}</Badge>
+              {:else}
+                <!-- Per-row accessible name. Select renders its `placeholder`
+                     as an sr-only <label for> when no visible `label` is
+                     given, and the trigger's visible text comes from the
+                     SELECTED option, which is always set here — so this names
+                     the control without adding a visible label. Without it the
+                     AT tree carried 7 identical "Change Role" comboboxes on
+                     studio-alpha (15 on of-blood-and-bones), the same defect
+                     already fixed for Remove.
+                     TODO(i18n): `team_change_role_for` = "Change role for
+                     {name}" — listed for the orchestrator; en.json belongs to
+                     another worktree this round. -->
+                <Select
+                  class="role-select"
+                  options={roleOptions}
+                  value={member.role}
+                  onValueChange={(val) => handleRoleChange(member.userId, val)}
+                  placeholder={`Change role for ${memberLabel}`}
+                />
+              {/if}
             </Table.Cell>
             <Table.Cell class="date-cell">
               {formatDate(member.joinedAt)}
@@ -180,17 +218,24 @@
                 <div class="rev-cell">
                   {#if rs?.active}
                     <Badge variant="success">{rs.label}</Badge>
-                  {:else if member.role === 'owner'}
-                    <span class="rev-none">—</span>
-                  {:else}
-                    <span class="rev-none">No agreement</span>
-                  {/if}
-                  {#if member.role !== 'owner'}
                     <a
                       class="rev-link"
                       href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
                     >
-                      {rs?.active ? 'Manage' : 'Set up'}
+                      Manage
+                    </a>
+                  {:else if member.role === 'owner'}
+                    <span class="rev-none">—</span>
+                  {:else}
+                    <!-- One affordance, not two. The row used to print "No
+                         agreement" AND a "Set up" link; the absence of a
+                         badge already says there is no agreement, so 15
+                         consecutive rows were spending two labels on it. -->
+                    <a
+                      class="rev-link"
+                      href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
+                    >
+                      Set up
                     </a>
                   {/if}
                 </div>
@@ -198,21 +243,13 @@
             {/if}
             <Table.Cell>
               {#if member.role !== 'owner'}
-                <div class="actions">
-                  <Select
-                    options={roleOptions}
-                    value={member.role}
-                    onValueChange={(val) => handleRoleChange(member.userId, val)}
-                    placeholder={m.team_change_role()}
-                  />
-                  <button
-                    class="remove-btn"
-                    onclick={() => handleRemove(member.userId)}
-                    aria-label="{m.team_remove()} {member.name ?? member.email}"
-                  >
-                    {m.team_remove()}
-                  </button>
-                </div>
+                <button
+                  class="remove-btn"
+                  onclick={() => handleRemove(member.userId)}
+                  aria-label="{m.team_remove()} {memberLabel}"
+                >
+                  {m.team_remove()}
+                </button>
               {/if}
             </Table.Cell>
           </Table.Row>
@@ -233,10 +270,6 @@
 />
 
 <style>
-  .table-wrapper {
-    overflow-x: auto;
-  }
-
   .member-name-cell {
     display: flex;
     align-items: center;
@@ -274,17 +307,11 @@
     white-space: nowrap;
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
   /* The role Select carries no width of its own — `.select-container` is
      `width: 100%` — so in a full-width studio column it stretches across the
      cell and reads as unconsidered. Cap it to the inline-control measure.
      `:global` is required: the class belongs to Select's own style scope. */
-  .actions :global(.select-container) {
+  .table-wrapper :global(.role-select) {
     max-width: var(--control-width-md);
   }
 
@@ -299,16 +326,24 @@
     color: var(--color-text-secondary);
   }
 
+  /* `--color-text`, NOT `--color-interactive`. The latter resolves to the org's
+     raw `--brand-color` under `[data-org-brand]`, i.e. arbitrary user input
+     painted as 12px text: measured 3.22:1 on studio-alpha dark, 4.24:1 on
+     of-blood-and-bones dark and 4.29:1 light — three AA failures against the
+     4.5:1 that applies at this size, and unbounded, because a lighter brand
+     makes it worse. The permanent underline carries the affordance instead;
+     this is the pattern PageHeader already established, where brand ink is
+     confined to a decorative rule that has no contrast requirement. */
   .rev-link {
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
-    text-decoration: none;
+    color: var(--color-text);
+    text-decoration: underline;
     white-space: nowrap;
   }
 
   .rev-link:hover {
-    text-decoration: underline;
+    color: var(--color-text-secondary);
   }
 
   .rev-link:focus-visible {
