@@ -10,6 +10,20 @@
   - Revenue share  → /studio/monetisation/revenue-share (creator agreements)
   - Pricing FAQ    → /studio/monetisation/pricing-faq   (public pricing-page FAQ)
 
+  MASTHEAD CONTRACT — this layout and its three leaves used to fight over the
+  role, stacking 402px of wayfinding before the first content on revenue-share
+  (kicker MONEY → h1 Monetisation → active tab → kicker ‹MONETISATION → h2).
+  The division now is:
+
+    layout : kicker + the single <h1> + a ONE-LINE hub lede + the tab track
+    leaf   : PageHeader variant="compact" (an <h2>) + its own lede, NO kicker
+
+  A leaf must not render a `kicker`/`kickerHref`. The back-link pointed at
+  `/studio/monetisation` — the tab strip 24px above it — so it was a fourth
+  device restating what the active tab already says. And all THREE leaves carry
+  the compact masthead: the Subscriptions tab used to render none, so moving
+  between tabs shifted the page structure under the reader.
+
   @prop {Snippet} children - Child route content
 -->
 <script lang="ts">
@@ -38,23 +52,23 @@
           : null
   );
 
-  const tabs = [
+  const tabs = $derived([
     {
       value: 'subscriptions',
       href: '/studio/monetisation',
-      label: 'Subscriptions',
+      label: m.monetisation_subscriptions_title(),
     },
     {
       value: 'revenue-share',
       href: '/studio/monetisation/revenue-share',
-      label: 'Revenue share',
+      label: m.monetisation_revenue_share_title(),
     },
     {
       value: 'pricing-faq',
       href: '/studio/monetisation/pricing-faq',
-      label: 'Pricing FAQ',
+      label: m.monetisation_pricing_faq_title(),
     },
-  ];
+  ]);
 </script>
 
 <div class="monetisation-hub">
@@ -65,16 +79,24 @@
     divider={false}
   />
 
+  <!-- These are ROUTE LINKS, not ARIA tabs. They used to claim
+       `role="tablist"` / `role="tab"` / `aria-selected` without implementing any
+       of that contract: no `aria-controls`, no `role="tabpanel"` on the content
+       below, no roving tabindex and no arrow-key handling — all three sat in the
+       natural tab order, which is the opposite of the tablist keyboard model.
+       `role="tab"` also overrode the native link role, so AT announced "tab, 1
+       of 3, selected" and the user expected an in-page panel swap and got a full
+       document navigation. `<nav aria-label>` + `aria-current="page"` is the
+       correct and sufficient signal for route-based navigation. Purely
+       subtractive: every `href` is unchanged. -->
   <nav class="monetisation-hub__tabs" aria-label={m.monetisation_title()}>
-    <div class="tabs-list" role="tablist">
+    <div class="tabs-list">
       {#each tabs as tab (tab.value)}
         <a
           href={tab.href}
           class="tab-trigger"
           class:active={activeTab === tab.value}
           class:loading={loadingTab === tab.value}
-          role="tab"
-          aria-selected={activeTab === tab.value}
           aria-current={activeTab === tab.value ? 'page' : undefined}
         >
           {tab.label}
@@ -133,8 +155,14 @@
     border-bottom-color: var(--color-border-strong);
   }
 
+  /* The active tab's TEXT takes `--color-text`; the brand colour stays on the
+     2px underline. `--color-interactive` is a brand fill, and as 15px text it
+     measured 3.47–3.85:1 in every dark theme — under AA, on the label that
+     tells you where you are. An underline is a non-text indicator (3:1), so
+     the brand still marks the tab; the ink inverts to the page's own, which is
+     the maximum-contrast side of the pair. */
   .tab-trigger.active {
-    color: var(--color-interactive);
+    color: var(--color-text);
     border-bottom-color: var(--color-interactive);
   }
 
