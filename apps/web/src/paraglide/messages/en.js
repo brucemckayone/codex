@@ -3779,6 +3779,30 @@ export const monetisation_tiers_delete_confirm = () => `Are you sure you want to
 
 
 /**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_delete_confirm_named = (params) => `Delete "${params.name}"? Subscribers on this tier keep access until their period ends. This cannot be undone.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_edit_aria = (params) => `Edit ${params.name}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_delete_aria = (params) => `Delete ${params.name}`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -10647,6 +10671,30 @@ export const money_setup_stripe_unknown_cta = () => `Retry`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const money_setup_stripe_unknown_link_cta = () => `Check payment settings`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_stripe_unknown_ok = () => `Stripe confirmed this account — charges and payouts are on.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const money_setup_stripe_unknown_error = () => `Still couldn't reach Stripe. The status below may be out of date; try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const money_setup_no_tiers_title = () => `Payments are live — now add a tier`
 
 
@@ -10720,14 +10768,6 @@ export const monetisation_connect_disabled = () => `Disabled by Stripe`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_connect_unverified = () => `Status unverified`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const monetisation_connect_recheck = () => `Re-check with Stripe`
 
 
 /**
@@ -10856,22 +10896,6 @@ export const monetisation_tier_subscribers = (params) => `${params.count} subscr
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_subscribers_one = () => `1 subscriber`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const monetisation_stats_view_subscribers = () => `View subscribers`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const monetisation_stats_average = () => `Average per subscriber`
 
 
 /**
@@ -11019,11 +11043,43 @@ export const subscribers_status_cancelled = () => `Cancelled`
 
 
 /**
- * @param {{ reason: NonNullable<unknown> }} params
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const subscribers_load_error = (params) => `Could not load subscribers: ${params.reason}`
+export const subscribers_load_error = () => `We couldn't load your subscribers. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_live_loading = () => `Loading subscribers…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_live_error = () => `Subscribers couldn't be loaded.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_live_count = (params) => `${params.count} subscribers shown`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_live_count_one = () => `1 subscriber shown`
 
 
 /**
@@ -11064,6 +11120,14 @@ export const subscribers_empty_title = () => `No subscribers yet`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const subscribers_empty_description = () => `Your tiers are live and ready to take payments. Anyone who subscribes will appear here with what they pay and when they renew.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscribers_empty_pending_setup_description = () => `Once the setup above is done, everyone who subscribes appears here with their tier, what they pay and when they renew.`
 
 
 /**
@@ -11243,35 +11307,35 @@ export const monetisation_faq_cancel = () => `Cancel`
 
 
 /**
- * 
+ * @param {{ question: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_faq_move_up = () => `Move up`
+export const monetisation_faq_edit_aria = (params) => `Edit "${params.question}"`
 
 
 /**
- * 
+ * @param {{ question: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_faq_move_down = () => `Move down`
+export const monetisation_faq_delete_aria = (params) => `Delete "${params.question}"`
 
 
 /**
- * 
+ * @param {{ question: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_faq_edit_aria = () => `Edit question`
+export const monetisation_faq_move_up_aria = (params) => `Move "${params.question}" up`
 
 
 /**
- * 
+ * @param {{ question: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const monetisation_faq_delete_aria = () => `Delete question`
+export const monetisation_faq_move_down_aria = (params) => `Move "${params.question}" down`
 
 
 /**
@@ -11504,6 +11568,30 @@ export const monetisation_revshare_view_thread = () => `View thread`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_revshare_terminate = () => `Terminate`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_terminate_title = () => `Terminate this agreement?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_terminate_confirm = () => `The split stops applying to revenue earned from now on. Earnings already recorded are unaffected. You can propose a new split afterwards.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, type: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_revshare_terminate_target = (params) => `${params.name} — ${params.type} revenue`
 
 
 /**

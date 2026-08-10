@@ -217,12 +217,16 @@
             <p class="faq-item-question">{item.question}</p>
             <p class="faq-item-answer">{item.answer}</p>
           </div>
+          <!-- Every label names its question. The four non-interpolating keys
+               these replace produced N identical AT elements per action ("Move
+               up, Move up, Move up…"), so the buttons list could not tell you
+               which row anything acted on. -->
           <div class="faq-item-actions">
             <button
               class="icon-btn"
               onclick={() => moveUp(index)}
               disabled={index === 0}
-              aria-label={m.monetisation_faq_move_up()}
+              aria-label={m.monetisation_faq_move_up_aria({ question: item.question })}
             >
               <ChevronUpIcon size={14} />
             </button>
@@ -230,21 +234,21 @@
               class="icon-btn"
               onclick={() => moveDown(index)}
               disabled={index === items.length - 1}
-              aria-label={m.monetisation_faq_move_down()}
+              aria-label={m.monetisation_faq_move_down_aria({ question: item.question })}
             >
               <ChevronDownIcon size={14} />
             </button>
             <button
               class="icon-btn"
               onclick={() => editExisting(item)}
-              aria-label={m.monetisation_faq_edit_aria()}
+              aria-label={m.monetisation_faq_edit_aria({ question: item.question })}
             >
               <EditIcon size={14} />
             </button>
             <button
               class="icon-btn icon-btn--danger"
               onclick={() => askDelete(item)}
-              aria-label={m.monetisation_faq_delete_aria()}
+              aria-label={m.monetisation_faq_delete_aria({ question: item.question })}
             >
               <TrashIcon size={14} />
             </button>

@@ -34,7 +34,7 @@
   import RevenueSplitPie from '$lib/components/agreements/RevenueSplitPie.svelte';
   import type { RevenueSplitSlice } from '$lib/components/agreements/types';
   import * as m from '$paraglide/messages';
-  import { PageHeader } from '$lib/components/ui';
+  import { Alert, Button, PageHeader } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -50,6 +50,7 @@
     withdrawAgreement,
   } from '$lib/remote/agreements.remote';
   import { getOrgMembers } from '$lib/remote/org.remote';
+  import { logger } from '$lib/observability';
 
   let { data } = $props();
 
@@ -448,21 +449,60 @@
     ]);
   }
 
-  // ─── Terminate handler ────────────────────────────────────────────────────
+  // ─── Terminate (confirmed) ────────────────────────────────────────────────
+  //
+  // Terminating ends a LIVE financial commitment governing how a creator's
+  // earnings are split. It used to fire on one click with no confirmation of any
+  // kind, which WCAG 3.3.4 (Error Prevention — Legal, Financial, Data) does not
+  // allow: a financial submission has to be reversible, checked or confirmed,
+  // and this is none of the three. It also stayed enabled through the whole
+  // await, so a second click on a slow connection fired a second terminate.
+  // Both are handled by routing it through a confirm dialog whose action is a
+  // `ui/Button` (disabled + spinner + aria-busy while it runs) — the same shape
+  // the pricing-FAQ delete confirmation uses.
 
-  async function handleTerminate(agreementId: string) {
+  let terminateOpen = $state(false);
+  let terminateLoading = $state(false);
+  let terminateTarget = $state<{
+    id: string;
+    creatorName: string;
+    revenueLabel: string;
+  } | null>(null);
+
+  function askTerminate(
+    agreementId: string,
+    creatorName: string,
+    revenueLabel: string
+  ) {
+    terminateTarget = { id: agreementId, creatorName, revenueLabel };
+    terminateOpen = true;
+  }
+
+  async function confirmTerminate() {
+    if (!terminateTarget) return;
+    terminateLoading = true;
     try {
-      await terminateAgreement({ agreementId });
+      await terminateAgreement({ agreementId: terminateTarget.id });
       toast.success(m.monetisation_revshare_terminated());
+      terminateOpen = false;
+      terminateTarget = null;
       await Promise.all([
-      agreementsQuery?.refresh(),
-      pendingProposalsQuery?.refresh(),
-    ]);
+        agreementsQuery?.refresh(),
+        pendingProposalsQuery?.refresh(),
+      ]);
     } catch (err) {
+      // Fixed copy in the toast; the real text goes to the logger, which
+      // redacts. A terminate failure is a money-path failure.
       toast.error(
         m.monetisation_revshare_terminate_error(),
-        err instanceof Error ? err.message : m.monetisation_revshare_unknown_error()
+        m.monetisation_revshare_unknown_error()
       );
+      logger.error('studio/revenue-share: terminate failed', {
+        organizationId: orgId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      terminateLoading = false;
     }
   }
 
@@ -801,7 +841,7 @@
                 <button
                   type="button"
                   class="revenue-share-page__btn revenue-share-page__btn--danger"
-                  onclick={() => handleTerminate(agreement.id)}
+                  onclick={() => askTerminate(agreement.id, creatorName, revLabel)}
                 >
                   {m.monetisation_revshare_terminate()}
                 </button>
@@ -834,6 +874,49 @@
       mode="counter"
       onSubmit={handleCounterSubmit}
     />
+
+    <!-- ─── Terminate confirmation ────────────────────────────────────── -->
+    <Dialog.Root bind:open={terminateOpen}>
+      <Dialog.Content size="sm">
+        <Dialog.Header>
+          <Dialog.Title>{m.monetisation_revshare_terminate_title()}</Dialog.Title>
+        </Dialog.Header>
+        <Dialog.Body>
+          <p class="revenue-share-page__confirm">
+            {m.monetisation_revshare_terminate_confirm()}
+          </p>
+          {#if terminateTarget}
+            <!-- Echo the target, so there is something to REVIEW: which
+                 creator, and which revenue stream. -->
+            <Alert variant="info">
+              {m.monetisation_revshare_terminate_target({
+                name: terminateTarget.creatorName,
+                type: terminateTarget.revenueLabel,
+              })}
+            </Alert>
+          {/if}
+        </Dialog.Body>
+        <Dialog.Footer>
+          <Button
+            variant="ghost"
+            onclick={() => {
+              terminateOpen = false;
+              terminateTarget = null;
+            }}
+            disabled={terminateLoading}
+          >
+            {m.common_cancel()}
+          </Button>
+          <Button
+            variant="destructive"
+            onclick={confirmTerminate}
+            loading={terminateLoading}
+          >
+            {m.monetisation_revshare_terminate()}
+          </Button>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
 
     <!-- ─── Thread review dialog ──────────────────────────────────────── -->
     <Dialog.Root open={threadDialogOpen} onOpenChange={handleThreadOpenChange}>
@@ -1040,10 +1123,19 @@
     flex-wrap: wrap;
   }
 
+  /* `--color-text-secondary`, not `--color-text-muted`: muted never clears
+     4.5:1 in any org × theme (2.52:1 on the platform light theme) and this
+     label renders 16 times on of-blood-and-bones at 12px. */
   .revenue-share-page__roster-prefix {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     margin-inline-end: var(--space-1);
+  }
+
+  .revenue-share-page__confirm {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
   }
 
   .revenue-share-page__cards-grid {

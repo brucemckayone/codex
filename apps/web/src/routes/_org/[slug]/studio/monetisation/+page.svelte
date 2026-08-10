@@ -37,7 +37,7 @@
   import { TrashIcon, EditIcon, PlusIcon, CheckCircleIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     listTiers,
     getConnectStatus,
@@ -54,7 +54,12 @@
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import { isConnectReady, moneyReadiness } from '$lib/utils/connect-readiness';
-  import type { ConnectRequirements, SubscriptionTier } from '$lib/types';
+  import type {
+    ConnectRequirements,
+    SubscriptionStats,
+    SubscriptionTier,
+  } from '$lib/types';
+  import { logger } from '$lib/observability';
 
   /** Shape returned by SvelteKit's query() when called client-side */
   interface QueryResult<T> {
@@ -137,12 +142,17 @@
     (settingsQuery as QueryResult<{ features?: { enableSubscriptions?: boolean } }> | null)
       ?.current?.features?.enableSubscriptions ?? false
   );
+  // `SubscriptionStats` from `$lib/types` — the same contract the service
+  // returns (`packages/subscription`, `tierBreakdown: TierBreakdown[]`). The
+  // inline shape this replaces declared `tierBreakdown: unknown[]` and then
+  // cast it straight back in `subscribersByTier`, duplicating the contract with
+  // no compiler link to its producer.
   const stats = $derived(
-    (statsQuery as QueryResult<{
-      totalSubscribers: number; activeSubscribers: number;
-      mrrCents: number; tierBreakdown: unknown[];
-    }> | null)?.current ?? {
-      totalSubscribers: 0, activeSubscribers: 0, mrrCents: 0, tierBreakdown: [],
+    (statsQuery as QueryResult<SubscriptionStats> | null)?.current ?? {
+      totalSubscribers: 0,
+      activeSubscribers: 0,
+      mrrCents: 0,
+      tierBreakdown: [],
     }
   );
 
@@ -186,9 +196,7 @@
       a second card restating the whole stats grid. */
   const subscribersByTier = $derived.by(() => {
     const map = new Map<string, { count: number; mrrCents: number }>();
-    for (const row of stats.tierBreakdown as Array<{
-      tierId: string; subscriberCount: number; mrrCents: number;
-    }>) {
+    for (const row of stats.tierBreakdown) {
       map.set(row.tierId, {
         count: row.subscriberCount,
         mrrCents: row.mrrCents,
@@ -249,6 +257,9 @@
       the "payments are live — add your first tier" hand-off. */
   let connectJustWentLive = $state(false);
   let recheckingStatus = $state(false);
+  /** Outcome of the last explicit Stripe re-check, for the live region. */
+  let recheckOutcome = $state<'ok' | 'failed' | null>(null);
+  let recheckStatusNode = $state<HTMLElement | null>(null);
 
   // Auto-sync Connect status when returning from Stripe onboarding.
   // Without a webhook tunnel, the account.updated event never arrives in local dev.
@@ -305,20 +316,53 @@
   });
 
   /**
+   * Every money path on this page funnels its real error here rather than into
+   * the DOM. `ObservabilityClient` redacts (emails in production, secrets
+   * always); the surface only ever renders a fixed i18n string.
+   */
+  function logRawError(what: string, error: unknown) {
+    logger.error(`studio/monetisation: ${what}`, {
+      organizationId: orgId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  /**
    * Re-check status against Stripe. Only ever on an explicit click — this hits
    * the live Stripe API, so firing it on load would turn every page view into a
    * third-party round trip.
+   *
+   * The outcome goes to `recheckOutcome`, a PERSISTENT live region beside the
+   * prompt, not to `connectError` several hundred pixels below inside the
+   * Connect card. Two reasons this had to change:
+   *
+   *   - on success `readiness` recomputes, `showReadinessPrompt` goes false and
+   *     the Alert unmounts, taking the focused button with it: focus fell to
+   *     <body> and nothing anywhere stated the result, so an AT user heard no
+   *     response at all to their own click;
+   *   - on failure it set `monetisation_connect_dashboard_error` — "Could not
+   *     open the Stripe dashboard" — which is not what a status re-check does.
    */
   async function handleRecheckStatus() {
     if (!orgId) return;
     recheckingStatus = true;
+    recheckOutcome = null;
     try {
       await syncConnectStatus({ organizationId: orgId });
       await getConnectStatus(orgId).refresh();
-    } catch {
-      connectError = m.monetisation_connect_dashboard_error();
+      recheckOutcome = 'ok';
+    } catch (error) {
+      recheckOutcome = 'failed';
+      logRawError('connect status re-check failed', error);
     } finally {
       recheckingStatus = false;
+      // Focus follows the OUTCOME, in both directions. On success the prompt
+      // unmounts and would drop focus to <body>; on failure the Button's own
+      // `loading` disabled it mid-flight, which ALSO drops focus to <body>
+      // (measured). Either way the answer is in this region, so put the caret
+      // on the answer.
+      await tick();
+      recheckStatusNode?.focus();
     }
   }
 
@@ -405,7 +449,14 @@
       tierDialogOpen = false;
       await invalidateAll();
     } catch (error) {
-      tierFormError = error instanceof Error ? error.message : m.monetisation_tier_save_error();
+      // NEVER the raw message. Tier writes create Stripe products and prices,
+      // so `error.message` can be a Stripe string carrying an `acct_…` id or an
+      // email — and every one of these renders inside `<Alert variant="error">`,
+      // which sets role="alert", so it would be spoken verbatim and swept into
+      // any DOM-scraping error pipeline. Generic copy in the DOM, real error to
+      // the logger (which redacts).
+      tierFormError = m.monetisation_tier_save_error();
+      logRawError('tier save failed', error);
     } finally {
       tierFormLoading = false;
     }
@@ -421,7 +472,8 @@
       deletingTier = null;
       await invalidateAll();
     } catch (error) {
-      deleteError = error instanceof Error ? error.message : m.monetisation_tier_delete_error();
+      deleteError = m.monetisation_tier_delete_error();
+      logRawError('tier delete failed', error);
     } finally {
       deleteLoading = false;
     }
@@ -439,7 +491,8 @@
       await updateSubscriptionFeature({ orgId, enabled: newValue });
       await invalidateAll();
     } catch (error) {
-      featureToggleError = error instanceof Error ? error.message : m.monetisation_feature_toggle_error();
+      featureToggleError = m.monetisation_feature_toggle_error();
+      logRawError('subscription feature toggle failed', error);
     } finally {
       featureToggleLoading = false;
     }
@@ -481,7 +534,8 @@
       });
       window.location.href = result.onboardingUrl;
     } catch (error) {
-      connectError = error instanceof Error ? error.message : m.monetisation_connect_onboard_error();
+      connectError = m.monetisation_connect_onboard_error();
+      logRawError('connect onboarding link failed', error);
       connectLoading = false;
     }
   }
@@ -493,10 +547,16 @@
       const result = await getConnectDashboardLink({ organizationId: orgId });
       window.location.href = result.url;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : m.monetisation_connect_dashboard_error();
-      connectError = msg.includes('test') || msg.includes('seed') || msg === 'API Error'
-        ? m.monetisation_connect_dashboard_test_error()
-        : msg;
+      // The seed-account branch stays — it maps a KNOWN condition to fixed
+      // copy, which is the correct shape. What went is the `: msg` fallback,
+      // which put a raw Stripe Connect error (account ids, emails) straight
+      // into the DOM.
+      const raw = error instanceof Error ? error.message : '';
+      connectError =
+        raw.includes('test') || raw.includes('seed') || raw === 'API Error'
+          ? m.monetisation_connect_dashboard_test_error()
+          : m.monetisation_connect_dashboard_error();
+      logRawError('connect dashboard link failed', error);
       connectLoading = false;
     }
   }
@@ -564,6 +624,36 @@
     />
   {/if}
 
+  <!-- OUTSIDE the {#if} above, deliberately, and mounted from first paint. A
+       successful re-check unmounts the prompt, so a region nested inside it
+       could never announce the outcome of the click that dismissed it — and a
+       region inserted at the same instant as its own text is not announced
+       either. This one persists and its TEXT changes. While it has nothing to
+       say it carries `.sr-only`, so it stays in the accessibility tree without
+       contributing a `--space-6` flex gap to the page. `tabindex="-1"` so the
+       handler can hand focus here instead of dropping it to <body>. -->
+  <div
+    bind:this={recheckStatusNode}
+    class="recheck-status"
+    class:sr-only={recheckOutcome === null}
+    role="status"
+    aria-live="polite"
+    aria-busy={recheckingStatus}
+    tabindex="-1"
+  >
+    {#if recheckOutcome === 'ok'}
+      <Alert variant="success" role="presentation">
+        {m.money_setup_stripe_unknown_ok()}
+      </Alert>
+    {:else if recheckOutcome === 'failed'}
+      <!-- `role="presentation"` — the wrapper above owns the announcement, so
+           Alert's own role="alert" would say it twice. -->
+      <Alert variant="error" role="presentation">
+        {m.money_setup_stripe_unknown_error()}
+      </Alert>
+    {/if}
+  </div>
+
   <!-- Stripe Connect Card -->
   <Card.Root>
     <Card.Header>
@@ -572,13 +662,29 @@
         {#if dataLoading}
           <Skeleton width="var(--space-20)" height="var(--space-6)" class="skeleton-circle" />
         {:else}
-          <Badge
-            variant={connectStatusVariant(connectStatus.status)}
-            data-testid="connect-status-badge"
-            data-connect-status={connectStatus.status ?? 'not_connected'}
-          >
-            {connectStatusLabel(connectStatus.status)}
-          </Badge>
+          <!-- `stripe_unknown` means the stored status is `active` but the live
+               requirements fetch failed, so the badge used to assert a
+               confident green "Active" directly under a prompt saying we could
+               not reach Stripe. Same fact, two answers. The badge now states
+               what we actually know. `data-connect-status` still carries the
+               raw status for tests and debugging. -->
+          {#if readiness.state === 'stripe_unknown'}
+            <Badge
+              variant="neutral"
+              data-testid="connect-status-badge"
+              data-connect-status={connectStatus.status ?? 'not_connected'}
+            >
+              {m.monetisation_connect_unverified()}
+            </Badge>
+          {:else}
+            <Badge
+              variant={connectStatusVariant(connectStatus.status)}
+              data-testid="connect-status-badge"
+              data-connect-status={connectStatus.status ?? 'not_connected'}
+            >
+              {connectStatusLabel(connectStatus.status)}
+            </Badge>
+          {/if}
         {/if}
       </div>
       <Card.Description>{m.monetisation_connect_description()}</Card.Description>
@@ -811,11 +917,26 @@
                   {/if}
                 </span>
               </div>
+              <!-- Names the tier, like the Switch above. `monetisation_tiers_edit`
+                   does not interpolate, so with three tiers the AT elements list
+                   read "Edit Tier, Edit Tier, Edit Tier" and nothing said which
+                   paid tier any button acted on. The short labels stay in use as
+                   the dialog titles. -->
               <div class="tier-actions">
-                <Button variant="ghost" size="sm" onclick={() => openEditTier(tier)} aria-label={m.monetisation_tiers_edit()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => openEditTier(tier)}
+                  aria-label={m.monetisation_tiers_edit_aria({ name: tier.name })}
+                >
                   <EditIcon size={14} />
                 </Button>
-                <Button variant="ghost" size="sm" onclick={() => openDeleteTier(tier)} aria-label={m.monetisation_tiers_delete()}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onclick={() => openDeleteTier(tier)}
+                  aria-label={m.monetisation_tiers_delete_aria({ name: tier.name })}
+                >
                   <TrashIcon size={14} />
                 </Button>
               </div>
@@ -918,7 +1039,14 @@
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
     <Dialog.Body>
-      <p class="delete-confirm">{m.monetisation_tiers_delete_confirm()}</p>
+      <!-- Names the tier. WCAG 3.3.4 wants something to REVIEW before a
+           revenue-bearing object is destroyed, and neither the trigger, the
+           title nor this sentence used to identify which tier was about to go. -->
+      <p class="delete-confirm">
+        {deletingTier
+          ? m.monetisation_tiers_delete_confirm_named({ name: deletingTier.name })
+          : m.monetisation_tiers_delete_confirm()}
+      </p>
       {#if deleteError}
         <Alert variant="error">{deleteError}</Alert>
       {/if}
@@ -1006,8 +1134,16 @@
     font-size: var(--text-sm);
   }
 
+  /* `--color-status-success-text`, NOT the raw `--color-success-600`. That token
+     is a fixed sRGB literal (`#16a34a`) with no `[data-theme]` and no
+     `[data-org-brand]` remap, so it painted the same green in all six org ×
+     theme combos: 3.30:1 on white, 2.89:1 on the of-blood-and-bones cream —
+     both AA failures for `--text-sm` body copy. The status triple is
+     color-mixed back toward the page's own ink, so it tracks every surface.
+     Same conversion this pass already made in AgreementCard's pills and the
+     pricing-FAQ danger button; this selector was the last holdout. */
   .status-enabled {
-    color: var(--color-success-600);
+    color: var(--color-status-success-text);
   }
 
   .connect-actions {
@@ -1269,11 +1405,16 @@
     flex-shrink: 0;
   }
 
+  /* `--color-text-secondary`, not `--color-text-muted`: muted measures 2.52:1 on
+     the platform light theme and never clears 4.5:1 in any org × theme, and
+     this is a NEW 12px price fact. Secondary derives back toward the page ink.
+     (`.tier-interval` below is a pre-existing consumer of the same token —
+     systemic, ~320 call sites, tracked in Codex-rj4xm.) */
   .tier-saving {
     display: block;
     font-size: var(--text-xs);
     font-weight: var(--font-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .tier-price {

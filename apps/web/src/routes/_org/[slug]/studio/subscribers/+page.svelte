@@ -44,6 +44,7 @@
   } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
+  import { logger } from '$lib/observability';
   import type { SubscriberListItem } from '@codex/subscription';
   import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
   import {
@@ -177,6 +178,16 @@
     )
   );
 
+  // The real text is logged (redacted by ObservabilityClient), never rendered.
+  $effect(() => {
+    if (queryError) {
+      logger.error('studio/subscribers list query failed', {
+        organizationId: orgId,
+        reason: queryError,
+      });
+    }
+  });
+
   const items = $derived<SubscriberRow[]>(subsData?.items ?? []);
   const pagination = $derived(subsData?.pagination);
   const isEmpty = $derived(!loading && items.length === 0);
@@ -196,6 +207,16 @@
       filter is what emptied the list. It used to offer to filter nothing. */
   const showFilters = $derived(!loading && (items.length > 0 || isFiltered));
   const showStats = $derived(!loading && stats.totalSubscribers > 0);
+
+  /** Text of the persistent live region — see the markup comment above it. */
+  const liveStatus = $derived.by(() => {
+    if (queryError) return m.subscribers_live_error();
+    if (loading) return m.subscribers_live_loading();
+    if (items.length === 0) return m.subscribers_empty_title();
+    return items.length === 1
+      ? m.subscribers_live_count_one()
+      : m.subscribers_live_count({ count: String(items.length) });
+  });
 
   const statBand = $derived<MoneyStat[]>([
     { label: m.subscribers_stat_active(), value: stats.activeSubscribers },
@@ -410,11 +431,30 @@
       <MoneyStatBand stats={statBand} label={m.subscribers_meta_total()} />
     {/if}
 
+    <!-- ONE persistent live region, mounted OUTSIDE the branch chain below.
+         The skeleton used to carry `aria-live` itself, so the region's lifetime
+         was the state it described: it was created when loading started and
+         destroyed when the rows arrived, which is precisely the transition an
+         AT user needs announced and the one an unmounted node cannot announce.
+         It also held nothing but <Skeleton> boxes, so there was no text to
+         read. This node persists and its TEXT changes, which is what
+         `aria-live` actually reacts to — and it covers the chip-filter and
+         show-cancelled swaps too, which were silent as well. -->
+    <p class="sr-only" role="status" aria-live="polite" aria-busy={loading}>
+      {liveStatus}
+    </p>
+
     {#if queryError}
-      <Alert variant="error">{m.subscribers_load_error({ reason: queryError })}</Alert>
+      <!-- Fixed copy, never the server's text. `queryError` is the worker's
+           `HttpError.body.message`; this route reads subscription and Stripe
+           data, so that string can carry account ids or an email, and Alert
+           sets role="alert" — it would be spoken verbatim and swept into any
+           DOM-scraping error pipeline. The real error goes to the logger,
+           which redacts. -->
+      <Alert variant="error">{m.subscribers_load_error()}</Alert>
     {:else if loading}
       <!-- Six columns, matching the table that replaces it. -->
-      <div class="table-skeleton" aria-busy="true" aria-live="polite">
+      <div class="table-skeleton" aria-busy="true">
         <Skeleton width="100%" height="var(--space-10)" />
         {#each Array(5) as _, i (i)}
           <div class="table-skeleton-row">
@@ -430,13 +470,28 @@
     {:else if isEmpty}
       <!-- `size="lg"` — on two of three seeded orgs this IS the page, so it gets
            a real heading and a real measure instead of a 300px caption centred
-           in an 1808px column. The prerequisite chain (Stripe → tiers →
-           subscribers) is stated by MoneySetupPrompt above; these branches say
-           only what is true once the rails work. -->
+           in an 1808px column. `headingLevel={2}` because the PageHeader above
+           owns the <h1> and nothing else on this page is a heading: the default
+           <h3> made the outline h1 → h3.
+
+           ONE OWNER for the prerequisite chain. This used to render
+           `money_setup_stripe_missing_*` and `money_setup_no_tiers_*` — the
+           EXACT keys MoneySetupPrompt renders ~80px above — so a brand-new org
+           (Stripe blocking, zero subscribers: the first screen every real
+           customer sees) read the same two sentences twice, the second time
+           with no CTA. Worse, the blocking branch hardcoded the
+           `stripe_missing` copy for all four blocking states, so an org
+           mid-onboarding was told "set up payments before you can be paid" by
+           the panel while the prompt above it said "Stripe still needs a few
+           details" about an account that IS set up.
+
+           The prompt states the blocker and carries the action. This panel now
+           says only what the prompt cannot: what will appear here, and when. -->
       <div class="empty-panel">
         {#if isFiltered}
           <EmptyState
             size="lg"
+            headingLevel={2}
             title={m.subscribers_empty_filtered_title()}
             description={m.subscribers_empty_filtered_description()}
             icon={HeartIcon}
@@ -447,32 +502,23 @@
               </Button>
             {/snippet}
           </EmptyState>
-        {:else if readiness.blocking}
+        {:else if readiness.blocking || readiness.state === 'no_tiers'}
+          <!-- No CTA: the prompt above already owns the one next action, and a
+               second competing button is how the duplication started. -->
           <EmptyState
             size="lg"
-            title={m.money_setup_stripe_missing_title()}
-            description={m.money_setup_stripe_missing_description()}
+            headingLevel={2}
+            title={m.subscribers_empty_title()}
+            description={m.subscribers_empty_pending_setup_description()}
             icon={HeartIcon}
           />
-        {:else if readiness.state === 'no_tiers'}
-          <EmptyState
-            size="lg"
-            title={m.money_setup_no_tiers_title()}
-            description={m.money_setup_no_tiers_description()}
-            icon={HeartIcon}
-          >
-            {#snippet action()}
-              <ActionLink href="/studio/monetisation">
-                {m.money_setup_no_tiers_cta()}
-              </ActionLink>
-            {/snippet}
-          </EmptyState>
         {:else}
           <!-- Rails work, tiers exist, nobody has joined. The next useful action
                is to look at (or share) the page people actually subscribe from —
                "Manage tiers" pointed back at tiers that already exist. -->
           <EmptyState
             size="lg"
+            headingLevel={2}
             title={m.subscribers_empty_title()}
             description={m.subscribers_empty_description()}
             icon={HeartIcon}
@@ -691,9 +737,14 @@
     white-space: nowrap;
   }
 
+  /* `--color-text-secondary`, NOT `--color-text-muted`. Muted measures 2.52:1
+     on the platform light theme and ~4.3:1 on the branded orgs — under AA for
+     body copy at any size, and this is 12px. Secondary derives back toward the
+     page's own ink, so it clears AA in all three orgs × both themes. The
+     hierarchy here is already carried by size. */
   .amount-interval {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .date-cell {

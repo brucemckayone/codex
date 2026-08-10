@@ -25,7 +25,9 @@
     already ARE the destination pass `undefined` for `onAction` instead.
   @prop {() => void} [onAction] - Renders a button instead of a link. Used for
     the `stripe_unknown` retry, which must only ever hit Stripe on an explicit
-    click — never on page load.
+    click — never on page load. A page that does NOT pass it gets the LINK copy
+    (`linkCta`), never the button copy: a link labelled "Retry" that navigates
+    somewhere else retries nothing, which is a 2.4.4 link-purpose failure.
   @prop {boolean} [showTierPrompt=false] - Opt in to rendering the `no_tiers`
     nudge. Off by default so the monetisation page (which owns the Tiers card
     and its own empty state) does not say it twice.
@@ -72,7 +74,15 @@
       (state === 'no_tiers' && showTierPrompt)
   );
 
-  const copy = $derived.by(() => {
+  /** `linkCta` overrides `cta` when this renders as a link rather than a button. */
+  type PromptCopy = {
+    title: string;
+    description: string;
+    cta: string;
+    linkCta?: string;
+  };
+
+  const copy = $derived.by((): PromptCopy | null => {
     switch (state) {
       case 'stripe_missing':
         // The studio-alpha case gets its own headline: an org already taking
@@ -111,6 +121,9 @@
           title: m.money_setup_stripe_unknown_title(),
           description: m.money_setup_stripe_unknown_description(),
           cta: m.money_setup_stripe_unknown_cta(),
+          // A page without `onAction` cannot retry anything — it can only send
+          // the operator to the surface that owns the Connect state machine.
+          linkCta: m.money_setup_stripe_unknown_link_cta(),
         };
       case 'no_tiers':
         return {
@@ -137,7 +150,9 @@
             {copy.cta}
           </Button>
         {:else}
-          <ActionLink {href} variant="secondary" size="sm">{copy.cta}</ActionLink>
+          <ActionLink {href} variant="secondary" size="sm">
+            {copy.linkCta ?? copy.cta}
+          </ActionLink>
         {/if}
       </div>
     </div>
