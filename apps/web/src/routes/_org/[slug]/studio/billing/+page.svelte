@@ -35,7 +35,7 @@
   import { Alert, Card, EmptyState, PageHeader } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { portalSessionForm, getOrgRevenue, getTopContent } from '$lib/remote/billing.remote';
-  import { formatPrice, formatPriceCompact } from '$lib/utils/format';
+  import { formatPrice } from '$lib/utils/format';
   import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
 
   // Shape of the slice of `getOrgRevenue`'s payload this page reads. The
@@ -166,11 +166,22 @@
     <!-- Revenue Summary Cards. Period-labelled: an unqualified "Total Revenue"
          next to /studio/customers' all-time £174.88 reads as a bug in the
          money, which is the worst thing a billing page can look like.
-         i18n: billing_total_revenue / billing_total_purchases / billing_avg_order. -->
+
+         EXACT PENCE, not formatPriceCompact. The tile labelled
+         "Gross · last 30 days" sits ~200px above a ledger row with the
+         IDENTICAL label, and compact rounding made the pair disagree on every
+         real org — bones £83 vs £82.96, alpha £100 vs £99.94, beta £30 vs
+         £29.99. Two different numbers under one label is the same "reads as a
+         bug in the money" failure the period label was added to fix, so the
+         summary now agrees with the statement to the penny. `.stat-value` gets
+         tabular figures page-side (StatCard declares none) so the tile digits
+         sit on the same rhythm as the ledger they summarise.
+         i18n: billing_stat_gross_30d / billing_stat_purchases_30d /
+         billing_stat_avg_order / billing_stats_region_label. -->
     <section class="stats-grid" aria-label="Revenue summary">
       <StatCard
         label="Gross · last 30 days"
-        value={formatPriceCompact(totalRevenue)}
+        value={formatPrice(totalRevenue)}
         loading={revenueLoading}
       />
       <StatCard
@@ -180,15 +191,15 @@
       />
       <StatCard
         label="Average order"
-        value={formatPriceCompact(avgOrder)}
+        value={formatPrice(avgOrder)}
         loading={revenueLoading}
       />
     </section>
 
     <!-- ── Fee ledger: the page's subject ───────────────────────────────
-         Exact pence, not compact. This block is a statement of account, so
-         a rounded figure here would be a defect rather than a headline —
-         the tiles above stay compact to match KPICard/analytics/sales. -->
+         Exact pence. This block is a statement of account, so a rounded figure
+         here would be a defect rather than a headline — and the tiles above now
+         match it to the penny for the aggregate they share. -->
     <Card.Root>
       <Card.Header>
         <Card.Title level={2}>What Codex charged</Card.Title>
@@ -219,7 +230,14 @@
                   </span>
                 {/if}
               </dt>
-              <dd class="fee-ledger__deduction">−{formatPrice(platformFee)}</dd>
+              <!-- The U+2212 MINUS SIGN is the accounting convention and stays,
+                   but several screen readers do not announce it — on the page
+                   whose subject is "what Codex charged", the charge line would
+                   then be read out identically to the Gross line above it. The
+                   sr-only word is the non-glyph carrier. (The former
+                   `class="fee-ledger__deduction"` here had no rule anywhere in
+                   the file — dead attribute, removed.) -->
+              <dd><span class="sr-only">minus </span>−{formatPrice(platformFee)}</dd>
             </div>
             <div class="fee-ledger__row fee-ledger__row--total">
               <dt>Left with your organisation</dt>
@@ -310,11 +328,21 @@
       </p>
     {:else}
       <!-- billing_top_content_empty_description was written and never wired
-           (zero call sites outside en.json). -->
-      <EmptyState
-        title={m.billing_top_content_empty()}
-        description={m.billing_top_content_empty_description()}
-      />
+           (zero call sites outside en.json). It is rendered here in the `action`
+           slot rather than passed as `description`, because
+           EmptyState's `.empty-state__description` paints
+           `--color-text-muted` — measured 2.52:1 light / 3.19:1 dark, a WCAG AA
+           body-text failure that belongs to the primitive (Codex-227yr). An org
+           with no content purchases in the 30-day window is the COMMON state on
+           this page, so its only explanatory sentence must be legible. Same
+           correction the payouts empty state carries. -->
+      <EmptyState title={m.billing_top_content_empty()}>
+        {#snippet action()}
+          <p class="empty-note">
+            {m.billing_top_content_empty_description()}
+          </p>
+        {/snippet}
+      </EmptyState>
     {/if}
     </Card.Content>
   </Card.Root>
@@ -335,14 +363,28 @@
     </Card.Header>
     <Card.Content>
       <div class="portal-block">
-        <form {...portalSessionForm} class="portal-form">
+        <!-- No `class="portal-form"`: it had no rule in this file (dead
+             attribute; `.portal-block` owns the column layout). -->
+        <form {...portalSessionForm}>
           <Button type="submit" variant="secondary" loading={portalSessionForm.pending > 0}>
             {portalSessionForm.pending > 0 ? m.common_loading() : 'Open Stripe portal'}
           </Button>
         </form>
 
+        <!-- A FIXED sentence, never `portalSessionForm.result.error`.
+             account.remote.ts:398-405 sets that field to the raw `error.message`
+             off `api.checkout.createPortalSession`, so whatever Stripe said
+             landed verbatim in a role="alert" element — "No such customer:
+             'cus_QRr8xK2aLmN9'" puts a live Stripe customer id in the DOM for
+             any session-replay or error-scraping tool to collect, and announces
+             it immediately. It is also unqualified provider jargon for the
+             operator. The raw message still needs to be logged server-side and
+             the same echo still exists on (platform)/account/payment — both
+             beaded. i18n: billing_portal_generic_error. -->
         {#if portalSessionForm.result?.error}
-          <Alert variant="error">{portalSessionForm.result.error}</Alert>
+          <Alert variant="error">
+            We couldn't open the Stripe portal. Try again in a moment.
+          </Alert>
         {/if}
 
         <p class="portal-note">
@@ -369,6 +411,15 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--space-4);
+  }
+
+  /* StatCard declares no `font-variant-numeric`, so these three tiles were the
+     only proportional-digit money on the page, directly above a tabular ledger.
+     Added here rather than in the primitive: `studio/StatCard.svelte` is shared
+     with the dashboard and other studio surfaces, and this round owns neither.
+     No conflict to win — the property is simply undeclared upstream. */
+  .stats-grid :global(.stat-value) {
+    font-variant-numeric: tabular-nums;
   }
 
   @media (--breakpoint-sm) {
@@ -466,6 +517,14 @@
     color: var(--color-text-secondary);
   }
 
+  /* The sentence EmptyState would otherwise paint on --color-text-muted. */
+  .empty-note {
+    margin: 0;
+    max-width: var(--measure-lede);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
   .table-skeleton {
     display: flex;
     flex-direction: column;
@@ -493,11 +552,16 @@
     color: var(--color-text);
   }
 
-  /* `th.` is load-bearing: TableHead's own scoped rule compiles to
-     `.table-head.s-XXXX` (specificity 0,2,0) and sets text-align:left, so a
-     bare `:global(.revenue-head)` (0,1,0) loses and the money column header
-     sits left-aligned over right-aligned figures. `th.…` is 0,2,1 and wins
-     without touching ui/Table/*. */
+  /* What beats TableHead's own `text-align: left` here is the `.table-wrapper`
+     DESCENDANT SCOPE, not the `th`. Svelte compiles this selector to
+     `.table-wrapper.svelte-XXXX th.revenue-head` = (0,3,1), against TableHead's
+     `.table-head.svelte-YYYY` = (0,2,0); with `th` removed it is still (0,3,0)
+     and still wins. `th` is a readability hint only — verified by compiling both
+     forms. If a sticky-header or overflow refactor ever removes the
+     `.table-wrapper` element, this rule drops to (0,1,1), LOSES, and the money
+     column header silently goes back to left-aligned over right-aligned tabular
+     figures — so the wrapper, or replacement specificity, is the thing to
+     preserve. */
   .table-wrapper :global(th.revenue-head),
   .table-wrapper :global(.revenue-cell) {
     font-weight: var(--font-medium);

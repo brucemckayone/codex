@@ -191,6 +191,48 @@
   // because inline they silently produced fabricated transaction totals.
   const groupedTransactions = $derived(groupTransactions(items));
 
+  // ── Why a paginated ledger shows no per-transaction total ─────────────
+  // The server paginates AND counts by a DIFFERENT unit than this page renders:
+  // `groupKeyExpr = COALESCE(payouts.transfer_group, payouts.id::text)`
+  // (subscription-service.ts:3033-3052), where every non-`paid` sibling has a
+  // NULL transfer_group and therefore becomes its own server "group". This page
+  // groups by charge identity instead (purchase → charge → transferGroup → id),
+  // which is what actually joins the siblings — on the seeded
+  // of-blood-and-bones ledger that is 6 server groups versus 2 real charges.
+  //
+  // Consequence: `limit` windows 20 SERVER groups, so once the result set spans
+  // more than one page a charge's rows can straddle the boundary and this page
+  // would print the SUBSET's sum in the Amount column as if it were the
+  // transaction total (on the seeded data, £2.47 as the total of a £12.99
+  // charge). A money figure the operator cannot check is worse than no figure,
+  // so the band total is suppressed for the whole page whenever the ledger is
+  // paginated. The honest fix is to align the server's key with the charge
+  // identity — Codex-dox8r — after which this guard can go.
+  const isPaginated = $derived((pagination?.totalPages ?? 1) > 1);
+
+  // Same mismatch, second symptom: `pagination.total` counts server groups, so
+  // "· 6 transactions" under a table showing 2 bands was simply wrong. Count
+  // what is actually on screen — a figure the operator can verify by looking.
+  const transactionsOnPage = $derived(groupedTransactions.length);
+
+  // ── Announcements ────────────────────────────────────────────────────
+  // Two persistent sr-only live regions, mounted on every branch (a region
+  // created at the same moment its content appears is the classic case AT
+  // ignores). `resultStatus` reports the settled outcome after every filter and
+  // pagination change — the Selects announce the new value, then the table body,
+  // the pagination line and the KPI figures all swap with nothing announced.
+  const resultStatus = $derived.by(() => {
+    if (loading) return 'Loading payouts…';
+    if (queryError) return 'Could not load payouts.';
+    if (isEmpty) return 'No payouts match these filters.';
+    const n = transactionsOnPage;
+    const suffix =
+      pagination && pagination.totalPages > 1
+        ? `, page ${pagination.page} of ${pagination.totalPages}`
+        : '';
+    return `${n} transaction${n === 1 ? '' : 's'} shown${suffix}.`;
+  });
+
   // ── Filter handlers ──────────────────────────────────────────────────
   // Default values per URL key — same pattern as /studio/sales:
   // setUrlParam strips a key from the URL when its value matches the
@@ -322,19 +364,33 @@
   }
 
   let copiedTransferId = $state<string | null>(null);
+  let copyFailedId = $state<string | null>(null);
+  // Announced, not just tinted: the only observable change used to be the
+  // button's `title` flipping to 'Copied!', and `title` mutations are never
+  // announced and never appear for a keyboard-only user. The transfer id is the
+  // single string that reconciles a ledger line against Stripe, so a silent
+  // failure here ends with stale clipboard content pasted into a support ticket.
+  let copyStatus = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function copyTransferId(id: string) {
+    if (copyTimer) clearTimeout(copyTimer);
     try {
       await navigator.clipboard.writeText(id);
       copiedTransferId = id;
-      if (copyTimer) clearTimeout(copyTimer);
+      copyFailedId = null;
+      copyStatus = `Transfer ID ${id} copied.`;
       copyTimer = setTimeout(() => {
         copiedTransferId = null;
+        copyStatus = '';
       }, 2000);
     } catch {
-      // navigator.clipboard can be blocked (non-secure context); fail
-      // silently — the title attribute lets the user copy manually.
+      // navigator.clipboard is undefined or rejects outside a secure context
+      // (e.g. the studio opened over plain HTTP on a LAN host). Surface the full
+      // id as selectable text so it stays recoverable without the clipboard.
+      copiedTransferId = null;
+      copyStatus = '';
+      copyFailedId = id;
     }
   }
 
@@ -459,6 +515,13 @@
 
     <div class="payouts-grid">
     <div class="payouts-main">
+    <!-- Persistent live regions. Mounted unconditionally so AT has them before
+         anything changes; `sr-only` because every message they carry is already
+         visible somewhere for sighted users (except the copy result, which had
+         no visible carrier at all). -->
+    <div class="sr-only" role="status" aria-live="polite">{resultStatus}</div>
+    <div class="sr-only" role="status" aria-live="polite">{copyStatus}</div>
+
     <!-- ── KPI row ──────────────────────────────────────────────────── -->
     <!-- Exact pence via `valueContent`: `format="money"` routes through
          formatPriceCompact (0dp), so this row read "£4 / £4 / £0" on a ledger
@@ -541,6 +604,13 @@
 
     <Card.Root>
       <Card.Header>
+        <!-- The ledger card used to hold nothing but the three Selects, so the
+             page's primary money table had no heading naming it and, on the
+             empty state, EmptyState's hardcoded <h3> made the outline
+             h1 → h3 → h2 (the rail's "By creator" comes later in DOM order).
+             `level={2}` restores h1 → h2 → h3 and names the region.
+             i18n: payouts_ledger_card_title. -->
+        <Card.Title level={2}>Transactions</Card.Title>
         <div class="filters">
           <Select
             options={statusOptions}
@@ -567,12 +637,27 @@
       </Card.Header>
 
       <Card.Content>
+        <!-- Only rendered when the clipboard write actually failed. Alert derives
+             role="alert" for variant="error", so it announces, and the full id is
+             present as selectable text — the visible <code> in the row shows only
+             `tr_1Qa…cdEF`, so without this there is no route to the value. -->
+        {#if copyFailedId}
+          <Alert variant="error">
+            Couldn't copy automatically. Select and copy this transfer ID:
+            <code class="transfer-id">{copyFailedId}</code>
+          </Alert>
+        {/if}
+
         {#if queryError}
           <Alert variant="error">
             Could not load payouts: {queryError}
           </Alert>
         {:else if loading}
-          <div class="table-skeleton" aria-busy="true" aria-live="polite">
+          <!-- No `aria-live` here: the region's entire content is `Skeleton`
+               divs, which render no text, so it had nothing to announce. The
+               persistent `resultStatus` region above carries "Loading payouts…"
+               and, crucially, the settled result afterwards. -->
+          <div class="table-skeleton" aria-busy="true">
             <Skeleton width="100%" height="var(--space-10)" />
             {#each Array(5) as _, i (i)}
               <div class="table-skeleton-row">
@@ -587,22 +672,20 @@
           </div>
         {:else if isEmpty}
           <!-- Two of the three seeded orgs render this, so it IS the payouts
-               page for most operators. Kept to one line: EmptyState's
-               `description` is --color-text-muted (measured 2.52:1 light /
-               3.19:1 dark — a WCAG AA fail that belongs to the primitive), so
-               the substantive guidance moved into the action slot where this
-               page controls the token. -->
-          <EmptyState
-            title="No payouts yet"
-            description="Nothing has been transferred in this period."
-            icon={BanknoteIcon}
-          >
+               page for most operators. `description` is NOT passed at all:
+               EmptyState paints it on --color-text-muted (measured 2.52:1 light
+               / 3.19:1 dark — a WCAG AA body-text fail that belongs to the
+               primitive, bead Codex-227yr), and one faint line sandwiched
+               between two darker ones reads as a rendering fault on top of being
+               unreadable. Every word lives in the action slot, where this page
+               owns the token. -->
+          <EmptyState title="No payouts yet" icon={BanknoteIcon}>
             {#snippet action()}
               <div class="empty-block">
                 <p class="empty-lede">
-                  Every sale splits three ways — a platform fee, an org fee, and
-                  a creator share. Those rows land here once Stripe settles the
-                  charge.
+                  Nothing has been transferred in this period. Every sale splits
+                  three ways — a platform fee, an org fee, and a creator share.
+                  Those rows land here once Stripe settles the charge.
                 </p>
                 <div class="empty-actions">
                   <a href="/studio/monetisation" class="empty-link">
@@ -620,7 +703,10 @@
           </EmptyState>
         {:else}
           <div class="table-wrapper">
-            <Table.Root>
+            <!-- `aria-label`, not a <caption>: Table.Root spreads restProps onto
+                 the <table>, so the primitive needs no change, and the visible
+                 name is the card title directly above. -->
+            <Table.Root aria-label="Payout ledger">
               <Table.Header>
                 <Table.Row>
                   <Table.Head>Date</Table.Head>
@@ -631,26 +717,44 @@
                   <Table.Head>Transfer / reason</Table.Head>
                 </Table.Row>
               </Table.Header>
-              <Table.Body>
-                {#each groupedTransactions as group (group.key)}
-                  {@const subscriber =
-                    group.subscriberName ?? group.subscriberEmail}
+              <!-- One <tbody> PER CHARGE, not one for the whole table. Multiple
+                   row groups are valid HTML and are the only thing that puts the
+                   band → children relationship in the accessibility tree: the
+                   indent (`padding-inline-start` on an empty cell) and the tinted
+                   band are purely visual, so a screen-reader user in table
+                   navigation previously read "Date: blank; … Amount: £10.52" with
+                   nothing tying that figure to the charge above it — and so could
+                   not check the arithmetic the band total asserts. -->
+              {#each groupedTransactions as group (group.key)}
+                {@const subscriber =
+                  group.subscriberName ?? group.subscriberEmail}
+                <Table.Body>
                   {#if group.rows.length > 1}
                     <!-- Group header: one band per charge. The total sits in the
                          Amount column (colspan 3 + the amount cell + colspan 2)
                          so it lands above the figures it sums — it used to float
                          ~290px to the right, out past the Transfer column, which
                          is what made the numbers read as design rather than
-                         data. -->
+                         data.
+
+                         `th scope="rowgroup"`, not `td`: TableHead spreads
+                         restProps AFTER its own `scope="col"`, so the call site
+                         overrides it with no primitive change, and the charge
+                         becomes the header of its row group. -->
                     <Table.Row data-row-kind="header">
-                      <Table.Cell colspan={3} class="group-header-cell">
+                      <Table.Head
+                        colspan={3}
+                        scope="rowgroup"
+                        class="group-header-cell"
+                      >
                         <span class="group-header__left">
-                          <span
+                          <time
                             class="date-cell"
+                            datetime={new Date(group.createdAt).toISOString()}
                             title={new Date(group.createdAt).toISOString()}
                           >
                             {formatDate(group.createdAt)}
-                          </span>
+                          </time>
                           <span class="source-label">
                             {sourceLabel(group.source)}
                           </span>
@@ -660,9 +764,11 @@
                             </span>
                           {/if}
                         </span>
-                      </Table.Cell>
+                      </Table.Head>
                       <Table.Cell class="group-header-cell amount-cell group-header__total">
-                        {formatPrice(group.totalCents)}
+                        {#if !isPaginated}
+                          {formatPrice(group.totalCents)}
+                        {/if}
                       </Table.Cell>
                       <Table.Cell colspan={2} class="group-header-cell" />
                     </Table.Row>
@@ -671,8 +777,15 @@
                       <Table.Row data-row-kind="child">
                         <!-- Date is blank for child rows; the header carries it
                              so the indent reads as "this row belongs to the
-                             transaction above". -->
-                        <Table.Cell class="child-spacer-cell" />
+                             transaction above". The sr-only back-reference means
+                             the Date column is never announced empty and the row
+                             names its own charge. -->
+                        <Table.Cell class="child-spacer-cell">
+                          <span class="sr-only">
+                            Part of the {formatDate(group.createdAt)}
+                            {sourceLabel(group.source).toLowerCase()}.
+                          </span>
+                        </Table.Cell>
                         {@render ledgerCells(payout)}
                       </Table.Row>
                     {/each}
@@ -685,12 +798,13 @@
                       <Table.Row data-row-kind="single">
                         <Table.Cell>
                           <span class="single-date">
-                            <span
+                            <time
                               class="date-cell"
+                              datetime={new Date(payout.createdAt).toISOString()}
                               title={new Date(payout.createdAt).toISOString()}
                             >
                               {formatDate(payout.createdAt)}
-                            </span>
+                            </time>
                             <span class="source-label">
                               {sourceLabel(payout.sourceType)}
                             </span>
@@ -700,8 +814,8 @@
                       </Table.Row>
                     {/each}
                   {/if}
-                {/each}
-              </Table.Body>
+                </Table.Body>
+              {/each}
             </Table.Root>
           </div>
 
@@ -715,12 +829,19 @@
               >
                 Previous
               </Button>
+              <!-- `transactionsOnPage`, NOT `pagination.total`: the server's
+                   total counts its own group unit (see isPaginated above), which
+                   on the seeded ledger is 6 against the 2 charges this table
+                   renders. A count of what is on screen is verifiable by
+                   looking; the cross-page total returns with Codex-dox8r.
+                   i18n: payouts_pagination_page_of + payouts_pagination_on_page
+                   (+ _one). -->
               <span class="pagination-status">
                 Page {pagination.page} of {pagination.totalPages}
                 <span class="pagination-total">
-                  · {pagination.total} transaction{pagination.total === 1
+                  · {transactionsOnPage} transaction{transactionsOnPage === 1
                     ? ''
-                    : 's'}
+                    : 's'} on this page
                 </span>
               </span>
               <Button
@@ -961,11 +1082,15 @@
     max-width: 22ch;
   }
 
-  /* `th.` is load-bearing: TableHead's scoped rule compiles to
-     `.table-head.s-XXXX` (0,2,0) and sets text-align:left, so the bare
-     `:global(.amount-head)` (0,1,0) this replaces always lost — the money
-     column header rendered left-aligned over right-aligned tabular figures.
-     `th.amount-head` is 0,2,1 and wins without touching ui/Table/*. */
+  /* What beats TableHead's own `text-align: left` here is the `.table-wrapper`
+     DESCENDANT SCOPE, not the `th`. Svelte compiles this to
+     `.table-wrapper.svelte-XXXX th.amount-head` = (0,3,1) against TableHead's
+     `.table-head.svelte-YYYY` = (0,2,0); with `th` removed it is still (0,3,0)
+     and still wins — verified by compiling both forms. `th` is a readability
+     hint only. The thing to preserve is the wrapper: drop that element in a
+     sticky-header or overflow refactor and this rule falls to (0,1,1), LOSES,
+     and the money column header silently returns to left-aligned over
+     right-aligned tabular figures. */
   .table-wrapper :global(th.amount-head),
   .table-wrapper :global(.amount-cell) {
     text-align: right;
@@ -988,7 +1113,14 @@
     border-radius: var(--radius-sm);
   }
 
+  /* The box and border are transparent, so the GLYPH is the only visual that
+     identifies these two controls — which puts them under WCAG 1.4.11's 3:1
+     non-text minimum. `--color-text-muted` measures 2.42:1 light at :root, and
+     only :hover lifted it to --color-text, which never fires on touch.
+     --color-text-secondary is the lowest token that clears the bar in every
+     org x theme combo (measured below). */
   .icon-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -997,10 +1129,25 @@
     background: transparent;
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     cursor: pointer;
     text-decoration: none;
     transition: var(--transition-colors);
+  }
+
+  /* 28px clears WCAG 2.5.8 (24px) but not 2.5.5 / this skill's 44px floor, and
+     these two sit 8px apart — a mis-tap opens dashboard.stripe.com in a new tab
+     instead of copying. Grow the HIT AREA only, on coarse pointers, so the
+     visual density of the ledger row is untouched. */
+  @media (pointer: coarse) {
+    .icon-btn::after {
+      content: '';
+      position: absolute;
+      inset: 50%;
+      width: var(--space-11);
+      height: var(--space-11);
+      transform: translate(-50%, -50%);
+    }
   }
 
   .icon-btn:hover {
@@ -1044,8 +1191,11 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Was --color-text-muted (2.42:1 light at :root) on a real sentence. There is
+     no de-emphasis worth an AA failure; the parent's --color-text-secondary is
+     already the quiet register. */
   .pagination-total {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .empty-block {
@@ -1089,6 +1239,22 @@
 
   .table-wrapper :global(.group-header-cell) {
     padding: var(--space-3) var(--space-4);
+  }
+
+  /* The band's identity cell is a `th scope="rowgroup"`, so it inherits
+     TableHead's COLUMN-label treatment — 13px, uppercase, wide tracking,
+     secondary ink, fixed 40px box. That would render "30 JUL 2026" and
+     "LUZURA PERALTA". Reset here, not in the primitive: the semantics are what
+     this page needs, the typography is not.
+     `.table-wrapper.svelte-X th.group-header-cell` = (0,3,1) beats
+     `.table-head.svelte-Y` = (0,2,0). */
+  .table-wrapper :global(th.group-header-cell) {
+    height: auto;
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-normal);
+    text-transform: none;
+    color: var(--color-text);
   }
 
   .group-header__left {

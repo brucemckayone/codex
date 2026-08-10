@@ -251,16 +251,21 @@
     color: var(--color-status-error-text);
   }
 
+  /* Both were --color-text-muted, which is --color-neutral-400 light /
+     --color-neutral-500 dark and measures 2.42:1 / 3.78:1 at :root — below AA
+     for any real text, and these are 12px. "Last paid 30 Jul 2026" and "of which
+     £X org fee" are both load-bearing money disclosures, not decoration.
+     --color-text-secondary is the quiet register that actually passes. */
   .creator-card__last-paid {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .creator-card__org-fee {
     margin: calc(-1 * var(--space-1)) 0 0 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-style: italic;
     font-variant-numeric: tabular-nums;
   }
