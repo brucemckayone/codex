@@ -55,6 +55,7 @@
   } from '@codex/subscription';
   import type { DateRange } from '@codex/shared-types';
   import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
+  import { groupTransactions } from './group-transactions';
 
   type PayoutsPage = {
     items: PayoutWithCreator[];
@@ -182,65 +183,54 @@
   const isEmpty = $derived(!loading && items.length === 0);
 
   // ── Transaction grouping (Codex-6nt4l) ───────────────────────────────
-  // Every charge generates 3 sibling rows (platform_fee + organization_fee
-  // + creator_payout) sharing the same `transferGroup`. Group them so the
-  // table reads as "one transaction per group header + indented children"
-  // rather than 3× as many flat rows. Pre-h69cg historical rows have no
-  // `transferGroup` — fall back to row id so they render as a 1-row group
-  // (still gets a header, just with a one-row child list).
-  type PayoutGroup = {
-    key: string;
-    source: PayoutWithCreator['sourceType'];
-    subscriberName: string | null;
-    subscriberEmail: string | null;
-    createdAt: string;
-    rows: PayoutWithCreator[];
-    totalCents: number;
-  };
+  // Every charge generates up to 3 sibling rows (platform_fee +
+  // organization_fee + creator_payout). Group them so the table reads as
+  // "one transaction per header + indented children" rather than 3x as many
+  // flat rows. The keying rules are load-bearing and non-obvious — they live
+  // in ./group-transactions.ts with unit tests over the real seeded ledger,
+  // because inline they silently produced fabricated transaction totals.
+  const groupedTransactions = $derived(groupTransactions(items));
 
-  // Render order within a group: ledger flow follows the money outward
-  // from the platform → org → creator. `creator_payout_to_owner` sits
-  // between because it routes the org owner's share of multi-creator pools.
-  const PAYOUT_TYPE_ORDER: Record<PayoutWithCreator['payoutType'], number> = {
-    platform_fee: 0,
-    organization_fee: 1,
-    creator_payout_to_owner: 2,
-    creator_payout: 3,
-  };
+  // ── Why a paginated ledger shows no per-transaction total ─────────────
+  // The server paginates AND counts by a DIFFERENT unit than this page renders:
+  // `groupKeyExpr = COALESCE(payouts.transfer_group, payouts.id::text)`
+  // (subscription-service.ts:3033-3052), where every non-`paid` sibling has a
+  // NULL transfer_group and therefore becomes its own server "group". This page
+  // groups by charge identity instead (purchase → charge → transferGroup → id),
+  // which is what actually joins the siblings — on the seeded
+  // of-blood-and-bones ledger that is 6 server groups versus 2 real charges.
+  //
+  // Consequence: `limit` windows 20 SERVER groups, so once the result set spans
+  // more than one page a charge's rows can straddle the boundary and this page
+  // would print the SUBSET's sum in the Amount column as if it were the
+  // transaction total (on the seeded data, £2.47 as the total of a £12.99
+  // charge). A money figure the operator cannot check is worse than no figure,
+  // so the band total is suppressed for the whole page whenever the ledger is
+  // paginated. The honest fix is to align the server's key with the charge
+  // identity — Codex-dox8r — after which this guard can go.
+  const isPaginated = $derived((pagination?.totalPages ?? 1) > 1);
 
-  const groupedTransactions = $derived.by<PayoutGroup[]>(() => {
-    const map = new Map<string, PayoutGroup>();
-    for (const row of items) {
-      const key = row.transferGroup ?? row.id;
-      let g = map.get(key);
-      if (!g) {
-        g = {
-          key,
-          source: row.sourceType,
-          subscriberName: row.subscriberName,
-          subscriberEmail: row.subscriberEmail,
-          createdAt: row.createdAt,
-          rows: [],
-          totalCents: 0,
-        };
-        map.set(key, g);
-      }
-      g.rows.push(row);
-      g.totalCents += row.amountCents;
-    }
-    for (const g of map.values()) {
-      g.rows.sort(
-        (a, b) =>
-          (PAYOUT_TYPE_ORDER[a.payoutType] ?? 99) -
-          (PAYOUT_TYPE_ORDER[b.payoutType] ?? 99)
-      );
-    }
-    // Groups sort by createdAt desc to match the table's existing
-    // server-side ORDER BY desc(payouts.createdAt).
-    return Array.from(map.values()).sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+  // Same mismatch, second symptom: `pagination.total` counts server groups, so
+  // "· 6 transactions" under a table showing 2 bands was simply wrong. Count
+  // what is actually on screen — a figure the operator can verify by looking.
+  const transactionsOnPage = $derived(groupedTransactions.length);
+
+  // ── Announcements ────────────────────────────────────────────────────
+  // Two persistent sr-only live regions, mounted on every branch (a region
+  // created at the same moment its content appears is the classic case AT
+  // ignores). `resultStatus` reports the settled outcome after every filter and
+  // pagination change — the Selects announce the new value, then the table body,
+  // the pagination line and the KPI figures all swap with nothing announced.
+  const resultStatus = $derived.by(() => {
+    if (loading) return 'Loading payouts…';
+    if (queryError) return 'Could not load payouts.';
+    if (isEmpty) return 'No payouts match these filters.';
+    const n = transactionsOnPage;
+    const suffix =
+      pagination && pagination.totalPages > 1
+        ? `, page ${pagination.page} of ${pagination.totalPages}`
+        : '';
+    return `${n} transaction${n === 1 ? '' : 's'} shown${suffix}.`;
   });
 
   // ── Filter handlers ──────────────────────────────────────────────────
@@ -297,16 +287,25 @@
   const rangeLabel = $derived(RANGE_LABELS[rangeFilter]);
 
   // ── Badge variant + label helpers ────────────────────────────────────
-  // Token-aligned status mapping: pending = warning, resolved/paid =
-  // success, failed = error.
+  /**
+   * Only two states earn a colour here: settled (success) and failed (error).
+   *
+   * `pending` used to fall through to `warning` — amber reads as "a problem to
+   * fix", but pending is the pipeline's normal pre-drain state (docs/payouts:
+   * the webhook drain plus the safety-net cron drain both resolve it), so it
+   * was colouring healthy rows as exceptions. `reversed` and
+   * `cancelled_by_refund` are terminal bookkeeping outcomes, and
+   * sales/+page.svelte:208 already maps its equivalent (`refunded`) to
+   * `neutral` — converging the two money surfaces is worth more than polishing
+   * one. `neutral`'s ink-on-fill is also the best of all six variants in every
+   * org × theme combo measured (16.44 / 16.87 light, 9.93 / 13.71 dark).
+   */
   function statusVariant(
     status: PayoutWithCreator['status']
-  ): 'warning' | 'success' | 'error' | 'info' {
+  ): 'success' | 'error' | 'neutral' {
     if (status === 'resolved') return 'success';
     if (status === 'failed') return 'error';
-    if (status === 'reversed') return 'info';
-    if (status === 'cancelled_by_refund') return 'info';
-    return 'warning';
+    return 'neutral';
   }
 
   function statusLabel(status: PayoutWithCreator['status']): string {
@@ -365,19 +364,33 @@
   }
 
   let copiedTransferId = $state<string | null>(null);
+  let copyFailedId = $state<string | null>(null);
+  // Announced, not just tinted: the only observable change used to be the
+  // button's `title` flipping to 'Copied!', and `title` mutations are never
+  // announced and never appear for a keyboard-only user. The transfer id is the
+  // single string that reconciles a ledger line against Stripe, so a silent
+  // failure here ends with stale clipboard content pasted into a support ticket.
+  let copyStatus = $state('');
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function copyTransferId(id: string) {
+    if (copyTimer) clearTimeout(copyTimer);
     try {
       await navigator.clipboard.writeText(id);
       copiedTransferId = id;
-      if (copyTimer) clearTimeout(copyTimer);
+      copyFailedId = null;
+      copyStatus = `Transfer ID ${id} copied.`;
       copyTimer = setTimeout(() => {
         copiedTransferId = null;
+        copyStatus = '';
       }, 2000);
     } catch {
-      // navigator.clipboard can be blocked (non-secure context); fail
-      // silently — the title attribute lets the user copy manually.
+      // navigator.clipboard is undefined or rejects outside a secure context
+      // (e.g. the studio opened over plain HTTP on a LAN host). Surface the full
+      // id as selectable text so it stays recoverable without the clipboard.
+      copiedTransferId = null;
+      copyStatus = '';
+      copyFailedId = id;
     }
   }
 
@@ -391,6 +404,105 @@
   <meta name="robots" content="noindex" />
 </svelte:head>
 
+<!-- The five ledger cells shared by a grouped child row and a standalone row.
+     Declared once so the two row shapes cannot drift. -->
+{#snippet ledgerCells(payout: PayoutWithCreator)}
+  <!-- Type: plain text, not a chip. 13 of the 19 pills on this page were
+       `variant="info"` doing taxonomy work — the source label and every Type
+       label — so the status column lost its scanability and the two statuses
+       that legitimately mean "informational" were chromatically identical to
+       "Org fee". status.css deliberately makes fills whisper and puts the
+       signal in border + ink, so a chip spent on taxonomy contributes almost
+       no fill but a full-strength coloured ring: the page read as rows of
+       small outlined buttons rather than labels. Sales renders exactly one
+       badge per row. -->
+  <Table.Cell>
+    <span class="type-cell">{typeLabel(payout.payoutType)}</span>
+  </Table.Cell>
+
+  <Table.Cell>
+    {#if payout.payoutType === 'platform_fee'}
+      <span class="creator-cell platform-cell">
+        <span class="creator-name">Platform</span>
+      </span>
+    {:else}
+      <span class="creator-cell">
+        <Avatar class="creator-avatar">
+          {#if payout.creatorAvatarUrl}
+            <AvatarImage
+              src={payout.creatorAvatarUrl}
+              alt={payout.creatorName ?? payout.creatorEmail ?? ''}
+            />
+          {/if}
+          <AvatarFallback>
+            {getInitials(payout.creatorName, payout.creatorEmail)}
+          </AvatarFallback>
+        </Avatar>
+        <span class="creator-name">
+          {payout.creatorName ?? payout.creatorEmail ?? 'Unknown'}
+        </span>
+      </span>
+    {/if}
+  </Table.Cell>
+
+  <Table.Cell class="amount-cell">
+    {formatPrice(payout.amountCents)}
+  </Table.Cell>
+
+  <Table.Cell>
+    <Badge variant={statusVariant(payout.status)}>
+      {statusLabel(payout.status)}
+    </Badge>
+  </Table.Cell>
+
+  <Table.Cell>
+    {#if payout.status === 'resolved' && payout.stripeTransferId}
+      <span class="transfer-cell">
+        <code class="transfer-id" title={payout.stripeTransferId}>
+          {truncateTransferId(payout.stripeTransferId)}
+        </code>
+        <button
+          type="button"
+          class="icon-btn"
+          onclick={() => copyTransferId(payout.stripeTransferId!)}
+          aria-label="Copy Stripe transfer ID {payout.stripeTransferId}"
+          title={copiedTransferId === payout.stripeTransferId
+            ? 'Copied!'
+            : 'Copy transfer ID'}
+        >
+          <CopyIcon size={14} />
+        </button>
+        <a
+          class="icon-btn"
+          href={stripeTransferUrl(payout.stripeTransferId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open transfer in Stripe Dashboard"
+          title="Open in Stripe Dashboard"
+        >
+          <ExternalLinkIcon size={14} />
+        </a>
+      </span>
+    {:else if payout.payoutType === 'platform_fee'}
+      <!-- Structural, not a data gap: the schema states that platform_fee rows
+           carry a NULL stripeTransferId because no transfer happens — the slice
+           retains on the platform balance (payouts.ts:141-143). Falling through
+           to reasonLabel('') rendered a blank last cell on 2 of 6 rows. -->
+      <span class="reason-cell">Retained on platform</span>
+    {:else}
+      <span
+        class="reason-cell"
+        class:reason-cell--failed={payout.status === 'failed'}
+      >
+        {#if payout.status === 'failed'}
+          <AlertTriangleIcon size={14} />
+        {/if}
+        {reasonLabel(payout.reason)}
+      </span>
+    {/if}
+  </Table.Cell>
+{/snippet}
+
 {#if !isOwner}
   <!-- Redirecting to /studio… -->
 {:else}
@@ -403,49 +515,102 @@
 
     <div class="payouts-grid">
     <div class="payouts-main">
+    <!-- Persistent live regions. Mounted unconditionally so AT has them before
+         anything changes; `sr-only` because every message they carry is already
+         visible somewhere for sighted users (except the copy result, which had
+         no visible carrier at all). -->
+    <div class="sr-only" role="status" aria-live="polite">{resultStatus}</div>
+    <div class="sr-only" role="status" aria-live="polite">{copyStatus}</div>
+
     <!-- ── KPI row ──────────────────────────────────────────────────── -->
+    <!-- Exact pence via `valueContent`: `format="money"` routes through
+         formatPriceCompact (0dp), so this row read "£4 / £4 / £0" on a ledger
+         whose only paid rows are £1.30 + £2.50 = £3.80 — a headline overstating
+         by 20p, twice, directly above figures printed to the penny.
+         `totalEarnedCents` is dropped: it is the same aggregate as
+         `earnedInPeriodCents` with a different window (identical when
+         range=all), and "Needs attention" is the number an operator opens this
+         page for. -->
     <div class="kpi-row">
       <KPICard
-        label="Earned ({rangeLabel})"
+        label="Settled · {rangeLabel}"
         value={summary?.earnedInPeriodCents ?? 0}
-        format="money"
         loading={summaryLoading}
-      />
-      <KPICard
-        label="Total earned"
-        value={summary?.totalEarnedCents ?? 0}
-        format="money"
-        loading={summaryLoading}
-      />
+      >
+        {#snippet valueContent()}
+          <span class="kpi-money">
+            {formatPrice(summary?.earnedInPeriodCents ?? 0)}
+          </span>
+        {/snippet}
+      </KPICard>
       <KPICard
         label="In transit"
         value={summary?.inTransitCents ?? 0}
-        format="money"
+        loading={summaryLoading}
+      >
+        {#snippet valueContent()}
+          <span class="kpi-money">
+            {formatPrice(summary?.inTransitCents ?? 0)}
+          </span>
+        {/snippet}
+      </KPICard>
+      <KPICard
+        label="Needs attention"
+        value={summary?.needsAttentionCount ?? 0}
+        format="number"
         loading={summaryLoading}
       />
     </div>
 
+    <!-- `getPayoutSummary` sums payouts.amountCents for status='paid' with NO
+         payoutType filter (subscription-service.ts:3158-3167), so the platform's
+         retained slice is inside the figure. On of-blood-and-bones 100% of it is
+         (£1.30 + £2.50, both platform_fee) — "Earned" was therefore naming money
+         the org never receives. Labelled "Settled" and disclosed rather than
+         silently relabelled; narrowing the aggregate is a backend change. -->
+    <p class="kpi-note">
+      Settled counts every ledger line that cleared, including the platform's
+      fee. The table below shows the split.
+    </p>
+
     <!-- ── Exception banner (only when needsAttention > 0) ──────────── -->
     {#if summary && summary.needsAttentionCount > 0 && statusFilter !== 'needs_attention'}
       <Alert variant="warning">
-        <span class="banner-text">
-          <AlertTriangleIcon size={16} />
-          <strong>{summary.needsAttentionCount}</strong>
-          payout{summary.needsAttentionCount === 1 ? '' : 's'} need attention
-          — Connect onboarding incomplete, transfers failed, or amounts
-          below the minimum-transfer floor.
-        </span>
-        <Button
-          variant="secondary"
-          onclick={() => setUrlParam('status', 'needs_attention')}
-        >
-          Review
-        </Button>
+        <!-- ui/Alert is a plain block (no `display`), so the old
+             `.banner-text { flex: 1 }` was inert: the Review button was dumped
+             inline after the sentence with ~380px of dead space to its right and
+             its 40px box sat off-centre against the 22.5px text line. The row
+             lives here, at the call site — the Alert's colours were already
+             correct. -->
+        <div class="banner">
+          <span class="banner-text">
+            <AlertTriangleIcon size={16} />
+            <span>
+              <strong>{summary.needsAttentionCount}</strong>
+              payout{summary.needsAttentionCount === 1 ? '' : 's'} need attention
+              — Connect onboarding incomplete, transfers failed, or amounts
+              below the minimum-transfer floor.
+            </span>
+          </span>
+          <Button
+            variant="secondary"
+            onclick={() => setUrlParam('status', 'needs_attention')}
+          >
+            Review
+          </Button>
+        </div>
       </Alert>
     {/if}
 
     <Card.Root>
       <Card.Header>
+        <!-- The ledger card used to hold nothing but the three Selects, so the
+             page's primary money table had no heading naming it and, on the
+             empty state, EmptyState's hardcoded <h3> made the outline
+             h1 → h3 → h2 (the rail's "By creator" comes later in DOM order).
+             `level={2}` restores h1 → h2 → h3 and names the region.
+             i18n: payouts_ledger_card_title. -->
+        <Card.Title level={2}>Transactions</Card.Title>
         <div class="filters">
           <Select
             options={statusOptions}
@@ -472,193 +637,185 @@
       </Card.Header>
 
       <Card.Content>
+        <!-- Only rendered when the clipboard write actually failed. Alert derives
+             role="alert" for variant="error", so it announces, and the full id is
+             present as selectable text — the visible <code> in the row shows only
+             `tr_1Qa…cdEF`, so without this there is no route to the value. -->
+        {#if copyFailedId}
+          <Alert variant="error">
+            Couldn't copy automatically. Select and copy this transfer ID:
+            <code class="transfer-id">{copyFailedId}</code>
+          </Alert>
+        {/if}
+
         {#if queryError}
           <Alert variant="error">
             Could not load payouts: {queryError}
           </Alert>
         {:else if loading}
-          <div class="table-skeleton" aria-busy="true" aria-live="polite">
+          <!-- No `aria-live` here: the region's entire content is `Skeleton`
+               divs, which render no text, so it had nothing to announce. The
+               persistent `resultStatus` region above carries "Loading payouts…"
+               and, crucially, the settled result afterwards. -->
+          <div class="table-skeleton" aria-busy="true">
             <Skeleton width="100%" height="var(--space-10)" />
             {#each Array(5) as _, i (i)}
               <div class="table-skeleton-row">
-                <Skeleton width="14%" height="var(--space-5)" />
-                <Skeleton width="22%" height="var(--space-5)" />
-                <Skeleton width="14%" height="var(--space-5)" />
-                <Skeleton width="18%" height="var(--space-5)" />
-                <Skeleton width="12%" height="var(--space-5)" />
+                <Skeleton width="16%" height="var(--space-5)" />
+                <Skeleton width="16%" height="var(--space-5)" />
                 <Skeleton width="20%" height="var(--space-5)" />
+                <Skeleton width="14%" height="var(--space-5)" />
+                <Skeleton width="12%" height="var(--space-5)" />
+                <Skeleton width="22%" height="var(--space-5)" />
               </div>
             {/each}
           </div>
         {:else if isEmpty}
-          <EmptyState
-            title="No payouts yet"
-            description="Payouts appear here once subscription invoices land and Stripe transfers each share. Every sale splits into a platform fee, an org fee, and a creator share — as the sole creator you're your own beneficiary, so 100% of the creator share is yours today. Invite other creators via revenue-share and they'll appear in the By-creator breakdown."
-            icon={BanknoteIcon}
-          >
+          <!-- Two of the three seeded orgs render this, so it IS the payouts
+               page for most operators. `description` is NOT passed at all:
+               EmptyState paints it on --color-text-muted (measured 2.52:1 light
+               / 3.19:1 dark — a WCAG AA body-text fail that belongs to the
+               primitive, bead Codex-227yr), and one faint line sandwiched
+               between two darker ones reads as a rendering fault on top of being
+               unreadable. Every word lives in the action slot, where this page
+               owns the token. -->
+          <EmptyState title="No payouts yet" icon={BanknoteIcon}>
             {#snippet action()}
-              <div class="empty-actions">
-                <a href="/studio/monetisation" class="empty-link">
-                  <Button variant="secondary">Go to Monetisation</Button>
-                </a>
-                <a
-                  href="/studio/monetisation/revenue-share"
-                  class="empty-link"
-                >
-                  <Button variant="secondary">Revenue share</Button>
-                </a>
+              <div class="empty-block">
+                <p class="empty-lede">
+                  Nothing has been transferred in this period. Every sale splits
+                  three ways — a platform fee, an org fee, and a creator share.
+                  Those rows land here once Stripe settles the charge.
+                </p>
+                <div class="empty-actions">
+                  <a href="/studio/monetisation" class="empty-link">
+                    <Button variant="secondary">Go to Monetisation</Button>
+                  </a>
+                  <a
+                    href="/studio/monetisation/revenue-share"
+                    class="empty-link"
+                  >
+                    <Button variant="secondary">Revenue share</Button>
+                  </a>
+                </div>
               </div>
             {/snippet}
           </EmptyState>
         {:else}
           <div class="table-wrapper">
-            <Table.Root>
+            <!-- `aria-label`, not a <caption>: Table.Root spreads restProps onto
+                 the <table>, so the primitive needs no change, and the visible
+                 name is the card title directly above. -->
+            <Table.Root aria-label="Payout ledger">
               <Table.Header>
                 <Table.Row>
                   <Table.Head>Date</Table.Head>
-                  <Table.Head>From</Table.Head>
                   <Table.Head>Type</Table.Head>
                   <Table.Head>Beneficiary</Table.Head>
                   <Table.Head class="amount-head">Amount</Table.Head>
                   <Table.Head>Status</Table.Head>
-                  <Table.Head>Transfer / Reason</Table.Head>
+                  <Table.Head>Transfer / reason</Table.Head>
                 </Table.Row>
               </Table.Header>
-              <Table.Body>
-                {#each groupedTransactions as group (group.key)}
-                  <!-- Group header: one row per transaction, banner-styled
-                       with date + source pill + subscriber + gross total.
-                       colspan=7 spans the whole table width. -->
-                  <Table.Row data-row-kind="header">
-                    <Table.Cell colspan={7} class="group-header-cell">
-                      <span class="group-header">
+              <!-- One <tbody> PER CHARGE, not one for the whole table. Multiple
+                   row groups are valid HTML and are the only thing that puts the
+                   band → children relationship in the accessibility tree: the
+                   indent (`padding-inline-start` on an empty cell) and the tinted
+                   band are purely visual, so a screen-reader user in table
+                   navigation previously read "Date: blank; … Amount: £10.52" with
+                   nothing tying that figure to the charge above it — and so could
+                   not check the arithmetic the band total asserts. -->
+              {#each groupedTransactions as group (group.key)}
+                {@const subscriber =
+                  group.subscriberName ?? group.subscriberEmail}
+                <Table.Body>
+                  {#if group.rows.length > 1}
+                    <!-- Group header: one band per charge. The total sits in the
+                         Amount column (colspan 3 + the amount cell + colspan 2)
+                         so it lands above the figures it sums — it used to float
+                         ~290px to the right, out past the Transfer column, which
+                         is what made the numbers read as design rather than
+                         data.
+
+                         `th scope="rowgroup"`, not `td`: TableHead spreads
+                         restProps AFTER its own `scope="col"`, so the call site
+                         overrides it with no primitive change, and the charge
+                         becomes the header of its row group. -->
+                    <Table.Row data-row-kind="header">
+                      <Table.Head
+                        colspan={3}
+                        scope="rowgroup"
+                        class="group-header-cell"
+                      >
                         <span class="group-header__left">
-                          <span
+                          <time
                             class="date-cell"
+                            datetime={new Date(group.createdAt).toISOString()}
                             title={new Date(group.createdAt).toISOString()}
                           >
                             {formatDate(group.createdAt)}
-                          </span>
-                          <Badge variant="info">
+                          </time>
+                          <span class="source-label">
                             {sourceLabel(group.source)}
-                          </Badge>
-                          <span class="group-header__subscriber">
-                            From: {group.subscriberName ??
-                              group.subscriberEmail ??
-                              '—'}
                           </span>
+                          {#if subscriber}
+                            <span class="group-header__subscriber">
+                              {subscriber}
+                            </span>
+                          {/if}
                         </span>
-                        <span class="group-header__total">
+                      </Table.Head>
+                      <Table.Cell class="group-header-cell amount-cell group-header__total">
+                        {#if !isPaginated}
                           {formatPrice(group.totalCents)}
-                        </span>
-                      </span>
-                    </Table.Cell>
-                  </Table.Row>
-
-                  {#each group.rows as payout (payout.id)}
-                    <Table.Row data-row-kind="child">
-                      <!-- Date + From are blank for child rows; the header
-                           carries them so the indent reads as "this row
-                           belongs to the transaction above". -->
-                      <Table.Cell class="child-spacer-cell" />
-                      <Table.Cell />
-
-                      <Table.Cell>
-                        <span class="type-cell">
-                          <Badge variant="info">
-                            {typeLabel(payout.payoutType)}
-                          </Badge>
-                        </span>
+                        {/if}
                       </Table.Cell>
+                      <Table.Cell colspan={2} class="group-header-cell" />
+                    </Table.Row>
 
-                      <Table.Cell>
-                        {#if payout.payoutType === 'platform_fee'}
-                          <span class="creator-cell platform-cell">
-                            <span class="creator-name">Platform</span>
+                    {#each group.rows as payout (payout.id)}
+                      <Table.Row data-row-kind="child">
+                        <!-- Date is blank for child rows; the header carries it
+                             so the indent reads as "this row belongs to the
+                             transaction above". The sr-only back-reference means
+                             the Date column is never announced empty and the row
+                             names its own charge. -->
+                        <Table.Cell class="child-spacer-cell">
+                          <span class="sr-only">
+                            Part of the {formatDate(group.createdAt)}
+                            {sourceLabel(group.source).toLowerCase()}.
                           </span>
-                        {:else}
-                          <span class="creator-cell">
-                            <Avatar class="creator-avatar">
-                              {#if payout.creatorAvatarUrl}
-                                <AvatarImage
-                                  src={payout.creatorAvatarUrl}
-                                  alt={payout.creatorName ?? payout.creatorEmail ?? ''}
-                                />
-                              {/if}
-                              <AvatarFallback>
-                                {getInitials(
-                                  payout.creatorName,
-                                  payout.creatorEmail
-                                )}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span class="creator-name">
-                              {payout.creatorName ??
-                                payout.creatorEmail ??
-                                'Unknown'}
+                        </Table.Cell>
+                        {@render ledgerCells(payout)}
+                      </Table.Row>
+                    {/each}
+                  {:else}
+                    <!-- A one-row group has no arithmetic to show, so it gets no
+                         band and no total: a "transaction total" that sums a
+                         single line is a number the operator cannot check. Date
+                         and source fold into the row. -->
+                    {#each group.rows as payout (payout.id)}
+                      <Table.Row data-row-kind="single">
+                        <Table.Cell>
+                          <span class="single-date">
+                            <time
+                              class="date-cell"
+                              datetime={new Date(payout.createdAt).toISOString()}
+                              title={new Date(payout.createdAt).toISOString()}
+                            >
+                              {formatDate(payout.createdAt)}
+                            </time>
+                            <span class="source-label">
+                              {sourceLabel(payout.sourceType)}
                             </span>
                           </span>
-                        {/if}
-                      </Table.Cell>
-
-                      <Table.Cell class="amount-cell">
-                        {formatPrice(payout.amountCents)}
-                      </Table.Cell>
-
-                      <Table.Cell>
-                        <Badge variant={statusVariant(payout.status)}>
-                          {statusLabel(payout.status)}
-                        </Badge>
-                      </Table.Cell>
-
-                      <Table.Cell>
-                        {#if payout.status === 'resolved' && payout.stripeTransferId}
-                          <span class="transfer-cell">
-                            <code
-                              class="transfer-id"
-                              title={payout.stripeTransferId}
-                            >
-                              {truncateTransferId(payout.stripeTransferId)}
-                            </code>
-                            <button
-                              type="button"
-                              class="icon-btn"
-                              onclick={() =>
-                                copyTransferId(payout.stripeTransferId!)}
-                              aria-label="Copy Stripe transfer ID {payout.stripeTransferId}"
-                              title={copiedTransferId === payout.stripeTransferId
-                                ? 'Copied!'
-                                : 'Copy transfer ID'}
-                            >
-                              <CopyIcon size={14} />
-                            </button>
-                            <a
-                              class="icon-btn"
-                              href={stripeTransferUrl(payout.stripeTransferId)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label="Open transfer in Stripe Dashboard"
-                              title="Open in Stripe Dashboard"
-                            >
-                              <ExternalLinkIcon size={14} />
-                            </a>
-                          </span>
-                        {:else}
-                          <span
-                            class="reason-cell"
-                            class:reason-cell--failed={payout.status === 'failed'}
-                          >
-                            {#if payout.status === 'failed'}
-                              <AlertTriangleIcon size={14} />
-                            {/if}
-                            {reasonLabel(payout.reason)}
-                          </span>
-                        {/if}
-                      </Table.Cell>
-                    </Table.Row>
-                  {/each}
-                {/each}
-              </Table.Body>
+                        </Table.Cell>
+                        {@render ledgerCells(payout)}
+                      </Table.Row>
+                    {/each}
+                  {/if}
+                </Table.Body>
+              {/each}
             </Table.Root>
           </div>
 
@@ -672,12 +829,19 @@
               >
                 Previous
               </Button>
+              <!-- `transactionsOnPage`, NOT `pagination.total`: the server's
+                   total counts its own group unit (see isPaginated above), which
+                   on the seeded ledger is 6 against the 2 charges this table
+                   renders. A count of what is on screen is verifiable by
+                   looking; the cross-page total returns with Codex-dox8r.
+                   i18n: payouts_pagination_page_of + payouts_pagination_on_page
+                   (+ _one). -->
               <span class="pagination-status">
                 Page {pagination.page} of {pagination.totalPages}
                 <span class="pagination-total">
-                  · {pagination.total} transaction{pagination.total === 1
+                  · {transactionsOnPage} transaction{transactionsOnPage === 1
                     ? ''
-                    : 's'}
+                    : 's'} on this page
                 </span>
               </span>
               <Button
@@ -711,6 +875,8 @@
 {/if}
 
 <style>
+  /* No max-width: the studio shell owns the content column via
+     --container-studio. Re-adding a cap here would be a regression. */
   .payouts {
     display: flex;
     flex-direction: column;
@@ -723,8 +889,15 @@
      1024px the rail stacks below the main content as a regular section
      — preserves the rail's affordance without crowding narrower screens. */
   .payouts-grid {
+    /* Named locally because tokens/layout.css has no studio data-rail width —
+       --brand-studio-rail-width (24rem) is the brand editor's control rail and
+       --control-width-md (16rem) is an inline filter. A shared
+       --studio-rail-width belongs in the token file; that is a cross-round
+       change, so this at least stops the literal being anonymous. */
+    --payouts-rail-width: 20rem;
+
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) var(--payouts-rail-width);
     gap: var(--space-6);
     align-items: start;
   }
@@ -762,11 +935,52 @@
     }
   }
 
+  /* Mirrors KPICard's own .kpi-card__value treatment — the `valueContent`
+     snippet renders outside that component's scoped styles. */
+  .kpi-money {
+    font-size: var(--text-3xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    line-height: var(--leading-tight);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kpi-note {
+    margin: calc(-1 * var(--space-3)) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  /* `flex-basis: 0`, not `auto`: with a non-zero basis the flex algorithm
+     breaks the line BEFORE it shrinks, so the Review button dropped onto its
+     own row and sat 43px below the sentence's centre. Basis 0 lets both items
+     share one line and the text grow into what is left. */
   .banner-text {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* Below md the sentence needs the full measure more than the row needs to
+     stay a row. */
+  @media (--below-md) {
+    .banner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .banner-text {
+      flex: 0 1 auto;
+    }
   }
 
   .filters {
@@ -786,14 +1000,15 @@
   }
 
   .type-cell {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
     white-space: nowrap;
   }
 
-  .platform-cell {
-    font-style: italic;
+  /* Was font-style: italic — the only italic in the table, which reads as a
+     placeholder or an error state. "Platform" is a real beneficiary. */
+  .platform-cell .creator-name {
+    font-weight: var(--font-normal);
     color: var(--color-text-secondary);
   }
 
@@ -821,13 +1036,35 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Source as a label, not a chip — same treatment TableHead gives its own
+     column labels, so it reads as metadata rather than as a status. */
+  .source-label {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    letter-spacing: var(--tracking-wide);
+    text-transform: var(--text-transform-label);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+
+  .single-date {
+    display: inline-flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    align-items: flex-start;
+  }
+
   .creator-cell {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
   }
 
-  :global(.creator-avatar) {
+  /* Scoped under .table-wrapper — these were declared bare, leaking generic
+     names (`.amount-cell`, `.creator-avatar`, `tr[data-row-kind]`) app-wide
+     from a page component. The `!important` stays: it beats Avatar's own
+     scoped size rule and removing it is a separate, verifiable change. */
+  .table-wrapper :global(.creator-avatar) {
     width: var(--space-7) !important;
     height: var(--space-7) !important;
     flex-shrink: 0 !important;
@@ -840,11 +1077,22 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 14ch;
+    /* Was 14ch, which "Luzura Peralta" sits exactly on — the next slightly
+       longer name would have started ellipsing silently. */
+    max-width: 22ch;
   }
 
-  :global(.amount-head),
-  :global(.amount-cell) {
+  /* What beats TableHead's own `text-align: left` here is the `.table-wrapper`
+     DESCENDANT SCOPE, not the `th`. Svelte compiles this to
+     `.table-wrapper.svelte-XXXX th.amount-head` = (0,3,1) against TableHead's
+     `.table-head.svelte-YYYY` = (0,2,0); with `th` removed it is still (0,3,0)
+     and still wins — verified by compiling both forms. `th` is a readability
+     hint only. The thing to preserve is the wrapper: drop that element in a
+     sticky-header or overflow refactor and this rule falls to (0,1,1), LOSES,
+     and the money column header silently returns to left-aligned over
+     right-aligned tabular figures. */
+  .table-wrapper :global(th.amount-head),
+  .table-wrapper :global(.amount-cell) {
     text-align: right;
     font-variant-numeric: tabular-nums;
     font-weight: var(--font-medium);
@@ -865,7 +1113,14 @@
     border-radius: var(--radius-sm);
   }
 
+  /* The box and border are transparent, so the GLYPH is the only visual that
+     identifies these two controls — which puts them under WCAG 1.4.11's 3:1
+     non-text minimum. `--color-text-muted` measures 2.42:1 light at :root, and
+     only :hover lifted it to --color-text, which never fires on touch.
+     --color-text-secondary is the lowest token that clears the bar in every
+     org x theme combo (measured below). */
   .icon-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -874,10 +1129,25 @@
     background: transparent;
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     cursor: pointer;
     text-decoration: none;
     transition: var(--transition-colors);
+  }
+
+  /* 28px clears WCAG 2.5.8 (24px) but not 2.5.5 / this skill's 44px floor, and
+     these two sit 8px apart — a mis-tap opens dashboard.stripe.com in a new tab
+     instead of copying. Grow the HIT AREA only, on coarse pointers, so the
+     visual density of the ledger row is untouched. */
+  @media (pointer: coarse) {
+    .icon-btn::after {
+      content: '';
+      position: absolute;
+      inset: 50%;
+      width: var(--space-11);
+      height: var(--space-11);
+      transform: translate(-50%, -50%);
+    }
   }
 
   .icon-btn:hover {
@@ -921,8 +1191,29 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Was --color-text-muted (2.42:1 light at :root) on a real sentence. There is
+     no de-emphasis worth an AA failure; the parent's --color-text-secondary is
+     already the quiet register. */
   .pagination-total {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
+  }
+
+  .empty-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  /* Left-aligned inside the centred block: centred running text at a narrow
+     measure is the least readable configuration available, and this replaced a
+     46-word centred wall that also sat on --color-text-muted. */
+  .empty-lede {
+    margin: 0;
+    max-width: var(--measure-lede);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    text-align: start;
   }
 
   .empty-actions {
@@ -940,30 +1231,35 @@
   /* ── Transaction grouping (Codex-6nt4l) ──────────────────────────── */
 
   /* Group header row: full-width banner on tinted surface so the eye
-     sees "one transaction" before reading its 3 indented children. */
-  :global(tr[data-row-kind='header']) {
+     sees "one transaction" before reading its indented children. */
+  .table-wrapper :global(tr[data-row-kind='header']),
+  .table-wrapper :global(tr[data-row-kind='header']:hover) {
     background-color: var(--color-surface-secondary);
   }
 
-  :global(tr[data-row-kind='header']:hover) {
-    background-color: var(--color-surface-secondary);
-  }
-
-  :global(.group-header-cell) {
+  .table-wrapper :global(.group-header-cell) {
     padding: var(--space-3) var(--space-4);
   }
 
-  .group-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    flex-wrap: wrap;
+  /* The band's identity cell is a `th scope="rowgroup"`, so it inherits
+     TableHead's COLUMN-label treatment — 13px, uppercase, wide tracking,
+     secondary ink, fixed 40px box. That would render "30 JUL 2026" and
+     "LUZURA PERALTA". Reset here, not in the primitive: the semantics are what
+     this page needs, the typography is not.
+     `.table-wrapper.svelte-X th.group-header-cell` = (0,3,1) beats
+     `.table-head.svelte-Y` = (0,2,0). */
+  .table-wrapper :global(th.group-header-cell) {
+    height: auto;
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-normal);
+    text-transform: none;
+    color: var(--color-text);
   }
 
   .group-header__left {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--space-3);
     flex-wrap: wrap;
   }
@@ -974,17 +1270,16 @@
     color: var(--color-text);
   }
 
-  .group-header__total {
+  .table-wrapper :global(.group-header__total) {
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
     color: var(--color-text);
-    font-variant-numeric: tabular-nums;
   }
 
   /* Indent the first child cell so siblings read as belonging to the
      group above. Using padding-inline-start on the first cell keeps the
      remaining column grid intact. */
-  :global(tr[data-row-kind='child'] .child-spacer-cell) {
+  .table-wrapper :global(tr[data-row-kind='child'] .child-spacer-cell) {
     padding-inline-start: var(--space-6);
   }
 </style>
