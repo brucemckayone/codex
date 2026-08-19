@@ -36,6 +36,12 @@
   /* ─── TEXT ON BRAND ─────────────────────────────────────────────────── */
   --color-text-on-brand: oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
+  /* Ink for filled --color-interactive controls (ui/Button primary). Keyed to
+     --color-interactive rather than --brand-color so an org that overrides the
+     interactive token alone still gets a legible label; same step function.
+     See themes/light.css for why this is re-declared per scope. */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
   /* ─── LEGACY PRIMARY ────────────────────────────────────────────────── */
   --color-primary-500: var(--brand-color, var(--color-primary-500));
   --color-primary-600: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
@@ -237,7 +243,26 @@
 
   --color-text: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --color-text-primary: oklch(from var(--brand-bg, white) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
-  --color-text-secondary: oklch(from var(--brand-bg, white) clamp(0.25, abs(0.55 - l) + 0.25, 0.65) 0 0);
+  /* Secondary ink is a MIX BACK TOWARDS THE PAGE, not an absolute lightness.
+   * The abs()-of-lightness recipe this replaces topped out at its own 0.65
+   * ceiling on any near-white background, so a light org page got a flat
+   * #8f8f8f: 2.83:1 on of-blood-and-bones' #F6EFE6 (measured), an outright
+   * WCAG 1.4.3 AA failure for the ~520 places that consume this token. No
+   * symmetric lightness formula can serve both ends of the range — a dark
+   * page needs a far larger absolute step than a light one to reach the same
+   * ratio — which is why the ceiling existed and why it broke.
+   *
+   * Mixing from --color-text (already directional: near-black on a light
+   * page, near-white on a dark one) inherits that direction for free, so only
+   * the STRENGTH differs per theme. 62% here / 70% in the dark rule below.
+   * Measured against --color-background, --color-surface-card and
+   * --color-surface-secondary. Read out of the running app on
+   * of-blood-and-bones' #F6EFE6: #484643 at 8.24 / 9.39 / 7.56 — 7.56:1
+   * worst. Computed for a pure-white --brand-bg: 9.22:1 worst; and for the
+   * pathological config (a DARK --brand-bg viewed in light theme, which still
+   * lands on this rule): 4.76:1 worst. Do not raise 62% far without
+   * re-checking that last one; do not lower it below ~62% at all. */
+  --color-text-secondary: color-mix(in oklab, var(--color-text) 62%, var(--color-background));
   --color-text-muted: oklch(from var(--brand-bg, white) clamp(0.3, abs(0.5 - l) + 0.3, 0.55) 0 0);
 
   --color-border: oklch(from var(--brand-bg, white) calc(l - 0.12) calc(c * 0.3) h);
@@ -296,6 +321,9 @@
      wearing a label picked for #EA580C = 2.26:1, under the 4.5:1 AA floor.
      The step function is unchanged — only its input is corrected. */
   --color-text-on-brand: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  /* Same correction, one token over: --color-interactive is re-declared above
+     from the DARK brand, so re-deriving the ink here keeps the pair in step. */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --color-border-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
   --color-primary-600: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
 
@@ -327,7 +355,17 @@
 
   --color-text: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --color-text-primary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
-  --color-text-secondary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.25, abs(0.55 - l) + 0.25, 0.65) 0 0);
+  /* See the light rule for the reasoning. Only the strength differs: a dark
+   * page needs a longer reach back towards its own ink to clear AA. Read out
+   * of the running app on of-blood-and-bones' #200000: #a29390 at 6.70 /
+   * 5.84 / 6.25 — 5.84:1 worst, against --color-surface-card. A #101018 navy
+   * computes to 5.66:1 worst; the light-bg fallback path — an org with no dark
+   * override, so --brand-bg flows in here — lands at 12.53:1.
+   * `var(--color-text)` and
+   * `var(--color-background)` both resolve on THIS element, where this rule
+   * has already re-declared them, so the mix follows the dark page
+   * automatically; it must not be hoisted out of this rule. */
+  --color-text-secondary: color-mix(in oklab, var(--color-text) 70%, var(--color-background));
   --color-text-muted: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0.3, abs(0.5 - l) + 0.3, 0.55) 0 0);
 
   --color-border: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.12) calc(c * 0.3) h);

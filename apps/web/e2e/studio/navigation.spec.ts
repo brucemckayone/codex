@@ -14,7 +14,11 @@ import {
 /**
  * Studio Navigation E2E Tests
  *
- * Tests sidebar navigation, mobile drawer behavior, and settings tabs.
+ * Tests sidebar navigation, mobile drawer behavior, and the Settings/Brand
+ * destinations the rail points at. There is no settings tab strip to test any
+ * more — it listed exactly one destination once branding moved to
+ * `/studio/brand` (Codex-cijzb) and was deleted; `studio/settings.spec.ts`
+ * owns the assertion that it cannot creep back.
  * Owner role is used for full nav access (sees all sections).
  */
 
@@ -209,7 +213,7 @@ test.describe('Studio Navigation - Mobile Drawer', () => {
   });
 });
 
-test.describe('Studio Navigation - Settings Tabs', () => {
+test.describe('Studio Navigation - Settings & Brand', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedAuth: SharedStudioAuth;
@@ -226,7 +230,7 @@ test.describe('Studio Navigation - Settings Tabs', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('settings page shows the General tab (Branding moved to /studio/brand)', async ({
+  test('settings root renders the General section (Branding moved to /studio/brand)', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -235,30 +239,37 @@ test.describe('Studio Navigation - Settings Tabs', () => {
       '/settings'
     );
 
+    // "General" used to be a one-item tab strip (`a[href="/studio/settings"]`
+    // with `role="tab"` + `.tab-trigger.active`). That strip is gone — it was a
+    // navigation with nowhere to go whose active state painted raw brand ink at
+    // 14px (an AA failure) — so the surviving "General" is the settings form's
+    // own card heading, an <h2> under the layout's single <h1> "Settings".
+    // `settings_social_title` is "Social Links", so the anchored name matches
+    // exactly one heading. The explicit timeout is because that heading, unlike
+    // the strip, sits inside the form — which renders behind a skeleton until
+    // the settings query resolves.
     await expect(
-      page.locator('a[href="/studio/settings"]', {
-        hasText: /General/i,
-      })
-    ).toBeVisible();
-    // Branding is no longer a settings tab — it moved to the top-level
-    // /studio/brand workspace (Codex-cijzb).
+      page.getByRole('heading', { level: 2, name: /^General$/ })
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Branding is no longer a settings destination at all — it moved to the
+    // top-level /studio/brand workspace (Codex-cijzb) and only a 301 stub is
+    // left behind (covered by studio/settings.spec.ts). Nothing on this page
+    // may link into it.
     await expect(
       page.locator('a[href="/studio/settings/branding"]')
     ).toHaveCount(0);
   });
 
-  test('General tab is active on settings root', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings'
-    );
-
-    const generalTab = page
-      .locator('.tab-trigger')
-      .filter({ hasText: /General/i });
-    await expect(generalTab).toHaveClass(/active/);
-  });
+  // REMOVED: 'General tab is active on settings root'. It asserted
+  // `.tab-trigger` filtered to /General/i `toHaveClass(/active/)`. Which
+  // settings tab is selected is no longer a question this surface can answer:
+  // the strip was deleted, and repo-wide `.tab-trigger` now exists only in
+  // `studio/monetisation/+layout.svelte`, a different route. The guarantee that
+  // replaced it — a one-item strip cannot come back — lives in
+  // `studio/settings.spec.ts` ('settings has no tablist and exactly one h1',
+  // asserting `getByRole('tablist')` and `getByRole('tab')` are both 0).
+  // Re-adding an absence check here would only duplicate that.
 
   test('clicking Brand nav link navigates to the brand workspace', async ({
     page,

@@ -21,6 +21,7 @@ import {
   creatorNegotiationsUrl,
   injectAgreementCookies,
   ownerRevenueSharePath,
+  proposeFromRoster,
 } from '../helpers/agreements';
 
 /**
@@ -38,12 +39,9 @@ async function bootstrapActiveAgreement(
     ownerPage.getByRole('heading', { name: 'Team revenue share' })
   ).toBeVisible({ timeout: 30_000 });
 
-  const card = ownerPage.locator(`article[aria-label*="${creatorName}"]`);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card
-    .getByRole('button', { name: /propose agreement/i })
-    .first()
-    .click();
+  // Fresh topology → the creator is in the roster's "No agreement yet" group,
+  // which renders a compact row instead of an AgreementCard.
+  await proposeFromRoster(ownerPage, creatorName);
 
   const dialog = ownerPage.getByRole('dialog');
   await expect(dialog).toBeVisible({ timeout: 5000 });
@@ -106,11 +104,22 @@ test.describe('Agreements — Terminate', () => {
       await expect(activeSection).toBeVisible({ timeout: 15_000 });
       await expect(activeSection).toContainText(creator.user.name);
 
-      // Click Terminate on the only active row.
+      // Click Terminate on the only active row. This no longer mutates:
+      // `askTerminate()` just opens a confirm dialog (revenue-share page —
+      // terminate is a money-path destructive action, so it is two-step now,
+      // the same shape as the pricing-FAQ delete).
       await activeSection
         .getByRole('button', { name: /terminate/i })
         .first()
         .click();
+
+      // Confirm inside the dialog — `confirmTerminate()` is what calls the
+      // mutation and raises the toast. Scoping to the dialog is required:
+      // "Terminate" labels BOTH the row button and the confirm button.
+      const confirmDialog = ownerPage.getByRole('dialog');
+      await expect(confirmDialog).toBeVisible({ timeout: 5000 });
+      await expect(confirmDialog).toContainText(/Terminate this agreement\?/i);
+      await confirmDialog.getByRole('button', { name: /^Terminate$/i }).click();
 
       // Toast confirms termination.
       await expect(

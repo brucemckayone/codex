@@ -31,9 +31,34 @@
 
   const isActive = $derived(activeCount > 0);
   const badgeLabel = $derived(activeCount > 9 ? '9+' : String(activeCount));
+
+  /**
+   * Return focus to this trigger when the panel it opened closes — WCAG 2.4.3.
+   *
+   * Melt's own `closeFocus` cannot do it: this is a plain `<button>` calling the
+   * parent's open setter rather than Melt's `$trigger`, so the dialog has no
+   * element to restore focus to. All three close paths (Esc, overlay click, the
+   * X) left `document.activeElement` on `<body>`, so a keyboard user had to Tab
+   * from the top of the page again.
+   *
+   * The trigger is the right owner: it already receives `expanded`, so a
+   * true→false transition IS the close event, and every consumer gets the fix
+   * without the drawer having to guess which element invoked it.
+   *
+   * `wasExpanded` is a plain variable, not `$state` — it is a comparison key
+   * read inside the effect, and making it reactive would re-trigger the effect
+   * on its own write.
+   */
+  let btnEl: HTMLButtonElement | undefined = $state();
+  let wasExpanded = false;
+  $effect(() => {
+    if (wasExpanded && !expanded) btnEl?.focus();
+    wasExpanded = expanded;
+  });
 </script>
 
 <button
+  bind:this={btnEl}
   type="button"
   class="filter-trigger"
   class:filter-trigger--active={isActive}

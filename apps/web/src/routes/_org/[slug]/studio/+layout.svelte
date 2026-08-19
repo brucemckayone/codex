@@ -161,6 +161,25 @@
     grid-row: 1;
     min-width: 0;
     padding: var(--space-4);
+    /* The shell owns the studio content width — exactly once. Studio pages
+       MUST NOT declare an outer max-width; the cap and the centring live
+       here. `width: 100%` is load-bearing: auto inline margins remove a grid
+       item's default `stretch`, so without it the column collapses to
+       max-content (measured 1012px instead of 1920px at a 2560 viewport).
+       This is a border-box cap (global box-sizing), so content resolves to
+       120rem − 2 × --space-6; do NOT "fix" that with content-box, which
+       breaks the padding contract.
+
+       NO exceptions any more. The settings subtree used to be one: it capped
+       `.settings-layout`, which also capped its MASTHEAD and left the settings
+       header 528px short of every sibling studio page's at 1920. That measure
+       now sits on the form itself (`.settings-form` in
+       `studio/settings/+page.svelte`). A measure applied to a form, a prose
+       column or a single control is fine at any depth; a second opinion about
+       the COLUMN width belongs here and only here. */
+    width: 100%;
+    max-width: var(--container-studio);
+    margin-inline: auto;
     /* `clip` (Baseline Widely) clips horizontally without creating a
        scroll container. `overflow-x: hidden` would promote overflow-y
        to `auto` and break `position: sticky` on children that expect

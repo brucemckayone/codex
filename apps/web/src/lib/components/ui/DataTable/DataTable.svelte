@@ -101,7 +101,12 @@
       <thead>
         <tr>
           {#if selectable}
-            <th class="data-table__th data-table__th--checkbox">
+            <!-- `scope="col"` on BOTH header cells, matching `ui/Table`'s
+                 TableHead. Without it a screen reader in table-navigation mode
+                 reads "active" instead of "Status: active" for every cell in
+                 the column — and this primitive is what studio/subscribers
+                 migrated onto. -->
+            <th scope="col" class="data-table__th data-table__th--checkbox">
               <input
                 type="checkbox"
                 id="data-table-select-all"
@@ -115,6 +120,7 @@
           {/if}
           {#each visibleColumns as col (col.key)}
             <th
+              scope="col"
               class="data-table__th"
               class:data-table__th--sortable={col.sortable}
               style:width={col.width}

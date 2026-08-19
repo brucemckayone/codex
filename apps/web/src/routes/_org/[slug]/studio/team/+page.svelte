@@ -13,7 +13,7 @@
   import * as m from '$paraglide/messages';
   import MemberTable from '$lib/components/studio/MemberTable.svelte';
   import InviteMemberDialog from '$lib/components/studio/InviteMemberDialog.svelte';
-  import { PageHeader } from '$lib/components/ui';
+  import { Button, PageHeader } from '$lib/components/ui';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { UserPlusIcon } from '$lib/components/ui/Icon';
   import {
@@ -45,6 +45,13 @@
 
   const membersQuery = $derived(
     isAuthorized ? getOrgMembers({ orgId: data.org.id, limit: 50 }) : null
+  );
+
+  // Subscribers are not team members — the table filters them out, so the
+  // header count must too. Named `member` rather than `m` so it does not
+  // shadow the paraglide namespace inside the callback.
+  const teamMembers = $derived(
+    (membersQuery?.current?.items ?? []).filter((member) => member.role !== 'subscriber')
   );
 
   // Revenue-share lives in the owner-only Monetisation hub, so the per-member
@@ -114,17 +121,32 @@
   <!-- Redirecting... -->
 {:else}
 <div class="team-page">
-  <PageHeader title={m.team_title()}>
+  <PageHeader
+    kicker={m.studio_section_organisation()}
+    title={m.team_title()}
+    description={m.team_description()}
+  >
+    {#snippet meta()}
+      {#if !membersQuery?.loading && teamMembers.length > 0}
+        <!-- Labelled stat, not "{n} members": paraglide-js 1.x has no plural
+             form (zero ICU plurals repo-wide), so an interpolated noun would
+             read "1 members". Matches the customers header's shape. -->
+        <li>{m.team_meta_members()}: {teamMembers.length}</li>
+      {/if}
+    {/snippet}
     {#snippet actions()}
       {#if isOwner}
-        <a class="btn btn-secondary" href="/studio/monetisation/revenue-share">
+        <!-- Stays an <a>, not a Button: it is navigation to another hub, so
+             middle-click and open-in-new-tab must keep working. `ui/Button`
+             renders a <button> only, hence the one remaining local class. -->
+        <a class="link-action" href="/studio/monetisation/revenue-share">
           Manage revenue share
         </a>
       {/if}
-      <button class="btn btn-primary" onclick={() => (inviteDialogOpen = true)}>
+      <Button onclick={() => (inviteDialogOpen = true)}>
         <UserPlusIcon size={16} />
         {m.team_invite()}
-      </button>
+      </Button>
     {/snippet}
   </PageHeader>
 
@@ -132,7 +154,7 @@
     {#if membersQuery?.loading}
       <div class="table-skeleton">
         <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
-        {#each Array(5) as _, i}
+        {#each Array(5) as _, i (i)}
           <div class="table-skeleton-row">
             <Skeleton width="{30 + (i % 3) * 8}%" height="var(--space-5)" />
             <Skeleton width="30%" height="var(--space-5)" />
@@ -143,9 +165,10 @@
       </div>
     {:else}
       <MemberTable
-        members={(membersQuery?.current?.items ?? []).filter((m) => m.role !== 'subscriber')}
+        members={teamMembers}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
+        onInvite={() => (inviteDialogOpen = true)}
         {revenueShareByUser}
       />
     {/if}
@@ -165,7 +188,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
   }
   .members-section {
     background-color: var(--color-surface);
@@ -193,53 +215,34 @@
     padding: var(--space-3) var(--space-4);
   }
 
-  /* Buttons */
-  .btn {
+  /* The residue of a ~50-line hand-rolled button block that duplicated
+     `ui/Button` (which Customers uses, and which supplies the focus ring and
+     aria-busy). Only the anchor variant survives, because Button cannot render
+     an <a>. Matched to Button's `secondary` variant + `md` size so the two sit
+     level in the header row. */
+  .link-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    font-size: var(--text-sm);
+    height: var(--space-10);
+    padding-inline: var(--space-4);
+    font-size: var(--text-base);
     font-weight: var(--font-medium);
     border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    border: none;
-    text-decoration: none;
-    padding: var(--space-2) var(--space-4);
-  }
-
-  .btn:disabled {
-    opacity: var(--opacity-60);
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-interactive-hover);
-  }
-
-  .btn-primary:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
-  .btn-secondary {
-    background-color: transparent;
+    background-color: var(--color-surface);
     color: var(--color-text);
     border: var(--border-width) var(--border-style) var(--color-border);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: var(--transition-colors);
   }
 
-  .btn-secondary:hover:not(:disabled) {
+  .link-action:hover {
     background-color: var(--color-surface-secondary);
-    border-color: var(--color-border-strong);
   }
 
-  .btn-secondary:focus-visible {
+  .link-action:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }

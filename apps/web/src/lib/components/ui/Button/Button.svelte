@@ -106,10 +106,18 @@
     font-size: var(--text-lg);
   }
 
-  /* Variant: Primary */
+  /* Variant: Primary.
+     `--color-on-interactive`, NOT `--color-text-inverse`: `inverse` inverts the
+     PAGE background, so on a dark page it resolves to dark ink and then gets
+     painted onto the saturated brand fill this button actually wears —
+     measured 3.82:1 on studio-alpha dark and 3.47:1 on studio-beta dark at
+     17px/500, both under the 4.5:1 AA floor. `--color-on-interactive` is
+     derived FROM `--color-interactive` (white below OKLCH L 0.62, black above),
+     so the label always contrasts with the swatch beneath it, for every org
+     brand and for the platform palette in both themes. */
   .button[data-variant="primary"] {
     background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
+    color: var(--color-on-interactive);
     border: none;
   }
 

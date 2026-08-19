@@ -65,6 +65,11 @@
     onViewThread: (
       revenueType: 'subscription' | 'content_purchase'
     ) => void;
+    /** Heading level for the creator name. Defaults to 4: this card renders
+      * inside a section whose own heading is an <h3>, so an <h3> here made 16
+      * creator names SIBLINGS of the heading that contains them and flattened
+      * the document outline. Mirrors `ui/PageHeader`'s `headingLevel`. */
+    headingLevel?: 3 | 4 | 5;
     /** Optional composition seam — forwarded to the root element. */
     class?: string;
   }
@@ -78,8 +83,11 @@
     onPropose,
     onAmend,
     onViewThread,
+    headingLevel = 4,
     class: className,
   }: Props = $props();
+
+  const nameTag = $derived(`h${headingLevel}` as 'h3' | 'h4' | 'h5');
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -182,7 +190,9 @@
         {/if}
       </div>
       <div class="agreement-card__identity-text">
-        <h3 class="agreement-card__name">{creator.name ?? 'Unnamed creator'}</h3>
+        <svelte:element this={nameTag} class="agreement-card__name">
+          {creator.name ?? 'Unnamed creator'}
+        </svelte:element>
       </div>
     </div>
   </header>
@@ -282,17 +292,24 @@
               </div>
             </dl>
           {:else}
-            <p class="agreement-card__row-empty">
-              No revenue share configured. Default: org keeps 100% of post-platform {row.copyLabel} revenue.
-            </p>
+            <!-- The "No revenue share configured. Default: org keeps 100% of
+                 post-platform … revenue." sentence used to live here, which meant
+                 of-blood-and-bones rendered it 32 times (16 creators × 2 revenue
+                 types) down a 3044px page. The page states it ONCE at section
+                 level; the `No agreement` pill above already carries the
+                 per-row fact. -->
           {/if}
         </div>
 
         <div class="agreement-card__row-actions">
           {#if row.state.kind === 'none'}
+            <!-- SECONDARY, not primary. 32 filled brand-coloured buttons on one
+                 page made nothing a decision because everything was equally
+                 loud. Primary emphasis is reserved below for the rows that
+                 actually need the owner to act on a counter. -->
             <button
               type="button"
-              class="agreement-card__btn agreement-card__btn--primary"
+              class="agreement-card__btn agreement-card__btn--secondary"
               onclick={() => onPropose(row.revType)}
             >
               Propose agreement
@@ -454,16 +471,21 @@
     border-color: var(--color-border);
   }
 
+  /* `--color-status-*` rather than the raw `--color-info-*` / `--color-success-*`
+     steps: those are fixed light-mode sRGB with no `[data-theme]` remap, so the
+     -50 tints invert into the brightest thing on a dark page and the -700
+     foregrounds never lighten. `styles/themes/status.css` derives each triple
+     from the page's own surface and ink. */
   .agreement-card__pill--info {
-    background: var(--color-info-50);
-    color: var(--color-info-700);
-    border-color: var(--color-info-200);
+    background: var(--color-status-info-surface);
+    color: var(--color-status-info-text);
+    border-color: var(--color-status-info-border);
   }
 
   .agreement-card__pill--success {
-    background: var(--color-success-50);
-    color: var(--color-success-700);
-    border-color: var(--color-success-200);
+    background: var(--color-status-success-surface);
+    color: var(--color-status-success-text);
+    border-color: var(--color-status-success-border);
   }
 
   .agreement-card__row-body {
@@ -487,8 +509,8 @@
   .agreement-card__row-detail-cell dt {
     font-size: var(--text-xs);
     color: var(--color-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    text-transform: var(--text-transform-label, uppercase);
+    letter-spacing: var(--tracking-wider);
   }
 
   .agreement-card__row-detail-cell dd {
@@ -541,9 +563,16 @@
     outline-offset: var(--space-0-5);
   }
 
+  /* `--color-on-interactive`, NOT `--color-text-on-brand`. The latter is a
+     hardcoded `#ffffff` in both platform themes, and the dark platform fill is
+     `--color-primary-400` (#f47d67, OKLCH L 0.72) — so this painted white on
+     salmon. `--color-on-interactive` is derived FROM the fill (white below
+     L 0.62, black above), so the label contrasts with the swatch under it for
+     every org brand and both themes. dark.css documents this trap directly
+     above its own derivation. */
   .agreement-card__btn--primary {
     background: var(--color-interactive);
-    color: var(--color-text-on-brand);
+    color: var(--color-on-interactive);
   }
 
   .agreement-card__btn--primary:hover {

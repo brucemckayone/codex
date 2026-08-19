@@ -378,10 +378,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    /* Let the parent studio layout govern width; `--container-studio` is
-       intentionally unset in tokens (removed on purpose). Falling back to
-       `none` = full studio width, which is what we want here. */
-    max-width: var(--container-studio);
     width: 100%;
   }
 

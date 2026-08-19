@@ -33,6 +33,19 @@
   --color-interactive-active: var(--color-primary-700);
   --color-interactive-subtle: var(--color-primary-50);
 
+  /* Ink for text sitting ON --color-interactive (filled primary controls).
+     Derived FROM the fill, not from the page: --color-text-inverse inverts the
+     PAGE background, so on a dark page it hands you dark ink and then paints it
+     onto a saturated brand fill — 3.82:1 on studio-alpha dark, measured. Same
+     step function as --color-text-on-brand (white below L 0.62, black above),
+     but keyed to the swatch actually being painted, which is what makes it
+     correct for every org brand AND for the platform palette. Declared in each
+     scope that declares --color-interactive: a custom property substitutes
+     var() at computed-value time on the element it is DECLARED on, so a single
+     :root copy would freeze the platform value and never see an org override.
+     (No :root fallback needed — `:root` is in this rule's selector list.) */
+  --color-on-interactive: oklch(from var(--color-interactive) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+
   /* Focus */
   --color-focus: var(--color-primary-500);
   --color-focus-ring: var(--color-primary-200);

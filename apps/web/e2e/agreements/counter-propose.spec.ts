@@ -18,6 +18,7 @@ import {
   creatorNegotiationsUrl,
   injectAgreementCookies,
   ownerRevenueSharePath,
+  proposeFromRoster,
 } from '../helpers/agreements';
 
 test.describe('Agreements — Counter-propose round-trip', () => {
@@ -47,14 +48,11 @@ test.describe('Agreements — Counter-propose round-trip', () => {
       ownerPage.getByRole('heading', { name: 'Team revenue share' })
     ).toBeVisible({ timeout: 30_000 });
 
-    const creatorCard = ownerPage.locator(
-      `article[aria-label*="${creator.user.name}"]`
-    );
-    await expect(creatorCard).toBeVisible({ timeout: 15_000 });
-    await creatorCard
-      .getByRole('button', { name: /propose agreement/i })
-      .first()
-      .click();
+    // Fresh topology → the creator sits in the roster's "No agreement yet"
+    // group, which renders a compact row rather than an AgreementCard. The
+    // card locator below (line ~127) IS correct: by then the creator has
+    // countered, which moves them into the `attention` group.
+    await proposeFromRoster(ownerPage, creator.user.name);
 
     const proposeDialog = ownerPage.getByRole('dialog');
     await expect(proposeDialog).toBeVisible({ timeout: 5000 });

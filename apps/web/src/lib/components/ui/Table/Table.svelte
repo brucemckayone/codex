@@ -10,7 +10,10 @@
 </script>
 
 <div class="table-container">
-  <table class="table {className}" {...restProps}>
+  <!-- `{className ?? ''}` (R13): every current caller omits `class`, so the
+       bare interpolation stringified `undefined` into the DOM class attribute
+       of every raw table in the app. -->
+  <table class="table {className ?? ''}" {...restProps}>
     {@render children()}
   </table>
 </div>
