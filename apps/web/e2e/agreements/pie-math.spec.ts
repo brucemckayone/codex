@@ -21,6 +21,7 @@ import {
   creatorNegotiationsUrl,
   injectAgreementCookies,
   ownerRevenueSharePath,
+  proposeFromRoster,
 } from '../helpers/agreements';
 
 const CREATOR_SHARES = [30, 20, 10] as const;
@@ -52,14 +53,12 @@ test.describe('Agreements — Multi-creator pie math', () => {
           ownerPage.getByRole('heading', { name: 'Team revenue share' })
         ).toBeVisible({ timeout: 30_000 });
 
-        const card = ownerPage.locator(
-          `article[aria-label*="${creator.user.name}"]`
-        );
-        await expect(card).toBeVisible({ timeout: 15_000 });
-        await card
-          .getByRole('button', { name: /propose agreement/i })
-          .first()
-          .click();
+        // Each creator starts with no agreement, so on this iteration they
+        // are in the roster's "No agreement yet" group (a compact row) while
+        // the creators accepted on earlier iterations have moved into
+        // `agreed` and render AgreementCards. The per-creator accessible name
+        // on the roster button is what keeps the three apart.
+        await proposeFromRoster(ownerPage, creator.user.name);
 
         const dialog = ownerPage.getByRole('dialog');
         await expect(dialog).toBeVisible({ timeout: 5000 });

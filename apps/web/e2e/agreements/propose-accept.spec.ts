@@ -22,6 +22,7 @@ import {
   creatorNegotiationsUrl,
   injectAgreementCookies,
   ownerRevenueSharePath,
+  proposeFromRoster,
 } from '../helpers/agreements';
 
 test.describe('Agreements — Propose → Accept happy path', () => {
@@ -55,17 +56,13 @@ test.describe('Agreements — Propose → Accept happy path', () => {
       ownerPage.getByRole('heading', { name: 'Team revenue share' })
     ).toBeVisible({ timeout: 30_000 });
 
-    // The seeded creator should appear in the Creators section.
-    const creatorCard = ownerPage.locator(
-      `article[aria-label*="${creator.user.name}"]`
-    );
-    await expect(creatorCard).toBeVisible({ timeout: 15_000 });
-
-    // Click "Propose agreement" inside the subscription row of the card.
-    await creatorCard
-      .getByRole('button', { name: /propose agreement/i })
-      .first()
-      .click();
+    // The seeded creator has no agreement and no open proposal, so the owner
+    // roster puts them in the "No agreement yet" group — a compact
+    // `<li class="revenue-share-page__roster-row">`, NOT an
+    // `<article aria-label="Agreement for …">` AgreementCard (those are only
+    // rendered for the attention / agreed / waiting groups). See
+    // `rosterRowFor` in `helpers/agreements.ts`.
+    await proposeFromRoster(ownerPage, creator.user.name);
 
     // ProposeAgreementDialog opens — default share 30%, term 6 months.
     const dialog = ownerPage.getByRole('dialog');
