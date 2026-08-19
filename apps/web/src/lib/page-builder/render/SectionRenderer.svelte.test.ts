@@ -175,7 +175,7 @@ describe('SectionRenderer (mount)', () => {
               type: 'hero',
               enabled: true,
               // A declared hero variant, so it survives resolution intact.
-              variant: 'split',
+              variant: 'split-media',
               props: { headline: 'x' },
               design: { density: 'airy' },
             },
@@ -188,7 +188,7 @@ describe('SectionRenderer (mount)', () => {
 
       const probe = document.body.querySelector('[data-probe="section-props"]');
       expect(probe).not.toBeNull();
-      expect(probe?.getAttribute('data-probe-variant')).toBe('split');
+      expect(probe?.getAttribute('data-probe-variant')).toBe('split-media');
       expect(probe?.getAttribute('data-probe-density')).toBe('airy');
       expect(probe?.getAttribute('data-probe-width')).toBe('narrow');
       expect(probe?.getAttribute('data-probe-config-keys')).toBe('headline');
