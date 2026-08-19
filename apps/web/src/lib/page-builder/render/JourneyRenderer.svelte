@@ -93,7 +93,11 @@
     it inherits an already-resolved `--jp-ink`. See `../journey-palette.css`.
   -->
   <div class="journey-palette--page">
-    <SectionRenderer sections={coursePage.page.sections} {context} />
+    <SectionRenderer
+      sections={coursePage.page.sections}
+      {context}
+      pageDesign={coursePage.page.design}
+    />
     <FloatingCta
       href={enrolled ? dashboardUrl : checkoutUrl}
       label={coursePage.course.title}

@@ -52,6 +52,26 @@ export interface SellPreview {
   intro: PreviewMedia | null;
   /** The practice-preview clip (the `reel` section). */
   reel: PreviewMedia | null;
+  /**
+   * The guide's PORTRAIT still — a public CDN URL, or null when the creator has
+   * picked no portrait (contract amendment A15). FE mirror of
+   * `CourseSellPreview.guidePortraitUrl`.
+   *
+   * `GuideSection` reads a `portraitUrl` PROP that no builder field and no query
+   * could ever fill, so the published guide could only render its letter
+   * monogram. The picker wrote `courses.guide.portraitMediaId` and nothing public
+   * read it. This is the projection; WT-6 is what consumes it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and the section keeps
+   * falling back to the monogram.
+   */
+  guidePortraitUrl?: string | null;
+  /**
+   * The guide's talking-head clip (the second builder-written, publicly-unread
+   * media slot A15 closes). The public `guide` section has no video affordance at
+   * all today — adding one is WT-6's composition work.
+   */
+  guideClip?: PreviewMedia | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

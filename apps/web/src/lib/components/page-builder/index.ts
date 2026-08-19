@@ -43,3 +43,19 @@ export {
   type SectionFieldOption,
 } from './section-fields';
 export { default as VariantPicker } from './VariantPicker.svelte';
+/*
+  RESERVED SLOTS — the design-axis editor UI (journey-sections F-B).
+
+  The axis vocabulary itself is NOT re-exported here: it lives in
+  `$lib/page-builder` (`SECTION_DESIGN_AXES` / `SECTION_DESIGN_VALUES` /
+  `SECTION_DESIGN_DEFAULTS`), which this tree may import directly — the allowed
+  direction. A second copy in the editor barrel is how an axis value ends up
+  selectable in the panel and unstyled on the page.
+
+  F-B adds, alphabetically among the exports above:
+    • `DesignPanel.svelte`  — the nine axis controls (page scope + section scope)
+    • `PresetPicker.svelte` — the eight composition presets from research §4
+
+  Named here so both land in a known place rather than at whichever line each
+  worktree happens to pick.
+*/

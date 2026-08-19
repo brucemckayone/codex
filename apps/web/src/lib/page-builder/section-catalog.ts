@@ -27,6 +27,8 @@
 import type {
   CourseSectionType,
   PageSection,
+  ResolvedSectionDesign,
+  SectionDesign,
   SectionProps,
 } from '@codex/shared-types';
 
@@ -478,6 +480,140 @@ export function resolveVariant(
     return section.variant;
   }
   return def.defaultVariant || def.variants[0]?.id || '';
+}
+
+// ── Design axes ──────────────────────────────────────────────────────────────
+//
+// The DESIGN-LANGUAGE layer, orthogonal to the variant layer above (see
+// `docs/design/journey-sections/02-axis-contract.md`). A variant says WHICH boxes
+// a section draws; an axis says HOW — how wide, how dense, how loud. They compose,
+// so nine axes multiply every composition of every type rather than adding to the
+// variant namespace.
+//
+// Lives here, next to `resolveVariant`, for the same reason: `$lib/page-builder`
+// is the CE-4-scanned PUBLIC_LIB_ROOT, so this must stay pure, framework-free and
+// DOM-free. `SECTION_DESIGN_VALUES` and `SECTION_DESIGN_DEFAULTS` are exported so
+// the renderer, the builder's design panel and the tests all read ONE source of
+// truth for the enums — a second hand-written list is how an axis value ends up
+// selectable in the editor and unstyled on the page.
+
+/**
+ * The nine axes, in the order the renderer emits their `data-jp-*` attributes.
+ * Attribute order is cosmetic; a stable order keeps the served HTML diffable.
+ */
+export const SECTION_DESIGN_AXES = [
+  'width',
+  'density',
+  'surface',
+  'edge',
+  'align',
+  'type',
+  'accent',
+  'motion',
+  'media',
+] as const;
+
+/** One axis name. */
+export type SectionDesignAxis = (typeof SECTION_DESIGN_AXES)[number];
+
+/**
+ * Every legal value per axis (research §2.2) — the closed enum made available at
+ * RUNTIME, which is what lets {@link resolveDesign} drop an unknown stored value
+ * instead of forwarding it into an attribute that matches no CSS rule.
+ */
+export const SECTION_DESIGN_VALUES: {
+  readonly [A in SectionDesignAxis]: readonly NonNullable<SectionDesign[A]>[];
+} = {
+  width: ['narrow', 'text', 'wide', 'full'],
+  density: ['compact', 'regular', 'airy', 'vast'],
+  surface: ['bare', 'tint', 'panel', 'invert', 'media'],
+  edge: ['none', 'hairline', 'soft', 'heavy', 'offset'],
+  align: ['start', 'center'],
+  type: ['restrained', 'balanced', 'expressive', 'monumental'],
+  accent: ['text', 'fill', 'edge', 'glow', 'none'],
+  motion: ['none', 'fade', 'rise', 'stagger', 'drift'],
+  media: ['bleed', 'frame', 'mask', 'inset', 'none'],
+};
+
+/**
+ * The axis DEFAULTS (research §2.2) — what a section renders as when neither it
+ * nor its page states an opinion.
+ *
+ * These describe a SENSIBLE NEUTRAL page, deliberately NOT today's cinematic
+ * look: a creator with no design opinion should not inherit a niche aesthetic.
+ * That makes the Candlelit backfill in F-B's migration load-bearing — every
+ * PRE-EXISTING page is written an explicit Candlelit bundle in the same step that
+ * adds the column, so these defaults only ever apply to pages created afterwards
+ * (amendment A3).
+ */
+export const SECTION_DESIGN_DEFAULTS: ResolvedSectionDesign = {
+  width: 'text',
+  density: 'regular',
+  surface: 'bare',
+  edge: 'hairline',
+  align: 'center',
+  type: 'balanced',
+  accent: 'fill',
+  motion: 'rise',
+  media: 'frame',
+};
+
+/** Anything that can carry design opinions: a section, or a page draft. */
+type DesignSource = { design?: SectionDesign } | null | undefined;
+
+/**
+ * Resolve ONE axis: the first source that names a LEGAL value wins; an unknown
+ * value is skipped as if unset (never forwarded, never an error), and the axis
+ * default is the floor.
+ */
+function resolveAxis<A extends SectionDesignAxis>(
+  axis: A,
+  sources: readonly DesignSource[]
+): NonNullable<SectionDesign[A]> {
+  const legal: readonly unknown[] = SECTION_DESIGN_VALUES[axis];
+  for (const source of sources) {
+    const value = source?.design?.[axis];
+    if (value !== undefined && legal.includes(value)) {
+      return value as NonNullable<SectionDesign[A]>;
+    }
+  }
+  return SECTION_DESIGN_DEFAULTS[axis];
+}
+
+/**
+ * The design language a section renders in — the axis sibling of
+ * {@link resolveVariant}.
+ *
+ * Resolution is PER AXIS, first hit wins: `section.design[axis]` →
+ * `page.design[axis]` → the axis default. Per-axis (rather than
+ * all-or-nothing) inheritance is the point — a real page wants a `vast` hero
+ * above a `compact` FAQ, and that is good design, not incoherence.
+ *
+ * ALWAYS TOTAL: every axis is present in the result, because the renderer emits
+ * one attribute per axis and an unset value would emit an empty attribute.
+ * Unknown/garbage values fall back to the default rather than being passed
+ * through, which is what keeps a future client's new axis value from rendering
+ * as an unstyled no-op that looks like a broken control.
+ *
+ * @param section the section instance, or null to resolve the page's own look
+ * @param page the page draft carrying the page-level defaults (`coursePage.page`)
+ */
+export function resolveDesign(
+  section: Pick<PageSection, 'design'> | null | undefined,
+  page?: DesignSource
+): ResolvedSectionDesign {
+  const sources: readonly DesignSource[] = [section, page];
+  return {
+    width: resolveAxis('width', sources),
+    density: resolveAxis('density', sources),
+    surface: resolveAxis('surface', sources),
+    edge: resolveAxis('edge', sources),
+    align: resolveAxis('align', sources),
+    type: resolveAxis('type', sources),
+    accent: resolveAxis('accent', sources),
+    motion: resolveAxis('motion', sources),
+    media: resolveAxis('media', sources),
+  };
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────

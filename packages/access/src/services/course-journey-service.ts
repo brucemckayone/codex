@@ -507,9 +507,10 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Resolve the PUBLIC 30s sell-preview clips for a course's intro-film +
-   * practice reel (SPEC §10) — the streamed, off-critical-path payload of the
-   * sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
+   * Resolve the PUBLIC 30s sell-preview media for a course: the intro-film and
+   * practice-reel clips (SPEC §10) plus the guide's portrait still and
+   * talking-head clip (journey-sections contract A15) — the streamed,
+   * off-critical-path payload of the sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
    * SAME public preview path the org-landing hero consumes —
    * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
    * `R2_PUBLIC_URL_BASE` (mirrors `content-api/routes/public.ts` `resolveR2Urls`);
@@ -526,6 +527,10 @@ export class CourseJourneyService extends BaseService {
         .select({
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
+          guideVideoMediaId: courses.guideVideoMediaId,
+          // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
+          // of its own — `updateJourneySellMedia` read-then-merges it there.
+          guide: courses.guide,
         })
         .from(courses)
         .where(
@@ -539,9 +544,13 @@ export class CourseJourneyService extends BaseService {
 
       if (!courseRow) return null;
 
+      const guidePortraitMediaId = courseRow.guide?.portraitMediaId ?? null;
+
       const mediaIds = [
         courseRow.introVideoMediaId,
         courseRow.previewVideoMediaId,
+        courseRow.guideVideoMediaId,
+        guidePortraitMediaId,
       ].filter((id): id is string => id !== null);
 
       const previewByMediaId = new Map<
@@ -581,9 +590,25 @@ export class CourseJourneyService extends BaseService {
         };
       };
 
+      // Resolve one media id → a public STILL. The portrait is a `media_items`
+      // ref, and `media_items` is CHECK-constrained to video/audio, so the still
+      // the creator picked is the item's `thumbnailKey` — NOT `hlsPreviewKey`,
+      // which is why the portrait cannot go through `toClip`.
+      const toStill = (mediaId: string | null): string | null => {
+        if (!mediaId) return null;
+        const media = previewByMediaId.get(mediaId);
+        if (!media?.thumbnailKey || !r2PublicUrlBase) return null;
+        return `${r2PublicUrlBase}/${media.thumbnailKey}`;
+      };
+
       return {
         intro: toClip(courseRow.introVideoMediaId),
         reel: toClip(courseRow.previewVideoMediaId),
+        // Contract amendment A15: both guide slots were WRITE-ONLY codebase-wide
+        // — the builder's pickers persisted them and no public read projected
+        // them, so the guide section could never show a portrait or a clip.
+        guidePortraitUrl: toStill(guidePortraitMediaId),
+        guideClip: toClip(courseRow.guideVideoMediaId),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
