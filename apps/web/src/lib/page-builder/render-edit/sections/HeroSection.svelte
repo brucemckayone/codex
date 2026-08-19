@@ -17,7 +17,11 @@
   const edit = (key: string) => (value: string) => onEdit?.(key, value);
   const motes = Array.from({ length: 12 }, (_, i) => i);
   const bg = $derived(text(props, 'bg') || 'ember');
-  const showCue = $derived(variant !== 'split' && variant !== 'minimal');
+  // The 0085 collapse rewrote every stored id, so `split` no longer arrives —
+  // `split-media` does. These comparisons were silently matching nothing, which
+  // rendered a split hero as a centred stack and gave it a scroll cue it never had.
+  // Consolidation deletes this twin (contract A1); until then it should be honest.
+  const showCue = $derived(variant !== 'split-media');
 </script>
 
 {#snippet column()}
@@ -86,7 +90,7 @@
     <div class="jp-hero__vignette"></div>
   </div>
 
-  {#if variant === 'split'}
+  {#if variant === 'split-media'}
     <div class="jp-hero__inner">
       <div class="jp-hero__col">{@render column()}</div>
       <div class="jp-hero__media"><span class="jp-play-dot" aria-hidden="true">▶</span></div>

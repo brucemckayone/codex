@@ -22,7 +22,11 @@
 /* ═══════════════════ HERO ═══════════════════════════════════════════════════
    Breathing brand-glow core, rising motes, vignette, kinetic serif headline with
    italic accent, lede + emphasis line, primary + quiet CTA, trust dot, scroll cue.
-   Variants: centered (default) · left · split (media) · minimal.
+   Compositions (post-0085 ids): stage (default) · split-media.
+   `--left` and `--minimal` below are RETIRED ids kept only so an unmigrated row
+   still paints; both are now axis values (`align`, and density+accent+motion).
+   This partial drains at consolidation, when the canvas is repointed at
+   `render/sections/HeroSection.svelte` (contract A12/A1).
    Background treatment via [data-bg]: ember · blood · still. */
 .jp-hero {
   position: relative;
@@ -210,18 +214,18 @@
 .jp-hero--left .jp-hero__headline,
 .jp-hero--left .jp-hero__lede { margin-inline: 0; }
 .jp-hero--left .jp-hero__glow { left: 82%; }
-.jp-hero--split { text-align: left; justify-items: stretch; }
-.jp-hero--split .jp-hero__inner {
+.jp-hero--split-media { text-align: left; justify-items: stretch; }
+.jp-hero--split-media .jp-hero__inner {
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
   align-items: center;
   gap: clamp(1.5rem, 4cqw, 3rem);
   max-width: none;
 }
-.jp-hero--split .jp-hero__col { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(1rem, 2.4cqw, 1.7rem); }
-.jp-hero--split .jp-hero__headline,
-.jp-hero--split .jp-hero__lede { margin-inline: 0; text-align: left; }
-.jp-hero--split .jp-hero__media {
+.jp-hero--split-media .jp-hero__col { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(1rem, 2.4cqw, 1.7rem); }
+.jp-hero--split-media .jp-hero__headline,
+.jp-hero--split-media .jp-hero__lede { margin-inline: 0; text-align: left; }
+.jp-hero--split-media .jp-hero__media {
   aspect-ratio: 4 / 5;
   border-radius: var(--radius-xl);
   border: var(--border-width) solid color-mix(in oklab, var(--jp-ember) 18%, transparent);
@@ -230,7 +234,7 @@
   place-items: center;
   box-shadow: 0 24px 60px -28px black;
 }
-.jp-hero--split .jp-hero__media .jp-play-dot {
+.jp-hero--split-media .jp-hero__media .jp-play-dot {
   width: 58px;
   height: 58px;
   border-radius: 50%;
@@ -240,10 +244,10 @@
   color: var(--jp-on-ember);
   font-size: 1.1rem;
 }
-.jp-hero--split .jp-hero__glow { left: 78%; top: 50%; }
+.jp-hero--split-media .jp-hero__glow { left: 78%; top: 50%; }
 @container (max-width: 420px) {
-  .jp-hero--split .jp-hero__inner { grid-template-columns: 1fr; }
-  .jp-hero--split .jp-hero__media { order: -1; aspect-ratio: 16 / 10; }
+  .jp-hero--split-media .jp-hero__inner { grid-template-columns: 1fr; }
+  .jp-hero--split-media .jp-hero__media { order: -1; aspect-ratio: 16 / 10; }
 }
 .jp-hero--minimal { min-height: clamp(240px, 34cqw, 380px); }
 .jp-hero--minimal .jp-hero__glow { opacity: 0.32; }
