@@ -529,8 +529,9 @@ export class CourseJourneyService extends BaseService {
 
   /**
    * Resolve the PUBLIC 30s sell-preview media for a course: the intro-film and
-   * practice-reel clips (SPEC §10) plus the guide's portrait still and
-   * talking-head clip (journey-sections contract A15) — the streamed,
+   * practice-reel clips (SPEC §10), the guide's portrait still and talking-head
+   * clip (journey-sections contract A15), and the hero still plus the guide's
+   * signature (contract A27, Codex-wqxv4) — the streamed,
    * off-critical-path payload of the sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
    * SAME public preview path the org-landing hero consumes —
    * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
@@ -549,6 +550,10 @@ export class CourseJourneyService extends BaseService {
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
+          // A27: the hero still + the guide's signature. Real columns (unlike the
+          // portrait below), so they select and write like the three videos.
+          heroMediaId: courses.heroMediaId,
+          signatureMediaId: courses.signatureMediaId,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
           guide: courses.guide,
@@ -572,6 +577,8 @@ export class CourseJourneyService extends BaseService {
         courseRow.previewVideoMediaId,
         courseRow.guideVideoMediaId,
         guidePortraitMediaId,
+        courseRow.heroMediaId,
+        courseRow.signatureMediaId,
       ].filter((id): id is string => id !== null);
 
       const previewByMediaId = new Map<
@@ -630,6 +637,13 @@ export class CourseJourneyService extends BaseService {
         // them, so the guide section could never show a portrait or a clip.
         guidePortraitUrl: toStill(guidePortraitMediaId),
         guideClip: toClip(courseRow.guideVideoMediaId),
+        // Contract amendment A27 (Codex-wqxv4): the hero image and the guide's
+        // signature. Both go through `toStill` for the reason its own comment
+        // gives — `media_items` is video/audio-only, so the still a creator picks
+        // is the item's `thumbnailKey`. `hero.full-bleed` / `hero.poster` /
+        // `guide.letter` are named after media that, until now, no column held.
+        heroImageUrl: toStill(courseRow.heroMediaId),
+        signatureUrl: toStill(courseRow.signatureMediaId),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
@@ -1994,6 +2008,8 @@ export class CourseJourneyService extends BaseService {
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
+          heroMediaId: courses.heroMediaId,
+          signatureMediaId: courses.signatureMediaId,
           guide: courses.guide,
           coverImageKey: courses.coverImageKey,
         })
@@ -2017,6 +2033,8 @@ export class CourseJourneyService extends BaseService {
         previewVideoMediaId: row.previewVideoMediaId,
         guideVideoMediaId: row.guideVideoMediaId,
         guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+        heroMediaId: row.heroMediaId,
+        signatureMediaId: row.signatureMediaId,
         coverImageUrl: resolveCourseCoverUrl(
           row.coverImageKey,
           r2PublicUrlBase
@@ -2028,7 +2046,7 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Persist the journey's SELL MEDIA — a TOTAL write of the four media slots.
+   * Persist the journey's SELL MEDIA — a TOTAL write of the six media slots.
    *
    * Total, not merge: every slot is set to exactly what the caller sends, so
    * `null` CLEARS. A merge shape could only ever set a video, never unset one,
@@ -2057,6 +2075,10 @@ export class CourseJourneyService extends BaseService {
       previewVideoMediaId: string | null;
       guideVideoMediaId: string | null;
       guidePortraitMediaId: string | null;
+      /** A27 (Codex-wqxv4) — the hero still. */
+      heroMediaId: string | null;
+      /** A27 (Codex-wqxv4) — the guide's signature mark. */
+      signatureMediaId: string | null;
     }
   ): Promise<JourneySellMedia> {
     try {
@@ -2072,6 +2094,8 @@ export class CourseJourneyService extends BaseService {
         input.previewVideoMediaId,
         input.guideVideoMediaId,
         input.guidePortraitMediaId,
+        input.heroMediaId,
+        input.signatureMediaId,
       ]);
 
       return await this.txDb.transaction(async (tx) => {
@@ -2110,6 +2134,8 @@ export class CourseJourneyService extends BaseService {
             introVideoMediaId: input.introVideoMediaId,
             previewVideoMediaId: input.previewVideoMediaId,
             guideVideoMediaId: input.guideVideoMediaId,
+            heroMediaId: input.heroMediaId,
+            signatureMediaId: input.signatureMediaId,
             guide,
           })
           .where(
@@ -2123,6 +2149,8 @@ export class CourseJourneyService extends BaseService {
             introVideoMediaId: courses.introVideoMediaId,
             previewVideoMediaId: courses.previewVideoMediaId,
             guideVideoMediaId: courses.guideVideoMediaId,
+            heroMediaId: courses.heroMediaId,
+            signatureMediaId: courses.signatureMediaId,
             guide: courses.guide,
             coverImageKey: courses.coverImageKey,
           });
@@ -2141,6 +2169,8 @@ export class CourseJourneyService extends BaseService {
           previewVideoMediaId: row.previewVideoMediaId,
           guideVideoMediaId: row.guideVideoMediaId,
           guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+          heroMediaId: row.heroMediaId,
+          signatureMediaId: row.signatureMediaId,
           // The cover is written by its own multipart endpoint; echo the stored
           // key unresolved-to-null here rather than inventing a base URL.
           coverImageUrl: null,

@@ -653,6 +653,8 @@ export const updateJourneySellMedia = command(
         previewVideoMediaId: media.previewVideoMediaId ?? null,
         guideVideoMediaId: media.guideVideoMediaId ?? null,
         guidePortraitMediaId: media.guidePortraitMediaId ?? null,
+        heroMediaId: media.heroMediaId ?? null,
+        signatureMediaId: media.signatureMediaId ?? null,
       });
     } catch (err) {
       if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {

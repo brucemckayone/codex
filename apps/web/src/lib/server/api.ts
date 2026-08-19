@@ -1445,8 +1445,8 @@ export function createServerApi(
       // ── Sell media + cover (Codex-eqh0z) ──────────────────────────────────
 
       /**
-       * Read the journey's sell media — the four `media_items` refs the sales
-       * page's `introVideo` / `reel` / `guide` sections resolve, plus the cover
+       * Read the journey's sell media — the six `media_items` refs the sales
+       * page's `hero` / `introVideo` / `reel` / `guide` sections resolve, plus the cover
        * URL. Separate from `getJourneyForBuilder` because these columns live on
        * the subject COURSE and the page-save body is `.strict()`.
        */
@@ -1472,6 +1472,8 @@ export function createServerApi(
           previewVideoMediaId: string | null;
           guideVideoMediaId: string | null;
           guidePortraitMediaId: string | null;
+          heroMediaId: string | null;
+          signatureMediaId: string | null;
         }
       ) =>
         request<JourneySellMedia>(

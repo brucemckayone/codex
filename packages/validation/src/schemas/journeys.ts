@@ -395,6 +395,12 @@ export const updateJourneySellMediaBodySchema = z
     previewVideoMediaId: uuidSchema.nullable().default(null),
     guideVideoMediaId: uuidSchema.nullable().default(null),
     guidePortraitMediaId: uuidSchema.nullable().default(null),
+    // A27 (Codex-wqxv4): the hero still and the guide's signature. Same
+    // total-write, `.nullable().default(null)` treatment as the four above, so an
+    // omitted slot CLEARS. Both are `media_items` refs — the still resolved is
+    // the picked item's thumbnail, since `media_items` is video/audio only.
+    heroMediaId: uuidSchema.nullable().default(null),
+    signatureMediaId: uuidSchema.nullable().default(null),
   })
   .strict();
 export type UpdateJourneySellMediaBody = z.infer<

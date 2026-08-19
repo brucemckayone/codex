@@ -79,11 +79,16 @@ export interface SectionFieldDef {
    *
    * This is what makes the media control REAL. The live sections do not read a
    * clip out of `props`: `introVideo` reads `sellPreview.intro`, `reel` reads
-   * `sellPreview.reel`, and the guide reads `portraitUrl` — all projected from
+   * `sellPreview.reel`, the hero reads `sellPreview.heroImageUrl` and the guide
+   * reads `guidePortraitUrl` / `signatureUrl` — all projected from
    * `courses.*MediaId`. So a picker that wrote into `props` could never affect
    * what renders, which is exactly why the old control was a decorative text
    * input. Naming the slot here points the picker at the column the section
    * actually reads.
+   *
+   * A27 (Codex-wqxv4) added the last two of those columns. `hero` and the guide's
+   * signature had NO slot at all, which is why F-C could declare
+   * `hero.full-bleed` / `hero.poster` / `guide.letter` but not field them.
    */
   readonly mediaSlot?: JourneySellMediaSlot;
   /**
@@ -226,6 +231,13 @@ export const SECTION_FIELDS: Readonly<
       hint: 'Small reassurance under the buttons. Optional.',
     },
     {
+      key: 'heroMedia',
+      label: 'Hero image',
+      control: 'media',
+      mediaSlot: 'heroMediaId',
+      hint: 'The image the hero shows. Pick a ready item from your media library — its still frame is used.',
+    },
+    {
       key: 'bg',
       label: 'Background',
       control: 'select',
@@ -354,6 +366,13 @@ export const SECTION_FIELDS: Readonly<
       control: 'media',
       mediaSlot: 'guideVideoMediaId',
       hint: 'A talking-head clip. Optional.',
+    },
+    {
+      key: 'signatureMedia',
+      label: 'Signature',
+      control: 'media',
+      mediaSlot: 'signatureMediaId',
+      hint: 'The sign-off mark at the foot of the Letter layout. Optional.',
     },
     {
       key: 'clip',

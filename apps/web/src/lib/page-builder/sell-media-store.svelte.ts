@@ -1,16 +1,16 @@
 /**
  * Journey SELL-MEDIA store (Codex-eqh0z).
  *
- * The pending-draft spine for the four media slots the sales page's `introVideo`
- * / `reel` / `guide` sections resolve their primary content from, plus the still
- * cover. Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
+ * The pending-draft spine for the six media slots the sales page's `hero` /
+ * `introVideo` / `reel` / `guide` sections resolve their primary content from,
+ * plus the still cover. Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
  * (`open()` on load → edit via the panel or a section inspector → `save()` →
  * `close()` on destroy), and every surface that can set media reads and writes
  * THIS store, so the media panel and the per-section pickers can never disagree
  * about what is pending.
  *
  * Why a store rather than props: the pickers live in two places at once — the
- * `PageMediaPanel` (all four slots together) and the per-section inspector
+ * `PageMediaPanel` (the slots together) and the per-section inspector
  * (`SectionEditor`'s `media` control, which sets the slot its section renders).
  * Threading the same pending state through two component trees would mean two
  * sources of truth for one save.
@@ -29,12 +29,22 @@ import {
 } from '$lib/remote/journeys.remote';
 import { listMedia } from '$lib/remote/media.remote';
 
-/** The four course columns a picker can target. */
+/**
+ * The six course columns a picker can target.
+ *
+ * `heroMediaId` and `signatureMediaId` are contract amendment A27 (Codex-wqxv4).
+ * Three of the six are real `courses` columns, `guidePortraitMediaId` lives in
+ * the `guide` jsonb bag and the two A27 slots are real columns again — but that
+ * asymmetry is entirely the service's to hide: every slot here is a flat
+ * `mediaId` the pickers set identically.
+ */
 export type JourneySellMediaSlot =
   | 'introVideoMediaId'
   | 'previewVideoMediaId'
   | 'guideVideoMediaId'
-  | 'guidePortraitMediaId';
+  | 'guidePortraitMediaId'
+  | 'heroMediaId'
+  | 'signatureMediaId';
 
 /** The `media_items` projection the pickers render (matches `MediaPicker`). */
 export interface SellMediaOption {
@@ -45,7 +55,7 @@ export interface SellMediaOption {
   fileSizeBytes?: number | null;
 }
 
-/** The four slots, all independently clearable. `null` = empty. */
+/** The six slots, all independently clearable. `null` = empty. */
 export type SellMediaSlots = Record<JourneySellMediaSlot, string | null>;
 
 const EMPTY_SLOTS: SellMediaSlots = {
@@ -53,6 +63,8 @@ const EMPTY_SLOTS: SellMediaSlots = {
   previewVideoMediaId: null,
   guideVideoMediaId: null,
   guidePortraitMediaId: null,
+  heroMediaId: null,
+  signatureMediaId: null,
 };
 
 class SellMediaStore {
@@ -125,6 +137,8 @@ class SellMediaStore {
           previewVideoMediaId: media.previewVideoMediaId,
           guideVideoMediaId: media.guideVideoMediaId,
           guidePortraitMediaId: media.guidePortraitMediaId,
+          heroMediaId: media.heroMediaId,
+          signatureMediaId: media.signatureMediaId,
         };
         this.#pending = { ...slots };
         this.#saved = { ...slots };
@@ -170,6 +184,8 @@ class SellMediaStore {
       previewVideoMediaId: persisted.previewVideoMediaId,
       guideVideoMediaId: persisted.guideVideoMediaId,
       guidePortraitMediaId: persisted.guidePortraitMediaId,
+      heroMediaId: persisted.heroMediaId,
+      signatureMediaId: persisted.signatureMediaId,
     };
     this.#pending = { ...slots };
     this.#saved = { ...slots };

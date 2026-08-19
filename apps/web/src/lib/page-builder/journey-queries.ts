@@ -216,13 +216,16 @@ export interface JourneyCardView {
 }
 
 /**
- * The journey's SELL MEDIA — the four media refs the sales page's `introVideo` /
- * `reel` / `guide` sections resolve their primary content from, plus the still
- * cover (Codex-eqh0z). FE mirror of `@codex/shared-types` `JourneySellMedia`.
+ * The journey's SELL MEDIA — the six media refs the sales page's `hero` /
+ * `introVideo` / `reel` / `guide` sections resolve their primary content from,
+ * plus the still cover (Codex-eqh0z). FE mirror of `@codex/shared-types`
+ * `JourneySellMedia`.
  *
- * The three video ids and the guide portrait are `media_items` refs; the cover is
- * NOT (`media_items` is CHECK-constrained to video/audio, so a still image
- * cannot live there) — it arrives already resolved to a CDN URL.
+ * Every id is a `media_items` ref; the cover is NOT (`media_items` is
+ * CHECK-constrained to video/audio, so a still image cannot live there) — it
+ * arrives already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
+ * contract amendment A27 (Codex-wqxv4); each resolves publicly to the picked
+ * item's thumbnail, the same way the guide portrait does.
  */
 export interface JourneySellMedia {
   courseId: string;
@@ -230,6 +233,8 @@ export interface JourneySellMedia {
   previewVideoMediaId: string | null;
   guideVideoMediaId: string | null;
   guidePortraitMediaId: string | null;
+  heroMediaId: string | null;
+  signatureMediaId: string | null;
   coverImageUrl: string | null;
 }
 

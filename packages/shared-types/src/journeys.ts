@@ -882,14 +882,20 @@ export interface JourneyCardView {
 }
 
 /**
- * The journey's SELL MEDIA — the four media refs the sales page's `introVideo`,
- * `reel` and `guide` sections resolve their primary content from, plus the still
- * cover (Codex-eqh0z). All five are creator-owned and independently clearable.
+ * The journey's SELL MEDIA — the six media refs the sales page's `hero`,
+ * `introVideo`, `reel` and `guide` sections resolve their primary content from,
+ * plus the still cover (Codex-eqh0z). All seven are creator-owned and
+ * independently clearable.
  *
- * The three video ids and the guide portrait are `media_items` refs (they reuse
- * the transcoding pipeline; SPEC §10). The cover is NOT a `media_items` ref —
- * `media_items` is CHECK-constrained to ('video','audio'), so a still image
- * cannot live there; it is an R2 key on `courses`, resolved to a CDN URL here.
+ * Every id here is a `media_items` ref (they reuse the transcoding pipeline;
+ * SPEC §10). The cover is NOT — `media_items` is CHECK-constrained to
+ * ('video','audio'), so a still image cannot live there; it is an R2 key on
+ * `courses`, resolved to a CDN URL here.
+ *
+ * `heroMediaId` / `signatureMediaId` are contract amendment A27 (Codex-wqxv4).
+ * Because of that same video/audio CHECK, the STILL each names is the picked
+ * item's `thumbnailKey` — the identical resolution `guidePortraitMediaId` has
+ * always used, projected by `getCourseSellPreview`'s `toStill`.
  */
 export interface JourneySellMedia {
   /** The subject course these refs live on (`landing_pages.subjectId`). */
@@ -902,6 +908,15 @@ export interface JourneySellMedia {
   guideVideoMediaId: string | null;
   /** The guide's portrait still (`courses.guide.portraitMediaId`). */
   guidePortraitMediaId: string | null;
+  /**
+   * The HERO still (`courses.heroMediaId`, A27) — the image `hero.full-bleed`
+   * and `hero.poster` are named after. Before A27 there was no hero image slot
+   * at all, so `hero.split` rendered a synthetic radial-gradient plate and the
+   * `media` design axis had nothing to act on in the page's loudest section.
+   */
+  heroMediaId: string | null;
+  /** The guide's SIGNATURE mark (`courses.signatureMediaId`, A27) — `guide.letter`'s sign-off. */
+  signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
 }
@@ -983,4 +998,24 @@ export interface CourseSellPreview {
    * no guide video or its preview has not transcoded.
    */
   guideClip?: CourseSellPreviewClip | null;
+  /**
+   * The HERO still — a public CDN URL resolved from the thumbnail of
+   * `courses.heroMediaId` (contract amendment A27, Codex-wqxv4).
+   *
+   * Resolved by `toStill`, NOT `toClip`: `media_items` is CHECK-constrained to
+   * ('video','audio'), so the still a creator picks for a hero is the chosen
+   * item's `thumbnailKey`. This is what makes the `media` design axis
+   * (`bleed`/`frame`/`mask`/`inset`) mean something on the hero — before it,
+   * every hero composition had only a synthetic gradient plate to draw.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.guidePortraitUrl}): an older
+   * worker deployment omits it and the hero falls back to its synthetic plate.
+   */
+  heroImageUrl?: string | null;
+  /**
+   * The guide's SIGNATURE mark — a public CDN URL resolved from the thumbnail of
+   * `courses.signatureMediaId` (A27). `guide.letter` signs off with it; null
+   * leaves the letter unsigned. Same `toStill` resolution as the portrait.
+   */
+  signatureUrl?: string | null;
 }

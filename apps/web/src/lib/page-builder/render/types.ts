@@ -72,6 +72,25 @@ export interface SellPreview {
    * all today — adding one is WT-6's composition work.
    */
   guideClip?: PreviewMedia | null;
+  /**
+   * The HERO still — a public CDN URL, or null when the creator has picked no
+   * hero media (contract amendment A27). FE mirror of
+   * `CourseSellPreview.heroImageUrl`.
+   *
+   * Until A27 the `courses` table had NO hero image slot, so every hero
+   * composition drew a synthetic radial-gradient plate and the `media` design
+   * axis (`bleed`/`frame`/`mask`/`inset`) had no real image to shape. This is the
+   * projection; the hero compositions in WT-3 are what consume it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and the hero keeps
+   * falling back to its synthetic plate.
+   */
+  heroImageUrl?: string | null;
+  /**
+   * The guide's SIGNATURE mark — a public CDN URL, or null when unset (A27).
+   * `guide.letter` signs off with it; WT-6 owns that composition.
+   */
+  signatureUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

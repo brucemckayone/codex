@@ -178,6 +178,22 @@ export const courses = pgTable(
       () => mediaItems.id,
       { onDelete: 'set null' }
     ),
+    // Hero + signature stills (contract amendment A27, Codex-wqxv4). Same shape
+    // as the three above — a `media_items` ref, `set null` on delete — because
+    // `media_items` is CHECK-constrained to ('video','audio'), so the STILL these
+    // two name is the item's `thumbnailKey`, resolved by `getCourseSellPreview`'s
+    // `toStill` exactly as `guide.portraitMediaId` already is. Before A27 the
+    // page had NO hero image slot at all, so `hero.full-bleed` / `hero.poster`
+    // rendered a synthetic gradient plate and the `media` design axis was
+    // meaningless on the highest-visibility section of the page.
+    heroMediaId: uuid('hero_media_id').references(() => mediaItems.id, {
+      onDelete: 'set null',
+    }),
+    // The guide's signature mark — `guide.letter`'s sign-off.
+    signatureMediaId: uuid('signature_media_id').references(
+      () => mediaItems.id,
+      { onDelete: 'set null' }
+    ),
 
     // One-off purchase price in pence (NULL = not sold standalone; §6/§7).
     // The course-specific subscription plan lives in course_subscription_plans.
