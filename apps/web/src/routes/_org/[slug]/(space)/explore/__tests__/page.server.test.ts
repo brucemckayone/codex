@@ -215,6 +215,9 @@ describe('explore +page.server.ts — cache wiring', () => {
         })
       );
 
+      // Narrow out the `void` half of the PageServerLoad return union.
+      if (!result) throw new Error('load returned no data');
+
       expect(browseMock).not.toHaveBeenCalled();
       expect(getPublicContentMock).toHaveBeenCalledWith(
         expect.objectContaining({ featured: true, sort: 'newest' })
@@ -407,9 +410,10 @@ describe('explore +page.server.ts — cache wiring', () => {
         baseInput({ user: null, url: 'http://lvh.me:3000/explore' })
       );
 
-      expect(listPublishedCoursesMock).toHaveBeenCalledWith(ORG_ID);
       // Narrow out the `void` half of the PageServerLoad return union.
       if (!result) throw new Error('load returned no data');
+
+      expect(listPublishedCoursesMock).toHaveBeenCalledWith(ORG_ID);
       expect(result.journeys).toEqual(courses);
     });
 
@@ -421,9 +425,11 @@ describe('explore +page.server.ts — cache wiring', () => {
         baseInput({ user: null, url: 'http://lvh.me:3000/explore' })
       );
 
+      // Narrow out the `void` half of the PageServerLoad return union.
+      if (!result) throw new Error('load returned no data');
+
       // A failed journeys read must NOT crash the page — the load resolves
       // with an empty rail and the content path is unaffected.
-      if (!result) throw new Error('load returned no data');
       expect(result.journeys).toEqual([]);
       expect(getPublicContentMock).toHaveBeenCalled();
     });
@@ -504,6 +510,9 @@ describe('explore +page.server.ts — cache wiring', () => {
 
       const result = await load(baseInput({ user: null }));
 
+      // Narrow out the `void` half of the PageServerLoad return union.
+      if (!result) throw new Error('load returned no data');
+
       expect(getPublicCategoriesMock).toHaveBeenCalledWith(ORG_ID);
       // Order is the curator's `sortOrder`, already applied by the endpoint —
       // the load must NOT re-sort it.
@@ -522,6 +531,9 @@ describe('explore +page.server.ts — cache wiring', () => {
       const { load } = await import('../+page.server');
 
       const result = await load(baseInput({ user: null }));
+
+      // Narrow out the `void` half of the PageServerLoad return union.
+      if (!result) throw new Error('load returned no data');
 
       for (const option of result.categoryOptions) {
         expect(option.slug).toMatch(SLUG_CHARSET);
@@ -554,6 +566,9 @@ describe('explore +page.server.ts — cache wiring', () => {
       const { load } = await import('../+page.server');
 
       const result = await load(baseInput({ user: null }));
+
+      // Narrow out the `void` half of the PageServerLoad return union.
+      if (!result) throw new Error('load returned no data');
 
       expect(result.categoryOptions).toEqual([]);
       // The content path is untouched by a taxonomy failure.
