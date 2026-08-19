@@ -929,6 +929,7 @@
   "settings_tiktok": "TikTok",
   "settings_save": "Save Changes",
   "settings_saved": "Settings updated successfully.",
+  "settings_validation_summary": "Some changes could not be saved",
   "team_title": "Team",
   "team_invite": "Invite Member",
   "team_invite_email": "Email Address",

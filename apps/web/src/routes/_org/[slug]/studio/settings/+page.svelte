@@ -348,12 +348,11 @@
          them. Safe because `RemoteFormIssue.path` is non-optional and
          `updateContactFormSchema` is a flat `z.object` with no root-level
          `.refine()`, so every issue carries a non-empty path.
-         TODO(i18n): `settings_validation_summary` = "Some changes could not be
-         saved". Listed for the orchestrator; en.json is owned by another
-         worktree this round. -->
+         The summary line reads from `settings_validation_summary`; the
+         per-field messages below are Zod's and stay as the server sent them. -->
     {#if allIssues.length > 0}
       <Alert variant="error">
-        <p class="issue-summary__title">Some changes could not be saved</p>
+        <p class="issue-summary__title">{m.settings_validation_summary()}</p>
         <ul class="issue-summary__list">
           {#each allIssues as issue (`${issue.path.join('.')}|${issue.message}`)}
             <li>{issue.message}</li>

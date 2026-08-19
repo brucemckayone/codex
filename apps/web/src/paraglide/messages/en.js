@@ -7455,6 +7455,14 @@ export const settings_saved = () => `Settings updated successfully.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const settings_validation_summary = () => `Some changes could not be saved`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const team_title = () => `Team`
 
 
