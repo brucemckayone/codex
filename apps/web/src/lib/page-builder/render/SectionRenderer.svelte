@@ -22,6 +22,19 @@
   reuses this same renderer via `JourneyRenderer`.
 -->
 <script lang="ts">
+  /* ── THE AXIS SUBSTRATE ──────────────────────────────────────────────────
+     Imported HERE, in the component that EMITS `data-jp-*`, rather than in
+     `JourneyRenderer` beside the palette. Co-locating the attributes and the
+     rules that read them means a surface cannot end up with the markup and not
+     the stylesheet — including WP-5's live-preview iframe, which mounts this
+     renderer directly.
+
+     Deliberately NOT imported from `journey-palette.css`, whose four consumers
+     include the checkout and the member dashboard: those have the `--jp-*`
+     ladder but no sections, and should not carry section CSS. The studio canvas
+     reaches the same two files through `render-edit/journey-sections.css`. */
+  import '../journey-design.css';
+  import '../journey-sections-shared.css';
   import { selectRenderableSections } from './section-registry';
   import type { JourneySalesContext } from './types';
   import type { PageSection, SectionDesign } from '$lib/page-builder';

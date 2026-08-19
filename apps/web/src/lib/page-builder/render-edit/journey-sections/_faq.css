@@ -1,0 +1,46 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   CANVAS · FAQ — objection-handling accordion
+
+   A PARTIAL of the canvas stylesheet. Split out of the 575-line
+   `../journey-sections.css` unchanged — same declarations, same order, no
+   reformatting. Imported by that file, which stays the single entry point
+   (`render-edit/SectionRenderer.svelte`).
+
+   WHY IT WAS SPLIT. Contract A12: this tree holds a WORKING implementation of
+   every one of the 37 declared variants, and the public components hold none of
+   them. So the section-flexibility programme is "port 37 layouts", not "invent
+   37 layouts", and each of the seven component work packages ports one type.
+   One 575-line file would have serialised all seven on the same merge conflict;
+   nine disjoint partials let them run in parallel. See
+   `docs/design/journey-sections/02-axis-contract.md` A16.
+
+   DRAINED, NOT KEPT. As each work package ports its type into the unified public
+   component, its partial empties out. Consolidation deletes the empties along
+   with `render-edit/sections/*`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════ FAQ · objection-handling accordion ══════════════════════
+   Native <details> for a11y. Variants: accordion (first open) · open · boxed. */
+.jp-faq { padding: clamp(2.6rem, 7cqw, 4.6rem) 0; }
+.jp-faq__wrap { max-width: 46rem; margin: 0 auto; padding: 0 clamp(1.4rem, 6cqw, 3rem); }
+.jp-faq__head { text-align: center; margin-bottom: clamp(1.8rem, 4cqw, 3rem); }
+.jp-faq__title { font-family: var(--jp-serif); font-weight: var(--font-normal); color: var(--jp-heading); font-size: clamp(1.6rem, 4.4cqw, 2.6rem); line-height: 1.04; letter-spacing: -0.012em; }
+.jp-faq__rule { width: 46px; height: 1px; margin: 1.2rem auto 0; background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--jp-ember) 60%, transparent), transparent); }
+.jp-faq__list { border-top: var(--border-width) solid color-mix(in oklab, var(--jp-heading) 11%, transparent); }
+.jp-faq__item { border-bottom: var(--border-width) solid color-mix(in oklab, var(--jp-heading) 11%, transparent); }
+.jp-faq__q { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: clamp(1rem, 2.4cqw, 1.4rem) 0; list-style: none; cursor: pointer; }
+.jp-faq__q::-webkit-details-marker { display: none; }
+.jp-faq__q::marker { content: ''; }
+.jp-faq__qt { flex: 1; font-family: var(--jp-serif); font-weight: var(--font-normal); font-size: clamp(1.02rem, 2cqw, 1.28rem); line-height: 1.32; letter-spacing: -0.005em; color: color-mix(in oklab, var(--jp-heading) 84%, var(--jp-ink)); transition: color var(--duration-slow) var(--jp-ease); }
+.jp-faq__item:hover .jp-faq__qt,
+.jp-faq__item[open] .jp-faq__qt { color: var(--jp-heading); }
+.jp-faq__ic { position: relative; flex: none; width: 32px; height: 32px; margin-top: 2px; border-radius: 50%; border: var(--border-width) solid color-mix(in oklab, var(--jp-ember) 26%, transparent); transition: border-color var(--duration-slow) var(--jp-ease), background var(--duration-slow) var(--jp-ease); }
+.jp-faq__item:hover .jp-faq__ic,
+.jp-faq__item[open] .jp-faq__ic { border-color: color-mix(in oklab, var(--jp-ember) 62%, transparent); background: color-mix(in oklab, var(--jp-ember) 8%, transparent); }
+.jp-faq__ic::before,
+.jp-faq__ic::after { content: ''; position: absolute; top: 50%; left: 50%; width: 12px; height: 1.5px; border-radius: 2px; background: var(--jp-ember); transform: translate(-50%, -50%); transition: transform var(--duration-slow) var(--jp-ease), opacity var(--duration-slow) var(--jp-ease); }
+.jp-faq__ic::after { transform: translate(-50%, -50%) rotate(90deg); }
+.jp-faq__item[open] .jp-faq__ic::after { transform: translate(-50%, -50%); opacity: 0; }
+.jp-faq__panel { color: var(--jp-dim); line-height: 1.7; font-size: clamp(0.92rem, 1.5cqw, 1.02rem); padding-bottom: clamp(1rem, 2.4cqw, 1.4rem); max-width: 60ch; }
+.jp-faq--boxed .jp-faq__list { border-top: 0; display: grid; gap: 0.7rem; }
+.jp-faq--boxed .jp-faq__item { border: var(--border-width) solid color-mix(in oklab, var(--jp-heading) 10%, transparent); border-radius: var(--radius-lg); padding: 0 1.1rem; background: color-mix(in oklab, var(--jp-ink-3) 40%, transparent); }
