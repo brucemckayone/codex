@@ -781,11 +781,23 @@ export const LEGACY_SECTION_VARIANTS: Readonly<
     // 0.32 (accent), motes + scroll cue hidden (motion) — research §3's worked
     // example. Note `accent: 'none'` removes the glow rather than dimming it:
     // there is no "dimmed glow" axis value, and none was worth inventing for one
-    // retired id. This is the one place the collapse is an approximation, and it
-    // is recorded here rather than left to be discovered.
+    // retired id. The GLOW is the one place the collapse stays an approximation,
+    // and it is recorded here rather than left to be discovered.
     minimal: {
       variant: 'stage',
-      design: { density: 'compact', accent: 'none', motion: 'none' },
+      // `type: 'expressive'` is here because the WT-3 pilot found a SECOND
+      // difference this map originally missed: `.jp-hero--minimal` also shrank the
+      // headline by ~23% (`clamp(1.8rem, 6.6cqw, 3.6rem)` against the base
+      // `clamp(2rem, 8.4cqw, 4.7rem)`). Without it a page storing `minimal` would
+      // render a MONUMENTAL headline where it rendered a small one — the exact
+      // silent appearance change this whole map exists to prevent. Latent today
+      // (no page stores `minimal`), which is why it was invisible.
+      design: {
+        density: 'compact',
+        accent: 'none',
+        motion: 'none',
+        type: 'expressive',
+      },
     },
     split: { variant: 'split-media', design: {} },
   },

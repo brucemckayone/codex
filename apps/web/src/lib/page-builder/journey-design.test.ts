@@ -356,9 +356,17 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-display-tracking': 'var(--tracking-tighter)',
   },
 
+  // `--jp-accent-mark` was added after the WT-3 pilot measured a real hole:
+  // `--jp-accent-fill` is `transparent` on `text` and `edge`, so a small
+  // decorative brand mark (the hero's trust dot, its motes, its cue spark) had
+  // nothing to paint with and VANISHED on two of five values. A mark is closer to
+  // text than to a fill, so it carries the accent hue and neutralises to
+  // `--jp-heading` at `accent: none` — never `transparent`, on any value. WT-4's
+  // spine + gate nodes and WT-5/WT-7's accent dots consume it too.
   'accent:text': {
     '--jp-accent-text': 'var(--jp-ember-text)',
     '--jp-accent-fill': 'transparent',
+    '--jp-accent-mark': 'var(--jp-ember-text)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
   },
@@ -366,12 +374,14 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-text': 'var(--jp-ember-text)',
     '--jp-accent-fill': 'var(--jp-ember)',
     '--jp-accent-on-fill': 'var(--jp-on-ember)',
+    '--jp-accent-mark': 'var(--jp-ember)',
     '--jp-accent-edge': 'var(--jp-ember)',
     '--jp-accent-glow': 'none',
   },
   'accent:edge': {
     '--jp-accent-text': 'var(--jp-text)',
     '--jp-accent-fill': 'transparent',
+    '--jp-accent-mark': 'var(--jp-ember)',
     '--jp-accent-edge': 'var(--jp-ember)',
     '--jp-accent-glow': 'none',
   },
@@ -379,6 +389,7 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-text': 'var(--jp-ember-text)',
     '--jp-accent-fill': 'var(--jp-ember)',
     '--jp-accent-on-fill': 'var(--jp-on-ember)',
+    '--jp-accent-mark': 'var(--jp-ember)',
     '--jp-accent-edge': 'color-mix(in oklab, var(--jp-ember) 45%, transparent)',
     '--jp-accent-glow':
       '0 var(--space-6) var(--space-14) calc(var(--space-10) * -1) var(--jp-blood)',
@@ -387,6 +398,7 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-text': 'var(--jp-heading)',
     '--jp-accent-fill': 'var(--jp-ink-4)',
     '--jp-accent-on-fill': 'var(--jp-heading)',
+    '--jp-accent-mark': 'var(--jp-heading)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
   },

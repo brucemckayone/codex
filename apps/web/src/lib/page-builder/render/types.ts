@@ -163,6 +163,25 @@ export interface HeroSectionProps {
   secondaryHref?: string;
   /** A quiet trust line under the CTAs ("Practised by 2,400+ …"). */
   trust?: string;
+  /**
+   * The three keys the builder has always written and the renderer never read
+   * (`Codex-tqr51`; they were `OWED_READS.hero` until the WT-3 pilot wired them).
+   * They are not aliases of an existing prop — each needs its own markup, which is
+   * why the bridge in `coerce.ts` could not close them.
+   *
+   * `accent` — an emphasised ending to the headline, set on its own line.
+   * `felt` — a short emphasis line between the sub-line and the CTAs.
+   * `bg` — the atmosphere recipe (`ember` | `blood` | `still`). Note this is an
+   * AXIS IN DISGUISE and a candidate for a later collapse: `still` is
+   * `motion: none` plus a dimmer accent, and `ember`/`blood` are two accent
+   * recipes. It is kept as a prop for now because retiring it would need its own
+   * forward-map entry and stored-data migration; it is scoped to the glow's own
+   * recipe and still gated by `--jp-sec-atmos`, so it composes with the axes
+   * rather than fighting them.
+   */
+  accent?: string;
+  felt?: string;
+  bg?: string;
 }
 
 /** `introVideo` — the 90-second sell film (streamed preview). */

@@ -447,7 +447,15 @@ function buildSections(spec: PortalSpec) {
         bg: 'ember',
       },
       enabled: true,
-      variant: 'split',
+      // `stage`, NOT the old `split`. This line used to write `split`, and because
+      // the public renderer ignored `variant` entirely until Codex-qcgo3 was fixed,
+      // every seeded page stored a split hero while rendering a centred stage — all
+      // seven real journey pages. The moment the variant plumbing landed, all seven
+      // would have flipped to a two-column split hero that no creator ever chose or
+      // saw. Migration 0087 corrected the stored rows; this stops a re-seed
+      // reintroducing it. `split-media` stays fully available — as a choice made in
+      // the builder, not a seed default.
+      variant: 'stage',
     },
     {
       id: crypto.randomUUID(),

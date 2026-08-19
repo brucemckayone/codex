@@ -156,7 +156,6 @@ const READERS: Readonly<Record<string, readonly string[]>> = {
  * the fields F-C declared for the new compositions.
  */
 const OWED_READS: Readonly<Record<string, readonly string[]>> = {
-  hero: ['accent', 'felt', 'bg'], // WT-3
   introVideo: ['clip', 'duration'], // WT-2 — `reel.clip` IS aliased (as `tag`)
   reel: ['duration'], // WT-2
   ache: ['points'], // WT-1 — the List and Checklist compositions

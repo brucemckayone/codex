@@ -106,6 +106,10 @@
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: var(--jp-ember);
   --jp-accent-on-fill: var(--jp-on-ember);
+  /* Small decorative brand marks — dots, nodes, sparks. NEVER use
+     `--jp-accent-fill` for these: it is `transparent` at `accent: text` and
+     `accent: edge`, so the mark disappears on two of five values (WT-3 pilot). */
+  --jp-accent-mark: var(--jp-ember);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 
@@ -370,10 +374,27 @@
    `accent: none` still resolves `--jp-accent-fill` to `--jp-ink-4` rather than
    transparent, because a price-bearing CTA must stay the visually dominant
    element even in a monochrome family — the luxury-minimal signature failure is
-   exactly the page where the CTA becomes indistinguishable from body text. */
+   exactly the page where the CTA becomes indistinguishable from body text.
+
+   `--jp-accent-mark` EXISTS BECAUSE `--jp-accent-fill` IS `transparent` ON TWO
+   OF FIVE VALUES. Added after the WT-3 pilot: the hero's trust dot, its motes
+   and its scroll-cue spark all VANISHED at `accent: text` and `accent: edge`,
+   because a small decorative brand mark had nothing to paint with. `fill` is the
+   right role for a CTA plate and the wrong one for a 6px dot.
+
+   So `--jp-accent-mark` is always a REAL colour: the accent hue where the value
+   tints anything, and `--jp-heading` at `accent: none` (so a monochrome family
+   gets a neutral mark rather than an invisible one). It tracks `--jp-accent-text`
+   deliberately — a mark is closer to text than to a fill, and that inherits the
+   AA-safe `--jp-ember-text` rather than the 2.04:1-in-dark `--jp-ember`.
+
+   WT-4 (the descent spine and its gate nodes), WT-5 and WT-7 (accent dots) all
+   need this. Use it for any small decorative brand element; never
+   `--jp-accent-fill`. */
 [data-jp-accent='text'] {
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: transparent;
+  --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: var(--jp-line);
   --jp-accent-glow: none;
 }
@@ -381,12 +402,14 @@
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: var(--jp-ember);
   --jp-accent-on-fill: var(--jp-on-ember);
+  --jp-accent-mark: var(--jp-ember);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
 [data-jp-accent='edge'] {
   --jp-accent-text: var(--jp-text);
   --jp-accent-fill: transparent;
+  --jp-accent-mark: var(--jp-ember);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
@@ -394,6 +417,7 @@
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: var(--jp-ember);
   --jp-accent-on-fill: var(--jp-on-ember);
+  --jp-accent-mark: var(--jp-ember);
   --jp-accent-edge: color-mix(in oklab, var(--jp-ember) 45%, transparent);
   --jp-accent-glow: 0 var(--space-6) var(--space-14)
     calc(var(--space-10) * -1) var(--jp-blood);
@@ -402,6 +426,7 @@
   --jp-accent-text: var(--jp-heading);
   --jp-accent-fill: var(--jp-ink-4);
   --jp-accent-on-fill: var(--jp-heading);
+  --jp-accent-mark: var(--jp-heading);
   --jp-accent-edge: var(--jp-line);
   --jp-accent-glow: none;
 }
