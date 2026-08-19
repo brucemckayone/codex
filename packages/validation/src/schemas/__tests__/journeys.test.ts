@@ -254,6 +254,45 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(parsed.sections[0].props).toEqual(SECTION.props);
   });
 
+  it('accepts the PAGE-level design bundle (F-B2 — the column now exists)', () => {
+    // F-A left this key out on purpose: under `.strict()` a declared-but-
+    // unpersistable field is worse than a rejected one, because the save accepts
+    // it, drops it and reports "Page saved". The column, the service write and the
+    // `SavePagePayload` field all landed in F-B2, so the key is now honourable.
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      design: { width: 'narrow', density: 'airy', surface: 'media' },
+    });
+    expect(parsed.design).toEqual({
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+    });
+  });
+
+  it('accepts a body with NO page design — absence means "leave it alone"', () => {
+    const parsed = saveJourneyPageBodySchema.parse(BODY);
+    expect(parsed.design).toBeUndefined();
+  });
+
+  it('degrades an unknown PAGE axis value instead of 400ing the whole save', () => {
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      design: { width: 'narrow', motion: 'teleport' },
+    });
+    expect(parsed.design?.width).toBe('narrow');
+    expect(parsed.design?.motion).toBeUndefined();
+  });
+
+  it('still rejects a key this endpoint cannot honour (`.strict()` holds)', () => {
+    // The guard that made `design` worth adding properly: `seo` has no column, so
+    // it must 400 rather than be accepted and discarded.
+    expect(
+      saveJourneyPageBodySchema.safeParse({ ...BODY, seo: { title: 'x' } })
+        .success
+    ).toBe(false);
+  });
+
   it('still rejects a section that is not an object at all', () => {
     expect(
       saveJourneyPageBodySchema.safeParse({ ...BODY, sections: [null] }).success

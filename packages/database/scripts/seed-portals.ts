@@ -372,6 +372,22 @@ async function reconcilePage(
     subjectType: 'course' as const,
     subjectId: courseId,
     sections: buildSections(spec),
+    // CANDLELIT (research §4.1) — the same bundle migration 0084 wrote onto every
+    // pre-existing page, because a seeded portal's body copy IS the cinematic
+    // family the golden page belongs to. Explicit rather than left NULL so a
+    // re-seeded page shows a SELECTED preset in the builder instead of a picker
+    // that looks dead over a page rendering at the neutral defaults (A21).
+    design: {
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+      edge: 'none',
+      align: 'center',
+      type: 'monumental',
+      accent: 'glow',
+      motion: 'drift',
+      media: 'bleed',
+    } as const,
   };
 
   if (existing) {

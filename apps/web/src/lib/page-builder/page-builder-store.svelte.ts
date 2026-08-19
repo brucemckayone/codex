@@ -27,6 +27,7 @@ import type {
   PageOffer,
   PageSection,
   PageSeo,
+  SectionDesign,
   SectionProps,
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
@@ -339,6 +340,54 @@ function setSectionVariant(id: string, variant: string): void {
   state.pending.sections[i].variant = variant;
 }
 
+/**
+ * Set the PAGE's look — the whole nine-axis bundle the preset picker writes
+ * (`docs/design/journey-sections/02-axis-contract.md` A21).
+ *
+ * Whole-bundle rather than per-axis because a preset IS a coherent set: writing
+ * five of nine axes would leave the page half in one look and half in another,
+ * which is the incoherence the preset exists to prevent. Per-axis freedom lives
+ * at the SECTION level ({@link setSectionDesignAxis}), where a deliberate
+ * exception (a vast hero over a compact FAQ) is good design.
+ */
+function setPageDesign(design: SectionDesign): void {
+  if (!state.pending) return;
+  snapshot();
+  state.pending.design = { ...design };
+}
+
+/**
+ * Override ONE axis on ONE section, or clear that override with `undefined`.
+ *
+ * Clearing DELETES the key rather than storing `undefined`, and drops the whole
+ * `design` bag once it is empty, so "inherited" is represented by absence — the
+ * shape `resolveDesign` already resolves and the shape a page stored before the
+ * axes existed already has. A stored `{ width: undefined }` would serialise to
+ * `{}` through the save anyway, so absence is also the only round-trip-stable
+ * representation.
+ */
+function setSectionDesignAxis<A extends keyof SectionDesign>(
+  id: string,
+  axis: A,
+  value: SectionDesign[A] | undefined
+): void {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return;
+  snapshot();
+  const section = state.pending.sections[i];
+  const next: SectionDesign = { ...(section.design ?? {}) };
+  if (value === undefined) {
+    delete next[axis];
+  } else {
+    next[axis] = value;
+  }
+  if (Object.keys(next).length === 0) {
+    delete section.design;
+  } else {
+    section.design = next;
+  }
+}
+
 /** Move a section to an absolute index (the drag-reorder drop target). */
 function moveSectionTo(id: string, toIndex: number): void {
   const from = indexOf(id);
@@ -511,6 +560,8 @@ export const pageBuilder = {
   addSection,
   duplicateSection,
   setSectionVariant,
+  setPageDesign,
+  setSectionDesignAxis,
   removeSection,
   moveSection,
   moveSectionTo,

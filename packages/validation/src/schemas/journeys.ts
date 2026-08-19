@@ -294,11 +294,15 @@ export const pageSectionSchema = z.object({
  * no persistence yet — under Zod's default strip both were accepted, discarded,
  * and reported as "Page saved". A key this endpoint cannot honour must 400.
  *
- * `PageBuilderState.design` (the PAGE-level look) is likewise absent on purpose:
- * F-A adds the type and the read path, F-B adds the `landing_pages.design` column.
- * Declaring it here before the service can persist it would accept it, drop it,
- * and report "Page saved" — exactly the failure `.strict()` exists to prevent. It
- * lands in F-B together with the column, the service write and `SavePagePayload`.
+ * `design` (the PAGE-level look) IS now declared — F-B2 added the
+ * `landing_pages.design` column, the service write and the `SavePagePayload`
+ * field, so the key this endpoint accepts is a key it can honour. It stayed out of
+ * F-A deliberately: under `.strict()` a declared-but-unpersistable field is worse
+ * than a rejected one, because the save would accept it, discard it, and report
+ * "Page saved".
+ *
+ * It is `.optional()` and the service treats absent as LEAVE ALONE, never as
+ * clear — a client that predates the axes must not wipe a page's stored look.
  */
 export const saveJourneyPageBodySchema = z
   .object({
@@ -324,6 +328,7 @@ export const saveJourneyPageBodySchema = z
     subjectId: uuidSchema.nullable(),
     brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
     sections: z.array(pageSectionSchema),
+    design: sectionDesignSchema.optional(),
   })
   .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;

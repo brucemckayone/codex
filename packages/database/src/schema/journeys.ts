@@ -2,6 +2,7 @@ import type {
   BrandTokenOverrides,
   PageOffer,
   PageSection,
+  SectionDesign,
 } from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
 import {
@@ -86,6 +87,20 @@ export const landingPages = pgTable(
     // `updateJourneyOffer` writes in the SAME transaction that writes this bag.
     // Nullable — a page authored before pricing was set has no offer.
     offer: jsonb('offer').$type<PageOffer>(),
+
+    // The page's LOOK — the nine design axes every section on it inherits
+    // (`docs/design/journey-sections/02-axis-contract.md` A3). A section's own
+    // `PageSection.design` (inside the `sections` jsonb) overrides this PER AXIS;
+    // anything neither states falls to `SECTION_DESIGN_DEFAULTS`.
+    //
+    // NULLABLE, and yet no page should ever hold NULL: the migration that added
+    // this column wrote the Candlelit bundle onto every PRE-EXISTING row in the
+    // same step (so a published page cannot change appearance the moment a
+    // section starts reading the axes), and `createJourney` writes the Signal
+    // bundle onto every new one. Nullable is only the migration's transient
+    // state plus forward-compat for a row written by an older deployment —
+    // `resolveDesign` is total, so a NULL still renders coherently.
+    design: jsonb('design').$type<SectionDesign>(),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

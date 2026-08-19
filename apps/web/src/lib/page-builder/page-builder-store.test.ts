@@ -194,6 +194,97 @@ describe('pageBuilder — section mutations', () => {
   });
 });
 
+describe('pageBuilder — design axes (F-B2)', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    pageBuilder.open(PAGE_ID, makeSaved({ design: { width: 'wide' } }));
+  });
+
+  it('setPageDesign replaces the page look wholesale and marks dirty', () => {
+    pageBuilder.setPageDesign({ width: 'narrow', density: 'vast' });
+    // Wholesale, NOT merged: a preset is a complete look, so the previous
+    // bundle's axes must not survive underneath the new one.
+    expect(pageBuilder.pending?.design).toEqual({
+      width: 'narrow',
+      density: 'vast',
+    });
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+
+  it('setPageDesign stores a COPY, so a later preset edit cannot mutate the draft', () => {
+    const bundle = { width: 'full' as const };
+    pageBuilder.setPageDesign(bundle);
+    bundle.width = 'narrow' as never;
+    expect(pageBuilder.pending?.design?.width).toBe('full');
+  });
+
+  it('setSectionDesignAxis overrides ONE axis, leaving the others inherited', () => {
+    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
+    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(hero?.design).toEqual({ density: 'vast' });
+    // The page-level bundle is untouched — inheritance is per axis, so a section
+    // opinion must never be promoted to the page.
+    expect(pageBuilder.pending?.design).toEqual({ width: 'wide' });
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+
+  it('a second axis merges rather than replacing the first', () => {
+    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
+    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', 'none');
+    expect(
+      pageBuilder.sections.find((s) => s.id === 'sec-hero')?.design
+    ).toEqual({ density: 'vast', accent: 'none' });
+  });
+
+  it('clearing an axis DELETES the key, and the last one drops the whole bag', () => {
+    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
+    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', 'none');
+
+    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', undefined);
+    const partial = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    // Deleted, not stored as `undefined`: "inherited" is represented by ABSENCE —
+    // the shape `resolveDesign` resolves and the only one that survives a JSON
+    // round trip through the save.
+    expect(partial?.design).toEqual({ density: 'vast' });
+    expect(Object.keys(partial?.design ?? {})).not.toContain('accent');
+
+    pageBuilder.setSectionDesignAxis('sec-hero', 'density', undefined);
+    const cleared = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(cleared?.design).toBeUndefined();
+    expect(JSON.stringify(cleared)).not.toContain('design');
+  });
+
+  it('both design writes are undoable discrete steps', () => {
+    pageBuilder.setPageDesign({ width: 'narrow' });
+    pageBuilder.setSectionDesignAxis('sec-hero', 'motion', 'none');
+
+    pageBuilder.undo();
+    expect(
+      pageBuilder.sections.find((s) => s.id === 'sec-hero')?.design
+    ).toBeUndefined();
+    expect(pageBuilder.pending?.design).toEqual({ width: 'narrow' });
+
+    pageBuilder.undo();
+    expect(pageBuilder.pending?.design).toEqual({ width: 'wide' });
+  });
+
+  it('is a no-op for an unknown section id', () => {
+    pageBuilder.setSectionDesignAxis('sec-nope', 'width', 'full');
+    expect(pageBuilder.isDirty).toBe(false);
+  });
+
+  it('the save payload carries the page look and the section overrides', () => {
+    pageBuilder.setPageDesign({ width: 'narrow', motion: 'drift' });
+    pageBuilder.setSectionDesignAxis('sec-ache', 'density', 'compact');
+
+    const payload = pageBuilder.getSavePayload();
+    expect(payload?.design).toEqual({ width: 'narrow', motion: 'drift' });
+    expect(payload?.sections.find((s) => s.id === 'sec-ache')?.design).toEqual({
+      density: 'compact',
+    });
+  });
+});
+
 describe('pageBuilder — revert paths', () => {
   beforeEach(() => {
     pageBuilder.close();

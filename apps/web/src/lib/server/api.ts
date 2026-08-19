@@ -1376,7 +1376,11 @@ export function createServerApi(
         record: Pick<
           JourneyPageRecord,
           'id' | 'title' | 'slug' | 'status' | 'sections'
-        > & { brandOverrides?: JourneyPageRecord['brandOverrides'] }
+        > & {
+          brandOverrides?: JourneyPageRecord['brandOverrides'];
+          /** The page's LOOK — absent means "leave the stored bundle alone". */
+          design?: JourneyPageRecord['design'];
+        }
       ) =>
         request<null>(
           'access',

@@ -55,6 +55,14 @@ export interface SavePagePayload {
   subjectId: string | null;
   brandOverrides: PageBuilderState['brandOverrides'];
   sections: PageSection[];
+  /**
+   * The page's LOOK — the design-axis bundle every section inherits per axis.
+   *
+   * OPTIONAL, and omitted rather than sent as `undefined` when the draft has
+   * none: the service reads absence as "leave the stored bundle alone", so a
+   * draft loaded before F-B2's read path existed cannot wipe a page's look.
+   */
+  design?: PageBuilderState['design'];
 }
 
 /**
@@ -254,6 +262,11 @@ export async function saveBuilderDraft(
       subjectId: payload.subjectId,
       brandOverrides: payload.brandOverrides,
       sections: payload.sections,
+      // Spread-when-present: the save body is `.strict()`, and Zod strips a
+      // literal `undefined` fine — but the SERVICE distinguishes absent (leave
+      // the stored look alone) from set, so an explicit `design: undefined` would
+      // still be the wrong thing to express here.
+      ...(payload.design ? { design: payload.design } : {}),
     });
   } catch (err) {
     return {

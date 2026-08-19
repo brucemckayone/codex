@@ -29,6 +29,7 @@
   import {
     JourneyBuilderCanvas,
     PageBrandPanel,
+    PageDesignPanel,
     PageMediaPanel,
     PagePricingPanel,
     PageSeoPanel,
@@ -94,7 +95,7 @@
   );
 
   // ── Workspace view state ──────────────────────────────────────────────────
-  type BuilderMode = 'design' | 'pricing' | 'media' | 'brand' | 'seo';
+  type BuilderMode = 'design' | 'look' | 'pricing' | 'media' | 'brand' | 'seo';
   let mode = $state<BuilderMode>('design');
   let device = $state<'desktop' | 'tablet' | 'mobile'>('desktop');
   let railCollapsed = $state(false);
@@ -103,6 +104,11 @@
 
   const MODES: readonly { id: BuilderMode; label: string }[] = [
     { id: 'design', label: 'Design' },
+    // "Look" is the page-scope design-axis preset picker (journey sections F-B2).
+    // Beside Design rather than inside it: Design edits ONE section at a time,
+    // Look sets what every section inherits, and merging the two put a page-wide
+    // control inside a per-section inspector.
+    { id: 'look', label: 'Look' },
     { id: 'pricing', label: 'Pricing' },
     { id: 'media', label: 'Media' },
     { id: 'brand', label: 'Brand' },
@@ -483,7 +489,9 @@
         </aside>
       {:else}
         <aside class="jb__settings">
-          {#if mode === 'pricing'}
+          {#if mode === 'look'}
+            <PageDesignPanel />
+          {:else if mode === 'pricing'}
             <PagePricingPanel />
           {:else if mode === 'media'}
             <PageMediaPanel />
@@ -858,7 +866,9 @@
     min-height: 0;
   }
 
+  .jb[data-mode='look'] .jb__shell,
   .jb[data-mode='pricing'] .jb__shell,
+  .jb[data-mode='media'] .jb__shell,
   .jb[data-mode='brand'] .jb__shell,
   .jb[data-mode='seo'] .jb__shell {
     grid-template-columns: 380px minmax(0, 1fr);
@@ -921,7 +931,9 @@
 
   @media (--below-lg) {
     .jb__shell,
+    .jb[data-mode='look'] .jb__shell,
     .jb[data-mode='pricing'] .jb__shell,
+    .jb[data-mode='media'] .jb__shell,
     .jb[data-mode='brand'] .jb__shell,
     .jb[data-mode='seo'] .jb__shell {
       grid-template-columns: minmax(0, 1fr);

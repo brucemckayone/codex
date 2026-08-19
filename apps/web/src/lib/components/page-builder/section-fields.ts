@@ -230,6 +230,14 @@ export const SECTION_FIELDS: Readonly<
     { key: 'q3', label: 'Question 3', control: 'text' },
     { key: 'a3', label: 'Answer 3', control: 'textarea' },
   ],
+  // NO `price` FIELD, deliberately (`05-bridge-table.md`, Codex-2pryk.2.4.3). It
+  // existed and was removed: prices come ONLY from `JourneySalesContext.offer`,
+  // which is derived from `courses.price_cents` and the monetisation tables, so an
+  // authored price line let a page advertise a number nothing behind it agreed
+  // with — a page still reading "£12 a month" after the offer moved to £29, on the
+  // surface a buyer decides from. The renderer never read it (`coerce.ts` has no
+  // `invite.price` alias, on purpose), so removing the field removes the only way
+  // to author a new one. `risk` below is where a "what's included" line goes.
   invite: [
     { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
     { key: 'heading', label: 'Heading', control: 'textarea' },
@@ -240,12 +248,6 @@ export const SECTION_FIELDS: Readonly<
       hint: 'A second line, italic accent. Optional.',
     },
     { key: 'sub', label: 'Sub-line', control: 'textarea' },
-    {
-      key: 'price',
-      label: 'Price line',
-      control: 'text',
-      hint: 'Wrap the amount in the offer. e.g. Included with membership · £12 a month',
-    },
     { key: 'button', label: 'Button', control: 'text' },
     {
       key: 'risk',

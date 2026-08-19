@@ -80,6 +80,7 @@ import type {
   PlaylistEntry,
   PracticeCompletionRecord,
   PracticeContentType,
+  SectionDesign,
 } from '@codex/shared-types';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
@@ -304,6 +305,7 @@ export class CourseJourneyService extends BaseService {
           subjectId: landingPages.subjectId,
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -372,6 +374,15 @@ export class CourseJourneyService extends BaseService {
           brandOverrides:
             (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
           sections: (pageRow.sections as PageSection[]) ?? [],
+          // The page's LOOK, fed to `SectionRenderer`'s `pageDesign` prop, where
+          // `resolveDesign` resolves it per axis under each section's own
+          // override. Spread-when-present rather than `?? undefined`: `design` is
+          // optional on the record, and a row written before the F-B2 migration
+          // (or by an older deployment) must resolve to the axis DEFAULTS, not to
+          // an explicit empty bundle.
+          ...(pageRow.design
+            ? { design: pageRow.design as SectionDesign }
+            : {}),
         },
         course: {
           id: courseRow.id,
@@ -425,6 +436,7 @@ export class CourseJourneyService extends BaseService {
           subjectId: landingPages.subjectId,
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -486,6 +498,15 @@ export class CourseJourneyService extends BaseService {
           brandOverrides:
             (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
           sections: (pageRow.sections as PageSection[]) ?? [],
+          // The page's LOOK, fed to `SectionRenderer`'s `pageDesign` prop, where
+          // `resolveDesign` resolves it per axis under each section's own
+          // override. Spread-when-present rather than `?? undefined`: `design` is
+          // optional on the record, and a row written before the F-B2 migration
+          // (or by an older deployment) must resolve to the axis DEFAULTS, not to
+          // an explicit empty bundle.
+          ...(pageRow.design
+            ? { design: pageRow.design as SectionDesign }
+            : {}),
         },
         course: {
           id: courseRow.id,
@@ -1323,6 +1344,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           offer: landingPages.offer,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -1350,11 +1372,52 @@ export class CourseJourneyService extends BaseService {
         // `offer` is optional on the draft; an unpriced page has no bag yet, so
         // the pricing panel opens with every path off rather than a stale guess.
         ...(row.offer ? { offer: row.offer as PageOffer } : {}),
+        // The page's LOOK — what the builder's preset picker renders as selected.
+        // Every page created since F-B2 holds an explicit bundle (Signal on
+        // create, Candlelit on the migrated rows), so the absent case only covers
+        // a row written by an older deployment: the picker then shows no preset
+        // selected, which is honest — the page really is rendering at the axis
+        // defaults.
+        ...(row.design ? { design: row.design as SectionDesign } : {}),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
     }
   }
+
+  /**
+   * The design bundle a NEW page is born with — **Signal** (research §4.8), the
+   * recommended platform default: a contemporary/product look for the creator
+   * with no design opinion.
+   *
+   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left to
+   * `SECTION_DESIGN_DEFAULTS`: an implicit default is invisible. A page storing no
+   * `design` renders *like something* while the builder's preset picker shows
+   * NOTHING selected — so the creator sees a control that appears dead, and the
+   * first preset they pick looks like it changed the page when it merely made the
+   * existing look explicit. An explicit stored bundle is inspectable, diffable and
+   * editable. Same argument as the Candlelit migration, applied to new pages
+   * instead of old ones.
+   *
+   * These nine values are ALSO declared in the builder's preset table
+   * (`apps/web/src/lib/components/page-builder/design-vocabulary.ts` →
+   * `SECTION_DESIGN_PRESETS` → `signal`), because a package cannot import from
+   * `apps/web` and the presets are builder-UI vocabulary. `design-vocabulary.test.ts`
+   * pins that copy to these exact values, so a drift fails `pnpm --filter web test`
+   * rather than silently making a new page's stored bundle match no preset in the
+   * picker.
+   */
+  private static readonly NEW_PAGE_DESIGN: SectionDesign = {
+    width: 'wide',
+    density: 'regular',
+    surface: 'panel',
+    edge: 'hairline',
+    align: 'start',
+    type: 'balanced',
+    accent: 'fill',
+    motion: 'rise',
+    media: 'frame',
+  };
 
   /**
    * Create a new journey/page (as a draft) and return its page id + slug. For a
@@ -1451,6 +1514,9 @@ export class CourseJourneyService extends BaseService {
             subjectType: pageType === 'course' ? 'course' : null,
             subjectId,
             sections: [],
+            // An EXPLICIT look, never the implicit axis defaults (A21) — see
+            // {@link CourseJourneyService.NEW_PAGE_DESIGN}.
+            design: CourseJourneyService.NEW_PAGE_DESIGN,
           })
           .returning({ id: landingPages.id, slug: landingPages.slug });
         if (!page) {
@@ -1492,6 +1558,16 @@ export class CourseJourneyService extends BaseService {
       status: PageStatus;
       sections: PageSection[];
       brandOverrides?: BrandTokenOverrides | null;
+      /**
+       * The page's LOOK (the preset picker's write). OPTIONAL and treated as
+       * "leave alone" when absent — never as "clear it". A client that does not
+       * know about the axes (or a save issued before the draft finished loading)
+       * must not silently wipe a stored bundle and drop the page back to the
+       * neutral axis defaults, which for a migrated page means visibly losing its
+       * appearance. There is deliberately no way to clear it: A21 requires every
+       * page to hold an explicit bundle.
+       */
+      design?: SectionDesign;
     }
   ): Promise<void> {
     try {
@@ -1577,6 +1653,7 @@ export class CourseJourneyService extends BaseService {
             status,
             sections: record.sections,
             brandOverrides: record.brandOverrides,
+            ...(record.design ? { design: record.design } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
           })
           .where(
