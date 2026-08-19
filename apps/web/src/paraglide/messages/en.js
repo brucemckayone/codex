@@ -11792,3 +11792,43 @@ export const monetisation_revshare_type_content = () => `Content purchase`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const monetisation_revshare_propose_aria = (params) => `Propose a ${params.type} revenue split with ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_hero_cta_default = () => `Get started`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_hero_cta_enrolled = () => `Go to your dashboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_reel_tag_default = () => `Preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_cta_default = () => `Join now`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_map_practice_label = () => `Practice`
