@@ -255,7 +255,15 @@ describe('ReelSection — no hardcoded editorial voice (Codex-i9pzs)', () => {
   });
 
   it('self-hides the heading when there is no title either', () => {
-    render({ config: {}, courseTitle: undefined });
+    /*
+     * `courseTitle: ''`, not `undefined`. Passing `undefined` through a
+     * DEFAULTED parameter (`title = 'The course title'`) selects the default, so
+     * the assertion would have been testing the opposite of what it says — and
+     * it failed loudly rather than passing vacuously, which is the good outcome.
+     * An empty title is the real shape of "this course has nothing to lend the
+     * heading", and it exercises the same `{#if}` guard.
+     */
+    render({ config: {}, courseTitle: '' });
     expect(title()).toBeNull();
   });
 });
