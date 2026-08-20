@@ -619,3 +619,173 @@ every control except `media`, so an array-fed field cannot be authored at all. *
 eighteen compositions are markup-complete and test-pinned but unreachable from the builder.** Do
 not build a bespoke control; report what shape you need, and design every composition to degrade
 gracefully to empty.
+
+---
+
+## MEASURED LESSONS FROM ROUND 4 — the last component round
+
+Round 4 wired `introVideo`/`reel` (WT-2) and `guide` (WT-6), completing all 11 types. Both worktrees
+corrected the orchestrator and each other; **every correction below is a measurement.** Full statements
+are amendments **A63–A72** in `02-axis-contract.md`.
+
+There is no round 5 of component work, so read these as **consolidation** and **future-WP** lessons
+rather than as a next worktree's checklist.
+
+### A correct diagnosis in a component header does not reach the next component (A64)
+
+This is the most expensive lesson of the round and it is a *process* lesson, not a CSS one.
+
+`InviteSection.svelte:1187-1196` measured, diagnosed and documented — correctly and completely, in
+prose — that `--jp-edge-width` was a unitless `0`, that math on it invalidates the whole declaration,
+and that the fix was one character in the axis file. It ended: *"until then, no component math touches
+that token."*
+
+Nobody swept the tree. `MapSection.svelte:1056` was already doing exactly that math, on four card
+selectors, and kept doing it for a whole round — so `.descent__card` shipped with **no border at all**
+on every published page, while its own comment claimed the `max()` *prevented* cards dissolving.
+`dev@013e2d42` ships those cards with a real hairline, so it was a live regression, not a new look.
+
+**If you diagnose a shared defect, the deliverable is a fix at the root or a red test — never a
+paragraph.** A paragraph reaches the reader of that one file.
+
+### Do not treat a self-check number as a target (A63)
+
+The orchestrator handed both worktrees a `var(--jp-` read-count band (30–85, measured across the seven
+already-wired components) as a "stage 1 is done" signal. WT-2 did something better: it **diffed defined
+tokens against read tokens, one by one**, and found `--jp-accent-glow` had **no consumer anywhere** in
+`ReelSection`. Since Candlelit is `accent: glow`, that was a bloom that never bloomed on 695 pages.
+
+Its read count would have looked healthy either way. A band tells you whether you are in the right
+order of magnitude; **an exhaustive token diff tells you what you missed.** Audit every unread token and
+justify it — WT-2's legitimate ones were display/heading-size/leading/tracking (via `.jp-sec__heading`),
+distance/stagger (via `.jp-reveal`), and `--jp-rhythm` (via the `--jp-sec-pad-block`/`-gap` aliases,
+because reading it directly is the anti-pattern pilot lesson 1 forbids).
+
+### A54 generalises: the mechanism is the KEYWORD, not the `--jp-edge-*` family (A63)
+
+Three more axis tokens resolve to `none` — `--jp-accent-glow` (4 of 5 accent values),
+`--jp-media-scrim` and `--jp-media-mask` (4 of 5 each). So
+`background: var(--jp-media-scrim), var(--color-surface)` evaporates exactly as A54's three rings did,
+and **that is a natural thing to write**, because layering a scrim over a surface is what the token is
+for.
+
+Any axis token that can resolve to a keyword must be the WHOLE value of its property. Never a list
+item, never inside `min()`/`max()`/`clamp()`/`calc()`. Guard filed as `Codex-3kqqp`.
+
+### The scrim is bottom-anchored, so half the aspect↔scrim coupling is unreachable by aspect (A68)
+
+`--jp-media-scrim` is `to top`. It therefore protects **nothing at the top of the box at any aspect**,
+and **a text block that wraps climbs out of it.** Neither is an aspect problem, so flooring the aspect
+cannot fix either.
+
+The rule that came out of it: floor the aspect (`min-height`), never override it per breakpoint — a
+floor can only make the box taller, moving the fade further above the text, whereas a second
+`aspect-ratio` can make it shorter. Then give over-media blocks the scrim **on their own box** with
+`padding-block-start` as the fade lead-in, and give top-anchored chrome its own plate at **88%**, not a
+glassy 55% (A39 applies to plates too).
+
+### "Verify Candlelit" is two different checks, and only one is falsifiable (A66)
+
+Every check through round 3 was a **fidelity** check: does the preset render what shipped? `guide` had
+**zero rows in the database**, so there was no "today" to reproduce and fidelity was *undefined* — only
+a **consistency** check was available. State which one you did. Both of Candlelit's known errors were
+caught by fidelity, i.e. by someone noticing a mismatch against a real page, so **a type with no rows
+has no tripwire** and needs the arithmetic done rather than the eye.
+
+### Candlelit now needs a per-type escape hatch on four of nine axes (A65)
+
+`width` (accepted at A51), `type` (grows `feel`'s h2 +8px, because `feel` ships `--text-3xl` where
+`proof`/`faq` ship `--text-4xl`), `media` (letterboxes `guide`'s portrait to 21/9; `introVideo` wants
+`frame` while `reel` and `hero` want `bleed`), `align` (`reel`'s editorial split).
+
+**None can be fixed locally** — each fix is right for one type and a regression for another. And note
+the evidence *for* the page-level default: `introVideo`'s `type` matched **byte-identically** at all
+three widths. The override map is an escape hatch, not a replacement, and it must sit BESIDE the pinned
+bundle or all 695 pages read as "Custom".
+
+### Three measurement corrections, each of which changed a conclusion (A67)
+
+1. **Type must be measured at real viewports.** `--text-*` carries a `vw` term, so a container
+   constrained to 375px inside a 1440px window reports the **1440px** `font-size`. A first pass read
+   48px at 375; the truth was 37.24px. A10's "constrain `.jp-sec`" is right for *container queries* and
+   wrong for *type*.
+2. **A10's ancestor walk cannot measure text over media at all.** Scrim and poster are
+   absolutely-positioned **siblings**, so the walk returns the frame's base colour — it reported
+   15.58:1 for a chip whose real backdrop is a plate. Use a **glyph-pixel diff** (shoot with text
+   visible, shoot with `color: transparent`, sample only where ink landed). And `visibility: hidden` is
+   the WRONG control: it removes the chip's own plate, which produced 7082 phantom glyph pixels and a
+   reproducible-to-2dp ratio that was pure artefact.
+3. **A third reveal state exists: armed-and-never-entered.** `reveal.ts` sets `opacity: 0` from JS and
+   clears it only when an IntersectionObserver fires, so a below-the-fold section stays invisible
+   indefinitely — 5–10 nodes were still armed after a scroll sweep on an 8078px page, and a crop behind
+   one reads the page background as a plausible, stable, wrong ratio. Force `is-in`.
+
+Plus: **the builder canvas loads curriculum stages asynchronously** — 20 descendants at a 2.5s settle,
+**128 at 9s**. A46's settle is calibrated for the public page and under-reports canvas fidelity.
+
+### Two amendments were simply wrong, and saying so was worth more than the code
+
+- **A56's seeder claim is false for the video types (A69).** `seed-portals.ts` writes `variant` on
+  exactly four types (`hero`, `ache`, `map`, `invite`). Neither video type appears, so there was no
+  seeder literal to be an artifact of — a **clean negative**. The check was still right to run; 0087
+  and 0089 were positives.
+- **A22's "`Codex-maf0y` is latent, not live" is wrong (A70).** It reasons from `createDefaultSections`
+  being dead code, but the placeholder reaches pages via the **add-section path**, which seeds
+  `defaultProps`. Two published rows confirm it.
+
+### Each bridge fix promotes one more placeholder from invisible to visible (A70)
+
+A seeded placeholder is invisible while its type's bridge is broken, because the renderer reads the
+canonical key and the row stores the alias. Wiring the bridge **makes it render.** Measured: 2
+occurrences / 0 rendered → 3 / 1 on a published page. `faq` and `proof` went through this in rounds 2
+and 3 without anyone noticing the pattern.
+
+So `Codex-maf0y` is not "placeholders exist" — it is a **queue**, and the remaining types are future
+leaks. Do not fix it renderer-side: a renderer already self-hides an *absent* field, a placeholder is
+present-with-placeholder-content, and string-matching seed text breaks the moment the seed changes.
+
+### The builder MIS-authors; it does not merely fail to author (A72)
+
+`SectionEditor.svelte:183-231` has no branch for `repeater`/`list`/`number`/`toggle`, so all four fall
+through a catch-all `{:else}` to `<input type="text">` and persist a **string** into array- and
+number-shaped keys. A creator sees a field labelled "Credentials", types into it, it saves, and nothing
+appears. `feel.previewDuration` is worse still — it substitutes a hardcoded 480s rather than vanishing.
+
+**The renderer's correct behaviour is to read the DECLARED shape only and self-hide.** Do not accept the
+string: a field with two sub-fields makes `{label: <whole string>}` a guess dressed as data, and
+shipping the guess makes it a contract the eventual migration must preserve. WT-6 reverted a first pass
+that had done exactly that; the fix was *deleting* code, because `asObjectArray` already returns
+undefined for a non-array.
+
+**And the sequencing is counter-intuitive.** `valueOf()` blanks non-strings, so once a field correctly
+holds an array the text box renders **empty over real content** and a creator "filling in the blank"
+destroys it. The catch-all must stop claiming these kinds **before or with** the real control.
+
+### Annotate-don't-drain is now *more* strongly justified (A71)
+
+The canvas applies **no page-level styling at all** — not the nine axes, and not
+`landing_pages.brand_overrides`. So draining a `_*.css` partial would take the twin from *untreated* to
+*unstyled*, which A16 explicitly will not accept. Keep the port map, the non-1:1 splits, and the
+deliberately-not-ported rules in the partial.
+
+### Process notes that cost real time
+
+- **Every agent this round wrote its report as assistant text and never sent it.** The orchestrator had
+  to reconstruct two of the three from git and the database. If you are a subagent: your report only
+  exists if you *send* it.
+- **A62 worked.** All six of round 4's i18n key claims were accurate, against four false ones in round
+  3. Quote the `en.json` line or call the key new.
+- **A cold worktree reports 235 svelte-check errors, not 65.** `src/paraglide/messages.js` is a
+  gitignored build artifact; until the vite plugin compiles it, every `$paraglide/messages` import
+  errors. Run `svelte-kit sync` and start vite once before believing any svelte-check number.
+- **`lsof -ti:PORT | head -1 && echo OCCUPIED` false-positives** — the pipeline's exit status is
+  `head`'s, not `lsof`'s. Same class as `$?` after a pipe to `tail`.
+- **The login form does not match the obvious selector.** The email field is `type="text"` with
+  `id="email"`, so `input[type="email"]` never matches — and each failed attempt extends the shared
+  5-per-15-minute rate-limit window. Use `#email` / `#password` / `button[type="submit"]`, and cache
+  `storageState`.
+- **The add-section control is `.section-list__add` and its label is `" Add"` with a LEADING SPACE**, so
+  `hasText:/^Add$/` does not match.
+- **Put the substance in the commit SUBJECT.** WT-2 folded its compositions into a commit *body*, and
+  the orchestrator — who gates on subjects — wrongly concluded stage 3 was outstanding and asked it to
+  justify itself.
