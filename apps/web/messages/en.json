@@ -1476,5 +1476,15 @@
   "journey_hero_cta_enrolled": "Go to your dashboard",
   "journey_reel_tag_default": "Preview",
   "journey_invite_cta_default": "Join now",
-  "journey_map_practice_label": "Practice"
+  "journey_map_practice_label": "Practice",
+  "journey_map_stat_stages": "stages",
+  "journey_map_stat_stages_one": "stage",
+  "journey_map_stat_practices": "practices",
+  "journey_map_stat_practices_one": "practice",
+  "journey_map_col_stage": "Stage",
+  "journey_map_col_includes": "Includes",
+  "journey_map_col_practices": "Practices",
+  "journey_map_locked_hint": "included with membership",
+  "journey_map_audio_label": "Audio",
+  "journey_map_written_label": "Reflection"
 }

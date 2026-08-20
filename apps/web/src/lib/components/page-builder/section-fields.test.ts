@@ -161,7 +161,6 @@ const OWED_READS: Readonly<Record<string, readonly string[]>> = {
   ache: ['points'], // WT-1 — the List and Checklist compositions
   turn: ['from', 'to'], // WT-1 — the Before / after composition
   guide: ['clip', 'duration', 'facts'], // WT-6 — `facts` is the Credentials composition
-  faq: ['g1', 'g2', 'g3'], // WT-5 — `asNumberedGroups` gains a `group: 'g'` field
   invite: ['accent'], // WT-7
 };
 

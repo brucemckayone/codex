@@ -109,7 +109,7 @@
   /* Small decorative brand marks — dots, nodes, sparks. NEVER use
      `--jp-accent-fill` for these: it is `transparent` at `accent: text` and
      `accent: edge`, so the mark disappears on two of five values (WT-3 pilot). */
-  --jp-accent-mark: var(--jp-ember);
+  --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 
@@ -402,14 +402,14 @@
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: var(--jp-ember);
   --jp-accent-on-fill: var(--jp-on-ember);
-  --jp-accent-mark: var(--jp-ember);
+  --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
 [data-jp-accent='edge'] {
   --jp-accent-text: var(--jp-text);
   --jp-accent-fill: transparent;
-  --jp-accent-mark: var(--jp-ember);
+  --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
@@ -417,7 +417,7 @@
   --jp-accent-text: var(--jp-ember-text);
   --jp-accent-fill: var(--jp-ember);
   --jp-accent-on-fill: var(--jp-on-ember);
-  --jp-accent-mark: var(--jp-ember);
+  --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: color-mix(in oklab, var(--jp-ember) 45%, transparent);
   --jp-accent-glow: 0 var(--space-6) var(--space-14)
     calc(var(--space-10) * -1) var(--jp-blood);
