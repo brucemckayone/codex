@@ -12008,3 +12008,27 @@ export const journey_invite_row_who = () => `Who it is for`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const journey_invite_row_includes = () => `Includes`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_guide_portrait_alt = (params) => `Portrait of ${params.name}`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_guide_play_clip = (params) => `Play the clip from ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_guide_play_clip_generic = () => `Play the guide clip`

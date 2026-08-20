@@ -156,9 +156,15 @@ const READERS: Readonly<Record<string, readonly string[]>> = {
  * the fields F-C declared for the new compositions.
  */
 const OWED_READS: Readonly<Record<string, readonly string[]>> = {
-  introVideo: ['clip', 'duration'], // WT-2 — `reel.clip` IS aliased (as `tag`)
-  reel: ['duration'], // WT-2
-  guide: ['clip', 'duration', 'facts'], // WT-6 — `facts` is the Credentials composition
+  // EMPTY, as A28 said it should be by consolidation. Round 4 wired the last
+  // three entries and they were deleted here in the same change:
+  //   introVideo: ['clip', 'duration']  -> IntroVideoSection.svelte:152-153
+  //   reel: ['duration']                -> ReelSection.svelte:133
+  //   guide: ['clip', 'duration', 'facts'] -> GuideSection.svelte:159-161
+  // Leaving the map in place rather than deleting it: the checklist mechanism is
+  // what future work packages will re-use, and an empty map makes the test above
+  // enforce the STRONGER invariant — that every authorable field on every type is
+  // read, with no exemptions outstanding.
 };
 
 function readerSource(type: string): string {

@@ -1498,5 +1498,8 @@
   "journey_invite_compare_caption": "The ways in, compared",
   "journey_invite_row_price": "Price",
   "journey_invite_row_who": "Who it is for",
-  "journey_invite_row_includes": "Includes"
+  "journey_invite_row_includes": "Includes",
+  "journey_guide_portrait_alt": "Portrait of {name}",
+  "journey_guide_play_clip": "Play the clip from {name}",
+  "journey_guide_play_clip_generic": "Play the guide clip"
 }

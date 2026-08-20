@@ -68,6 +68,7 @@
     asStringFrom,
     fieldString,
   } from '../coerce';
+  import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
   import { safeHref } from '../safe-href';
   import type { GuideSectionProps, JourneySalesContext } from '../types';
@@ -350,7 +351,7 @@
         <img
           class="guide__img"
           src={safeHref(poster)}
-          alt={p.name ? `Portrait of ${p.name}` : ''}
+          alt={p.name ? m.journey_guide_portrait_alt({ name: p.name }) : ''}
           loading="lazy"
           decoding="async"
         />
@@ -407,8 +408,8 @@
             class="guide__play"
             onclick={() => (clipOpen = true)}
             aria-label={p.name
-              ? `Play the clip from ${p.name}`
-              : 'Play the guide clip'}
+              ? m.journey_guide_play_clip({ name: p.name })
+              : m.journey_guide_play_clip_generic()}
           >
             <span class="guide__play-icon" aria-hidden="true">
               <PlayIcon />

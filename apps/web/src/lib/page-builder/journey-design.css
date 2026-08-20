@@ -323,7 +323,22 @@
    And per research §5.1, `none` and `soft` remove borders but must NEVER remove
    a focus ring. */
 [data-jp-edge='none'] {
-  --jp-edge-width: 0;
+  /* `0px`, NOT a bare `0`. A unitless zero is a `<number>`, not a `<length>`, so
+     any math on this token mixes types and invalidates the WHOLE declaration at
+     computed-value time. `MapSection` shipped
+     `border: max(var(--jp-edge-width), var(--border-width)) solid …` on its four
+     card selectors to floor the width so cards could not dissolve — and because
+     `edge: none` IS Candlelit, the shorthand went invalid on every published
+     page and `border-style` stayed `none`, doing the exact opposite of what the
+     floor intended. `dev@013e2d42` ships those cards with a real hairline
+     (`border: var(--border-width) solid var(--color-border-subtle)`), so this is
+     a RESTORATION, not a new look. `InviteSection` measured and documented the
+     trap in round 3 and asked for this one-character fix; nobody swept the tree.
+     Keeping the unit here fixes the whole CLASS of bug rather than the one
+     instance, so component math on the token is safe from now on. The twelve
+     plain `border: var(--jp-edge-width) solid X` consumers are unaffected —
+     `0px` and `0` are identical there. */
+  --jp-edge-width: 0px;
   --jp-edge-shadow: none;
 }
 [data-jp-edge='hairline'] {
@@ -332,7 +347,8 @@
   --jp-edge-shadow: var(--shadow-xs);
 }
 [data-jp-edge='soft'] {
-  --jp-edge-width: 0;
+  /* `0px` for the same reason as `none` above — see that comment. */
+  --jp-edge-width: 0px;
   --jp-edge-shadow: var(--shadow-lg);
 }
 [data-jp-edge='heavy'] {
