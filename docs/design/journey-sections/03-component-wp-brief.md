@@ -441,3 +441,24 @@ Do not animate-then-override. Put the ticker inside
 `@media (prefers-reduced-motion: no-preference)`. An override-based fallback has to remember
 every property the animation set, and WT-5's forgot the one (`flex: none`) that blocked
 wrapping — while every motion probe read clean.
+
+### "Wire all nine axes" means all nine that APPLY — `media` is conditional per type
+
+Research §2.2 names the five types where `media` is meaningful — `hero`, `introVideo`, `reel`,
+`guide`, `proof` — and says the rest "ignore it, exactly as they ignore a variant they do not
+offer." `map` wired **eight** and was right to: `JourneyStageView` is
+`{id, name, gloss, sortOrder, practices[]}` with no media reference at any depth, so there is
+nothing for `--jp-media-*` to shape and claiming nine would have meant inventing a consumer.
+
+**Do not manufacture a consumer to reach nine.** State in your component header which axes apply
+and cite §2.2. Same discipline as WT-4 shipping `table` with 3 columns instead of the research's
+4, because `minutes` and per-stage `access` have no field on the view model — a fourth column
+would have been a control that renders nothing, which is the exact mistake
+`SectionFieldDef.mediaSlot`'s own JSDoc exists to prevent.
+
+### A "typographic" glyph can still be an emoji
+
+WT-4 removed a `▶ ♪ ✎` content-type map alongside the lock emoji: **U+25B6 carries emoji
+presentation on Apple platforms**, so a map that looked like typography was shipping an emoji
+into product UI. If you are replacing emoji, check the replacement's presentation rather than
+assuming a geometric-shape codepoint is safe. Use `Icon/*Icon.svelte` via `IconBase`.

@@ -79,9 +79,28 @@
    `[data-org-brand]`, org-brand.css:136) rather than the raw `--brand-*` token,
    with `--font-normal` as the floor for any surface outside org scope.
 
-   `--jp-heading-size` is the axis's SECOND step, for a subordinate heading
-   inside the same section (a stage name, a card title). Use
-   `.jp-sec__heading--sub` for those rather than inventing a size. */
+   READ THIS BEFORE SIZING ANY HEADING (contract A36). `--jp-display` is the
+   PAGE's display heading — the hero's `h1`, and nothing else. EVERY other
+   section's `h2` takes `--jp-heading-size` via `.jp-sec__heading--sub`. This is
+   load-bearing, not advice: at `type: monumental` `--jp-heading-size` IS
+   `--text-4xl` (48px), which is exactly what the section headings ship today,
+   while `--jp-display` is 80px. Wiring a section `h2` to `--jp-display` grows
+   every published page's heading by 67% — measured, and caught in round 2 only
+   because two worktrees independently distrusted an earlier wording of this
+   comment.
+
+   An earlier version of this comment offered "(a stage name, a card title)" as
+   the examples for `--jp-heading-size`. That was removed: read literally it makes
+   a stage name the same size as the section heading above it, and it implies a
+   section `h2` belongs on `--jp-display`. Both are wrong.
+
+   A card-scale third rung — a stage name, a card title, an FAQ question row, a
+   quote — is NOT in this file yet. Two components have derived it independently
+   (`clamp(--text-base, calc(--jp-heading-size * 0.5), --text-2xl)` and
+   `max(--text-lg, --jp-heading-size / 2)`); it is being promoted to a real
+   `--jp-body-size` rung (`Codex-8oznv`, contract A44). Until then, derive it from
+   `--jp-heading-size` rather than hardcoding a size, so the `type` axis still
+   reaches it. */
 .jp-sec__heading {
   margin: 0;
   font-family: var(--font-heading);

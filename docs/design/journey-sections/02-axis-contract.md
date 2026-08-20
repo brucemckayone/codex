@@ -731,11 +731,33 @@ back onto the role.
 A34's reason for adding the role (marks vanish at `accent: text`/`edge`) still stands; it was
 never contrast-safe, which is what the comment already knew.
 
-## A39 — a resting control boundary cannot be "faint"
+## A39 — no alpha low enough to READ as faint survives the dark pole
 
-Any alpha low enough to read as faint failed in dark: WT-5 measured **2.53:1 at a 55% mix**
-on a control ring. Carry resting/hover state on **fill and border-weight**, not on opacity.
-Same class as the pilot's CTA `min-height` — a decorative treatment on a functional element.
+Stated deliberately more broadly than my first version, because WT-4 showed the narrow version
+would have missed its own two failures.
+
+I originally framed this as an A37 corollary — "don't carry a mix percentage onto a *pre-mixed*
+axis token like `--jp-accent-edge` at `glow`." WT-4 correctly pointed out that its failures were
+**not** that case: `--jp-accent-text` is a text-role token, not pre-mixed, so nothing was
+double-counted. A worktree reading the narrow rule would have checked only `--jp-accent-edge`
+and shipped both defects.
+
+**The general rule:** any alpha low enough to look faint fails 3:1 at the dark pole, whatever
+token it is mixed from. Measured, three times, in two components:
+
+| element | mix | dark ratio |
+|---|---|---|
+| WT-5, control ring | `--jp-accent-text` @ 55% | **2.53** |
+| WT-4, node ring | `--descent-signal` @ 60% | **2.53** |
+| WT-4, spine fade top | `--descent-signal` @ 45% | **2.05** |
+
+The two 2.53s are independent measurements of the same failure mode in different components,
+from different tokens — which is what makes this a rule rather than a coincidence.
+
+WT-4 swept the thresholds rather than guessing, and the numbers are reusable: over the node's
+own surface dark does not clear 3:1 until **80%**; over the page, until **70%**. Below that,
+carry resting/hover state on **fill and border-weight**, not on opacity. Same class as the
+pilot's CTA `min-height` — a decorative treatment applied to a functional element.
 
 ## A40 — invert continuous-motion fallbacks: the STATIC layout is the baseline
 
