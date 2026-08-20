@@ -9,10 +9,17 @@
   ── THE AXES THIS SECTION CONSUMES: ALL NINE ───────────────────────────────
   `width` `density` `surface` `edge` `align` `type` `accent` `motion` `media`.
 
-  `media` is REAL here (research §2.2 names `hero`, `introVideo`, `reel`, `guide`,
-  `proof` as the five media-bearing types) and this section is where the axis is
-  most load-bearing, because its text sits ON the media. COLOUR STAYS `--color-*`
-  (contract A11); `--jp-accent-*` is the deliberate exception.
+  `media` is REAL here, and this section is where the axis is most load-bearing,
+  because its text sits ON the media. The media-bearing five are named in research
+  §2.2 and, machine-checked, in
+  `components/page-builder/design-vocabulary.ts:320` —
+  `MEDIA_AWARE_SECTION_TYPES = ['hero', 'introVideo', 'reel', 'guide', 'proof']`,
+  pinned by `design-vocabulary.test.ts:156`. On the other six the panel HIDES the
+  control but the value still resolves and still emits its attribute; nothing
+  consumes it. See `IntroVideoSection`'s header for the full note.
+
+  COLOUR STAYS `--color-*` (contract A11); `--jp-accent-*` is the deliberate
+  exception.
 
   ── THE ASPECT ↔ SCRIM RULE (the coupling this section motivated) ───────────
   `IntroVideoSection`'s header states the rule in full. In short:
@@ -1130,6 +1137,17 @@
        read as faint clears 3:1 at the dark pole (contract A39), and this border
        is the control's only boundary. */
     border: var(--border-width-thick) solid var(--jp-accent-mark);
+    /* `accent: glow` IS Candlelit, i.e. what all 695 backfilled pages hold, so an
+       unconsumed `--jp-accent-glow` would be a bloom that never blooms on every
+       published page. This is its only consumer in the section.
+
+       THE WHOLE VALUE of `box-shadow`, never one item of a list: the token is the
+       keyword `none` at the other four accent values, and `none` cannot be a
+       shadow-list item — the declaration would be invalid at computed-value time
+       and fall back to the initial `none`. That is contract A54's mechanism,
+       which is about the KEYWORD rather than the `--jp-edge-*` family, and it
+       also catches `--jp-media-scrim` and `--jp-media-mask`. */
+    box-shadow: var(--jp-accent-glow);
     -webkit-backdrop-filter: blur(var(--blur-md));
     backdrop-filter: blur(var(--blur-md));
     cursor: pointer;

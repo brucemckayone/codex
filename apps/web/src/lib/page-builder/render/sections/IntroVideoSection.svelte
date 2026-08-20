@@ -12,11 +12,24 @@
   `width` `density` `surface` `edge` `align` `type` `accent` `motion` `media`.
 
   `media` is REAL here, not a documented N/A. Research §2.2 names five types
-  where it is meaningful — `hero`, `introVideo`, `reel`, `guide`, `proof` — and
-  this is one of them: the section's whole lower half is a media box, so all six
-  of the axis's properties (`--jp-media-aspect` / `-radius` / `-inset` / `-scrim`
-  / `-mask` / `-display`) have a genuine consumer. Contrast `map`, which wired
-  eight and was right to (contract A50).
+  where it is meaningful, and there is a MACHINE-CHECKED source for that list:
+  `components/page-builder/design-vocabulary.ts:320` declares
+  `MEDIA_AWARE_SECTION_TYPES = ['hero', 'introVideo', 'reel', 'guide', 'proof']`,
+  and `design-vocabulary.test.ts:156` asserts the design panel offers the `media`
+  control on exactly those five. Cite the constant as well as the prose — it is
+  the thing that fails if someone later disagrees. (Its JSDoc also explains the
+  one non-obvious entry: `proof` is there for its avatars.)
+
+  This section is one of the five: its whole lower half is a media box, so all
+  six of the axis's properties (`--jp-media-aspect` / `-radius` / `-inset` /
+  `-scrim` / `-mask` / `-display`) have a genuine consumer. Contrast `map`, which
+  wired eight and was right to (contract A50).
+
+  NOTE what "N/A on the other six" does and does not mean. The panel HIDES the
+  control there; it does not drop the value. A stored `media` override on a `faq`
+  still resolves and still emits its `data-jp-media` attribute — there is simply
+  nothing in that component consuming it. "Not worth a creator's attention", not
+  "inert in the cascade".
 
   COLOUR STAYS `--color-*` (contract A11); the one exception is the
   `--jp-accent-*` family, which is the axis system's deliberate colour role.
