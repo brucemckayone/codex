@@ -30,7 +30,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PageSection } from '@codex/shared-types';
+import type { CourseSectionType, PageSection } from '@codex/shared-types';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   resolveVariant,
@@ -210,7 +210,7 @@ describe('canvas CSS ↔ catalogue: unreachable modifier rules (CHARACTERISATION
    * ids type-blind would call `.jp-video--statement` reachable just because
    * `ache` declares `statement`.
    */
-  const PREFIX_TYPES: Record<string, readonly string[]> = {
+  const PREFIX_TYPES: Record<string, readonly CourseSectionType[]> = {
     hero: ['hero'],
     prose: ['ache', 'turn', 'feel'],
     video: ['introVideo', 'reel'],
