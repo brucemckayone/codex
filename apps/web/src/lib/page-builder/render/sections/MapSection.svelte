@@ -710,25 +710,48 @@
     --descent-step: calc(var(--jp-reveal-stagger) / 2);
     --descent-step-max: var(--duration-slowest);
     /*
-      TWO ACCENT ROLES, and the split is measured rather than stylistic.
+      TWO ACCENT ROLES — now the SAME token, and that collapse is measured.
 
       The spine, the node ring and the roman numeral are MEANINGFUL graphics, so
       research §5.1 puts them under the 3:1 UI/graphic floor. `--jp-accent-mark`
-      is the role for a brand mark and the right answer in principle — but it
-      resolves to `--jp-ember` on four of its five accent values, and
-      `--jp-ember` is theme-blind (`Codex-8jve9`): measured on the golden org it
-      is 8.49:1 in light and **2.04:1 in dark**, i.e. below the floor at one
-      pole. `journey-design.css`'s own comment says accent-mark "tracks
-      `--jp-accent-text` … rather than the 2.04:1-in-dark `--jp-ember`", which is
-      what it should do and not what it does — reported, not edited here.
+      is the role for a brand mark and the right answer in principle. Round 2
+      could not use it for the signal, and recorded why: accent-mark resolved to
+      the theme-blind `--jp-ember` (`Codex-8jve9`), measured at 8.49 light and
+      2.04 dark — below the floor at one pole. So the signal borrowed
+      `--jp-accent-text` and only the decorative bloom kept accent-mark.
 
-      `--jp-accent-text` is the same hue mixed 55% toward the ink and measures
-      14.62 light / 6.04 dark, clearing the floor at both poles on all five
-      accent values. So the SIGNAL uses it and the purely decorative bloom keeps
-      `--jp-accent-mark`. Collapse `--descent-signal` back onto
-      `--jp-accent-mark` once `Codex-8jve9` lands.
+      THAT IS NO LONGER TRUE, and the 2.04 figure was misattributed. Re-measured
+      on the golden org (`of-blood-and-bones`, `pricing-smoke-test`), both poles,
+      all five accent values, with the A67 method — `copy` composite, ancestor
+      walk to alpha > 250, both `data-theme` AND `.dark`, 2× rAF + 1300ms:
+
+        accent  | mark dark | text dark | mark light | text light
+        none    |   17.51   |   17.51   |   18.38    |   18.38
+        text    |    6.04   |    6.04   |   14.62    |   14.62
+        fill    |    6.04   |    6.04   |   14.62    |   14.62
+        edge    |    6.04   |   11.04   |   14.62    |   15.41
+        glow    |    6.04   |    6.04   |   14.62    |   14.62
+
+      `--jp-accent-mark` now resolves to `--jp-ember-text`, so it is IDENTICAL to
+      `--jp-accent-text` at four of five accent values and clears both floors at
+      every one. The token that actually measures 2.04 dark is `--jp-ember` /
+      `--jp-accent-fill` (`rgb(85,46,142)`); accent-mark is `rgb(155,132,187)` at
+      6.04. Round 2 read `--jp-ember`'s ratio onto the token that merely pointed
+      at it — a real hazard whenever one token aliases another.
+
+      So the signal reads `--jp-accent-mark` directly. The only behaviour change
+      is at `accent: edge`, where it moves 11.04 → 6.04 dark and 15.41 → 14.62
+      light — both still far above the 4.5 text floor and the 3 graphic floor.
+      `Codex-8jve9` stays open on its own terms (`--jp-ember` is still
+      theme-blind, and the CTA still disagrees with the accent ladder), but it no
+      longer gates this: A38 repointed accent-mark off ember.
+
+      Signal and bloom are now the same token. Keeping both names for one value
+      is redundant — a later sweep should read `--jp-accent-mark` at the call
+      sites and drop both aliases. Not done here to avoid churning six call sites
+      for no behaviour change.
     */
-    --descent-signal: var(--jp-accent-text);
+    --descent-signal: var(--jp-accent-mark);
     --descent-bloom: var(--jp-accent-mark);
     position: relative;
     isolation: isolate;
