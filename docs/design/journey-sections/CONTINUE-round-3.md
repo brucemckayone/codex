@@ -38,11 +38,13 @@ never passed `variant` to the component. So the model is:
 
 ## Current state
 
-**Integration branch: `feat/journey-sections-foundation` @ `a67aacf6`**
+**Integration branch: `feat/journey-sections-foundation` @ `64023e03`**
 in worktree `/Users/brucemckay/development/Codex-js-foundation`. Based on `dev@013e2d42`.
 Not pushed. No PR. Working tree clean. **3 of 11 types done** (hero, proof, faq, map — 4 types).
 
 ```
+64023e03  --jp-body-size rung + editAttrs typed (Codex-8oznv, Codex-pxxby CLOSED)
+ab32e9a2  this continuation prompt
 a67aacf6  docs — WT-4's corrections to my own amendments
 37626625  Candlelit's width becomes text, and the data moves with it
 98dc0745  merge: WT-4's alpha-carried graphics fix
@@ -56,7 +58,7 @@ a8d6b35a  fix — round 2's shared findings (accent-mark, 10 map keys, OWED_READ
 **Gate on that HEAD, verified independently with REAL exit codes** (not `$?` after a pipe — that
 measures `tail`): `check:ci` **0** (179 warnings, 0 errors) · both `check:brand-boundary` **0** ·
 `pnpm typecheck --force` **0**, 57/57, **0 cached** · `pnpm --filter web test` **0**, **167 files /
-1980 tests**. (`a67aacf6` is comment-and-markdown only, so only `check:ci` was re-run on it.)
+1980 tests**. Re-verified in full on `64023e03`.
 
 **Migrations applied locally:** `0084` (design column + Candlelit backfill), `0085` (variant
 collapse), `0086` (hero + signature media slots), `0087` (hero split-media → stage), **`0088`
@@ -81,7 +83,7 @@ Round 2 held both merges until both worktrees reported.
 
 ## ROUND 3 — what to do
 
-Two worktrees **in parallel**, both cut from `a67aacf6`. Ports 3022/3023 are free.
+Two worktrees **in parallel**, both cut from `64023e03`. Ports 3022/3023 are free.
 
 | WT | Types | Owns exclusively | Port |
 |---|---|---|---|
@@ -94,7 +96,7 @@ WT-1 is the largest WP in the programme (1525 lines across three types). WT-7 is
 Worktree setup recipe (per worktree):
 ```bash
 cd /Users/brucemckay/development/Codex
-git worktree add -b feat/journey-sections-prose /Users/brucemckay/development/Codex-js-prose a67aacf6
+git worktree add -b feat/journey-sections-prose /Users/brucemckay/development/Codex-js-prose 64023e03
 for f in .env.dev .env.test .npmrc; do cp "$f" /Users/brucemckay/development/Codex-js-prose/; done
 for d in workers/*/; do w=$(basename $d); for f in .dev.vars .dev.vars.test; do \
   [ -f "$d$f" ] && cp "$d$f" "/Users/brucemckay/development/Codex-js-prose/workers/$w/"; done; done
@@ -235,6 +237,20 @@ Also WT-7's:
 - **A36 · a section `<h2>` reads `--jp-heading-size`, NEVER `--jp-display`.** At `monumental`
   `--jp-heading-size` IS `--text-4xl` (48px) = what headings ship today; `--jp-display` is 80px, the
   hero's `h1`. Use `class="jp-sec__heading jp-sec__heading--sub"`. The shared-CSS comment now says so.
+- **A44 · card-scale text reads `--jp-body-size`. THE RUNG NOW EXISTS — do not derive your own.**
+  This was closed for you (`Codex-8oznv`, commit `64023e03`) precisely because your four types are
+  all card-scale text and would otherwise have been the third and fourth independent derivation.
+  It is declared once in `journey-design.css`'s `:where(.jp-sec)` and measures **17 / 17 / 20 /
+  24px** across `restrained` / `balanced` / `expressive` / `monumental`. Use it for a tier row, an
+  inclusion line, a `before-after` cell, a checklist item, an `arc` entry — anything that is neither
+  the section `h2` nor running body copy. If you need a **denser** step, derive it from the rung
+  (`calc(var(--jp-body-size) / 1.2)` is how `map`'s table cell does it), **never** from
+  `--jp-heading-size` again. If you need a floor, wrap it (`max(var(--text-lg),
+  var(--jp-body-size))`, as `map`'s stage name does) — do not re-spell the clamp.
+- **`editAttrs` returns `HTMLAttributes<HTMLElement>`** (from `svelte/elements`) in all four
+  existing sections — copy that shape. svelte-check is at **65 errors / 37 warnings** repo-wide with
+  **zero** in any journey section, so the standing "0 errors in the files you changed" gate is now
+  easy to read. Do not regress it.
 - **A37 · never carry a hardcoded mix percentage onto an axis token.** `--jp-accent-edge` at `glow`
   is already a 45% ember mix, so `26%` of it is ~12%. A ring regressed 3.32 → 1.62 this way.
 - **A38 · `--jp-accent-mark` was FIXED** — its declarations contradicted its own comment. It now
@@ -398,11 +414,9 @@ have derived it two different ways, and guide bios / map stage names / feel incl
 4.43:1 because `#E11D48` is OKLCH L=0.5858, just under the 0.60 pivot; carried in
 `journey-design.test.ts`'s `KNOWN_OPEN`, **written to FAIL if it ever stops failing**.
 
-**Worth settling before round 3 starts:** `Codex-8oznv` (`--jp-body-size`). WT-1's three types and
-WT-7's tier rows are all card-scale text, so all four will otherwise derive the rung a third and
-fourth way. Also cheap: `Codex-9jqel`-class — type `editAttrs`' return as
-`HTMLAttributes<HTMLElement>` from `svelte/elements`, which took `MapSection` to 0 svelte-check
-errors and moved the repo 76/39 → 72/37.
+**Both of the pre-round-3 items are now DONE**, so nothing blocks a start: `Codex-8oznv`
+(`--jp-body-size`) and `Codex-pxxby` (`editAttrs` typing) are closed on `64023e03`. See the two
+bullets in the measured-lessons list above for what that means for your CSS.
 
 ## The one risk to keep watching
 
