@@ -19,8 +19,48 @@
    with `render-edit/sections/*`.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   WT-2 · PORTED, AND DELIBERATELY LEFT IN PLACE.
+
+   Both types now live in `render/sections/IntroVideoSection.svelte` and
+   `render/sections/ReelSection.svelte`, wired to the nine axes.
+
+   THESE RULES ARE NOT DRAINED, on purpose. `JourneyBuilderCanvas` still renders
+   through `render-edit/section-registry.ts`, so emptying this partial now would
+   leave the studio canvas previewing UNSTYLED video sections until the canvas is
+   repointed (`Codex-eckbx`). Contract A16 accepts a canvas that looks DIFFERENT
+   from the published page; it does not accept one with no styles. Consolidation
+   deletes this file together with `render-edit/sections/VideoSection.svelte`.
+
+   THE CLASS-BY-CLASS PORT MAP, the genuine (non-1:1) splits, and the rules
+   deliberately NOT ported because they are axes rather than compositions, are all
+   recorded in the header of `render-edit/sections/VideoSection.svelte` — one
+   copy, beside the markup it describes, rather than two that can drift.
+
+   The three notes a reader of THIS file will want:
+
+   • `.jp-video__frame`'s `aspect-ratio: 16 / 9` became `var(--jp-media-aspect)`,
+     and `.jp-video__frame::after`'s `height: 42%` scrim became
+     `background: var(--jp-media-scrim)` on a full-box overlay. The percentage was
+     NOT carried across: a scrim fixed at a percentage of a box whose
+     `aspect-ratio` is a variable is exactly the coupling defect WT-2 was sent to
+     fix. The public components floor the box's HEIGHT instead, which can only
+     ever move the gradient stop further above the text.
+   • `.jp-video__heading`'s `font-size: clamp(1.6rem, 4.4cqw, 2.4rem)` was NOT
+     ported. Type scale belongs to the `type` axis, and a composition that also
+     scaled type would put treatment back inside the variant namespace — the one
+     thing this programme removes.
+   • `.jp-video__frame`'s `box-shadow: 0 34px 80px -40px black` became
+     `--shadow-xl`: a raw black shadow breaks on a light-brand org (A18).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 /* ═══════════════════ VIDEO · cinematic frame (introVideo + reel) ═════════════
-   Variants: cinema (corners + meta) · simple · split (text beside frame). */
+   Variants: cinema (corners + meta) · simple · split (text beside frame).
+
+   NOTE these are the PRE-0085 variant ids. The public components draw
+   `theatre` / `plain` / `split` / `bleed` / `card` (introVideo) and
+   `theatre` / `plain` / `split` / `waveform` (reel — `strip` is descoped per
+   A27). `LEGACY_SECTION_VARIANTS` maps `cinema`→`theatre`, `simple`→`plain`. */
 .jp-video { padding: clamp(2.6rem, 7cqw, 4.6rem) clamp(1.4rem, 6cqw, 3.4rem); }
 .jp-video__lead { text-align: center; max-width: 46rem; margin: 0 auto clamp(1.4rem, 3cqw, 2rem); }
 .jp-video__kick { font-size: clamp(0.62rem, 1.1cqw, 0.72rem); letter-spacing: var(--tracking-wider, 0.24em); text-transform: uppercase; color: var(--jp-ember); font-weight: var(--font-semibold); }
