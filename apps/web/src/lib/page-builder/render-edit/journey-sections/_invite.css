@@ -17,6 +17,66 @@
    DRAINED, NOT KEPT. As each work package ports its type into the unified public
    component, its partial empties out. Consolidation deletes the empties along
    with `render-edit/sections/*`.
+
+   ═══════════════════════════════════════════════════════════════════════════
+    WT-7 · PORTED, AND DELIBERATELY NOT DRAINED YET
+   ═══════════════════════════════════════════════════════════════════════════
+   Every rule below has been ported into
+   `render/sections/InviteSection.svelte` and generalised onto the nine axes.
+   THIS FILE IS NOW DEAD REFERENCE — nothing here reaches the published page,
+   and consolidation deletes it along with `../sections/InviteSection.svelte`
+   once `JourneyBuilderCanvas.svelte` is repointed at the public component.
+
+   IT IS LEFT INTACT ON PURPOSE, following WT-1's precedent. `SectionRenderer`
+   in this tree is the ONLY consumer of `../journey-sections.css`, and the
+   builder canvas still renders `../sections/InviteSection.svelte`. Emptying
+   this partial now would leave the canvas previewing an UNSTYLED invite until
+   consolidation repoints it. Contract A16 accepts a canvas that looks
+   DIFFERENT from the published page — it already does — not one with no styles
+   at all.
+
+   ── THE PORT MAP ─────────────────────────────────────────────────────────
+   canvas rule                        → public component
+   `.jp-invite`                       → `.invite` (padding/min-height now
+                                        `--jp-sec-pad-*` + the density-scaled
+                                        `min(100svh, 80svh * --jp-rhythm)`)
+   `.jp-invite::before` (bloom)       → `.invite__bloom`, gated once on
+                                        `.invite__atmos` by `--jp-sec-atmos`
+   `.jp-invite::after` (vignette)     → `.invite__vignette`
+   `.jp-invite__descent` / `__seed`   → same names; `1px`/`7px` → `--border-width`
+                                        / `--space-2`, `--jp-ember` →
+                                        `--jp-accent-mark`
+   `.jp-invite__wrap`                 → `.invite__inner` (`42rem` →
+                                        `--jp-content-max`, + `min-width: 0`)
+   `.jp-invite .jp-eyebrow`           → `.jp-sec__eyebrow` (the shared atom)
+   `.jp-invite__title`                → `.jp-sec__heading` + `.invite__heading`
+                                        (the clamp → `--jp-display`; see the A36
+                                        departure note in the component)
+   `.jp-invite__accent`               → `.invite__accent` (the `--jp-rose` mix →
+                                        `--jp-accent-text`)
+   `.jp-invite__sub`                  → `.invite__sub`
+   `.jp-invite__offer`                → SPLIT IN TWO, because this tree had one
+                                        offer block and the public component has
+                                        a real per-path grid:
+                                        `.invite__offer` (a card in
+                                        `.invite__offers`) and `.invite__single`
+                                        (the price-less threshold). The pool
+                                        (`::before`) is `.invite__pool`.
+   `.jp-invite__price`                → `.invite__price` + `__price-amount` +
+                                        `__price-cadence`. The `<b>` inside the
+                                        authored price string has NO public
+                                        equivalent BY DESIGN: the authored
+                                        `price` field is deleted, not bridged.
+   `.jp-invite__risk`                 → `.invite__note`, bridged from `risk`
+   `.jp-invite--banner`               → `.invite[data-invite='banner']`
+   `.jp-invite--card`                 → `.invite[data-invite='card']`
+                                        (`--invite-atmos: 0` replaces the three
+                                        `display: none` selectors; its title
+                                        shrink is NOT ported — that is the `type`
+                                        axis, not a composition)
+   `@keyframes jp-invite-breathe`     → `invite-breathe`, duration from
+   `@keyframes jp-invite-pulse`         `--jp-reveal-duration`
+   NEW, no canvas equivalent          → `tiers`, `table`, `sticky` (research §3)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════ THE INVITE · price + CTA close ══════════════════════════
