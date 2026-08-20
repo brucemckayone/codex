@@ -413,7 +413,7 @@
         class="reel__play"
         class:is-armed={mounted && !reduced}
         onclick={() => (open = true)}
-        aria-label="Play the practice preview"
+        aria-label={m.journey_reel_play_aria()}
       >
         <span class="reel__play-icon" aria-hidden="true">
           <PlayIcon />

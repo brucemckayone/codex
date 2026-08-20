@@ -1501,5 +1501,8 @@
   "journey_invite_row_includes": "Includes",
   "journey_guide_portrait_alt": "Portrait of {name}",
   "journey_guide_play_clip": "Play the clip from {name}",
-  "journey_guide_play_clip_generic": "Play the guide clip"
+  "journey_guide_play_clip_generic": "Play the guide clip",
+  "journey_intro_play_aria": "Play the {seconds}-second intro film",
+  "journey_intro_skeleton_label": "Loading the intro film",
+  "journey_reel_play_aria": "Play the practice preview"
 }

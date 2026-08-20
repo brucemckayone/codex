@@ -12032,3 +12032,27 @@ export const journey_guide_play_clip = (params) => `Play the clip from ${params.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const journey_guide_play_clip_generic = () => `Play the guide clip`
+
+
+/**
+ * @param {{ seconds: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_intro_play_aria = (params) => `Play the ${params.seconds}-second intro film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_intro_skeleton_label = () => `Loading the intro film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_reel_play_aria = () => `Play the practice preview`

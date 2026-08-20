@@ -1205,3 +1205,252 @@ orchestrator greps every claimed key before accepting the list, and greps the co
 `m.journey_*` call sites to confirm the strings are actually keyed rather than merely reported.
 Verified after wiring: all 27 `journey_*` keys reach BOTH generated files
 (`src/paraglide/messages/en.js` and `src/paraglide/messages.js`), with only the former git-tracked.
+
+---
+
+# ROUND 4 AMENDMENTS (A63–A72)
+
+Round 4 wired the last three types (`introVideo`, `reel`, `guide`), completing all 11. Every amendment
+below is a MEASUREMENT, and several correct an earlier amendment rather than extending it.
+
+## A63 — A54's mechanism is the KEYWORD, not the `--jp-edge-*` family. Generalise it.
+
+A54 was derived from `--jp-edge-shadow` and written as *"never compose an `--jp-edge-*` token into a
+larger value."* That framing is too narrow and would have missed most of the surface.
+
+The actual failure: **a custom property resolving to the keyword `none` — or to a unitless zero —
+cannot participate in a list, a shorthand, or a math function.** The whole declaration then goes
+invalid at computed-value time and falls back to its initial value. It stays syntactically valid, so
+nothing lints it and nothing warns.
+
+Three more axis tokens resolve to `none`, and **none of them is in the `--jp-edge-*` family**:
+
+| token | `none` at |
+|---|---|
+| `--jp-accent-glow` | 4 of 5 `accent` values |
+| `--jp-media-scrim` | 4 of 5 `media` values |
+| `--jp-media-mask` | 4 of 5 `media` values |
+
+So `background: var(--jp-media-scrim), var(--color-surface)` evaporates exactly as A54's three rings
+did — and that is a *natural* thing to write, because layering a scrim over a surface is what the token
+is for.
+
+**The rule:** any axis token that can resolve to a keyword must be used as the WHOLE value of its
+property, never as one item of a list, never inside `min()`/`max()`/`clamp()`/`calc()`. Want the axis
+value *plus* your own? Put yours on a different property — a ring goes on `outline` with a negative
+`outline-offset`.
+
+Guard filed as `Codex-3kqqp`. A prose warning in a component header demonstrably does not propagate —
+see A64.
+
+## A64 — `--jp-edge-width` was a unitless `0`, and it silently killed a border on every published page
+
+`journey-design.css` declared `--jp-edge-width: 0` at `edge: none` and `edge: soft`. A unitless zero is
+a `<number>`, not a `<length>`, so **any math on the token mixes types**.
+
+`MapSection.svelte:1056` shipped, on four card selectors:
+```css
+border: max(var(--jp-edge-width), var(--border-width)) solid var(--jp-edge-color);
+```
+written specifically to FLOOR the width so cards could not dissolve at `edge: none`. Because
+`edge: none` IS Candlelit, the shorthand went invalid on every published page and `border-style` stayed
+`none` — the exact opposite of what the floor intended. `dev@013e2d42` ships those cards with a real
+hairline (`border: var(--border-width) solid var(--color-border-subtle)`), so it was a live regression,
+not a new look.
+
+**Both declarations now carry an explicit `0px`, so component math on the token is safe.** The twelve
+plain `border: var(--jp-edge-width) solid X` consumers are unaffected — `0px` and `0` are identical
+there, which is exactly why only MATH on the token broke and why it was so easy to ship.
+
+**The process lesson is larger than the fix.** `InviteSection.svelte:1187-1196` MEASURED and documented
+this precise mechanism in round 3, in prose, ending *"Reported for a one-character fix in the axis file;
+until then, no component math touches that token."* The diagnosis was correct and complete, and nobody
+swept the tree — so a second component carried the same bug for a whole round. **A correct diagnosis
+recorded only in a component header does not reach the next component.** It needs a test, or a fix at
+the root, or both.
+
+## A65 — A51's per-type override map is now needed on FOUR of the nine axes
+
+A51 named the gap (*"a per-type override map inside the preset… needs the A21/A29 preset variant maps,
+which do not exist yet"*) and deferred it. It now has four independent measurements:
+
+| axis | page-level value | the type that disagrees | measured |
+|---|---|---|---|
+| `width` | `text` | `reel` 72rem→64rem, `introVideo` 60rem→64rem | accepted at A51 |
+| `type` | `monumental` | **`feel`** — ships `--text-3xl` (40px) where `proof`/`faq` ship `--text-4xl` (48px), so A36 grows its `<h2>` **+8px on 2 published pages** | round 4 |
+| `media` | `bleed` | **`guide`** — letterboxes the *portrait* to 21/9 (407×175 @1440); `mask` is `4/5`, what the base shipped. **`introVideo`** — wants `frame`; `bleed` takes it 16/9→21/9 and radius→0. But `reel` and the round-1 `hero` both want `bleed` | round 4 |
+| `align` | `center` | `reel` — base right-aligned `.reel__sub` at `@media (--breakpoint-md)` unconditionally | round 4 |
+
+**None of these can be fixed locally, and that is the whole point.** Lowering `type: monumental` to
+spare `feel` breaks `proof`/`faq`'s clean 48→48. Changing `media: bleed` to spare `guide` or
+`introVideo` changes `hero` and `reel` on every published page — and `bleed` is the ONLY value that
+ships a scrim, so it is load-bearing for any composition placing text over media. Each fix is correct
+for one type and a regression for another. That is the definition of a missing layer.
+
+Evidence FOR keeping the page-level default: `introVideo`'s `type` matched **byte-identically** at all
+three widths (37.24 / 46.08 / 48px), because `.intro__heading` shipped `var(--text-4xl)` and
+`--jp-heading-size` at `monumental` *is* `--text-4xl`. The page value is right for most types most of
+the time. **The override map must be an escape hatch, not a replacement.**
+
+Constraint on its shape: `design-vocabulary.test.ts:116-131` pins Candlelit's nine values to what `0084`
+backfilled onto 695 rows, precisely so preset and data cannot drift. **The override map must sit BESIDE
+the pinned bundle**, resolving `section.design[axis]` → `preset.perType[type][axis]` →
+`page.design[axis]` → default. Modify the pinned values and all 695 pages read as "Custom" in the picker.
+
+Filed as `Codex-9tze8`.
+
+## A66 — "Verify Candlelit" is TWO different checks, and only one of them is falsifiable
+
+A3/D8's bet is that 695 rows were backfilled with a preset **reproducing today's appearance**. Every
+Candlelit check through round 3 was therefore a **fidelity** check: does the preset render what shipped?
+
+`guide` has never appeared on a published page — **zero rows in the entire database**. So for `guide`
+there is no "today" to reproduce, and the fidelity check is not merely hard, it is **undefined**. The
+only available check is a **consistency** check: does the bundle produce something coherent and legible
+for this type?
+
+**A worktree must state which check it performed.** Both of Candlelit's known errors — `0088`'s `width`
+and `0089`'s `invite` variant map — were caught by fidelity, i.e. by someone noticing a mismatch against
+a real page. **A type with no stored rows has no such tripwire**, which makes it the likeliest place for
+a third Candlelit error to survive undetected. For row-less types, do the arithmetic; do not trust the
+eye.
+
+## A67 — Three measurement corrections, each of which changed a conclusion
+
+**(a) Type must be measured at REAL viewports, not a constrained container.** `--text-*` carries a `vw`
+term, so a container constrained to 375px inside a 1440px window reports the **1440px** `font-size`.
+A first pass read 48px at 375; the truth was 37.24px. A10's "constrain `.jp-sec`'s inline size" is
+correct for *container queries* and wrong for *type*. Resize the viewport for anything type-related.
+
+**(b) A10's ancestor walk CANNOT measure text over media.** The scrim and the poster are
+absolutely-positioned **siblings**, not ancestors, so walking up returns the frame's base colour. It
+reported 15.58:1 for a chip whose real backdrop is a plate. Use a **glyph-pixel diff** instead: shoot
+the region with text visible, shoot it again with `color: transparent`, and take contrast only where ink
+landed. Note `visibility: hidden` is the WRONG control — it removes the chip's own plate, so the
+"without" shot reads what is behind the plate, which produced 7082 phantom "glyph" pixels in a 4700px
+box and a **reproducible-to-2dp 2.16:1** that was pure artefact.
+
+**(c) There is a THIRD reveal state beyond round 3's SSR-vs-settled: armed-and-never-entered.**
+`reveal.ts` arms `opacity: 0` from JS and clears it only when an IntersectionObserver fires, so a
+below-the-fold section stays invisible indefinitely. A scroll sweep left **5–10 nodes still armed** on
+an 8078px page, and a crop behind an invisible section reads the page background as a plausible, stable,
+**wrong** ratio. Force `is-in` for determinism.
+
+Also: the builder canvas loads curriculum stages **asynchronously** — 20 descendants at a 2.5s settle,
+**128 at 9s** on the same section. A46's "2× rAF + ≥1200ms" is calibrated for the PUBLIC page and
+**under-reports canvas fidelity**. Wait for a stable count.
+
+## A68 — `--jp-media-scrim` is bottom-anchored, so the aspect↔scrim coupling has a half no aspect fix reaches
+
+The `media: bleed` rule, in three parts. Parts 1–2 were anticipated; **part 3 was not.**
+
+1. **Text on media only where the axis ships a scrim** — `bleed`, only `bleed`. At `frame`/`mask`/`inset`
+   the caption, meta and transport drop *below* the frame. §5.1 says the composition "uses `bleed`", but
+   `media` is creator-facing, so a composition must **degrade**, not demand.
+2. **Never override the aspect per breakpoint — FLOOR it.** `min-height: calc(var(--jp-body-size) *
+   11.5)`, scoped to where text is actually over media. A floor can only make the box taller, moving the
+   62% stop further above the text; a second `aspect-ratio` can make it shorter.
+3. **`--jp-media-scrim` is `to top`, so it protects nothing at the TOP of the box at any aspect — and a
+   text block that WRAPS climbs out of it.** Neither is an aspect problem, so part 2 cannot fix either.
+   Reel's rec tag was unprotected **by construction**, not by aspect. Over-media blocks therefore read
+   `background: var(--jp-media-scrim)` **on their own box** with `padding-block-start` as the fade
+   lead-in, and top-anchored chrome carries its own plate at **88%** — not a glassy 55%, because A39
+   applies to plates too.
+
+Since Candlelit is `media: bleed`, all three describe the live path on **695 pages**, not a new surface.
+
+## A69 — A56's seeder claim is FALSE for `introVideo` and `reel`
+
+A56 says `introVideo`, `reel` and `guide` all carry seeder-written variants that have never been
+expressed. **`seed-portals.ts` writes `variant` on exactly four types**: `hero:stage` (:458),
+`ache:default` (:470), `map:descent` (:483), `invite:pool` (:503). Neither video type appears, so there
+is no seeder literal for either to be an artifact of.
+
+Both stored rows (`introVideo|theatre`, `reel|theatre`) are the catalogue **default** landing, and
+stored value, Candlelit's map, catalogue default and rendered markup all agree. **A clean negative.**
+The check was still worth running — 0087 and 0089 were both positives — but the amendment overstated its
+scope. `0090`/`0091` remain unused.
+
+## A70 — A22's "`Codex-maf0y` is latent, not live" is wrong, and each bridge fix promotes one more placeholder
+
+A22 reasons from `createDefaultSections` being dead code. But the placeholder reaches pages via the
+**add-section path**, which seeds the catalogue's `defaultProps`. Two published rows confirm it.
+
+**The mechanism nobody had written down:** a seeded placeholder is invisible while its type's bridge is
+broken, because the renderer reads the canonical key and the row stores the alias. Wiring the bridge
+**promotes the placeholder to visible.** Measured on `studio-alpha/bone-deep` (published): the guide
+placeholder went from **2 occurrences / 0 rendered** to **3 / 1**. `faq` and `proof` already went through
+this conversion in rounds 2 and 3, unnoticed.
+
+So `Codex-maf0y` is not "placeholders exist" — it is **"each bridge fix promotes one more placeholder to
+visible"**, which makes the remaining types a *queue* of future leaks rather than a static list. That is
+what makes it worth prioritising.
+
+**Do not fix it renderer-side.** A renderer already self-hides an *absent* field; a placeholder is
+present-with-placeholder-content, and string-matching seed text breaks the moment the seed changes. The
+fix is seeding strategy, in a closed file.
+
+## A71 — The builder canvas applies NO page-level styling: not the axes, not brand overrides
+
+`resolveDesign` is called in exactly three places — `render/SectionRenderer.svelte:67`,
+`PageDesignPanel.svelte:49`, `SectionEditor.svelte:63` — and **never in `render-edit/`**. Measured: the
+canvas emits **0/10** `data-jp-*` and resolves **0/9** axis properties on 11 of 11 sections; the public
+page emits 10/10 and 9/9 on 11 of 11.
+
+But it is wider than the axes. Page-level styling lives in **two** public-tree wrappers:
+`render/JourneyRenderer.svelte:55` `brandOverridesToStyleAttr(...)` and `render/SectionRenderer.svelte:67`
+`resolveDesign(...)`. `JourneyBuilderCanvas.svelte:28` imports `render-edit`'s `SectionRenderer`
+**directly**, bypassing both.
+
+Confirmed by a real divergence: `--color-brand-primary` read `#D82741` in the canvas and `#552e8e` on the
+public page for the same org. Cause — `landing_pages 'of-blood-and-bones/pricing-smoke-test'` is the
+**only** row with non-empty `brand_overrides`
+(`{"primaryColor": "#552e8e", "tokenOverrides": {"--brand-shader-preset": "lava"}}`), and it is the golden
+page every measurement runs against. **The public page is correct; the canvas does not read the override.**
+
+This changes the fix: a patch that only calls `resolveDesign` in `render-edit/SectionRenderer` would still
+preview the wrong brand on that page, and would do so *more convincingly* because everything else would
+look right. Filed as `Codex-6nrsk`.
+
+**Corollary for `04-contrast-baseline.md`:** `#552e8e` is a **PAGE** fact, not an org fact.
+`branding_settings.primary_color_hex` for `of-blood-and-bones` is `#D82741`. Any figure attributed to that
+org must name the page — the same token measured 6.04 dark on the golden page and 8.38 on `bone-deep`, and
+both are correct.
+
+**Corollary for annotate-don't-drain (A16):** it *strengthens* the rule. If the canvas applies no
+page-level styling, draining a `_*.css` partial takes the twin from *untreated* to *unstyled*, which A16
+explicitly will not accept.
+
+## A72 — What the builder actually does with the four unbuilt control kinds: it MIS-authors
+
+A29 says `number`, `toggle`, `list` and `repeater` have "no editor UI" and concludes the fields "cannot be
+authored at all". The plan is right; **the diagnosis is wrong, and the truth is worse.**
+
+`SectionEditor.svelte:183-231` branches `media` → `MediaPicker`, `textarea` → `<textarea>`, `select` →
+`<select>`, then a **catch-all `{:else}` → `<input type="text">`**. There is no branch for the four kinds,
+so all four render a normal-looking text box, and `onInput` (`:78-81`) writes `target.value` — a **string**
+— into the key. `valueOf()` (`:73-76`) returns `''` for any non-string.
+
+Proved end to end: typing into guide's field labelled **"Credentials"** (declared `repeater`, `itemFields:
+[{label},{detail}]`) persisted `props.facts` with `jsonb_typeof = string`; `render/coerce.ts`
+`asObjectArray` then discards it at `if (!Array.isArray(value)) return undefined;` with no warning. The
+field's own hint reads *"The hairline-ruled fact list… years practising, students taught, qualifications."*
+
+The six affected fields, of 82 declared across 11 types: `ache.points`, `turn.points`, `feel.inclusions`,
+**`feel.previewDuration`** (does not vanish — substitutes a hardcoded 480s, the worst behaviour of the six),
+`guide.facts`, `invite.offers`.
+
+**A29's scope is also too wide:** `turn.before-after` IS authorable (`from`/`to` are declared `textarea` and
+both render), and `invite.offers` is decorative for authoring because `InviteSection.svelte:189` derives
+paths from `context.offer`, not from the repeater. The unreachable-composition count is **7** and does not
+widen: `ache.list`/`checklist`, `turn.arc`/`numbered`, `feel.grid`/`ledger`/`stack`, each verified at its
+gate.
+
+**Sequencing matters, and it is the opposite of the obvious order.** Because `valueOf()` blanks non-strings,
+once a field correctly holds an array the text box renders **empty over real content**, and a creator
+"filling in the blank" overwrites the array with a string. **The catch-all must stop claiming these kinds
+BEFORE or WITH the real control, never after.** That is `Codex-wtfs1`'s trap on a different key.
+
+Filed as `Codex-28ifd`. A renderer's correct behaviour meanwhile is to read the DECLARED shape only and
+self-hide — never to accept the string, because a field with two sub-fields makes `{label: <whole string>}`
+a guess dressed as data, and shipping the guess makes it a contract the eventual migration must preserve.

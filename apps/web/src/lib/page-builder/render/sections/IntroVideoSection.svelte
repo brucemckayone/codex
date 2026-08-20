@@ -85,6 +85,7 @@
   import { PlayIcon } from '$lib/components/ui/Icon';
   import SectionSkeleton from '../SectionSkeleton.svelte';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
+  import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
   import type { IntroVideoSectionProps, JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
@@ -372,7 +373,7 @@
       <span class="iv__scrim" aria-hidden="true"></span>
 
       {#await context.sellPreview}
-        <SectionSkeleton shape="media" label="Loading the intro film" />
+        <SectionSkeleton shape="media" label={m.journey_intro_skeleton_label()} />
       {:then preview}
         {#if preview?.intro}
           {@const intro = preview.intro}
@@ -385,9 +386,9 @@
               class="iv__play"
               data-iv-plate={plate}
               onclick={() => (open = true)}
-              aria-label="Play the {Math.round(
-                intro.durationSeconds ?? 90
-              )}-second intro film"
+              aria-label={m.journey_intro_play_aria({
+                seconds: Math.round(intro.durationSeconds ?? 90),
+              })}
             >
               <span class="iv__play-icon" aria-hidden="true">
                 <PlayIcon />

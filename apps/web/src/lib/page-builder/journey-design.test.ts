@@ -298,14 +298,21 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
   'surface:media': { '--jp-sec-bg': 'transparent', '--jp-sec-atmos': '1' },
 
-  'edge:none': { '--jp-edge-width': '0', '--jp-edge-shadow': 'none' },
+  // `0px`, NOT `0` — and this pin is load-bearing. A unitless zero is a
+  // `<number>`, not a `<length>`, so `max(var(--jp-edge-width), <length>)` mixes
+  // types and invalidates the WHOLE declaration at computed-value time.
+  // `MapSection:1056` did exactly that to FLOOR its card border, and because
+  // `edge: none` is Candlelit the border died on every published page (A64).
+  // If a future tidy-up drops the unit, this assertion is what catches it.
+  'edge:none': { '--jp-edge-width': '0px', '--jp-edge-shadow': 'none' },
   'edge:hairline': {
     '--jp-edge-width': 'var(--border-width)',
     '--jp-edge-color': 'var(--jp-line)',
     '--jp-edge-shadow': 'var(--shadow-xs)',
   },
   'edge:soft': {
-    '--jp-edge-width': '0',
+    // `0px` for the same reason as `edge:none` above — see A64.
+    '--jp-edge-width': '0px',
     '--jp-edge-shadow': 'var(--shadow-lg)',
   },
   'edge:heavy': {
