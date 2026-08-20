@@ -362,15 +362,21 @@ describe('GuideSection — the read boundary (Codex-tqr51 · A28)', () => {
     expect(document.body.querySelector('.guide__dur')).toBeNull();
   });
 
-  it('degrades the STRING that the editor actually writes for `facts`', () => {
+  it('renders NOTHING for the string the editor actually writes into `facts`', () => {
     // MEASURED FIXTURE, verbatim from `studio-alpha`/`bone-deep` (landing page
-    // `4664e6ce…`), added through the real builder UI:
-    //   "facts": "20 years teaching — somatics and grief work"
-    // `facts` is declared `control: 'repeater'`, the generic array control is
-    // deferred to consolidation (A29), and `SectionEditor.svelte` writes
-    // `target.value` — a raw STRING. Without this guard `asObjectArray` returns
-    // undefined and a credential the creator typed renders as nothing, on the one
-    // composition whose whole purpose is that list.
+    // `4664e6ce…`): `"facts": "20 years teaching — somatics and grief work"`.
+    //
+    // `facts` is declared `control: 'repeater'` with `itemFields: [{label},
+    // {detail}]`, but `SectionEditor.svelte:183-231` has no `repeater` branch and
+    // falls through a catch-all `{:else}` to `<input type="text">`, so `onInput`
+    // writes a raw STRING. The field is MIS-authorable, not merely unauthorable.
+    //
+    // The renderer deliberately refuses that shape. Coercing it to `{label: <the
+    // whole string>}` would be a guess — the field has two sub-fields and a
+    // free-typed string says nothing about which — and shipping the guess would
+    // make it a rendering contract the eventual repeater migration must preserve.
+    // Rendering nothing keeps the corrupt value inert. This test exists so nobody
+    // "helpfully" adds the string branch back.
     render({
       variant: 'credentials',
       config: {
@@ -379,14 +385,17 @@ describe('GuideSection — the read boundary (Codex-tqr51 · A28)', () => {
       },
     });
 
-    const rows = document.body.querySelectorAll('.guide__fact');
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.querySelector('dt')?.textContent).toBe(
-      '20 years teaching — somatics and grief work'
-    );
+    expect(document.body.querySelector('.guide__facts')).toBeNull();
+    expect(document.body.querySelector('.guide__fact')).toBeNull();
+    // The rest of the composition still renders — a malformed field self-hides,
+    // it does not take the section down.
+    expect(document.body.querySelector('.guide--credentials')).not.toBeNull();
+    expect(
+      document.body.querySelector('.guide__heading')?.textContent
+    ).toContain('Who holds this');
   });
 
-  it('prefers a real repeater array over the string fallback', () => {
+  it('renders `facts` in its DECLARED array shape', () => {
     render({
       variant: 'credentials',
       config: {
@@ -397,6 +406,7 @@ describe('GuideSection — the read boundary (Codex-tqr51 · A28)', () => {
 
     const rows = document.body.querySelectorAll('.guide__fact');
     expect(rows).toHaveLength(1);
+    expect(rows[0]?.querySelector('dt')?.textContent).toBe('Years');
     expect(rows[0]?.querySelector('dd')?.textContent).toBe('20');
   });
 

@@ -166,55 +166,48 @@
   });
 
   /**
-   * `facts` AS THE EDITOR ACTUALLY WRITES IT — a bare STRING.
+   * `facts` IS READ IN ITS DECLARED SHAPE ONLY — `Array<{label, detail}>`, per
+   * `section-fields.ts:384-395`. A string under this key renders NOTHING, and
+   * that is deliberate. Do not add a string branch here.
    *
-   * MEASURED, not hypothetical. The `guide` section on `studio-alpha`/`bone-deep`
-   * (landing page `4664e6ce…`, added through the real builder UI) stores
-   * `"facts": "20 years teaching — somatics and grief work"` on a section whose
-   * `variant` is `credentials` — the one composition whose entire purpose is that
-   * list.
+   * WHAT THE EDITOR ACTUALLY WRITES TODAY, measured rather than assumed: the
+   * `guide` section on `studio-alpha`/`bone-deep` (landing page `4664e6ce…`)
+   * stores `"facts": "20 years teaching — somatics and grief work"` — a bare
+   * string — on a section whose `variant` is `credentials`, the one composition
+   * whose entire purpose is that list.
    *
-   * The cause is contract A29: `facts` is declared `control: 'repeater'`, the
-   * generic array control is deferred to consolidation, and
-   * `SectionEditor.svelte` writes `target.value` — a raw string — for every
-   * control except `media`. So `asObjectArray` sees a non-array, returns
-   * `undefined`, and a credential the creator actually typed renders as NOTHING.
-   * This is the same defect A29 describes for `previewDuration` ("a `text`
-   * control writes `"480"` and the section silently falls back to its default"),
-   * now with real content already in the database.
+   * The mechanism is `SectionEditor.svelte:183-231`: it branches on `media`,
+   * `textarea` and `select`, then falls through a catch-all `{:else}` to
+   * `<input type="text">`. There is no `repeater` / `list` / `number` / `toggle`
+   * branch, so all four render a plain text box, and `onInput` (`:78-81`) writes
+   * `target.value` into the key. So the field is not merely UNauthorable (which is
+   * how A29 reads); it is MIS-authorable — a creator sees a box labelled
+   * "Credentials", types into it, it saves, and nothing appears. Those need
+   * different fixes, which is why the distinction is recorded here.
    *
-   * Degrading it to a single label-only row is a READ-BOUNDARY guard, which is
-   * what `coerce.ts` is for — not a second authoring path (A30: there is only
-   * ever one writer, and it is the one that produced this string) and not a
-   * reshaped field (A29 forbids that, and the field stays a `repeater`). When the
-   * real repeater control lands, the array branch above takes over and this one
-   * stops matching. Nothing is lost either way.
-   */
-  const factsFallback: GuideFact[] | undefined = $derived.by(() => {
-    if (p.facts) return undefined;
-    const raw = config.facts;
-    if (typeof raw === 'string' && raw.trim() !== '') {
-      return [{ label: raw.trim() }];
-    }
-    return asStringArray(config, 'facts')?.map((label) => ({ label }));
-  });
-
-  /**
-   * The fact list, from the authorable `facts` repeater or — failing that —
-   * synthesised from the legacy `credentials` string array this component has
-   * always read.
+   * WHY NOT COERCE THE STRING. It looks like kindness and it is a trap. The field
+   * declares TWO sub-fields; a free-typed string carries no information about
+   * which one it is, so rendering it as `{label: <the whole string>}` is a guess
+   * dressed as data. Ship that and the guess becomes a rendering contract the
+   * eventual repeater migration has to preserve — and every creator who sees
+   * their text appear writes more of it. Rendering nothing keeps the corrupt
+   * value inert and unblessed, so consolidation can migrate or discard it freely.
+   * The right fix is the generic array control (A29), which is consolidation's,
+   * and `SectionEditor.svelte` is a CLOSED shared file.
    *
-   * NOT the A30 trap. A30 forbids adding a repeater bound to a key the renderer
-   * PREFERS over an existing authored vocabulary, because the empty repeater then
-   * wins and silently destroys content. Here the preference runs the other way
-   * and, decisively, `credentials` was never authorable: it appears in no
-   * `SECTION_FIELDS.guide` entry, so no creator can have stored it, and there are
-   * zero `guide` sections in the database at all. Both halves of A30's precondition
-   * are absent. The fallback is kept so the declared `GuideSectionProps.credentials`
-   * is not orphaned, not because anything can reach it.
+   * `asObjectArray` already returns `undefined` for a non-array, so the self-hide
+   * is the guard doing its job — no extra code, which is the point.
+   *
+   * The one fallback kept is the LEGACY `credentials` string array: a different
+   * key, and a declared prop on `GuideSectionProps`. Not the A30 trap either —
+   * A30 needs a repeater bound to a key the renderer PREFERS over an existing
+   * authored vocabulary, and here `credentials` appears in no
+   * `SECTION_FIELDS.guide` entry at all, so no creator can ever have stored it.
+   * It exists so the declared prop is not orphaned, not because anything can
+   * reach it.
    */
   const facts: GuideFact[] | undefined = $derived(
-    p.facts ?? factsFallback ?? p.credentials?.map((label) => ({ label }))
+    p.facts ?? p.credentials?.map((label) => ({ label }))
   );
 
   const COMPOSITIONS = [
