@@ -136,3 +136,73 @@ the documented `--jp-line` at 1.79 / 1.49.
 And note `.descent__rn`'s recorded 4.45:1 is its **pre-lit dim** state; the state SSR serves
 measured **1.13:1** in light. A single ratio per element is not enough when the element has an
 enhancement pass.
+
+---
+
+## ROUND 4 RE-MEASUREMENT — the accent ladder, done properly (`Codex-gkhro`)
+
+The correction above says any figure taken with a ~260ms settle should be re-measured. This is the
+first block of that work: **the whole accent ladder, both poles, all five accent values**, on the
+golden org and page.
+
+**Method**, per contract A67 — worth stating because two of its clauses were established by finding
+that the earlier method produced confident wrong numbers:
+- Canvas `fillStyle` + `getImageData` with `globalCompositeOperation = 'copy'`. With the default
+  `source-over` a transparent parent composites onto the previous pixel and reads back opaque.
+- Effective background resolved by **walking ancestors until alpha > 250** (`body` is transparent).
+- Theme flipped by setting **both** `data-theme` AND the `.dark` class — `data-theme` alone leaves
+  `.dark` selectors matching.
+- Settle of **2× `requestAnimationFrame` plus 1300ms** (A46).
+- **Reveals forced `is-in`** before measuring (A67c) — `reveal.ts` arms `opacity: 0` from JS and clears
+  it only when an IntersectionObserver fires, so a below-the-fold section stays invisible indefinitely
+  and a crop behind one reads the page background as a plausible, stable, wrong ratio.
+
+**Surface:** `of-blood-and-bones` / `pricing-smoke-test`, the `map` section.
+`--jp-sec-bg` resolved to `rgb(32,0,0)` dark and `rgb(246,239,230)` light.
+
+| accent | `--jp-accent-mark` dark | `--jp-accent-text` dark | mark light | text light |
+|---|---|---|---|---|
+| `none` | 17.51 | 17.51 | 18.38 | 18.38 |
+| `text` | 6.04 | 6.04 | 14.62 | 14.62 |
+| `fill` | 6.04 | 6.04 | 14.62 | 14.62 |
+| `edge` | **6.04** | **11.04** | **14.62** | **15.41** |
+| `glow` | 6.04 | 6.04 | 14.62 | 14.62 |
+
+Resolved colours: `--jp-accent-mark` and `--jp-accent-text` are both `rgb(155,132,187)` wherever they
+agree; at `accent: none` both are `rgb(252,238,236)`; `--jp-accent-text` at `accent: edge` is
+`rgb(210,189,185)`.
+
+### The correction this produced: a 2.04 that was attributed to the wrong token
+
+`MapSection` recorded, in round 2, that `--jp-accent-mark` "is 8.49:1 in light and **2.04:1 in dark**",
+and built a local `--descent-signal` alias to avoid it. Re-measured, the token that actually measures
+**2.04 dark** is `--jp-ember` / `--jp-accent-fill` — `rgb(85,46,142)`. `--jp-accent-mark` is
+`rgb(155,132,187)` at **6.04**, because A38 repointed it off `--jp-ember` onto `--jp-ember-text`.
+
+Round 2 read the *aliased* token's ratio onto the *alias*. That is a standing hazard here, because this
+palette is layered aliases several deep: **read both expressions before believing that X mirrors Y.**
+
+Two things worth noting alongside it:
+- The same run reproduced **`--jp-accent-edge` at 2.05 dark**, matching WT-6's independent figure
+  exactly. So that measurement was sound; only the accent-mark one was a conflation. `--jp-accent-edge`
+  remains decorative-only.
+- `--jp-accent-mark` and `--jp-accent-text` are now **identical at four of five accent values**, which
+  is what licensed collapsing `--descent-signal` back onto `--jp-accent-mark` (round 4, and zero visual
+  change on any published page, because Candlelit is `accent: glow` where they already agreed).
+
+### A token's ratio is not what it paints
+
+`.descent__spine` reads `--descent-signal` and then mixes it 80% toward transparent at the call site, so
+it measures **11.04 dark** where the raw token is 6.04. `.descent__node` measures **9.13 dark**. Both
+readings are unchanged before and after the collapse.
+
+So: measure the ELEMENT for a pass/fail claim, and the token only to understand which rung you are on.
+A table of token ratios cannot tell you whether a component passes.
+
+### Still outstanding for `Codex-gkhro`
+
+Everything above the "ROUND 2 CORRECTION" heading remains taken with the short settle. This block
+covers the accent ladder only. The per-element figures for the other ten section types have not been
+re-measured, and the note about `.descent__rn` having three different ratios depending on enhancement
+state is the reason a re-sweep must **name the state it measured** rather than recording one number
+per element.
