@@ -1011,7 +1011,10 @@
     margin: 0;
     font-family: var(--font-heading);
     font-weight: var(--font-normal);
-    font-size: max(var(--text-lg), calc(var(--jp-heading-size) / 2));
+    /* `--jp-body-size` (A44) with this component's own --text-lg floor kept:
+       the rung alone would drop a stage name 20px -> 17px at `restrained` and
+       `balanced`, which no published page uses but the axis does. */
+    font-size: max(var(--text-lg), var(--jp-body-size));
     line-height: var(--leading-snug);
     letter-spacing: var(--tracking-tight);
     color: var(--color-heading);
@@ -1212,7 +1215,10 @@
   .descent__cell-name {
     display: block;
     font-family: var(--font-heading);
-    font-size: max(var(--text-base), calc(var(--jp-heading-size) / 2.4));
+    /* One step tighter than `--jp-body-size` because a table cell is denser
+       than a card. /1.2 off the rung reproduces the old /2.4 off
+       `--jp-heading-size` EXACTLY at all four type values (17/17/17/20). */
+    font-size: max(var(--text-base), calc(var(--jp-body-size) / 1.2));
     line-height: var(--leading-snug);
     color: var(--color-heading);
   }

@@ -99,6 +99,43 @@
   /* type */
   --jp-display: var(--text-4xl);
   --jp-heading-size: var(--text-2xl);
+  /* The `type` axis's THIRD rung, for CARD-SCALE text — a testimonial quote, an
+     FAQ question row, a map stage name, a guide bio, a feel inclusion. Neither
+     heading step fits those, and without a rung of their own the bulk of most
+     sections sits outside this axis's reach, because the alternative is a
+     hardcoded size, which puts it out of reach permanently. Contract A44,
+     `Codex-8oznv`.
+
+     DERIVED, not declared per value, and that is deliberate. `--jp-display` and
+     `--jp-heading-size` get four explicit declarations because they are the axis's
+     own vocabulary. This rung is promoted from two components that had each already
+     invented it — WT-5 as `clamp(--text-base, calc(--jp-heading-size * 0.5),
+     --text-2xl)` and WT-4 as `max(--text-lg, calc(--jp-heading-size / 2))` — and
+     WT-5's expression is preserved here BYTE FOR BYTE so no published page changes.
+
+     Four explicit declarations (`--text-base` / `--text-base` / `--text-lg` /
+     `--text-xl`) would read better and match the pattern above, and they equal this
+     clamp exactly at desktop. They diverge by ~2px at narrow viewports, because the
+     clamp floors on `--text-base`'s own minimum while a plain token floors on its
+     own. That is a live appearance change on 7 published pages for a legibility
+     gain, which A3/D8 does not permit without measuring and accepting it first.
+     Promote it once someone does; until then this form is the safe one.
+
+     Resolution note, because it is subtle: a custom property referencing another
+     resolves on the element it is DECLARED on, not where it is used. That is correct
+     here only because `[data-jp-type='…']` also lands on `.jp-sec` and outranks
+     `:where(.jp-sec)`, so the type-specific `--jp-heading-size` wins. Moving this
+     declaration to an ANCESTOR of `.jp-sec` would silently freeze it at balanced.
+
+     Measured, desktop: 17 / 17 / 20 / 24px across restrained / balanced /
+     expressive / monumental. At `monumental` that is `--text-xl` — exactly what the
+     proof quote, the FAQ question and the map stage name shipped before the axes
+     existed, which is how the 0.5 was solved backwards. */
+  --jp-body-size: clamp(
+    var(--text-base),
+    calc(var(--jp-heading-size) * 0.5),
+    var(--text-2xl)
+  );
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-normal);
 

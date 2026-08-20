@@ -50,6 +50,7 @@
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import type { HeroSectionProps, JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
+  import type { HTMLAttributes } from 'svelte/elements';
 
   /**
    * The three keys the builder writes that the canonical `HeroSectionProps` does
@@ -182,13 +183,13 @@
    * because the studio is `ssr = false`. Here the text is a real child node, so it
    * is in the served HTML, and `contenteditable` is layered on top for the canvas.
    */
-  const editAttrs = (key: string) =>
+  const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
     editable
       ? {
           contenteditable: 'true',
           spellcheck: 'false',
           'data-field': key,
-          oninput: (e: Event) =>
+          oninput: (e) =>
             onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
         }
       : {};

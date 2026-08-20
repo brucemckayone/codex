@@ -46,6 +46,7 @@
   import { reveal } from '../reveal';
   import type { ProofSectionProps, JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
+  import type { HTMLAttributes } from 'svelte/elements';
 
   interface Props {
     config: SectionProps;
@@ -199,13 +200,13 @@
    * `ssr = false`. Here the text is a real child node, so it is in the served
    * HTML and `contenteditable` is layered on top.
    */
-  const editAttrs = (key: string) =>
+  const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
     editable
       ? {
           contenteditable: 'true',
           spellcheck: 'false',
           'data-field': key,
-          oninput: (e: Event) =>
+          oninput: (e) =>
             onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
         }
       : {};
@@ -385,11 +386,10 @@
        `80svh`: at `type: monumental` this lands on the `--text-xl` the quote
        shipped before the axes existed (24px at a 1440 viewport). The four values
        then read 17 / 17 / 20 / 24px, so the axis genuinely reaches the quote. */
-    --proof-quote-size: clamp(
-      var(--text-base),
-      calc(var(--jp-heading-size) * 0.5),
-      var(--text-2xl)
-    );
+    /* Promoted to `--jp-body-size` in `journey-design.css` (A44,
+       `Codex-8oznv`). The expression that used to live here IS that rung, so this
+       is the same value from one source instead of two. */
+    --proof-quote-size: var(--jp-body-size);
 
     /* The gap between the section's three blocks (header / quotes / trust line).
        It was a fixed `--space-12`, so `density` could not reach it. Expressed as a
