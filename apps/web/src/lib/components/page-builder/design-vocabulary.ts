@@ -67,7 +67,7 @@ export const SECTION_DESIGN_PRESETS: readonly SectionDesignPreset[] = [
     description:
       'Cinematic and close. For narrative, depth work and film-led programmes.',
     design: {
-      width: 'narrow',
+      width: 'text',
       density: 'airy',
       surface: 'media',
       edge: 'none',

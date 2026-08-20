@@ -825,19 +825,54 @@ plausible.** Everything was re-measured at 1200ms.
 **Lesson 8 now reads:** 2× `requestAnimationFrame` plus a timeout **longer than the longest
 `transition-duration` in the section**.
 
-## A47 — the descent spine has been shipping the platform's WARNING amber, on every org
+## A47 — the accent chain, stated accurately (this CORRECTS my own first version)
 
-`--color-brand-accent` is `var(--brand-accent, var(--color-warning))`, and neither seeded org
-sets `--brand-accent` (`of-blood-and-bones`' `brand_overrides` holds only `primaryColor` and
-a shader `tokenOverrides`). WT-4 measured `#f59e0b` exactly on `studio-alpha`.
+My first draft of this amendment repeated WT-4's framing without checking it, and said the
+spine "has been shipping the platform's warning amber" and that "the old colour was a fallback
+bug rather than a choice." **Both halves are wrong, and the accurate version is narrower.**
 
-So the descent spine, gate nodes and numerals have painted the platform's warning amber on
-every org that has not set an accent. Moving them to the ember ladder is **a visible change
-on all 7 pages, and the old colour was a fallback bug rather than a choice.**
+**The amber IS the platform's intended default accent.** `lib/brand-editor/defaults.ts:16`
+declares `BRAND_DEFAULT_ACCENT = '#F59E0B'` and `tokens/colors.css:36` declares
+`--color-warning: #f59e0b`. They are the same colour. So `--color-brand-accent:
+var(--brand-accent, var(--color-warning))` falls back to precisely the amber the brand editor
+shows as its own default swatch. Nothing leaked; an org that sets no accent is *supposed* to
+be amber.
 
-Same fallback chain as `Codex-d01er` ("`Badge variant="accent"` is warning-coloured") — one
-defect, two symptoms. Any worktree touching `--color-brand-accent` should assume it is amber
-until proven otherwise.
+**And `of-blood-and-bones` DOES set one.** WT-4 checked `brand_overrides` and concluded neither
+seeded org sets an accent — but the accent lives in `branding_settings.accent_color_hex`, where
+`of-blood-and-bones` holds `#ED8110`. Custom properties inherit and `[data-org-brand]`
+(`tokens/org-brand.css:18`) sits below `:root` (`themes/light.css:2`), so inside an org layout
+the org definition wins regardless of their equal specificity. That org's spine was `#ED8110`
+orange — never amber. WT-4's measurement of `#f59e0b` was on `studio-alpha`, which sets no
+accent, so it was correct-by-design rather than evidence of a bug.
+
+**Consequence for what shipped:** routing the spine onto the ember ladder is, on
+`of-blood-and-bones`, a change from *the org's chosen accent* to *the org's primary* — a
+deliberate design change, not a bug fix. It remains the right call (the axis system routes
+every accent role through `--jp-ember` by design, and the 3:1 graphic-floor fix under A38/A39
+is real and independent), but it must be recorded as a design decision. Approved by the user
+2026-08-20 on the explicit principle that **brand colour must come from the token system**.
+
+**The genuine underlying defect, which IS real and is platform-wide:**
+
+1. The default accent is *expressed through* `--color-warning`, welding two unrelated
+   semantics. Change the warning colour and every unset org's accent changes with it.
+2. `themes/light.css:64` and `themes/dark.css:58` declare `--color-brand-accent:
+   var(--color-warning)` with **no `--brand-accent` indirection at all.** Harmless inside an
+   org layout, where the closer `[data-org-brand]` wins — but on any platform surface outside
+   one, an org's accent can never apply.
+
+76 consumers read `var(--color-brand-accent)`, including `Button`, `Badge`, `ContentCard`,
+`SubscribeCTA`, `FeatureCarousel`, the platform homepage and seven journey sections. This is
+the root cause of `Codex-d01er` ("`Badge variant="accent"` is warning-coloured") — one chain,
+two symptoms. **Deliberately NOT fixed in round 2**: a 76-consumer token change is its own
+work package with its own contrast sweep, and quietly widening a component round into it is
+the scope error this contract exists to prevent. Filed separately.
+
+**The transferable lesson:** verify what a token RESOLVES to, and verify the claim about *why*.
+A plausible token name is not evidence of a plausible value — and "this looks like a bug" is
+not evidence that it is one. Two of us asserted a fallback bug; the value was the documented
+default all along.
 
 ## A48 — MEASURED CSS trap: `auto-fit` needs a FLEXIBLE max
 
@@ -873,3 +908,69 @@ Related, and the same discipline: WT-4 shipped `table` with **3 columns, not the
 4**, because `minutes` and per-stage `access` have no field on `JourneyPracticeView` /
 `JourneyStageView`. A fourth column would have been a control that renders nothing — the
 exact mistake `SectionFieldDef.mediaSlot`'s JSDoc exists to prevent.
+
+## A51 — Candlelit's `width` was `narrow` and is now `text`; migration 0088 moves the data with it
+
+The A3 bet — "Candlelit reproduces today's appearance" — was flagged as unverified because it
+could not be checked before a component consumed an axis. Round 2 consumed them and measured
+it. **It holds on eight of nine axes and fails on `width`, systematically:**
+
+| section | cap today | Candlelit `narrow` | delta |
+|---|---|---|---|
+| hero | 48rem | 48rem | 0 — but only because the pilot TUNED it there |
+| map | 60rem | 48rem | −12rem |
+| proof | 68rem | 48rem | −20rem |
+| reel | 72rem | 48rem | −24rem |
+
+Only the hero matched. `narrow` narrows every other section by 12–24rem, so the bet was false
+on this axis for essentially the whole page, across 695 rows.
+
+**Resolved: Candlelit becomes `width: text` (64rem)**, which is within 8rem of every real cap
+where `narrow` is 12–24rem off three of four. A per-type override map inside the preset would
+be more faithful but needs the A21/A29 preset variant maps, which do not exist yet, and would
+stop the preset being nine plain axes. User decision, 2026-08-20.
+
+**The preset and the data are ONE change.** `design-vocabulary.test.ts` pins the preset to the
+bundle 0084 backfilled, and its comment gives the reason: if they drift, all 695 pages silently
+become "Custom" in the picker — a creator opens the panel and their page matches no preset. So
+migration `0088` rewrites the stored `width` in the same commit as the preset edit.
+
+**0088 is scoped to page-level `design` only, deliberately.** Two sections on the golden page
+(`turn`, `feel`) carry a section-level `{"align":"center","width":"narrow"}` — that is **0085's
+collapse output**, written so the retired prose `centered` variant kept its published
+appearance. Those sections genuinely rendered narrow, so a section override correctly stays at
+48rem while its page moves to 64rem. Overwriting them would destroy exactly what 0085
+preserved. Section-level design is a creator's content (F-C's principle); only the backfilled
+page-level bundle was ours to correct.
+
+The predicate matches the exact nine-key bundle, not `design->>'width' = 'narrow'`. Both select
+the same 695 rows today, but the loose form would also catch a page a creator later set to
+`narrow` deliberately, and nothing could tell them apart afterwards. Dry-run in a rolled-back
+transaction: `UPDATE 695`, golden page → `text`, both section overrides still `narrow`, and
+F-B2's Signal probe (`studio-alpha/fb2-design-default-probe`, the only non-Candlelit bundle)
+untouched. Verified after applying: 695 at `text`, 0 remaining `narrow` page-level, 2 section
+overrides intact.
+
+**The general lesson, and it is the round's most important:** an unverified assertion that
+underpins a data migration must be verified by the FIRST work that can test it, and the test
+must cover every axis rather than the ones that happen to be easy to eyeball. Candlelit was
+right about typography — the part that got attention — and wrong about measure on three of four
+sections, which nobody could see until an axis was consumed.
+
+## A52 — process: re-read the branch tip immediately before merging
+
+The orchestrator merged `feat/journey-sections-map` at `98db53ea` after WT-4 reported
+completion, then gated the integration branch — but WT-4 had produced a SECOND commit
+(`cebee3ac`) in response to a mid-flight correction, containing two real 3:1 fixes. **The gate
+therefore ran green on an incomplete tree.** Nothing was lost because the follow-up was caught,
+but a green gate on a stale tip is exactly the kind of false assurance this programme keeps
+finding. Re-read the tip at merge time; a report is a snapshot, not a promise of finality.
+
+## A53 — the vite-during-tests hazard is REAL but NOT universal
+
+WT-5 measured a 30× slowdown (6384s vs 142s) with its dev server running, producing 7 false
+failures. WT-4, running the same suite with its own vite up, measured **176s vs 142s and zero
+failures** — a 1.24× slowdown. So the hazard is real, was misreported by me as a general rule,
+and is evidently load-dependent. WT-4's own conclusion is the right one to carry: **"it passed
+with vite up" is not evidence that vite-up is safe.** Stop your vite; just do not conclude your
+machine is immune because one run survived.

@@ -119,7 +119,7 @@ describe('design vocabulary — presets', () => {
     // become "Custom" in the picker.
     const candlelit = SECTION_DESIGN_PRESETS.find((p) => p.id === 'candlelit');
     expect(candlelit?.design).toEqual({
-      width: 'narrow',
+      width: 'text',
       density: 'airy',
       surface: 'media',
       edge: 'none',
