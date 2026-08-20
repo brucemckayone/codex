@@ -36,3 +36,28 @@
 .jp-prose--twocol .jp-prose__inner { max-width: 62rem; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.4rem, 4cqw, 3rem); align-items: start; }
 .jp-prose--twocol .jp-prose__heading { margin-top: 0; }
 @container (max-width: 520px) { .jp-prose--twocol .jp-prose__inner { grid-template-columns: 1fr; } }
+
+/* ═══════════════════ PORTED — READY FOR CONSOLIDATION TO DELETE ═════════════
+   WT-1 has ported every rule above into the unified public components
+   (`render/sections/AcheSection.svelte`, `TurnSection.svelte`,
+   `FeelSection.svelte`) and generalised them onto the nine design axes:
+
+     .jp-prose--centered  →  `column` + { align: center, width: narrow }
+     .jp-prose--wide      →  `column` + { align: start,  width: text   }
+     .jp-prose--twocol    →  `paired`
+     .jp-prose--statement →  `statement` (the tight heading measure and the 1.3x
+                             block padding are the ported parts; the font-size
+                             STEP is deliberately NOT ported — scale belongs to
+                             the `type` axis, contract A36)
+
+   The rules are LEFT IN PLACE, not drained, and that is deliberate:
+   `render-edit/SectionRenderer.svelte` still renders `render-edit/sections/
+   ProseSection.svelte` for the studio canvas, so emptying this file now would
+   leave the builder previewing unstyled prose sections until consolidation
+   repoints the canvas at the public components. A canvas that looks DIFFERENT
+   from the published page is the accepted interim state (contract A16); a canvas
+   with no styles at all is not.
+
+   Consolidation deletes this file together with `render-edit/sections/
+   ProseSection.svelte`, `section-registry.ts` and `section-render.ts`.
+   ═══════════════════════════════════════════════════════════════════════════ */
