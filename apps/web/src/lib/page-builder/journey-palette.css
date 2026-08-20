@@ -211,7 +211,21 @@
   --jp-blood: var(--brand-secondary, var(--jp-ember));
   --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
   --jp-rose: var(--brand-accent, var(--jp-ember));
-  --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 0.98) 0 0);
+  /* The upper bound is 1, not 0.98, and that single character is the whole of
+     `Codex-g7ipk`. `--color-text-on-brand` uses `clamp(0, (0.62 - l) * 1000, 1)`;
+     this token used to stop at 0.98, so on a mid-lightness fill it handed back
+     #f8f8f8 where the platform hands back #ffffff. On `studio-alpha`'s #E11D48
+     (OKLCH L = 0.5858) that is 4.45:1 versus 4.70:1 — one side of the 4.5 floor
+     each. The bead and the `KNOWN_OPEN` note both recorded this token as already
+     mirroring `--color-text-on-brand`, which is why the fix was scoped as a
+     platform-wide design decision and deferred; measured (WT-7, round 3) they
+     were never the same expression. The PIVOT genuinely does not fix it — 0.60,
+     0.62 and 0.65 all measure identical because #E11D48 saturates every one of
+     them — so the earlier finding was right about the threshold and wrong about
+     the range. Note the floor stays 0.05 rather than the platform's 0: this is
+     now a mirror at the light end only, deliberately, because darkening the ink
+     on a light fill is a separate sweep. */
+  --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0);
 
   /* ── the ember AS TEXT ───────────────────────────────────────────────────
      `--jp-ember` is tuned to be a FILL, with `--jp-on-ember` written on top of

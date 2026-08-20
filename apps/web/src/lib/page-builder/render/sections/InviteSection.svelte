@@ -315,32 +315,27 @@
   const step = (i: number): string => String(Math.min(i + 2, 5));
 
   /**
-   * GENERIC CHROME AWAITING i18n KEYS — reported, not added (contract A7/A20:
-   * the orchestrator owns `messages/en.json`, and two worktrees regenerating
-   * paraglide strips keys and produces runtime 500s).
+   * GENERIC CHROME, now keyed. Every string here is a neutral noun or a column
+   * label rather than editorial voice, so it is the class `05-bridge-table.md`
+   * calls "legitimate UI labels" — the same class as `journey_invite_cta_default`
+   * above, and the opposite of `'Begin the work.'`, which is voice and therefore
+   * falls back to the creator's own `course.title` instead of to a key.
    *
-   * Every string here is a neutral noun or a column label rather than editorial
-   * voice, so it is the class `05-bridge-table.md` calls "legitimate UI labels"
-   * — the same class as `journey_invite_cta_default`, which already exists and
-   * IS consumed above. Collected in ONE place rather than scattered through the
-   * markup so swapping them for `m.*()` calls is a single edit.
+   * Kept as one object rather than inlined at each call site because that is how
+   * it stayed reviewable while the keys were pending: the worktree could not add
+   * them (contract A7/A20 — i18n is single-owner, and two worktrees regenerating
+   * paraglide strips keys and produces runtime 500s), so it collected them here
+   * and reported them. The orchestrator added all five to `messages/en.json` on
+   * the round-3 report; this is the same object with the literals swapped out.
    *
-   * Requested keys, name → English:
-   *   journey_invite_badge_recommended  "Recommended"
-   *   journey_invite_compare_caption    "The ways in, compared"
-   *   journey_invite_row_price          "Price"
-   *   journey_invite_row_who            "Who it is for"
-   *   journey_invite_row_includes       "Includes"
-   *
-   * `Recommended` is the only one of the five that renders today (`:129` before
-   * this change) — the other four arrive with the `table` composition.
+   * `recommended` is the only one of the five that renders outside `table`.
    */
   const CHROME = {
-    recommended: 'Recommended',
-    compareCaption: 'The ways in, compared',
-    rowPrice: 'Price',
-    rowWho: 'Who it is for',
-    rowIncludes: 'Includes',
+    recommended: m.journey_invite_badge_recommended(),
+    compareCaption: m.journey_invite_compare_caption(),
+    rowPrice: m.journey_invite_row_price(),
+    rowWho: m.journey_invite_row_who(),
+    rowIncludes: m.journey_invite_row_includes(),
   };
 
   /**

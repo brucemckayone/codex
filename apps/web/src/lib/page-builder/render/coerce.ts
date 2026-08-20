@@ -197,7 +197,15 @@ export const SECTION_PROP_ALIASES: Readonly<
     secondaryLabel: ['secondaryLabel', 'quiet'],
   },
   introVideo: { eyebrow: ['eyebrow', 'kicker'] },
-  ache: { eyebrow: ['eyebrow', 'kicker'] },
+  // `sub` is a seeder key the editor never declared (`PROSE_FIELDS` writes
+  // `kicker`/`heading`/`body`), so the sentence the portal seeder authored under
+  // it was unreadable AND unread. Six sections across both orgs store a real
+  // paragraph there — "Grief is not a problem to be solved. These practices make
+  // room for it to move." — on five published pages. Bridged onto `body`, which
+  // still wins the preference list wherever a creator has since typed one.
+  // Reported by WT-1 (round 3); NOT in `05-bridge-table.md`, which recorded
+  // `AcheSection` as "already bridged, do nothing".
+  ache: { eyebrow: ['eyebrow', 'kicker'], body: ['body', 'sub'] },
   turn: {
     eyebrow: ['eyebrow', 'kicker'],
     statement: ['statement', 'heading'],

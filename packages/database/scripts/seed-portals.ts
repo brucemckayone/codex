@@ -496,7 +496,11 @@ function buildSections(spec: PortalSpec) {
         button: 'Begin',
       },
       enabled: true,
-      variant: 'card',
+      // `pool` is what the public page has always RENDERED. The seeder wrote
+      // `card` here while the renderer discarded `variant` entirely, so all
+      // seven seeded pages stored a composition no visitor ever saw — see
+      // migration 0089, and 0087 for the identical hero case (contract A33).
+      variant: 'pool',
     },
   ];
 }

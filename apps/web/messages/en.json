@@ -1486,5 +1486,17 @@
   "journey_map_col_practices": "Practices",
   "journey_map_locked_hint": "included with membership",
   "journey_map_audio_label": "Audio",
-  "journey_map_written_label": "Reflection"
+  "journey_map_written_label": "Reflection",
+  "journey_turn_panel_from": "Where you are",
+  "journey_turn_panel_to": "Where this goes",
+  "journey_turn_stages_label": "The stages of the shift",
+  "journey_turn_stages_label_descent": "The stages of the descent",
+  "journey_feel_preview_label": "Free taste — {title} preview",
+  "journey_feel_preview_play": "Play preview",
+  "journey_feel_preview_pause": "Pause preview",
+  "journey_invite_badge_recommended": "Recommended",
+  "journey_invite_compare_caption": "The ways in, compared",
+  "journey_invite_row_price": "Price",
+  "journey_invite_row_who": "Who it is for",
+  "journey_invite_row_includes": "Includes"
 }

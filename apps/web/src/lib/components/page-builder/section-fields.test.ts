@@ -158,10 +158,7 @@ const READERS: Readonly<Record<string, readonly string[]>> = {
 const OWED_READS: Readonly<Record<string, readonly string[]>> = {
   introVideo: ['clip', 'duration'], // WT-2 — `reel.clip` IS aliased (as `tag`)
   reel: ['duration'], // WT-2
-  ache: ['points'], // WT-1 — the List and Checklist compositions
-  turn: ['from', 'to'], // WT-1 — the Before / after composition
   guide: ['clip', 'duration', 'facts'], // WT-6 — `facts` is the Credentials composition
-  invite: ['accent'], // WT-7
 };
 
 function readerSource(type: string): string {

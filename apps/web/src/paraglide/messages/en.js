@@ -11912,3 +11912,99 @@ export const journey_map_audio_label = () => `Audio`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const journey_map_written_label = () => `Reflection`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_turn_panel_from = () => `Where you are`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_turn_panel_to = () => `Where this goes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_turn_stages_label = () => `The stages of the shift`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_turn_stages_label_descent = () => `The stages of the descent`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_feel_preview_label = (params) => `Free taste — ${params.title} preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_feel_preview_play = () => `Play preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_feel_preview_pause = () => `Pause preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_badge_recommended = () => `Recommended`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_compare_caption = () => `The ways in, compared`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_row_price = () => `Price`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_row_who = () => `Who it is for`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_invite_row_includes = () => `Includes`

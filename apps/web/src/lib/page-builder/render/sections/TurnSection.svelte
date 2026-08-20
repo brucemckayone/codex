@@ -45,6 +45,7 @@
   `prefers-reduced-motion`.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { aliasKeys, asStringArray, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
   import type { TurnSectionProps, JourneySalesContext } from '../types';
@@ -264,8 +265,8 @@
   <ol
     class="turn__stages"
     aria-label={numbering === 'arc'
-      ? 'The stages of the descent'
-      : 'The stages of the shift'}
+      ? m.journey_turn_stages_label_descent()
+      : m.journey_turn_stages_label()}
   >
     {#each stages as stage, i (i)}
       <li class="turn__stage jp-reveal" data-jp-step={step(i)} style="--d: {i}">
@@ -324,13 +325,13 @@
         {#if panels === 'yes'}
           <div class="turn__panels">
             <div class="turn__panel jp-reveal" data-jp-step="1">
-              <p class="turn__panel-label">Where you are</p>
+              <p class="turn__panel-label">{m.journey_turn_panel_from()}</p>
               {#if p.from}
                 <p class="turn__panel-body" {...editAttrs('from')}>{p.from}</p>
               {/if}
             </div>
             <div class="turn__panel turn__panel--to jp-reveal" data-jp-step="2">
-              <p class="turn__panel-label">Where this goes</p>
+              <p class="turn__panel-label">{m.journey_turn_panel_to()}</p>
               {#if p.to}
                 <p class="turn__panel-body" {...editAttrs('to')}>{p.to}</p>
               {/if}

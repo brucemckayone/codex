@@ -624,6 +624,13 @@
       "when": 1787166213948,
       "tag": "0088_candlelit_width_was_never_todays_page",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1787166214948,
+      "tag": "0089_invite_card_was_a_seed_artifact",
+      "breakpoints": true
     }
   ]
 }

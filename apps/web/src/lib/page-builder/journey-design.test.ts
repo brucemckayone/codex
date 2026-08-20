@@ -813,7 +813,7 @@ function ladderFrom(ink: Oklab, ember: Oklab): Ladder {
     lineHover: mix(ink, heading, 0.56),
     ember,
     emberText: mix(ember, heading, 0.55),
-    onEmber: autoContrastGrey(ember, 0.6, 0.98),
+    onEmber: autoContrastGrey(ember, 0.6, 1),
   };
 }
 
@@ -860,7 +860,8 @@ describe('the colour model matches the CSS it claims to model', () => {
     ],
     [
       '--jp-on-ember',
-      'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 0.98) 0 0)',
+      // Ceiling 1, not 0.98 — `Codex-g7ipk`. See the note on `KNOWN_OPEN`.
+      'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)',
     ],
   ];
 
@@ -1289,31 +1290,39 @@ function sweep(label: string, bg: string, emberHex: string): Failure[] {
  * KNOWN-OPEN failures, with their cause, so the sweep can be green without the
  * finding being lost. Anything NOT on this list turns the suite red.
  *
+ * EMPTY, and deliberately kept rather than deleted — the mechanism below is the
+ * point, not the entries. It held two:
+ *
+ *   'studio-alpha light|cta-label-on-fill'
+ *   'studio-alpha dark|cta-label-on-fill'
+ *
  * `cta-label-on-fill` measures `--jp-on-ember` on `--jp-ember` — the CTA's own
- * label on its own fill. It is 4.43:1 for `studio-alpha` (`#E11D48`) at BOTH
+ * label on its own fill. Both were 4.43:1 for `studio-alpha` (`#E11D48`) at BOTH
  * poles and on ALL five surfaces, because the ratio does not involve the page
  * background at all: `#E11D48` is OKLCH L = 0.5858, just under `--jp-on-ember`'s
- * 0.60 pivot, so the label resolves to near-white (L 0.98) on a mid-lightness
- * red. No pivot value fixes it — measured identical at 0.60, 0.62 and 0.65 —
- * because the problem is the FILL's lightness, not the threshold. Black would be
- * worse.
+ * 0.60 pivot, so the label resolved to near-white on a mid-lightness red.
  *
- * NOT IN F-B1's SCOPE, deliberately, and this is the reason: `--jp-on-ember`
- * mirrors `--color-text-on-brand`, so the same 4.43 applies to every primary
- * Button on that org, not just to journey CTAs. Fixing it means changing how
- * on-accent labels are derived platform-wide — most likely darkening the fill
- * when its label would be marginal — which is a design decision with a much
- * wider blast radius than a section axis. Compare `platform-500 #c24129` at 4.86
- * and `studio-beta #2563EB` at 4.88: both pass, so this is brand-dependent and a
- * single-brand check would have missed it entirely.
+ * RESOLVED in round 3 (`Codex-g7ipk`) by raising `--jp-on-ember`'s clamp CEILING
+ * from 0.98 to 1 — see the comment on the token in `journey-palette.css`. The
+ * original analysis was RIGHT that no PIVOT fixes it (0.60, 0.62 and 0.65 all
+ * measure identical, because the fill's lightness saturates every threshold) and
+ * wrong about what followed from that: the ceiling, not the pivot, was the
+ * difference, and 0.98 versus 1 is 4.45:1 versus 4.70:1 — one side of the 4.5
+ * floor each.
  *
- * Note it clears the 3:1 large-text floor, so a CTA label at >= 24px is
- * compliant. Today's CTA labels are ~16px.
+ * It was also deferred on a premise that measurement did not support — that
+ * `--jp-on-ember` mirrors `--color-text-on-brand`, so the same 4.43 hit every
+ * primary Button on that org and any fix was therefore a platform-wide design
+ * decision. Read side by side they were never the same expression: the platform
+ * token is `clamp(0, (0.62 - l) * 1000, 1)`, with a different pivot, multiplier
+ * AND ceiling. The blast radius was journey-only throughout. `platform-500
+ * #c24129` (4.86) and `studio-beta #2563EB` (4.88) always passed, which is why a
+ * single-brand check missed it entirely.
+ *
+ * The lesson worth keeping: a token DOCUMENTED as a mirror of another is not a
+ * mirror until both expressions have been read side by side.
  */
-const KNOWN_OPEN = new Set([
-  'studio-alpha light|cta-label-on-fill',
-  'studio-alpha dark|cta-label-on-fill',
-]);
+const KNOWN_OPEN = new Set<string>([]);
 
 describe('the dangerous combination sweep — surface x accent x type', () => {
   const GOLDEN_EMBER = '#552e8e';

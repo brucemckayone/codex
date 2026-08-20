@@ -102,18 +102,15 @@
     eyebrow: asStringFrom(config, aliasKeys('ache', 'eyebrow')),
     heading: asStringFrom(config, aliasKeys('ache', 'heading')),
     /**
-     * `['body', 'sub']` is an INLINE list where every other read here goes
-     * through `aliasKeys`, because `SECTION_PROP_ALIASES.ache` declares only
-     * `eyebrow` and `coerce.ts` is a shared file this worktree may not edit.
-     *
-     * The alias is needed and the loss is live: SIX seeded `ache` sections across
-     * BOTH orgs (`of-blood-and-bones` × 4, `studio-alpha` × 2) store a real
-     * sentence under `sub` — "Grief is not a problem to be solved. These practices
-     * make room for it to move." — and nothing has ever read it. The WT-1 report
-     * asks for `body: ['body', 'sub']` to be added to the table; this literal is
-     * then deleted in favour of `aliasKeys('ache', 'body')`.
+     * Bridged through the alias table like every other read here. The loss this
+     * closes was live: SIX seeded `ache` sections across BOTH orgs
+     * (`of-blood-and-bones` × 4, `studio-alpha` × 2) store a real sentence under
+     * `sub` — "Grief is not a problem to be solved. These practices make room for
+     * it to move." — and nothing had ever read it, because `sub` is a seeder key
+     * `PROSE_FIELDS` never declared. `coerce.ts` now carries
+     * `body: ['body', 'sub']` (added by the orchestrator on the WT-1 report).
      */
-    body: asStringFrom(config, ['body', 'sub']),
+    body: asStringFrom(config, aliasKeys('ache', 'body')),
     /**
      * `OWED_READS.ache` (contract A28). The `list` and `checklist` compositions
      * are made of these; nothing read them before, so the field was authorable
@@ -256,7 +253,7 @@
     <p
       class="jp-sec__measure ache__body jp-reveal"
       data-jp-step="2"
-      {...editAttrs(readKey(['body', 'sub'], 'body'))}
+      {...editAttrs(readKey(aliasKeys('ache', 'body'), 'body'))}
     >
       {p.body}
     </p>

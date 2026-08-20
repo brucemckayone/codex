@@ -50,6 +50,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import * as m from '$paraglide/messages';
   import { PauseIcon, PlayIcon } from '$lib/components/ui/Icon';
   import { aliasKeys, asObjectArray, asString, asStringFrom, fieldString } from '../coerce';
   import { reveal } from '../reveal';
@@ -331,7 +332,7 @@
               <div
                 class="feel-taste"
                 role="group"
-                aria-label="Free taste — {previewTitle} preview"
+                aria-label={m.journey_feel_preview_label({ title: previewTitle })}
               >
                 <div class="feel-taste__aura" aria-hidden="true"></div>
                 <div class="feel-taste__head">
@@ -340,7 +341,9 @@
                     class:is-playing={playing}
                     type="button"
                     aria-pressed={playing}
-                    aria-label={playing ? 'Pause preview' : 'Play preview'}
+                    aria-label={playing
+                      ? m.journey_feel_preview_pause()
+                      : m.journey_feel_preview_play()}
                     onclick={togglePlay}
                   >
                     <!-- `Icon/*Icon.svelte` via `IconBase`, not an inline `<svg>`
