@@ -9,15 +9,43 @@ Today the builder is locked to exactly ONE aesthetic. This programme is an **exp
 replacement: the current candlelit/cinematic look survives as one preset among many, and is the
 default for every already-published page.
 
-**Status.** Round 0 complete. Foundation in progress on `feat/journey-sections-foundation`
-(worktree `/Users/brucemckay/development/Codex-js-foundation`, off `dev@013e2d42`).
+**Status — ALL COMPONENT WORK COMPLETE.** Foundation plus four component rounds have landed on
+`feat/journey-sections-foundation` (worktree `/Users/brucemckay/development/Codex-js-foundation`, off
+`dev@013e2d42`). **11 of 11 types wired, 62 compositions declared, nine axes live.** Not pushed, no PR
+— consolidation next, then ONE PR to `dev` (not `main`).
 
-| Stage | Commit | State |
-|---|---|---|
-| F-A · contract + render seam | `845086f0` | **landed, verified** |
-| F-B1 · axis CSS substrate | `d1c69754` | **landed, verified** |
-| F-B2 · migration + builder controls | `69f2fb72` | **landed, verified** |
-| F-C · catalogue + field sets, all 11 types | — | in flight |
+| Stage | State |
+|---|---|
+| F-A · contract + render seam | **landed, verified** (`845086f0`) |
+| F-B1 · axis CSS substrate | **landed, verified** (`d1c69754`) |
+| F-B2 · migration + builder controls | **landed, verified** (`69f2fb72`) |
+| F-C · catalogue + field sets, all 11 types | **landed** |
+| F-D · hero + signature media slots | **landed** (migration `0086`) |
+| Round 1 · WT-3 hero (pilot) | **landed** |
+| Round 2 · WT-5 social, WT-4 map | **landed** |
+| Round 3 · WT-1 prose, WT-7 invite | **landed** |
+| Round 4 · WT-2 video, WT-6 guide | **landed, verified on served pages** |
+| Consolidation | in progress — see "Realistic remaining shape" |
+
+**Gate on the current tip**, measured independently rather than trusted: `check:ci` **0** (1438 files,
+179 warnings) · both `check:brand-boundary` **0** · `pnpm typecheck --force` **0** (57/57, **0 cached**
+— not a FULL TURBO) · `pnpm --filter web test` **0** (**172/172 files**) · `svelte-check` 65 errors
+repo-wide, **0 in `page-builder/render*`**, identical to the pre-round-4 baseline.
+
+**Migrations applied:** `0084` (design column + Candlelit backfill) · `0085` (variant collapse) ·
+`0086` (hero + signature media slots) · `0087` (hero `split-media` → `stage`) · `0088` (Candlelit
+`width` narrow → `text`, 695 rows) · `0089` (invite `card` → `pool`, 7 rows). Round 4 needed none —
+`seed-portals.ts` writes `variant` on only four types, so neither video type nor `guide` had a seeder
+literal to be an artifact of (A69).
+
+**Closed by round 4:** `Codex-tqr51` (all 10 real bridges consumed — `faq: {}` is a deliberate empty
+bridge and a legitimate N/A, so the bead's "7 of 11" denominator was wrong) · `Codex-i9pzs` (zero
+editorial-voice fallbacks remain in live code, across all eleven renderers) · `Codex-qcgo3` (eight
+distinct resolved compositions verified reaching the served HTML on one page).
+
+`OWED_READS` is **empty** for the first time — A28's checklist is complete, which means no authorable
+field on any type is unread. The map is kept in place, because an empty one makes the neighbouring test
+enforce the stronger invariant.
 
 ### Why F-C exists (a plan correction)
 
@@ -187,8 +215,17 @@ variant set share an implementation. From audit §E.3:
 | **WT-6 · guide** | `guide` | `GuideSection` (452) · `_guide.css` | Mostly a *data* worktree; its contract need is pulled into foundation (A15) |
 | **WT-7 · invite** | `invite` | `InviteSection` (532) · `_invite.css` · `offer-paths.ts` + test | Commerce-critical. Must preserve "authored price is never rendered" |
 
-Round order — **the first round is a SINGLE pilot, not a pair** (contract A31): **WT-3 alone** →
-(WT-5, WT-4) → (WT-1, WT-7) → (WT-2, WT-6) → consolidation.
+Round order — **the first round was a SINGLE pilot, not a pair** (contract A31): **WT-3 alone** →
+(WT-5, WT-4) → (WT-1, WT-7) → (WT-2, WT-6) → consolidation. **All four component rounds are done**; the
+line counts in the table above are the PRE-work sizes and are now historical — every component grew
+substantially (`GuideSection` 452 → ~1,400; `ReelSection` 935 → ~1,500).
+
+A useful completion signal that emerged in round 4, worth reusing: **`var(--jp-` read counts** per
+component. Every wired component lands in a 30–85 band — Ache 30, Faq 36, Turn 51, Feel 58, Proof 62,
+Map 74, Hero 75, Invite 85, IntroVideo 46, Reel 48, Guide 60 — and an unwired one reads 0. Treat it as
+an order-of-magnitude check, **not a target**: WT-2 did better by diffing DEFINED tokens against READ
+ones one by one, which is how it found `--jp-accent-glow` had no consumer anywhere in `ReelSection`.
+Since Candlelit is `accent: glow`, that was a bloom that never bloomed on 695 pages.
 
 Nothing has yet wired a single axis to a single component, so round one is the first real use of the
 mechanism, not a polish round. Two worktrees hitting the same unknowns simultaneously would produce two
