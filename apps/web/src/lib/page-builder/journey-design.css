@@ -159,7 +159,7 @@
   /* media */
   --jp-media-display: block;
   --jp-media-radius: var(--radius-lg);
-  --jp-media-inset: 0;
+  --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
   --jp-media-scrim: none;
   --jp-media-mask: none;
@@ -237,7 +237,7 @@
   --jp-sec-bg: transparent;
   /* No painted box, so no inline padding of its own — the page gutter carries
      it. This is the only value that zeroes it. */
-  --jp-sec-pad-inline: 0;
+  --jp-sec-pad-inline: 0px;
 }
 /* `tint` and `panel` — A LIFTED SURFACE MUST RE-DERIVE ITS OWN TEXT LADDER.
 
@@ -370,7 +370,7 @@
 [data-jp-align='start'] {
   --jp-align: start;
   --jp-text-align: left;
-  --jp-measure-margin: 0;
+  --jp-measure-margin: 0px;
 }
 [data-jp-align='center'] {
   --jp-align: center;
@@ -494,13 +494,13 @@
    neutralised explicitly, which is what the reduced-motion block at the bottom
    of this file does. */
 [data-jp-motion='none'] {
-  --jp-reveal-distance: 0;
+  --jp-reveal-distance: 0px;
   --jp-reveal-duration: 0ms;
   --jp-reveal-stagger: 0ms;
   --jp-reveal-ease: linear;
 }
 [data-jp-motion='fade'] {
-  --jp-reveal-distance: 0;
+  --jp-reveal-distance: 0px;
   --jp-reveal-duration: var(--duration-slower);
   --jp-reveal-stagger: 0ms;
   --jp-reveal-ease: var(--ease-out);
@@ -539,22 +539,22 @@
    across the top two corners, the standard radius at the bottom two, expressed
    in percentages so it tracks the box rather than needing a raw px path(). */
 [data-jp-media='bleed'] {
-  --jp-media-radius: 0;
-  --jp-media-inset: 0;
+  --jp-media-radius: 0px;
+  --jp-media-inset: 0px;
   --jp-media-aspect: 21 / 9;
   --jp-media-scrim: linear-gradient(to top, var(--jp-ink), transparent 62%);
   --jp-media-mask: none;
 }
 [data-jp-media='frame'] {
   --jp-media-radius: var(--radius-lg);
-  --jp-media-inset: 0;
+  --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
   --jp-media-scrim: none;
   --jp-media-mask: none;
 }
 [data-jp-media='mask'] {
   --jp-media-radius: var(--radius-xl);
-  --jp-media-inset: 0;
+  --jp-media-inset: 0px;
   --jp-media-aspect: 4 / 5;
   --jp-media-scrim: none;
   --jp-media-mask: inset(
@@ -590,7 +590,7 @@
 @media (prefers-reduced-motion: reduce) {
   :where(.jp-sec),
   .jp-sec[data-jp-motion] {
-    --jp-reveal-distance: 0;
+    --jp-reveal-distance: 0px;
     --jp-reveal-stagger: 0ms;
   }
 }

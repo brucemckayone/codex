@@ -33,7 +33,7 @@
  * `reproduces the measured browser baseline` test below is that check, and it is
  * what licenses every other ratio in this file.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -270,7 +270,10 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'density:airy': { '--jp-rhythm': '1.25' },
   'density:vast': { '--jp-rhythm': '1.6' },
 
-  'surface:bare': { '--jp-sec-bg': 'transparent', '--jp-sec-pad-inline': '0' },
+  'surface:bare': {
+    '--jp-sec-bg': 'transparent',
+    '--jp-sec-pad-inline': '0px',
+  },
   // `tint` and `panel` re-point `--jp-ink` rather than painting `--jp-ink-2/3`
   // directly. The painted colour is identical — outside `invert`, `--jp-heading`
   // is `autoContrast(--jp-ink)` and `--jp-pole-b` is `autoContrast(--jp-pole-a)`
@@ -330,7 +333,7 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'align:start': {
     '--jp-align': 'start',
     '--jp-text-align': 'left',
-    '--jp-measure-margin': '0',
+    '--jp-measure-margin': '0px',
   },
   'align:center': {
     '--jp-align': 'center',
@@ -411,13 +414,13 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
 
   'motion:none': {
-    '--jp-reveal-distance': '0',
+    '--jp-reveal-distance': '0px',
     '--jp-reveal-duration': '0ms',
     '--jp-reveal-stagger': '0ms',
     '--jp-reveal-ease': 'linear',
   },
   'motion:fade': {
-    '--jp-reveal-distance': '0',
+    '--jp-reveal-distance': '0px',
     '--jp-reveal-duration': 'var(--duration-slower)',
     '--jp-reveal-stagger': '0ms',
     '--jp-reveal-ease': 'var(--ease-out)',
@@ -442,8 +445,8 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
 
   'media:bleed': {
-    '--jp-media-radius': '0',
-    '--jp-media-inset': '0',
+    '--jp-media-radius': '0px',
+    '--jp-media-inset': '0px',
     '--jp-media-aspect': '21 / 9',
     '--jp-media-scrim':
       'linear-gradient(to top, var(--jp-ink), transparent 62%)',
@@ -451,14 +454,14 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
   'media:frame': {
     '--jp-media-radius': 'var(--radius-lg)',
-    '--jp-media-inset': '0',
+    '--jp-media-inset': '0px',
     '--jp-media-aspect': '16 / 9',
     '--jp-media-scrim': 'none',
     '--jp-media-mask': 'none',
   },
   'media:mask': {
     '--jp-media-radius': 'var(--radius-xl)',
-    '--jp-media-inset': '0',
+    '--jp-media-inset': '0px',
     '--jp-media-aspect': '4 / 5',
     '--jp-media-scrim': 'none',
     '--jp-media-mask':
@@ -575,7 +578,7 @@ describe('journey-design.css — the axis probe', () => {
         // the padded value every OTHER surface uses, so this one legitimately
         // differs. Assert it is the documented pair rather than skipping it.
         if (prop === '--jp-sec-pad-inline') {
-          expect(want).toBe('0');
+          expect(want).toBe('0px');
           expect(defaults[prop]).toContain('--space-');
           continue;
         }
@@ -631,7 +634,7 @@ describe('journey-design.css — the accessibility floors that are structural', 
     );
     expect(guard.length).toBeGreaterThan(0);
     const zeroed = guard.find(
-      (r) => r.declarations['--jp-reveal-distance'] === '0'
+      (r) => r.declarations['--jp-reveal-distance'] === '0px'
     );
     expect(zeroed, 'no reduced-motion --jp-reveal-distance: 0').toBeDefined();
     // The motion axis rules are (0,1,0), so the guard has to out-specify them on
@@ -1377,5 +1380,179 @@ describe('the dangerous combination sweep — surface x accent x type', () => {
             .join('\n')}`
         : ''
     ).toEqual([]);
+  });
+});
+
+// ── The keyword / unitless-zero guard (A63, A64 · Codex-3kqqp) ───────────────
+//
+// WHY THIS EXISTS. A custom property that resolves to the KEYWORD `none`, or to
+// a UNITLESS zero, cannot participate in a list, a shorthand, or a math
+// function. The whole declaration then goes invalid at computed-value time and
+// silently falls back to its initial value. The CSS still parses, so nothing
+// lints it and nothing warns.
+//
+// It has shipped to published pages twice, two rounds apart:
+//   · A54 — three rings composed `--jp-edge-shadow` (the keyword `none` at
+//     `edge: none`, which IS Candlelit) into a larger `box-shadow` list and
+//     painted nothing on every published page.
+//   · A64 — `MapSection` floored its card border with
+//     `max(var(--jp-edge-width), var(--border-width))`. `--jp-edge-width` was a
+//     bare `0`, so the shorthand went invalid and `border-style` stayed `none`,
+//     doing the exact opposite of what the floor intended.
+//
+// A54's diagnosis was recorded, correctly and completely, in a component header
+// comment — and the tree was never swept, so the second instance survived a
+// whole round. That is what this file is for: a paragraph reaches the reader of
+// one file, a red test reaches everyone.
+//
+// The dangerous set is DERIVED from `AXIS_SPEC`, not hand-listed, so a token
+// added tomorrow is covered on the day it is added.
+
+/** Tokens whose pinned value is the bare keyword `none` at any axis value. */
+const KEYWORD_VALUED_TOKENS = [
+  ...new Set(
+    Object.values(AXIS_SPEC).flatMap((props) =>
+      Object.entries(props)
+        .filter(
+          ([, value]) => value.trim() === 'none' || value.trim() === 'auto'
+        )
+        .map(([prop]) => prop)
+    )
+  ),
+].sort();
+
+/** Tokens whose pinned value is a UNITLESS zero at any axis value. */
+const UNITLESS_ZERO_TOKENS = [
+  ...new Set(
+    Object.values(AXIS_SPEC).flatMap((props) =>
+      Object.entries(props)
+        .filter(([, value]) => /^0$/.test(value.trim()))
+        .map(([prop]) => prop)
+    )
+  ),
+].sort();
+
+const SECTION_DIR = 'render/sections';
+const SECTION_SOURCES = readdirSync(join(HERE, SECTION_DIR))
+  .filter((f) => f.endsWith('.svelte'))
+  .map((f) => ({ file: f, css: stripComments(read(`${SECTION_DIR}/${f}`)) }));
+
+interface Declaration {
+  file: string;
+  prop: string;
+  value: string;
+}
+
+/** Every `prop: value` pair in a component, comments already stripped. */
+const declarationsIn = ({ file, css }: { file: string; css: string }) => {
+  const out: Declaration[] = [];
+  const re = /(?:^|[;{}])\s*([-a-z]+)\s*:\s*([^;{}]+)/g;
+  for (const m of css.matchAll(re)) {
+    out.push({ file, prop: m[1], value: squash(m[2]) });
+  }
+  return out;
+};
+
+const ALL_DECLARATIONS = SECTION_SOURCES.flatMap(declarationsIn);
+
+/** True when `value` has a comma at bracket depth zero — i.e. it is a LIST. */
+const hasTopLevelComma = (value: string): boolean => {
+  let depth = 0;
+  for (const ch of value) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (ch === ',' && depth === 0) return true;
+  }
+  return false;
+};
+
+const usesInMath = (value: string, token: string): boolean =>
+  new RegExp(
+    `\\b(?:min|max|clamp|calc)\\s*\\([^;]*var\\(${token.replace(/-/g, '\\-')}`
+  ).test(value);
+
+/**
+ * Known violations, each with the reason it is not yet fixed. An entry here is a
+ * DEBT RECORD, not an exemption — the point is that the count cannot grow
+ * silently. Empty this list rather than adding to it.
+ */
+const KNOWN_VIOLATIONS: {
+  file: string;
+  prop: string;
+  token: string;
+  bead: string;
+}[] = [
+  {
+    // `background-image: var(--jp-media-scrim), linear-gradient(…)`. The scrim
+    // is a real gradient at `media: bleed` — which is Candlelit — so this
+    // WORKS on every published page today. At the other four media values the
+    // token is `none`, the whole list goes invalid, and the second gradient
+    // disappears along with it. Not fixed here because the honest fixes are
+    // either restructuring the layers or making the axis token list-safe
+    // (a transparent gradient instead of `none`), and the latter changes the
+    // `media` axis's pinned semantics — a design-system decision, not a
+    // drive-by.
+    file: 'HeroSection.svelte',
+    prop: 'background-image',
+    token: '--jp-media-scrim',
+    bead: 'Codex-3kqqp',
+  },
+];
+
+const isKnown = (d: Declaration, token: string): boolean =>
+  KNOWN_VIOLATIONS.some(
+    (k) => k.file === d.file && k.prop === d.prop && k.token === token
+  );
+
+describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
+  it('derives its dangerous set from AXIS_SPEC rather than a hand-written list', () => {
+    // Guards the guard: if this ever reads empty, the test below passes
+    // vacuously and the whole file stops protecting anything.
+    expect(KEYWORD_VALUED_TOKENS.length).toBeGreaterThan(0);
+    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-edge-shadow');
+    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-media-scrim');
+    expect(ALL_DECLARATIONS.length).toBeGreaterThan(200);
+  });
+
+  it('has no UNITLESS-ZERO axis token left in any named axis rule', () => {
+    // Every zero-valued token in the named axis rules now carries an explicit
+    // `0px`, which is what makes component math on it safe (A64). A new bare
+    // `0` here reintroduces the whole class, so this asserts EMPTY.
+    //
+    // Note what is deliberately out of scope: `AXIS_SPEC` pins the named
+    // `[data-jp-*]` rules, not the `:where(.jp-sec)` defaults block. The one
+    // legitimate unitless zero lives there — `--jp-sec-atmos: 0`, a 0/1
+    // opacity gate consumed as `opacity: var(--jp-sec-atmos)`. It is a
+    // `<number>` and MUST stay unitless, which is exactly why giving every
+    // token a unit blindly would be wrong.
+    expect(UNITLESS_ZERO_TOKENS).toEqual([]);
+  });
+
+  it('never composes a keyword-valued token into a LIST', () => {
+    const offenders = ALL_DECLARATIONS.flatMap((d) =>
+      KEYWORD_VALUED_TOKENS.filter(
+        (token) =>
+          d.value.includes(`var(${token}`) &&
+          hasTopLevelComma(d.value) &&
+          !isKnown(d, token)
+      ).map((token) => `${d.file} — ${d.prop}: … var(${token}) … (list)`)
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('never uses a keyword- or unitless-zero token inside min/max/clamp/calc', () => {
+    const dangerous = [...KEYWORD_VALUED_TOKENS, ...UNITLESS_ZERO_TOKENS];
+    const offenders = ALL_DECLARATIONS.flatMap((d) =>
+      dangerous
+        .filter((token) => usesInMath(d.value, token) && !isKnown(d, token))
+        .map((token) => `${d.file} — ${d.prop}: ${d.value} (math on ${token})`)
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps the known-violation list from growing silently', () => {
+    // One entry, and it is the pre-existing HeroSection background-image list.
+    // If you are adding to this, fix the declaration instead.
+    expect(KNOWN_VIOLATIONS).toHaveLength(1);
   });
 });

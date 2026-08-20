@@ -742,11 +742,19 @@
 
   .guide__img {
     position: absolute;
+    /* `inset` on all four sides already determines the used width and height of
+       an absolutely-positioned box, so explicit `width`/`height` here would be
+       redundant — AND they were invalid. `--jp-media-inset` is a UNITLESS `0` at
+       `bleed`, `frame` and `mask` (3 of 5 values, including Candlelit), so
+       `calc(100% - 2 * var(--jp-media-inset))` reduced to `calc(100% - 2 * 0)`,
+       which subtracts a `<number>` from a percentage and is invalid at
+       computed-value time — the declaration would fall back to `auto` the moment
+       a creator assigned a portrait. Same class as A63/A64; `inset` itself is
+       fine because a bare `0` IS a valid length in an ordinary property value,
+       and only MATH on it mixes types. */
     inset: var(--jp-media-inset);
     z-index: 0;
     display: block;
-    width: calc(100% - 2 * var(--jp-media-inset));
-    height: calc(100% - 2 * var(--jp-media-inset));
     object-fit: cover;
     border-radius: inherit;
   }
