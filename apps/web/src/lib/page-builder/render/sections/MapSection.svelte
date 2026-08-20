@@ -849,9 +849,19 @@
     width: 100%;
     height: 100%;
     border-radius: var(--radius-full);
+    /*
+      THE TOP STOP IS 80%, NOT THE 45% THIS SHIPPED WITH.
+
+      The spine is a meaningful graphic, so every part of it owes 3:1 — including
+      the end of its own fade. Measured over the page background: 45% gives
+      2.81:1 light and 2.05:1 DARK, i.e. the kindling fade was below the floor for
+      its whole upper stop. Swept 45/60/70/80/90/100: dark clears 3:1 at 70%
+      (3.45) and clears with margin at 80% (4.19 dark / 8.21 light). 80% keeps a
+      visible gradient — the spine still kindles — and passes at both poles.
+    */
     background: linear-gradient(
       180deg,
-      color-mix(in oklab, var(--descent-signal) 45%, transparent),
+      color-mix(in oklab, var(--descent-signal) 80%, transparent),
       var(--descent-signal)
     );
     box-shadow: 0 0 var(--space-2-5)
@@ -940,8 +950,17 @@
       color-mix(in oklab, var(--descent-bloom) 18%, var(--color-surface-secondary)),
       var(--color-surface)
     );
-    border: var(--border-width) solid
-      color-mix(in oklab, var(--descent-signal) 60%, transparent);
+    /*
+      THE RING READS THE TOKEN DIRECTLY — no percentage carried onto it.
+
+      This was `color-mix(--descent-signal 60%, transparent)` and measured 3.35:1
+      light and **2.53:1 dark** against the node's own surface, under a 3:1 floor.
+      A ring is a resting boundary that has to read, and no alpha low enough to
+      look "faint" survives the dark pole: the sweep needed 80% before dark
+      cleared (3.45). Full strength measures 7.88 / 4.60. The lesson generalises —
+      carry state on fill and border WEIGHT, never on the boundary's opacity.
+    */
+    border: var(--border-width) solid var(--descent-signal);
     /* The ring and the drop bloom are atmosphere and ride the `--jp-sec-atmos`
        gate; the inset highlight is material and does not. */
     box-shadow:
