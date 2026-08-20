@@ -19,6 +19,59 @@
    with `render-edit/sections/*`.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   PORTED — BUT DELIBERATELY NOT DRAINED (WT-6 · guide).
+
+   Every rule below now has a public equivalent in
+   `render/sections/GuideSection.svelte`, generalised onto the nine design axes.
+   The rules are left IN PLACE on purpose: `JourneyBuilderCanvas.svelte` still
+   renders `render-edit/sections/GuideSection.svelte`, so emptying this file
+   would leave the builder canvas previewing an UNSTYLED guide section until
+   consolidation repoints it (`Codex-eckbx`). Contract A16 accepts a canvas that
+   looks DIFFERENT from the published page; it does not accept one with no
+   styles. Same precedent as rounds 2 and 3.
+
+   THE CLASS-BY-CLASS PORT MAP lives in the header of
+   `render-edit/sections/GuideSection.svelte`, next to the markup it describes,
+   so both halves of the twin are documented in one place.
+
+   WHAT REPLACED THE LITERALS HERE, so a reader can see the axis substitution:
+
+     `padding: clamp(2.6rem, 7cqw, 4.6rem) 0`  -> `--jp-sec-pad-block` / `-inline`
+     `max-width: 62rem`                        -> `--jp-content-max`      (width)
+     `max-width: 40rem` / `46ch` / `28ch`      -> `--jp-measure`          (width)
+     `gap: clamp(1.6rem, 4cqw, 3.4rem)`        -> `--jp-sec-gap`        (density)
+     `aspect-ratio: 4 / 5`                     -> `--jp-media-aspect`     (media)
+     `border-radius: clamp(16px, 3cqw, 26px)`  -> `--jp-media-radius`     (media)
+     three stacked gradients + `isolation`     -> `.guide__atmos`, gated once by
+                                                  `--jp-sec-atmos`      (surface)
+     `box-shadow: 0 40px 90px -50px ...`       -> `--jp-edge-shadow`       (edge)
+     `border: ... color-mix(--jp-ember 20%)`   -> `--jp-edge-width`/`-color`(edge)
+     `font-size: clamp(1.6rem, 4.2cqw, 2.6rem)`-> `--jp-heading-size`      (type)
+     `font-size: clamp(0.95rem, 1.5cqw, 1.08rem)`, `line-height: 1.72`
+                                               -> `--jp-body-size`         (type)
+     `color: var(--jp-ember)` on the role      -> `--jp-accent-text`     (accent)
+     `color-mix(--jp-ember 55%)` on the rule   -> `--jp-accent-mark`     (accent)
+     `animation: ... 7.5s var(--jp-ease)`      -> `calc(--jp-reveal-duration
+                                                   * 9)`                (motion)
+     `text-align: center` in `--centered`      -> `--jp-text-align` / `--jp-align`
+                                                  (align) + the `column` variant
+     `@container (max-width: 620px)`           -> kept a container query, fold
+                                                  inverted to `min-width`
+
+   THE ONE RULE WITH NO PUBLIC EQUIVALENT: `.jp-guide--quote .jp-guide__body
+   { display: none }`. The catalogue's hint for that composition is "A big
+   pull-quote leads; bio and attribution beneath", so the public version keeps
+   the bio and demotes the heading. The hint is the specification.
+
+   THE ONE LINE TO READ BEFORE TOUCHING ANY OF THIS: `.jp-guide__player` is a
+   685-character single line carrying three stacked gradients (two `radial-
+   gradient`s in `oklab` plus a `linear-gradient`), `isolation: isolate`, an
+   `aspect-ratio`, a `clamp()` radius, a `color-mix` border and a
+   `0 40px 90px -50px` box-shadow. It is SIX axes' worth of decisions fused into
+   one declaration, which is why the public port splits it into four elements.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 /* ═══════════════════ THE GUIDE · credibility ═════════════════════════════════
    Variants: portrait (media + text) · centered (no media) · quote (quote-led). */
 .jp-guide { padding: clamp(2.6rem, 7cqw, 4.6rem) 0; }
