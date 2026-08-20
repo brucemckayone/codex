@@ -462,3 +462,160 @@ WT-4 removed a `▶ ♪ ✎` content-type map alongside the lock emoji: **U+25B6
 presentation on Apple platforms**, so a map that looked like typography was shipping an emoji
 into product UI. If you are replacing emoji, check the replacement's presentation rather than
 assuming a geometric-shape codepoint is safe. Use `Icon/*Icon.svelte` via `IconBase`.
+
+---
+
+## MEASURED LESSONS FROM ROUND 3 — read before writing any CSS
+
+Round 3 wired `ache`/`turn`/`feel` (WT-1) and `invite` (WT-7). Both worktrees corrected the
+orchestrator; both corrections are in this list. Full statements are amendments **A54–A62** in
+`02-axis-contract.md`.
+
+### The one that painted nothing on every published page (A54)
+
+**Never compose an `--jp-edge-*` token into a larger value.** `--jp-edge-shadow` resolves to the
+keyword `none` at `edge: none` (Candlelit, so all seven live pages) and at `edge: heavy`.
+`box-shadow`'s grammar is `none | <shadow>#` — `none` cannot be one *item* of a comma list — so
+
+```css
+box-shadow: inset 0 0 0 2px var(--jp-accent-mark), var(--jp-edge-shadow);  /* evaporates */
+```
+
+is invalid at computed-value time and falls back to the initial `none`. Three rings vanished this
+way — a recommended-tier ring, a card's only boundary on four of seven pages, and a sticky bar's
+edge — **silently, because an invalid declaration does not error.** The same token family had
+already been found from the other side: `--jp-edge-width` is a unitless `0` at `edge: none`, which
+poisons `max()` and invalidates a `border` shorthand.
+
+**An `--jp-edge-*` token is the whole value of its own property, or it is not used.** Want the axis
+edge *plus* your own ring? The ring goes on `outline` with a negative `outline-offset`. WT-2 will
+meet this the moment it layers emphasis on a video frame.
+
+### Before applying A36, read the BASE COMMIT's `font-size` (A55)
+
+A36 ("a section `<h2>` reads `--jp-heading-size`, NEVER `--jp-display`") was written from four
+sections that all shipped `--text-3xl`/`--text-4xl`. `invite` shipped `--text-display`, so A36's
+letter would have SHRUNK its heading **80 → 48px on seven published pages** — the same A3/D8 breach
+A36 exists to prevent. A36 is now narrowed: **the test is what the element ships on `dev`, not its
+tag name.** If you claim the exception, show the measured base-commit declaration, as WT-7 did.
+
+And when you do port to the shared atom: **`.jp-sec__heading` carries `line-height` and
+`letter-spacing` too** (A59). `invite`'s heading moved `--leading-tight` → `--leading-none` and
+`-0.02em` → `--tracking-tighter` with its `font-size` byte-identical. A worktree that only diffs
+`font-size` will report "Candlelit matches" and be wrong.
+
+### Your type's stored variant is probably a seeder's literal (A56)
+
+0087 rewrote a seeded `hero: split-media` back to `stage`. Round 3 found **the identical defect on
+`invite`** — `seed-portals.ts:499` hardcoded `variant: 'card'`, all seven pages stored `card` while
+rendering `pool`, and merging without migration `0089` would have flipped seven live pages to a
+composition no creator ever chose or saw.
+
+Two types, two seeders' literals, two silent flips averted. **This is a class of defect, and
+checking for it is part of YOUR stage 2** — `introVideo`, `reel` and `guide` all have
+seeder-written variants that have never been expressed. Query what the pages store, then compare
+against what the DOM actually renders. `data-jp-variant="card"` on unmistakably pool markup is what
+the evidence looks like.
+
+The distinction that decides the fix, kept sharp because round 3 hit both cases at once:
+
+- **seeder literal, never expressed** → migrate; restore what visitors have been seeing;
+- **human choice, made in a builder where it visibly did something** → leave it and let it land.
+  WT-1 correctly left the golden page's `turn`/`feel` section-level `{"align":"center",
+  "width":"narrow"}`, so honouring them moves those two sections from a 68rem left-aligned
+  two-column layout to a 48rem centred stack. **That is `Codex-qcgo3` landing, not a regression.**
+
+By value alone the two are identical. Provenance is the entire test.
+
+### `--jp-accent-edge` is unusable as a visible rule on a dark brand
+
+Measured independently by both worktrees, on `of-blood-and-bones` dark, against a 3:1 graphic
+floor: WT-1 got **2.05** at `accent: glow`; WT-7 got **1.27** at `glow` and **1.49 / 2.04 / 2.04**
+at `text` / `fill` / `edge`. **Every value fails.** Both routed every visible accent rule to
+`--jp-accent-mark` instead (5.00 dark / 10.47 light for WT-7; 6.04 / 14.62 for WT-1).
+
+So: `--jp-accent-mark` for anything that must be SEEN — marks, rings, spines, ticks, rules.
+`--jp-accent-edge` is decorative-only until someone raises its mixes. Do not carry a hardcoded
+percentage onto it either (A37) — at `glow` it is already a 45% ember mix.
+
+### Changing a palette token is THREE coupled edits (A57 corollary)
+
+`journey-design.test.ts` computes contrast in a JS colour model and then asserts that model against
+the stylesheet (`the colour model matches the CSS it claims to model`). So a palette change needs
+the CSS, the model's derivation, **and** the formula assertion — all three, or the suite tells you
+within a second. That guard is why the on-fill fix could be trusted: it re-measured 100
+combinations at 8 poles rather than one element on one page.
+
+Which is also the round's headline correction: **a token DOCUMENTED as a mirror of another is not a
+mirror until both expressions are read side by side.** The journey on-fill ratio sat open for
+three rounds on the claim that `--jp-on-ember` mirrors `--color-text-on-brand`. It never did —
+different pivot, multiplier and, decisively, ceiling (`0.98` vs `1`), which is 4.45:1 vs 4.70:1.
+Fixed, and `KNOWN_OPEN` is now empty.
+
+**Do not read that as `Codex-g7ipk` being closed** — the earlier docs, including this brief at
+line ~357, mis-filed the journey ratio under that bead. `Codex-g7ipk` is a separate open P1 about
+`Button.svelte` / `FeatureCarousel.svelte` not consuming `--color-text-on-brand` at all, and it
+carries its own trap. See A57.
+
+### The `--jp-display` rung is non-monotonic (A58)
+
+`type: expressive` renders a **smaller** display heading than `balanced` (28.0 / 35.2 / 44px vs
+37.2 / 46.1 / 48px), because `--text-5xl` maxes at `2.75rem` and `--text-4xl` at `3rem`.
+`--jp-heading-size` is fine. Reported, not fixed — it is a `tokens/typography` change with
+consumers outside this tree. Expect it; do not "fix" it locally.
+
+### Verification method — three corrections
+
+1. **The public page redirects an entitled viewer to `/dashboard`.** The shared MCP browser carries
+   a `creator@test.com` session, so `/journeys/<slug>` is only measurable in a **fresh, cookie-free
+   context**. Add a `sectionCount === 0` guard that reloads once and re-measures — it caught a
+   blank-render run in each worktree that would otherwise have been reported as real contrast.
+2. **`--jp-sec-pad-block` is 40px at 375**, 46.08 at 768, 82.56 at 1440. This corrects round 2's
+   22.5px figure. Note `airy` and `vast` **coincide** at 82.56 in a ~1376px container, because the
+   clamp's `6cqw` middle term dominates — correct, not a defect.
+3. **A53, third data point.** WT-1 measured load average **44.45** with a sibling's vite up and got
+   4 failed tests + 2 failed suites, every one a timeout in files it never touched
+   (`journey-palette`, `explore/page.server`, `collections/index`, `content.remote`); re-run in
+   isolation, 61/61 green. The orchestrator's own full-suite run with only the shared fleet up, at
+   load **26**, saw **170 files / 2094 tests, zero timeouts, 27s**. Confirmed load-dependent. Stop
+   your vite, and if you see a timeout in an untouched suite, **re-run that file in isolation before
+   reporting a failure — and report the load average.**
+
+### A scrolling region must be focusable
+
+WT-7's `table` composition overflows by design at 375px (four columns have a ~733px min-content
+against a 330px content box) and scrolls rather than truncating. A scroll container with no
+keyboard path is a WCAG 2.1.1 failure: Chrome gives no keyboard scrolling to a non-focusable
+overflow box. It needs `tabindex="0"`, a `role="region"` and an accessible name — and
+`svelte-autofixer` will flag `a11y_no_noninteractive_tabindex`, which is the documented exception
+for scrollable regions. **Suppress at the one element, with the reasoning in the file**; do not
+remove the behaviour.
+
+### Two process notes that cost real time
+
+- **`onEdit` must write back to the key the value was READ from** (A60). Alias lists are ordered,
+  so always writing the canonical key corrupts a page storing the alias: it ends up holding both,
+  the alias keeps losing, and **the creator's edit renders as nothing while the data grows a second
+  copy.** Use a `readKey(keys, fallback)` helper and pin it with a test.
+- **Verify a "pre-existing" i18n key against `en.json` before reporting it as one** (A62). Four of
+  WT-1's seven claimed-existing keys did not exist, and its components imported paraglide not at
+  all — the strings were inline English. Round 3 needed **twelve** keys, not eight. Quote the
+  `en.json` line, or call it new.
+
+### Follow the annotate-don't-drain precedent for your `render-edit` partial
+
+Both worktrees annotated their canvas twin and CSS partial with a class-by-class port map and a
+"consolidation deletes this" banner, and **left the rules in place**. Draining the partial now
+would leave the builder canvas previewing **unstyled** sections until `JourneyBuilderCanvas` is
+repointed (`Codex-eckbx`). A16 accepts a canvas that looks *different*; it does not accept one with
+no styles. Record the genuine splits — WT-7's single `.jp-invite__offer` became two public classes,
+and `.jp-invite--card`'s title shrink was deliberately NOT ported because that is the `type` axis.
+
+### Still not built, and it blocks compositions
+
+The generic array control (A29) remains undone, so `number`, `toggle`, `list` and `repeater` are
+declared with no editor UI. `SectionEditor.svelte:78-81` writes `target.value` — a **string** — for
+every control except `media`, so an array-fed field cannot be authored at all. **Seven of WT-1's
+eighteen compositions are markup-complete and test-pinned but unreachable from the builder.** Do
+not build a bespoke control; report what shape you need, and design every composition to degrade
+gracefully to empty.

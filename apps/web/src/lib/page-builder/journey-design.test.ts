@@ -860,7 +860,7 @@ describe('the colour model matches the CSS it claims to model', () => {
     ],
     [
       '--jp-on-ember',
-      // Ceiling 1, not 0.98 — `Codex-g7ipk`. See the note on `KNOWN_OPEN`.
+      // Ceiling 1, not 0.98. See the note on `KNOWN_OPEN` below.
       'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)',
     ],
   ];
@@ -1302,7 +1302,7 @@ function sweep(label: string, bg: string, emberHex: string): Failure[] {
  * background at all: `#E11D48` is OKLCH L = 0.5858, just under `--jp-on-ember`'s
  * 0.60 pivot, so the label resolved to near-white on a mid-lightness red.
  *
- * RESOLVED in round 3 (`Codex-g7ipk`) by raising `--jp-on-ember`'s clamp CEILING
+ * RESOLVED in round 3 by raising `--jp-on-ember`'s clamp CEILING
  * from 0.98 to 1 — see the comment on the token in `journey-palette.css`. The
  * original analysis was RIGHT that no PIVOT fixes it (0.60, 0.62 and 0.65 all
  * measure identical, because the fill's lightness saturates every threshold) and

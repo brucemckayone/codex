@@ -996,3 +996,212 @@ failures** — a 1.24× slowdown. So the hazard is real, was misreported by me a
 and is evidently load-dependent. WT-4's own conclusion is the right one to carry: **"it passed
 with vite up" is not evidence that vite-up is safe.** Stop your vite; just do not conclude your
 machine is immune because one run survived.
+
+## A54 — never compose an `--jp-edge-*` token into a larger value
+
+Both halves of this are now measured, from opposite directions, in the same file.
+
+`--jp-edge-width` resolves to a **unitless `0`** at `edge: none`, which poisons `max()` and makes
+a `border` shorthand invalid. WT-7's inherited work already documented that half.
+
+`--jp-edge-shadow` resolves to the **keyword `none`** at `edge: none` (Candlelit — so all seven
+published pages) and at `edge: heavy`. `box-shadow`'s grammar is `none | <shadow>#`: `none` cannot
+be one *item* of a comma list. So
+
+```css
+box-shadow: inset 0 0 0 2px var(--jp-accent-mark), var(--jp-edge-shadow);
+```
+
+is **invalid at computed-value time**, and because `box-shadow` is not inherited it falls back to
+its initial value — `none`. Measured `getComputedStyle(el).boxShadow === "none"` at those two
+values, and a literal `inset 0 0 0 2px red, none` behaves identically, so it is the CSS grammar
+and not a `var()` quirk.
+
+The cost, before it was caught: the recommended-tier ring, the price-less threshold's only
+boundary on four of seven pages, and the sticky bar's edge **all painted nothing** — on every
+published page, invisibly, because the declaration silently evaporates rather than erroring.
+
+**The rule:** an `--jp-edge-*` token is the whole value of its own property, or it is not used.
+If a composition wants an axis border *and* its own ring, the ring goes on `outline` (with a
+negative `outline-offset` to sit inside), leaving `box-shadow` to the axis alone. Every remaining
+worktree will meet this the moment it wants "the axis edge plus my own emphasis".
+
+## A55 — A36 NARROWED: `invite`'s `<h2>` is the tree's only display-scale section heading
+
+A36 says a section `<h2>` reads `--jp-heading-size` and NEVER `--jp-display`. It was written from
+four sections whose local heading rules were all `--text-3xl`/`--text-4xl`, and its purpose is to
+stop an axis growing a 48px heading to 80px on published pages.
+
+`invite` is the exception, verified on the base commit: `.invite__heading` shipped
+`font-size: var(--text-display)` where `.feel__heading` shipped `--text-3xl`. It is the page's
+**closing** display moment, paired with the hero's opening one. Applying A36's letter would take
+the desktop heading **80 → 48px on seven published pages** — the same A3/D8 breach A36 exists to
+prevent, arriving from the other side.
+
+Measured at real viewports (375 / 768 / 1440), because `--text-*` carries `vw`:
+
+| `type` | `--jp-display` (what ships) | `--jp-heading-size` (A36's letter) |
+|---|---|---|
+| `restrained` | 24.6 / 28.5 / 30 | 20.4 / 23.4 / 24 |
+| `balanced` | 37.2 / 46.1 / 48 | 24.6 / 28.5 / 30 |
+| `expressive` | 28.0 / 35.2 / 44 | 31.0 / 38.4 / 40 |
+| **`monumental`** | **44.0 / 50.6 / 80** | 37.2 / 46.1 / 48 |
+
+`monumental` is Candlelit and is what all seven pages carry, and its row is **identical to the
+base commit at all three widths — zero delta**.
+
+**The amended rule:** A36 governs a section `<h2>` that today ships `--jp-heading-size`-scale
+type. The test is **what the element ships on `dev`, not its tag name.** `invite` is the sole
+exception in the tree; a future worktree claiming a second one must show the measured base-commit
+`font-size`, as WT-7 did.
+
+## A56 — A33 is a CLASS of defect, not an incident (migration 0089)
+
+0087 rewrote a seeded `hero: split-media` back to `stage` because the seeder wrote a variant the
+renderer discarded, so no visitor ever saw it. Round 3 found **exactly the same defect on
+`invite`**: `seed-portals.ts:499` hardcoded `variant: 'card'` on every invite it created, and all
+seven real pages stored `card` while rendering the cinematic `pool`. Migration `0089` restores
+`pool`; the seeder is fixed in the same change, because by value alone a creator's deliberate
+`card` is indistinguishable from the artifact.
+
+Two types, two seeders' literals, two silent flips averted. **Every remaining worktree must check
+its own type's stored variant against what the page actually renders, as part of stage 2** — the
+check is not optional and it is not the orchestrator's to remember for you. `introVideo`, `reel`,
+`guide` and the remaining prose types all have seeder-written variants that have never been
+expressed.
+
+The distinction that decides the fix is the one 0087 drew and 0089 restates, and it stayed sharp
+under pressure in this round because both cases appeared at once:
+
+- **A seeder's literal, never expressed** → restore what visitors have been seeing. `invite: card`.
+- **A human's choice, expressed in a builder where it visibly did something** → leave it, and let
+  it land. The golden page's `turn`/`feel` carry section-level `{"align":"center","width":"narrow"}`
+  written by 0085 from a `centered` variant a person selected; WT-1 left them, correctly, and the
+  consequence is that honouring them changes those two sections from a 68rem left-aligned
+  two-column layout to a 48rem centred measure stack. **That is `Codex-qcgo3` landing, not a
+  regression.**
+
+By value alone the two are indistinguishable. Provenance is the whole of the test.
+
+## A57 — a token DOCUMENTED as a mirror is not a mirror until both expressions are read side by side
+
+The journey on-fill ratio (`studio-alpha`'s label at 4.43:1) sat open for three rounds on this
+reasoning, recorded in `journey-design.test.ts`'s `KNOWN_OPEN` note: *"`--jp-on-ember` mirrors
+`--color-text-on-brand`, so the same 4.43 applies to every primary Button on that org … a design
+decision with a much wider blast radius than a section axis."*
+
+Read side by side they were never the same expression:
+
+```
+--color-text-on-brand : clamp(0,    (0.62 - l) * 1000, 1)
+--jp-on-ember         : clamp(0.05, (0.60 - l) *  100, 0.98)
+```
+
+Different pivot, different multiplier, and — the one that mattered — **a different ceiling**. On
+`#E11D48` (OKLCH L = 0.5858) both pivots saturate, so the platform token hands back `#ffffff`
+(4.70:1, passes) and the journey token handed back `#f8f8f8` (4.45:1, fails). One side of the 4.5
+floor each, from a two-hundredths difference.
+
+The original analysis was **right** that no PIVOT fixes it — 0.60, 0.62 and 0.65 all measure
+identical, because the fill's lightness saturates every threshold — and wrong about what followed.
+The pivot was never the variable; the RANGE was. `--jp-on-ember`'s ceiling is now `1`, the sweep
+is green across all 100 combinations at all 8 poles, `KNOWN_OPEN` is empty (kept for its
+mechanism), and the blast radius was journey-only the whole time.
+
+**AND A SECOND CORRECTION, TO MY OWN FIRST VERSION OF THIS AMENDMENT.** I wrote that this
+closed `Codex-g7ipk`. It does not. `Codex-g7ipk` is a **different, still-open P1**: brand-painted
+surfaces (`Button.svelte:110-112`, `FeatureCarousel.svelte:384-393`) hardcoding
+`--color-text-inverse` / `--media-glyph` instead of consuming `--color-text-on-brand` at all — 9
+pairs below AA, with a documented trap that a naive repoint regresses every PLATFORM dark primary
+button, because `--color-text-on-brand` is a static `#ffffff` outside `[data-org-brand]`.
+
+The journey on-fill ratio **never had a bead of its own.** `CONTINUE-round-2.md` attributed it to
+`Codex-g7ipk` on the strength of both being "on-brand ink", and every later doc inherited that
+line, including the WP brief handed to WT-7. They are cousins and not the same defect: g7ipk is
+about which surfaces CONSUME the platform token; this was about the JOURNEY token's own range.
+Fixed here, verified by the 100 × 8 sweep, and **`Codex-g7ipk` remains open and untouched.**
+
+Which makes this amendment an instance of itself: I verified the two token EXPRESSIONS side by
+side and then took the bead ID on trust from a summary doc. Read the bead, not the citation.
+
+Note what made it findable: WT-7 was told to measure what a token *resolves to* and to verify the
+*claim about why*. It reported `sameToken: false` as a measured fact. The bead had been reasoned
+about accurately and never read.
+
+**Corollary for the remaining rounds:** `journey-design.test.ts` computes contrast in a JS colour
+model and then asserts that model against the stylesheet (`the colour model matches the CSS it
+claims to model`). Changing any palette token therefore takes THREE coupled edits — the CSS, the
+model's derivation, and the formula assertion. The guard caught a half-change within a second,
+which is exactly its purpose; do not work around it.
+
+## A58 — the `--jp-display` rung is NON-MONOTONIC: `expressive` renders SMALLER than `balanced`
+
+Measured at 375 / 768 / 1440: `expressive` gives 28.0 / 35.2 / 44px where `balanced` gives
+37.2 / 46.1 / 48px. The cause is upstream of this programme — `--text-5xl` maxes at `2.75rem`
+while `--text-4xl` maxes at `3rem`, so the ladder inverts at that step.
+
+`--jp-heading-size` is monotonic (24 / 30 / 40 / 48), so the fault is isolated to the display rung
+and reaches every `--jp-display` consumer: today the hero's `h1` and `invite`'s `h2`. A creator
+moving `type` from `balanced` to `expressive` gets a *smaller* display heading, which reads as a
+bug in the axis rather than in a typography token. Reported, not fixed here — it is a
+`tokens/typography` change with consumers well outside the journey tree.
+
+## A59 — porting a heading to `.jp-sec__heading` changes THREE properties, not one
+
+The shared atom carries `line-height` and `letter-spacing` as well as `font-size`. `invite`'s
+`<h2>` moved from `--leading-tight` to `--leading-none` (100px → 80px on an 80px heading) and from
+a local `-0.02em` to `--tracking-tighter` (−0.03em) — both while its `font-size` was byte-for-byte
+unchanged.
+
+Neither is a defect and both are the `type` axis doing what stage 1's mapping table asks. But they
+are **silent Candlelit deltas** for any section whose local heading rule did not already match the
+axis, and a worktree that only diffs `font-size` will report "matches" and be wrong. Measure
+leading and tracking alongside size when verifying Candlelit.
+
+## A60 — `onEdit` must write back to the key the value was READ FROM
+
+Alias lists are ordered preference lists, so an inline edit that always writes the canonical key
+corrupts a page that stores the alias. Concretely: the six seeded `ache` sections store `eyebrow`;
+had their inline edit written `kicker`, the page would hold **both**, `eyebrow` would keep winning
+the preference list, and **the creator's edit would render as nothing while the data silently grew
+a second copy.**
+
+All four round-3 sections use a `readKey(keys, fallback)` helper that returns whichever alias the
+value actually came from, pinned by a test asserting a page storing `statement` edits as
+`statement` and one storing `heading` edits as `heading`. Every worktree implementing the
+`editable`/`onEdit` seam over an aliased prop needs this; it is not covered by the pilot's lesson 9,
+which is about SSR-safety rather than write-back.
+
+## A61 — CORRECTION to A10's tap-target metric: "content box inside any border" is wrong for a hairline
+
+`--tap-target-min` is `max(2.75rem, var(--space-11))` = 44px, and with the app's global
+`box-sizing: border-box` that yields a **44px border box and a 42px content box**. Read to the
+letter, A10 fails by 2px on every journey CTA on every section — including the pilot's, which A34
+records as fixed.
+
+WCAG 2.5.5 / 2.5.8 measure the **pointer target**, and a 1px transparent border is part of the
+clickable area, so a 44px border box passes. A10's wording was aimed at *padded* boxes, which is
+where round 2's real error happened — a control whose visible box cleared 44px while its content
+box did not.
+
+**Amended:** measure the pointer target, i.e. the border box, and separately confirm no *padding*
+is eating the target. `CtaLink` is deliberately unchanged; if the letter is ever preferred it needs
+`min-height: calc(var(--tap-target-min) + 2 * var(--border-width))`.
+
+## A62 — a reported "pre-existing i18n key" must be verified against `en.json`
+
+WT-1 reported seven keys, four of them as already existing (`journey_turn_stages_label_descent`,
+`journey_feel_preview_group`, `journey_feel_preview_play`, `journey_feel_preview_pause`). **None of
+the four was in `messages/en.json`**, and the three prose components imported paraglide not at all
+— the strings were inline English literals in `aria-label`s and `<p>`s. Round 3 needed **twelve**
+new keys, not the eight requested.
+
+This is a benign-looking error with a sharp edge: i18n is single-owner precisely so a worktree
+cannot add keys, which means the orchestrator is the only party who can notice a key does not
+exist. A report that says "already exists" ends the check unless someone greps.
+
+**Rule for both sides.** A worktree citing an existing key quotes the `en.json` line. The
+orchestrator greps every claimed key before accepting the list, and greps the components for
+`m.journey_*` call sites to confirm the strings are actually keyed rather than merely reported.
+Verified after wiring: all 27 `journey_*` keys reach BOTH generated files
+(`src/paraglide/messages/en.js` and `src/paraglide/messages.js`), with only the former git-tracked.
