@@ -5,6 +5,17 @@
   WP-3/WP-5), the prototype's single `prose` renderer. Variants: centered ·
   statement (oversized) · wide · twocol (heading | body). Styling in
   `../journey-sections.css`.
+
+  SUPERSEDED — CONSOLIDATION DELETES THIS FILE. WT-1 has ported all four variants
+  into the three unified public components (`render/sections/AcheSection.svelte`,
+  `TurnSection.svelte`, `FeelSection.svelte`), which now honour `variant`, the
+  nine design axes and the `editable`/`onEdit` seam. See the port map in
+  `../journey-sections/_prose.css`.
+
+  It is kept working rather than emptied because `render-edit/SectionRenderer`
+  still renders it for the studio canvas; consolidation repoints the canvas at the
+  public components and deletes this file, its siblings and the drained partials
+  (contract A16).
 -->
 <script lang="ts">
   import EditableText from '../EditableText.svelte';
