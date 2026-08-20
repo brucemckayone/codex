@@ -149,3 +149,83 @@ problem — it has moved it.
 
 These are chrome, not voice. Keys, neutral wording, done. The orchestrator owns `messages/en.json` —
 report the key names.
+
+---
+
+## CLOSED — every bridge in this document is now consumed (round 4)
+
+`Codex-tqr51` is closed at `feat/journey-sections-foundation`. Verified per-renderer, counting
+`asStringFrom` / `aliasKeys` calls in `render/sections/*.svelte`:
+
+| renderer | `asStringFrom` | `aliasKeys` |
+|---|---|---|
+| `AcheSection` | 4 | 6 |
+| `FaqSection` | **0** | **0** |
+| `FeelSection` | 5 | 7 |
+| `GuideSection` | 4 | 7 |
+| `HeroSection` | 4 | 4 |
+| `IntroVideoSection` | 4 | 6 |
+| `InviteSection` | 4 | 4 |
+| `MapSection` | 3 | 4 |
+| `ProofSection` | 2 | 2 |
+| `ReelSection` | 6 | 9 |
+| `TurnSection` | 6 | 10 |
+
+**`FaqSection`'s 0/0 is a legitimate N/A, not an outstanding item.** `coerce.ts` declares
+`faq: {}` — a deliberately EMPTY bridge, because FAQ stays on the numbered `q1/a1…` vocabulary by
+design (A30). So the real denominator is **10 types, not 11**, which is why the bead's own title
+("7 of 11") undercounted the work and its "4 of 7 done" figure was stale arithmetic. Ten types
+declare a non-empty bridge; ten consume it.
+
+### The correction worth carrying forward
+
+This document listed WT-6 · guide as "the most severe case", and it was right — but for a reason
+stronger than it stated. The catalogue's `defaultProps` seeds the **alias** side (`role`, `body`),
+not the canonical side (`eyebrow`, `bio`). So it is not that *some* guide pages stored aliases —
+**every guide section a creator adds stores them**, and before the bridge landed every one of them
+rendered with no eyebrow and no bio while the copy sat unread in the row. Measured on a published
+page: `guide__eyebrow` and `guide__bio` did not exist in the DOM at all beforehand, and render now.
+
+### A consequence nobody had written down
+
+**Wiring a bridge PROMOTES that type's seeded placeholder from invisible to visible.** While the
+bridge is broken the renderer reads the canonical key, finds nothing, and shows nothing — so the
+placeholder is latent. Wire it and the placeholder renders.
+
+Measured: the guide placeholder went from **2 occurrences / 0 rendered** to **3 / 1** on a published
+page. `faq` and `proof` had already been through this conversion in rounds 2 and 3 without anyone
+connecting it, which is why their placeholders are the ones visible today.
+
+So `Codex-maf0y` is not "placeholders exist" — it is a **queue**, and it empties in step with this
+table. That reframing is what makes it worth prioritising. Do NOT fix it renderer-side: a renderer
+already self-hides an *absent* field, a placeholder is present-with-placeholder-content, and
+string-matching seed text breaks the moment the seed text changes. The fix is seeding strategy, in a
+closed file.
+
+### A60 in practice
+
+Every bridged renderer writes back to the key the value was **read** from, via a `readKey(keys,
+fallback)` helper — so a page storing `kicker` edits as `kicker` and one storing `eyebrow` edits as
+`eyebrow`. Without it a page ends up holding both keys and the creator's edit renders as nothing.
+
+WT-6 found a failure mode A60 did not anticipate: bridging a textarea string onto an **array**-shaped
+prop via `asParagraphsFrom` alone silently drops the declared array shape, because it delegates to
+`asStringFrom`, which takes strings only. The same shape gap then reached `readKey` — an array is not
+a string, so the write-back fell through to the fallback key while the array under the canonical key
+kept winning. **A60 can fail through a SHAPE as well as through an alias.** Any bridge from a scalar
+control onto an array prop needs both halves checked.
+
+### The Class A / Class B split, resolved
+
+Both classes are done. Class A (voice-bearing editorial copy) is empty — a grep for string-literal
+fallbacks of the shape *nullish-coalesce followed by a capitalised phrase* across all eleven
+renderers returns **zero** in live code; the strings survive only in comments explaining their
+removal. `Codex-i9pzs` is closed.
+
+Class B took keys, as specified. `ReelSection:65`'s `'Preview'` consumes `journey_reel_tag_default`
+(`messages/en.json:1477`). Round 4 added six further keys for accessible names and one skeleton
+label — chrome that can fall back to neither data nor self-hiding — taking the total from 27 to 33
+`journey_*` keys.
+
+**The test that decides which class a string is in, restated because it is the useful part:** not the
+string's length or position, but *whether another org publishing it verbatim would be embarrassed*.
