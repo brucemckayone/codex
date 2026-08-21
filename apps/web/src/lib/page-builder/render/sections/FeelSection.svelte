@@ -292,7 +292,7 @@
     <!-- ONE observer for the whole section, on the container: the shared atom is
          `.reveal--armed .jp-reveal` (a DESCENDANT selector) and the action adds
          `.reveal--armed` to the node it is used on. -->
-    <div class="feel__inner" use:reveal>
+    <div class="feel__inner" use:reveal={{ disabled: editable }}>
       <div class="feel__grid">
         <!-- what it feels like -->
         <div class="feel__col">

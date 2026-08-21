@@ -577,7 +577,7 @@
   data-reel-overlay={overlay}
   data-reel-align={design?.align ?? 'center'}
 >
-  <div class="reel__inner" use:reveal>
+  <div class="reel__inner" use:reveal={{ disabled: editable }}>
     {#if composition === 'split'}
       <div class="reel__split">
         {@render header()}

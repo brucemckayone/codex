@@ -461,7 +461,7 @@
        short page where `banner` or `sticky` opens above the fold, the observer
        fires on its first callback because the node is already intersecting, so
        nothing waits for a scroll that never comes. -->
-  <div class="invite__inner" use:reveal>
+  <div class="invite__inner" use:reveal={{ disabled: editable }}>
     <header class="invite__head jp-reveal">
       {#if eyebrow}
         <p class="jp-sec__eyebrow invite__eyebrow" {...editAttrs('eyebrow')}>

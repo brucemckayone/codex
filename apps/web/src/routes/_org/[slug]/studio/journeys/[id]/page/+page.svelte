@@ -49,7 +49,6 @@
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
-  import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import { toast } from '$lib/components/ui/Toast/toast-store';
 
   const { data } = $props();
@@ -82,17 +81,22 @@
   // non-course journey at a guaranteed 404.
   const isCourse = $derived(draftQuery?.current?.subjectType === 'course');
 
-  const stages: JourneyStagePreview[] = $derived(
-    (curriculumQuery?.current?.stages ?? []).map((stage) => ({
-      name: stage.name,
-      gloss: stage.gloss ?? '',
-      lessons: stage.practices.map((practice) => ({
-        title: practice.title,
-        type: practice.contentType,
-        minutes: Math.round((practice.durationSeconds ?? 0) / 60),
-      })),
-    }))
-  );
+  // Passed to the canvas RAW. It used to be re-shaped here into a builder-only
+  // `JourneyStagePreview`, because the canvas rendered its own component set; now
+  // the canvas renders the public sections, and `builderSalesContext` maps the
+  // admin curriculum down to the public `JourneyStageView` the `map` section
+  // actually reads. Mapping in one place is what keeps the canvas and the live
+  // page numbering practices identically (Codex-eckbx W1–W3).
+  const stages = $derived(curriculumQuery?.current?.stages ?? []);
+
+  // The course the sections render against. `id` is the subject of the page
+  // draft; title/slug come from the same draft read, so the canvas needs no
+  // extra request.
+  const course = $derived({
+    id: draftQuery?.current?.subjectId ?? '',
+    slug: draftQuery?.current?.slug ?? '',
+    title: draftQuery?.current?.title ?? '',
+  });
 
   // ── Workspace view state ──────────────────────────────────────────────────
   type BuilderMode = 'design' | 'look' | 'pricing' | 'media' | 'brand' | 'seo';
@@ -517,6 +521,7 @@
           {slug}
           {orgDomain}
           {stages}
+          {course}
         />
       </section>
 

@@ -292,7 +292,7 @@
          `.reveal--armed .jp-reveal` — a DESCENDANT selector — and the `reveal`
          action adds `.reveal--armed` to the node it is used on, so the action goes
          on the container and the staggered beats are its children. -->
-    <div class="faq__inner" use:reveal>
+    <div class="faq__inner" use:reveal={{ disabled: editable }}>
       {#if p.eyebrow || heading}
         <header class="faq__head jp-reveal">
           {#if p.eyebrow}

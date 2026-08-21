@@ -241,7 +241,7 @@
          action goes on the container and the staggered beats are its children;
          putting both on the same element matches nothing. One IntersectionObserver
          per section rather than one per quote is also the cheaper shape. -->
-    <div class="proof__inner" use:reveal>
+    <div class="proof__inner" use:reveal={{ disabled: editable }}>
       {#if p.eyebrow || heading}
         <header class="proof__head jp-reveal">
           {#if p.eyebrow}

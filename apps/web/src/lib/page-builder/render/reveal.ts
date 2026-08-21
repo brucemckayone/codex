@@ -13,8 +13,9 @@
  * journeys design brief (SPEC §6: "CSS-first motion, always degradable").
  *
  * Usage:
- *   <div use:reveal>…</div>              // default threshold/margin
- *   <div use:reveal={{ once: false }}>…  // re-arm when scrolled back out
+ *   <div use:reveal>…</div>                    // default threshold/margin
+ *   <div use:reveal={{ once: false }}>…        // re-arm when scrolled back out
+ *   <div use:reveal={{ disabled: editable }}>… // studio canvas: no motion
  * Pair with `.reveal` + optional `.d1`…`.d5` stagger classes (see sell tokens).
  */
 export interface RevealOptions {
@@ -24,6 +25,22 @@ export interface RevealOptions {
   rootMargin?: string;
   /** Re-hide + replay when the node leaves and re-enters. Default true (one-shot). */
   once?: boolean;
+  /**
+   * Skip the observer entirely and reveal immediately — the same resting state
+   * reduced-motion and SSR already get.
+   *
+   * Exists for the studio canvas (Codex-eckbx W1-W3). Scroll choreography cannot
+   * run correctly inside an inner-scrolling device frame: the observer's root is
+   * the viewport, so a section the author has scrolled to inside the canvas may
+   * never intersect it and would stay armed — i.e. invisible — while being
+   * edited. Suppressing motion is therefore a CORRECTNESS requirement of the
+   * editing surface, not a preference.
+   *
+   * Note this takes the accessible baseline path rather than a bespoke one, so
+   * the canvas shows exactly the fully-revealed state the public page settles
+   * into.
+   */
+  disabled?: boolean;
 }
 
 const ARMED = 'reveal--armed';
@@ -38,9 +55,14 @@ function prefersReducedMotion(): boolean {
 }
 
 export function reveal(node: HTMLElement, options: RevealOptions = {}) {
-  // No motion path: reduced-motion or environments without IntersectionObserver
-  // (incl. SSR) reveal immediately and stay put — the accessible baseline.
-  if (typeof IntersectionObserver === 'undefined' || prefersReducedMotion()) {
+  // No motion path: explicitly disabled (the studio canvas), reduced-motion, or
+  // environments without IntersectionObserver (incl. SSR) reveal immediately and
+  // stay put — the accessible baseline.
+  if (
+    options.disabled ||
+    typeof IntersectionObserver === 'undefined' ||
+    prefersReducedMotion()
+  ) {
     node.classList.add(IN);
     return;
   }

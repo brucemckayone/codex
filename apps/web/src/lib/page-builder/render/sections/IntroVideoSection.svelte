@@ -427,7 +427,7 @@
 {/snippet}
 
 <div class="iv" data-iv-composition={composition} data-iv-overlay={overlay}>
-  <div class="iv__inner" use:reveal>
+  <div class="iv__inner" use:reveal={{ disabled: editable }}>
     {#if composition === 'split'}
       <div class="iv__split">
         {@render lead()}

@@ -298,7 +298,7 @@
     <!-- ONE observer for the whole section, on the container: the shared atom is
          `.reveal--armed .jp-reveal` (a DESCENDANT selector) and the action adds
          `.reveal--armed` to the node it is used on. -->
-    <div class="turn__inner" use:reveal>
+    <div class="turn__inner" use:reveal={{ disabled: editable }}>
       <div class="turn__grid">
         <!-- `paired` is the one composition whose SECOND column is the lede, so
              the lede is rendered as a grid child rather than inside the head. One

@@ -23,7 +23,7 @@
  *   4. the two palette classes never land on the SAME element — that is a
  *      custom-property cycle whose failure mode is a page that paints nothing.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PageSection } from '@codex/shared-types';
@@ -41,6 +41,25 @@ vi.mock('$app/state', () => ({
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(join(HERE, rel), 'utf8');
+
+/**
+ * Every `.svelte` file in the section render tree(s), so the axis-emission guard
+ * can be stated over the WHOLE surface rather than over a hand-kept list a new
+ * component would quietly miss. Enumerated rather than named for the same reason
+ * the guard derives the emitter from its markup: the invariant has to survive
+ * someone moving the seam.
+ */
+const SECTION_TREE_FILES: string[] = [
+  'render',
+  'render-edit',
+  'render/sections',
+]
+  .filter((dir) => existsSync(join(HERE, dir)))
+  .flatMap((dir) =>
+    readdirSync(join(HERE, dir))
+      .filter((name) => name.endsWith('.svelte'))
+      .map((name) => `${dir}/${name}`)
+  );
 
 const PALETTE = read('journey-palette.css');
 
@@ -250,16 +269,31 @@ describe('journey palette — one derivation, three surfaces', () => {
     expect(imported).toEqual([...SECTION_PARTIALS]);
   });
 
-  it('reaches the axis substrate from the canvas tree as well as the public one', () => {
-    // `journey-design.css` has to be present on BOTH section trees. The public
-    // page gets it from `render/SectionRenderer.svelte`, the component that
-    // emits `data-jp-*`; the canvas gets it here. Without this line F-B2's
-    // design panel would have a control with no CSS behind it in the one place
-    // a creator is looking while they use it.
-    expect(SECTIONS_CSS).toContain("@import '../journey-design.css'");
-    const renderer = read('render/SectionRenderer.svelte');
-    expect(renderer).toContain("import '../journey-design.css'");
-    expect(renderer).toContain("import '../journey-sections-shared.css'");
+  it('imports the axis substrate in the very component that emits the axes', () => {
+    // The invariant: whatever emits `data-jp-*` must also carry the stylesheet
+    // that reads it, so no surface can end up with the markup and not the rules.
+    // Without it, F-B2's design panel would have a control with no CSS behind it
+    // in the one place a creator is looking while they use it.
+    //
+    // This asserts the RELATIONSHIP rather than a filename. It used to name
+    // `render/SectionRenderer.svelte` on one side and the canvas's own
+    // stylesheet on the other, because there were two section trees; the emitter
+    // now lives in one place (`SectionFrame`, mounted by both the public
+    // renderer and the studio canvas), and deriving the file from the emission
+    // means a future move of the seam fails here instead of silently shipping
+    // attributes with no rules.
+    const frame = read('render/SectionFrame.svelte');
+    expect(frame).toContain('data-jp-');
+    expect(frame).toContain("import '../journey-design.css'");
+    expect(frame).toContain("import '../journey-sections-shared.css'");
+
+    // And nothing ELSE may emit the axes without importing the substrate.
+    const emitters = SECTION_TREE_FILES.filter((file) =>
+      read(file).includes('data-jp-width=')
+    );
+    expect(emitters, 'exactly one component emits the axis attributes').toEqual(
+      ['render/SectionFrame.svelte']
+    );
   });
 });
 

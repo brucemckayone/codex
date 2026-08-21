@@ -2,16 +2,27 @@
   @component JourneyBuilderCanvas
 
   The INLINE WYSIWYG canvas for the journey sales-page builder
-  (Codex-2pryk.3.3 · WP-5). Renders the store's enabled sections directly via the
-  EDITABLE {@link SectionRenderer} from `$lib/page-builder/render-edit`, so the
-  canvas IS the page — structurally, not pixel-for-pixel.
+  (Codex-2pryk.3.3 · WP-5). Renders the store's sections through the SAME public
+  components the live page uses — one {@link SectionFrame} per section — so the
+  canvas IS the page, compositions and design axes included (Codex-eckbx W1–W3).
 
-  NOT the public components. `render-edit/` holds 8 static, contenteditable
-  sections; the public page renders 11 animated ones from `render/`. The canvas
-  therefore cannot show real motion, and a section with no `render-edit` twin does
-  not appear here at all. The route's "View live ↗" (which saves first) is the way
-  to see the true page. Unifying the two sets behind one `editable` flag is filed
-  as a follow-up.
+  IT USED TO BE A COPY. `render-edit/` held 8 static twins for 11 public types,
+  and the cost was not just fidelity: three types had no twin at all, the canvas
+  emitted none of the nine `data-jp-*` axes (so every design control appeared
+  inert), and Hero's six compositions collapsed to two distinguishable layouts
+  because only `split-media` had a branch. Every section change had to be made
+  twice or the two drifted — and they did.
+
+  The canvas keeps its own section LOOP because it interleaves per-block editing
+  chrome, which is why it mounts `SectionFrame` per section rather than
+  `SectionRenderer` over the array. Both go through the same frame, so the
+  wrapper attributes and the component contract cannot diverge again.
+
+  MOTION is suppressed by `editable`: scroll choreography cannot run correctly
+  inside an inner-scrolling device frame (the observer's root is the viewport, so
+  a section scrolled to inside the canvas may never intersect and would stay
+  armed — invisible — while being edited). Sections take the same immediate-reveal
+  path reduced-motion clients get.
 
   Each block is:
     · selectable  — mousedown selects it (without stealing caret from text)
@@ -24,9 +35,13 @@
   (Preview mode) the block chrome + contenteditable are off — a clean read-only page.
 -->
 <script lang="ts">
+  import type { CourseOffer, EditorStageView, JourneyCourseView } from '$lib/page-builder';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
-  import { SectionRenderer } from '$lib/page-builder/render-edit';
-  import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
+  import {
+    builderSalesContext,
+    SectionFrame,
+    selectRenderableSections,
+  } from '$lib/page-builder/render';
   import {
     ChevronDownIcon,
     ChevronUpIcon,
@@ -47,8 +62,18 @@
     /** Page slug + org domain for the read-only address read-out in the bar. */
     slug?: string;
     orgDomain?: string;
-    /** Curriculum stages the map/descent section previews. */
-    stages?: readonly JourneyStagePreview[];
+    /**
+     * The ADMIN curriculum read, passed straight through — the `map` section
+     * renders from it. No longer pre-mapped to a builder-only preview shape: the
+     * adapter maps `EditorStageView` down to the public `JourneyStageView` the
+     * section actually reads, so the canvas and the live page number practices
+     * the same way.
+     */
+    stages?: readonly EditorStageView[];
+    /** The course being sold — id/slug/title at minimum. */
+    course?: Pick<JourneyCourseView, 'id' | 'slug' | 'title'>;
+    /** The authoritative offer, when loaded. Null ⇒ sections draw a price-less CTA. */
+    offer?: CourseOffer | null;
   }
 
   let {
@@ -59,11 +84,36 @@
     slug = '',
     orgDomain = '',
     stages = [],
+    course,
+    offer = null,
   }: Props = $props();
 
   const sections = $derived(pageBuilder.sections);
-  const enabled = $derived(sections.filter((s) => s.enabled));
+  /**
+   * The SAME selection the public renderer makes — enabled, known-type, with the
+   * same anchor-id scheme (ordinal suffixes for duplicate types). Using this
+   * rather than a local `.filter(s => s.enabled)` is what keeps an unknown type
+   * from rendering here but not on the page, and keeps `#ache-2` meaning the same
+   * section in both.
+   */
+  const renderables = $derived(selectRenderableSections(sections));
   const selectedId = $derived(pageBuilder.selectedSectionId);
+
+  /**
+   * The render context the public sections expect, assembled from what the studio
+   * has. Rebuilt when its inputs change; `enrolled` is always false so the author
+   * sees the pre-purchase page a prospective member sees.
+   */
+  const salesContext = $derived(
+    builderSalesContext({
+      course: course ?? { id: '', slug: slug, title: pageBuilder.pending?.title ?? '' },
+      stages,
+      offer,
+    })
+  );
+
+  /** The page-level design defaults each section overrides per axis. */
+  const pageDesign = $derived(pageBuilder.pending?.design);
 
   const indexOf = (id: string): number => sections.findIndex((s) => s.id === id);
 
@@ -128,7 +178,8 @@
       class:jbc-page--editable={editable}
       data-device={device}
     >
-      {#each enabled as section (section.id)}
+      {#each renderables as entry (entry.section.id)}
+        {@const section = entry.section}
         {@const i = indexOf(section.id)}
         {@const isSel = editable && selectedId === section.id}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -193,11 +244,17 @@
             {/if}
           {/if}
 
-          <SectionRenderer {section} {editable} {onEditProp} {stages} />
+          <SectionFrame
+            renderable={entry}
+            context={salesContext}
+            {pageDesign}
+            {editable}
+            onEdit={(key, value) => onEditProp(section.id, key, value)}
+          />
         </div>
       {/each}
 
-      {#if enabled.length === 0}
+      {#if renderables.length === 0}
         <p class="jbc-empty">No visible sections. Enable one in the rail, or add a section.</p>
       {/if}
     </div>

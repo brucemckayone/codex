@@ -278,7 +278,7 @@
          `.reveal--armed .jp-reveal` (a DESCENDANT selector) and the action adds
          `.reveal--armed` to the node it is used on, so the action goes here and
          the staggered beats are its children. -->
-    <div class="ache__inner" use:reveal>
+    <div class="ache__inner" use:reveal={{ disabled: editable }}>
       {#if composition === 'paired'}
         <div class="ache__pair">
           <div class="ache__pair-head">

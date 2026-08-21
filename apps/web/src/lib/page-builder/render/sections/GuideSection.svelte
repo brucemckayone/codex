@@ -551,7 +551,7 @@
 
 {#if p.bio || p.name || p.heading}
   <div class="guide guide--{composition}">
-    <div class="guide__inner" use:reveal>
+    <div class="guide__inner" use:reveal={{ disabled: editable }}>
       {#if showsPlate}
         {@render plate()}
       {/if}
