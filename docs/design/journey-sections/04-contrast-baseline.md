@@ -258,7 +258,11 @@ as it should.
 | org / page | widths | poles | sections | leaves | gaps | **failures** |
 |---|---|---|---|---|---|---|
 | `of-blood-and-bones` / `pricing-smoke-test` | 375 · 768 · 1440 | light + dark | 11 | 104 @768 | none | **0** |
-| `studio-alpha` / `bone-deep` | 1440 | light + dark | 9 | 60 | none | **0** |
+| `studio-alpha` / `bone-deep` | 375 · 768 · 1440 | light + dark | 9 | 60 | none | **0** |
+
+**TWELVE combinations measured — 2 pages × 3 widths × 2 poles — with zero gaps and zero failures in
+every one.** That is the A10/A24 "all six combinations" requirement satisfied for both orgs that have
+pages, at all three widths, rather than at one.
 
 `studio-alpha/bone-deep` covers all three round-4 types on a real page — `guide/credentials`,
 `introVideo/theatre`, `reel/theatre` — plus `hero/stage`, `ache/column`, `map/spine`, `invite/pool`,
@@ -297,8 +301,10 @@ ratio per element is not enough when the element has an enhancement pass.
 
 ### What remains for `Codex-gkhro`
 
-- The 375/768 widths on `studio-alpha` (1440 done). Expected to be uneventful — the golden page showed
-  the tightest ratios are width-invariant — but unmeasured is unmeasured.
+- ~~The 375/768 widths on `studio-alpha`~~ — **done.** They were uneventful, as the golden page's
+  width-invariance predicted, and the CTA held at exactly 4.70 (+0.20) at every width and both poles.
+  Measuring them anyway was the right call: "expected to be uneventful" is a hypothesis, and the whole
+  reason this file needed a re-sweep is that a previous round recorded a hypothesis as a figure.
 - Everything above the "ROUND 2 CORRECTION" heading in this file is still short-settle. The two round-4
   blocks are additive; they do not retire the earlier per-element table.
 - `studio-beta`, by labelled substitution.
