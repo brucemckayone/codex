@@ -78,6 +78,38 @@ export async function runUploadOrchestration(
  * structurally a `ProcedureContext<TPolicy, TInput>` since
  * `ProcedureContext.services` is `ServiceRegistry`.
  */
+/**
+ * Collects handler-registered background work so the caller can tear down the
+ * service registry only after that work has settled.
+ *
+ * Exists because `waitUntil(cleanup())` and a handler's own
+ * `waitUntil(backgroundTask)` are siblings, not ordered: cleanup calls
+ * `pool.end()` on the shared per-request DB client and, being near-instant,
+ * reliably wins. Any DB access the background task attempts afterwards fails
+ * with a bare "Failed query" — and when the task's whole purpose was to record
+ * a failure, that failure disappears silently.
+ */
+export interface BackgroundTracker {
+  /** Register a task; returns the same promise so it can be used inline. */
+  background: <T>(promise: Promise<T>) => Promise<T>;
+  /** Resolves once every registered task has settled (never rejects). */
+  settled: () => Promise<unknown>;
+}
+
+export function createBackgroundTracker(): BackgroundTracker {
+  const tasks: Promise<unknown>[] = [];
+
+  return {
+    background: (promise) => {
+      tasks.push(promise);
+      return promise;
+    },
+    // allSettled attaches handlers, so a rejecting task cannot surface as an
+    // unhandled rejection, and one failure never skips cleanup.
+    settled: () => Promise.allSettled(tasks),
+  };
+}
+
 export function buildBaseProcedureContext<
   TPolicy extends ProcedurePolicy,
   TInput extends InputSchema | undefined,
@@ -86,11 +118,13 @@ export function buildBaseProcedureContext<
   organizationId: string | undefined,
   validatedInput: unknown,
   registry: ServiceRegistry,
-  obs: ObservabilityClient | undefined
+  obs: ObservabilityClient | undefined,
+  background: BackgroundTracker['background']
 ): Omit<ProcedureContext<TPolicy, TInput>, 'services'> & {
   services: ServiceRegistry;
 } {
   return {
+    background,
     user: c.get('user') as ProcedureContext<TPolicy, TInput>['user'],
     session: c.get('session') as ProcedureContext<TPolicy, TInput>['session'],
     input: validatedInput as ProcedureContext<TPolicy, TInput>['input'],

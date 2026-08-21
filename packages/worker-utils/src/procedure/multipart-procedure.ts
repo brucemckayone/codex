@@ -49,6 +49,7 @@ import type {
 } from './types';
 import {
   buildBaseProcedureContext,
+  createBackgroundTracker,
   runUploadOrchestration,
   sendUploadResponse,
 } from './upload-shared';
@@ -215,6 +216,10 @@ export function multipartProcedure<
     const obs = c.get('obs') as ObservabilityClient | undefined;
     let cleanup: (() => Promise<void>) | undefined;
 
+    // Handler-registered background work (ctx.background); cleanup is
+    // chained after it settles. See createBackgroundTracker.
+    const tracker = createBackgroundTracker();
+
     try {
       // Policy enforcement + service registry (shared scaffold).
       const orchestration = await runUploadOrchestration(c, policy, obs);
@@ -233,7 +238,8 @@ export function multipartProcedure<
           orchestration.organizationId,
           validatedInput,
           orchestration.registry,
-          obs
+          obs,
+          tracker.background
         ),
         files: validatedFiles as InferFiles<TFiles>,
       };
@@ -244,8 +250,10 @@ export function multipartProcedure<
       const { statusCode, response } = mapErrorToResponse(error, { obs });
       return c.json(response, statusCode);
     } finally {
+      // Chained after ctx.background work — see createBackgroundTracker.
       if (cleanup) {
-        c.executionCtx.waitUntil(cleanup());
+        const runCleanup = cleanup;
+        c.executionCtx.waitUntil(tracker.settled().then(() => runCleanup()));
       }
     }
   };
