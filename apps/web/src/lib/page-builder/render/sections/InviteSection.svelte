@@ -509,7 +509,7 @@
       {/if}
     </header>
 
-    {#if paths.length === 0}
+    {#if context.enrolled || paths.length === 0}
       <!-- THE PRICE-LESS THRESHOLD — a warm doorway seated on its own ember
            pool so beginning feels contained, safe, inevitable.
 
@@ -519,13 +519,29 @@
            the live state on four of the seven pages, and it is the state every
            composition below falls back to — `sticky` renders its bar with this
            CTA and no amount, `tiers` and `table` render nothing at all rather
-           than an empty grid. -->
+           than an empty grid.
+
+           AN ENROLLED VIEWER TAKES THIS BRANCH TOO, and that is the fix for the
+           state below: the compositions rendered every priced path to a member
+           who had already bought, re-pointing each card's CTA to the same
+           dashboard. Four cards quoting £24.99 / £27 / £270 / £15 to someone
+           holding all of it, behind four links with one destination — and the
+           file already said why that was wrong ("An enrolled viewer has nothing
+           to buy") while rendering the buying UI anyway. It also compounded the
+           WCAG 2.4.4 duplicate-link-name problem the composition CTAs work
+           around: for an enrolled viewer the four names were not merely similar,
+           they were the same link four times.
+           `hrefFor(null)` already resolves to `dashboardUrl` and `ctaLabel`
+           already reads the enrolled string, so the enrolled state needs no new
+           markup — only this branch. -->
       <div class="invite__single jp-reveal" data-jp-step="2">
         <div class="invite__pool" aria-hidden="true"></div>
         <CtaLink href={hrefFor(null)} variant="primary" size="lg">
           {ctaLabel}
         </CtaLink>
-        {#if priceNote}
+        <!-- The risk note ("Start free · cancel anytime") is purchase copy. It
+             says nothing true to a member who has already joined. -->
+        {#if priceNote && !context.enrolled}
           <p class="invite__note" {...editAttrs('risk')}>{priceNote}</p>
         {/if}
       </div>
