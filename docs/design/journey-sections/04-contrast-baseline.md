@@ -206,3 +206,45 @@ covers the accent ladder only. The per-element figures for the other ten section
 re-measured, and the note about `.descent__rn` having three different ratios depending on enhancement
 state is the reason a re-sweep must **name the state it measured** rather than recording one number
 per element.
+
+## ROUND 4 RE-MEASUREMENT, part 2 — the full-page dark sweep (`Codex-gkhro`)
+
+**Every text-bearing leaf in all 11 sections** of the golden page, dark pole, WCAG floors applied per
+element (4.5 normal, 3.0 for ≥24px or ≥18.66px bold). Method as part 1, plus the corrected reveal
+disarm (see A67(c) — the `is-in` approach in the first draft of that amendment does not work).
+
+**Result: ZERO failures.** Worst margin per section, sorted by headroom:
+
+| section | worst element | size | ratio | floor | headroom | leaves measured |
+|---|---|---|---|---|---|---|
+| `hero` | `.cta` "Get started" | 17px | **4.66** | 4.5 | **+0.16** | 16 |
+| `invite` | `.cta` "Get started" | 15px | **4.66** | 4.5 | **+0.16** | 26 |
+| `map` | numeral "12" | 13px | 5.00 | 4.5 | +0.50 | 25 |
+| `feel` | `.jp-sec__eyebrow` | 15px | 6.04 | 4.5 | +1.54 | 3 |
+| `ache` ×2 | `.jp-sec__eyebrow` | 15px | 7.79 | 4.5 | +3.29 | 3 |
+| `turn` | `.jp-sec__eyebrow` | 15px | 7.79 | 4.5 | +3.29 | 3 |
+| `introVideo` | `.jp-sec__eyebrow` | 15px | 7.79 | 4.5 | +3.29 | 4 |
+| `reel` | `.jp-sec__eyebrow` | 15px | 7.79 | 4.5 | +3.29 | 5 |
+| `proof` | `.jp-sec__eyebrow` | 15px | 7.79 | 4.5 | +3.29 | 12 |
+| `faq` | `.faq__q-text` | 24px | 11.04 | 3.0 | +8.04 | 4 |
+
+### The finding: the primary CTA has 0.16 of headroom
+
+`.cta` "Get started" measures **4.66** against a 4.5 floor, in **both** `hero` and `invite` — i.e. the
+primary call to action on every journey page, at the harder pole. It passes, and it is the least
+comfortable pass on the page by a factor of three. Any change to the brand colour, the button fill, or
+the surface behind it moves it under. Filed as a bead.
+
+Note what this is NOT: `Codex-5wgwf` records "every org primary button, 2.26:1" for
+`--color-text-on-brand` against the light brand in dark mode. That is a different measurement of a
+different pair, and I have not reconciled the two — do not assume they are the same number seen twice.
+This reading is the `.cta` label against its resolved backdrop on the journey page.
+
+### Scope, stated so this is not read as more than it is
+
+Dark pole, `of-blood-and-bones`, `pricing-smoke-test`, at the default viewport. Not yet swept: the light
+pole, the other two orgs, and the 375/768 widths — and per A67(a) the widths matter for TYPE, because
+`--text-*` carries a `vw` term, so a narrow reading needs a real viewport resize rather than a
+constrained container. The `.jp-sec__eyebrow` figure recurring at 7.79 across six types is a good sign
+that the shared atoms behave consistently, and also a reminder that a shared atom means a single
+regression would move all six at once.

@@ -1334,7 +1334,24 @@ box and a **reproducible-to-2dp 2.16:1** that was pure artefact.
 `reveal.ts` arms `opacity: 0` from JS and clears it only when an IntersectionObserver fires, so a
 below-the-fold section stays invisible indefinitely. A scroll sweep left **5–10 nodes still armed** on
 an 8078px page, and a crop behind an invisible section reads the page background as a plausible, stable,
-**wrong** ratio. Force `is-in` for determinism.
+**wrong** ratio.
+
+**CORRECTED — "force `is-in`" does NOT work, and I wrote that here without testing it.** The arming
+class sits on the **PARENT**, not the revealed element: `.ache__inner` carries `reveal--armed` while its
+children carry `.jp-reveal` + `data-jp-step`. Adding `is-in` to all 39 `.jp-reveal` nodes left every one
+of them still computing `opacity: 0`, because `is-in` is not what the rule keys on.
+
+**The forcing action that works is to REMOVE `reveal--armed` from the parents** (11 of them on the
+golden page):
+```js
+document.querySelectorAll('.reveal--armed').forEach((n) => n.classList.remove('reveal--armed'));
+```
+**And the failure was silent, which is the part worth internalising.** A sweep using the `is-in`
+approach returned `worst: null` for `ache`, `turn` and `feel` — read as "nothing to measure" rather than
+"I could not measure". After disarming the parents the same sweep measured **3 to 26 leaves per
+section**, so it had been under-sampling *every* section, not merely missing three. **Assert a non-zero
+measured count per section and treat zero as a failure**, never as a pass — the same discipline as
+`sectionCount === 0` on the builder.
 
 Also: the builder canvas loads curriculum stages **asynchronously** — 20 descendants at a 2.5s settle,
 **128 at 9s** on the same section. A46's "2× rAF + ≥1200ms" is calibrated for the PUBLIC page and
