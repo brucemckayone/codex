@@ -43,6 +43,21 @@
     SectionFrame,
     selectRenderableSections,
   } from '$lib/page-builder/render';
+  /* THE COLOUR LADDER. `SectionFrame` carries the axis substrate
+     (`journey-design.css` + `journey-sections-shared.css`) but deliberately NOT
+     the palette, because the checkout and member dashboard want the ladder
+     without any section rules. Every other surface that applies a
+     `journey-palette` class therefore imports it for itself, and this one is no
+     exception: `--jp-pole-a` is declared ONLY here, and `surface: tint|panel|
+     invert` resolve `--jp-sec-bg` through `--jp-ink` down to it.
+
+     NOT UNUSED, despite having no identifier. Until `render-edit/` was deleted
+     the canvas got this file by accident — its old `SectionRenderer` imported
+     `journey-sections.css`, which `@import`ed the palette. Repointing the canvas
+     at `SectionFrame` broke that chain silently, and the three lifted surfaces
+     painted nothing here while painting correctly when published.
+     `journey-palette.test.ts` now asserts the applies-it/imports-it pair. */
+  import '$lib/page-builder/journey-palette.css';
   import {
     ChevronDownIcon,
     ChevronUpIcon,
@@ -186,10 +201,11 @@
   </div>
 
   <div class="jbc__stage">
-    <!-- `journey-palette` supplies the colour ladder `.jp` styles read; it is the
+    <!-- `journey-palette` supplies the colour ladder `.jp` styles read, from the
          same file the live sales page and checkout derive from, so the canvas and
-         the real page cannot drift apart again (Codex-gfg50). The canvas takes
-         the BASE class only — `--page` would re-point `--color-surface*` /
+         the real page cannot drift apart again (Codex-gfg50) — see the import
+         above, which is what makes this class more than decoration. The canvas
+         takes the BASE class only — `--page` would re-point `--color-surface*` /
          `--color-border*`, which the in-canvas block affordances below read and
          need to keep studio-neutral against any page palette. -->
     <div
