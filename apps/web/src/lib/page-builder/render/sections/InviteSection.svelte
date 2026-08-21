@@ -58,7 +58,7 @@
    SIX COMPOSITIONS
   ══════════════════════════════════════════════════════════════════════════
   `pool` (default) · `banner` · `card` · `tiers` · `table` · `sticky`.
-  `pool`/`banner`/`card` are ported from the canvas partial
+  `pool`/`banner`/`card` are ported from the since-deleted canvas partial
   (`render-edit/journey-sections/_invite.css`, contract A12 — `.jp-invite`,
   `.jp-invite--banner` :40-42, `.jp-invite--card` :43-47). `tiers`, `table` and
   `sticky` are new (research §3).
@@ -377,7 +377,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: that component renders an
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: that component renders an
    * EMPTY element and fills `textContent` from a Svelte action, and actions do
    * not run during SSR — so the public page would serve an empty heading and
    * paint the text in only after hydration. The canvas never noticed because the

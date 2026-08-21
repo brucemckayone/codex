@@ -461,7 +461,7 @@ describe('MapSection — the edit seam', () => {
     });
 
     const h2 = document.body.querySelector('.descent__title');
-    // `render-edit/EditableText.svelte` renders an EMPTY element and fills
+    // The deleted `render-edit/EditableText.svelte` renders an EMPTY element and fills
     // `textContent` from a Svelte ACTION; actions do not run during SSR, so using
     // it here would serve `<h2></h2>` and paint the heading in after hydration.
     expect(h2?.textContent?.trim()).toBe('Server rendered heading');

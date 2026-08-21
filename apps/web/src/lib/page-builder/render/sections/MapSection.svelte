@@ -33,7 +33,7 @@
 
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `spine` (default) · `rows` · `cards` · `table` · `timeline` · `numbered-prose`.
-  The first three are ports of the canvas tree's working implementations
+  The first three are ports of the since-deleted canvas tree's working implementations
   (`render-edit/journey-sections/_descent.css` — `.jp-descent`, `.jp-stages`,
   `.jp-stagegrid`), which is contract A12: port, do not invent. `spine`/`rows`/
   `cards` carry the retired `descent`/`list`/`grid` ids forward through
@@ -297,7 +297,7 @@
    * (`title`, `foot`) — an edit must write back to the key `section-fields.ts`
    * declares, which is the same direction the alias table reads.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`, the canvas's primitive:
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`, the canvas's primitive:
    * that component renders an EMPTY element and lets a Svelte ACTION write
    * `textContent`, and actions do not run during SSR. On the public page it would
    * serve `<h2></h2>` and paint the heading in only after hydration. The canvas

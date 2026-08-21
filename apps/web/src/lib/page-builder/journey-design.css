@@ -32,17 +32,17 @@
    unlayered rule beats. Plain attribute selectors are correct here.
 
    ── WHERE IT IS LOADED ─────────────────────────────────────────────────────
-   Two imports, one per section tree, because the two trees are not unified
-   until consolidation (contract A16):
+   ONE import, in `render/SectionFrame.svelte` — the component that EMITS the
+   attributes — so the rules cannot go missing from a surface that has the
+   markup. Every host arrives through it: the public journey page and WP-5's
+   live-preview iframe via `SectionRenderer`'s array loop, and the studio canvas
+   via its own loop over the same frame.
 
-     • `render/SectionRenderer.svelte`      → the PUBLIC journey page. Imported
-       by the component that EMITS the attributes, so the rules cannot go
-       missing from a surface that has the markup.
-     • `render-edit/journey-sections.css`   → the STUDIO CANVAS, via its index
-       of partials. The canvas does not emit `data-jp-*` yet (it renders through
-       `render-edit/SectionRenderer.svelte`), so the rules are inert there until
-       F-B2 wires the design panel — but the substrate is present, which is what
-       lets the panel's preview work without a second plumbing change.
+   It was two imports until consolidation, one per section tree, the second being
+   `render-edit/journey-sections.css`. The canvas emitted no `data-jp-*` at all
+   then, so every control on the design panel was inert in the one place a
+   creator is looking while they use it. Both the second tree and that gap are
+   gone (contract A16, Codex-eckbx W1–W3).
 
    Deliberately NOT imported from `journey-palette.css`, even though the ladder
    this file reads lives there: the palette has two further consumers with no
@@ -581,12 +581,15 @@
 
    Specificity: the motion axis rules above are (0,1,0), so this has to beat
    them on the same element. `.jp-sec[data-jp-motion]` is (0,2,0) and matches
-   whatever value is set; the `:where(.jp-sec)` half covers the canvas tree,
-   which carries no `data-jp-motion` attribute at all.
+   whatever value is set; the `:where(.jp-sec)` half is the fallback for a
+   `.jp-sec` carrying no `data-jp-motion` at all. Nothing hits that half today —
+   `SectionFrame` always emits the attribute — and it is kept rather than dropped
+   because a host that mounts a section WITHOUT the frame would otherwise get no
+   reduced-motion handling at all. It used to cover the canvas tree, which
+   emitted none of the nine axes.
 
    Stopping keyframe ANIMATIONS is the section CSS's job, not an axis's — see
-   the `prefers-reduced-motion` block in `journey-sections-shared.css` (public
-   tree) and in `render-edit/journey-sections/_base.css` (canvas). */
+   the `prefers-reduced-motion` block in `journey-sections-shared.css`. */
 @media (prefers-reduced-motion: reduce) {
   :where(.jp-sec),
   .jp-sec[data-jp-motion] {

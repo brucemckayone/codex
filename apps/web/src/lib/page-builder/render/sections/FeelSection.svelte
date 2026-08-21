@@ -24,7 +24,7 @@
   `paired` (default) · `column` · `statement` · `grid` · `ledger` · `stack`.
   `paired` is the arrangement this component has always drawn (the retired prose
   `twocol`); `column` absorbs the retired `centered` + `wide` (they were `align` +
-  `width`); both are ported from the canvas partial
+  `width`); both are ported from the since-deleted canvas partial
   `render-edit/journey-sections/_prose.css` (contract A12). `grid`, `ledger` and
   `stack` are new (research §3).
 
@@ -270,7 +270,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: it renders an EMPTY
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
    * element and fills `textContent` from a Svelte action, and actions do not run
    * during SSR — so the public page would serve `<h2></h2>` and paint the text in
    * only after hydration. Here the text is a real child node.

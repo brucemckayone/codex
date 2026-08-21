@@ -438,11 +438,14 @@
       </div>
 
       <!--
-        "Full width" only hides the editor rails — the canvas still renders the
-        EDITABLE section components (`render-edit/`), which are deliberately static
-        so click-to-edit stays reliable. The cinematic motion (pinned ache, kinetic
-        hero, scroll reveals) lives in the PUBLIC renderer (`render/`), so seeing it
-        means opening the real page — hence the separate "View live" below.
+        "Full width" only hides the editor rails — the canvas renders the same
+        PUBLIC section components the live page does (`render/`), so what is on it
+        IS the page. The cinematic motion (pinned ache, kinetic hero, scroll
+        reveals) is the one difference, and only WHILE EDITING: every `use:reveal`
+        takes `{ disabled: editable }`, because animating a block out from under a
+        contenteditable caret makes click-to-edit unreliable. Preview mode turns
+        editing off, so the motion runs there too; "View live" below is for seeing
+        it on the real URL.
       -->
       <button
         type="button"
@@ -509,7 +512,7 @@
 
       <!--
         Per-page brand vars flow into the canvas; the `.jp` page self-derives its
-        surface + text ladder from them (see journey-sections.css), so the sales
+        surface + text ladder from them (see journey-palette.css), so the sales
         page tints without re-theming the studio chrome around it.
       -->
       <section class="jb__canvas" style={brandStyle}>

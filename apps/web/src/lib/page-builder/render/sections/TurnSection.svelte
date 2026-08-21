@@ -21,8 +21,8 @@
   `numbered`.
 
   `column` absorbs the retired prose `centered` + `wide` (they were `align` +
-  `width`) and `paired` is the retired `twocol`; both are ported from the canvas
-  partial `render-edit/journey-sections/_prose.css` (contract A12). `arc` is the
+  `width`) and `paired` is the retired `twocol`; both are ported from the since-deleted
+  canvas partial `render-edit/journey-sections/_prose.css` (contract A12). `arc` is the
   numbered descent rail this component has always drawn — the behaviour existed
   and had no name (research §3). `before-after` and `numbered` are new.
 
@@ -213,7 +213,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: it renders an EMPTY
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
    * element and fills `textContent` from a Svelte action, and actions do not run
    * during SSR — so the public page would serve `<h2></h2>` and paint the text in
    * only after hydration. Here the text is a real child node.

@@ -31,7 +31,7 @@
 
   `column` absorbs the retired `centered` variant (it was `align` + `width` on top
   of "no media" — see `LEGACY_SECTION_VARIANTS.guide` in `section-catalog.ts`),
-  and `portrait` / `quote` are ported from the canvas partial
+  and `portrait` / `quote` are ported from the since-deleted canvas partial
   `render-edit/journey-sections/_guide.css` (contract A12). `credentials` and
   `letter` are new.
 
@@ -304,7 +304,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte` (pilot lesson 9): it
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte` (pilot lesson 9): it
    * renders an EMPTY element and fills `textContent` from a Svelte action, and
    * actions do not run during SSR — so the public page would serve `<h2></h2>`
    * and paint the text in only after hydration. The canvas never noticed because

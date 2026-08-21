@@ -20,8 +20,8 @@
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `column` (default) · `statement` · `paired` · `list` · `quote` · `checklist`.
   `column` absorbs the retired prose `centered` + `wide` (they were `align` +
-  `width`); `paired` is the retired `twocol`. All three are ported from the canvas
-  partial `render-edit/journey-sections/_prose.css` (contract A12). `list`,
+  `width`); `paired` is the retired `twocol`. All three are ported from the since-deleted
+  canvas partial `render-edit/journey-sections/_prose.css` (contract A12). `list`,
   `quote` and `checklist` are new (research §3).
 
   COMPOSITIONS CARRY ARRANGEMENT, NEVER TYPE SCALE. `statement` is "oversized"
@@ -211,7 +211,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: it renders an EMPTY
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
    * element and fills `textContent` from a Svelte action, and actions do not run
    * during SSR — so the public page would serve `<h2></h2>` and paint the text in
    * only after hydration. Here the text is a real child node.
@@ -507,7 +507,8 @@
   }
 
   /* `paired` — heading in one column, body in the other. Ported from
-     `.jp-prose--twocol` in `render-edit/journey-sections/_prose.css`. */
+     `.jp-prose--twocol` in the since-deleted
+     `render-edit/journey-sections/_prose.css`. */
   .ache__pair {
     display: grid;
     grid-template-columns: 1fr 1fr;

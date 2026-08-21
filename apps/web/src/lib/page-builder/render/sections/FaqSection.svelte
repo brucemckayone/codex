@@ -12,7 +12,7 @@
 
   ── FIVE COMPOSITIONS ──────────────────────────────────────────────────────
   `accordion` (default) · `open` · `boxed` · `paired` · `grouped`. `boxed` is
-  ported from the canvas partial's `.jp-faq--boxed`
+  ported from the since-deleted canvas partial's `.jp-faq--boxed`
   (`render-edit/journey-sections/_faq.css:45-46`, contract A12); `paired` and
   `grouped` are new (research §3).
 
@@ -184,7 +184,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: it renders an EMPTY
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
    * element and fills `textContent` from a Svelte action, and actions do not run
    * during SSR — so the public page would serve `<h2></h2>` and paint the text in
    * only after hydration. The canvas never noticed because the studio is
@@ -663,7 +663,8 @@
      ═══════════════════════════════════════════════════════════════════════ */
 
   /* `boxed` — each entry in its own panel. Ported from the canvas partial's
-     `.jp-faq--boxed` (`render-edit/journey-sections/_faq.css:45-46`).
+     `.jp-faq--boxed` (the since-deleted
+     `render-edit/journey-sections/_faq.css:45-46`).
 
      Research §3 marked this a COLLAPSE candidate ("largely `open` +
      `surface: panel`; keep only if the per-entry panel differs from the section
