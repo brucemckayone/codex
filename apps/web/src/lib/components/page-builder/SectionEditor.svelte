@@ -46,7 +46,42 @@
   const { section }: Props = $props();
 
   const definition = $derived(findSectionDefinition(section.type));
-  const fields = $derived(fieldsForSectionType(section.type));
+  /**
+   * Control kinds F-C DECLARED but consolidation has not BUILT (A29/A72).
+   *
+   * `section-fields.ts` states the intended behaviour: "these fields are inert in
+   * the rail: `SectionEditor` renders the controls it knows and skips the rest."
+   * It did not skip them. The dispatch below branches `media`, `textarea` and
+   * `select`, then falls through a catch-all `{:else}` to `<input type="text">` —
+   * so all four unbuilt kinds rendered a normal-looking text box and `onInput`
+   * wrote `target.value`, a STRING, into keys that must hold an array or a number.
+   *
+   * That is worse than not rendering them. A creator saw a field labelled
+   * "Credentials", with a hint promising "the hairline-ruled fact list — years
+   * practising, students taught, qualifications", typed into it, saved, and got
+   * nothing: `coerce.ts`'s `asObjectArray` discards a non-array at its first line,
+   * silently. Proved end to end on a published page, where `props.facts` persisted
+   * with `jsonb_typeof = string`.
+   *
+   * SEQUENCING IS WHY THIS CANNOT WAIT FOR THE REAL CONTROL. `valueOf()` below
+   * returns `''` for any non-string, so once a field correctly holds an array the
+   * text box would render EMPTY OVER REAL CONTENT, and a creator "filling in the
+   * blank" would overwrite the array with a string. That is `Codex-wtfs1`'s
+   * data-loss trap on a different key. The wrong control has to stop accepting
+   * input BEFORE or WITH the right one, never after.
+   *
+   * So this honours the declared contract literally: skip. A disabled affordance
+   * naming the field would be more informative, and is the right call to make
+   * alongside the generic array control (A29) — but inventing one here is a design
+   * decision, and skipping is what F-C specified. `Codex-28ifd`.
+   */
+  const UNBUILT_CONTROLS = ['number', 'toggle', 'list', 'repeater'];
+
+  const fields = $derived(
+    fieldsForSectionType(section.type).filter(
+      (f) => !UNBUILT_CONTROLS.includes(f.control)
+    )
+  );
   const variants = $derived(variantsForType(section.type));
   const currentVariant = $derived(resolveVariant(section));
 
