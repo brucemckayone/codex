@@ -1,0 +1,10 @@
+DATABASE_URL=postgres://postgres:postgres@db.localtest.me:5432/main
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
+DB_METHOD=LOCAL_PROXY
+BETTER_AUTH_SECRET=test-secret-key-min-32-chars-long-for-testing
+BETTER_AUTH_URL=http://localhost:42069
+AUTH_TRUST_HOST=true
+
+# Local CDN override — serves Miniflare R2 files via dev-cdn worker (port 4100)
+# Run `pnpm dev:dev-cdn` alongside this worker for org logos to load on reload
+R2_PUBLIC_URL_BASE=http://localhost:4100

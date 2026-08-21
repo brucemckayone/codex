@@ -10,6 +10,10 @@
 .dev.vars.*
 **/.dev.vars
 **/.dev.vars.*
+# ...but the placeholder templates ARE the documentation for local setup.
+# Without these tracked, a working local config only ever exists on one machine
+# (which is how local transcoding silently rotted — see infrastructure/runpod/LOCAL_DEV.md).
+!**/.dev.vars.example
 env.dev
 env.prod
 

@@ -34,7 +34,10 @@ import type {
   ProcedureHandler,
   ProcedurePolicy,
 } from './types';
-import { buildBaseProcedureContext } from './upload-shared';
+import {
+  buildBaseProcedureContext,
+  createBackgroundTracker,
+} from './upload-shared';
 
 /**
  * Create a tRPC-style procedure handler
@@ -113,6 +116,11 @@ export function procedure<
     let registry: ReturnType<typeof createServiceRegistry>['registry'];
     let cleanup: (() => Promise<void>) | undefined;
 
+    // Handler-registered background work (ctx.background). Cleanup is chained
+    // after this settles — see createBackgroundTracker for why waitUntil alone
+    // is unsafe for background DB access.
+    const tracker = createBackgroundTracker();
+
     try {
       // ====================================================================
       // Step 1: Enforce Policy (auth, RBAC, IP, org membership)
@@ -145,7 +153,7 @@ export function procedure<
       const ctx: ProcedureContext<TPolicy, TInput> = buildBaseProcedureContext<
         TPolicy,
         TInput
-      >(c, organizationId, validatedInput, registry, obs);
+      >(c, organizationId, validatedInput, registry, obs, tracker.background);
 
       // ====================================================================
       // Step 5: Execute Handler
@@ -178,9 +186,12 @@ export function procedure<
       // ====================================================================
       // Step 8: Cleanup Services
       // ====================================================================
-      // Only cleanup if registry was created
+      // Only cleanup if registry was created.
+      // Chained AFTER ctx.background work so tearing down the DB pool cannot
+      // pull the connection out from under a still-running background task.
       if (cleanup) {
-        c.executionCtx.waitUntil(cleanup());
+        const runCleanup = cleanup;
+        c.executionCtx.waitUntil(tracker.settled().then(() => runCleanup()));
       }
     }
   };

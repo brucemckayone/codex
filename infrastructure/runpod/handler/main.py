@@ -1413,5 +1413,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-# RunPod serverless entry point
-runpod.serverless.start({"handler": handler})
+# RunPod serverless entry point.
+#
+# Guarded so this module can be imported without starting the serverless loop —
+# local_server.py imports `handler` directly to run jobs on a background thread
+# (see LOCAL_DEV.md). Production is unaffected: its CMD is
+# `python3 -u handler/main.py`, so __name__ == "__main__" and this still runs.
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})

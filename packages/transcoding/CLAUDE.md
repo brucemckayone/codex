@@ -56,6 +56,28 @@ RunPod's `/run` endpoint is fire-and-forget:
 
 `triggerJob()` returns as soon as RunPod acknowledges the job — it does NOT wait for transcoding to complete.
 
+### The dispatch runs in `ctx.background`, not `waitUntil`
+
+`triggerJobInternal()` returns `{ dispatchPromise }`; the route registers it with
+**`ctx.background(...)`**, not `ctx.executionCtx.waitUntil(...)`. The dispatch
+writes to the DB after the response is sent (the job id on success,
+`status='failed'` on error), and a bare `waitUntil` races `procedure()`'s own
+`waitUntil(cleanup())` — which calls `pool.end()` and reliably wins. Both writes
+then failed silently, so a dead dispatch left the row at `transcoding` with no
+error recorded. Use `ctx.background` for any post-response DB work.
+
+Also note `AbortSignal.timeout(runpodTimeout)` is 30 000 ms, the same as
+Cloudflare's `waitUntil` ceiling. That is fine against RunPod's cloud `/run`
+(returns in <1s) but fatal against any blocking dispatch endpoint.
+
+### Local development
+
+Local dev does **not** talk to RunPod. It posts to a container running
+`infrastructure/runpod/local_server.py` via `RUNPOD_DIRECT_URL`, which
+reproduces the cloud `/run` contract. Do not point it at runpod-python's
+`--rp_serve_api`: that server's `/run` never invokes the handler at all.
+See **[infrastructure/runpod/LOCAL_DEV.md](../../infrastructure/runpod/LOCAL_DEV.md)**.
+
 ## R2 Path Utilities (`paths.ts`)
 
 **Always use these functions — never hardcode R2 paths.**

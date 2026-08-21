@@ -314,6 +314,26 @@ export interface ProcedureContext<
   // Execution context for non-blocking operations
   executionCtx: ExecutionContext;
 
+  /**
+   * Register background work that must finish BEFORE the service registry's
+   * DB clients are torn down.
+   *
+   * `ctx.executionCtx.waitUntil()` is NOT safe for background work that
+   * touches the database. procedure() schedules its own
+   * `waitUntil(cleanup())` when the handler returns, and cleanup calls
+   * `pool.end()` on the shared per-request client — so the two race, and
+   * cleanup (being near-instant) reliably wins. Any DB write attempted after
+   * that fails with a bare "Failed query", and if it was an error-reporting
+   * write the failure vanishes entirely.
+   *
+   * Use this instead whenever the background task reads or writes the DB;
+   * cleanup is chained after everything registered here settles. Plain
+   * `waitUntil` remains correct for work that never touches the DB.
+   *
+   * Returns the promise it was given, so it can be used inline.
+   */
+  background: <T>(promise: Promise<T>) => Promise<T>;
+
   // Observability client
   obs: ObservabilityClient | undefined;
 

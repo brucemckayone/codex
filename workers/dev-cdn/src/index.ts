@@ -223,6 +223,37 @@ async function handleS3Request(
   bucket: R2Bucket,
   key: string
 ): Promise<Response> {
+  // ─────────────────────────────────────────────────────────────────────────
+  // Multipart upload (Codex: local transcoding of real-sized media)
+  //
+  // boto3 switches to multipart automatically once a file exceeds
+  // TransferConfig.multipart_threshold (8 MB by default), so the Python
+  // transcoding handler uses it for any HLS output of consequence — a
+  // single-file `stream.ts` for a 47 MB source is comfortably over the line.
+  // Without these four routes dev-cdn answered `POST ?uploads` with 405 and
+  // every large local transcode died at the upload step.
+  //
+  // Not skipped by raising the threshold in the Python handler on purpose:
+  // production DOES use multipart against real R2, and a local dev path that
+  // never exercises it would hide multipart bugs until they reached prod.
+  // ─────────────────────────────────────────────────────────────────────────
+  const params = new URL(request.url).searchParams;
+  const uploadId = params.get('uploadId');
+  const partNumber = params.get('partNumber');
+
+  if (request.method === 'POST' && params.has('uploads')) {
+    return handleS3CreateMultipart(bucket, key);
+  }
+  if (request.method === 'PUT' && uploadId && partNumber) {
+    return handleS3UploadPart(request, bucket, key, uploadId, partNumber);
+  }
+  if (request.method === 'POST' && uploadId) {
+    return handleS3CompleteMultipart(request, bucket, key, uploadId);
+  }
+  if (request.method === 'DELETE' && uploadId) {
+    return handleS3AbortMultipart(bucket, key, uploadId);
+  }
+
   switch (request.method) {
     case 'GET':
       return handleS3Get(request, bucket, key);
@@ -235,6 +266,145 @@ async function handleS3Request(
     default:
       return new Response('Method Not Allowed', { status: 405 });
   }
+}
+
+/** Escape the five XML entities so keys with `&` or quotes cannot break the document. */
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function xmlResponse(xml: string, status = 200): Response {
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n${xml}`, {
+    status,
+    headers: { 'content-type': 'application/xml', ...CORS_HEADERS },
+  });
+}
+
+/** S3 CreateMultipartUpload — `POST /{bucket}/{key}?uploads` */
+async function handleS3CreateMultipart(
+  bucket: R2Bucket,
+  key: string
+): Promise<Response> {
+  const upload = await bucket.createMultipartUpload(key);
+
+  return xmlResponse(
+    `<InitiateMultipartUploadResult>
+  <Bucket>local</Bucket>
+  <Key>${escapeXml(key)}</Key>
+  <UploadId>${escapeXml(upload.uploadId)}</UploadId>
+</InitiateMultipartUploadResult>`
+  );
+}
+
+/**
+ * S3 UploadPart — `PUT /{bucket}/{key}?partNumber=N&uploadId=X`
+ *
+ * The ETag returned here is R2's, and boto3 echoes it back verbatim in the
+ * CompleteMultipartUpload body. `complete()` rejects any part whose etag does
+ * not match, so this value must round-trip untouched.
+ */
+async function handleS3UploadPart(
+  request: Request,
+  bucket: R2Bucket,
+  key: string,
+  uploadId: string,
+  partNumber: string
+): Promise<Response> {
+  const part = Number(partNumber);
+  if (!Number.isInteger(part) || part < 1 || part > 10_000) {
+    return s3Error('InvalidArgument', `Bad partNumber: ${partNumber}`, 400);
+  }
+
+  const upload = bucket.resumeMultipartUpload(key, uploadId);
+  const body = await request.arrayBuffer();
+
+  try {
+    const uploaded = await upload.uploadPart(part, body);
+    const headers = new Headers(CORS_HEADERS);
+    headers.set('etag', `"${uploaded.etag}"`);
+    return new Response(null, { status: 200, headers });
+  } catch (error) {
+    return s3Error(
+      'NoSuchUpload',
+      `Upload ${uploadId} part ${part} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      404
+    );
+  }
+}
+
+/**
+ * S3 CompleteMultipartUpload — `POST /{bucket}/{key}?uploadId=X`
+ *
+ * Parses the part list from the request body. A regex is adequate here: this
+ * worker is never deployed, and the only client is boto3's fixed serialiser.
+ */
+async function handleS3CompleteMultipart(
+  request: Request,
+  bucket: R2Bucket,
+  key: string,
+  uploadId: string
+): Promise<Response> {
+  const xml = await request.text();
+  const parts: R2UploadedPart[] = [];
+
+  for (const block of xml.match(/<Part>[\s\S]*?<\/Part>/g) ?? []) {
+    const num = /<PartNumber>\s*(\d+)\s*<\/PartNumber>/.exec(block);
+    const tag = /<ETag>\s*(?:&quot;|")?(.*?)(?:&quot;|")?\s*<\/ETag>/.exec(
+      block
+    );
+    const partNumber = num?.[1];
+    const etag = tag?.[1];
+    if (partNumber !== undefined && etag !== undefined) {
+      parts.push({ partNumber: Number(partNumber), etag });
+    }
+  }
+
+  if (parts.length === 0) {
+    return s3Error('MalformedXML', 'No <Part> entries in completion body', 400);
+  }
+
+  const upload = bucket.resumeMultipartUpload(key, uploadId);
+
+  try {
+    const object = await upload.complete(parts);
+    return xmlResponse(
+      `<CompleteMultipartUploadResult>
+  <Location>${escapeXml(key)}</Location>
+  <Bucket>local</Bucket>
+  <Key>${escapeXml(key)}</Key>
+  <ETag>${escapeXml(object.httpEtag)}</ETag>
+</CompleteMultipartUploadResult>`
+    );
+  } catch (error) {
+    return s3Error(
+      'InvalidPart',
+      `Completing ${uploadId} failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      400
+    );
+  }
+}
+
+/** S3 AbortMultipartUpload — `DELETE /{bucket}/{key}?uploadId=X` */
+async function handleS3AbortMultipart(
+  bucket: R2Bucket,
+  key: string,
+  uploadId: string
+): Promise<Response> {
+  try {
+    await bucket.resumeMultipartUpload(key, uploadId).abort();
+  } catch {
+    // An already-aborted or unknown upload is not worth failing the caller for.
+  }
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
 /** S3 GetObject — returns the object body, honouring Range with a 206 when present */

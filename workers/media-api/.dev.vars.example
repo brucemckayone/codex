@@ -1,0 +1,71 @@
+# Media API Worker (port 4002) — local development variables
+#
+# Copy to `.dev.vars` (gitignored). Every value below is a LOCAL placeholder —
+# none of these are real credentials. See infrastructure/runpod/LOCAL_DEV.md for
+# the full local transcoding walkthrough.
+#
+# Wrangler reads .dev.vars at worker START. If you edit it, restart the worker —
+# do not assume a hot reload picked it up.
+
+# ---------------------------------------------------------------------------
+# Database — LOCAL_PROXY mode (db_method is set in wrangler.jsonc)
+# ---------------------------------------------------------------------------
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main
+
+# BetterAuth secret (min 32 characters)
+BETTER_AUTH_SECRET=local-dev-secret-key-min-32-chars-long-for-auth
+
+# ---------------------------------------------------------------------------
+# RunPod — NOT used against the real RunPod API in local dev
+# ---------------------------------------------------------------------------
+# These two are only required because TranscodingService validates their
+# presence in its constructor. When RUNPOD_DIRECT_URL is set they are unused
+# for routing (the key is still sent as a Bearer token and ignored locally).
+RUNPOD_API_KEY=local-dev-not-used
+RUNPOD_ENDPOINT_ID=local-dev-not-used
+
+# HMAC secret the container signs its completion webhook with.
+# MUST match WEBHOOK_SECRET in infrastructure/runpod/local.env.
+RUNPOD_WEBHOOK_SECRET=local-webhook-secret-for-testing
+
+# ---------------------------------------------------------------------------
+# RUNPOD_DIRECT_URL — the local transcoder container
+# ---------------------------------------------------------------------------
+# Used AS-IS by TranscodingService (skips RunPod's /v2/{endpoint}/run path
+# construction). Three parts of this value are load-bearing:
+#
+#   · /run — the same path production uses. The local container serves
+#     infrastructure/runpod/local_server.py, which reproduces RunPod's cloud
+#     contract: it returns a job id immediately and transcodes on a background
+#     thread. Do NOT point this at runpod-python's own `--rp_serve_api`, whose
+#     `/run` is a stub that never invokes the handler (silent no-op) and whose
+#     `/runsync` blocks for the whole transcode — tripping media-api's 30s
+#     dispatch timeout, which then marks still-running jobs as failed.
+#
+#   · port 8010 — the container listens on 8000 internally, but host port 8000
+#     is commonly taken, so `pnpm dev:transcoder` publishes it on 8010.
+#
+#   · 127.0.0.1 is fine: workerd under `wrangler dev` CAN fetch loopback
+#     (verified 2026-08-21). A LAN IP also works but breaks whenever your
+#     DHCP lease changes.
+RUNPOD_DIRECT_URL=http://127.0.0.1:8010/run
+
+# ---------------------------------------------------------------------------
+# Webhook callback — container → host
+# ---------------------------------------------------------------------------
+# The container needs a host-reachable address, so this is host.docker.internal
+# rather than localhost. TranscodingService appends /api/transcoding/webhook.
+TRANSCODING_WEBHOOK_URL=http://host.docker.internal:4002
+
+# ---------------------------------------------------------------------------
+# Worker-to-worker HMAC — must match content-api's .dev.vars
+# ---------------------------------------------------------------------------
+WORKER_SHARED_SECRET=test-worker-shared-secret
+
+# ---------------------------------------------------------------------------
+# B2 (MinIO) — mezzanine archival storage
+# ---------------------------------------------------------------------------
+B2_ENDPOINT=http://localhost:9000
+B2_KEY_ID=minioadmin
+B2_APP_KEY=minioadmin
+B2_BUCKET=codex-mezzanine-dev
