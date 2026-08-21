@@ -248,3 +248,57 @@ pole, the other two orgs, and the 375/768 widths — and per A67(a) the widths m
 constrained container. The `.jp-sec__eyebrow` figure recurring at 7.79 across six types is a good sign
 that the shared atoms behave consistently, and also a reminder that a shared atom means a single
 regression would move all six at once.
+
+### Sweep coverage, completed for the two orgs that have pages
+
+Same method throughout. **Real viewport resizes**, not constrained containers, per A67(a) — confirmed
+working: the CTA measured 17px at 1440/768 and **16.3px at 375**, i.e. the `vw` term in `--text-*` moved
+as it should.
+
+| org / page | widths | poles | sections | leaves | gaps | **failures** |
+|---|---|---|---|---|---|---|
+| `of-blood-and-bones` / `pricing-smoke-test` | 375 · 768 · 1440 | light + dark | 11 | 104 @768 | none | **0** |
+| `studio-alpha` / `bone-deep` | 1440 | light + dark | 9 | 60 | none | **0** |
+
+`studio-alpha/bone-deep` covers all three round-4 types on a real page — `guide/credentials`,
+`introVideo/theatre`, `reel/theatre` — plus `hero/stage`, `ache/column`, `map/spine`, `invite/pool`,
+`proof/grid`, `faq/grouped`.
+
+`studio-beta` has zero courses and zero landing pages (A41 · `Codex-jl17s`), so it remains measurable
+only by labelled brand substitution. An earlier audit cross-validated an emulated studio-alpha against
+the real one and got identical figures, which is the check that licenses the method — but it is still
+emulation and should be labelled as such wherever quoted.
+
+### The CTA finding is stronger than the dark-only reading suggested
+
+| org | CTA dark | CTA light |
+|---|---|---|
+| `of-blood-and-bones` | **4.66** (+0.16) | 7.14 (+2.64) — comfortable |
+| `studio-alpha` | **4.70** (+0.20) | **4.70** (+0.20) — equally tight |
+
+So on `studio-alpha` the primary CTA is the tightest element on the page at **both** poles. That rules
+out "a dark-mode problem" and points at the **brand colour against the on-brand text colour** — the pair
+`Codex-5wgwf` and `Codex-g7ipk` are both about. It is also width-invariant: 4.66 at 375, 768 and 1440 on
+the golden page.
+
+Still not reconciled, deliberately: `Codex-5wgwf` records 2.26:1 for `--color-text-on-brand` against the
+light brand in dark mode, "every org primary button". That is a different pair measured differently and
+I have not shown the two numbers describe one root cause. **Do not merge the beads on the assumption
+that they do** — round 2 made exactly that mistake with the 2.04, and it cost two rounds of a
+workaround.
+
+### Round 2's `.descent__rn` figures, revisited
+
+The round-2 correction notes `.descent__rn` recorded 4.45:1 as its "pre-lit dim" state and 1.13:1 in
+"the state SSR serves". Measured now, settled with the reveal parents disarmed: **5.96 dark / 8.38
+light** on `studio-alpha`. Consistent with the correction's own point — those earlier numbers were
+states of an unsettled element, not properties of it. It is the clearest example on file of why a single
+ratio per element is not enough when the element has an enhancement pass.
+
+### What remains for `Codex-gkhro`
+
+- The 375/768 widths on `studio-alpha` (1440 done). Expected to be uneventful — the golden page showed
+  the tightest ratios are width-invariant — but unmeasured is unmeasured.
+- Everything above the "ROUND 2 CORRECTION" heading in this file is still short-settle. The two round-4
+  blocks are additive; they do not retire the earlier per-element table.
+- `studio-beta`, by labelled substitution.
