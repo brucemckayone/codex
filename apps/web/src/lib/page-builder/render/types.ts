@@ -52,6 +52,45 @@ export interface SellPreview {
   intro: PreviewMedia | null;
   /** The practice-preview clip (the `reel` section). */
   reel: PreviewMedia | null;
+  /**
+   * The guide's PORTRAIT still — a public CDN URL, or null when the creator has
+   * picked no portrait (contract amendment A15). FE mirror of
+   * `CourseSellPreview.guidePortraitUrl`.
+   *
+   * `GuideSection` reads a `portraitUrl` PROP that no builder field and no query
+   * could ever fill, so the published guide could only render its letter
+   * monogram. The picker wrote `courses.guide.portraitMediaId` and nothing public
+   * read it. This is the projection; WT-6 is what consumes it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and the section keeps
+   * falling back to the monogram.
+   */
+  guidePortraitUrl?: string | null;
+  /**
+   * The guide's talking-head clip (the second builder-written, publicly-unread
+   * media slot A15 closes). The public `guide` section has no video affordance at
+   * all today — adding one is WT-6's composition work.
+   */
+  guideClip?: PreviewMedia | null;
+  /**
+   * The HERO still — a public CDN URL, or null when the creator has picked no
+   * hero media (contract amendment A27). FE mirror of
+   * `CourseSellPreview.heroImageUrl`.
+   *
+   * Until A27 the `courses` table had NO hero image slot, so every hero
+   * composition drew a synthetic radial-gradient plate and the `media` design
+   * axis (`bleed`/`frame`/`mask`/`inset`) had no real image to shape. This is the
+   * projection; the hero compositions in WT-3 are what consume it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and the hero keeps
+   * falling back to its synthetic plate.
+   */
+  heroImageUrl?: string | null;
+  /**
+   * The guide's SIGNATURE mark — a public CDN URL, or null when unset (A27).
+   * `guide.letter` signs off with it; WT-6 owns that composition.
+   */
+  signatureUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -124,6 +163,25 @@ export interface HeroSectionProps {
   secondaryHref?: string;
   /** A quiet trust line under the CTAs ("Practised by 2,400+ …"). */
   trust?: string;
+  /**
+   * The three keys the builder has always written and the renderer never read
+   * (`Codex-tqr51`; they were `OWED_READS.hero` until the WT-3 pilot wired them).
+   * They are not aliases of an existing prop — each needs its own markup, which is
+   * why the bridge in `coerce.ts` could not close them.
+   *
+   * `accent` — an emphasised ending to the headline, set on its own line.
+   * `felt` — a short emphasis line between the sub-line and the CTAs.
+   * `bg` — the atmosphere recipe (`ember` | `blood` | `still`). Note this is an
+   * AXIS IN DISGUISE and a candidate for a later collapse: `still` is
+   * `motion: none` plus a dimmer accent, and `ember`/`blood` are two accent
+   * recipes. It is kept as a prop for now because retiring it would need its own
+   * forward-map entry and stored-data migration; it is scoped to the glow's own
+   * recipe and still gated by `--jp-sec-atmos`, so it composes with the axes
+   * rather than fighting them.
+   */
+  accent?: string;
+  felt?: string;
+  bg?: string;
 }
 
 /** `introVideo` — the 90-second sell film (streamed preview). */

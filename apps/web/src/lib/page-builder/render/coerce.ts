@@ -129,6 +129,109 @@ export function asNumberedGroups<T>(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * The first non-empty string among `keys`, split into PARAGRAPHS — the bridge for
+ * a builder `textarea` field whose renderer counterpart is a string array.
+ *
+ * Added for `guide`: the builder's field is labelled "Bio" and writes the flat
+ * string `body`, while `GuideSection` reads `bio` as a `string[]`. `asStringArray`
+ * discards a plain string outright, so the guide's ENTIRE biography rendered as
+ * nothing — the most severe of the seven copy-loss cases in `Codex-tqr51`.
+ *
+ * Splits on any run of newlines, so a creator who presses Enter once between
+ * paragraphs gets two paragraphs and one who presses it twice gets the same. A
+ * single-line value yields a one-entry array, which is exactly what the array
+ * shape means. Undefined when nothing survives, so callers keep their `{#if}`
+ * self-hide guard.
+ */
+export function asParagraphsFrom(
+  props: SectionProps,
+  keys: readonly string[]
+): string[] | undefined {
+  const text = asStringFrom(props, keys);
+  if (text === undefined) return undefined;
+  const out = text
+    .split(/[\r\n]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * THE BUILDER→RENDERER KEY MAP — the read-boundary reconciliation, in one place.
+ *
+ * Verified against the database (audit §B): the builder's names ARE what is stored
+ * (`hero.{sub, button, quiet}`, `map.{heading, note}`, `guide.{role, body}`), and
+ * the public renderer's own vocabulary (`subheadline`, `ctaLabel`, `title`,
+ * `foot`, `bio`) is the LATER invention. So the renderer's name stays first in
+ * every preference list (a page authored against it still wins) and the builder's
+ * name is the fallback that makes existing pages render.
+ *
+ * Confirmed live loss this closes: the golden page stores `hero.button` =
+ * "Get started", `HeroSection` read only `ctaLabel`, and the served HTML showed
+ * the hardcoded `'Begin the journey'` — a creator's CTA label replaced by
+ * hardcoded English on a real page.
+ *
+ * WHY A TABLE and not 15 inline literals: seven component work-packages read
+ * these keys in seven worktrees. A hand-copied preference list drifts, and a
+ * drifted list is invisible — it degrades to the hardcoded fallback rather than
+ * failing. One table also gives `section-fields.test.ts` a machine-readable
+ * source for the round-trip guard ("every writable key is read").
+ *
+ * NOT here, deliberately:
+ *   - `invite.price` — pricing comes ONLY from `JourneySalesContext.offer`
+ *     (Codex-2pryk.2.4.3). The FIELD should be deleted, never bridged; reading it
+ *     would re-introduce a page advertising a price that does not exist.
+ *   - media slots (`clipMedia`, `portraitMedia`) — not `props` keys at all; they
+ *     write `courses.*MediaId` and arrive through the render context.
+ *   - keys whose renderer prop does not exist yet (`hero.accent`, `hero.felt`,
+ *     `hero.bg`, `invite.accent`, `introVideo.clip`, `*.duration`). Those need new
+ *     markup, which is the owning component WP's job, not a read-boundary alias.
+ */
+export const SECTION_PROP_ALIASES: Readonly<
+  Record<string, Readonly<Record<string, readonly string[]>>>
+> = {
+  hero: {
+    subheadline: ['subheadline', 'sub'],
+    ctaLabel: ['ctaLabel', 'button'],
+    secondaryLabel: ['secondaryLabel', 'quiet'],
+  },
+  introVideo: { eyebrow: ['eyebrow', 'kicker'] },
+  // `sub` is a seeder key the editor never declared (`PROSE_FIELDS` writes
+  // `kicker`/`heading`/`body`), so the sentence the portal seeder authored under
+  // it was unreadable AND unread. Six sections across both orgs store a real
+  // paragraph there — "Grief is not a problem to be solved. These practices make
+  // room for it to move." — on five published pages. Bridged onto `body`, which
+  // still wins the preference list wherever a creator has since typed one.
+  // Reported by WT-1 (round 3); NOT in `05-bridge-table.md`, which recorded
+  // `AcheSection` as "already bridged, do nothing".
+  ache: { eyebrow: ['eyebrow', 'kicker'], body: ['body', 'sub'] },
+  turn: {
+    eyebrow: ['eyebrow', 'kicker'],
+    statement: ['statement', 'heading'],
+    lede: ['lede', 'body'],
+  },
+  reel: { eyebrow: ['eyebrow', 'kicker'], tag: ['tag', 'clip'] },
+  map: { title: ['title', 'heading'], foot: ['foot', 'note'] },
+  feel: { eyebrow: ['eyebrow', 'kicker'] },
+  proof: { trustLabel: ['trustLabel', 'trust'] },
+  guide: { eyebrow: ['eyebrow', 'role'], bio: ['bio', 'body'] },
+  faq: {},
+  invite: {
+    ctaLabel: ['ctaLabel', 'button'],
+    priceNote: ['priceNote', 'risk'],
+  },
+};
+
+/**
+ * The preference list for one section type's prop — the {@link SECTION_PROP_ALIASES}
+ * entry, or just the prop's own name when no alias is declared. Total, so a call
+ * site never has to branch on whether an alias exists.
+ */
+export function aliasKeys(type: string, prop: string): readonly string[] {
+  return SECTION_PROP_ALIASES[type]?.[prop] ?? [prop];
+}
+
 /** A boolean prop with an explicit default (non-boolean values fall back). */
 export function asBool(
   props: SectionProps,

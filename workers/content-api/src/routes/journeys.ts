@@ -224,7 +224,10 @@ app.get(
  * GET /api/journeys/courses/:courseId/sell-preview
  *
  * The STREAMED, off-critical-path payload of the sales page (SPEC §10): the
- * public 30s intro-film + practice-reel clips. Fully PUBLIC (`auth: 'optional'`,
+ * public 30s intro-film + practice-reel clips, plus the guide's portrait still and
+ * talking-head clip (journey-sections contract A15 — both guide slots were
+ * write-only codebase-wide before it, so the published guide section could never
+ * show either). Fully PUBLIC (`auth: 'optional'`,
  * NO `canView`). Clips reuse the SAME public preview path the org-landing hero
  * consumes — `mediaItems.hlsPreviewKey` → a CDN URL via `R2_PUBLIC_URL_BASE`,
  * NO R2 signing (mirrors `public.ts` `resolveR2Urls`). The URL base is supplied

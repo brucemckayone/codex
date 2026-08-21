@@ -372,6 +372,22 @@ async function reconcilePage(
     subjectType: 'course' as const,
     subjectId: courseId,
     sections: buildSections(spec),
+    // CANDLELIT (research §4.1) — the same bundle migration 0084 wrote onto every
+    // pre-existing page, because a seeded portal's body copy IS the cinematic
+    // family the golden page belongs to. Explicit rather than left NULL so a
+    // re-seeded page shows a SELECTED preset in the builder instead of a picker
+    // that looks dead over a page rendering at the neutral defaults (A21).
+    design: {
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+      edge: 'none',
+      align: 'center',
+      type: 'monumental',
+      accent: 'glow',
+      motion: 'drift',
+      media: 'bleed',
+    } as const,
   };
 
   if (existing) {
@@ -431,7 +447,15 @@ function buildSections(spec: PortalSpec) {
         bg: 'ember',
       },
       enabled: true,
-      variant: 'split',
+      // `stage`, NOT the old `split`. This line used to write `split`, and because
+      // the public renderer ignored `variant` entirely until Codex-qcgo3 was fixed,
+      // every seeded page stored a split hero while rendering a centred stage — all
+      // seven real journey pages. The moment the variant plumbing landed, all seven
+      // would have flipped to a two-column split hero that no creator ever chose or
+      // saw. Migration 0087 corrected the stored rows; this stops a re-seed
+      // reintroducing it. `split-media` stays fully available — as a choice made in
+      // the builder, not a seed default.
+      variant: 'stage',
     },
     {
       id: crypto.randomUUID(),
@@ -472,7 +496,11 @@ function buildSections(spec: PortalSpec) {
         button: 'Begin',
       },
       enabled: true,
-      variant: 'card',
+      // `pool` is what the public page has always RENDERED. The seeder wrote
+      // `card` here while the renderer discarded `variant` entirely, so all
+      // seven seeded pages stored a composition no visitor ever saw — see
+      // migration 0089, and 0087 for the identical hero case (contract A33).
+      variant: 'pool',
     },
   ];
 }

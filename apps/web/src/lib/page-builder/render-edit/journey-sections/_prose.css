@@ -1,0 +1,63 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   CANVAS · PROSE — editorial text (ache/turn/feel)
+
+   A PARTIAL of the canvas stylesheet. Split out of the 575-line
+   `../journey-sections.css` unchanged — same declarations, same order, no
+   reformatting. Imported by that file, which stays the single entry point
+   (`render-edit/SectionRenderer.svelte`).
+
+   WHY IT WAS SPLIT. Contract A12: this tree holds a WORKING implementation of
+   every one of the 37 declared variants, and the public components hold none of
+   them. So the section-flexibility programme is "port 37 layouts", not "invent
+   37 layouts", and each of the seven component work packages ports one type.
+   One 575-line file would have serialised all seven on the same merge conflict;
+   nine disjoint partials let them run in parallel. See
+   `docs/design/journey-sections/02-axis-contract.md` A16.
+
+   DRAINED, NOT KEPT. As each work package ports its type into the unified public
+   component, its partial empties out. Consolidation deletes the empties along
+   with `render-edit/sections/*`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════ PROSE · editorial text (ache/turn/feel) ═════════════════
+   Variants: centered · statement (oversized) · wide · twocol. */
+.jp-prose { padding: clamp(2.6rem, 7cqw, 4.6rem) clamp(1.4rem, 6cqw, 3.4rem); }
+.jp-prose__kick { font-size: clamp(0.62rem, 1.1cqw, 0.72rem); letter-spacing: var(--tracking-wider, 0.24em); text-transform: uppercase; color: var(--jp-ember); font-weight: var(--font-semibold); }
+.jp-prose__heading { font-family: var(--jp-serif); font-weight: var(--font-normal); color: var(--jp-heading); line-height: 1.1; letter-spacing: var(--tracking-tight, -0.015em); margin: 0.5rem 0 0.8rem; font-size: clamp(1.6rem, 4.6cqw, 2.6rem); }
+.jp-prose__body { color: var(--jp-dim); line-height: 1.7; font-size: clamp(0.95rem, 1.6cqw, 1.08rem); }
+.jp-prose--centered { text-align: center; }
+.jp-prose--centered .jp-prose__inner { max-width: 46rem; margin: 0 auto; }
+.jp-prose--centered .jp-prose__body { max-width: 52ch; margin: 0 auto; }
+.jp-prose--statement { text-align: center; padding-block: clamp(3.4rem, 9cqw, 6rem); }
+.jp-prose--statement .jp-prose__heading { font-size: clamp(2.1rem, 6.6cqw, 4rem); max-width: 16ch; margin-inline: auto; }
+.jp-prose--statement .jp-prose__body { max-width: 48ch; margin: 1.2rem auto 0; }
+.jp-prose--wide .jp-prose__inner { max-width: 62rem; margin: 0 auto; }
+.jp-prose--wide .jp-prose__body { max-width: 66ch; }
+.jp-prose--twocol .jp-prose__inner { max-width: 62rem; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.4rem, 4cqw, 3rem); align-items: start; }
+.jp-prose--twocol .jp-prose__heading { margin-top: 0; }
+@container (max-width: 520px) { .jp-prose--twocol .jp-prose__inner { grid-template-columns: 1fr; } }
+
+/* ═══════════════════ PORTED — READY FOR CONSOLIDATION TO DELETE ═════════════
+   WT-1 has ported every rule above into the unified public components
+   (`render/sections/AcheSection.svelte`, `TurnSection.svelte`,
+   `FeelSection.svelte`) and generalised them onto the nine design axes:
+
+     .jp-prose--centered  →  `column` + { align: center, width: narrow }
+     .jp-prose--wide      →  `column` + { align: start,  width: text   }
+     .jp-prose--twocol    →  `paired`
+     .jp-prose--statement →  `statement` (the tight heading measure and the 1.3x
+                             block padding are the ported parts; the font-size
+                             STEP is deliberately NOT ported — scale belongs to
+                             the `type` axis, contract A36)
+
+   The rules are LEFT IN PLACE, not drained, and that is deliberate:
+   `render-edit/SectionRenderer.svelte` still renders `render-edit/sections/
+   ProseSection.svelte` for the studio canvas, so emptying this file now would
+   leave the builder previewing unstyled prose sections until consolidation
+   repoints the canvas at the public components. A canvas that looks DIFFERENT
+   from the published page is the accepted interim state (contract A16); a canvas
+   with no styles at all is not.
+
+   Consolidation deletes this file together with `render-edit/sections/
+   ProseSection.svelte`, `section-registry.ts` and `section-render.ts`.
+   ═══════════════════════════════════════════════════════════════════════════ */

@@ -37,4 +37,23 @@
   --space-20: calc(var(--space-unit) * 20); /* 80px * density */
   --space-24: calc(var(--space-unit) * 24); /* 96px * density */
   --space-32: calc(var(--space-unit) * 32); /* 128px * density */
+
+  /* ─── GUARDRAIL: the WCAG 2.5.5 minimum target size ──────────────────────
+     44px, and DENSITY MAY ONLY EVER MAKE IT LARGER.
+
+     The obvious spelling is `var(--space-11)`, which is "44px x density" — and
+     that multiplication is the bug. `--space-11` derives from `--space-unit`,
+     which derives from `--brand-density-scale`, so an org that sets a density
+     below 1 silently drops the token under 44px: at 0.9 it yields 39.6px. A
+     floor a brand setting can lower is not a floor. `max()` keeps the density
+     scale in the chain for orgs that want ROOMIER targets while making 2.75rem
+     absolute. Asserted at a sub-1 density in
+     `page-builder/journey-design.test.ts`.
+
+     Also re-declared at `[data-org-brand]` in `org-brand.css` for the R12
+     reason documented on `--space-9` above: a `:root` declaration substitutes
+     `var(--space-11)` ONCE, against :root's density-1 scale, and descendants
+     inherit the already-resolved length — so without the org-scope twin an
+     org's density never reaches it at all. Keep the two in lockstep. */
+  --tap-target-min: max(2.75rem, var(--space-11));
 }

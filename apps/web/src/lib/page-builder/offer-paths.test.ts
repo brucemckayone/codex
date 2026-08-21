@@ -24,6 +24,7 @@ import {
   checkoutUrlForPath,
   deriveOfferPaths,
   deriveOfferPathsForPage,
+  formatCleanPrice,
   resolveOfferTarget,
   resolvePreselectedOffer,
   toWireInterval,
@@ -560,5 +561,216 @@ describe('checkoutUrlForPath', () => {
     expect(
       new URL(href, 'http://acme.lvh.me:3000').searchParams.get('offer')
     ).toBe(`tier:${TIER_ID}`);
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE INVITE SECTION'S NEW COMPOSITIONS — the data half of their contract.
+
+   `tiers`, `table` and `sticky` (WT-7) are the first surfaces on the PUBLIC sell
+   page to render `who` and `bullets`, and `sticky` is the first to pick a single
+   path out of the list and put a price beside a pinned CTA. Each of those is a
+   fresh way for the £12-vs-£15 bug to come back, so each gets a guard here
+   rather than in the component: the component can only render what this module
+   returns, so the invariant is cheaper and stronger to pin at the derivation.
+
+   These EXTEND the suite above and weaken nothing — every existing assertion is
+   untouched.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Every offer shape a real page can be in, including the two empty ones. */
+const ALL_SHAPES: ReadonlyArray<readonly [string, CourseOffer | null]> = [
+  ['full (purchase + subscription + tier)', FULL_OFFER],
+  [
+    'purchase only',
+    offerWith({ paths: ['purchase'], subscription: null, tiers: [] }),
+  ],
+  [
+    'subscription only',
+    offerWith({ paths: ['subscription'], purchase: null, tiers: [] }),
+  ],
+  [
+    'tier only',
+    offerWith({ paths: ['tier'], purchase: null, subscription: null }),
+  ],
+  [
+    'nothing for sale',
+    offerWith({ paths: [], purchase: null, subscription: null, tiers: [] }),
+  ],
+  ['offer read unavailable', null],
+];
+
+describe('the pricing invariant, swept across every offer shape', () => {
+  it.each(
+    ALL_SHAPES
+  )('%s — every priceLabel is a pure function of its own priceCents', (_label, offer) => {
+    // THE structural guard. If any authored string ever reaches `priceLabel`
+    // again, it stops equalling the formatting of the real pence and this
+    // fails — regardless of which composition renders it, and regardless of
+    // whether anyone remembered to write a test for that composition.
+    for (const path of deriveOfferPaths(offer, COURSE, LEGACY_AUTHORED)) {
+      expect(path.priceLabel).toBe(formatCleanPrice(path.priceCents));
+      expect(Number.isInteger(path.priceCents)).toBe(true);
+      expect(path.priceCents).toBeGreaterThan(0);
+    }
+  });
+
+  it.each(
+    ALL_SHAPES
+  )('%s — the cadence label follows the KIND, never authored copy', (_label, offer) => {
+    const expected = {
+      purchase: 'one-off',
+      monthly: 'per month',
+      annual: 'per year',
+    };
+    for (const path of deriveOfferPaths(offer, COURSE, LEGACY_AUTHORED)) {
+      expect(path.cadenceLabel).toBe(
+        path.recurring
+          ? expected[path.billingInterval ?? 'monthly']
+          : expected.purchase
+      );
+      // `recurring` and `billingInterval` must agree, because `sticky` renders
+      // one path's cadence beside its amount with nothing else to cross-check.
+      expect(path.recurring).toBe(path.billingInterval !== undefined);
+    }
+  });
+
+  it.each(
+    ALL_SHAPES
+  )('%s — EXACTLY ONE path is recommended whenever any path exists', (_label, offer) => {
+    const paths = deriveOfferPaths(offer, COURSE);
+    if (paths.length === 0) return;
+    // `tiers` and `table` badge this one column; `sticky` renders THIS path in
+    // its bar via `paths.find(p => p.best)`. Two badged paths is a broken page
+    // and zero would leave the sticky bar falling back silently.
+    expect(paths.filter((p) => p.best)).toHaveLength(1);
+  });
+
+  it('renders NO path — and therefore no price — when there is nothing to sell', () => {
+    // The price-less CTA, at the data layer. This is the live state on four of
+    // the seven published pages carrying an invite section, so it is a real
+    // runtime branch rather than a defensive one.
+    for (const [, offer] of ALL_SHAPES.slice(-2)) {
+      expect(deriveOfferPaths(offer, COURSE, LEGACY_AUTHORED)).toEqual([]);
+    }
+  });
+
+  it('authored copy cannot resurrect a path when the offer read failed', () => {
+    // A creator who has authored four decorations still gets an empty list, so
+    // every composition falls through to its price-less CTA rather than
+    // rendering four cards with no prices in them.
+    const authored: SectionProps = {
+      offers: [
+        { id: 'purchase', name: 'Own it', bullets: ['Yours forever'] },
+        {
+          id: 'subscription-monthly',
+          name: 'Monthly',
+          who: 'Just this course',
+        },
+        { id: 'subscription-annual', name: 'Yearly' },
+        { id: `tier:${TIER_ID}`, name: 'Membership', best: true },
+      ],
+    };
+    expect(deriveOfferPaths(null, COURSE, authored)).toEqual([]);
+  });
+});
+
+describe('`who` and `bullets` — decoration only, and now rendered', () => {
+  it('overlays authored `who` and `bullets` without touching a price field', () => {
+    const authored: SectionProps = {
+      offers: [
+        {
+          id: 'purchase',
+          who: 'For the archivists',
+          bullets: ['One payment', 'No renewal'],
+          // Every price-shaped key the old authored shape had, all ignored.
+          priceLabel: '£3',
+          price: '£3 once',
+          per: 'once',
+          cadenceLabel: 'per fortnight',
+          priceCents: 300,
+        },
+      ],
+    } as unknown as SectionProps;
+
+    const purchase = deriveOfferPaths(FULL_OFFER, COURSE, authored)[0];
+
+    expect(purchase.who).toBe('For the archivists');
+    expect(purchase.bullets).toEqual(['One payment', 'No renewal']);
+    expect(purchase.priceCents).toBe(2499);
+    expect(purchase.priceLabel).toBe('£24.99');
+    expect(purchase.cadenceLabel).toBe('one-off');
+  });
+
+  it('keeps the derived bullets when the authored list is EMPTY, and replaces them when it is not', () => {
+    // Pinned because `tiers` and `table` are the first surfaces to render this
+    // list, so which of the two wins is now visible to a buyer. An empty
+    // repeater must read as "I have not authored these" rather than as "show
+    // nothing" — otherwise adding then clearing one bullet blanks the column.
+    const empty = deriveOfferPaths(FULL_OFFER, COURSE, {
+      offers: [{ id: 'purchase', bullets: [] }],
+    } as unknown as SectionProps)[0];
+    expect(empty.bullets).toEqual([
+      'Yours forever',
+      'No subscription',
+      'Lifetime access',
+    ]);
+
+    const filled = deriveOfferPaths(FULL_OFFER, COURSE, {
+      offers: [{ id: 'purchase', bullets: ['Only this'] }],
+    } as unknown as SectionProps)[0];
+    expect(filled.bullets).toEqual(['Only this']);
+  });
+
+  it('falls back to the derived `who` when the authored one is blank', () => {
+    // `fieldString` trims and rejects empty, so a creator who clears the field
+    // gets the derived micro-label back rather than an empty row in the table.
+    const blank = deriveOfferPaths(FULL_OFFER, COURSE, {
+      offers: [{ id: 'purchase', who: '   ' }],
+    } as unknown as SectionProps)[0];
+    expect(blank.who).toBe('Prefer to own, not subscribe');
+  });
+
+  it('drops `who` and `bullets` authored against a path the offer does not contain', () => {
+    const paths = deriveOfferPaths(
+      offerWith({ paths: ['purchase'], subscription: null, tiers: [] }),
+      COURSE,
+      {
+        offers: [
+          {
+            id: 'subscription-annual',
+            who: 'Ghost audience',
+            bullets: ['Ghost benefit'],
+          },
+        ],
+      } as unknown as SectionProps
+    );
+    expect(paths).toHaveLength(1);
+    expect(JSON.stringify(paths)).not.toContain('Ghost');
+  });
+
+  it('gives every path a bullets ARRAY, so a composition can iterate unguarded', () => {
+    for (const [, offer] of ALL_SHAPES) {
+      for (const path of deriveOfferPaths(offer, COURSE, LEGACY_AUTHORED)) {
+        expect(Array.isArray(path.bullets)).toBe(true);
+        for (const bullet of path.bullets) expect(typeof bullet).toBe('string');
+      }
+    }
+  });
+});
+
+describe('the sticky bar picks a path that always exists', () => {
+  it.each(
+    ALL_SHAPES
+  )('%s — `find(best) ?? paths[0]` is defined for every non-empty list', (_label, offer) => {
+    const paths = deriveOfferPaths(offer, COURSE);
+    if (paths.length === 0) return;
+    const chosen = paths.find((p) => p.best) ?? paths[0];
+    expect(chosen).toBeDefined();
+    expect(chosen.priceLabel).toBe(formatCleanPrice(chosen.priceCents));
+    // And it deep-links with its OWN id, so the bar's choice survives the nav.
+    expect(checkoutUrlForPath('/checkout', chosen.id)).toContain(
+      `offer=${encodeURIComponent(chosen.id)}`
+    );
   });
 });

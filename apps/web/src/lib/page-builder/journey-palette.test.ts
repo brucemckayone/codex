@@ -43,7 +43,37 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(join(HERE, rel), 'utf8');
 
 const PALETTE = read('journey-palette.css');
+
+/**
+ * The canvas stylesheet is now an INDEX of per-type partials (F-B1 split the
+ * 575-line original so the seven component work packages each have a disjoint
+ * file to port from — contract A12/A16). Both views are needed:
+ *
+ *   `SECTIONS_CSS`   the index alone, for the `@import`-ordering assertions;
+ *   `SECTIONS_ALL`   index + every partial, for "the ladder is not restated
+ *                    here". Asserting that against the index alone would pass
+ *                    trivially — the index declares nothing — which is exactly
+ *                    the kind of assertion a refactor turns vacuous without
+ *                    turning red.
+ */
 const SECTIONS_CSS = read('render-edit/journey-sections.css');
+const SECTION_PARTIALS = [
+  '_base',
+  '_hero',
+  '_prose',
+  '_video',
+  '_descent',
+  '_proof',
+  '_guide',
+  '_faq',
+  '_invite',
+] as const;
+const SECTIONS_ALL = [
+  SECTIONS_CSS,
+  ...SECTION_PARTIALS.map((name) =>
+    read(`render-edit/journey-sections/${name}.css`)
+  ),
+].join('\n');
 
 /** Comment-free view, for anything that locates a SELECTOR by substring. */
 const PALETTE_CODE = PALETTE.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -87,32 +117,55 @@ describe('journey palette — one derivation, three surfaces', () => {
     expect(compound).not.toMatch(/[\s>+~]/);
   });
 
-  it('declares the ink ladder in exactly one place — one declaration per theme pole', () => {
+  it('declares the ladder INPUT in exactly one place — one declaration per theme pole', () => {
     // The ladder's root input. Exactly TWO declarations, both in this file: the
     // light pole and the dark pole (Codex-a1tz6). A third would mean the
     // divergence this file exists to prevent has come back; a single one would
     // mean the dark pole was dropped and journeys stopped honouring dark mode.
-    expect(declarationsOf(PALETTE, '--jp-ink')).toHaveLength(2);
-    expect(declarationsOf(SECTIONS_CSS, '--jp-ink')).toEqual([]);
-    expect(declarationsOf(SECTIONS_CSS, '--jp-heading')).toEqual([]);
+    //
+    // The INPUT is now `--jp-pole-a`, not `--jp-ink`. F-B1's two-pole refactor
+    // made `--jp-ink` a POINTER at one of two poles so `surface: invert` can
+    // re-point it without a custom-property cycle (research §2.4), and the dark
+    // theme therefore re-points the input rather than the pointer. `--jp-ink`
+    // is consequently declared ONCE here.
+    expect(declarationsOf(PALETTE, '--jp-pole-a')).toHaveLength(2);
+    expect(declarationsOf(PALETTE, '--jp-ink')).toEqual(['var(--jp-pole-a)']);
+    expect(declarationsOf(SECTIONS_ALL, '--jp-pole-a')).toEqual([]);
+    expect(declarationsOf(SECTIONS_ALL, '--jp-ink')).toEqual([]);
+    expect(declarationsOf(SECTIONS_ALL, '--jp-heading')).toEqual([]);
   });
 
-  it('derives the ink from the brand BACKGROUND, not the brand primary, in BOTH themes', () => {
-    const inks = declarationsOf(PALETTE, '--jp-ink');
-    expect(inks).toHaveLength(2);
-    for (const ink of inks) {
-      expect(ink).toContain('--brand-bg');
-      expect(ink).not.toContain('--color-brand-primary');
+  it('derives the ladder input from the brand BACKGROUND, not the brand primary, in BOTH themes', () => {
+    const poles = declarationsOf(PALETTE, '--jp-pole-a');
+    expect(poles).toHaveLength(2);
+    for (const pole of poles) {
+      expect(pole).toContain('--brand-bg');
+      expect(pole).not.toContain('--color-brand-primary');
       // `--brand-color` is the org PRIMARY. Anchoring the ink on it is the exact
       // bug this file was created to remove, and the one the member dashboard
       // still carried (Codex-4i8x5).
-      expect(ink).not.toContain('--brand-color');
+      expect(pole).not.toContain('--brand-color');
     }
-    const [light, dark] = inks;
+    const [light, dark] = poles;
     // The light pole reads the light background only; the dark pole prefers the
     // org's dark companion and falls back to it.
     expect(light).not.toContain('--brand-bg-dark');
     expect(dark).toContain('--brand-bg-dark');
+  });
+
+  it('derives pole B from pole A alone, which is what makes invert cycle-free', () => {
+    // `[data-jp-surface='invert']` re-points `--jp-ink` to pole B. If pole B
+    // read `--jp-ink` or `--jp-heading` it would be defined in terms of
+    // something the invert rule redefines, and both would go invalid at
+    // computed-value time — the same class of failure as the
+    // `--color-background` cycle this file already documents.
+    const [poleB] = declarationsOf(PALETTE, '--jp-pole-b');
+    expect(poleB).toContain('var(--jp-pole-a)');
+    expect(poleB).not.toContain('--jp-ink');
+    expect(poleB).not.toContain('--jp-heading');
+    // Same auto-contrast step function as the heading, so pole B is genuinely
+    // the ink's contrast partner rather than a second, drifting formula.
+    expect(poleB).toMatch(/clamp\(0\.05, \(0\.62 - l\) \* 100, 0\.96\)/);
   });
 
   it('switches the ink on theme using BOTH selector forms the app emits', () => {
@@ -170,12 +223,43 @@ describe('journey palette — one derivation, three surfaces', () => {
 
   it('has the builder CSS consume the shared palette instead of restating it', () => {
     expect(SECTIONS_CSS).toContain("@import '../journey-palette.css'");
-    // `@import` is only valid before other rules; a rule appearing first would
-    // make the browser drop the import and silently un-style the canvas.
-    const importAt = SECTIONS_CSS.indexOf('@import');
-    const firstRuleAt = SECTIONS_CSS.search(/^\.[a-z]/m);
-    expect(importAt).toBeGreaterThanOrEqual(0);
-    expect(importAt).toBeLessThan(firstRuleAt);
+
+    // `@import` is only valid BEFORE any other rule; a rule appearing first
+    // makes the browser drop every later import and silently un-style the
+    // canvas. Since the split this file is an index of imports and declares no
+    // rules at all, so the invariant is stated directly: nothing but `@import`.
+    const code = SECTIONS_CSS.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    const statements = code
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement.startsWith('@import '), statement).toBe(true);
+    }
+
+    // The palette must come FIRST: the axis rules and every partial read the
+    // `--jp-*` ladder it declares.
+    expect(statements[0]).toBe("@import '../journey-palette.css'");
+
+    // Every partial is imported, in the order its declarations were in before
+    // the split — import order IS the cascade order.
+    const imported = statements
+      .map((s) => s.match(/journey-sections\/(_[a-z]+)\.css/)?.[1])
+      .filter((name): name is string => Boolean(name));
+    expect(imported).toEqual([...SECTION_PARTIALS]);
+  });
+
+  it('reaches the axis substrate from the canvas tree as well as the public one', () => {
+    // `journey-design.css` has to be present on BOTH section trees. The public
+    // page gets it from `render/SectionRenderer.svelte`, the component that
+    // emits `data-jp-*`; the canvas gets it here. Without this line F-B2's
+    // design panel would have a control with no CSS behind it in the one place
+    // a creator is looking while they use it.
+    expect(SECTIONS_CSS).toContain("@import '../journey-design.css'");
+    const renderer = read('render/SectionRenderer.svelte');
+    expect(renderer).toContain("import '../journey-design.css'");
+    expect(renderer).toContain("import '../journey-sections-shared.css'");
   });
 });
 
@@ -185,24 +269,113 @@ describe('journey palette — cycle safety', () => {
     // `--color-background: var(--jp-ink)` in the SAME rule is a custom-property
     // cycle: both become invalid at computed-value time and the page paints
     // nothing. So the base class must NOT declare it, and the modifier must.
+    // `.journey-palette--page` now carries a `.jp-sec` twin so the semantic
+    // surface tokens re-derive per section, so the slice marker is the selector
+    // START rather than `… {`.
+    const PAGE_AT = PALETTE_CODE.indexOf('.journey-palette--page');
+    expect(PAGE_AT).toBeGreaterThan(0);
     const baseBlock = PALETTE_CODE.slice(
       PALETTE_CODE.indexOf(BASE_SELECTOR),
-      PALETTE_CODE.indexOf('.journey-palette--page {')
+      PAGE_AT
     );
-    const pageBlock = PALETTE_CODE.slice(
-      PALETTE_CODE.indexOf('.journey-palette--page {')
-    );
+    const pageBlock = PALETTE_CODE.slice(PAGE_AT);
 
-    // Two `--jp-ink` declarations live here: the light pole and the dark pole.
-    // Both are ABOVE `.journey-palette--page`, which is what keeps the ink and
-    // its re-point on separate elements.
-    expect(declarationsOf(baseBlock, '--jp-ink')).toHaveLength(2);
+    // The ladder input is declared here twice — the light pole and the dark pole
+    // — and `--jp-ink` once, pointing at whichever pole won. All three are ABOVE
+    // `.journey-palette--page`, which is what keeps the ink and its re-point on
+    // separate elements.
+    expect(declarationsOf(baseBlock, '--jp-pole-a')).toHaveLength(2);
+    expect(declarationsOf(baseBlock, '--jp-ink')).toHaveLength(1);
     expect(declarationsOf(baseBlock, '--color-background')).toEqual([]);
 
     expect(declarationsOf(pageBlock, '--color-background')).toEqual([
       'var(--jp-ink)',
     ]);
     expect(declarationsOf(pageBlock, '--jp-ink')).toEqual([]);
+    expect(declarationsOf(pageBlock, '--jp-pole-a')).toEqual([]);
+  });
+});
+
+describe('the ladder re-derives PER SECTION, not once per page', () => {
+  /**
+   * The correction that makes the whole `surface` axis work, and the one a future
+   * tidy-up is most likely to undo by "deduplicating" a selector list.
+   *
+   * MEASURED, in Chrome, on the golden page: with the ladder declared only on the
+   * palette root, an inverted section rendered its heading at **1.00:1** — ink
+   * `#010000` on a `#010000` background, an invisible section. After applying the
+   * same block to `.jp-sec` as well: **18.72:1** light / 18.56:1 dark, and
+   * identical at nesting depth 2.
+   *
+   * WHY. A custom property's `var()` is substituted at computed-value time ON THE
+   * ELEMENT WHERE IT IS DECLARED, and only the result inherits. Declared on the
+   * root, `--jp-heading` bakes in pole A and every descendant inherits that
+   * literal — so a section re-pointing its own `--jp-ink` changes nothing
+   * downstream. Research §2.4 asserts the opposite ("the entire ladder re-derives
+   * correctly inside an inverted section"); it is wrong, and the failure is total
+   * rather than subtle.
+   */
+  const derivedRungs = [
+    '--jp-heading',
+    '--jp-ink-2',
+    '--jp-ink-3',
+    '--jp-ink-4',
+    '--jp-text',
+    '--jp-dim',
+    '--jp-faint',
+    '--jp-line-subtle',
+    '--jp-line',
+    '--jp-line-strong',
+    '--jp-line-hover',
+    '--jp-ember-text',
+  ];
+
+  /** The rule block a property is declared in, by its selector prelude. */
+  const selectorDeclaring = (prop: string): string => {
+    const code = PALETTE_CODE;
+    const at = code.search(new RegExp(`[;{\\s]${prop}\\s*:`));
+    expect(at, `${prop} is not declared`).toBeGreaterThan(0);
+    const open = code.lastIndexOf('{', at);
+    const prev = code.lastIndexOf('}', open);
+    return code.slice(prev + 1, open).trim();
+  };
+
+  it('declares every derived rung on the section wrapper as well as the page', () => {
+    for (const rung of derivedRungs) {
+      const selector = selectorDeclaring(rung);
+      expect(selector, `${rung} must also be declared on .jp-sec`).toContain(
+        '.jp-sec'
+      );
+      // …and still on the palette root, or a page-level consumer outside any
+      // section (the atmosphere, the floating CTA) loses the ladder entirely.
+      expect(selector).toContain(BASE_SELECTOR.slice(0, -2).trim());
+    }
+  });
+
+  it('keeps the INPUT on the palette root only, so a section can re-point it', () => {
+    // `--jp-ink` and the two poles must NOT be re-declared on `.jp-sec`: the
+    // `surface` axis's whole mechanism is a section declaring its own `--jp-ink`
+    // at (0,1,0), and a palette rule at (0,2,0) would silently beat it.
+    for (const input of ['--jp-pole-a', '--jp-pole-b', '--jp-ink']) {
+      expect(selectorDeclaring(input), input).not.toContain('.jp-sec');
+    }
+  });
+
+  it('re-derives the SEMANTIC tokens per section too, or the axis is inert', () => {
+    // Contract A11: `--jp-*` appears 0x in `render/sections/*` — the public
+    // sections speak `--color-*`. Without the section twin, `surface: invert`
+    // would flip the `--jp-*` ladder and leave every section reading the PAGE's
+    // colours, i.e. the axis would do nothing in the one tree it exists for.
+    for (const semantic of [
+      '--color-heading',
+      '--color-text',
+      '--color-text-muted',
+      '--color-background',
+      '--color-surface',
+      '--color-border',
+    ]) {
+      expect(selectorDeclaring(semantic), semantic).toContain('.jp-sec');
+    }
   });
 });
 

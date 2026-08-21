@@ -1,0 +1,256 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   CANVAS · HERO
+
+   A PARTIAL of the canvas stylesheet. Split out of the 575-line
+   `../journey-sections.css` unchanged — same declarations, same order, no
+   reformatting. Imported by that file, which stays the single entry point
+   (`render-edit/SectionRenderer.svelte`).
+
+   WHY IT WAS SPLIT. Contract A12: this tree holds a WORKING implementation of
+   every one of the 37 declared variants, and the public components hold none of
+   them. So the section-flexibility programme is "port 37 layouts", not "invent
+   37 layouts", and each of the seven component work packages ports one type.
+   One 575-line file would have serialised all seven on the same merge conflict;
+   nine disjoint partials let them run in parallel. See
+   `docs/design/journey-sections/02-axis-contract.md` A16.
+
+   DRAINED, NOT KEPT. As each work package ports its type into the unified public
+   component, its partial empties out. Consolidation deletes the empties along
+   with `render-edit/sections/*`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════ HERO ═══════════════════════════════════════════════════
+   Breathing brand-glow core, rising motes, vignette, kinetic serif headline with
+   italic accent, lede + emphasis line, primary + quiet CTA, trust dot, scroll cue.
+   Compositions (post-0085 ids): stage (default) · split-media.
+   `--left` and `--minimal` below are RETIRED ids kept only so an unmigrated row
+   still paints; both are now axis values (`align`, and density+accent+motion).
+   This partial drains at consolidation, when the canvas is repointed at
+   `render/sections/HeroSection.svelte` (contract A12/A1).
+   Background treatment via [data-bg]: ember · blood · still. */
+.jp-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  min-height: clamp(340px, 52cqw, 580px);
+  padding: clamp(3rem, 9cqw, 6rem) clamp(1.4rem, 6cqw, 3.6rem) clamp(3rem, 7cqw, 4.5rem);
+}
+.jp-hero__atmos { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.jp-hero__glow {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  width: min(92cqw, 820px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  opacity: 0.7;
+  filter: blur(20px);
+  background: radial-gradient(
+    circle at 50% 46%,
+    color-mix(in oklab, var(--jp-ember) 28%, transparent),
+    color-mix(in oklab, var(--jp-blood) 15%, transparent) 46%,
+    transparent 70%
+  );
+  animation: jp-breathe 11s ease-in-out infinite;
+}
+.jp-hero__vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+      125% 95% at 50% 42%,
+      transparent 55%,
+      color-mix(in oklab, var(--jp-ink) 58%, transparent) 100%
+    ),
+    linear-gradient(to bottom, transparent 70%, color-mix(in oklab, var(--jp-ink) 88%, transparent) 100%);
+}
+.jp-hero__motes { position: absolute; inset: 0; overflow: hidden; }
+.jp-hero__mote {
+  position: absolute;
+  bottom: -10px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--jp-ember) 92%, white),
+    color-mix(in oklab, var(--jp-ember) 20%, transparent) 70%
+  );
+  box-shadow: 0 0 6px color-mix(in oklab, var(--jp-ember) 55%, transparent);
+  animation: jp-rise linear infinite;
+}
+.jp-hero__mote:nth-child(1) { left: 7%; --dx: 16px; --o: 0.4; animation-duration: 20s; animation-delay: 0s; }
+.jp-hero__mote:nth-child(2) { left: 16%; --dx: -14px; --o: 0.34; animation-duration: 25s; animation-delay: 3s; }
+.jp-hero__mote:nth-child(3) { left: 25%; --dx: 20px; --o: 0.48; animation-duration: 16s; animation-delay: 6s; }
+.jp-hero__mote:nth-child(4) { left: 34%; --dx: -10px; --o: 0.3; animation-duration: 28s; animation-delay: 1s; }
+.jp-hero__mote:nth-child(5) { left: 43%; --dx: 12px; --o: 0.52; animation-duration: 21s; animation-delay: 9s; }
+.jp-hero__mote:nth-child(6) { left: 51%; --dx: -19px; --o: 0.38; animation-duration: 26s; animation-delay: 4s; }
+.jp-hero__mote:nth-child(7) { left: 60%; --dx: 15px; --o: 0.46; animation-duration: 18s; animation-delay: 11s; }
+.jp-hero__mote:nth-child(8) { left: 68%; --dx: -11px; --o: 0.34; animation-duration: 23s; animation-delay: 2s; }
+.jp-hero__mote:nth-child(9) { left: 77%; --dx: 18px; --o: 0.5; animation-duration: 17s; animation-delay: 7s; }
+.jp-hero__mote:nth-child(10) { left: 85%; --dx: -15px; --o: 0.28; animation-duration: 27s; animation-delay: 5s; }
+.jp-hero__mote:nth-child(11) { left: 92%; --dx: 10px; --o: 0.44; animation-duration: 20s; animation-delay: 10s; }
+.jp-hero__mote:nth-child(12) { left: 96%; --dx: -16px; --o: 0.36; animation-duration: 22s; animation-delay: 13s; }
+.jp-hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 40rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1rem, 2.4cqw, 1.7rem);
+}
+.jp-hero__headline {
+  max-width: 15ch;
+  margin-inline: auto;
+  font-family: var(--jp-serif);
+  color: var(--jp-heading);
+  font-weight: var(--font-normal);
+  font-optical-sizing: auto;
+  font-size: clamp(2rem, 8.4cqw, 4.7rem);
+  line-height: 1.04;
+  letter-spacing: var(--tracking-tight, -0.015em);
+  text-wrap: balance;
+}
+.jp-hero__soften {
+  font-style: italic;
+  color: var(--jp-rose);
+  text-shadow: 0 0 22px color-mix(in oklab, var(--jp-rose) 42%, transparent);
+  animation: jp-soften 7s ease-in-out infinite;
+}
+.jp-hero__lede {
+  max-width: 42ch;
+  margin-inline: auto;
+  color: var(--jp-dim);
+  font-size: clamp(0.95rem, 1.7cqw, 1.18rem);
+  line-height: 1.62;
+}
+.jp-hero__lede-accent { display: block; margin-top: 0.55rem; color: var(--jp-heading); letter-spacing: 0.01em; }
+.jp-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem 1.5rem;
+  margin-top: 0.2rem;
+}
+.jp-hero__quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--jp-faint);
+  font-size: clamp(0.85rem, 1.4cqw, 0.95rem);
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.jp-hero__trust {
+  display: inline-flex;
+  align-items: center;
+  color: var(--jp-faint);
+  font-size: clamp(0.72rem, 1.2cqw, 0.82rem);
+  letter-spacing: 0.02em;
+}
+.jp-hero__trust-dot {
+  width: 6px;
+  height: 6px;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  background: var(--jp-ember);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--jp-ember) 70%, transparent);
+  animation: jp-heartbeat 4.5s ease-in-out infinite;
+}
+.jp-hero__cue {
+  position: absolute;
+  bottom: clamp(0.8rem, 2.4cqw, 1.6rem);
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: max-content;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--jp-faint);
+}
+.jp-hero__cue-line {
+  position: relative;
+  width: 1px;
+  height: 40px;
+  overflow: hidden;
+  background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--jp-heading) 22%, transparent) 45%, transparent);
+}
+.jp-hero__cue-spark {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 3px;
+  height: 10px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: linear-gradient(var(--jp-ember), transparent);
+  box-shadow: 0 0 9px color-mix(in oklab, var(--jp-ember) 80%, transparent);
+  animation: jp-spark 2.8s var(--jp-ease) infinite;
+}
+.jp-hero[data-bg='blood'] .jp-hero__glow {
+  background: radial-gradient(
+    circle at 50% 46%,
+    color-mix(in oklab, var(--jp-blood) 40%, transparent),
+    color-mix(in oklab, var(--jp-blood-deep) 22%, transparent) 48%,
+    transparent 72%
+  );
+}
+.jp-hero[data-bg='still'] .jp-hero__glow { opacity: 0.32; filter: blur(30px); animation: none; }
+.jp-hero[data-bg='still'] .jp-hero__motes { display: none; }
+/* hero variants */
+.jp-hero--left { text-align: left; justify-items: start; }
+.jp-hero--left .jp-hero__inner { align-items: flex-start; max-width: 34rem; margin-right: auto; }
+.jp-hero--left .jp-hero__headline,
+.jp-hero--left .jp-hero__lede { margin-inline: 0; }
+.jp-hero--left .jp-hero__glow { left: 82%; }
+.jp-hero--split-media { text-align: left; justify-items: stretch; }
+.jp-hero--split-media .jp-hero__inner {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  align-items: center;
+  gap: clamp(1.5rem, 4cqw, 3rem);
+  max-width: none;
+}
+.jp-hero--split-media .jp-hero__col { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(1rem, 2.4cqw, 1.7rem); }
+.jp-hero--split-media .jp-hero__headline,
+.jp-hero--split-media .jp-hero__lede { margin-inline: 0; text-align: left; }
+.jp-hero--split-media .jp-hero__media {
+  aspect-ratio: 4 / 5;
+  border-radius: var(--radius-xl);
+  border: var(--border-width) solid color-mix(in oklab, var(--jp-ember) 18%, transparent);
+  background: radial-gradient(120% 120% at 40% 15%, color-mix(in oklab, var(--jp-blood) 44%, var(--jp-ink-2)), var(--jp-ink));
+  display: grid;
+  place-items: center;
+  box-shadow: 0 24px 60px -28px black;
+}
+.jp-hero--split-media .jp-hero__media .jp-play-dot {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--jp-ember) 92%, white);
+  color: var(--jp-on-ember);
+  font-size: 1.1rem;
+}
+.jp-hero--split-media .jp-hero__glow { left: 78%; top: 50%; }
+@container (max-width: 420px) {
+  .jp-hero--split-media .jp-hero__inner { grid-template-columns: 1fr; }
+  .jp-hero--split-media .jp-hero__media { order: -1; aspect-ratio: 16 / 10; }
+}
+.jp-hero--minimal { min-height: clamp(240px, 34cqw, 380px); }
+.jp-hero--minimal .jp-hero__glow { opacity: 0.32; }
+.jp-hero--minimal .jp-hero__motes,
+.jp-hero--minimal .jp-hero__cue { display: none; }
+.jp-hero--minimal .jp-hero__headline { font-size: clamp(1.8rem, 6.6cqw, 3.6rem); }

@@ -114,6 +114,11 @@
      density 1.5. */
   --app-sidebar-width: var(--space-16);
 
+  /* Same reason, and the same lockstep obligation as `spacing.css`: the WCAG
+     target floor must pick up the ORG's density here, while `max()` stops a
+     sub-1 density from lowering it below 44px. */
+  --tap-target-min: max(2.75rem, var(--space-11));
+
   /* ─── TYPOGRAPHY ────────────────────────────────────────────────────── */
   --font-body: var(--brand-font-body, var(--font-sans));
   --font-heading: var(--brand-font-heading, var(--font-sans));

@@ -5,9 +5,17 @@ import {
   defaultSectionOrder,
   findSectionDefinition,
   firstSectionMatch,
+  LEGACY_SECTION_VARIANTS,
+  legacySectionVariant,
   listSectionDefinitions,
+  migrateSectionVariant,
+  migrateSectionVariants,
+  resolveDesign,
   resolveVariant,
   SECTION_CATALOG,
+  SECTION_DESIGN_AXES,
+  SECTION_DESIGN_DEFAULTS,
+  SECTION_DESIGN_VALUES,
   sectionMatchesQuery,
   variantsForType,
 } from './section-catalog';
@@ -118,11 +126,11 @@ describe('variants', () => {
   });
 
   it('resolveVariant falls back to the default for an unset/unknown variant', () => {
-    expect(resolveVariant({ type: 'hero', variant: undefined })).toBe(
-      'centered'
+    expect(resolveVariant({ type: 'hero', variant: undefined })).toBe('stage');
+    expect(resolveVariant({ type: 'hero', variant: 'bogus' })).toBe('stage');
+    expect(resolveVariant({ type: 'hero', variant: 'split-media' })).toBe(
+      'split-media'
     );
-    expect(resolveVariant({ type: 'hero', variant: 'bogus' })).toBe('centered');
-    expect(resolveVariant({ type: 'hero', variant: 'split' })).toBe('split');
   });
 
   it('createSection seeds id, default variant, name and a cloned props bag', () => {
@@ -161,7 +169,7 @@ describe('createDefaultSections', () => {
         (s) => typeof s.variant === 'string' && s.variant.length > 0
       )
     ).toBe(true);
-    expect(sections[0].variant).toBe('centered');
+    expect(sections[0].variant).toBe('stage');
     expect(sections[0].props.headline).toBeDefined();
   });
 
@@ -175,5 +183,382 @@ describe('createDefaultSections', () => {
   it('mints unique ids by default (crypto.randomUUID)', () => {
     const ids = createDefaultSections().map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+// ── Design axes (docs/design/journey-sections/02-axis-contract.md) ───────────
+
+describe('SECTION_DESIGN_* vocabulary', () => {
+  it('declares exactly the nine axes, and a default + value list for each', () => {
+    expect([...SECTION_DESIGN_AXES]).toEqual([
+      'width',
+      'density',
+      'surface',
+      'edge',
+      'align',
+      'type',
+      'accent',
+      'motion',
+      'media',
+    ]);
+    for (const axis of SECTION_DESIGN_AXES) {
+      expect(SECTION_DESIGN_VALUES[axis].length).toBeGreaterThan(1);
+      expect(SECTION_DESIGN_DEFAULTS[axis]).toBeDefined();
+    }
+  });
+
+  it('every axis DEFAULT is one of that axis’ legal values', () => {
+    // Guards the failure that would be invisible otherwise: a typo'd default
+    // emits an attribute matching no CSS rule on EVERY section of every page.
+    for (const axis of SECTION_DESIGN_AXES) {
+      expect(SECTION_DESIGN_VALUES[axis]).toContain(
+        SECTION_DESIGN_DEFAULTS[axis]
+      );
+    }
+  });
+
+  it('lists no duplicate values within an axis', () => {
+    for (const axis of SECTION_DESIGN_AXES) {
+      const values = SECTION_DESIGN_VALUES[axis];
+      expect(new Set(values).size).toBe(values.length);
+    }
+  });
+});
+
+describe('resolveDesign', () => {
+  it('is TOTAL — every axis is present even with nothing set anywhere', () => {
+    // The renderer emits one attribute per axis; a missing value would emit an
+    // EMPTY attribute that matches no rule.
+    const design = resolveDesign({}, null);
+    expect(Object.keys(design).sort()).toEqual([...SECTION_DESIGN_AXES].sort());
+    expect(design).toEqual(SECTION_DESIGN_DEFAULTS);
+  });
+
+  it('falls back to the axis defaults for a section with no design bag', () => {
+    expect(resolveDesign({ design: undefined }, {})).toEqual(
+      SECTION_DESIGN_DEFAULTS
+    );
+    expect(resolveDesign(null, null)).toEqual(SECTION_DESIGN_DEFAULTS);
+  });
+
+  it('applies the PAGE-level look to every axis the page names', () => {
+    const design = resolveDesign(
+      {},
+      { design: { width: 'narrow', motion: 'drift', accent: 'glow' } }
+    );
+    expect(design.width).toBe('narrow');
+    expect(design.motion).toBe('drift');
+    expect(design.accent).toBe('glow');
+    // Axes the page said nothing about still take the default.
+    expect(design.density).toBe(SECTION_DESIGN_DEFAULTS.density);
+  });
+
+  it('lets a section override the page PER AXIS, not all-or-nothing', () => {
+    // The modelling that matters: a `vast` hero above a `compact` FAQ is good
+    // design, so a section stating one axis must not discard the page's others.
+    const design = resolveDesign(
+      { design: { density: 'vast' } },
+      { design: { width: 'wide', density: 'compact', motion: 'none' } }
+    );
+    expect(design.density).toBe('vast');
+    expect(design.width).toBe('wide');
+    expect(design.motion).toBe('none');
+  });
+
+  it('drops an UNKNOWN axis value back to the default instead of passing it through', () => {
+    // Forward-compatibility, exactly as an unknown `variant` degrades: a future
+    // client's new value must render as the default, never reach the DOM as an
+    // attribute that matches no CSS rule.
+    const design = resolveDesign({
+      design: {
+        // @ts-expect-error — deliberately not a declared value
+        width: 'ultra-wide',
+        // @ts-expect-error — deliberately not a declared value
+        motion: 'explode',
+      },
+    });
+    expect(design.width).toBe(SECTION_DESIGN_DEFAULTS.width);
+    expect(design.motion).toBe(SECTION_DESIGN_DEFAULTS.motion);
+  });
+
+  it('skips a garbage section value and still honours the page for that axis', () => {
+    const design = resolveDesign(
+      // @ts-expect-error — jsonb round-trips arbitrary shapes
+      { design: { width: 42, align: null, surface: {} } },
+      { design: { width: 'full', align: 'start', surface: 'panel' } }
+    );
+    expect(design.width).toBe('full');
+    expect(design.align).toBe('start');
+    expect(design.surface).toBe('panel');
+  });
+
+  it('accepts every declared value of every axis unchanged', () => {
+    for (const axis of SECTION_DESIGN_AXES) {
+      for (const value of SECTION_DESIGN_VALUES[axis]) {
+        const design = resolveDesign({ design: { [axis]: value } });
+        expect(design[axis]).toBe(value);
+      }
+    }
+  });
+});
+
+// ── The variant collapse (research §3 · guard bead Codex-qcgo3) ──────────────
+//
+// Every assertion here is a PROPERTY, never a count. "37 variants" was true for
+// exactly as long as it took to write this file down; a total is a test that
+// fails on the next legitimate change and teaches nothing when it does.
+
+describe('composition set', () => {
+  it('declares a unique, fully described variant id per type', () => {
+    for (const def of SECTION_CATALOG) {
+      const ids = def.variants.map((v) => v.id);
+      expect(new Set(ids).size, `duplicate variant id in ${def.type}`).toBe(
+        ids.length
+      );
+      for (const variant of def.variants) {
+        expect(variant.id, `${def.type} variant id`).toMatch(
+          /^[a-z][a-z0-9-]*$/
+        );
+        expect(
+          variant.label.length,
+          `${def.type}/${variant.id} label`
+        ).toBeGreaterThan(0);
+        expect(
+          variant.hint.length,
+          `${def.type}/${variant.id} hint`
+        ).toBeGreaterThan(0);
+        expect(
+          variant.thumb.length,
+          `${def.type}/${variant.id} thumb`
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("every type's defaultVariant names a variant that type declares", () => {
+    for (const def of SECTION_CATALOG) {
+      expect(
+        def.variants.some((v) => v.id === def.defaultVariant),
+        `${def.type} defaultVariant "${def.defaultVariant}" is not declared`
+      ).toBe(true);
+    }
+  });
+});
+
+describe('LEGACY_SECTION_VARIANTS', () => {
+  it('only maps ids that are genuinely retired, onto ids that exist', () => {
+    for (const [type, retired] of Object.entries(LEGACY_SECTION_VARIANTS)) {
+      const def = findSectionDefinition(type);
+      expect(def, `forward map for unknown type ${type}`).not.toBeNull();
+      const declared = new Set((def?.variants ?? []).map((v) => v.id));
+      for (const [from, to] of Object.entries(retired)) {
+        // A retired id must NOT also be declared — otherwise the map is dead
+        // code that `resolveVariant` never reaches, and the migration would
+        // rewrite a variant that is still current.
+        expect(
+          declared.has(from),
+          `${type}/${from} is retired AND declared`
+        ).toBe(false);
+        expect(
+          declared.has(to.variant),
+          `${type}/${from} maps to undeclared "${to.variant}"`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('encodes only LEGAL axis values, so a migrated section never gains a dead attribute', () => {
+    for (const [type, retired] of Object.entries(LEGACY_SECTION_VARIANTS)) {
+      for (const [from, to] of Object.entries(retired)) {
+        for (const [axis, value] of Object.entries(to.design)) {
+          expect(
+            SECTION_DESIGN_AXES as readonly string[],
+            `${type}/${from} names unknown axis ${axis}`
+          ).toContain(axis);
+          expect(
+            SECTION_DESIGN_VALUES[
+              axis as keyof typeof SECTION_DESIGN_VALUES
+            ] as readonly string[],
+            `${type}/${from} sets illegal ${axis}: ${value}`
+          ).toContain(value);
+        }
+      }
+    }
+  });
+
+  it('legacySectionVariant is total — unknown type, unknown id, and nullish all yield null', () => {
+    expect(legacySectionVariant('hero', 'centered')).not.toBeNull();
+    expect(legacySectionVariant('hero', 'stage')).toBeNull();
+    expect(legacySectionVariant('retreat-x', 'centered')).toBeNull();
+    expect(legacySectionVariant(undefined, 'centered')).toBeNull();
+    expect(legacySectionVariant('hero', undefined)).toBeNull();
+    expect(legacySectionVariant('hero', null)).toBeNull();
+  });
+
+  it('resolveVariant carries every retired id to its replacement COMPOSITION', () => {
+    for (const [type, retired] of Object.entries(LEGACY_SECTION_VARIANTS)) {
+      for (const [from, to] of Object.entries(retired)) {
+        expect(resolveVariant({ type, variant: from }), `${type}/${from}`).toBe(
+          to.variant
+        );
+      }
+    }
+  });
+
+  it('resolveDesign applies a retired id’s axes so appearance is unchanged', () => {
+    // `hero: minimal` was `stage` + compact + no accent + no motion.
+    const resolved = resolveDesign({
+      type: 'hero',
+      variant: 'minimal',
+      design: undefined,
+    });
+    expect(resolved.density).toBe('compact');
+    expect(resolved.accent).toBe('none');
+    expect(resolved.motion).toBe('none');
+  });
+
+  it('a retired id’s axes BEAT the page but LOSE to the section’s own', () => {
+    const page = {
+      design: { align: 'start' as const, density: 'vast' as const },
+    };
+
+    // Beats the page: `centered` must still render centred on a start-aligned page.
+    expect(
+      resolveDesign({ type: 'ache', variant: 'centered' }, page).align
+    ).toBe('center');
+
+    // Loses to the section: a creator who set `align: start` on that section keeps it.
+    expect(
+      resolveDesign(
+        { type: 'ache', variant: 'centered', design: { align: 'start' } },
+        page
+      ).align
+    ).toBe('start');
+
+    // An axis the retired id says nothing about still inherits from the page.
+    expect(
+      resolveDesign({ type: 'ache', variant: 'centered' }, page).density
+    ).toBe('vast');
+  });
+
+  it('resolveDesign is unaffected for a current variant, and for a section with no type', () => {
+    expect(resolveDesign({ type: 'hero', variant: 'stage' })).toEqual(
+      SECTION_DESIGN_DEFAULTS
+    );
+    expect(resolveDesign({ design: { width: 'wide' } }).width).toBe('wide');
+  });
+});
+
+describe('migrateSectionVariant', () => {
+  it('rewrites the variant and merges the axes the retired id encoded', () => {
+    const migrated = migrateSectionVariant({
+      type: 'ache',
+      variant: 'wide',
+      props: {},
+    } as never) as { variant: string; design: Record<string, string> };
+    expect(migrated.variant).toBe('column');
+    expect(migrated.design).toEqual({ align: 'start', width: 'text' });
+  });
+
+  it('never overwrites an axis the section already states', () => {
+    const migrated = migrateSectionVariant({
+      type: 'ache',
+      variant: 'wide',
+      design: { width: 'full' },
+    });
+    expect(migrated.design).toEqual({ align: 'start', width: 'full' });
+  });
+
+  it('is a NO-OP (same reference) for a current id, an unknown id and an unknown type', () => {
+    const current = { type: 'ache', variant: 'column' };
+    const unknownId = { type: 'ache', variant: 'default' };
+    const unknownType = { type: 'retreat-x', variant: 'centered' };
+    expect(migrateSectionVariant(current)).toBe(current);
+    expect(migrateSectionVariant(unknownId)).toBe(unknownId);
+    expect(migrateSectionVariant(unknownType)).toBe(unknownType);
+  });
+
+  it('is IDEMPOTENT — migrating a migrated section changes nothing further', () => {
+    const once = migrateSectionVariant({ type: 'hero', variant: 'minimal' });
+    const twice = migrateSectionVariant(once);
+    expect(twice).toBe(once);
+  });
+
+  it('migrateSectionVariants returns the SAME array when nothing needed migrating', () => {
+    const clean = [
+      { type: 'hero', variant: 'stage' },
+      { type: 'faq', variant: 'accordion' },
+    ];
+    expect(migrateSectionVariants(clean)).toBe(clean);
+
+    const dirty = [{ type: 'map', variant: 'descent' }];
+    const migrated = migrateSectionVariants(dirty);
+    expect(migrated).not.toBe(dirty);
+    expect(migrated[0].variant).toBe('spine');
+    expect(dirty[0].variant).toBe('descent'); // input untouched
+  });
+});
+
+describe('the variant ids real pages actually store', () => {
+  // Read out of the dev database on the branch that introduced the collapse —
+  // every distinct `sections[].variant` across `landing_pages`, including the
+  // golden page `pricing-smoke-test`. None of these may resolve to a composition
+  // its type does not declare, because that is a published page silently
+  // changing layout.
+  const STORED: readonly [string, string][] = [
+    ['hero', 'split'],
+    ['hero', ''],
+    ['introVideo', 'cinema'],
+    ['ache', 'default'],
+    ['ache', 'statement'],
+    ['turn', 'centered'],
+    ['reel', 'cinema'],
+    ['map', 'descent'],
+    ['feel', 'centered'],
+    ['proof', 'grid'],
+    ['faq', 'accordion'],
+    ['invite', 'card'],
+  ];
+
+  it('resolves every stored id to a composition its type declares', () => {
+    for (const [type, variant] of STORED) {
+      const resolved = resolveVariant({ type, variant });
+      const declared = (findSectionDefinition(type)?.variants ?? []).map(
+        (v) => v.id
+      );
+      expect(declared, `${type}/"${variant}" → ${resolved}`).toContain(
+        resolved
+      );
+    }
+  });
+
+  it('keeps the golden page on the SAME compositions it renders today', () => {
+    expect(resolveVariant({ type: 'hero', variant: 'split' })).toBe(
+      'split-media'
+    );
+    expect(resolveVariant({ type: 'introVideo', variant: 'cinema' })).toBe(
+      'theatre'
+    );
+    expect(resolveVariant({ type: 'turn', variant: 'centered' })).toBe(
+      'column'
+    );
+    expect(resolveVariant({ type: 'reel', variant: 'cinema' })).toBe('theatre');
+    expect(resolveVariant({ type: 'map', variant: 'descent' })).toBe('spine');
+    expect(resolveVariant({ type: 'feel', variant: 'centered' })).toBe(
+      'column'
+    );
+    // Untouched by the collapse — still their own compositions.
+    expect(resolveVariant({ type: 'ache', variant: 'statement' })).toBe(
+      'statement'
+    );
+    expect(resolveVariant({ type: 'proof', variant: 'grid' })).toBe('grid');
+    expect(resolveVariant({ type: 'faq', variant: 'accordion' })).toBe(
+      'accordion'
+    );
+    expect(resolveVariant({ type: 'invite', variant: 'card' })).toBe('card');
+  });
+
+  it('an id that never existed still falls to the type default (studio-alpha stores "default")', () => {
+    expect(resolveVariant({ type: 'ache', variant: 'default' })).toBe('column');
   });
 });

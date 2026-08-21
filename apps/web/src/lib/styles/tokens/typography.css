@@ -24,7 +24,9 @@
      `ch` already tracks the element's own font-size, so these need no
      [data-org-brand] re-declaration (unlike every --text-* step, which is
      multiplied by --brand-text-scale at org scope). */
+  --measure-narrow: 46ch; /* a single-column statement or pull-quote */
   --measure-lede: 64ch;   /* page-header ledes and standfirst copy */
+  --measure-wide: 78ch;   /* dense/technical body — the WCAG-practical ceiling */
 
   /* Font Weights */
   --font-normal: 400;

@@ -31,7 +31,9 @@ export type {
   PageSection,
   PageSeo,
   PageStatus,
+  ResolvedSectionDesign,
   ResourceType,
+  SectionDesign,
   SectionProps,
   StoredEntitlementSource,
 } from '@codex/shared-types';
@@ -75,7 +77,10 @@ export {
   type PagePreviewMessage,
   type PagePreviewSender,
 } from './preview-protocol';
-// Section model — the catalogue + ordering + search + variants + factories.
+// Section model — the catalogue + ordering + search + variants + design axes +
+// factories. `resolveDesign` / `SECTION_DESIGN_*` are the design-language half
+// (`docs/design/journey-sections/02-axis-contract.md`); they sit beside
+// `resolveVariant` because both are pure, DOM-free and public-bundle safe.
 export {
   createDefaultSections,
   createSection,
@@ -83,9 +88,14 @@ export {
   findSectionDefinition,
   firstSectionMatch,
   listSectionDefinitions,
+  resolveDesign,
   resolveVariant,
   SECTION_CATALOG,
+  SECTION_DESIGN_AXES,
+  SECTION_DESIGN_DEFAULTS,
+  SECTION_DESIGN_VALUES,
   type SectionDefinition,
+  type SectionDesignAxis,
   type SectionVariant,
   sectionMatchesQuery,
   variantsForType,

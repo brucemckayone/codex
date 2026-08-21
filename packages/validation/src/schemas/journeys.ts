@@ -1,4 +1,4 @@
-import type { BrandTokenOverrides, PageSection } from '@codex/shared-types';
+import type { BrandTokenOverrides } from '@codex/shared-types';
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 
@@ -205,27 +205,104 @@ export const createJourneyBodySchema = z.object({
 export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
 
 /**
- * A single page section. Typed as `PageSection` (so the inferred save body is
- * assignable to the service input without a cast) with a light runtime guard —
- * each section must be a non-null object. Deep structural validation of the
- * section union is deferred to the renderer + a follow-up (the write path is
- * `requireOrgManagement`, and the render path sanitises HTML).
+ * One design AXIS: a CLOSED enum that DEGRADES instead of rejecting.
+ *
+ * `.optional().catch(undefined)` is the whole point. A future client sending an
+ * axis value this deployment does not know must not fail the entire page save —
+ * losing every other edit on the page to one unrecognised enum member would be a
+ * far worse outcome than dropping that one value. The unknown value is stripped to
+ * `undefined`, `resolveDesign` then falls back to the axis default, and the
+ * creator sees the section render normally rather than a 400 they cannot explain.
+ *
+ * The alternative — leaving the axes unvalidated — is what `z.custom` gave us: an
+ * arbitrary string reaching `resolveDesign` and being emitted as a `data-jp-*`
+ * attribute value that matches no CSS rule, so the section silently renders with
+ * defaults and the creator sees a control that appears to do nothing.
  */
-export const pageSectionSchema = z.custom<PageSection>(
-  (value) => typeof value === 'object' && value !== null,
-  { message: 'each section must be an object' }
-);
+const designAxis = <const T extends readonly [string, ...string[]]>(
+  values: T
+) => z.enum(values).optional().catch(undefined);
+
+/**
+ * The nine design axes (`docs/design/journey-sections/02-axis-contract.md` A5).
+ * Mirrors `SectionDesign` in `@codex/shared-types`; unknown KEYS are stripped by
+ * `z.object`'s default behaviour and unknown VALUES by the per-axis `.catch`.
+ */
+export const sectionDesignSchema = z.object({
+  width: designAxis(['narrow', 'text', 'wide', 'full']),
+  density: designAxis(['compact', 'regular', 'airy', 'vast']),
+  surface: designAxis(['bare', 'tint', 'panel', 'invert', 'media']),
+  edge: designAxis(['none', 'hairline', 'soft', 'heavy', 'offset']),
+  align: designAxis(['start', 'center']),
+  type: designAxis(['restrained', 'balanced', 'expressive', 'monumental']),
+  accent: designAxis(['text', 'fill', 'edge', 'glow', 'none']),
+  motion: designAxis(['none', 'fade', 'rise', 'stagger', 'drift']),
+  media: designAxis(['bleed', 'frame', 'mask', 'inset', 'none']),
+});
+export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
+
+/**
+ * A single page section — a REAL structural schema (contract amendment A5).
+ *
+ * This was `z.custom<PageSection>(v => typeof v === 'object' && v !== null)`: a
+ * type assertion with a predicate, not a schema. It validated NOTHING structural,
+ * so adding `design` to the TypeScript interface would have bought no validation
+ * at all.
+ *
+ * Three fields stay deliberately LOOSE, and tightening any of them would reject
+ * data the platform already stores:
+ *   - `type` is an OPEN string. The renderer skips an unrecognised type rather
+ *     than erroring (that is what makes a future page template additive), so the
+ *     schema must accept one too.
+ *   - `variant` is an OPEN string for the same reason, and concretely: the seeded
+ *     `studio-alpha` page stores `variant: "default"`, which is not a declared
+ *     variant of any type. An enum here would 400 a real page on save.
+ *   - `props` is a PASSTHROUGH record. Its per-type shape is owned by the renderer
+ *     + editor, not by this contract, and `render/coerce.ts` already treats every
+ *     field as untrusted at the read boundary.
+ *
+ * `props` carries `.default({})` rather than being required: `.default()` only
+ * widens the INPUT type while the output stays required, so the inferred body is
+ * still assignable to the service input with no boundary cast — the same idiom
+ * `updateJourneyOfferBodySchema` uses.
+ *
+ * That assignability is what replaces the old `z.custom<PageSection>` type
+ * assertion, and it is CHECKED rather than asserted: the save route hands
+ * `ctx.input.body` straight to `CourseJourneyService.saveJourneyPage`, whose input
+ * declares `sections: PageSection[]`, so any drift between this schema and the
+ * frozen contract fails `pnpm typecheck` at that call site.
+ */
+export const pageSectionSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1).max(60),
+  enabled: z.boolean(),
+  variant: z.string().max(60).optional(),
+  name: z.string().max(200).optional(),
+  design: sectionDesignSchema.optional(),
+  props: z.record(z.string(), z.unknown()).default({}),
+});
 
 /**
  * Save-journey-page body — the editable page record (frozen `JourneyPageRecord`
  * minus the server-owned `organizationId`/`publishedAt`, which the service
- * derives). `sections`/`brandOverrides` carry their FE types via `z.custom` so
- * the inferred type is assignable to the service input with no boundary cast.
+ * derives). `sections` is validated structurally by {@link pageSectionSchema};
+ * `brandOverrides` still carries its FE type via `z.custom` so the inferred type
+ * is assignable to the service input with no boundary cast.
  *
  * `.strict()` because this endpoint does NOT own the whole builder draft. The
  * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema`, and `seo` has
  * no persistence yet — under Zod's default strip both were accepted, discarded,
  * and reported as "Page saved". A key this endpoint cannot honour must 400.
+ *
+ * `design` (the PAGE-level look) IS now declared — F-B2 added the
+ * `landing_pages.design` column, the service write and the `SavePagePayload`
+ * field, so the key this endpoint accepts is a key it can honour. It stayed out of
+ * F-A deliberately: under `.strict()` a declared-but-unpersistable field is worse
+ * than a rejected one, because the save would accept it, discard it, and report
+ * "Page saved".
+ *
+ * It is `.optional()` and the service treats absent as LEAVE ALONE, never as
+ * clear — a client that predates the axes must not wipe a page's stored look.
  */
 export const saveJourneyPageBodySchema = z
   .object({
@@ -251,6 +328,7 @@ export const saveJourneyPageBodySchema = z
     subjectId: uuidSchema.nullable(),
     brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
     sections: z.array(pageSectionSchema),
+    design: sectionDesignSchema.optional(),
   })
   .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;
@@ -317,6 +395,12 @@ export const updateJourneySellMediaBodySchema = z
     previewVideoMediaId: uuidSchema.nullable().default(null),
     guideVideoMediaId: uuidSchema.nullable().default(null),
     guidePortraitMediaId: uuidSchema.nullable().default(null),
+    // A27 (Codex-wqxv4): the hero still and the guide's signature. Same
+    // total-write, `.nullable().default(null)` treatment as the four above, so an
+    // omitted slot CLEARS. Both are `media_items` refs — the still resolved is
+    // the picked item's thumbnail, since `media_items` is video/audio only.
+    heroMediaId: uuidSchema.nullable().default(null),
+    signatureMediaId: uuidSchema.nullable().default(null),
   })
   .strict();
 export type UpdateJourneySellMediaBody = z.infer<

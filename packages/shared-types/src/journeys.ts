@@ -59,6 +59,60 @@ export type CourseSectionType =
 export type SectionProps = Record<string, unknown>;
 
 /**
+ * The DESIGN-LANGUAGE axes a section renders through
+ * (`docs/design/journey-sections/02-axis-contract.md`; research §2.2 + §2.6).
+ *
+ * Nine ORTHOGONAL axes, each a closed enum, each independent of the section's
+ * `variant`. A variant is a COMPOSITION (which boxes exist, in what arrangement);
+ * an axis is a LANGUAGE knob (how wide, how dense, how loud) that applies to
+ * every composition of every type. Splitting them is what stops the variant
+ * namespace exploding — `hero.centered` vs `hero.left` differ only in `align`,
+ * so promoting the axis DELETES the variant pair.
+ *
+ * DELIBERATELY ABSENT: colour, typeface, radius and global density. Those are the
+ * BRAND layer ({@link BrandTokenOverrides} + `journey-palette.css`) — already
+ * creator-editable and already auto-contrasted. An axis that re-states the brand
+ * layer is a second source of truth for one thing (research §2.7).
+ *
+ * Every field is optional and every unknown value is IGNORED — forward-compatible
+ * exactly as {@link PageSection.variant} already is. A value this build does not
+ * know resolves to the axis DEFAULT rather than reaching the DOM, so the renderer
+ * never emits an attribute that matches no CSS rule.
+ */
+export interface SectionDesign {
+  /** Content measure: `narrow` 46ch · `text` 64ch · `wide` 78ch · `full` bleed. */
+  width?: 'narrow' | 'text' | 'wide' | 'full';
+  /** Vertical-rhythm multiplier, applied ON TOP of the org's brand density. */
+  density?: 'compact' | 'regular' | 'airy' | 'vast';
+  /** Section backdrop: none / tinted / panelled / inverted / media-backed. */
+  surface?: 'bare' | 'tint' | 'panel' | 'invert' | 'media';
+  /** Border weight FUSED with elevation — they co-vary, so one axis owns both. */
+  edge?: 'none' | 'hairline' | 'soft' | 'heavy' | 'offset';
+  /** Text/box alignment. Two values, and it deletes ~8 alignment-only variants. */
+  align?: 'start' | 'center';
+  /** Type-scale character, from utilitarian to display-led. */
+  type?: 'restrained' | 'balanced' | 'expressive' | 'monumental';
+  /** How the ember accent is spent. `none` still leaves a price-bearing CTA filled. */
+  accent?: 'text' | 'fill' | 'edge' | 'glow' | 'none';
+  /** Reveal choreography. `none` is an authored value, not just reduced-motion. */
+  motion?: 'none' | 'fade' | 'rise' | 'stagger' | 'drift';
+  /** How media sits in the section. Inert on the types that carry no media. */
+  media?: 'bleed' | 'frame' | 'mask' | 'inset' | 'none';
+}
+
+/**
+ * A FULLY RESOLVED {@link SectionDesign} — every axis populated, because the
+ * renderer emits one `data-jp-<axis>` attribute per axis and an absent value
+ * would emit an EMPTY attribute that matches no CSS rule.
+ *
+ * Produced by `resolveDesign(section, page)` in
+ * `apps/web/src/lib/page-builder/section-catalog.ts`, which resolves per axis
+ * (section override → page default → axis default) and drops unknown values.
+ * This is the shape a section component receives as its `design` prop.
+ */
+export type ResolvedSectionDesign = Required<SectionDesign>;
+
+/**
  * One composable section INSTANCE (SPEC §4.1). Order is array position;
  * on/off is {@link PageSection.enabled}; copy/config is {@link PageSection.props}.
  * `type` is a widenable `string` (not {@link CourseSectionType}) so the renderer
@@ -81,6 +135,13 @@ export interface PageSection {
    * Purely editorial; the public renderer ignores it.
    */
   name?: string;
+  /**
+   * PER-SECTION design-axis overrides (`02-axis-contract.md`). Each axis set here
+   * wins over the page-level look; each axis left unset inherits it, and then the
+   * axis default. Per-axis (not all-or-nothing) inheritance is the point: a real
+   * page genuinely wants a `vast` hero above a `compact` FAQ.
+   */
+  design?: SectionDesign;
   props: SectionProps;
 }
 
@@ -160,6 +221,20 @@ export interface PageBuilderState {
    * presentation of it. Backs `landing_pages.offer` jsonb.
    */
   offer?: PageOffer;
+  /**
+   * The page's LOOK — the design-axis defaults every section inherits
+   * (`02-axis-contract.md`). A section's own {@link PageSection.design} overrides
+   * this PER AXIS; anything neither sets falls to the axis default.
+   *
+   * PLACEMENT (deviation from research §2.6, deliberate): the research puts this
+   * on `JourneyCoursePage`. That type is the public READ ENVELOPE
+   * (`{ page, course, stages, testimonials }`) — it is assembled per request and
+   * persists nothing, so a `design` there could never be saved or loaded. The
+   * page-level look is stored state, so it belongs on the page draft, exactly
+   * beside `seo` and `offer`, and reaches the renderer as `coursePage.page.design`.
+   * Backs the `landing_pages.design` jsonb column added in F-B.
+   */
+  design?: SectionDesign;
   /** Ordered, typed, toggleable (§4.1). */
   sections: PageSection[];
 }
@@ -807,14 +882,20 @@ export interface JourneyCardView {
 }
 
 /**
- * The journey's SELL MEDIA — the four media refs the sales page's `introVideo`,
- * `reel` and `guide` sections resolve their primary content from, plus the still
- * cover (Codex-eqh0z). All five are creator-owned and independently clearable.
+ * The journey's SELL MEDIA — the six media refs the sales page's `hero`,
+ * `introVideo`, `reel` and `guide` sections resolve their primary content from,
+ * plus the still cover (Codex-eqh0z). All seven are creator-owned and
+ * independently clearable.
  *
- * The three video ids and the guide portrait are `media_items` refs (they reuse
- * the transcoding pipeline; SPEC §10). The cover is NOT a `media_items` ref —
- * `media_items` is CHECK-constrained to ('video','audio'), so a still image
- * cannot live there; it is an R2 key on `courses`, resolved to a CDN URL here.
+ * Every id here is a `media_items` ref (they reuse the transcoding pipeline;
+ * SPEC §10). The cover is NOT — `media_items` is CHECK-constrained to
+ * ('video','audio'), so a still image cannot live there; it is an R2 key on
+ * `courses`, resolved to a CDN URL here.
+ *
+ * `heroMediaId` / `signatureMediaId` are contract amendment A27 (Codex-wqxv4).
+ * Because of that same video/audio CHECK, the STILL each names is the picked
+ * item's `thumbnailKey` — the identical resolution `guidePortraitMediaId` has
+ * always used, projected by `getCourseSellPreview`'s `toStill`.
  */
 export interface JourneySellMedia {
   /** The subject course these refs live on (`landing_pages.subjectId`). */
@@ -827,6 +908,15 @@ export interface JourneySellMedia {
   guideVideoMediaId: string | null;
   /** The guide's portrait still (`courses.guide.portraitMediaId`). */
   guidePortraitMediaId: string | null;
+  /**
+   * The HERO still (`courses.heroMediaId`, A27) — the image `hero.full-bleed`
+   * and `hero.poster` are named after. Before A27 there was no hero image slot
+   * at all, so `hero.split` rendered a synthetic radial-gradient plate and the
+   * `media` design axis had nothing to act on in the page's loudest section.
+   */
+  heroMediaId: string | null;
+  /** The guide's SIGNATURE mark (`courses.signatureMediaId`, A27) — `guide.letter`'s sign-off. */
+  signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
 }
@@ -886,4 +976,46 @@ export interface CourseSellPreview {
   intro: CourseSellPreviewClip | null;
   /** The practice-preview clip (the `reel` section → `courses.previewVideoMediaId`). */
   reel: CourseSellPreviewClip | null;
+  /**
+   * The guide's PORTRAIT still — a public CDN URL resolved from the thumbnail of
+   * `courses.guide.portraitMediaId` (contract amendment A15).
+   *
+   * Why it lands here rather than on {@link JourneyCourseView}: this is the
+   * media-resolution payload, media ids already resolve to public CDN URLs in
+   * exactly one place (`getCourseSellPreview`), and a portrait is not SEO-critical
+   * so it belongs off the awaited critical path. Before this the builder's
+   * portrait picker wrote `guide.portraitMediaId` and NOTHING public read it, so
+   * the guide section could only ever render its letter monogram.
+   *
+   * OPTIONAL-additive (like `PageBuilderState.seo`): an older worker deployment
+   * simply omits it, and the section falls back to the monogram.
+   */
+  guidePortraitUrl?: string | null;
+  /**
+   * The guide's talking-head clip (→ `courses.guideVideoMediaId`) — the second
+   * builder-written, publicly-unread media slot A15 closes. Resolved through the
+   * SAME public `hlsPreviewKey` path as `intro`/`reel`; null when the course has
+   * no guide video or its preview has not transcoded.
+   */
+  guideClip?: CourseSellPreviewClip | null;
+  /**
+   * The HERO still — a public CDN URL resolved from the thumbnail of
+   * `courses.heroMediaId` (contract amendment A27, Codex-wqxv4).
+   *
+   * Resolved by `toStill`, NOT `toClip`: `media_items` is CHECK-constrained to
+   * ('video','audio'), so the still a creator picks for a hero is the chosen
+   * item's `thumbnailKey`. This is what makes the `media` design axis
+   * (`bleed`/`frame`/`mask`/`inset`) mean something on the hero — before it,
+   * every hero composition had only a synthetic gradient plate to draw.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.guidePortraitUrl}): an older
+   * worker deployment omits it and the hero falls back to its synthetic plate.
+   */
+  heroImageUrl?: string | null;
+  /**
+   * The guide's SIGNATURE mark — a public CDN URL resolved from the thumbnail of
+   * `courses.signatureMediaId` (A27). `guide.letter` signs off with it; null
+   * leaves the letter unsigned. Same `toStill` resolution as the portrait.
+   */
+  signatureUrl?: string | null;
 }

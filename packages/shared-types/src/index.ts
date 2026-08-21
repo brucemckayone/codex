@@ -83,7 +83,9 @@ export type {
   PlaylistEntry,
   PracticeCompletionRecord,
   PracticeContentType,
+  ResolvedSectionDesign,
   ResourceType,
+  SectionDesign,
   SectionProps,
   StoredEntitlementSource,
 } from './journeys';

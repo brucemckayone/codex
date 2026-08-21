@@ -10,15 +10,35 @@
  * bundle and in WP-5's same-origin preview iframe.
  */
 
+// Re-exported through the renderer barrel too, so a section component reaches its
+// own props' types (`design`) without a second import path.
+export type { ResolvedSectionDesign, SectionDesign } from '$lib/page-builder';
 export {
   brandOverrideLogo,
   brandOverridesToCssVars,
   brandOverridesToStyleAttr,
 } from './brand-overrides';
 export { default as CtaLink } from './CtaLink.svelte';
+// The prop-coercion layer + the BUILDER→RENDERER key map (Codex-tqr51). Exported
+// so the round-trip guard in `components/page-builder/section-fields.test.ts` can
+// assert every writable key is read — the allowed import direction (editor UI may
+// import the public tree, never the reverse).
+export {
+  aliasKeys,
+  asBool,
+  asNumberedGroups,
+  asObjectArray,
+  asParagraphsFrom,
+  asString,
+  asStringArray,
+  asStringFrom,
+  asStringsFrom,
+  fieldBool,
+  fieldString,
+  SECTION_PROP_ALIASES,
+} from './coerce';
 export { default as JourneyRenderer } from './JourneyRenderer.svelte';
 export { default as SectionRenderer } from './SectionRenderer.svelte';
-
 export {
   type RenderableSection,
   resolveSectionComponent,

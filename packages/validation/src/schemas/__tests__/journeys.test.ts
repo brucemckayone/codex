@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest';
 import {
   journeyInsightsQuerySchema,
   orgJourneyRevenueQuerySchema,
+  pageSectionSchema,
+  saveJourneyPageBodySchema,
+  sectionDesignSchema,
 } from '../journeys';
 
 const ORG_ID = '32300000-0000-4000-8000-000000000002';
@@ -95,5 +98,204 @@ describe('orgJourneyRevenueQuerySchema', () => {
     });
     expect(parsed.period).toBe('30d');
     expect(parsed).not.toHaveProperty('pageId');
+  });
+});
+
+// ── Section + design-axis structure (journey-sections contract A5) ────────────
+//
+// `pageSectionSchema` was `z.custom<PageSection>(v => typeof v === 'object')` — a
+// type assertion with a predicate, validating nothing structural. The tests below
+// pin the two properties that matter and pull in opposite directions: `design` is
+// now really validated, and NOTHING that a real stored page contains is rejected.
+
+const SECTION = {
+  id: 'sec-1',
+  type: 'ache',
+  enabled: true,
+  variant: 'statement',
+  name: 'The ache',
+  props: { kicker: 'K', heading: 'H', body: 'B' },
+};
+
+describe('sectionDesignSchema', () => {
+  it('accepts every declared axis value', () => {
+    const design = {
+      width: 'narrow',
+      density: 'vast',
+      surface: 'invert',
+      edge: 'offset',
+      align: 'start',
+      type: 'monumental',
+      accent: 'glow',
+      motion: 'drift',
+      media: 'bleed',
+    };
+    expect(sectionDesignSchema.parse(design)).toEqual(design);
+  });
+
+  it('accepts an empty bag and a partially-set bag', () => {
+    expect(sectionDesignSchema.parse({})).toEqual({});
+    expect(sectionDesignSchema.parse({ width: 'wide' })).toMatchObject({
+      width: 'wide',
+    });
+  });
+
+  it('DROPS an unknown axis value to undefined rather than failing the parse', () => {
+    // The load-bearing behaviour: a future client sending a new axis value must
+    // not make the whole page save 400. Losing every other edit on the page to
+    // one unrecognised enum member is a far worse outcome than dropping it, and
+    // `resolveDesign` then falls back to the axis default.
+    const parsed = sectionDesignSchema.parse({
+      width: 'ultra-wide',
+      motion: 'explode',
+      density: 'airy',
+    });
+    expect(parsed.width).toBeUndefined();
+    expect(parsed.motion).toBeUndefined();
+    // An axis alongside the unknown one still survives.
+    expect(parsed.density).toBe('airy');
+  });
+
+  it('drops non-string garbage the same way (jsonb round-trips any shape)', () => {
+    const parsed = sectionDesignSchema.parse({
+      width: 42,
+      align: null,
+      surface: { nested: true },
+      edge: ['heavy'],
+    });
+    expect(parsed.width).toBeUndefined();
+    expect(parsed.align).toBeUndefined();
+    expect(parsed.surface).toBeUndefined();
+    expect(parsed.edge).toBeUndefined();
+  });
+
+  it('strips unknown axis KEYS instead of rejecting them', () => {
+    const parsed = sectionDesignSchema.parse({ radius: 'pill', width: 'text' });
+    expect(parsed).toEqual({ width: 'text' });
+  });
+});
+
+describe('pageSectionSchema', () => {
+  it('accepts a real stored section unchanged', () => {
+    expect(pageSectionSchema.parse(SECTION)).toEqual(SECTION);
+  });
+
+  it('accepts a section carrying a design bag', () => {
+    const parsed = pageSectionSchema.parse({
+      ...SECTION,
+      design: { density: 'compact', accent: 'none' },
+    });
+    expect(parsed.design).toEqual({ density: 'compact', accent: 'none' });
+  });
+
+  it('keeps `type` an OPEN string — the renderer skips unknown types', () => {
+    expect(
+      pageSectionSchema.safeParse({ ...SECTION, type: 'retreat-schedule' })
+        .success
+    ).toBe(true);
+  });
+
+  it('keeps `variant` an OPEN string', () => {
+    // The seeded `studio-alpha` page stores `variant: "default"`, which is not a
+    // declared variant of any type. An enum here would 400 a real page on save.
+    expect(
+      pageSectionSchema.safeParse({ ...SECTION, variant: 'default' }).success
+    ).toBe(true);
+  });
+
+  it('keeps `props` a PASSTHROUGH record and defaults it when absent', () => {
+    const weird = { a: 1, b: null, c: [1, 2], d: { e: 'f' } };
+    expect(pageSectionSchema.parse({ ...SECTION, props: weird }).props).toEqual(
+      weird
+    );
+    const { props: _omitted, ...noProps } = SECTION;
+    expect(pageSectionSchema.parse(noProps).props).toEqual({});
+  });
+
+  it('rejects a section missing its identity or on/off state', () => {
+    const { id: _id, ...noId } = SECTION;
+    const { enabled: _enabled, ...noEnabled } = SECTION;
+    expect(pageSectionSchema.safeParse(noId).success).toBe(false);
+    expect(pageSectionSchema.safeParse(noEnabled).success).toBe(false);
+    expect(pageSectionSchema.safeParse({ ...SECTION, type: '' }).success).toBe(
+      false
+    );
+    expect(pageSectionSchema.safeParse(null).success).toBe(false);
+    expect(pageSectionSchema.safeParse('a section').success).toBe(false);
+  });
+});
+
+describe('saveJourneyPageBodySchema with structural sections', () => {
+  const BODY = {
+    id: PAGE_ID,
+    pageType: 'course',
+    slug: 'pricing-smoke-test',
+    title: 'Of Blood & Bones',
+    status: 'published' as const,
+    subjectType: 'course',
+    subjectId: ORG_ID,
+    brandOverrides: null,
+    sections: [SECTION, { ...SECTION, id: 'sec-2', design: { edge: 'soft' } }],
+  };
+
+  it('accepts a body whose sections carry design bags', () => {
+    const parsed = saveJourneyPageBodySchema.parse(BODY);
+    expect(parsed.sections).toHaveLength(2);
+    expect(parsed.sections[1].design).toEqual({ edge: 'soft' });
+  });
+
+  it('does not fail the whole page save over one unknown axis value', () => {
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      sections: [{ ...SECTION, design: { width: 'from-the-future' } }],
+    });
+    expect(parsed.sections[0].design?.width).toBeUndefined();
+    // The section's copy — everything the creator actually typed — survives.
+    expect(parsed.sections[0].props).toEqual(SECTION.props);
+  });
+
+  it('accepts the PAGE-level design bundle (F-B2 — the column now exists)', () => {
+    // F-A left this key out on purpose: under `.strict()` a declared-but-
+    // unpersistable field is worse than a rejected one, because the save accepts
+    // it, drops it and reports "Page saved". The column, the service write and the
+    // `SavePagePayload` field all landed in F-B2, so the key is now honourable.
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      design: { width: 'narrow', density: 'airy', surface: 'media' },
+    });
+    expect(parsed.design).toEqual({
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+    });
+  });
+
+  it('accepts a body with NO page design — absence means "leave it alone"', () => {
+    const parsed = saveJourneyPageBodySchema.parse(BODY);
+    expect(parsed.design).toBeUndefined();
+  });
+
+  it('degrades an unknown PAGE axis value instead of 400ing the whole save', () => {
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      design: { width: 'narrow', motion: 'teleport' },
+    });
+    expect(parsed.design?.width).toBe('narrow');
+    expect(parsed.design?.motion).toBeUndefined();
+  });
+
+  it('still rejects a key this endpoint cannot honour (`.strict()` holds)', () => {
+    // The guard that made `design` worth adding properly: `seo` has no column, so
+    // it must 400 rather than be accepted and discarded.
+    expect(
+      saveJourneyPageBodySchema.safeParse({ ...BODY, seo: { title: 'x' } })
+        .success
+    ).toBe(false);
+  });
+
+  it('still rejects a section that is not an object at all', () => {
+    expect(
+      saveJourneyPageBodySchema.safeParse({ ...BODY, sections: [null] }).success
+    ).toBe(false);
   });
 });

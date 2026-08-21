@@ -2,6 +2,7 @@ import type {
   BrandTokenOverrides,
   PageOffer,
   PageSection,
+  SectionDesign,
 } from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
 import {
@@ -87,6 +88,20 @@ export const landingPages = pgTable(
     // Nullable — a page authored before pricing was set has no offer.
     offer: jsonb('offer').$type<PageOffer>(),
 
+    // The page's LOOK — the nine design axes every section on it inherits
+    // (`docs/design/journey-sections/02-axis-contract.md` A3). A section's own
+    // `PageSection.design` (inside the `sections` jsonb) overrides this PER AXIS;
+    // anything neither states falls to `SECTION_DESIGN_DEFAULTS`.
+    //
+    // NULLABLE, and yet no page should ever hold NULL: the migration that added
+    // this column wrote the Candlelit bundle onto every PRE-EXISTING row in the
+    // same step (so a published page cannot change appearance the moment a
+    // section starts reading the axes), and `createJourney` writes the Signal
+    // bundle onto every new one. Nullable is only the migration's transient
+    // state plus forward-compat for a row written by an older deployment —
+    // `resolveDesign` is total, so a NULL still renders coherently.
+    design: jsonb('design').$type<SectionDesign>(),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -160,6 +175,22 @@ export const courses = pgTable(
       { onDelete: 'set null' }
     ),
     guideVideoMediaId: uuid('guide_video_media_id').references(
+      () => mediaItems.id,
+      { onDelete: 'set null' }
+    ),
+    // Hero + signature stills (contract amendment A27, Codex-wqxv4). Same shape
+    // as the three above — a `media_items` ref, `set null` on delete — because
+    // `media_items` is CHECK-constrained to ('video','audio'), so the STILL these
+    // two name is the item's `thumbnailKey`, resolved by `getCourseSellPreview`'s
+    // `toStill` exactly as `guide.portraitMediaId` already is. Before A27 the
+    // page had NO hero image slot at all, so `hero.full-bleed` / `hero.poster`
+    // rendered a synthetic gradient plate and the `media` design axis was
+    // meaningless on the highest-visibility section of the page.
+    heroMediaId: uuid('hero_media_id').references(() => mediaItems.id, {
+      onDelete: 'set null',
+    }),
+    // The guide's signature mark — `guide.letter`'s sign-off.
+    signatureMediaId: uuid('signature_media_id').references(
       () => mediaItems.id,
       { onDelete: 'set null' }
     ),

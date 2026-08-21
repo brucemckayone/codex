@@ -26,6 +26,11 @@
  *      never handed to a client as a raw R2 key.
  *   7. An inactive (invited/removed) membership does NOT grant attachment — the
  *      guard checks `status = 'active'`, not mere row existence.
+ *   8. The A27 slots (`heroMediaId` / `signatureMediaId`, Codex-wqxv4) round-trip,
+ *      are covered by the SAME org guard, and — the part that actually matters —
+ *      are PROJECTED onto the public sell-preview payload. A15's finding was that
+ *      two slots persisted and nothing public read them, so a new slot is not
+ *      done until the served payload carries it.
  *
  * Falsifiability: every assertion re-reads the persisted row, so dropping the
  * org guard, the merge, the null-clear, or the URL resolution fails the test.
@@ -58,6 +63,8 @@ function mediaBag(
     previewVideoMediaId: string | null;
     guideVideoMediaId: string | null;
     guidePortraitMediaId: string | null;
+    heroMediaId: string | null;
+    signatureMediaId: string | null;
   }> = {}
 ) {
   return {
@@ -65,6 +72,8 @@ function mediaBag(
     previewVideoMediaId: null,
     guideVideoMediaId: null,
     guidePortraitMediaId: null,
+    heroMediaId: null,
+    signatureMediaId: null,
     ...overrides,
   };
 }
@@ -98,6 +107,9 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   let reelId: string;
   let guideVideoId: string;
   let portraitId: string;
+  /** A27 (Codex-wqxv4) — the hero still and the guide's signature mark. */
+  let heroId: string;
+  let signatureId: string;
   /** Media owned by a non-member — must be refused. */
   let foreignMediaId: string;
   /** Media owned by an invited-but-not-active member — must be refused. */
@@ -168,6 +180,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
         introVideoMediaId: courses.introVideoMediaId,
         previewVideoMediaId: courses.previewVideoMediaId,
         guideVideoMediaId: courses.guideVideoMediaId,
+        heroMediaId: courses.heroMediaId,
+        signatureMediaId: courses.signatureMediaId,
         guide: courses.guide,
         coverImageKey: courses.coverImageKey,
       })
@@ -250,6 +264,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     reelId = await seedMedia(creatorId, 'reel');
     guideVideoId = await seedMedia(creatorId, 'guide-video');
     portraitId = await seedMedia(creatorId, 'portrait');
+    heroId = await seedMedia(creatorId, 'hero');
+    signatureId = await seedMedia(creatorId, 'signature');
     foreignMediaId = await seedMedia(outsiderId, 'foreign');
     invitedMediaId = await seedMedia(invitedId, 'invited');
     deletedMediaId = await seedMedia(creatorId, 'deleted', { deleted: true });
@@ -261,7 +277,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
   // ── Happy path ────────────────────────────────────────────────────────────
 
-  it('persists all four slots and reads them back off the course row', async () => {
+  it('persists all six slots and reads them back off the course row', async () => {
     const returned = await svc.updateJourneySellMedia(
       orgAId,
       pageId,
@@ -270,6 +286,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
         previewVideoMediaId: reelId,
         guideVideoMediaId: guideVideoId,
         guidePortraitMediaId: portraitId,
+        heroMediaId: heroId,
+        signatureMediaId: signatureId,
       })
     );
 
@@ -278,6 +296,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(returned.previewVideoMediaId).toBe(reelId);
     expect(returned.guideVideoMediaId).toBe(guideVideoId);
     expect(returned.guidePortraitMediaId).toBe(portraitId);
+    expect(returned.heroMediaId).toBe(heroId);
+    expect(returned.signatureMediaId).toBe(signatureId);
 
     // Re-read the row: the return value must not be the only evidence.
     const row = await readCourse(courseId);
@@ -285,6 +305,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(row?.previewVideoMediaId).toBe(reelId);
     expect(row?.guideVideoMediaId).toBe(guideVideoId);
     expect(row?.guide?.portraitMediaId).toBe(portraitId);
+    expect(row?.heroMediaId).toBe(heroId);
+    expect(row?.signatureMediaId).toBe(signatureId);
   });
 
   it('getJourneySellMedia projects the persisted slots for the builder', async () => {
@@ -295,6 +317,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       previewVideoMediaId: reelId,
       guideVideoMediaId: guideVideoId,
       guidePortraitMediaId: portraitId,
+      heroMediaId: heroId,
+      signatureMediaId: signatureId,
     });
   });
 
@@ -328,6 +352,8 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(row?.previewVideoMediaId).toBeNull();
     expect(row?.guideVideoMediaId).toBeNull();
     expect(row?.guide?.portraitMediaId ?? null).toBeNull();
+    expect(row?.heroMediaId).toBeNull();
+    expect(row?.signatureMediaId).toBeNull();
   });
 
   // ── The guide jsonb merge ─────────────────────────────────────────────────
@@ -394,6 +420,36 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(after?.introVideoMediaId).toBe(before?.introVideoMediaId);
     expect(after?.previewVideoMediaId).toBeNull();
     expect(after?.guideVideoMediaId).toBeNull();
+  });
+
+  // The exact hole a new slot opens: `assertMediaItemsInOrg` takes a hand-written
+  // list of ids, so a slot added to the write but NOT to that list would accept
+  // another org's media. Asserted per new slot rather than in aggregate, so a
+  // half-wired guard names which slot leaked.
+  it.each([
+    ['heroMediaId'],
+    ['signatureMediaId'],
+  ] as const)('rejects a FOREIGN media id in the A27 slot %s and writes nothing', async (slot) => {
+    await svc.updateJourneySellMedia(
+      orgAId,
+      pageId,
+      mediaBag({ introVideoMediaId: introId })
+    );
+
+    await expect(
+      svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({
+          introVideoMediaId: introId,
+          [slot]: foreignMediaId,
+        })
+      )
+    ).rejects.toThrow(ForbiddenError);
+
+    const after = await readCourse(courseId);
+    expect(after?.heroMediaId).toBeNull();
+    expect(after?.signatureMediaId).toBeNull();
   });
 
   it('rejects media whose owner has a non-active membership', async () => {
@@ -540,5 +596,72 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(
       journeys.find((j) => j.courseId === courseId)?.coverImageUrl
     ).toBeNull();
+  });
+
+  // ── The PUBLIC projection (contract A27, Codex-wqxv4) ─────────────────────
+  //
+  // A slot that persists but is never PROJECTED is the exact dead end A15 found
+  // and A27 must not repeat: the builder saves an id, the public page reads
+  // nothing, and no test fails. So these assert the served payload, not the row.
+  describe('getCourseSellPreview projects the A27 stills', () => {
+    const CDN = 'https://cdn.example.test';
+
+    beforeAll(async () => {
+      // The projection is published-only, and `seedCoursePage` seeds a draft.
+      await db
+        .update(courses)
+        .set({ status: 'published', publishedAt: new Date() })
+        .where(eq(courses.id, courseId));
+    });
+
+    it('resolves the hero and signature to CDN thumbnail URLs', async () => {
+      await svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ heroMediaId: heroId, signatureMediaId: signatureId })
+      );
+
+      const [heroMedia] = await db
+        .select({ thumbnailKey: mediaItems.thumbnailKey })
+        .from(mediaItems)
+        .where(eq(mediaItems.id, heroId))
+        .limit(1);
+      const [signatureMedia] = await db
+        .select({ thumbnailKey: mediaItems.thumbnailKey })
+        .from(mediaItems)
+        .where(eq(mediaItems.id, signatureId))
+        .limit(1);
+
+      const preview = await svc.getCourseSellPreview(courseId, CDN);
+
+      // `toStill`, not `toClip`: `media_items` is CHECK-constrained to
+      // video/audio, so the still a creator picks for a hero IS the item's
+      // thumbnail. Compared against the seeded key so a projection that returned
+      // some other media's thumbnail would fail.
+      expect(preview?.heroImageUrl).toBe(`${CDN}/${heroMedia?.thumbnailKey}`);
+      expect(preview?.signatureUrl).toBe(
+        `${CDN}/${signatureMedia?.thumbnailKey}`
+      );
+    });
+
+    it('projects null for both when the slots are cleared', async () => {
+      await svc.updateJourneySellMedia(orgAId, pageId, mediaBag());
+
+      const preview = await svc.getCourseSellPreview(courseId, CDN);
+      expect(preview?.heroImageUrl).toBeNull();
+      expect(preview?.signatureUrl).toBeNull();
+    });
+
+    it('projects null with no CDN base configured rather than a relative key', async () => {
+      await svc.updateJourneySellMedia(
+        orgAId,
+        pageId,
+        mediaBag({ heroMediaId: heroId })
+      );
+
+      const preview = await svc.getCourseSellPreview(courseId, undefined);
+      // A bare R2 key served to a browser is a broken image, not a degraded one.
+      expect(preview?.heroImageUrl).toBeNull();
+    });
   });
 });

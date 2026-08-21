@@ -18,7 +18,7 @@
 
   Cover upload/clear apply IMMEDIATELY (a multipart upload has a different failure
   mode from a JSON patch, and the creator needs the resolved URL back to see what
-  they picked). The four media slots are pending until Save, like page copy.
+  they picked). The media slots are pending until Save, like page copy.
 -->
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
@@ -30,14 +30,24 @@
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
   /**
-   * The four slots, in the order they appear down the sales page — so the panel
-   * reads as a walk through the page rather than an arbitrary list.
+   * The slots, in the order they appear down the sales page — so the panel reads
+   * as a walk through the page rather than an arbitrary list. Hero first, because
+   * it is the first thing a visitor sees.
+   *
+   * Kept in step with `JourneySellMediaSlot`: a slot the store knows and this
+   * panel does not is only reachable from a section inspector, which is the
+   * two-sources-of-truth problem the store exists to prevent.
    */
   const SLOTS: readonly {
     slot: JourneySellMediaSlot;
     label: string;
     hint: string;
   }[] = [
+    {
+      slot: 'heroMediaId',
+      label: 'Hero image',
+      hint: 'The image the hero shows. Its still frame is used.',
+    },
     {
       slot: 'introVideoMediaId',
       label: 'Intro film',
@@ -57,6 +67,11 @@
       slot: 'guideVideoMediaId',
       label: 'Guide video',
       hint: 'A talking-head clip for the guide section. Optional.',
+    },
+    {
+      slot: 'signatureMediaId',
+      label: 'Guide signature',
+      hint: 'The sign-off mark at the foot of the guide’s letter. Optional.',
     },
   ];
 

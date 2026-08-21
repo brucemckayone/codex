@@ -1,0 +1,106 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   CANVAS · VIDEO — cinematic frame (introVideo + reel)
+
+   A PARTIAL of the canvas stylesheet. Split out of the 575-line
+   `../journey-sections.css` unchanged — same declarations, same order, no
+   reformatting. Imported by that file, which stays the single entry point
+   (`render-edit/SectionRenderer.svelte`).
+
+   WHY IT WAS SPLIT. Contract A12: this tree holds a WORKING implementation of
+   every one of the 37 declared variants, and the public components hold none of
+   them. So the section-flexibility programme is "port 37 layouts", not "invent
+   37 layouts", and each of the seven component work packages ports one type.
+   One 575-line file would have serialised all seven on the same merge conflict;
+   nine disjoint partials let them run in parallel. See
+   `docs/design/journey-sections/02-axis-contract.md` A16.
+
+   DRAINED, NOT KEPT. As each work package ports its type into the unified public
+   component, its partial empties out. Consolidation deletes the empties along
+   with `render-edit/sections/*`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WT-2 · PORTED, AND DELIBERATELY LEFT IN PLACE.
+
+   Both types now live in `render/sections/IntroVideoSection.svelte` and
+   `render/sections/ReelSection.svelte`, wired to the nine axes.
+
+   THESE RULES ARE NOT DRAINED, on purpose. `JourneyBuilderCanvas` still renders
+   through `render-edit/section-registry.ts`, so emptying this partial now would
+   leave the studio canvas previewing UNSTYLED video sections until the canvas is
+   repointed (`Codex-eckbx`). Contract A16 accepts a canvas that looks DIFFERENT
+   from the published page; it does not accept one with no styles. Consolidation
+   deletes this file together with `render-edit/sections/VideoSection.svelte`.
+
+   THE CLASS-BY-CLASS PORT MAP, the genuine (non-1:1) splits, and the rules
+   deliberately NOT ported because they are axes rather than compositions, are all
+   recorded in the header of `render-edit/sections/VideoSection.svelte` — one
+   copy, beside the markup it describes, rather than two that can drift.
+
+   The three notes a reader of THIS file will want:
+
+   • `.jp-video__frame`'s `aspect-ratio: 16 / 9` became `var(--jp-media-aspect)`,
+     and `.jp-video__frame::after`'s `height: 42%` scrim became
+     `background: var(--jp-media-scrim)` on a full-box overlay. The percentage was
+     NOT carried across: a scrim fixed at a percentage of a box whose
+     `aspect-ratio` is a variable is exactly the coupling defect WT-2 was sent to
+     fix. The public components floor the box's HEIGHT instead, which can only
+     ever move the gradient stop further above the text.
+   • `.jp-video__heading`'s `font-size: clamp(1.6rem, 4.4cqw, 2.4rem)` was NOT
+     ported. Type scale belongs to the `type` axis, and a composition that also
+     scaled type would put treatment back inside the variant namespace — the one
+     thing this programme removes.
+   • `.jp-video__frame`'s `box-shadow: 0 34px 80px -40px black` became
+     `--shadow-xl`: a raw black shadow breaks on a light-brand org (A18).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════ VIDEO · cinematic frame (introVideo + reel) ═════════════
+   Variants: cinema (corners + meta) · simple · split (text beside frame).
+
+   NOTE these are the PRE-0085 variant ids. The public components draw
+   `theatre` / `plain` / `split` / `bleed` / `card` (introVideo) and
+   `theatre` / `plain` / `split` / `waveform` (reel — `strip` is descoped per
+   A27). `LEGACY_SECTION_VARIANTS` maps `cinema`→`theatre`, `simple`→`plain`. */
+.jp-video { padding: clamp(2.6rem, 7cqw, 4.6rem) clamp(1.4rem, 6cqw, 3.4rem); }
+.jp-video__lead { text-align: center; max-width: 46rem; margin: 0 auto clamp(1.4rem, 3cqw, 2rem); }
+.jp-video__kick { font-size: clamp(0.62rem, 1.1cqw, 0.72rem); letter-spacing: var(--tracking-wider, 0.24em); text-transform: uppercase; color: var(--jp-ember); font-weight: var(--font-semibold); }
+.jp-video__heading { font-family: var(--jp-serif); font-weight: var(--font-normal); color: var(--jp-heading); font-size: clamp(1.6rem, 4.4cqw, 2.4rem); line-height: 1.12; margin: 0.4rem 0 0.5rem; }
+.jp-video__sub { color: var(--jp-dim); font-size: clamp(0.9rem, 1.5cqw, 1.02rem); line-height: 1.6; max-width: 52ch; margin-inline: auto; }
+.jp-video__frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: var(--border-width) solid color-mix(in oklab, var(--jp-ember) 16%, transparent);
+  background: radial-gradient(120% 130% at 50% 0%, color-mix(in oklab, var(--jp-blood) 42%, var(--jp-ink-2)), var(--jp-ink));
+  box-shadow: 0 34px 80px -40px black;
+  display: grid;
+  place-items: center;
+}
+.jp-video__frame::after { content: ''; position: absolute; inset: auto 0 0 0; height: 42%; background: linear-gradient(to top, color-mix(in oklab, black 60%, transparent), transparent); }
+.jp-video__play {
+  position: relative;
+  z-index: 2;
+  width: clamp(50px, 9cqw, 70px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--jp-ember) 92%, white);
+  color: var(--jp-on-ember);
+  font-size: 1.15rem;
+  box-shadow: 0 0 0 8px color-mix(in oklab, var(--jp-ember) 14%, transparent);
+}
+.jp-video__corner { position: absolute; width: 16px; height: 16px; z-index: 2; border: 1.5px solid color-mix(in oklab, var(--jp-heading) 38%, transparent); }
+.jp-video__corner--tl { top: 12px; left: 12px; border-right: 0; border-bottom: 0; }
+.jp-video__corner--tr { top: 12px; right: 12px; border-left: 0; border-bottom: 0; }
+.jp-video__corner--bl { bottom: 12px; left: 12px; border-right: 0; border-top: 0; }
+.jp-video__corner--br { bottom: 12px; right: 12px; border-left: 0; border-top: 0; }
+.jp-video__tag { position: absolute; left: 14px; bottom: 12px; z-index: 3; font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--jp-dim); }
+.jp-video__dur { position: absolute; right: 14px; bottom: 12px; z-index: 3; font-size: 0.7rem; color: var(--jp-heading); background: color-mix(in oklab, black 42%, transparent); padding: 0.2rem 0.5rem; border-radius: var(--radius-sm); letter-spacing: 0.04em; }
+.jp-video--simple .jp-video__corner,
+.jp-video--simple .jp-video__tag { display: none; }
+.jp-video--split .jp-video__wrap { display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(1.4rem, 4cqw, 3rem); align-items: center; }
+.jp-video--split .jp-video__lead { text-align: left; max-width: none; margin: 0; }
+.jp-video--split .jp-video__sub { margin-inline: 0; }
+@container (max-width: 520px) { .jp-video--split .jp-video__wrap { grid-template-columns: 1fr; } }

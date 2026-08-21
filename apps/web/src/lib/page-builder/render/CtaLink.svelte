@@ -66,6 +66,20 @@
     text-decoration: none;
     text-align: center;
     cursor: pointer;
+    /*
+      WCAG 2.5.5 floor. Measured by the WT-3 pilot: `lg`'s content box came out
+      40–41px at every density and every width — `--text-base` (16px) at
+      `--leading-none` plus 2 × `--space-3` (12px) is 40px, and nothing declared a
+      floor. `md` is smaller still. This affects every CTA on every journey
+      section, which is why it belongs here rather than in one component.
+
+      `--tap-target-min` is `max(2.75rem, var(--space-11))`, so an org whose
+      `--brand-density` is under 1 cannot shrink the target below 44px — a floor a
+      brand setting can lower is not a floor (contract A2). Padding still governs
+      the resting size wherever it already clears the floor; this only ever makes
+      the target larger.
+    */
+    min-height: var(--tap-target-min);
     transition:
       background-color var(--duration-fast) var(--ease-default),
       border-color var(--duration-fast) var(--ease-default),

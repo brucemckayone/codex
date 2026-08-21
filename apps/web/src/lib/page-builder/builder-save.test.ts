@@ -93,6 +93,31 @@ describe('saveBuilderDraft', () => {
     expect(deps.markSaved).toHaveBeenCalledTimes(1);
   });
 
+  it('sends the page LOOK when the draft has one (F-B2)', async () => {
+    const deps = makeDeps({
+      payload: makePayload({ design: { width: 'narrow', motion: 'drift' } }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(deps.savePage).toHaveBeenCalledWith(
+      expect.objectContaining({ design: { width: 'narrow', motion: 'drift' } })
+    );
+  });
+
+  it('OMITS design entirely when the draft has none', async () => {
+    // Absence is meaningful, not cosmetic: the service reads an absent `design` as
+    // "leave the stored bundle alone". Sending `design: undefined` would express the
+    // same thing today, but a draft loaded by a client that predates the axes must
+    // never be able to say anything about a page's look at all.
+    const deps = makeDeps();
+
+    await saveBuilderDraft(deps);
+
+    const sent = deps.savePage.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(sent)).not.toContain('design');
+  });
+
   it('reports ok:false with the service message when the page write fails', async () => {
     const deps = makeDeps({
       savePage: vi

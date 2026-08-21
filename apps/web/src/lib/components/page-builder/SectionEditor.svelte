@@ -21,8 +21,21 @@
   import type { PageSection } from '@codex/shared-types';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
-  import { findSectionDefinition, resolveVariant, variantsForType } from '$lib/page-builder';
+  import {
+    findSectionDefinition,
+    resolveDesign,
+    resolveVariant,
+    variantsForType,
+  } from '$lib/page-builder';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
+  import DesignAxisControl from './DesignAxisControl.svelte';
+  import {
+    AXIS_HINTS,
+    AXIS_LABELS,
+    axesForSectionType,
+    axisOptions,
+    isAxisValue,
+  } from './design-vocabulary';
   import { fieldsForSectionType } from './section-fields';
   import VariantPicker from './VariantPicker.svelte';
 
@@ -33,9 +46,63 @@
   const { section }: Props = $props();
 
   const definition = $derived(findSectionDefinition(section.type));
-  const fields = $derived(fieldsForSectionType(section.type));
+  /**
+   * Control kinds F-C DECLARED but consolidation has not BUILT (A29/A72).
+   *
+   * `section-fields.ts` states the intended behaviour: "these fields are inert in
+   * the rail: `SectionEditor` renders the controls it knows and skips the rest."
+   * It did not skip them. The dispatch below branches `media`, `textarea` and
+   * `select`, then falls through a catch-all `{:else}` to `<input type="text">` —
+   * so all four unbuilt kinds rendered a normal-looking text box and `onInput`
+   * wrote `target.value`, a STRING, into keys that must hold an array or a number.
+   *
+   * That is worse than not rendering them. A creator saw a field labelled
+   * "Credentials", with a hint promising "the hairline-ruled fact list — years
+   * practising, students taught, qualifications", typed into it, saved, and got
+   * nothing: `coerce.ts`'s `asObjectArray` discards a non-array at its first line,
+   * silently. Proved end to end on a published page, where `props.facts` persisted
+   * with `jsonb_typeof = string`.
+   *
+   * SEQUENCING IS WHY THIS CANNOT WAIT FOR THE REAL CONTROL. `valueOf()` below
+   * returns `''` for any non-string, so once a field correctly holds an array the
+   * text box would render EMPTY OVER REAL CONTENT, and a creator "filling in the
+   * blank" would overwrite the array with a string. That is `Codex-wtfs1`'s
+   * data-loss trap on a different key. The wrong control has to stop accepting
+   * input BEFORE or WITH the right one, never after.
+   *
+   * So this honours the declared contract literally: skip. A disabled affordance
+   * naming the field would be more informative, and is the right call to make
+   * alongside the generic array control (A29) — but inventing one here is a design
+   * decision, and skipping is what F-C specified. `Codex-28ifd`.
+   */
+  const UNBUILT_CONTROLS = ['number', 'toggle', 'list', 'repeater'];
+
+  const fields = $derived(
+    fieldsForSectionType(section.type).filter(
+      (f) => !UNBUILT_CONTROLS.includes(f.control)
+    )
+  );
   const variants = $derived(variantsForType(section.type));
   const currentVariant = $derived(resolveVariant(section));
+
+  // ── Design axes (journey sections · F-B2) ──────────────────────────────────
+  // Three values per axis, and the panel needs all three to be honest about
+  // inheritance: what this section RENDERS as, what it would render as with no
+  // override of its own, and where that fallback comes from.
+  //
+  // Both calls are the SAME `resolveDesign` the renderer uses, so the effective
+  // value shown here cannot drift from the value emitted as `data-jp-*` — which a
+  // second, local resolution eventually would.
+  const pendingPage = $derived(pageBuilder.pending);
+  /** Section → page → default: what this section actually renders as. */
+  const effectiveDesign = $derived(resolveDesign(section, pendingPage));
+  /** Page → default only: what it would render as if it overrode nothing. */
+  const inheritedDesign = $derived(resolveDesign(null, pendingPage));
+  /** `media` is inert on 6 of 11 types — hidden there rather than shown dead. */
+  const designAxes = $derived(axesForSectionType(section.type));
+  const overriddenCount = $derived(
+    designAxes.filter((axis) => section.design?.[axis] !== undefined).length
+  );
 
   /** Read a prop as a string for a control `value` (non-strings coerce to ''). */
   function valueOf(key: string): string {
@@ -88,10 +155,60 @@
     </div>
   {/if}
 
+  <!--
+    The DESIGN group. Sits under the variant picker because a variant is which
+    composition this section uses, and the axes are how that composition is
+    dressed — you choose the shape, then adjust it.
+
+    Every control shows its effective value, whether that value is inherited or
+    set here, and the way back to inherited. Without that the model is invisible:
+    per-axis inheritance means a control reading "Wide" may be this section's
+    choice OR the page's, and those two behave completely differently when the
+    page's preset changes.
+  -->
+  <div class="section-editor__group">
+    <p class="section-editor__group-label">
+      Design
+      {#if overriddenCount > 0}
+        <span class="section-editor__group-count">
+          · {overriddenCount} set here
+        </span>
+      {/if}
+    </p>
+    <p class="section-editor__hint">
+      Inherited from the page's look unless you change it here.
+    </p>
+    <div class="section-editor__axes">
+      {#each designAxes as axis (axis)}
+        <!--
+          Hoist the per-iteration values BEFORE the handler closures: Svelte 5
+          does not carry narrowing from the `{#each}` binding into a callback, so
+          the `{@const}`s are what keep `axis` typed inside `onselect`.
+        -->
+        {@const override = section.design?.[axis]}
+        <DesignAxisControl
+          label={AXIS_LABELS[axis]}
+          hint={AXIS_HINTS[axis]}
+          options={axisOptions(axis)}
+          effective={effectiveDesign[axis]}
+          {override}
+          inherited={inheritedDesign[axis]}
+          inheritedFrom={pendingPage?.design?.[axis] ? 'page' : 'default'}
+          onselect={(value) => {
+            // Guarded, not cast: an illegal value would store fine and then match
+            // no CSS rule, which reads as a control that does nothing.
+            if (isAxisValue(axis, value)) {
+              pageBuilder.setSectionDesignAxis(section.id, axis, value);
+            }
+          }}
+          onclear={() => pageBuilder.setSectionDesignAxis(section.id, axis, undefined)}
+        />
+      {/each}
+    </div>
+  </div>
+
   <div class="section-editor__fields">
-    {#if variants.length >= 2}
-      <p class="section-editor__group-label">Content</p>
-    {/if}
+    <p class="section-editor__group-label">Content</p>
     {#each fields as field (field.key)}
       <!--
         Hoist the narrowed slot BEFORE the handler closure: Svelte 5 does not
@@ -214,7 +331,7 @@
   .section-editor__summary {
     margin: var(--space-0-5) 0 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
@@ -250,13 +367,32 @@
     gap: var(--space-2);
   }
 
+  /* Group headings, so they carry structure — measured 2.52:1 light / 3.19:1 dark
+     on `--color-text-muted` at 13px semibold, which is NOT WCAG large text and so
+     needs the full 4.5. Same one-token fix as the hints below. */
   .section-editor__group-label {
     margin: 0;
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
+  }
+
+  /* Deliberately NOT the override colour: this is a count on a plain surface, and
+     the status-info text token is vetted against its own chip surface, not this
+     one. The chips inside the group carry the colour; this carries the number. */
+  .section-editor__group-count {
+    font-weight: var(--font-normal);
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--color-text-secondary);
+  }
+
+  .section-editor__axes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
   }
 
   .section-editor__fields {
@@ -294,6 +430,10 @@
     line-height: var(--leading-normal);
   }
 
+  /* Placeholders stay MUTED on purpose: they are the one string here that must
+     read as absent-until-typed, and WCAG treats placeholder text as exempt only
+     while it is not the field's only label — every field above has a real
+     `<label>`. */
   .section-editor__input::placeholder {
     color: var(--color-text-muted);
   }
@@ -304,9 +444,13 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
+  /* `--color-text-secondary`, not `--color-text-muted`: measured by canvas readback
+     on this panel, muted at `--text-xs` is 2.52:1 light / 3.19:1 dark, and 13px is
+     not WCAG "large text", so it needed the full 4.5. Secondary reads 7.81 / 10.21.
+     Applies to the pre-existing field hints too, which had the same defect. */
   .section-editor__hint {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 

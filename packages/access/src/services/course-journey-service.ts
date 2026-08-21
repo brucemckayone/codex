@@ -80,6 +80,7 @@ import type {
   PlaylistEntry,
   PracticeCompletionRecord,
   PracticeContentType,
+  SectionDesign,
 } from '@codex/shared-types';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
@@ -304,6 +305,7 @@ export class CourseJourneyService extends BaseService {
           subjectId: landingPages.subjectId,
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -372,6 +374,15 @@ export class CourseJourneyService extends BaseService {
           brandOverrides:
             (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
           sections: (pageRow.sections as PageSection[]) ?? [],
+          // The page's LOOK, fed to `SectionRenderer`'s `pageDesign` prop, where
+          // `resolveDesign` resolves it per axis under each section's own
+          // override. Spread-when-present rather than `?? undefined`: `design` is
+          // optional on the record, and a row written before the F-B2 migration
+          // (or by an older deployment) must resolve to the axis DEFAULTS, not to
+          // an explicit empty bundle.
+          ...(pageRow.design
+            ? { design: pageRow.design as SectionDesign }
+            : {}),
         },
         course: {
           id: courseRow.id,
@@ -425,6 +436,7 @@ export class CourseJourneyService extends BaseService {
           subjectId: landingPages.subjectId,
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -486,6 +498,15 @@ export class CourseJourneyService extends BaseService {
           brandOverrides:
             (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
           sections: (pageRow.sections as PageSection[]) ?? [],
+          // The page's LOOK, fed to `SectionRenderer`'s `pageDesign` prop, where
+          // `resolveDesign` resolves it per axis under each section's own
+          // override. Spread-when-present rather than `?? undefined`: `design` is
+          // optional on the record, and a row written before the F-B2 migration
+          // (or by an older deployment) must resolve to the axis DEFAULTS, not to
+          // an explicit empty bundle.
+          ...(pageRow.design
+            ? { design: pageRow.design as SectionDesign }
+            : {}),
         },
         course: {
           id: courseRow.id,
@@ -507,9 +528,11 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Resolve the PUBLIC 30s sell-preview clips for a course's intro-film +
-   * practice reel (SPEC §10) — the streamed, off-critical-path payload of the
-   * sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
+   * Resolve the PUBLIC 30s sell-preview media for a course: the intro-film and
+   * practice-reel clips (SPEC §10), the guide's portrait still and talking-head
+   * clip (journey-sections contract A15), and the hero still plus the guide's
+   * signature (contract A27, Codex-wqxv4) — the streamed,
+   * off-critical-path payload of the sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
    * SAME public preview path the org-landing hero consumes —
    * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
    * `R2_PUBLIC_URL_BASE` (mirrors `content-api/routes/public.ts` `resolveR2Urls`);
@@ -526,6 +549,14 @@ export class CourseJourneyService extends BaseService {
         .select({
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
+          guideVideoMediaId: courses.guideVideoMediaId,
+          // A27: the hero still + the guide's signature. Real columns (unlike the
+          // portrait below), so they select and write like the three videos.
+          heroMediaId: courses.heroMediaId,
+          signatureMediaId: courses.signatureMediaId,
+          // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
+          // of its own — `updateJourneySellMedia` read-then-merges it there.
+          guide: courses.guide,
         })
         .from(courses)
         .where(
@@ -539,9 +570,15 @@ export class CourseJourneyService extends BaseService {
 
       if (!courseRow) return null;
 
+      const guidePortraitMediaId = courseRow.guide?.portraitMediaId ?? null;
+
       const mediaIds = [
         courseRow.introVideoMediaId,
         courseRow.previewVideoMediaId,
+        courseRow.guideVideoMediaId,
+        guidePortraitMediaId,
+        courseRow.heroMediaId,
+        courseRow.signatureMediaId,
       ].filter((id): id is string => id !== null);
 
       const previewByMediaId = new Map<
@@ -581,9 +618,32 @@ export class CourseJourneyService extends BaseService {
         };
       };
 
+      // Resolve one media id → a public STILL. The portrait is a `media_items`
+      // ref, and `media_items` is CHECK-constrained to video/audio, so the still
+      // the creator picked is the item's `thumbnailKey` — NOT `hlsPreviewKey`,
+      // which is why the portrait cannot go through `toClip`.
+      const toStill = (mediaId: string | null): string | null => {
+        if (!mediaId) return null;
+        const media = previewByMediaId.get(mediaId);
+        if (!media?.thumbnailKey || !r2PublicUrlBase) return null;
+        return `${r2PublicUrlBase}/${media.thumbnailKey}`;
+      };
+
       return {
         intro: toClip(courseRow.introVideoMediaId),
         reel: toClip(courseRow.previewVideoMediaId),
+        // Contract amendment A15: both guide slots were WRITE-ONLY codebase-wide
+        // — the builder's pickers persisted them and no public read projected
+        // them, so the guide section could never show a portrait or a clip.
+        guidePortraitUrl: toStill(guidePortraitMediaId),
+        guideClip: toClip(courseRow.guideVideoMediaId),
+        // Contract amendment A27 (Codex-wqxv4): the hero image and the guide's
+        // signature. Both go through `toStill` for the reason its own comment
+        // gives — `media_items` is video/audio-only, so the still a creator picks
+        // is the item's `thumbnailKey`. `hero.full-bleed` / `hero.poster` /
+        // `guide.letter` are named after media that, until now, no column held.
+        heroImageUrl: toStill(courseRow.heroMediaId),
+        signatureUrl: toStill(courseRow.signatureMediaId),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
@@ -1298,6 +1358,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           offer: landingPages.offer,
+          design: landingPages.design,
         })
         .from(landingPages)
         .where(
@@ -1325,11 +1386,52 @@ export class CourseJourneyService extends BaseService {
         // `offer` is optional on the draft; an unpriced page has no bag yet, so
         // the pricing panel opens with every path off rather than a stale guess.
         ...(row.offer ? { offer: row.offer as PageOffer } : {}),
+        // The page's LOOK — what the builder's preset picker renders as selected.
+        // Every page created since F-B2 holds an explicit bundle (Signal on
+        // create, Candlelit on the migrated rows), so the absent case only covers
+        // a row written by an older deployment: the picker then shows no preset
+        // selected, which is honest — the page really is rendering at the axis
+        // defaults.
+        ...(row.design ? { design: row.design as SectionDesign } : {}),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
     }
   }
+
+  /**
+   * The design bundle a NEW page is born with — **Signal** (research §4.8), the
+   * recommended platform default: a contemporary/product look for the creator
+   * with no design opinion.
+   *
+   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left to
+   * `SECTION_DESIGN_DEFAULTS`: an implicit default is invisible. A page storing no
+   * `design` renders *like something* while the builder's preset picker shows
+   * NOTHING selected — so the creator sees a control that appears dead, and the
+   * first preset they pick looks like it changed the page when it merely made the
+   * existing look explicit. An explicit stored bundle is inspectable, diffable and
+   * editable. Same argument as the Candlelit migration, applied to new pages
+   * instead of old ones.
+   *
+   * These nine values are ALSO declared in the builder's preset table
+   * (`apps/web/src/lib/components/page-builder/design-vocabulary.ts` →
+   * `SECTION_DESIGN_PRESETS` → `signal`), because a package cannot import from
+   * `apps/web` and the presets are builder-UI vocabulary. `design-vocabulary.test.ts`
+   * pins that copy to these exact values, so a drift fails `pnpm --filter web test`
+   * rather than silently making a new page's stored bundle match no preset in the
+   * picker.
+   */
+  private static readonly NEW_PAGE_DESIGN: SectionDesign = {
+    width: 'wide',
+    density: 'regular',
+    surface: 'panel',
+    edge: 'hairline',
+    align: 'start',
+    type: 'balanced',
+    accent: 'fill',
+    motion: 'rise',
+    media: 'frame',
+  };
 
   /**
    * Create a new journey/page (as a draft) and return its page id + slug. For a
@@ -1426,6 +1528,9 @@ export class CourseJourneyService extends BaseService {
             subjectType: pageType === 'course' ? 'course' : null,
             subjectId,
             sections: [],
+            // An EXPLICIT look, never the implicit axis defaults (A21) — see
+            // {@link CourseJourneyService.NEW_PAGE_DESIGN}.
+            design: CourseJourneyService.NEW_PAGE_DESIGN,
           })
           .returning({ id: landingPages.id, slug: landingPages.slug });
         if (!page) {
@@ -1467,6 +1572,16 @@ export class CourseJourneyService extends BaseService {
       status: PageStatus;
       sections: PageSection[];
       brandOverrides?: BrandTokenOverrides | null;
+      /**
+       * The page's LOOK (the preset picker's write). OPTIONAL and treated as
+       * "leave alone" when absent — never as "clear it". A client that does not
+       * know about the axes (or a save issued before the draft finished loading)
+       * must not silently wipe a stored bundle and drop the page back to the
+       * neutral axis defaults, which for a migrated page means visibly losing its
+       * appearance. There is deliberately no way to clear it: A21 requires every
+       * page to hold an explicit bundle.
+       */
+      design?: SectionDesign;
     }
   ): Promise<void> {
     try {
@@ -1552,6 +1667,7 @@ export class CourseJourneyService extends BaseService {
             status,
             sections: record.sections,
             brandOverrides: record.brandOverrides,
+            ...(record.design ? { design: record.design } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
           })
           .where(
@@ -1892,6 +2008,8 @@ export class CourseJourneyService extends BaseService {
           introVideoMediaId: courses.introVideoMediaId,
           previewVideoMediaId: courses.previewVideoMediaId,
           guideVideoMediaId: courses.guideVideoMediaId,
+          heroMediaId: courses.heroMediaId,
+          signatureMediaId: courses.signatureMediaId,
           guide: courses.guide,
           coverImageKey: courses.coverImageKey,
         })
@@ -1915,6 +2033,8 @@ export class CourseJourneyService extends BaseService {
         previewVideoMediaId: row.previewVideoMediaId,
         guideVideoMediaId: row.guideVideoMediaId,
         guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+        heroMediaId: row.heroMediaId,
+        signatureMediaId: row.signatureMediaId,
         coverImageUrl: resolveCourseCoverUrl(
           row.coverImageKey,
           r2PublicUrlBase
@@ -1926,7 +2046,7 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Persist the journey's SELL MEDIA — a TOTAL write of the four media slots.
+   * Persist the journey's SELL MEDIA — a TOTAL write of the six media slots.
    *
    * Total, not merge: every slot is set to exactly what the caller sends, so
    * `null` CLEARS. A merge shape could only ever set a video, never unset one,
@@ -1955,6 +2075,10 @@ export class CourseJourneyService extends BaseService {
       previewVideoMediaId: string | null;
       guideVideoMediaId: string | null;
       guidePortraitMediaId: string | null;
+      /** A27 (Codex-wqxv4) — the hero still. */
+      heroMediaId: string | null;
+      /** A27 (Codex-wqxv4) — the guide's signature mark. */
+      signatureMediaId: string | null;
     }
   ): Promise<JourneySellMedia> {
     try {
@@ -1970,6 +2094,8 @@ export class CourseJourneyService extends BaseService {
         input.previewVideoMediaId,
         input.guideVideoMediaId,
         input.guidePortraitMediaId,
+        input.heroMediaId,
+        input.signatureMediaId,
       ]);
 
       return await this.txDb.transaction(async (tx) => {
@@ -2008,6 +2134,8 @@ export class CourseJourneyService extends BaseService {
             introVideoMediaId: input.introVideoMediaId,
             previewVideoMediaId: input.previewVideoMediaId,
             guideVideoMediaId: input.guideVideoMediaId,
+            heroMediaId: input.heroMediaId,
+            signatureMediaId: input.signatureMediaId,
             guide,
           })
           .where(
@@ -2021,6 +2149,8 @@ export class CourseJourneyService extends BaseService {
             introVideoMediaId: courses.introVideoMediaId,
             previewVideoMediaId: courses.previewVideoMediaId,
             guideVideoMediaId: courses.guideVideoMediaId,
+            heroMediaId: courses.heroMediaId,
+            signatureMediaId: courses.signatureMediaId,
             guide: courses.guide,
             coverImageKey: courses.coverImageKey,
           });
@@ -2039,6 +2169,8 @@ export class CourseJourneyService extends BaseService {
           previewVideoMediaId: row.previewVideoMediaId,
           guideVideoMediaId: row.guideVideoMediaId,
           guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+          heroMediaId: row.heroMediaId,
+          signatureMediaId: row.signatureMediaId,
           // The cover is written by its own multipart endpoint; echo the stored
           // key unresolved-to-null here rather than inventing a base URL.
           coverImageUrl: null,
