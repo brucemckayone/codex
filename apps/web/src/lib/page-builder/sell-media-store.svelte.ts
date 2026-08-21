@@ -25,7 +25,6 @@ import {
   deleteJourneyCover,
   getJourneySellMedia,
   updateJourneySellMedia,
-  uploadJourneyCover,
 } from '$lib/remote/journeys.remote';
 import { listMedia } from '$lib/remote/media.remote';
 
@@ -193,26 +192,19 @@ class SellMediaStore {
   }
 
   /**
-   * Upload (or replace) the cover. Immediate — NOT part of the page save, because
-   * a multipart upload has a different failure mode from a JSON patch and the
-   * creator needs the resolved URL back to see what they picked.
+   * Record a cover the PANEL has just uploaded.
    *
-   * Errors propagate so the panel can surface the server's own message (an
-   * unsupported format, most commonly).
+   * The upload itself is a `form()` submission owned by the panel rather than a
+   * method here, because a `File` cannot cross a `command()` boundary — devalue
+   * cannot serialize one, so the multipart `<form>` has to live in the component
+   * (see `uploadJourneyCoverForm`). The store still owns the resolved URL, so the
+   * card preview and the save payload read one source rather than two.
+   *
+   * Immediate, and deliberately NOT part of the page save: a multipart upload
+   * has a different failure mode from a JSON patch.
    */
-  async uploadCover(file: File): Promise<void> {
-    const pageId = this.#pageId;
-    if (!pageId) return;
-    this.#coverBusy = true;
-    try {
-      const { coverImageUrl } = await uploadJourneyCover({
-        pageId,
-        cover: file,
-      });
-      this.#coverImageUrl = coverImageUrl;
-    } finally {
-      this.#coverBusy = false;
-    }
+  applyCoverUrl(url: string | null): void {
+    this.#coverImageUrl = url;
   }
 
   /** Clear the cover — the journey card falls back to its typographic form. */

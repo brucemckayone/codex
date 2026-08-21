@@ -30,7 +30,7 @@ vi.mock('$lib/remote/journeys.remote', () => ({
   getJourneySellMedia: (input: { pageId: string }) =>
     getJourneySellMedia(input),
   updateJourneySellMedia: (input: unknown) => updateJourneySellMedia(input),
-  uploadJourneyCover: vi.fn(),
+  uploadJourneyCoverForm: { enhance: vi.fn(), fields: {}, pending: 0 },
   deleteJourneyCover: vi.fn(),
 }));
 
