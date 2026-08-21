@@ -37,11 +37,14 @@ import {
   SECTION_CATALOG,
   SECTION_DESIGN_AXES,
 } from '$lib/page-builder';
-import { SECTION_COMPONENTS as PUBLIC_COMPONENTS } from '$lib/page-builder/render';
+import {
+  SECTION_COMPONENTS as PUBLIC_COMPONENTS,
+  selectRenderableSections,
+} from '$lib/page-builder/render';
+import SectionFrame from '$lib/page-builder/render/SectionFrame.svelte';
 import PublicSectionRenderer from '$lib/page-builder/render/SectionRenderer.svelte';
 import type { JourneySalesContext } from '$lib/page-builder/render/types';
 import { SECTION_COMPONENTS as CANVAS_COMPONENTS } from '$lib/page-builder/render-edit';
-import CanvasSectionRenderer from '$lib/page-builder/render-edit/SectionRenderer.svelte';
 import {
   flushSync,
   mount,
@@ -171,30 +174,34 @@ describe('canvas ↔ public: axis emission (CHARACTERISATION — Codex-6nrsk)', 
     unmount(component);
   });
 
-  it('emits NONE of them on the canvas tree — this is the gap, not the goal', () => {
-    // `resolveDesign` is called in exactly three places — the public
-    // SectionRenderer, PageDesignPanel and SectionEditor — and never in
-    // `render-edit/`. So a creator can change any of the nine axes, watch the
-    // panel's own resolved-value readout update, and see the canvas beside it
-    // not move. The panel is honest about what it resolved and dishonest about
-    // what it will look like.
+  it('emits all nine on the CANVAS path too — the gap is closed', () => {
+    // This assertion is the inverse of the one it replaces. It used to read
+    // "emits NONE of them on the canvas tree", because the canvas rendered its
+    // own component set and `resolveDesign` was never called for it: a creator
+    // could change any of the nine axes, watch the panel's resolved-value readout
+    // update, and see the canvas beside it not move.
     //
-    // WHEN YOU FIX Codex-6nrsk THIS TEST FAILS. That is intended. Delete this
-    // assertion and let the public-tree one above cover both trees. Note the fix
-    // is wider than the axes: page-level styling lives in TWO public wrappers —
-    // `JourneyRenderer` applies `brandOverridesToStyleAttr` and `SectionRenderer`
-    // applies `resolveDesign` — and the canvas bypasses both, so it also fails
-    // to apply `landing_pages.brand_overrides`.
-    const component = mount(CanvasSectionRenderer, {
+    // The canvas now mounts the same `SectionFrame` the public renderer does, so
+    // there is no second tree to diverge. Kept (rather than deleted) and INVERTED
+    // deliberately: the old test's own note said to delete it and let the
+    // public-tree case cover both, but the canvas reaches the frame by its own
+    // loop, so "the public tree emits" would no longer witness the canvas at all.
+    const component = mount(SectionFrame, {
       target: document.body,
-      props: { section: oneOfEveryType[0] },
+      props: {
+        renderable: selectRenderableSections([oneOfEveryType[0]])[0],
+        context,
+        editable: true,
+      },
     });
     flushSync();
 
+    const sec = document.body.querySelector('.jp-sec');
+    expect(sec, 'canvas path rendered no .jp-sec').not.toBeNull();
     const emitted = SECTION_DESIGN_AXES.filter((axis) =>
-      document.body.querySelector(`[data-jp-${axis}]`)
+      sec?.hasAttribute(`data-jp-${axis}`)
     );
-    expect(emitted).toEqual([]);
+    expect(emitted).toEqual([...SECTION_DESIGN_AXES]);
 
     unmount(component);
   });

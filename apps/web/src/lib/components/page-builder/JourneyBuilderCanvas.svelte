@@ -38,6 +38,7 @@
   import type { CourseOffer, EditorStageView, JourneyCourseView } from '$lib/page-builder';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import {
+    brandOverridesToStyleAttr,
     builderSalesContext,
     SectionFrame,
     selectRenderableSections,
@@ -114,6 +115,24 @@
 
   /** The page-level design defaults each section overrides per axis. */
   const pageDesign = $derived(pageBuilder.pending?.design);
+
+  /**
+   * The page's brand overrides as a `style` declaration — the OTHER half of
+   * page-level styling, which the public page gets from `JourneyRenderer` and the
+   * canvas used to skip entirely, so `PageBrandPanel` wrote overrides nothing here
+   * could show (the second half of Codex-6nrsk).
+   *
+   * Applied per SECTION rather than on `.jbc-page`, and that placement is
+   * load-bearing. `tokenOverridesToCssVars` maps any non-`--brand-` key to
+   * `--color-<key>`, so a page's overrides CAN re-point `--color-surface*` /
+   * `--color-border*` — the very tokens the in-canvas block affordances (tags,
+   * toolbars) read and need to keep studio-neutral. Scoping the declaration to a
+   * wrapper around the section alone lets it reach the section by inheritance
+   * while leaving the chrome outside it.
+   */
+  const brandStyle = $derived(
+    brandOverridesToStyleAttr(pageBuilder.pending?.brandOverrides)
+  );
 
   const indexOf = (id: string): number => sections.findIndex((s) => s.id === id);
 
@@ -244,13 +263,18 @@
             {/if}
           {/if}
 
-          <SectionFrame
-            renderable={entry}
-            context={salesContext}
-            {pageDesign}
-            {editable}
-            onEdit={(key, value) => onEditProp(section.id, key, value)}
-          />
+          <!-- `display: contents` — the wrapper exists ONLY to scope the brand
+               declaration; it generates no box, so it cannot change section
+               layout, while custom properties still inherit through it. -->
+          <div class="jbc-block__brand" style={brandStyle}>
+            <SectionFrame
+              renderable={entry}
+              context={salesContext}
+              {pageDesign}
+              {editable}
+              onEdit={(key, value) => onEditProp(section.id, key, value)}
+            />
+          </div>
         </div>
       {/each}
 
@@ -279,6 +303,12 @@
 </div>
 
 <style>
+  /* Box-less: scopes the page brand declaration to the section without becoming
+     a layout participant. */
+  .jbc-block__brand {
+    display: contents;
+  }
+
   .jbc {
     position: relative;
     display: grid;
