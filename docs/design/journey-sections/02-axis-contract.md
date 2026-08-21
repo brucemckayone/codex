@@ -1454,3 +1454,62 @@ BEFORE or WITH the real control, never after.** That is `Codex-wtfs1`'s trap on 
 Filed as `Codex-28ifd`. A renderer's correct behaviour meanwhile is to read the DECLARED shape only and
 self-hide — never to accept the string, because a field with two sub-fields makes `{label: <whole string>}`
 a guess dressed as data, and shipping the guess makes it a contract the eventual migration must preserve.
+
+## A73 — A53 refined: the trigger is CONCURRENT VITE INSTANCES, not raw load average
+
+A53 was recorded as "load-dependent test timeouts", from three data points where a worktree at load
+average 44 saw four failed tests and two failed suites — every one a timeout in a file it never
+touched — and passed 61/61 on re-run in isolation.
+
+**A fourth data point changes the diagnosis.** `pnpm --filter web test` returned **exit 0, 173/173
+files** at load average **55**, higher than any of the failing runs, with **only the dev fleet
+running and no sibling vite**. The failing run was at load 44 **with a sibling worktree's vite up**.
+
+So the distinguishing variable is not the load number, it is **how many vite dev servers are
+resident**. That fits the mechanism better than raw CPU pressure: vitest's own transform/collect
+phases contend with a watching vite over the module graph and the filesystem, and a second vite
+doubles that contention regardless of what the load average happens to read.
+
+**Practical rules, unchanged in substance but now correctly aimed:**
+- **Stop your vite before gating.** This was already the advice; it is now the *primary* one rather
+  than one mitigation among several.
+- A high load average alone is not a reason to distrust a green run, or to postpone one. Tonight's
+  load peaked at 55 from `mds_stores` (Spotlight) indexing two fresh worktrees at 118% CPU — nothing
+  to do with the test run, and the run was green.
+- A timeout in a suite you never touched is still grounds to re-run that file in isolation before
+  reporting a failure. **Report the load average AND whether another vite was up** — the second half
+  is the one that turned out to matter.
+
+## A74 — Running a gate and not waiting for it is the same as not running it
+
+The orchestrator committed a new test file after starting `pnpm typecheck --force` but before it
+finished. `tsc` then found a `TS2345` in that very file — a `Record<string, readonly string[]>` where
+the consuming `Map` is keyed by `CourseSectionType`.
+
+**It escaped because `vitest` does not typecheck.** The test file was green under
+`pnpm --filter web test` and stayed green after the fix; only the separate `tsc --noEmit` gate could
+ever have caught it. That is exactly why the gate is four commands rather than one, and the four are
+not interchangeable:
+
+| command | what only IT can catch |
+|---|---|
+| `pnpm check:ci` | formatting and lint that the others ignore |
+| `check:brand-boundary` (+ `:test`) | a public-bundle import that typechecks fine |
+| `pnpm typecheck --force` | **type errors in test files**, which vitest never sees |
+| `pnpm --filter web test` | behaviour, which types cannot express |
+
+Two corollaries worth stating because both have now cost something:
+- **`--force` is not optional.** A cached `FULL TURBO` is not a gate that ran. Confirm `0 cached`.
+- **Capture the real exit code.** `$?` after a pipe to `tail` measures `tail`; `lsof -ti:PORT | head -1
+  && echo OCCUPIED` reports `head`'s status. Redirect to a file and read `$?` on the next line.
+
+### And a shell hazard that corrupted a commit message and a bead reason
+
+zsh **executes backticks inside a double-quoted string**, so `git commit -m "... \`auto\` ..."` ran
+`auto` and silently deleted the word, leaving a sentence reading "it would fall back to  on the first
+one". A `??` in a `bd close --reason` string was glob-expanded and truncated the reason. And
+`grep --include=*.svelte` unquoted fails to match at all.
+
+**Write any prose containing backticks, `??`, or globs via `git commit -F -` with a QUOTED heredoc
+(`<<'MSG'`), or single-quote the argument.** The failure is silent in every case: you get a commit,
+a closed bead, or an empty grep result, and nothing tells you a word went missing.
