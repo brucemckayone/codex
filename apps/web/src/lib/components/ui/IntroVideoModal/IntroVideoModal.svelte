@@ -52,10 +52,39 @@
   let dialogEl = $state<HTMLDivElement | undefined>(undefined);
   let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance: Hls | null = null;
+  let hlsCleanup: (() => void) | null = null;
   let playing = $state(false);
   let muted = $state(true);
   let loading = $state(false);
   let error = $state<string | null>(null);
+
+  /**
+   * Tear down the current HLS.js instance and any Safari error listener.
+   *
+   * `createHlsPlayer` returns a HANDLE — `{ hls, cleanup }` — not the player.
+   * Assigning that handle straight to `hlsInstance` (typed `Hls`) is what this
+   * component used to do: `hlsInstance.destroy()` then threw
+   * `destroy is not a function` on every close, `cleanup()` never ran, and the
+   * real HLS.js instance was never destroyed — so each open leaked a player
+   * whose worker kept fetching segments, plus the native-Safari `error`
+   * listener. `svelte-check` had been reporting the type mismatch all along
+   * ("Type 'HlsPlayerHandle' is missing … 88 more"); it sat in the accepted
+   * error baseline as if it were cosmetic.
+   *
+   * `hlsCleanup` is a no-op on the HLS.js branch and a `removeEventListener`
+   * on the Safari native branch, so both halves are needed. Mirrors
+   * `AudioPlayer`/`VideoPlayer`, which had it right.
+   */
+  function teardownHls() {
+    if (hlsCleanup) {
+      hlsCleanup();
+      hlsCleanup = null;
+    }
+    if (hlsInstance) {
+      hlsInstance.destroy();
+      hlsInstance = null;
+    }
+  }
 
   // ── HLS init/teardown tied to open state ──
   $effect(() => {
@@ -67,7 +96,7 @@
       error = null;
       loading = true;
       try {
-        hlsInstance = await createHlsPlayer({
+        const handle = await createHlsPlayer({
           media: videoEl,
           src,
           onError: (msg) => {
@@ -75,9 +104,11 @@
             loading = false;
           },
         });
+        hlsInstance = handle.hls;
+        hlsCleanup = handle.cleanup;
 
         if (destroyed) {
-          hlsInstance?.destroy();
+          teardownHls();
           return;
         }
 
@@ -98,8 +129,7 @@
 
     return () => {
       destroyed = true;
-      hlsInstance?.destroy();
-      hlsInstance = null;
+      teardownHls();
       playing = false;
       muted = true;
       loading = false;
@@ -164,8 +194,7 @@
   });
 
   onDestroy(() => {
-    hlsInstance?.destroy();
-    hlsInstance = null;
+    teardownHls();
   });
 
   /**
