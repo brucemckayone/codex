@@ -87,6 +87,19 @@ export interface SellPreview {
    */
   heroImageUrl?: string | null;
   /**
+   * The HERO clip — the same `courses.heroMediaId` item as `heroImageUrl`, but
+   * resolved through `toClip` so the hero can PLAY it. FE mirror of
+   * `CourseSellPreview.heroClip`.
+   *
+   * `heroImageUrl` remains the poster for the playing modes and the whole picture
+   * for the still ones, so a hero reads BOTH: the clip decides whether playback is
+   * possible, the still decides what shows before and instead of it.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and the hero degrades
+   * to the still, then to its synthetic plate.
+   */
+  heroClip?: PreviewMedia | null;
+  /**
    * The guide's SIGNATURE mark — a public CDN URL, or null when unset (A27).
    * `guide.letter` signs off with it; WT-6 owns that composition.
    */

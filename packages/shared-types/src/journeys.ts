@@ -1013,6 +1013,25 @@ export interface CourseSellPreview {
    */
   heroImageUrl?: string | null;
   /**
+   * The HERO clip — the SAME `courses.heroMediaId` item as {@link
+   * CourseSellPreview.heroImageUrl}, resolved through `toClip` instead of
+   * `toStill` so the hero can PLAY it rather than only draw its poster frame.
+   *
+   * Until this field the manifest was discarded at the projection boundary: a
+   * creator uploaded a video, `toStill` reduced it to its `thumbnailKey`, and the
+   * hero had no way to reach the playable preview it already had. `heroImageUrl`
+   * stays for the still-only modes and as the poster for the playing ones, so the
+   * two are complements, not alternatives.
+   *
+   * Null when the course has no hero media or its preview has not transcoded —
+   * the same condition `intro`/`reel`/`guideClip` use.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.guidePortraitUrl}): an older
+   * worker deployment omits it and the hero falls back to the still, then to its
+   * synthetic plate.
+   */
+  heroClip?: CourseSellPreviewClip | null;
+  /**
    * The guide's SIGNATURE mark — a public CDN URL resolved from the thumbnail of
    * `courses.signatureMediaId` (A27). `guide.letter` signs off with it; null
    * leaves the letter unsigned. Same `toStill` resolution as the portrait.
