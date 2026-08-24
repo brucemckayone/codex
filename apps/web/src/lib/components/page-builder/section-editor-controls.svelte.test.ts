@@ -162,3 +162,100 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     expect(unaccounted).toEqual([]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE AXIS GATE (`disabledWhenAxis` · `Codex-uj4jc`)
+//
+// The hero's `mediaMode` chooses WHICH asset appears; the `media` axis decides
+// HOW it is shaped, and `media: none` means "no plate at all" — so the axis
+// necessarily wins. Both alternatives were worse than saying so. Silently
+// ignoring the mode leaves an author picking "silent looping video", seeing
+// nothing, and having no way to find out why. Auto-lifting the axis mutates a
+// DESIGN decision as a side effect of a CONTENT choice, which is exactly the
+// conflation this field set exists to keep apart.
+//
+// `HeroSection.svelte.test.ts` asserts the renderer's half (the axis overrules
+// the mode). This asserts the builder's half: the control is visibly unavailable
+// and the reason is on screen. Both halves are needed — a disabled control with
+// a renderer that ignored the axis would be a lie in the other direction.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The `<label>` wrapping a field, found by its visible label text. */
+function fieldByLabel(text: string): HTMLElement | null {
+  const span = [
+    ...document.body.querySelectorAll('.section-editor__field-label'),
+  ].find((s) => s.textContent?.trim() === text);
+  return (span?.closest('.section-editor__field') as HTMLElement) ?? null;
+}
+
+function heroSection(design?: Record<string, string>): PageSection {
+  return {
+    id: 's-hero',
+    type: 'hero',
+    enabled: true,
+    props: {},
+    design,
+  } as PageSection;
+}
+
+describe('SectionEditor — a design axis can gate a content control', () => {
+  it('leaves the media mode authorable while the axis allows a plate', () => {
+    const component = mount(SectionEditor, {
+      target: document.body,
+      props: { section: heroSection({ media: 'bleed' }) },
+    });
+    flushSync();
+
+    const field = fieldByLabel('What the media does');
+    expect(field).not.toBeNull();
+    const select = field?.querySelector('select');
+    expect(select).not.toBeNull();
+    expect(select?.disabled).toBe(false);
+
+    unmount(component);
+  });
+
+  it('disables it under `media: none` and shows the reason instead of the hint', () => {
+    const component = mount(SectionEditor, {
+      target: document.body,
+      props: { section: heroSection({ media: 'none' }) },
+    });
+    flushSync();
+
+    const field = fieldByLabel('What the media does');
+    expect(field?.querySelector('select')?.disabled).toBe(true);
+
+    // The reason REPLACES the hint — a hint about what a control does is noise
+    // while the control cannot do it.
+    const hint =
+      field?.querySelector('.section-editor__hint')?.textContent ?? '';
+    expect(hint).toContain('Media axis');
+    expect(hint).not.toContain('All six layouts');
+
+    unmount(component);
+  });
+
+  it('gates only the field that asked to be gated', () => {
+    // The mechanism is declarative and per-field. If it ever starts keying off
+    // something broader than `disabledWhenAxis`, a hero under `media: none` would
+    // go read-only wholesale — which would be a far worse bug than the one the
+    // gate fixes, and silent.
+    const component = mount(SectionEditor, {
+      target: document.body,
+      props: { section: heroSection({ media: 'none' }) },
+    });
+    flushSync();
+
+    const gated = SECTION_FIELDS.hero.filter((f) => f.disabledWhenAxis).length;
+    expect(gated).toBe(1);
+
+    const disabled = [
+      ...document.body.querySelectorAll<HTMLInputElement>(
+        'input, select, textarea'
+      ),
+    ].filter((el) => el.disabled).length;
+    expect(disabled).toBe(gated);
+
+    unmount(component);
+  });
+});

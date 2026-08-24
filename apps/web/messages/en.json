@@ -1474,6 +1474,8 @@
   "monetisation_revshare_propose_aria": "Propose a {type} revenue split with {name}",
   "journey_hero_cta_default": "Get started",
   "journey_hero_cta_enrolled": "Go to your dashboard",
+  "journey_hero_media_play": "Watch the film",
+  "journey_hero_media_play_aria": "Play the hero film",
   "journey_reel_tag_default": "Preview",
   "journey_invite_cta_default": "Join now",
   "journey_map_practice_label": "Practice",

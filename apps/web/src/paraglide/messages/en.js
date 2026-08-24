@@ -11815,6 +11815,22 @@ export const journey_hero_cta_enrolled = () => `Go to your dashboard`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const journey_hero_media_play = () => `Watch the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_hero_media_play_aria = () => `Play the hero film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const journey_reel_tag_default = () => `Preview`
 
 

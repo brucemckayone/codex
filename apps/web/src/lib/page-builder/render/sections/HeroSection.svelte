@@ -44,11 +44,17 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ChevronDownIcon } from '$lib/components/ui/Icon';
+  import { ChevronDownIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import * as m from '$paraglide/messages';
   import CtaLink from '../CtaLink.svelte';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
-  import type { HeroSectionProps, JourneySalesContext } from '../types';
+  import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
+  import type {
+    HeroSectionProps,
+    JourneySalesContext,
+    SellPreview,
+  } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
 
@@ -66,6 +72,28 @@
     felt?: string;
     /** Atmosphere treatment: `ember` (default) · `blood` · `still`. */
     bg?: string;
+    /**
+     * What the hero does with its media: `none` · `image` · `loop` · `click`.
+     *
+     * NOT named `heroMedia`: that key is already taken by the media PICKER field,
+     * whose `key` is only an `{#each}` key because a `control: 'media'` writes the
+     * `courses.heroMediaId` column rather than section props. Two field defs
+     * sharing a key would collide in the editor's loop.
+     *
+     * A CONTENT choice, not a design axis — it selects which asset appears, while
+     * the `media` axis (`bleed`/`frame`/`mask`/`inset`/`none`) still decides how
+     * that asset is shaped. Absent on every page authored before this field, and
+     * `resolveMediaMode` deliberately resolves absence to today's appearance.
+     */
+    mediaMode?: string;
+    /**
+     * Label for the play affordance on the three compositions that have no plate.
+     *
+     * Authorable because the hero's clip and the `introVideo` section's film are
+     * separate slots pointing wherever the creator aimed them — so a hardcoded
+     * "Watch intro" would be a claim about content this section does not own.
+     */
+    mediaLabel?: string;
   }
 
   interface Props {
@@ -97,6 +125,8 @@
     secondaryHref: asString(config, 'secondaryHref'),
     trust: asString(config, 'trust'),
     bg: asString(config, 'bg'),
+    mediaMode: asString(config, 'mediaMode'),
+    mediaLabel: asString(config, 'mediaLabel'),
   });
 
   const eyebrow = $derived(p.eyebrow ?? context.course.kicker ?? undefined);
@@ -125,14 +155,117 @@
   const motionOff = $derived(design?.motion === 'none');
   const mediaOff = $derived(design?.media === 'none');
 
-  // `split-media`, `full-bleed` and `poster` are image-led; the other three never
-  // draw a plate. `media: none` suppresses it even on the three that would.
-  const wantsMedia = $derived(
-    !mediaOff &&
-      (composition === 'split-media' ||
-        composition === 'full-bleed' ||
-        composition === 'poster')
+  // ── MEDIA: WHERE IT GOES, vs WHETHER THERE IS ANY ────────────────────────
+  // Two questions, and conflating them is what confined the hero's media to three
+  // of its six compositions. WHERE: `split-media`, `full-bleed` and `poster` have
+  // a plate in their layout; `stage`, `oversized` and `banner` do not, so on those
+  // the media becomes an invitation in the actions row rather than a backdrop.
+  // WHETHER: the authored `heroMedia` mode, gated by the axis.
+  //
+  // `media: none` stays AUTHORITATIVE over the mode. The axis governs treatment,
+  // the field governs content, and a design axis must not be silently overturned
+  // by a content choice — so the builder greys the mode control while the axis is
+  // `none` and says why, rather than quietly lifting it.
+  const plateLed = $derived(
+    composition === 'split-media' ||
+      composition === 'full-bleed' ||
+      composition === 'poster'
   );
+
+  const MEDIA_MODES = ['none', 'image', 'loop', 'click'];
+
+  /**
+   * The media mode for a resolved preview.
+   *
+   * The fallback is deliberately "what this page looks like today", not a nicer
+   * default. A page authored before this field carries no stored intent, and A33's
+   * lesson is that absent or ignored data is not evidence of one — seven live
+   * journey pages resolve through this branch and none of them may change shape on
+   * deploy.
+   */
+  const resolveMediaMode = (preview: SellPreview | null | undefined) => {
+    if (mediaOff) return 'none';
+    if (MEDIA_MODES.includes(p.mediaMode)) return p.mediaMode;
+    return preview?.heroImageUrl ? 'image' : 'none';
+  };
+
+  /**
+   * Whether a resolved preview has footage that can actually play. `heroClip` is
+   * OPTIONAL-additive, so an older worker deployment answers `false` here and
+   * every playing mode degrades to its still. Callers check the CLIP rather than
+   * trusting the mode, because the mode is authored and the clip is a fact.
+   */
+  const canPlay = (preview: SellPreview | null | undefined) =>
+    Boolean(preview?.heroClip?.playlistUrl);
+
+  /** Whether this composition draws a plate at all. `media: none` removes it. */
+  const showPlate = $derived(plateLed && !mediaOff);
+
+  /**
+   * The resolved sell preview, mirrored into state.
+   *
+   * The plate consumes `context.sellPreview` directly through `{#await}`, so it
+   * streams and costs no layout shift. Three things OUTSIDE that block need the
+   * same resolved value: the modal's `src`, the play affordance, and whether the
+   * atmosphere should recede. Awaiting again would wrap three pieces of non-media
+   * markup in their own `{#await}` blocks, so it is mirrored here once.
+   *
+   * Null on the server, deliberately. That keeps the SSR baseline identical to
+   * today's — full atmosphere, no affordance — and a button whose only job is to
+   * open a JS modal is worth nothing without JS, so rendering it only once the
+   * client has resolved is the honest behaviour rather than a limitation.
+   */
+  let resolvedPreview = $state<SellPreview | null>(null);
+
+  $effect(() => {
+    let alive = true;
+    context.sellPreview
+      .then((v) => {
+        if (alive) resolvedPreview = v ?? null;
+      })
+      .catch(() => {
+        if (alive) resolvedPreview = null;
+      });
+    return () => {
+      alive = false;
+    };
+  });
+
+  let introOpen = $state(false);
+
+  const mediaMode = $derived(resolveMediaMode(resolvedPreview));
+  const clipUrl = $derived(resolvedPreview?.heroClip?.playlistUrl ?? '');
+
+  /**
+   * Real media is on screen, so the synthetic atmosphere yields to it.
+   *
+   * Only true for the modes that actually PAINT something (`image`, `loop`) and
+   * only where a plate exists to paint into — a `click` affordance on a
+   * plate-less `stage` hero leaves the ember doing all the work, so the ember
+   * stays.
+   */
+  const mediaPresent = $derived(
+    showPlate &&
+      (mediaMode === 'image' || mediaMode === 'loop') &&
+      Boolean(resolvedPreview?.heroImageUrl || clipUrl)
+  );
+
+  /**
+   * The plate-less compositions OFFER the film instead of showing it.
+   *
+   * `loop` lands here too, and that is the point: `stage`, `oversized` and
+   * `banner` have nowhere to loop footage, so the author's intent to feature a
+   * video becomes an invitation rather than being silently dropped.
+   */
+  const showWatch = $derived(
+    !mediaOff &&
+      !plateLed &&
+      Boolean(clipUrl) &&
+      (mediaMode === 'loop' || mediaMode === 'click')
+  );
+
+  /** Authored, because this section does not own what the creator pointed it at. */
+  const watchLabel = $derived(p.mediaLabel ?? m.journey_hero_media_play());
 
   // The scroll cue points BELOW the fold, so it is meaningless on the two
   // compositions that do not fill the viewport, and it is continuous decoration,
@@ -228,15 +361,29 @@
     {#await context.sellPreview}
       <span class="hero__plate" aria-hidden="true"></span>
     {:then preview}
-      {#if preview?.heroImageUrl}
-        <img
-          class="hero__img"
-          src={preview.heroImageUrl}
-          alt=""
-          decoding="async"
-        />
+      {@const mode = resolveMediaMode(preview)}
+      {@const clip = preview?.heroClip ?? null}
+      {@const still = preview?.heroImageUrl ?? clip?.posterUrl ?? null}
+      {#if mode === 'none'}
+        <span class="hero__plate" aria-hidden="true"></span>
+      {:else if mode === 'loop' && canPlay(preview)}
+        <HeroLoopVideo src={clip.playlistUrl} posterUrl={still} />
+      {:else if still}
+        <img class="hero__img" src={still} alt="" decoding="async" />
       {:else}
         <span class="hero__plate" aria-hidden="true"></span>
+      {/if}
+      {#if mode === 'click' && canPlay(preview)}
+        <!-- On a plate-led composition the invitation sits ON the media, over
+             the scrim, rather than in the actions row. -->
+        <button
+          class="hero__play"
+          type="button"
+          aria-label={m.journey_hero_media_play_aria()}
+          onclick={() => (introOpen = true)}
+        >
+          <PlayIcon size="1.5rem" />
+        </button>
       {/if}
     {:catch}
       <span class="hero__plate" aria-hidden="true"></span>
@@ -271,6 +418,12 @@
       <CtaLink href={p.secondaryHref} variant="secondary" size="lg">
         {p.secondaryLabel}
       </CtaLink>
+    {/if}
+    {#if showWatch}
+      <button class="hero__watch" type="button" onclick={() => (introOpen = true)}>
+        <PlayIcon size="1rem" />
+        <span>{watchLabel}</span>
+      </button>
     {/if}
   </div>
 {/snippet}
@@ -329,6 +482,7 @@
   class="hero"
   class:hero--enhanced={enhanced}
   class:hero--still={motionOff}
+  class:hero--media-present={mediaPresent}
   data-hero={composition}
   data-hero-bg={p.bg || 'ember'}
 >
@@ -342,22 +496,31 @@
     <div class="hero__vignette"></div>
   </div>
 
-  {#if composition === 'full-bleed' && wantsMedia}
+  {#if composition === 'full-bleed' && showPlate}
     {@render plate()}
   {/if}
 
-  {#if composition === 'split-media' && wantsMedia}
+  {#if composition === 'split-media' && showPlate}
     <div class="hero__inner">
       <div class="hero__col">{@render copy()}</div>
       {@render plate()}
     </div>
-  {:else if composition === 'poster' && wantsMedia}
+  {:else if composition === 'poster' && showPlate}
     <div class="hero__inner">
       {@render plate()}
       <div class="hero__col">{@render copy()}</div>
     </div>
   {:else}
     <div class="hero__inner">{@render copy()}</div>
+  {/if}
+
+  {#if clipUrl}
+    <IntroVideoModal
+      open={introOpen}
+      src={clipUrl}
+      title={headline}
+      onclose={() => (introOpen = false)}
+    />
   {/if}
 
   {#if showCue}
@@ -435,6 +598,81 @@
     z-index: 0;
     pointer-events: none;
     opacity: var(--jp-sec-atmos);
+  }
+
+  /* Real footage carries the mood, so the synthetic ember yields rather than
+     competing with it.
+
+     Composed as a MULTIPLIER on `--jp-sec-atmos` rather than replacing it, so the
+     `surface` axis keeps the final say: a section that gates its atmosphere to
+     zero stays at zero here too. The markup stays mounted either way, which is
+     the same reason the gate is an opacity and not an `{#if}` — a late-resolving
+     streamed preview must cost no layout shift. */
+  .hero--media-present .hero__atmos {
+    opacity: calc(var(--jp-sec-atmos, 1) * 0.4);
+  }
+
+  /* The invitation ON the media — plate-led compositions in `click` mode. Sits
+     above the scrim so it stays legible over any frame. */
+  .hero__play {
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-start: 50%;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    inline-size: var(--space-8);
+    block-size: var(--space-8);
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    color: var(--color-heading);
+    cursor: pointer;
+    transform: translate(-50%, -50%);
+    transition: var(--transition-transform);
+  }
+
+  .hero__play:hover {
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+
+  .hero__play:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* The invitation IN the actions row — the three plate-less compositions.
+     Deliberately third-tier: it sits beside the CTAs without competing, because
+     the conversion path is the CTA and watching a film is a detour from it. */
+  .hero__watch {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .hero__watch:hover {
+    color: var(--color-heading);
+  }
+
+  .hero__watch:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* Reduced motion: the hover growth is decoration, and the loop backdrop has
+     already declined to construct itself (see HeroLoopVideo). */
+  @media (prefers-reduced-motion: reduce) {
+    .hero__play:hover {
+      transform: translate(-50%, -50%);
+    }
   }
 
   /* Breathing warm core — the "living light" behind the headline.

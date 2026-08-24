@@ -92,6 +92,24 @@ export interface SectionFieldDef {
    */
   readonly mediaSlot?: JourneySellMediaSlot;
   /**
+   * Grey this control out while a design axis holds a given value, and say why.
+   *
+   * The case this exists for: the hero's `mediaMode` selects WHICH asset appears,
+   * while the `media` axis decides HOW it is shaped — and `media: none` means "no
+   * plate at all", so it necessarily wins. The alternative designs were both
+   * worse. Silently ignoring the mode leaves an author picking "silent looping
+   * video" and seeing nothing, with no explanation. Auto-lifting the axis mutates
+   * a DESIGN decision as a side effect of a CONTENT choice, which is the same
+   * conflation this field set exists to keep apart.
+   *
+   * So the control is visibly unavailable and the reason is on screen.
+   */
+  readonly disabledWhenAxis?: {
+    readonly axis: string;
+    readonly value: string;
+    readonly reason: string;
+  };
+  /**
    * For `control: 'repeater'` — the fields of ONE entry in the object array.
    *
    * Nesting is allowed exactly one level deep: an entry field may be a `list`
@@ -236,6 +254,32 @@ export const SECTION_FIELDS: Readonly<
       control: 'media',
       mediaSlot: 'heroMediaId',
       hint: 'The image the hero shows. Pick a ready item from your media library — its still frame is used.',
+    },
+    {
+      key: 'mediaMode',
+      label: 'What the media does',
+      control: 'select',
+      options: [
+        { value: '', label: 'Automatic — the still, if there is one' },
+        { value: 'none', label: 'Nothing — atmosphere only' },
+        { value: 'image', label: 'Still image' },
+        { value: 'loop', label: 'Silent looping video' },
+        { value: 'click', label: 'Video, played on click' },
+      ],
+      hint: 'All six layouts can carry media. The three with a media panel show it there; the other three offer a watch link beside the buttons instead.',
+      disabledWhenAxis: {
+        axis: 'media',
+        value: 'none',
+        reason:
+          'The Media axis is set to “none”, which removes the media panel entirely. Change it to choose what the media does.',
+      },
+    },
+    {
+      key: 'mediaLabel',
+      label: 'Watch link label',
+      control: 'text',
+      placeholder: 'Watch the film',
+      hint: 'Shown on the layouts that offer the video rather than displaying it. Yours to word, because the hero plays whichever clip you picked above — not necessarily an intro.',
     },
     {
       key: 'bg',
