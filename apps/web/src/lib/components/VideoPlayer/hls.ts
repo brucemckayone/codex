@@ -1,8 +1,11 @@
 /**
  * HLS Player Factory
  *
- * Creates an HLS.js instance for browsers without native HLS support.
- * Safari uses native HLS via the <video> element directly.
+ * Creates an HLS.js instance wherever Media Source Extensions are available —
+ * which is every current desktop browser, Safari included. The <video>
+ * element's own HLS support is the FALLBACK, for iOS Safari before managed
+ * Media Source. Do not reorder these: see `supportsNativeHls`, where Chrome
+ * reporting `'maybe'` for the HLS MIME type broke every player in the app.
  *
  * Error handling:
  * - Network 403 (signed URL expired): hand off to `onUrlExpired` — caller
@@ -56,7 +59,25 @@ interface HlsPlayerOptions {
 }
 
 /**
- * Check if the browser supports native HLS playback (Safari, iOS)
+ * Whether the browser claims it can play an HLS manifest natively.
+ *
+ * ONLY CONSULTED AS A FALLBACK, and the reason is a trap worth stating.
+ * `canPlayType` returns `''`, `'maybe'` or `'probably'`, and modern Chrome
+ * answers **`'maybe'`** for `application/vnd.apple.mpegurl` — it recognises the
+ * MIME type and cannot play it. An earlier version of this file tested
+ * `!== ''`, which read Chrome's `'maybe'` as support: it assigned the manifest
+ * straight to `video.src`, Chrome failed with `MEDIA_ERR_SRC_NOT_SUPPORTED`
+ * (code 4), and hls.js — fully supported, MSE and all — was never given a
+ * chance. Every video and audio surface in the app was affected on every
+ * Chromium browser, whatever the media.
+ *
+ * Measured in Chrome 151: `canPlayType` → `'maybe'`, `Hls.isSupported()` →
+ * `true`, `MediaSource.isTypeSupported('video/mp2t')` → `true`.
+ *
+ * So support is decided by CAPABILITY (`Hls.isSupported()`, which probes MSE and
+ * the codecs) rather than by a browser's opinion of a MIME string. This function
+ * survives only for the case where MSE is genuinely absent — iOS Safari before
+ * managed Media Source — where native HLS is the only way to play anything.
  */
 function supportsNativeHls(): boolean {
   if (typeof document === 'undefined') return false;
@@ -76,14 +97,29 @@ export async function createHlsPlayer(
 ): Promise<HlsPlayerHandle> {
   const { media, src, onError, onUrlExpired } = options;
 
-  // Safari / iOS: use native HLS.
-  //
-  // Native HLS does not expose per-segment error status, so the best
-  // granularity we get is the HTMLMediaElement 'error' event with a
-  // MediaError code. MEDIA_ERR_NETWORK is a best-effort proxy for
-  // "signed URL expired" — callers can refresh and retry.
-  if (supportsNativeHls()) {
+  /**
+   * Native HLS: hand the manifest to the element and watch for its error event.
+   *
+   * Native HLS does not expose per-segment error status, so the best
+   * granularity we get is the HTMLMediaElement 'error' event with a
+   * MediaError code. MEDIA_ERR_NETWORK is a best-effort proxy for
+   * "signed URL expired" — callers can refresh and retry.
+   *
+   * Reached only when MSE is unavailable (iOS Safari before managed Media
+   * Source). See `supportsNativeHls` for why this is the fallback and not the
+   * first choice.
+   */
+  const attachNative = (): HlsPlayerHandle => {
     media.src = src;
+
+    // Neither MSE nor native HLS, and the source IS a manifest: assigning it to
+    // `src` cannot work, so say so instead of leaving a dead element and no
+    // explanation. Guarded on the extension because this same last resort is
+    // correct for a plain mp4 URL, which most browsers play fine.
+    if (!supportsNativeHls() && /\.m3u8(\?|$)/.test(src)) {
+      onError?.('This browser cannot play this video format.');
+    }
+
     let handled = false;
     const handleError = () => {
       // One-shot — once we've handed off to `onUrlExpired`, the caller owns
@@ -113,16 +149,18 @@ export async function createHlsPlayer(
         media.removeEventListener('error', handleError);
       },
     };
-  }
+  };
 
   const { default: HlsJs } = await import('hls.js');
 
+  // CAPABILITY FIRST. When hls.js can run we use it everywhere, including
+  // Safari: it gives precise per-segment status (so a 403 is distinguishable
+  // from a flaky network, which the native path can only guess at). Only when
+  // MSE is missing do we fall back to the element's own HLS support — and if it
+  // has none either, `attachNative` still assigns `src` as a last resort, which
+  // is the right behaviour for a plain mp4 URL.
   if (!HlsJs.isSupported()) {
-    // Fallback: try direct source (may work for mp4 URLs). No recovery hook
-    // here — if the browser can't do HLS and can't play mp4 either, there
-    // is no reasonable retry path.
-    media.src = src;
-    return { hls: null, cleanup: () => {} };
+    return attachNative();
   }
 
   // RunPod encodes ~6s HLS segments; a 30s forward buffer holds ~5 segments, which balances
