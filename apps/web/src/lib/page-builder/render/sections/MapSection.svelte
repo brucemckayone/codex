@@ -33,7 +33,7 @@
 
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `spine` (default) · `rows` · `cards` · `table` · `timeline` · `numbered-prose`.
-  The first three are ports of the canvas tree's working implementations
+  The first three are ports of the since-deleted canvas tree's working implementations
   (`render-edit/journey-sections/_descent.css` — `.jp-descent`, `.jp-stages`,
   `.jp-stagegrid`), which is contract A12: port, do not invent. `spine`/`rows`/
   `cards` carry the retired `descent`/`list`/`grid` ids forward through
@@ -297,7 +297,7 @@
    * (`title`, `foot`) — an edit must write back to the key `section-fields.ts`
    * declares, which is the same direction the alias table reads.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`, the canvas's primitive:
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`, the canvas's primitive:
    * that component renders an EMPTY element and lets a Svelte ACTION write
    * `textContent`, and actions do not run during SSR. On the public page it would
    * serve `<h2></h2>` and paint the heading in only after hydration. The canvas
@@ -439,7 +439,7 @@
     data-map={composition}
   >
     <div class="descent__inner">
-      <header class="descent__head" use:reveal>
+      <header class="descent__head" use:reveal={{ disabled: editable }}>
         {#if p.eyebrow}
           <p
             class="jp-sec__eyebrow jp-reveal descent__eyebrow"
@@ -519,7 +519,7 @@
         </div>
       {:else if composition === 'rows'}
         <!-- Ported from the canvas tree's `.jp-stages` / `.jp-stage` (A12). -->
-        <ol class="descent__rows" use:reveal>
+        <ol class="descent__rows" use:reveal={{ disabled: editable }}>
           {#each stages as stage, i (stage.id)}
             <li
               class="jp-reveal descent__row descent__item"
@@ -533,7 +533,7 @@
         </ol>
       {:else if composition === 'cards'}
         <!-- Ported from the canvas tree's `.jp-stagegrid` / `.jp-stagecard` (A12). -->
-        <ol class="descent__cards" use:reveal>
+        <ol class="descent__cards" use:reveal={{ disabled: editable }}>
           {#each stages as stage, i (stage.id)}
             <li
               class="jp-reveal descent__stagecard descent__item"
@@ -626,7 +626,7 @@
         -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="descent__track" tabindex="0">
-          <ol class="descent__panels" use:reveal>
+          <ol class="descent__panels" use:reveal={{ disabled: editable }}>
             {#each stages as stage, i (stage.id)}
               <li
                 class="jp-reveal descent__panel descent__item"
@@ -645,7 +645,7 @@
         </div>
       {:else}
         <!-- `numbered-prose`: stages as numbered editorial paragraphs, no chrome. -->
-        <ol class="descent__prose" use:reveal>
+        <ol class="descent__prose" use:reveal={{ disabled: editable }}>
           {#each stages as stage, i (stage.id)}
             {@const practices = sortedPractices(stage)}
             <li
@@ -672,7 +672,7 @@
       {/if}
 
       {#if p.foot}
-        <div class="descent__footwrap" use:reveal>
+        <div class="descent__footwrap" use:reveal={{ disabled: editable }}>
           <p class="jp-reveal descent__foot" {...editAttrs('note')}>{p.foot}</p>
         </div>
       {/if}

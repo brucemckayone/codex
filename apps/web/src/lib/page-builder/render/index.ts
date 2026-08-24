@@ -18,6 +18,10 @@ export {
   brandOverridesToCssVars,
   brandOverridesToStyleAttr,
 } from './brand-overrides';
+export {
+  type BuilderContextInput,
+  builderSalesContext,
+} from './builder-context';
 export { default as CtaLink } from './CtaLink.svelte';
 // The prop-coercion layer + the BUILDER→RENDERER key map (Codex-tqr51). Exported
 // so the round-trip guard in `components/page-builder/section-fields.test.ts` can
@@ -38,6 +42,13 @@ export {
   SECTION_PROP_ALIASES,
 } from './coerce';
 export { default as JourneyRenderer } from './JourneyRenderer.svelte';
+/**
+ * ONE section's wrapper + component invocation. Exported for the studio canvas,
+ * which owns its own section loop (it interleaves per-block editing chrome) and
+ * so needs the per-section half of the render seam without the array-level half
+ * (Codex-eckbx W1-W3).
+ */
+export { default as SectionFrame } from './SectionFrame.svelte';
 export { default as SectionRenderer } from './SectionRenderer.svelte';
 export {
   type RenderableSection,

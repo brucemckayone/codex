@@ -20,7 +20,7 @@
 
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `grid` (default) · `stack` · `spotlight` · `wall` · `marquee` · `pull`.
-  `grid`/`stack`/`spotlight` are ported from the canvas partial
+  `grid`/`stack`/`spotlight` are ported from the since-deleted canvas partial
   (`render-edit/journey-sections/_proof.css`, contract A12); `wall`, `marquee`
   and `pull` are new.
 
@@ -193,7 +193,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: that component renders an
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: that component renders an
    * EMPTY element and fills `textContent` from a Svelte action, and actions do
    * not run during SSR — so the public page would serve `<h2></h2>` and paint the
    * text in only after hydration. The canvas never noticed because the studio is
@@ -241,7 +241,7 @@
          action goes on the container and the staggered beats are its children;
          putting both on the same element matches nothing. One IntersectionObserver
          per section rather than one per quote is also the cheaper shape. -->
-    <div class="proof__inner" use:reveal>
+    <div class="proof__inner" use:reveal={{ disabled: editable }}>
       {#if p.eyebrow || heading}
         <header class="proof__head jp-reveal">
           {#if p.eyebrow}
@@ -663,7 +663,7 @@
   /* ═══════════════════════════════════════════════════════════════════════
      COMPOSITIONS
 
-     Ported from `render-edit/journey-sections/_proof.css` where an
+     Ported from the since-deleted `render-edit/journey-sections/_proof.css` where an
      implementation already existed (contract A12): `stack` from
      `.jp-proof--stack` (:45-46) and `spotlight` from `.jp-proof--spotlight`
      (:47-52). `wall`, `marquee` and `pull` are new (research §3).

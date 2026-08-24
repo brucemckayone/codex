@@ -23,7 +23,7 @@
  *   4. the two palette classes never land on the SAME element — that is a
  *      custom-property cycle whose failure mode is a page that paints nothing.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PageSection } from '@codex/shared-types';
@@ -42,38 +42,62 @@ vi.mock('$app/state', () => ({
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(join(HERE, rel), 'utf8');
 
+/**
+ * Every `.svelte` file in the section render tree, so the axis-emission guard can
+ * be stated over the WHOLE surface rather than over a hand-kept list a new
+ * component would quietly miss. Enumerated rather than named for the same reason
+ * the guard derives the emitter from its markup: the invariant has to survive
+ * someone moving the seam.
+ *
+ * There is one tree now. `render-edit/` was the second, and it is deleted — the
+ * canvas and the public page mount the same `SectionFrame`.
+ */
+const SECTION_TREE_FILES: string[] = ['render', 'render/sections'].flatMap(
+  (dir) =>
+    readdirSync(join(HERE, dir))
+      .filter((name) => name.endsWith('.svelte'))
+      .map((name) => `${dir}/${name}`)
+);
+
+/**
+ * Every `.svelte` file under `src`, and a reader for them.
+ *
+ * Walked rather than listed because the palette guard below exists to catch a
+ * NEW surface that applies the palette class without loading it, and a hand-kept
+ * list cannot do that by construction.
+ */
+const SRC = join(HERE, '../..');
+const walkSvelte = (rel: string): string[] =>
+  readdirSync(join(SRC, rel), { withFileTypes: true }).flatMap((entry) => {
+    const next = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) return walkSvelte(next);
+    return entry.name.endsWith('.svelte') ? [next] : [];
+  });
+const ALL_SVELTE = walkSvelte('');
+const readSrc = (rel: string): string => readFileSync(join(SRC, rel), 'utf8');
+
 const PALETTE = read('journey-palette.css');
 
 /**
- * The canvas stylesheet is now an INDEX of per-type partials (F-B1 split the
- * 575-line original so the seven component work packages each have a disjoint
- * file to port from — contract A12/A16). Both views are needed:
+ * All the section CSS, for "the ladder is not restated here".
  *
- *   `SECTIONS_CSS`   the index alone, for the `@import`-ordering assertions;
- *   `SECTIONS_ALL`   index + every partial, for "the ladder is not restated
- *                    here". Asserting that against the index alone would pass
- *                    trivially — the index declares nothing — which is exactly
- *                    the kind of assertion a refactor turns vacuous without
- *                    turning red.
+ * This used to be `render-edit/journey-sections.css` plus its nine per-type
+ * partials. That tree is deleted, and section CSS now lives in
+ * `journey-sections-shared.css` and in each public component's Svelte `<style>`
+ * block — so the guard is stated over BOTH. Leaving the components out would be
+ * the vacuous version of it: they are where new section CSS actually gets
+ * written, and the shared file alone declares very little.
+ *
+ * `journey-design.css` is deliberately NOT folded in. `surface: tint|panel|invert`
+ * re-point `--jp-ink` there ON PURPOSE — that re-point is what makes `invert`
+ * cycle-free (research §2.4) — so including it would assert against the design
+ * instead of against divergence.
  */
-const SECTIONS_CSS = read('render-edit/journey-sections.css');
-const SECTION_PARTIALS = [
-  '_base',
-  '_hero',
-  '_prose',
-  '_video',
-  '_descent',
-  '_proof',
-  '_guide',
-  '_faq',
-  '_invite',
-] as const;
-const SECTIONS_ALL = [
-  SECTIONS_CSS,
-  ...SECTION_PARTIALS.map((name) =>
-    read(`render-edit/journey-sections/${name}.css`)
-  ),
-].join('\n');
+const SECTION_STYLE_SOURCES = [
+  'journey-sections-shared.css',
+  ...SECTION_TREE_FILES.filter((f) => f.startsWith('render/sections/')),
+];
+const SECTIONS_ALL = SECTION_STYLE_SOURCES.map(read).join('\n');
 
 /** Comment-free view, for anything that locates a SELECTOR by substring. */
 const PALETTE_CODE = PALETTE.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -130,6 +154,9 @@ describe('journey palette — one derivation, three surfaces', () => {
     // is consequently declared ONCE here.
     expect(declarationsOf(PALETTE, '--jp-pole-a')).toHaveLength(2);
     expect(declarationsOf(PALETTE, '--jp-ink')).toEqual(['var(--jp-pole-a)']);
+    // Guards the guard: an empty source set would make the next three
+    // assertions pass trivially. Eleven section components + the shared file.
+    expect(SECTION_STYLE_SOURCES).toHaveLength(12);
     expect(declarationsOf(SECTIONS_ALL, '--jp-pole-a')).toEqual([]);
     expect(declarationsOf(SECTIONS_ALL, '--jp-ink')).toEqual([]);
     expect(declarationsOf(SECTIONS_ALL, '--jp-heading')).toEqual([]);
@@ -221,45 +248,90 @@ describe('journey palette — one derivation, three surfaces', () => {
     expect(veil).toMatch(/\/\s*clamp\([^)]*\bl\b/);
   });
 
-  it('has the builder CSS consume the shared palette instead of restating it', () => {
-    expect(SECTIONS_CSS).toContain("@import '../journey-palette.css'");
+  it('gives the palette to every surface that applies its class', () => {
+    // WHAT THIS REPLACES, AND WHY IT IS NOT THE SAME ASSERTION.
+    //
+    // The old version read `render-edit/journey-sections.css` and asserted that
+    // it opened with `@import '../journey-palette.css'` and then imported its
+    // nine partials in cascade order. That chain was how the CANVAS reached the
+    // ladder: `render-edit/SectionRenderer.svelte` imported the index, and the
+    // index imported the palette.
+    //
+    // Then the canvas was repointed at `SectionFrame` — and the test kept
+    // passing, because the file it read was still on disk, merely orphaned. That
+    // is exactly the "assertion a refactor turns vacuous without turning red"
+    // this file's own comments warn about, and it hid a real defect:
+    // `surface: tint|panel|invert` resolve `--jp-sec-bg` from `--jp-ink`, which
+    // derives from `--jp-pole-a`, which is declared ONLY in
+    // `journey-palette.css`. With no import those three values paint nothing in
+    // the builder while painting correctly on the published page.
+    //
+    // The `@import` half has no successor on purpose: nothing uses `@import`
+    // any more, so ordering cannot be violated. The half that MATTERED — the
+    // canvas reaches the shared palette rather than restating or missing it — is
+    // stated here over the relationship instead of over a filename. Applying
+    // the class and loading the file that defines it are one decision, and no
+    // surface may make half of it.
+    const appliers = ALL_SVELTE.filter((rel) =>
+      /class="[^"]*\bjourney-palette/.test(readSrc(rel))
+    );
+    // Guards the guard: zero appliers would make the assertion below vacuous.
+    expect(
+      appliers.length,
+      'nothing applies the palette class'
+    ).toBeGreaterThan(0);
 
-    // `@import` is only valid BEFORE any other rule; a rule appearing first
-    // makes the browser drop every later import and silently un-style the
-    // canvas. Since the split this file is an index of imports and declares no
-    // rules at all, so the invariant is stated directly: nothing but `@import`.
-    const code = SECTIONS_CSS.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-    const statements = code
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    expect(statements.length).toBeGreaterThan(0);
-    for (const statement of statements) {
-      expect(statement.startsWith('@import '), statement).toBe(true);
-    }
-
-    // The palette must come FIRST: the axis rules and every partial read the
-    // `--jp-*` ladder it declares.
-    expect(statements[0]).toBe("@import '../journey-palette.css'");
-
-    // Every partial is imported, in the order its declarations were in before
-    // the split — import order IS the cascade order.
-    const imported = statements
-      .map((s) => s.match(/journey-sections\/(_[a-z]+)\.css/)?.[1])
-      .filter((name): name is string => Boolean(name));
-    expect(imported).toEqual([...SECTION_PARTIALS]);
+    const missing = appliers.filter(
+      (rel) => !/import '[^']*journey-palette\.css'/.test(readSrc(rel))
+    );
+    expect(
+      missing,
+      'applies a journey-palette class without importing the stylesheet that defines it'
+    ).toEqual([]);
   });
 
-  it('reaches the axis substrate from the canvas tree as well as the public one', () => {
-    // `journey-design.css` has to be present on BOTH section trees. The public
-    // page gets it from `render/SectionRenderer.svelte`, the component that
-    // emits `data-jp-*`; the canvas gets it here. Without this line F-B2's
-    // design panel would have a control with no CSS behind it in the one place
-    // a creator is looking while they use it.
-    expect(SECTIONS_CSS).toContain("@import '../journey-design.css'");
-    const renderer = read('render/SectionRenderer.svelte');
-    expect(renderer).toContain("import '../journey-design.css'");
-    expect(renderer).toContain("import '../journey-sections-shared.css'");
+  it('keeps the journey stylesheets off `@import` entirely', () => {
+    // The mechanism the deleted index used. `@import` is only valid BEFORE any
+    // other rule, so a rule creeping above one makes the browser drop every
+    // later import and silently un-style the tree — invisible to every gate,
+    // since none of them parse CSS. These files reach their consumers as
+    // Svelte/Vite `import` statements, which have no such ordering rule.
+    // Reintroducing `@import` would reintroduce the failure mode.
+    for (const rel of [
+      'journey-palette.css',
+      'journey-design.css',
+      'journey-sections-shared.css',
+    ]) {
+      const code = read(rel).replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(code, rel).not.toContain('@import');
+    }
+  });
+
+  it('imports the axis substrate in the very component that emits the axes', () => {
+    // The invariant: whatever emits `data-jp-*` must also carry the stylesheet
+    // that reads it, so no surface can end up with the markup and not the rules.
+    // Without it, F-B2's design panel would have a control with no CSS behind it
+    // in the one place a creator is looking while they use it.
+    //
+    // This asserts the RELATIONSHIP rather than a filename. It used to name
+    // `render/SectionRenderer.svelte` on one side and the canvas's own
+    // stylesheet on the other, because there were two section trees; the emitter
+    // now lives in one place (`SectionFrame`, mounted by both the public
+    // renderer and the studio canvas), and deriving the file from the emission
+    // means a future move of the seam fails here instead of silently shipping
+    // attributes with no rules.
+    const frame = read('render/SectionFrame.svelte');
+    expect(frame).toContain('data-jp-');
+    expect(frame).toContain("import '../journey-design.css'");
+    expect(frame).toContain("import '../journey-sections-shared.css'");
+
+    // And nothing ELSE may emit the axes without importing the substrate.
+    const emitters = SECTION_TREE_FILES.filter((file) =>
+      read(file).includes('data-jp-width=')
+    );
+    expect(emitters, 'exactly one component emits the axis attributes').toEqual(
+      ['render/SectionFrame.svelte']
+    );
   });
 });
 

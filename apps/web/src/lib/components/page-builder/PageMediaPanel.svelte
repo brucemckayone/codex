@@ -26,6 +26,7 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
+  import { uploadJourneyCoverForm } from '$lib/remote/journeys.remote';
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
@@ -77,22 +78,16 @@
 
   let fileInput = $state<HTMLInputElement | null>(null);
 
-  async function onCoverChange(event: Event): Promise<void> {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    // Reset the input so re-picking the SAME file fires `change` again — without
-    // this, a failed upload cannot be retried with the identical file.
-    input.value = '';
-    if (!file) return;
-    try {
-      await sellMedia.uploadCover(file);
-      toast.success('Cover updated');
-    } catch (err) {
-      // Surface the server's own message (an unsupported format, most commonly)
-      // rather than a generic failure — the creator can only fix what they see.
-      toast.error(err instanceof Error ? err.message : 'Cover upload failed');
-    }
-  }
+  /**
+   * Busy while EITHER the cover form is in flight or the store is clearing.
+   *
+   * The upload's pending state belongs to the form (a `File` cannot cross a
+   * `command()` boundary, so the upload is a real multipart submission — see
+   * `uploadJourneyCoverForm`); the clear is still a store command.
+   */
+  const coverBusy = $derived(
+    !!uploadJourneyCoverForm.pending || sellMedia.coverBusy
+  );
 
   async function onClearCover(): Promise<void> {
     try {
@@ -127,21 +122,64 @@
         {/if}
       </div>
 
-      <div class="cover__actions">
+      <!--
+        A real multipart <form>, not a button calling a store method. `File`
+        cannot be an argument to a `command()` — devalue cannot serialize it, and
+        the call threw before reaching the network — so the upload has to be a
+        `form()` submission. The picker UX is unchanged: the file input stays
+        visually hidden and the styled button opens it, then `change` submits.
+      -->
+      <form
+        class="cover__actions"
+        enctype="multipart/form-data"
+        {...uploadJourneyCoverForm.enhance(async ({ form, submit }) => {
+          // The callback argument is `{ form, data, submit }` in this SvelteKit
+          // (2.55) — `form` IS the HTMLFormElement, and the returned value is
+          // read from the form function itself, not from this copy. Newer docs
+          // describe an `{ element, result }` shape; that is a later version.
+          try {
+            await submit();
+            const result = uploadJourneyCoverForm.result;
+            if (result?.outcome === 'uploaded') {
+              sellMedia.applyCoverUrl(result.coverImageUrl);
+              toast.success('Cover updated');
+            } else {
+              // The server's own message (an unsupported format, most commonly)
+              // rather than a generic failure — the creator can only fix what
+              // they can see.
+              toast.error(result?.message ?? 'Cover upload failed');
+            }
+          } catch (err) {
+            toast.error(
+              err instanceof Error ? err.message : 'Cover upload failed'
+            );
+          } finally {
+            // Reset so re-picking the SAME file fires `change` again — without
+            // this a failed upload cannot be retried with the identical file.
+            form.reset();
+          }
+        })}
+      >
+        <input
+          {...uploadJourneyCoverForm.fields.pageId.as(
+            'hidden',
+            sellMedia.pageId ?? ''
+          )}
+        />
         <input
           bind:this={fileInput}
-          type="file"
           class="cover__file"
           accept="image/png,image/jpeg,image/webp,image/gif"
-          onchange={onCoverChange}
+          {...uploadJourneyCoverForm.fields.cover.as('file')}
+          onchange={(event) => event.currentTarget.form?.requestSubmit()}
         />
         <button
           type="button"
           class="cover__btn"
-          disabled={sellMedia.coverBusy}
+          disabled={coverBusy || !sellMedia.pageId}
           onclick={() => fileInput?.click()}
         >
-          {sellMedia.coverBusy
+          {coverBusy
             ? 'Uploading…'
             : sellMedia.coverImageUrl
               ? 'Replace'
@@ -151,14 +189,14 @@
           <button
             type="button"
             class="cover__btn cover__btn--quiet"
-            disabled={sellMedia.coverBusy}
+            disabled={coverBusy}
             onclick={onClearCover}
           >
             Remove
           </button>
         {/if}
         <span class="panel__hint">JPG, PNG, WebP or GIF · up to {MAX_COVER_MB}MB</span>
-      </div>
+      </form>
     </div>
   </section>
 

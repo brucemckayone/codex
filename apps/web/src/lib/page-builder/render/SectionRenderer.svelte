@@ -6,8 +6,18 @@
   unrecognised `type` resolves to no component and is skipped), and renders each
   known section inside a semantic `<section>` wrapper. Order is array position.
 
-  THE RENDER SEAM (`docs/design/journey-sections/02-axis-contract.md` A1). This is
-  the one place the two presentation layers are resolved and handed down:
+  THE ARRAY-LEVEL HALF of the render seam. Which sections render, in what order,
+  under which anchor id — that is this component. The PER-SECTION half (resolve
+  the composition + the axes, emit them, invoke the component) lives in
+  {@link SectionFrame}, because the studio canvas needs that half WITHOUT this
+  one: it interleaves per-block editing chrome between sections and so must own
+  its own loop (Codex-eckbx W1–W3).
+
+  Keeping the seam in `SectionFrame` is what stops the two surfaces drifting. The
+  canvas used to answer the same need with a second component set
+  (`render-edit/`), and the cost was structural: the public side never received
+  `variant`, the canvas emitted none of the `data-jp-*` axes, and every section
+  change had to be made in two places.
 
     • `variant` — WHICH composition the component draws (`resolveVariant`).
     • `design`  — the nine design AXES it draws in (`resolveDesign`), emitted as
@@ -22,23 +32,14 @@
   reuses this same renderer via `JourneyRenderer`.
 -->
 <script lang="ts">
-  /* ── THE AXIS SUBSTRATE ──────────────────────────────────────────────────
-     Imported HERE, in the component that EMITS `data-jp-*`, rather than in
-     `JourneyRenderer` beside the palette. Co-locating the attributes and the
-     rules that read them means a surface cannot end up with the markup and not
-     the stylesheet — including WP-5's live-preview iframe, which mounts this
-     renderer directly.
-
-     Deliberately NOT imported from `journey-palette.css`, whose four consumers
-     include the checkout and the member dashboard: those have the `--jp-*`
-     ladder but no sections, and should not carry section CSS. The studio canvas
-     reaches the same two files through `render-edit/journey-sections.css`. */
-  import '../journey-design.css';
-  import '../journey-sections-shared.css';
+  /* The axis substrate (`journey-design.css` + `journey-sections-shared.css`) is
+     imported by `SectionFrame`, the component that emits `data-jp-*`, so every
+     host that mounts a frame gets the rules that read its attributes — including
+     the studio canvas, which mounts frames without this renderer. */
+  import SectionFrame from './SectionFrame.svelte';
   import { selectRenderableSections } from './section-registry';
   import type { JourneySalesContext } from './types';
   import type { PageSection, SectionDesign } from '$lib/page-builder';
-  import { resolveDesign, resolveVariant } from '../section-catalog';
 
   interface Props {
     sections: PageSection[];
@@ -50,77 +51,27 @@
      * renders.
      */
     pageDesign?: SectionDesign;
+    /**
+     * True when this render is an editing surface rather than the public page.
+     * The public page never sets it; it exists so a host that reuses this whole
+     * renderer (rather than `SectionFrame` per section) can still opt in.
+     */
+    editable?: boolean;
+    /** Commit an inline copy edit. Only meaningful when `editable`. */
+    onEdit?: (sectionId: string, key: string, value: string) => void;
   }
 
-  const { sections, context, pageDesign }: Props = $props();
+  const { sections, context, pageDesign, editable = false, onEdit }: Props = $props();
 
   const renderable = $derived(selectRenderableSections(sections));
-
-  // Wrapped once rather than per section: `resolveDesign` takes design CARRIERS
-  // (a section, a page draft), not bare axis bags, so both arguments read the
-  // same way at the call site.
-  const pageSource = $derived({ design: pageDesign });
 </script>
 
-{#each renderable as { section, Component, anchorId } (section.id)}
-  {@const variant = resolveVariant(section)}
-  {@const design = resolveDesign(section, pageSource)}
-  <!--
-    `anchorId` is the section TYPE for the first section of that type, and an
-    ordinal suffix for later duplicates — so every `#<type>` a visitor may already
-    have bookmarked still lands on the section they expect. It is NOT plain
-    `section.type`: a page may hold several sections of one type
-    (`duplicateSection()` clones it), and the golden page did, which served an
-    invalid document with two `id="ache"` (Codex-yxkj7).
-
-    `data-jp-variant` mirrors the resolved composition onto the wrapper as well as
-    passing it as a prop. It is not a styling hook — a section's own `<style>` is
-    scoped and cannot reach an ancestor attribute — but it makes both halves of
-    the seam OBSERVABLE in devtools and in the served HTML, so the plumbing is
-    verified by measurement rather than by assertion (amendment A10).
-  -->
-  <section
-    id={anchorId}
-    class="jp-sec"
-    data-section-type={section.type}
-    data-jp-variant={variant}
-    data-jp-width={design.width}
-    data-jp-density={design.density}
-    data-jp-surface={design.surface}
-    data-jp-edge={design.edge}
-    data-jp-align={design.align}
-    data-jp-type={design.type}
-    data-jp-accent={design.accent}
-    data-jp-motion={design.motion}
-    data-jp-media={design.media}
-  >
-    <Component config={section.props} {context} {variant} {design} />
-  </section>
+{#each renderable as entry (entry.section.id)}
+  <SectionFrame
+    renderable={entry}
+    {context}
+    {pageDesign}
+    {editable}
+    onEdit={onEdit ? (key, value) => onEdit(entry.section.id, key, value) : undefined}
+  />
 {/each}
-
-<style>
-  .jp-sec {
-    /* Each section owns its own vertical rhythm; the wrapper only establishes
-       a stacking/isolation context so decorative section atmosphere never
-       bleeds between sections. */
-    position: relative;
-    isolation: isolate;
-
-    /*
-      The axis CONTAINER (amendment A14). Compositions scope to the section's own
-      inline size, not the viewport, so one can be correct at 1440 and broken at
-      375 independently — which is why verification measures all three builder
-      preview widths. Deliberately container queries rather than `--breakpoint-*`
-      media queries: the builder canvas renders these same sections inside a
-      device frame narrower than the window, where a viewport query reads the
-      wrong number.
-
-      NOTE this also brings LAYOUT CONTAINMENT, which makes the wrapper a
-      containing block for `position: fixed` descendants. Nothing inside a section
-      may position itself fixed against the viewport from here — `IntroVideoModal`
-      already portals its overlay out to `.org-layout` for the neighbouring
-      `isolation: isolate` reason, and any new overlay must do the same.
-    */
-    container-type: inline-size;
-  }
-</style>

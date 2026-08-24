@@ -407,7 +407,7 @@ describe('HeroSection — the edit seam', () => {
     render({ config: { headline: 'Server rendered words' } });
 
     const h1 = document.body.querySelector('.hero__headline');
-    // The SEO contract of this section. `render-edit/EditableText.svelte` renders an
+    // The SEO contract of this section. The deleted `render-edit/EditableText.svelte` renders an
     // EMPTY element and fills `textContent` from a Svelte ACTION, and actions do not
     // run during SSR — so using it here would serve `<h1></h1>` and paint the
     // headline in only after hydration.

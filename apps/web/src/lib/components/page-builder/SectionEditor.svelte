@@ -37,6 +37,7 @@
     isAxisValue,
   } from './design-vocabulary';
   import { fieldsForSectionType } from './section-fields';
+  import ArrayField from './ArrayField.svelte';
   import VariantPicker from './VariantPicker.svelte';
 
   interface Props {
@@ -47,41 +48,26 @@
 
   const definition = $derived(findSectionDefinition(section.type));
   /**
-   * Control kinds F-C DECLARED but consolidation has not BUILT (A29/A72).
+   * ALL EIGHT DECLARED CONTROL KINDS ARE NOW BUILT (`Codex-28ifd` closed).
    *
-   * `section-fields.ts` states the intended behaviour: "these fields are inert in
-   * the rail: `SectionEditor` renders the controls it knows and skips the rest."
-   * It did not skip them. The dispatch below branches `media`, `textarea` and
-   * `select`, then falls through a catch-all `{:else}` to `<input type="text">` —
-   * so all four unbuilt kinds rendered a normal-looking text box and `onInput`
-   * wrote `target.value`, a STRING, into keys that must hold an array or a number.
+   * `number`, `toggle`, `list` and `repeater` were declared by F-C and skipped
+   * here, because before being skipped they fell through a catch-all
+   * `<input type="text">` that wrote a STRING into keys that must hold an array
+   * or a number — a creator typed into a field labelled "Credentials", saved, and
+   * got nothing, since `coerce.ts`'s `asObjectArray` discards a non-array at its
+   * first line. Skipping stopped the corruption; it did not give anyone the
+   * control, so `guide.facts`, `feel.inclusions`, `ache.points`,
+   * `invite.offers[].bullets`, `feel.previewDuration` and `invite.offers[].best`
+   * were unauthorable.
    *
-   * That is worse than not rendering them. A creator saw a field labelled
-   * "Credentials", with a hint promising "the hairline-ruled fact list — years
-   * practising, students taught, qualifications", typed into it, saved, and got
-   * nothing: `coerce.ts`'s `asObjectArray` discards a non-array at its first line,
-   * silently. Proved end to end on a published page, where `props.facts` persisted
-   * with `jsonb_typeof = string`.
+   * The array kinds share {@link ArrayField} — same interaction, differing only in
+   * whether a row is one input or several, discriminated by `itemFields`.
    *
-   * SEQUENCING IS WHY THIS CANNOT WAIT FOR THE REAL CONTROL. `valueOf()` below
-   * returns `''` for any non-string, so once a field correctly holds an array the
-   * text box would render EMPTY OVER REAL CONTENT, and a creator "filling in the
-   * blank" would overwrite the array with a string. That is `Codex-wtfs1`'s
-   * data-loss trap on a different key. The wrong control has to stop accepting
-   * input BEFORE or WITH the right one, never after.
-   *
-   * So this honours the declared contract literally: skip. A disabled affordance
-   * naming the field would be more informative, and is the right call to make
-   * alongside the generic array control (A29) — but inventing one here is a design
-   * decision, and skipping is what F-C specified. `Codex-28ifd`.
+   * NO FILTER REMAINS. Every field the catalogue declares for a type now reaches
+   * the rail, which is what the control-coverage guard asserts.
    */
-  const UNBUILT_CONTROLS = ['number', 'toggle', 'list', 'repeater'];
+  const fields = $derived(fieldsForSectionType(section.type));
 
-  const fields = $derived(
-    fieldsForSectionType(section.type).filter(
-      (f) => !UNBUILT_CONTROLS.includes(f.control)
-    )
-  );
   const variants = $derived(variantsForType(section.type));
   const currentVariant = $derived(resolveVariant(section));
 
@@ -113,6 +99,39 @@
   function onInput(key: string, event: Event): void {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     pageBuilder.setSectionProp(section.id, key, target.value);
+  }
+
+  /** Read a prop as a number for a `number` control (non-numbers show empty). */
+  function numberOf(key: string): string {
+    const v = section.props[key];
+    return typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+  }
+
+  /**
+   * Write a NUMBER, or drop the key when the box is cleared.
+   *
+   * Cleared means absent, not `0`: `feel.previewDuration` is the playhead length
+   * and the section treats a missing duration as "no transport", where `0` is a
+   * zero-length one. Writing `0` for an empty box would invent a value the
+   * creator did not choose.
+   */
+  function onNumber(key: string, event: Event): void {
+    const raw = (event.target as HTMLInputElement).value.trim();
+    if (raw === '') {
+      pageBuilder.setSectionProp(section.id, key, undefined);
+      return;
+    }
+    const n = Number(raw);
+    if (Number.isFinite(n)) pageBuilder.setSectionProp(section.id, key, n);
+  }
+
+  /** Read a prop as a boolean for a `toggle` control. */
+  function boolOf(key: string): boolean {
+    return section.props[key] === true;
+  }
+
+  function onToggle(key: string, event: Event): void {
+    pageBuilder.setSectionProp(section.id, key, (event.target as HTMLInputElement).checked);
   }
 
   // Resettable only when it exists in the saved baseline (a new section has none).
@@ -230,6 +249,38 @@
             <span class="section-editor__hint">{field.hint}</span>
           {/if}
         </div>
+      {:else if field.control === 'list' || field.control === 'repeater'}
+        <!--
+          A `<div>`, not a `<label>`: these render MANY inputs, and a label
+          wrapping more than one control labels none of them. The group gets a
+          plain heading and each row labels its own cells.
+        -->
+        {@const arrayField = field}
+        <div class="section-editor__field">
+          <span class="section-editor__field-label">{field.label}</span>
+          <ArrayField
+            field={arrayField}
+            value={section.props[arrayField.key]}
+            onchange={(next) =>
+              pageBuilder.setSectionProp(section.id, arrayField.key, next)}
+          />
+          {#if field.hint}
+            <span class="section-editor__hint">{field.hint}</span>
+          {/if}
+        </div>
+      {:else if field.control === 'toggle'}
+        <label class="section-editor__field section-editor__field--inline">
+          <input
+            type="checkbox"
+            class="section-editor__check"
+            checked={boolOf(field.key)}
+            onchange={(e) => onToggle(field.key, e)}
+          />
+          <span class="section-editor__field-label">{field.label}</span>
+          {#if field.hint}
+            <span class="section-editor__hint">{field.hint}</span>
+          {/if}
+        </label>
       {:else}
       <label class="section-editor__field">
         <span class="section-editor__field-label">{field.label}</span>
@@ -241,6 +292,14 @@
             value={valueOf(field.key)}
             oninput={(e) => onInput(field.key, e)}
           ></textarea>
+        {:else if field.control === 'number'}
+          <input
+            type="number"
+            class="section-editor__input"
+            placeholder={field.placeholder}
+            value={numberOf(field.key)}
+            oninput={(e) => onNumber(field.key, e)}
+          />
         {:else if field.control === 'select'}
           <select
             class="section-editor__input"
@@ -387,6 +446,26 @@
     text-transform: none;
     letter-spacing: normal;
     color: var(--color-text-secondary);
+  }
+
+  /* A toggle labels itself beside its box rather than above it. */
+  .section-editor__field--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .section-editor__check {
+    inline-size: var(--space-4);
+    block-size: var(--space-4);
+    accent-color: var(--color-interactive);
+    flex: none;
+  }
+
+  .section-editor__check:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
   }
 
   .section-editor__axes {

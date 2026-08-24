@@ -175,7 +175,7 @@
    * props contract), as a spreadable attribute bag. Empty when `editable` is false,
    * so the PUBLIC markup is byte-identical to having no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`, which is the canvas's
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`, which was the canvas's
    * primitive: that component renders an EMPTY element and lets a Svelte ACTION
    * write `textContent`. Actions do not run during SSR, so on the public page it
    * would serve `<h1></h1>` and fill the headline in only after hydration — an SEO

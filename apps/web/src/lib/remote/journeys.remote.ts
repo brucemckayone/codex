@@ -26,7 +26,7 @@ import {
 } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
-import { command, getRequestEvent, query } from '$app/server';
+import { command, form, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import type {
@@ -668,14 +668,33 @@ export const updateJourneySellMedia = command(
 /**
  * Upload (or replace) the journey's still cover.
  *
- * A `command()` rather than a `form()` because the builder's media panel is
- * already a JS-driven surface inside the `ssr = false` studio, and the panel
- * needs the resolved URL back to update the preview in place. Client-side size /
- * MIME bounds mirror the server's so an unsupported file (iPhone HEIC, most
- * commonly) is rejected with actionable text BEFORE the round-trip; the worker
- * re-validates by magic bytes regardless.
+ * MUST be a `form()`, not a `command()`. A `command()`'s arguments are
+ * serialized with devalue, which cannot represent a `File` — the call threw
+ * "Cannot stringify arbitrary non-POJOs" in the BROWSER, before any request was
+ * made, so this path could never have worked. `form()` submits real
+ * `FormData`, and its schema may carry `File` fields. The three other upload
+ * paths in this app (`uploadLogoForm`, `uploadCategoryCoverForm`,
+ * `uploadThumbnailForm`) all say so in a comment; this one was written without
+ * inheriting the rule, which is why `remote-file-uploads.test.ts` now asserts it
+ * instead of trusting prose.
+ *
+ * The earlier justification for `command()` — "the panel needs the resolved URL
+ * back to update the preview in place" — is satisfiable here: a `form()`
+ * callback's return value is exposed as `.result`, so the panel reads
+ * `coverImageUrl` from the submission and hands it to the sell-media store.
+ *
+ * Client-side size / MIME bounds mirror the server's so an unsupported file
+ * (iPhone HEIC, most commonly) is rejected with actionable text BEFORE the
+ * round-trip; the worker re-validates by magic bytes regardless.
+ *
+ * Failures come back as a value rather than thrown, so the panel can surface the
+ * server's own message. The discriminant is a STRING (`outcome`), not the
+ * `success: boolean` the sibling uploads use: `apps/web` compiles with
+ * `strictNullChecks` off, where a boolean-literal discriminant does not narrow a
+ * union — `SubscribeButton.svelte` carries two pre-existing svelte-check errors
+ * of exactly that shape. A string discriminant narrows in both modes.
  */
-export const uploadJourneyCover = command(
+export const uploadJourneyCoverForm = form(
   z.object({
     pageId: z.string().uuid(),
     cover: z
@@ -691,16 +710,24 @@ export const uploadJourneyCover = command(
         )}MB or smaller.`
       ),
   }),
-  async ({ pageId, cover }): Promise<{ coverImageUrl: string }> => {
+  async ({ pageId, cover }) => {
     const ctx = await resolveStudioOrg();
     if (!ctx) {
-      error(400, 'Journey covers can only be set within an organization');
+      return {
+        outcome: 'failed' as const,
+        message: 'Journey covers can only be set within an organization',
+      };
     }
     try {
-      return await ctx.api.access.uploadJourneyCover(ctx.orgId, pageId, cover);
+      const { coverImageUrl } = await ctx.api.access.uploadJourneyCover(
+        ctx.orgId,
+        pageId,
+        cover
+      );
+      return { outcome: 'uploaded' as const, coverImageUrl };
     } catch (err) {
       if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
-        error(err.status, err.message);
+        return { outcome: 'failed' as const, message: err.message };
       }
       throw err;
     }

@@ -62,7 +62,7 @@
   `theatre` (default) · `plain` · `split` · `bleed` · `card`. `theatre` is the
   retired `cinema`; `plain` is the retired `simple` (LEGACY_SECTION_VARIANTS
   already maps both). `bleed` and `card` are new (research §3). All five port
-  their arrangement from the canvas partial
+  their arrangement from the since-deleted canvas partial
   `render-edit/journey-sections/_video.css` (contract A12).
 
   COMPOSITIONS CARRY ARRANGEMENT, NEVER TYPE SCALE — scale is the `type` axis's
@@ -253,7 +253,7 @@
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
    * no seam at all.
    *
-   * DELIBERATELY NOT `render-edit/EditableText.svelte`: it renders an EMPTY
+   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
    * element and fills `textContent` from a Svelte action, and actions do not run
    * during SSR — so the public page would serve `<h2></h2>` and paint the text in
    * only after hydration, an SEO hole (pilot lesson 9). Here the text is a real
@@ -427,7 +427,7 @@
 {/snippet}
 
 <div class="iv" data-iv-composition={composition} data-iv-overlay={overlay}>
-  <div class="iv__inner" use:reveal>
+  <div class="iv__inner" use:reveal={{ disabled: editable }}>
     {#if composition === 'split'}
       <div class="iv__split">
         {@render lead()}
@@ -897,7 +897,7 @@
   }
 
   /* ── COMPOSITIONS ──────────────────────────────────────────────────────
-     Arrangement only. Ported from `render-edit/journey-sections/_video.css`
+     Arrangement only. Ported from the since-deleted `render-edit/journey-sections/_video.css`
      (`.jp-video--split`'s two-column wrap, `.jp-video--simple`'s hidden corners
      and tag). No composition sets a type scale — that is the `type` axis. */
 

@@ -54,19 +54,6 @@ const ORG_BRAND = read('../styles/tokens/org-brand.css');
 const TYPOGRAPHY = read('../styles/tokens/typography.css');
 const SHARED = read('journey-sections-shared.css');
 
-/** The nine per-type partials the 575-line canvas stylesheet was split into. */
-const SECTION_PARTIAL_NAMES = [
-  '_base',
-  '_hero',
-  '_prose',
-  '_video',
-  '_descent',
-  '_proof',
-  '_guide',
-  '_faq',
-  '_invite',
-] as const;
-
 // ── a minimal CSS rule reader ───────────────────────────────────────────────
 // Enough for these files: strip comments, then walk brace depth so an @media /
 // @container block's inner rules are reachable under a composed key.
@@ -173,10 +160,15 @@ const declarationsOf = (css: string, prop: string): string[] => {
  * (`check:ci`, both brand-boundary checks, `typecheck`, the whole vitest suite)
  * stayed green, because none of them parse CSS.
  *
- * This matters well beyond one typo: the seven component work packages are about
- * to edit nine heavily-commented partials, and these files document their own
- * traps by QUOTING declarations. So the check is here rather than in a one-off
- * script.
+ * This matters well beyond one typo: every file in the list documents its own
+ * traps by QUOTING declarations, which is exactly the habit that produces an
+ * early terminator. So the check is here rather than in a one-off script.
+ *
+ * The list shrank when `render-edit/` went: its index plus nine per-type
+ * partials were the bulk of it. Per-section CSS now lives in each component's
+ * Svelte `<style>` block, which is NOT covered here — deliberately, because the
+ * Svelte compiler parses those at build time and a malformed comment fails the
+ * build loudly rather than reaching the browser as prose.
  *
  * The invariant, after stripping comments with the real first-terminator rule:
  * no `*·/` may remain, and braces must balance. A stray terminator means a
@@ -186,8 +178,6 @@ const JOURNEY_STYLESHEETS = [
   'journey-palette.css',
   'journey-design.css',
   'journey-sections-shared.css',
-  'render-edit/journey-sections.css',
-  ...SECTION_PARTIAL_NAMES.map((n) => `render-edit/journey-sections/${n}.css`),
   '../styles/tokens/spacing.css',
   '../styles/tokens/typography.css',
   '../styles/tokens/org-brand.css',

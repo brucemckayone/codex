@@ -1,6 +1,6 @@
 /**
- * `SectionEditor` renders only the control kinds it can actually author
- * (A29 / A72 · `Codex-28ifd`).
+ * `SectionEditor` renders a REAL control for every kind it declares
+ * (A29 / A72 · `Codex-28ifd`, now closed).
  *
  * WHAT WENT WRONG, and why this file is behavioural rather than a source grep.
  * `section-fields.ts` declares eight control kinds and states the intent plainly:
@@ -20,10 +20,16 @@
  * Svelte and correct TypeScript — the bug is which BRANCH a declared kind lands in.
  * So these assertions mount the real component and look at the real DOM.
  *
- * WHEN THE GENERIC ARRAY CONTROL LANDS these tests fail, and that is the point:
- * come here, move the kind out of `UNBUILT_CONTROLS`, and assert the new control
- * renders instead. Do not delete the file — the last assertion is what stops a
- * ninth control kind silently inheriting the text input.
+ * THE ARRAY CONTROL HAS NOW LANDED, and this file did what its own note asked:
+ * the four kinds moved out of the unbuilt set and the assertions were inverted to
+ * require the control rather than forbid it. `UNBUILT` is deliberately kept as an
+ * empty tuple rather than deleted — it is the seam a future declared-but-unbuilt
+ * kind goes through, and the last assertion reads it.
+ *
+ * That last assertion is the one that outlives the rest: a ninth kind added to
+ * `SectionFieldControl` with no branch in the dispatch would inherit the catch-all
+ * text input and start corrupting whatever shape it names — exactly how the first
+ * four got here. It must keep failing loudly.
  */
 
 import type { PageSection } from '@codex/shared-types';
@@ -36,10 +42,23 @@ import {
 import SectionEditor from './SectionEditor.svelte';
 import { fieldsForSectionType, SECTION_FIELDS } from './section-fields';
 
-/** The kinds F-C declared and consolidation has not built. */
-const UNBUILT = ['number', 'toggle', 'list', 'repeater'] as const;
+/**
+ * Declared-but-unbuilt kinds. EMPTY, and that is the current truth — every kind
+ * the catalogue declares now has a branch. Kept as the seam: a new kind lands
+ * here first, and the coverage assertion below reads it.
+ */
+const UNBUILT = [] as const;
 /** The kinds the dispatch has a real branch for. */
-const BUILT = ['text', 'textarea', 'select', 'media'] as const;
+const BUILT = [
+  'text',
+  'textarea',
+  'select',
+  'media',
+  'number',
+  'toggle',
+  'list',
+  'repeater',
+] as const;
 
 const guideSection: PageSection = {
   id: 's-guide',
@@ -60,7 +79,9 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     // control is the UI. Assert the contract survives.
     const declared = Object.entries(SECTION_FIELDS).flatMap(([type, fields]) =>
       fields
-        .filter((f) => (UNBUILT as readonly string[]).includes(f.control))
+        .filter((f) =>
+          ['list', 'repeater', 'number', 'toggle'].includes(f.control)
+        )
         .map((f) => `${type}.${f.key}`)
     );
     // The six A72 names, plus any new one someone adds — the point is that the
@@ -75,11 +96,11 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     ]);
   });
 
-  it('renders NO input for a declared-but-unbuilt control kind', () => {
+  it('renders the ARRAY control for a repeater field, not a bare text input', () => {
     // `guide.facts` is declared `repeater` with `itemFields: [{label},{detail}]`,
-    // and its label is "Credentials". Before the fix this rendered a writable
-    // text input; a creator's typing persisted as a bare string and was discarded
-    // at read.
+    // and its label is "Credentials". It rendered a writable text input once — a
+    // creator's typing persisted as a bare string and was discarded at read — and
+    // then rendered nothing at all. It must now render the real control.
     const component = mount(SectionEditor, {
       target: document.body,
       props: { section: guideSection },
@@ -89,15 +110,24 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     const labels = [
       ...document.body.querySelectorAll('.section-editor__field-label'),
     ].map((el) => el.textContent?.trim());
-    expect(labels).not.toContain('Credentials');
+    expect(labels).toContain('Credentials');
+
+    // And it is the array control, not the catch-all: an add affordance named
+    // after the field's own `itemLabel`. Asserting the AFFORDANCE rather than a
+    // class name is what distinguishes "the right control" from "any control" —
+    // a text input would satisfy the label assertion above on its own.
+    const addButtons = [...document.body.querySelectorAll('button')]
+      .map((b) => b.textContent?.trim())
+      .filter((t): t is string => !!t);
+    expect(addButtons.some((t) => t.includes('credential'))).toBe(true);
 
     unmount(component);
   });
 
-  it('renders every BUILT field for the same section', () => {
-    // The counterpart assertion: skipping the unbuilt kinds must not skip
-    // anything else. `guide` declares role/heading/body/quote (text+textarea),
-    // three media pickers, plus clip and duration.
+  it('renders EVERY declared field for the section — nothing is filtered out', () => {
+    // The counterpart assertion. It used to allow for the skipped kinds; now it
+    // requires their absence to be impossible, because the component no longer
+    // filters at all.
     const component = mount(SectionEditor, {
       target: document.body,
       props: { section: guideSection },
@@ -107,9 +137,8 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     const rendered = document.body.querySelectorAll(
       '.section-editor__field'
     ).length;
-    const expected = fieldsForSectionType('guide').filter((f) =>
-      (BUILT as readonly string[]).includes(f.control)
-    ).length;
+    // EVERY declared field, with no filter — the whole point of closing the bead.
+    const expected = fieldsForSectionType('guide').length;
     expect(rendered).toBe(expected);
     expect(expected).toBeGreaterThan(0);
 

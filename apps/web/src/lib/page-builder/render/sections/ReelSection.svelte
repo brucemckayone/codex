@@ -252,7 +252,7 @@
   /**
    * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
    * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all. DELIBERATELY NOT `render-edit/EditableText.svelte`: it fills
+   * no seam at all. DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it fills
    * `textContent` from a Svelte action and actions do not run during SSR, so the
    * public page would serve an empty heading and paint it in after hydration
    * (pilot lesson 9). Here the text is a real child node.
@@ -577,7 +577,7 @@
   data-reel-overlay={overlay}
   data-reel-align={design?.align ?? 'center'}
 >
-  <div class="reel__inner" use:reveal>
+  <div class="reel__inner" use:reveal={{ disabled: editable }}>
     {#if composition === 'split'}
       <div class="reel__split">
         {@render header()}
@@ -1299,7 +1299,7 @@
   }
 
   /* ── COMPOSITIONS ──────────────────────────────────────────────────────
-     Arrangement only. Ported from `render-edit/journey-sections/_video.css`
+     Arrangement only. Ported from the since-deleted `render-edit/journey-sections/_video.css`
      (`.jp-video--split`'s two-column wrap; `.jp-video--simple`'s hidden corners
      and tag, expressed positively as `framedChrome`). No composition sets a type
      scale — that is the `type` axis. */
