@@ -37,6 +37,7 @@
     isAxisValue,
   } from './design-vocabulary';
   import { fieldsForSectionType } from './section-fields';
+  import type { SectionFieldDef } from './section-fields';
   import ArrayField from './ArrayField.svelte';
   import VariantPicker from './VariantPicker.svelte';
 
@@ -47,6 +48,24 @@
   const { section }: Props = $props();
 
   const definition = $derived(findSectionDefinition(section.type));
+
+  /**
+   * The axis gate for a field, or null when it is not gated / not currently held.
+   *
+   * A field declaring `disabledWhenAxis` is one whose CONTENT choice a DESIGN axis
+   * can overrule — today only the hero's `mediaMode` under `media: none`. Rather
+   * than let the author pick something with no effect, the control goes disabled
+   * and the returned `reason` is shown in place of its hint.
+   *
+   * `section.design` is a bag of axis→value strings; the cast is to index it by a
+   * declared axis name without widening anything to `any`.
+   */
+  const axisGate = (field: SectionFieldDef) => {
+    const gate = field.disabledWhenAxis;
+    if (!gate) return null;
+    const axes = section.design as Record<string, string | undefined> | undefined;
+    return axes?.[gate.axis] === gate.value ? gate : null;
+  };
   /**
    * ALL EIGHT DECLARED CONTROL KINDS ARE NOW BUILT (`Codex-28ifd` closed).
    *
@@ -282,6 +301,7 @@
           {/if}
         </label>
       {:else}
+      {@const gate = axisGate(field)}
       <label class="section-editor__field">
         <span class="section-editor__field-label">{field.label}</span>
         {#if field.control === 'textarea'}
@@ -290,6 +310,7 @@
             rows="3"
             placeholder={field.placeholder}
             value={valueOf(field.key)}
+            disabled={Boolean(gate)}
             oninput={(e) => onInput(field.key, e)}
           ></textarea>
         {:else if field.control === 'number'}
@@ -298,12 +319,14 @@
             class="section-editor__input"
             placeholder={field.placeholder}
             value={numberOf(field.key)}
+            disabled={Boolean(gate)}
             oninput={(e) => onNumber(field.key, e)}
           />
         {:else if field.control === 'select'}
           <select
             class="section-editor__input"
             value={valueOf(field.key)}
+            disabled={Boolean(gate)}
             onchange={(e) => onInput(field.key, e)}
           >
             {#each field.options ?? [] as opt (opt.value)}
@@ -316,10 +339,15 @@
             class="section-editor__input"
             placeholder={field.placeholder}
             value={valueOf(field.key)}
+            disabled={Boolean(gate)}
             oninput={(e) => onInput(field.key, e)}
           />
         {/if}
-        {#if field.hint}
+        {#if gate}
+          <!-- The reason REPLACES the hint: a hint about what the control does is
+               noise while the control cannot do it. -->
+          <span class="section-editor__hint">{gate.reason}</span>
+        {:else if field.hint}
           <span class="section-editor__hint">{field.hint}</span>
         {/if}
       </label>

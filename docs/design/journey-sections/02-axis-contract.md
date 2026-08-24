@@ -1530,3 +1530,75 @@ one". A `??` in a `bd close --reason` string was glob-expanded and truncated the
 **Write any prose containing backticks, `??`, or globs via `git commit -F -` with a QUOTED heredoc
 (`<<'MSG'`), or single-quote the argument.** The failure is silent in every case: you get a commit,
 a closed bead, or an empty grep result, and nothing tells you a word went missing.
+
+## A75 — The hero plays its media, all six compositions carry it, and the atmosphere yields (`Codex-uj4jc`)
+
+A32 recorded that a hero "image" can only be a video's poster frame and deferred the fix. This closes
+the half that needed no migration, and in doing so found that the deferral had been hiding a second,
+larger omission.
+
+**The hero never received the video at all.** `getCourseSellPreview` projected `courses.heroMediaId`
+through `toStill` only:
+
+```
+heroImageUrl: toStill(courseRow.heroMediaId),   // the thumbnail
+                                               // ...and toClip was never called
+```
+
+`toClip` sat in the same function, ten lines above, already resolving `intro`, `reel` and `guideClip`
+into `{ playlistUrl, posterUrl, durationSeconds }`. So a creator uploaded a video, the projection
+reduced it to a poster URL, and the manifest the hero needed was discarded at the boundary. The hero
+could not have played its own media however the component was written. `heroClip` is now projected
+beside `heroImageUrl` — the same item resolved both ways, OPTIONAL-additive like `guideClip`, so an
+older worker deployment degrades to the still.
+
+### Three decisions, and what each rejects
+
+**1 · `mediaMode` is CONTENT; `media` is DESIGN; the axis wins.** The section gains an authored
+`mediaMode` (`none` · `image` · `loop` · `click`) choosing WHICH asset appears, while the `media` axis
+keeps deciding HOW it is shaped. `media: none` means "no plate at all", so it necessarily overrules the
+mode. Both alternatives were worse. Ignoring the mode silently leaves an author picking "silent looping
+video", seeing nothing, and having no way to learn why. Auto-lifting the axis mutates a design decision
+as a side effect of a content choice — the precise conflation the axis/field split exists to prevent.
+So `SectionFieldDef.disabledWhenAxis` greys the control and puts the reason where the hint was. The
+renderer and the builder are guarded separately, because a disabled control over a renderer that
+ignored the axis would be a lie in the other direction.
+
+**2 · All six compositions carry media, and the three without a plate OFFER it.** `wantsMedia` used to
+fold two different questions together — whether media is wanted, and whether this layout has anywhere
+to put it — which is what confined media to `split-media`, `full-bleed` and `poster`. They are now
+separate: `plateLed` answers WHERE, `mediaMode` answers WHAT. `stage`, `oversized` and `banner` have no
+plate in their layout, so on those a video becomes an invitation beside the CTAs rather than being
+silently dropped. `loop` lands there too — there is nowhere to loop footage, so the author's intent to
+feature a video is honoured as a link instead of discarded.
+
+The affordance's label is AUTHORED. The hero's clip and the `introVideo` section's film are separate
+slots pointing wherever the creator aimed them, so a hardcoded "Watch intro" would be this section
+making a claim about content it does not own.
+
+**3 · The atmosphere recedes when real media is painted.** `.hero__atmos` already multiplied its whole
+opacity by the `--jp-sec-atmos` 0/1 gate, keyed on the `surface` axis. That gate now also reads whether
+media is present, as a MULTIPLIER rather than a replacement — so `surface` keeps the final say and a
+section gated to zero stays at zero. Composed this way for the same reason the gate is an opacity and
+not an `{#if}`: the markup stays mounted, so a late-resolving streamed preview costs no layout shift.
+
+"Painted", not "present". A `click` affordance on a plate-less `stage` hero leaves the ember doing the
+whole job of carrying the mood, so it must not dim — only `image` and `loop`, and only where a plate
+exists, recede it.
+
+### The forward-compatibility rule this had to obey
+
+Seven live journey pages have no `mediaMode`. Absence resolves to **today's appearance** —
+`heroImageUrl ? 'image' : 'none'` — not to a nicer default. This is A33's lesson applied in the
+inverse direction: a stored value the renderer ignored is not evidence of intent, and neither is no
+stored value at all. The builder therefore offers an explicit "Automatic" choice, so returning to that
+state stays authorable rather than becoming unreachable once a mode is set.
+
+### What is still open
+
+`Codex-490z7` — real image upload, so a hero image need not be a video's poster frame — now depends on
+this and lands as the `image` mode's second source: `heroImageKey ?? heroMediaId`'s poster `?? ` the
+synthetic plate. Two traps on that path are already paid for elsewhere in this repo and must not be
+rediscovered: the write path goes through `forwardMultipartUpload()`, because re-forwarding a `File`
+strips the filename in production; and it must be a `form()`/FormData path rather than a `command()`,
+because command arguments serialize through devalue, which has no representation for a `File`.

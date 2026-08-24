@@ -643,6 +643,11 @@ export class CourseJourneyService extends BaseService {
         // is the item's `thumbnailKey`. `hero.full-bleed` / `hero.poster` /
         // `guide.letter` are named after media that, until now, no column held.
         heroImageUrl: toStill(courseRow.heroMediaId),
+        // The SAME item, resolved both ways: `toStill` for the modes that only
+        // draw it, `toClip` for the modes that play it. Before this the manifest
+        // was thrown away here, so a creator's hero video could only ever appear
+        // as its own poster frame (Codex-uj4jc).
+        heroClip: toClip(courseRow.heroMediaId),
         signatureUrl: toStill(courseRow.signatureMediaId),
       };
     } catch (error) {

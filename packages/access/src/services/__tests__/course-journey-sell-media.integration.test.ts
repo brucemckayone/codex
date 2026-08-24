@@ -622,7 +622,10 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       );
 
       const [heroMedia] = await db
-        .select({ thumbnailKey: mediaItems.thumbnailKey })
+        .select({
+          thumbnailKey: mediaItems.thumbnailKey,
+          hlsPreviewKey: mediaItems.hlsPreviewKey,
+        })
         .from(mediaItems)
         .where(eq(mediaItems.id, heroId))
         .limit(1);
@@ -642,6 +645,16 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       expect(preview?.signatureUrl).toBe(
         `${CDN}/${signatureMedia?.thumbnailKey}`
       );
+
+      // ...AND `toClip` for the same item, which is what `Codex-uj4jc` added. The
+      // manifest used to be discarded here: the hero was handed only a poster URL,
+      // so a creator's video could never do anything but sit still. Asserted as a
+      // RELATIONSHIP to the row rather than a literal, because whether the fixture
+      // has a transcoded preview is the factory's business — what must hold is that
+      // the projection stops throwing the manifest away.
+      expect(preview?.heroClip?.playlistUrl ?? null).toBe(
+        heroMedia?.hlsPreviewKey ? `${CDN}/${heroMedia.hlsPreviewKey}` : null
+      );
     });
 
     it('projects null for both when the slots are cleared', async () => {
@@ -649,6 +662,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
 
       const preview = await svc.getCourseSellPreview(courseId, CDN);
       expect(preview?.heroImageUrl).toBeNull();
+      expect(preview?.heroClip).toBeNull();
       expect(preview?.signatureUrl).toBeNull();
     });
 
@@ -662,6 +676,9 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       const preview = await svc.getCourseSellPreview(courseId, undefined);
       // A bare R2 key served to a browser is a broken image, not a degraded one.
       expect(preview?.heroImageUrl).toBeNull();
+      // Same for the manifest: an unresolvable playlist URL would leave the player
+      // erroring rather than falling back to the plate.
+      expect(preview?.heroClip).toBeNull();
     });
   });
 });

@@ -443,3 +443,221 @@ describe('HeroSection — the edit seam', () => {
     expect(edits).toEqual([['headline', 'Typed in the canvas']]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEDIA MODES (`Codex-uj4jc`)
+//
+// Before this, the hero drew media on three of its six compositions and could
+// only ever draw a STILL, because the projection reduced `courses.heroMediaId`
+// to a poster frame through `toStill` and discarded the manifest. These cases
+// pin the two decisions that replaced it: WHAT appears (the `mediaMode` field,
+// overruled by the `media` axis) and WHERE it appears (a plate on the three
+// layouts that have one, an invitation beside the CTAs on the three that do not).
+//
+// Playback itself is not asserted here and cannot be: jsdom has no MSE, so
+// `createHlsPlayer` could never construct a real player. What IS assertable — and
+// what actually regressed historically — is which ELEMENT the component chose.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HERO_CLIP = {
+  playlistUrl: 'https://cdn.test/hero/preview.m3u8',
+  posterUrl: 'https://cdn.test/hero/poster.jpg',
+  durationSeconds: 30,
+};
+
+const HERO_STILL = 'https://cdn.test/hero/still.jpg';
+
+function sellPreview(over: Partial<SellPreview> = {}): SellPreview {
+  return { intro: null, reel: null, ...over };
+}
+
+/**
+ * Let both media reads land: the plate's own `{#await}` and the `$effect` that
+ * mirrors the same promise into state for the modal / affordance / atmosphere.
+ * Two microtask turns, because the mirror resolves a `.then` off the promise the
+ * await block is already consuming.
+ */
+async function settle() {
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+  await tick();
+}
+
+describe('HeroSection — media modes', () => {
+  it('with no stored mode, a page showing a still today keeps showing it', async () => {
+    // The forward-compat case, and the one that matters most: seven live journey
+    // pages have no `mediaMode`. Absence is not intent (A33), so it must resolve
+    // to today's appearance rather than to a nicer default.
+    render({
+      variant: 'split-media',
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroImageUrl: HERO_STILL })),
+      }),
+    });
+    await settle();
+
+    expect(document.body.querySelector('.hero__img')?.getAttribute('src')).toBe(
+      HERO_STILL
+    );
+    expect(document.body.querySelector('.hero-loop__video')).toBeNull();
+  });
+
+  it('with no stored mode and no still, draws the synthetic plate', async () => {
+    render({ variant: 'split-media' });
+    await settle();
+
+    expect(document.body.querySelector('.hero__plate')).not.toBeNull();
+    expect(document.body.querySelector('.hero__img')).toBeNull();
+  });
+
+  it('`loop` renders the silent backdrop rather than the still', async () => {
+    render({
+      variant: 'full-bleed',
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(
+          sellPreview({ heroImageUrl: HERO_STILL, heroClip: HERO_CLIP })
+        ),
+      }),
+    });
+    await settle();
+
+    expect(document.body.querySelector('.hero-loop__video')).not.toBeNull();
+    expect(document.body.querySelector('.hero__img')).toBeNull();
+  });
+
+  it('`loop` degrades to the still when the worker omits `heroClip`', async () => {
+    // `heroClip` is OPTIONAL-additive, so an older worker deployment answers with
+    // no clip at all. The authored mode must not produce an empty plate: the mode
+    // is authored, the clip is a fact, and the fact wins.
+    render({
+      variant: 'full-bleed',
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroImageUrl: HERO_STILL })),
+      }),
+    });
+    await settle();
+
+    expect(document.body.querySelector('.hero-loop__video')).toBeNull();
+    expect(document.body.querySelector('.hero__img')?.getAttribute('src')).toBe(
+      HERO_STILL
+    );
+  });
+
+  it('`click` puts the invitation ON the plate, over the media', async () => {
+    render({
+      variant: 'poster',
+      config: { headline: 'A headline', mediaMode: 'click' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    const play = document.body.querySelector('.hero__play');
+    expect(play).not.toBeNull();
+    // Inside the media box, not loose in the copy column.
+    expect(play?.closest('.hero__media')).not.toBeNull();
+    expect(document.body.querySelector('.hero__watch')).toBeNull();
+  });
+
+  it('a plate-less composition offers the film beside the CTAs instead', async () => {
+    // `stage` has nowhere to put a backdrop, so the author's intent to feature a
+    // video becomes an invitation rather than being silently dropped.
+    render({
+      variant: 'stage',
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    const watch = document.body.querySelector('.hero__watch');
+    expect(watch).not.toBeNull();
+    expect(watch?.closest('.hero__actions')).not.toBeNull();
+    expect(document.body.querySelector('.hero__media')).toBeNull();
+  });
+
+  it('`mediaLabel` words the invitation, since the hero does not own the clip', async () => {
+    render({
+      variant: 'stage',
+      config: {
+        headline: 'A headline',
+        mediaMode: 'click',
+        mediaLabel: 'See the practice',
+      },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    expect(document.body.querySelector('.hero__watch')?.textContent).toContain(
+      'See the practice'
+    );
+  });
+
+  it('`media: none` overrules any authored mode, plate and invitation alike', async () => {
+    // The axis governs treatment, the field governs content, and a content choice
+    // must not overturn a design decision. The builder greys the control to say so
+    // (`section-editor-controls.svelte.test.ts`); here the renderer must agree.
+    render({
+      variant: 'full-bleed',
+      design: { ...CANDLELIT, media: 'none' },
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(
+          sellPreview({ heroImageUrl: HERO_STILL, heroClip: HERO_CLIP })
+        ),
+      }),
+    });
+    await settle();
+
+    expect(document.body.querySelector('.hero__media')).toBeNull();
+    expect(document.body.querySelector('.hero-loop__video')).toBeNull();
+    expect(document.body.querySelector('.hero__watch')).toBeNull();
+  });
+
+  it('the atmosphere recedes when media is actually painted', async () => {
+    render({
+      variant: 'full-bleed',
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    expect(
+      document.body
+        .querySelector('.hero')
+        ?.classList.contains('hero--media-present')
+    ).toBe(true);
+  });
+
+  it('the atmosphere holds when the film is merely OFFERED', async () => {
+    // `stage` has no plate, so nothing is painted and the ember is still doing
+    // the whole job of carrying the mood. Dimming it here would leave the hero
+    // flatter than before the author added a video, which is the opposite of the
+    // intent. Split from the case above rather than sharing a mount: two mounts
+    // in one `it` needed a manual `unmount(component!)`, and a non-null assertion
+    // is a poor trade for a saved test block.
+    render({
+      variant: 'stage',
+      config: { headline: 'A headline', mediaMode: 'click' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    expect(
+      document.body
+        .querySelector('.hero')
+        ?.classList.contains('hero--media-present')
+    ).toBe(false);
+  });
+});
