@@ -40,6 +40,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PageSection } from '@codex/shared-types';
+import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   resolveVariant,
@@ -47,6 +48,7 @@ import {
   SECTION_DESIGN_AXES,
 } from '$lib/page-builder';
 import {
+  builderSalesContext,
   SECTION_COMPONENTS as PUBLIC_COMPONENTS,
   selectRenderableSections,
 } from '$lib/page-builder/render';
@@ -221,5 +223,128 @@ describe('canvas ↔ public: axis emission (CHARACTERISATION — Codex-6nrsk)', 
     expect(emitted).toEqual([...SECTION_DESIGN_AXES]);
 
     unmount(component);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The sell media (Codex-bvhcr)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HERO_STILL = 'https://cdn.test/hero/still.jpg';
+
+/**
+ * One hero on a PLATE-LED composition. `full-bleed` matters: `stage`, `oversized`
+ * and `banner` have nowhere to draw a plate, so they paint no still no matter what
+ * media resolves, and a test built on one of them would pass for the wrong reason.
+ */
+const heroWithPlate: PageSection = {
+  id: 's-hero',
+  type: 'hero',
+  enabled: true,
+  props: {},
+  variant: 'full-bleed',
+} as PageSection;
+
+/**
+ * Let the media reads land: the plate's own `{#await}` plus the `$effect` that
+ * mirrors the same promise into state. Two microtask turns, because the mirror
+ * resolves a `.then` off the promise the await block is already consuming — the
+ * same reason `HeroSection.svelte.test.ts` settles twice.
+ */
+async function settle() {
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+  await tick();
+}
+
+/**
+ * Mount ONE of the two paths, read the still the hero actually painted, tear it
+ * down. Returning the `src` rather than asserting inside keeps each `it` to one
+ * mount at a time, so no teardown needs a non-null assertion to reach its handle.
+ */
+async function heroStillVia(
+  path: 'canvas' | 'public',
+  section: PageSection,
+  context: JourneySalesContext
+): Promise<string | null> {
+  const component =
+    path === 'canvas'
+      ? mount(SectionFrame, {
+          target: document.body,
+          props: {
+            renderable: selectRenderableSections([section])[0],
+            context,
+            editable: true,
+          },
+        })
+      : mount(PublicSectionRenderer, {
+          target: document.body,
+          props: { sections: [section], context },
+        });
+  flushSync();
+  await settle();
+
+  const src =
+    document.body.querySelector('.hero__img')?.getAttribute('src') ?? null;
+
+  unmount(component);
+  document.body.innerHTML = '';
+  return src;
+}
+
+describe('canvas ↔ public: the sell media (Codex-bvhcr)', () => {
+  it('forwards a sellPreview from the canvas into the shared context', () => {
+    // SOURCE-level, deliberately. This was never a rendering fault:
+    // `builderSalesContext` takes `sellPreview` as OPTIONAL and defaults it to
+    // null, so a canvas that simply never passed one type-checked, mounted and
+    // rendered — showing all four media-bearing sections (`hero`, `introVideo`,
+    // `reel`, `guide`) their media-less fallback. No assertion over the canvas
+    // ALONE could witness it, because "no media" is also the correct output for a
+    // course that has picked none. The defect was the disagreement with the public
+    // page, and what hid it was that the disagreement sat between a DEFAULT and a
+    // value rather than between two visible behaviours.
+    const canvas = readFileSync(
+      join(HERE, 'JourneyBuilderCanvas.svelte'),
+      'utf8'
+    );
+    const opens = canvas.indexOf('builderSalesContext({');
+    expect(opens, 'canvas no longer builds a context here').toBeGreaterThan(-1);
+    const call = canvas.slice(opens, canvas.indexOf('})', opens));
+    expect(
+      call,
+      'builderSalesContext is called without sellPreview — the canvas is blind to the course media again'
+    ).toContain('sellPreview');
+  });
+
+  it('paints the SAME hero still on both paths from one context', async () => {
+    const context = builderSalesContext({
+      course: { id: 'c1', slug: 'demo', title: 'Demo course' },
+      stages: [],
+      offer: null,
+      sellPreview: { intro: null, reel: null, heroImageUrl: HERO_STILL },
+    });
+
+    const canvasSrc = await heroStillVia('canvas', heroWithPlate, context);
+    const publicSrc = await heroStillVia('public', heroWithPlate, context);
+
+    expect(canvasSrc, 'the canvas painted no hero still').toBe(HERO_STILL);
+    expect(publicSrc, 'the two paths disagree on the hero still').toBe(
+      canvasSrc
+    );
+  });
+
+  it('agrees on NO media when the course has picked none', async () => {
+    // The other half, and the reason the case above cannot stand alone: a canvas
+    // that INVENTED media the page does not have would satisfy it just as well.
+    // Parity is an equality, so it needs both directions pinned.
+    const context = builderSalesContext({
+      course: { id: 'c1', slug: 'demo', title: 'Demo course' },
+      stages: [],
+      offer: null,
+    });
+
+    expect(await heroStillVia('canvas', heroWithPlate, context)).toBeNull();
+    expect(await heroStillVia('public', heroWithPlate, context)).toBeNull();
   });
 });

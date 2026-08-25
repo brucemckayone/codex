@@ -42,6 +42,7 @@
     builderSalesContext,
     SectionFrame,
     selectRenderableSections,
+    type SellPreview,
   } from '$lib/page-builder/render';
   /* THE COLOUR LADDER. `SectionFrame` carries the axis substrate
      (`journey-design.css` + `journey-sections-shared.css`) but deliberately NOT
@@ -90,6 +91,19 @@
     course?: Pick<JourneyCourseView, 'id' | 'slug' | 'title'>;
     /** The authoritative offer, when loaded. Null ⇒ sections draw a price-less CTA. */
     offer?: CourseOffer | null;
+    /**
+     * The course's RESOLVED sell media — the hero's still and clip, the intro and
+     * reel manifests, the guide's portrait.
+     *
+     * Already-resolved rather than a promise, because `builderSalesContext` wraps
+     * it: the public page streams this off its critical path, and the studio has
+     * it in hand from an ordinary client query.
+     *
+     * Null ⇒ every media-bearing section draws its media-less fallback, which is
+     * the correct answer for a course that has picked no media and was the ONLY
+     * answer before Codex-bvhcr.
+     */
+    sellPreview?: SellPreview | null;
   }
 
   let {
@@ -102,6 +116,7 @@
     stages = [],
     course,
     offer = null,
+    sellPreview = null,
   }: Props = $props();
 
   const sections = $derived(pageBuilder.sections);
@@ -119,12 +134,22 @@
    * The render context the public sections expect, assembled from what the studio
    * has. Rebuilt when its inputs change; `enrolled` is always false so the author
    * sees the pre-purchase page a prospective member sees.
+   *
+   * `sellPreview` was MISSING here (Codex-bvhcr), and because
+   * `builderSalesContext` defaults it to null the omission was silent: `hero`,
+   * `introVideo`, `reel` and `guide` each drew their media-less fallback — a
+   * synthetic plate, no clip, the guide's monogram — while the same stored page
+   * rendered the real media publicly. What an author sees is meant to be what a
+   * visitor gets, which is the entire point of mounting the public components
+   * here, and A75 sharpened the cost: the `media` mode control it added had its
+   * whole effect hidden on the surface where you author it.
    */
   const salesContext = $derived(
     builderSalesContext({
       course: course ?? { id: '', slug: slug, title: pageBuilder.pending?.title ?? '' },
       stages,
       offer,
+      sellPreview,
     })
   );
 

@@ -1602,3 +1602,73 @@ synthetic plate. Two traps on that path are already paid for elsewhere in this r
 rediscovered: the write path goes through `forwardMultipartUpload()`, because re-forwarding a `File`
 strips the filename in production; and it must be a `form()`/FormData path rather than a `command()`,
 because command arguments serialize through devalue, which has no representation for a `File`.
+
+## A76 — The canvas gets the course's real media, and the recession's live reach is measured (`Codex-bvhcr`)
+
+### The omission, and why nothing could see it
+
+`JourneyBuilderCanvas` assembles its render context with `builderSalesContext`, whose `sellPreview` is
+**optional and defaults to null**. The canvas never passed one. So `hero`, `introVideo`, `reel` and
+`guide` — the four types that read `context.sellPreview`; `feel` only *mentions* it in comments, its
+taste player being synthetic until `Codex-scab9` — each drew their media-less fallback in the canvas
+while the same stored page rendered the real media publicly.
+
+The defect was invisible for a structural reason worth naming: **the disagreement sat between a default
+and a value, not between two visible behaviours.** "No media" is also the correct output for a course
+that has picked none, so nothing about the canvas alone looked wrong, and no assertion over the canvas
+alone could witness it. Only the comparison with the public page is evidence. A75 sharpened the cost —
+it added a `media` mode control whose entire effect was hidden on the surface where you author it.
+
+The seam already existed and the query already existed. `resolveSellPreview` is the same public,
+auth-free query the public sales load streams; the fix is to call it and pass the result down. Nothing
+new was built.
+
+### Two hops, two guards
+
+A prop can be dropped at either end, so both ends are pinned, in the file that owns each:
+
+| hop | guard | file |
+|---|---|---|
+| canvas → `builderSalesContext` | the call site must mention `sellPreview` | `canvas-public-parity.svelte.test.ts` |
+| route → canvas | the `<JourneyBuilderCanvas>` tag must pass it, gated on both UUIDs, degrading to null | `page/__tests__/builder-canvas-wiring.test.ts` |
+
+Both are SOURCE-level by necessity, not by preference: the builder mounts only behind a loaded draft in
+an `ssr = false` subtree, and a prop omission is observable in markup rather than in a rendered tree.
+Each was negative-controlled — removing the line it guards makes that test, and only that test, fail.
+
+The route guard is deliberately **per-prop** rather than "every declared prop must be passed", because
+the stronger form fails today and legitimately: `offer` is declared on the canvas and never passed
+either, so `InviteSection` draws a price-less CTA in the canvas while the live page prices itself
+(`Codex-4wun2`). Generalise the guard when that lands — the general form is what would have caught both
+at once.
+
+### The recession's live reach: ZERO pages, and the arithmetic behind that
+
+A75's "the atmosphere recedes when real media is painted" was carried forward as *"the seven live pages
+showing a still now render a dimmer ember"*. **It does not reach them, and the number is a
+three-condition chain collapsed into one.** Measured against the dev database:
+
+1. **7** pages carry a `hero_media_id` — this is the real source of "seven";
+2. **5 of those 7 have no `hero` section at all** — they are section-less rows (A25), so no hero
+   component runs;
+3. the **2** that do (`bone-deep`, `pricing-smoke-test`) both store `variant: stage`, and `stage` is
+   **not plate-led** (`plateLed` = `split-media | full-bleed | poster`), so `showPlate` is false and
+   `mediaPresent` cannot become true.
+
+Reaching `resolveMediaMode`'s fallback branch is not the same as resolving to `image`, and resolving to
+`image` is not the same as painting a plate. **DECISION (owner, 2026-08-25): the recession stays keyed
+on `image` OR `loop`.** The rationale is that real media carries the mood and a still photograph is
+real media; narrowing it to `loop` would leave a still competing with the ember, which is the problem
+the recession exists to solve. Recorded here because the misreading invited a "fix" to live behaviour
+that no live page exhibits.
+
+### Verified end to end
+
+On `pricing-smoke-test`, canvas and public page now emit **byte-identical** media across all four
+types: `introVideo` → "Play the 717-second intro film" (the 717 is `intro.durationSeconds`, so the
+label itself proves the preview arrived), `reel` → "Play the practice preview", `guide` → "Play the
+guide clip" plus the same portrait URL, `hero` → nothing on either, correctly, because its stored
+composition is `stage`. Controlled by removing the forwarding line and watching a full 20 s: the
+affordances never appear, while the canvas keeps rendering all 11 sections and their real copy. A 4 s
+window was NOT sufficient to tell "never arrives" from "not yet" — the first attempt at this control
+was invalid for exactly that reason.

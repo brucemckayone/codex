@@ -39,6 +39,7 @@
   import {
     getCourseCurriculum,
     getJourneyForBuilder,
+    resolveSellPreview,
     saveJourneyPage,
     updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
@@ -97,6 +98,31 @@
     slug: draftQuery?.current?.slug ?? '',
     title: draftQuery?.current?.title ?? '',
   });
+
+  // The course's resolved sell media — hero still + clip, intro and reel
+  // manifests, the guide's portrait. The canvas received NOTHING here
+  // (Codex-bvhcr), so its four media-bearing sections drew media-less fallbacks
+  // while the same page rendered the real media publicly.
+  //
+  // The SAME query the public sales load streams (`resolveSellPreview`, no auth
+  // by design — HARDENING §E), called as an ordinary client query because the
+  // studio runs `ssr = false`.
+  //
+  // Both ids must be real UUIDs before calling: the query's schema validates each
+  // as one, and a non-course journey has no `subjectId` to resolve — so the guard
+  // is a precondition, not defensiveness.
+  const sellPreviewQuery = $derived(
+    isCourse && pageId && course.id
+      ? resolveSellPreview({ pageId, courseId: course.id })
+      : null
+  );
+
+  // `.current` is `undefined` both in flight and AFTER A FAILURE — a rejected
+  // remote query puts its reason on `.error` and leaves this untouched
+  // (Codex-xo3bl) — so `?? null` reproduces exactly the `.catch(() => null)` the
+  // public load applies. A sell-media read that fails must cost the author their
+  // media preview, never their canvas.
+  const sellPreview = $derived(sellPreviewQuery?.current ?? null);
 
   // ── Workspace view state ──────────────────────────────────────────────────
   type BuilderMode = 'design' | 'look' | 'pricing' | 'media' | 'brand' | 'seo';
@@ -525,6 +551,7 @@
           {orgDomain}
           {stages}
           {course}
+          {sellPreview}
         />
       </section>
 
