@@ -262,18 +262,31 @@ The studio uses `export const ssr = false` (`_org/[slug]/studio/+layout.ts`) —
 Workers use `@codex/cache` `VersionedCache` for KV-backed cache-aside. Pattern:
 
 ```typescript
-const cache = new VersionedCache({ kv: env.CACHE_KV });
+// READ PATH: `waitUntil` is MANDATORY. The data-slot put is deliberately not
+// awaited (so a cache write never delays a response), and workerd CANCELS an
+// un-awaited promise the moment the response returns — production KV held 62
+// version keys and 0 data keys, a literal 0% hit rate (Codex-e32xz).
+const cache = new VersionedCache({
+  kv: env.CACHE_KV,
+  waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+});
 
-// Cache-aside: try cache, fall back to DB, write-through
-const data = await cache.get(CacheType.ORG_CONFIG, orgSlug, async () => {
+// Cache-aside: try cache, fall back to DB, write-through.
+// Signature is get(id, type, fetcher, options) — id FIRST. Swapping them
+// fragments the version namespace so the write-side invalidate never lands.
+const data = await cache.get(orgSlug, CacheType.ORG_CONFIG, async () => {
   return await service.getPublicInfo(slug); // fetcher on miss
 }, { ttl: 30 * 60 }); // 30 min TTL
 
 // Invalidate on mutation (fire-and-forget via waitUntil)
 executionCtx.waitUntil(
-  cache.invalidate(CacheType.ORG_CONFIG, orgSlug).catch(() => {})
+  cache.invalidate(orgSlug).catch(() => {})
 );
 ```
+
+**Never cache a class instance.** Values round-trip through JSON, so a cached
+`PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
+instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
 **Currently cached:** User profile (10min), user preferences (10min), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
 

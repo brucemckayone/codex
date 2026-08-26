@@ -216,8 +216,15 @@ export const load: PageServerLoad = async ({
     // auth-sort combo atomically. `type` carries the per-combo differentiator.
     const shouldCache = !q && !creator && platform?.env?.CACHE_KV;
     if (shouldCache) {
+      // `waitUntil` is what makes the cache-aside WRITE survive (Codex-e32xz):
+      // `cache.get` does not await its data-slot put, and the Workers runtime
+      // cancels un-awaited work as soon as the response is returned. Optional
+      // because `platform.context` is absent under `vite dev`.
       const cache = new VersionedCache({
         kv: platform.env.CACHE_KV as KVNamespace,
+        waitUntil: platform.context
+          ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+          : undefined,
       });
       // Every param that varies the RESULT must vary the key, or two filter
       // combinations read each other's cached payload.

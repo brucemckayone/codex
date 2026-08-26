@@ -240,52 +240,33 @@ const STREAM_RESULT = {
 const R2_PUBLIC_URL_BASE = 'http://localhost:4100';
 
 /**
- * In-memory stand-in for `CACHE_KV` (Codex-72k55).
+ * `CACHE_KV` is the REAL Miniflare binding from wrangler.jsonc (Codex-e32xz).
  *
- * The public portal reads are now KV cache-aside, and `VersionedCache.get`
- * writes its data slot FIRE-AND-FORGET (`packages/cache/src/versioned-cache.ts`
- * — the put is deliberately not awaited so a cache write never delays a
- * response). Against Miniflare's real KV that floating promise outlives the
- * test, and `vitest-pool-workers` isolated storage then fails to pop its stack
- * frame ("IoContext timed out due to inactivity, waitUntil tasks were cancelled"
- * → "unable to pop KV storage"). `waitOnExecutionContext` cannot help: the write
- * is never registered on the execution context.
+ * It used to be a hand-rolled in-memory Map. The reason was that
+ * `VersionedCache.get` wrote its data slot as a bare floating promise: against
+ * Miniflare's real KV that promise outlived the test, and `vitest-pool-workers`
+ * isolated storage then failed to pop its stack frame ("IoContext timed out due
+ * to inactivity, waitUntil tasks were cancelled" → "unable to pop KV storage").
+ * `waitOnExecutionContext` could not help, because the write was never
+ * registered on the execution context.
  *
- * A plain object is not a Miniflare KV namespace, so there is no storage frame
- * to pop — and it lets these tests exercise the CACHED branch for real rather
- * than the `if (!ctx.env.CACHE_KV)` fallback. The underlying fire-and-forget
- * write is tracked separately (see Codex-72k55 notes) because in production the
- * same floating promise can be cancelled when the response returns.
+ * That is exactly the production bug the stub was papering over — the same
+ * cancellation gave `CACHE_KV_PRODUCTION` 62 version keys and 0 data keys, a
+ * literal 0% hit rate. Now that the put IS registered on
+ * `ctx.executionCtx.waitUntil`, `dispatch`'s `waitOnExecutionContext(ec)`
+ * drains it before the test returns, the storage frame pops cleanly, and these
+ * tests exercise real KV instead of a mock that could never reproduce the
+ * failure.
+ *
+ * No manual reset is needed either: `isolatedStorage` (on by default) undoes
+ * every KV write between tests.
  */
-function createInMemoryKV() {
-  const data = new Map<string, string>();
-  return {
-    get: async (key: string, type?: string) => {
-      const value = data.get(key);
-      if (value === undefined) return null;
-      return type === 'json' ? JSON.parse(value) : value;
-    },
-    put: async (key: string, value: string) => {
-      data.set(key, value);
-    },
-    delete: async (key: string) => {
-      data.delete(key);
-    },
-    list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
-    getWithMetadata: async () => ({ value: null, metadata: null }),
-    _reset: () => data.clear(),
-  };
-}
-
-const cacheKV = createInMemoryKV();
-
 // The env the real `access` registry getter needs to build its dev R2 signer
 // without touching a real bucket (the service is mocked, so nothing signs).
 const testEnv = {
   ...env,
   ENVIRONMENT: 'development',
   R2_PUBLIC_URL_BASE,
-  CACHE_KV: cacheKV,
 } as unknown as typeof env;
 
 /** Mount both journey route groups behind a user-injection middleware. */
@@ -340,11 +321,12 @@ const COURSE_CARDS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // MUST clear between tests. The public portal reads are cache-aside, so a
-  // value primed by one test would silently satisfy the next — the service spy
-  // would go uncalled and a "service called with …" assertion would fail for a
-  // reason that has nothing to do with the route.
-  cacheKV._reset();
+  // KV is NOT cleared here: `isolatedStorage` (vitest-pool-workers default)
+  // rolls back every write between tests. A value primed by one test must not
+  // survive into the next — the public portal reads are cache-aside, so a
+  // leaked entry would silently satisfy the next read, the service spy would go
+  // uncalled, and a "service called with …" assertion would fail for a reason
+  // that has nothing to do with the route.
   accessSpies.canEnterCourse.mockResolvedValue(true);
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);

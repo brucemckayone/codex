@@ -37,7 +37,17 @@ function warmTierCache(
   orgId: string
 ): void {
   if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  // The `waitUntil` around the IIFE below is NOT enough on its own
+  // (Codex-e32xz): `cache.get` resolves as soon as the fetcher does and does
+  // not await its own data-slot put, so the IIFE — and with it the outer
+  // waitUntil — settles while the write is still in flight, and workerd
+  // cancels it. That is why `ORG_TIERS` had a version key and no data key in
+  // production despite this warm running on every tier mutation. Handing the
+  // cache its own waitUntil registers the put as a first-class task.
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV,
+    waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+  });
   ctx.executionCtx.waitUntil(
     (async () => {
       await cache.invalidate(orgId);
@@ -95,7 +105,10 @@ app.get(
     handler: async (ctx) => {
       const orgId = ctx.input.params.id;
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
         return await cache.get(
           orgId,
           CacheType.ORG_TIERS,

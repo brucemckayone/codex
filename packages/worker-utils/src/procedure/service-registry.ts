@@ -139,6 +139,30 @@ export function createServiceRegistry(
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
 
+  /**
+   * `waitUntil` handed to every `VersionedCache` built here (Codex-e32xz).
+   *
+   * `VersionedCache.get`/`getWithResult` write their data slot without awaiting
+   * it. In workerd an un-awaited promise is cancelled as soon as the response
+   * returns, so before this was wired the data slot NEVER landed — production
+   * KV held 62 version keys and 0 data keys, a literal 0% hit rate. Registering
+   * the put on the execution context keeps the response fast (nothing is
+   * awaited inline) while guaranteeing the write completes.
+   *
+   * Wrapped in a closure, not `.bind()` — same effect, and it keeps the
+   * "never pass `executionCtx.waitUntil` unbound" rule visible at the call
+   * site. `undefined` when there is no ExecutionContext (unit tests), in which
+   * case VersionedCache falls back to its old best-effort behaviour.
+   *
+   * NOT `tracker.background` from `procedure()`: that hook exists so DB work
+   * finishes before the pool is torn down, and chaining a KV put onto it would
+   * hold the Postgres connection open for the duration of a KV write for no
+   * reason. A KV put touches no pool, so plain `waitUntil` is correct here.
+   */
+  const cacheWaitUntil = executionCtx
+    ? (promise: Promise<unknown>) => executionCtx.waitUntil(promise)
+    : undefined;
+
   // Service instances (created on demand)
   let _content: ContentService | undefined;
   let _categories: CategoriesService | undefined;
@@ -234,7 +258,11 @@ export function createServiceRegistry(
 
         if (env.CACHE_KV) {
           _content.setCache(
-            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+            new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+              waitUntil: cacheWaitUntil,
+            })
           );
         }
       }
@@ -517,7 +545,11 @@ export function createServiceRegistry(
     get feeConfig() {
       if (!_feeConfig) {
         const cache = env.CACHE_KV
-          ? new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          ? new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+              waitUntil: cacheWaitUntil,
+            })
           : undefined;
         const waitUntil = executionCtx
           ? executionCtx.waitUntil.bind(executionCtx)
@@ -665,7 +697,11 @@ export function createServiceRegistry(
         // Mirror of the AccessRevocation wiring on `access` above —
         // same gating shape, same graceful-degrade semantics.
         const cache = env.CACHE_KV
-          ? new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          ? new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+              waitUntil: cacheWaitUntil,
+            })
           : undefined;
         const waitUntil = executionCtx
           ? executionCtx.waitUntil.bind(executionCtx)
@@ -819,7 +855,11 @@ export function createServiceRegistry(
         // the cache only when CACHE_KV is bound (skipped in unit tests).
         if (env.CACHE_KV) {
           _connectAccount.setCache(
-            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+            new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+              waitUntil: cacheWaitUntil,
+            })
           );
         }
       }
@@ -958,7 +998,11 @@ export function createServiceRegistry(
 
         if (env.CACHE_KV) {
           _adminContent.setCache(
-            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+            new VersionedCache({
+              kv: env.CACHE_KV,
+              prefix: 'cache',
+              waitUntil: cacheWaitUntil,
+            })
           );
         }
       }
@@ -1080,6 +1124,7 @@ export function createServiceRegistry(
           ? new VersionedCache({
               kv: env.CACHE_KV,
               prefix: 'cache',
+              waitUntil: cacheWaitUntil,
             })
           : undefined;
 

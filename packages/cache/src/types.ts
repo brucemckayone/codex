@@ -6,6 +6,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import type { ObservabilityClient } from '@codex/observability';
+import type { WaitUntilFn } from './helpers/invalidate';
 
 /**
  * Options for cache operations
@@ -27,6 +28,29 @@ export interface VersionedCacheConfig {
   prefix?: string;
   /** Observability client for logging cache operations */
   obs?: ObservabilityClient;
+  /**
+   * `ExecutionContext.waitUntil` for the in-flight request.
+   *
+   * WITHOUT this the data-slot write in `get()`/`getWithResult()` is a bare
+   * floating promise. The Workers runtime tears the request's IoContext down as
+   * soon as the response is returned and cancels any un-awaited work, so on a
+   * cache MISS the version key lands (it is awaited) and the data slot does
+   * NOT — a permanent 0% hit rate (Codex-e32xz: production CACHE_KV held 62
+   * version keys and 0 data keys).
+   *
+   * Supply it and the put is registered on the execution context: the response
+   * still returns without waiting for KV (no added latency), but the runtime
+   * keeps the context alive until the write completes.
+   *
+   * Optional so existing consumers without an ExecutionContext (unit tests,
+   * SvelteKit dev, helper call sites that only `invalidate()`) keep working
+   * unchanged — they retain the old non-blocking, best-effort behaviour.
+   *
+   * Pass a wrapped closure, NOT a bare method reference:
+   * `(p) => ctx.executionCtx.waitUntil(p)`. An unbound
+   * `executionCtx.waitUntil` throws "Illegal invocation" in workerd.
+   */
+  waitUntil?: WaitUntilFn;
 }
 
 /**

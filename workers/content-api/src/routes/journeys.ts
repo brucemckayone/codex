@@ -128,7 +128,13 @@ app.get(
 
       if (!ctx.env.CACHE_KV) return fetchCourses();
 
-      const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+      // `waitUntil` is REQUIRED on every read path (Codex-e32xz): without it
+      // the data-slot put is cancelled when the response returns and the cache
+      // never records a hit.
+      const cache = new VersionedCache({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+      });
       return getCachedPublishedCourses(cache, organizationId, fetchCourses);
     },
   })
@@ -460,7 +466,11 @@ app.get(
 
       if (!ctx.env.CACHE_KV) return fetchJourneys();
 
-      const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+      // See `/courses` above — `waitUntil` is what makes the write survive.
+      const cache = new VersionedCache({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+      });
       return getCachedPublishedJourneys(
         cache,
         organizationId,
