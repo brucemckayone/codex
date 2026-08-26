@@ -13,6 +13,7 @@ interface NavLink {
 export type SidebarIcon =
   | 'dashboard'
   | 'content'
+  | 'journeys'
   | 'media'
   | 'categories'
   | 'analytics'
@@ -25,7 +26,8 @@ export type SidebarIcon =
   | 'monetisation'
   | 'payouts'
   | 'agreements'
-  | 'earnings';
+  | 'earnings'
+  | 'brand';
 
 export interface SidebarLink extends NavLink {
   icon: SidebarIcon;
@@ -65,6 +67,8 @@ export const SIDEBAR_BASE_LINKS: SidebarLink[] = [
 
 /** Studio sidebar — admin-only links */
 export const SIDEBAR_ADMIN_LINKS: SidebarLink[] = [
+  { href: '/studio/journeys', label: 'Portals', icon: 'journeys' },
+  { href: '/studio/brand', label: 'Brand', icon: 'brand' },
   { href: '/studio/categories', label: 'Categories', icon: 'categories' },
   { href: '/studio/team', label: 'Team', icon: 'team' },
   { href: '/studio/customers', label: 'Customers', icon: 'customers' },

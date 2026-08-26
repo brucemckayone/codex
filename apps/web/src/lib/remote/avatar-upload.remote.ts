@@ -45,9 +45,13 @@ const avatarUploadSchema = z.object({
 /**
  * Avatar upload form
  *
+ * A `form()`, not a `command()`: File objects cannot be serialized by
+ * command()/devalue, so the upload must submit real FormData. The `<form>`
+ * therefore needs `enctype="multipart/form-data"`.
+ *
  * Usage in Svelte:
  * ```svelte
- * <form {...avatarUploadForm}>
+ * <form {...avatarUploadForm} enctype="multipart/form-data">
  *   <input type="file" name="avatar" accept="image/*" />
  *   <button disabled={$avatarUploadForm.pending}>Upload</button>
  * </form>

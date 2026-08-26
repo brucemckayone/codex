@@ -565,17 +565,27 @@ export class AdminAnalyticsService extends BaseService {
       const effectiveStart = options?.startDate ?? defaultStart;
       const effectiveEnd = options?.endDate ?? new Date();
 
+      // Correlates on `content.id`, NOT `purchases.contentId`. The two are equal
+      // through the inner join, but only `content.id` is in the GROUP BY — and a
+      // correlated subquery may reference only grouped columns, so the
+      // `purchases.contentId` form made Postgres reject the whole statement with
+      // "subquery uses ungrouped column". That regressed when WP-6 moved the
+      // SELECT/GROUP BY to `content.id` (purchases.contentId became nullable for
+      // course purchases) and left this correlation behind.
       const viewsInPeriod = sql<number>`(
         SELECT COUNT(DISTINCT ${schema.videoPlayback.userId})::int
         FROM ${schema.videoPlayback}
-        WHERE ${schema.videoPlayback.contentId} = ${schema.purchases.contentId}
+        WHERE ${schema.videoPlayback.contentId} = ${schema.content.id}
           AND ${schema.videoPlayback.updatedAt} >= ${effectiveStart}
           AND ${schema.videoPlayback.updatedAt} <= ${effectiveEnd}
       )::int`;
 
       const result = await this.db
         .select({
-          contentId: schema.purchases.contentId,
+          // Codex-2pryk WP-6: use content.id (non-null via the inner join) —
+          // purchases.contentId is now nullable for course purchases, which the
+          // inner join already excludes from this content-revenue leaderboard.
+          contentId: schema.content.id,
           contentTitle: schema.content.title,
           thumbnailUrl: schema.content.thumbnailUrl,
           revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
@@ -599,7 +609,7 @@ export class AdminAnalyticsService extends BaseService {
           )
         )
         .groupBy(
-          schema.purchases.contentId,
+          schema.content.id,
           schema.content.title,
           schema.content.thumbnailUrl
         )

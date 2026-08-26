@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curriculum · Rootwork · Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ═══════════════════════════════════════════════════════════════
+     CURRICULUM EDITOR — where the course itself is built.
+     A Journey is TWO artifacts: this Curriculum + its Sales page.
+     A primary switch (top bar) moves between them. Layout mirrors the
+     page builder — a Structure list (the course IS the canvas) + an
+     Inspector for the selected stage/practice — so the two editors
+     feel like one tool.
+     ═══════════════════════════════════════════════════════════════ */
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.13);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489; --st-ok: #7fb98a;
+  }
+  html, body { height: 100%; overflow: hidden; }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); }
+  body::before, body::after { display: none; }
+
+  .st-top { height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); }
+  .st-top .brand { font-weight: 700; font-size: .82rem; } .st-top .brand span { color: var(--st-gold); }
+  .st-top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .st-top .doc b { color: var(--st-text); font-weight: 600; }
+
+  /* primary artifact switch — Curriculum ⇄ Sales page */
+  .artswitch { display: flex; gap: .2rem; background: var(--st-panel-2); padding: .22rem; border-radius: 9px; margin-left: .4rem; }
+  .artswitch a { font-size: .78rem; padding: .42rem .85rem; border-radius: 7px; color: var(--st-dim); display: inline-flex; gap: .45rem; align-items: center; }
+  .artswitch a:hover { color: var(--st-text); }
+  .artswitch a.on { background: var(--st-panel-3); color: var(--st-text); }
+
+  .st-top .save { margin-left: auto; font-size: .8rem; padding: .5rem .9rem; border-radius: 8px; color: var(--st-dim); border: 1px solid var(--st-line-2); }
+  .st-top .save:hover { color: var(--st-text); }
+  .st-top .publish { font-size: .8rem; font-weight: 600; padding: .52rem 1.1rem; border-radius: 8px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); }
+  /* publish pre-flight checklist (error prevention, Nielsen #5) */
+  .pubcheck { position: fixed; top: 56px; right: 12px; z-index: 60; width: 300px; background: var(--st-panel); border: 1px solid var(--st-line-2); border-radius: 12px; box-shadow: 0 24px 60px -20px #000; padding: 1rem 1.1rem; opacity: 0; transform: translateY(-6px); pointer-events: none; transition: opacity .16s, transform .16s; }
+  .pubcheck.open { opacity: 1; transform: none; pointer-events: auto; }
+  .pubcheck h4 { font-size: .84rem; font-weight: 600; color: var(--st-text); margin-bottom: .8rem; }
+  .pubcheck ul { list-style: none; display: grid; gap: .55rem; margin-bottom: .9rem; }
+  .pubcheck li { display: flex; gap: .55rem; font-size: .82rem; color: var(--st-text); align-items: baseline; }
+  .pubcheck li .c { color: var(--st-gold); flex: none; }
+  .pubcheck li small { color: var(--st-faint); display: block; margin-top: .1rem; }
+  .pubcheck .go { width: 100%; text-align: center; font-size: .82rem; font-weight: 600; padding: .62rem; border-radius: 8px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); }
+
+  .ce-shell { display: grid; grid-template-columns: 1fr 360px; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 52px); }
+
+  /* ── STRUCTURE column ── */
+  .ce-struct { min-height: 0; overflow-y: auto; padding: clamp(1.4rem, 3vw, 2.4rem) clamp(1rem, 4vw, 3rem) 5rem; }
+  .ce-inner { max-width: 760px; margin: 0 auto; }
+  .ce-head h1 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(1.8rem, 4vw, 2.5rem); }
+  .ce-head .sum { color: var(--st-dim); font-size: .86rem; margin-top: .3rem; }
+  .ce-head .gate-note { margin: 1.1rem 0 1.6rem; padding: .8rem 1rem; border-radius: 11px; border: 1px solid color-mix(in oklab, var(--st-gold) 22%, transparent); background: color-mix(in oklab, var(--st-gold) 6%, transparent); font-size: .8rem; color: var(--st-dim); line-height: 1.5; }
+  .ce-head .gate-note b { color: var(--st-gold); }
+
+  .cstage { border: 1px solid var(--st-line); border-radius: 14px; background: var(--st-panel); margin-bottom: .5rem; overflow: hidden; }
+  .cstage.sel { border-color: var(--st-gold); }
+  .cstage__h { display: flex; align-items: center; gap: .7rem; padding: .9rem 1rem; cursor: pointer; background: var(--st-panel); }
+  .cstage__h:hover { background: var(--st-panel-2); }
+  .cstage__h .grip { color: var(--st-faint); cursor: grab; }
+  .cstage__h .rn { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-style: italic; font-size: .82rem; color: var(--st-gold); border: 1px solid color-mix(in oklab, var(--st-gold) 40%, transparent); }
+  .cstage__h .col { flex: 1; min-width: 0; }
+  .cstage__h .nm { font-family: var(--serif); font-size: 1.15rem; color: var(--st-text); line-height: 1.15; }
+  .cstage__h .gl { font-size: .76rem; color: var(--st-faint); margin-top: .1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cstage__h .ct { flex: none; font-size: .72rem; color: var(--st-faint); }
+
+  .cstage__list { padding: .3rem .6rem .7rem; display: grid; gap: .25rem; }
+  .prow { display: flex; align-items: center; gap: .6rem; padding: .55rem .6rem; border-radius: 9px; border: 1px solid transparent; cursor: pointer; transition: background .14s, border-color .14s; }
+  .prow:hover { background: var(--st-panel-2); }
+  .prow.sel { border-color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 9%, var(--st-panel-2)); }
+  .prow .grip { color: var(--st-faint); cursor: grab; font-size: .8rem; }
+  .prow .g { flex: none; width: 24px; text-align: center; color: var(--st-gold); }
+  .prow .pt { flex: 1; min-width: 0; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow .min { font-size: .74rem; color: var(--st-faint); font-variant-numeric: tabular-nums; }
+  .acc { font-size: .6rem; letter-spacing: .06em; text-transform: uppercase; padding: .16rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .acc.free { color: var(--st-ok); border: 1px solid color-mix(in oklab, var(--st-ok) 40%, transparent); }
+  .acc.incl { color: var(--st-faint); border: 1px solid var(--st-line-2); }
+  .acc.only { color: var(--st-gold); border: 1px solid color-mix(in oklab, var(--st-gold) 40%, transparent); }
+  .addprac { font-size: .78rem; color: var(--st-dim); padding: .5rem .6rem; border-radius: 8px; border: 1px dashed var(--st-line-2); text-align: center; cursor: pointer; }
+  .addprac:hover { color: var(--st-text); border-color: var(--st-gold); }
+
+  .cgate { display: flex; align-items: center; gap: .6rem; margin: .1rem 0 .1rem 1.3rem; padding: .2rem 0; font-size: .72rem; color: var(--st-faint); }
+  .cgate .line { flex: none; width: 1px; height: 18px; background: var(--st-line-2); margin-left: 12px; }
+  .cgate .txt { font-style: italic; }
+  .addstage { width: 100%; margin-top: .6rem; text-align: center; padding: .7rem; border-radius: 12px; border: 1px dashed var(--st-line-2); color: var(--st-dim); font-size: .84rem; cursor: pointer; }
+  .addstage:hover { color: var(--st-text); border-color: var(--st-gold); }
+  .prow.drag-over, .cstage.drag-over { border-top: 2px solid var(--st-gold); }
+
+  /* ── INSPECTOR ── */
+  .ce-insp { min-height: 0; border-left: 1px solid var(--st-line); background: var(--st-panel); overflow-y: auto; }
+  .insp-head { position: sticky; top: 0; background: var(--st-panel); border-bottom: 1px solid var(--st-line); padding: 1rem 1.1rem; z-index: 2; }
+  .insp-head .t { font-size: 1rem; font-weight: 600; }
+  .insp-head .s { font-size: .72rem; color: var(--st-faint); margin-top: .15rem; }
+  .insp-body { padding: 1.1rem; }
+  .fld { margin-bottom: 1rem; }
+  .fld label { display: block; font-size: .72rem; color: var(--st-dim); margin-bottom: .35rem; }
+  .fld input, .fld textarea, .fld select { width: 100%; background: var(--st-panel-2); border: 1px solid var(--st-line-2); border-radius: 8px; color: var(--st-text); font: inherit; font-size: .85rem; padding: .55rem .7rem; }
+  .fld input:focus, .fld textarea:focus, .fld select:focus { outline: none; border-color: var(--st-gold); }
+  .fld textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
+  .fld .hint { font-size: .7rem; color: var(--st-faint); margin-top: .3rem; line-height: 1.4; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+  .insp-group { font-size: .64rem; letter-spacing: .16em; text-transform: uppercase; color: var(--st-faint); margin: 1.4rem 0 .7rem; }
+  .media-slot { display: flex; align-items: center; gap: .7rem; padding: .6rem .7rem; border-radius: 9px; border: 1px solid var(--st-line-2); }
+  .media-slot .th { width: 54px; height: 34px; border-radius: 5px; background: radial-gradient(120% 120% at 40% 20%, color-mix(in oklab, var(--ember) 55%, #2c2f36), #191c21); display: grid; place-items: center; color: #241a09; flex: none; }
+  .media-slot .nm { font-size: .8rem; } .media-slot .nm small { display: block; color: var(--st-faint); font-size: .68rem; }
+  .media-slot .act { margin-left: auto; font-size: .74rem; color: var(--st-gold); }
+  .callout { font-size: .74rem; color: var(--st-faint); padding: .7rem .8rem; border-radius: 9px; background: var(--st-panel-2); border: 1px solid var(--st-line); margin-top: .5rem; line-height: 1.5; }
+  .callout b { color: var(--st-gold); }
+  .insp-foot { margin-top: 1.6rem; padding-top: 1.1rem; border-top: 1px solid var(--st-line); display: flex; gap: .5rem; }
+  .insp-foot button { flex: 1; font-size: .76rem; padding: .55rem; border-radius: 8px; border: 1px solid var(--st-line-2); color: var(--st-dim); cursor: pointer; }
+  .insp-foot button:hover { color: var(--st-text); }
+  .insp-foot button.del:hover { color: #e88; border-color: color-mix(in oklab, #e88 40%, transparent); }
+  .empty { color: var(--st-faint); font-size: .84rem; padding: 2rem 1.1rem; line-height: 1.6; }
+
+  .toast { position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--st-panel-3); border: 1px solid var(--st-line-2); color: var(--st-text); padding: .6rem 1.1rem; border-radius: 999px; font-size: .82rem; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .st-narrow { display: none; }
+  @media (max-width: 900px) {
+    .ce-shell { display: none; }
+    .st-narrow { display: grid; place-items: center; height: calc(100vh - 52px); padding: 2rem; text-align: center; color: var(--st-dim); }
+    .st-narrow p { max-width: 34ch; line-height: 1.6; }
+  }
+</style>
+</head>
+<body>
+<header class="st-top">
+  <a class="brand" href="studio-journeys.html" title="Studio home">Studio<span>.</span></a>
+  <span class="doc">Journey · <b>Rootwork</b></span>
+  <div class="artswitch">
+    <a href="course-editor.html" class="on">◈ Curriculum</a>
+    <a href="builder.html">▤ Sales page</a>
+    <a href="reporting.html">↗ Insights</a>
+  </div>
+  <button class="save" id="save">Save</button>
+  <button class="publish" id="publish">Publish</button>
+</header>
+
+<div class="ce-shell">
+  <section class="ce-struct">
+    <div class="ce-inner">
+      <div class="ce-head">
+        <h1>Curriculum</h1>
+        <p class="sum" id="sum"></p>
+        <p class="gate-note"><b>The gate.</b> Practices flow freely <em>within</em> a stage — there's no fixed order inside. Stages unlock in sequence: the next opens once the current one has been sat with. Mark any one practice as the <b>free taste</b> so newcomers can try before they buy.</p>
+      </div>
+      <div id="stages"></div>
+      <button class="addstage" id="addstage">+ Add a stage</button>
+    </div>
+  </section>
+
+  <aside class="ce-insp">
+    <div class="insp-head"><div class="t" id="insp-t">Nothing selected</div><div class="s" id="insp-s">Pick a stage or practice</div></div>
+    <div class="insp-body" id="insp-body"><p class="empty">Select a practice to set its content, type and access — or a stage to name it and write its felt meaning.</p></div>
+  </aside>
+</div>
+
+<div class="st-narrow"><p>The curriculum editor needs a little more room — open it on a wider screen.</p></div>
+<div class="toast" id="toast"></div>
+
+<script src="course-data.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, TM = window.TYPE_META, roman = ['i','ii','iii','iv','v','vi'];
+
+  /* editor model — structure + access (member progress lives elsewhere) */
+  const stages = C.stages.map((s, si) => ({
+    id: 'st' + si, name: s.n, gloss: s.gloss,
+    practices: s.lessons.map((l, li) => ({ id: `p${si}_${li}`, title: l.t, type: l.type, min: l.min, access: l.free ? 'free' : 'incl', complete: l.type === 'reflection' ? 'explicit' : 'auto' })),
+  }));
+  let uid = 100;
+
+  const ACC = { free: { c: 'free', label: 'Free taste' }, incl: { c: 'incl', label: 'Included' }, only: { c: 'only', label: 'Course-only' } };
+  const ACC_OPTS = [['free', 'Free taste — anyone can play it'], ['incl', 'Included with the course'], ['only', 'Course-only — hidden from the shop']];
+  const TYPE_OPTS = [['practice', 'Practice (guided)'], ['audio', 'Audio'], ['reflection', 'Reflection / journal'], ['video', 'Video'], ['article', 'Written']];
+  const COMPLETE_OPTS = [['auto', 'Auto — when finished (video/audio)'], ['explicit', 'Explicit — member marks it done']];
+  const gl = t => ({ practice: '❋', audio: '♪', reflection: '✎', video: '▶', article: '¶' }[t] || '◦');
+
+  let sel = null; // { kind:'practice'|'stage', id }
+
+  /* ── STRUCTURE ── */
+  function totals() {
+    const ps = stages.flatMap(s => s.practices);
+    const min = ps.reduce((a, p) => a + (+p.min || 0), 0);
+    const h = Math.floor(min / 60), m = min % 60;
+    return `${stages.length} stages · ${ps.length} practices · ${h ? h + 'h ' : ''}${m}m`;
+  }
+
+  function renderStructure() {
+    document.getElementById('sum').textContent = totals();
+    const wrap = document.getElementById('stages');
+    wrap.innerHTML = stages.map((s, si) => {
+      const rows = s.practices.map(p =>
+        `<div class="prow ${sel && sel.kind === 'practice' && sel.id === p.id ? 'sel' : ''}" draggable="true" data-p="${p.id}" data-st="${s.id}">
+          <span class="grip">⠿</span>
+          <span class="g">${gl(p.type)}</span>
+          <span class="pt">${p.title}</span>
+          <span class="min">${p.min}m</span>
+          <span class="acc ${ACC[p.access].c}">${ACC[p.access].label}</span>
+        </div>`).join('');
+      const gate = si < stages.length - 1
+        ? `<div class="cgate"><span class="line"></span><span class="txt">the gate — ${stages[si + 1].name} opens once ${s.name} settles</span></div>` : '';
+      return `<div class="cstage ${sel && sel.kind === 'stage' && sel.id === s.id ? 'sel' : ''}" draggable="true" data-st="${s.id}">
+          <div class="cstage__h" data-stagehead="${s.id}">
+            <span class="grip">⠿</span>
+            <span class="rn">${roman[si]}</span>
+            <span class="col"><span class="nm">${s.name}</span><span class="gl">${s.gloss}</span></span>
+            <span class="ct">${s.practices.length} practices</span>
+          </div>
+          <div class="cstage__list">
+            ${rows}
+            <div class="addprac" data-addp="${s.id}">+ Add a practice</div>
+          </div>
+        </div>${gate}`;
+    }).join('');
+
+    // practice select
+    wrap.querySelectorAll('.prow').forEach(row => {
+      row.addEventListener('click', () => selectItem('practice', row.dataset.p));
+      dragRow(row);
+    });
+    // stage select (header) + stage drag
+    wrap.querySelectorAll('.cstage').forEach(card => dragStage(card));
+    wrap.querySelectorAll('[data-stagehead]').forEach(h =>
+      h.addEventListener('click', e => { if (!e.target.classList.contains('grip')) selectItem('stage', h.dataset.stagehead); }));
+    // add practice
+    wrap.querySelectorAll('[data-addp]').forEach(b => b.addEventListener('click', () => addPractice(b.dataset.addp)));
+  }
+
+  /* drag: practices reorder within their stage */
+  function dragRow(row) {
+    row.addEventListener('dragstart', e => { e.stopPropagation(); e.dataTransfer.setData('p', row.dataset.p); row.style.opacity = '.4'; });
+    row.addEventListener('dragend', () => { row.style.opacity = ''; });
+    row.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); row.classList.add('drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault(); e.stopPropagation(); row.classList.remove('drag-over');
+      const st = stages.find(s => s.id === row.dataset.st);
+      const fromId = e.dataTransfer.getData('p'); if (!st) return;
+      const from = st.practices.findIndex(p => p.id === fromId);
+      const to = st.practices.findIndex(p => p.id === row.dataset.p);
+      if (from === -1 || to === -1 || from === to) return; // reorder within same stage only
+      const [m] = st.practices.splice(from, 1); st.practices.splice(to, 0, m);
+      renderStructure();
+    });
+  }
+  /* drag: stages reorder */
+  function dragStage(card) {
+    card.addEventListener('dragstart', e => { if (e.target.closest('.prow')) return; e.dataTransfer.setData('st', card.dataset.st); card.style.opacity = '.5'; });
+    card.addEventListener('dragend', () => { card.style.opacity = ''; });
+    card.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('st')) { e.preventDefault(); card.classList.add('drag-over'); } });
+    card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+    card.addEventListener('drop', e => {
+      if (!e.dataTransfer.types.includes('st')) return;
+      e.preventDefault(); card.classList.remove('drag-over');
+      const from = stages.findIndex(s => s.id === e.dataTransfer.getData('st'));
+      const to = stages.findIndex(s => s.id === card.dataset.st);
+      if (from === -1 || to === -1 || from === to) return;
+      const [m] = stages.splice(from, 1); stages.splice(to, 0, m);
+      renderStructure();
+    });
+  }
+
+  /* ── INSPECTOR ── */
+  const selText = (opts, v) => opts.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('');
+
+  function renderInspector() {
+    const t = document.getElementById('insp-t'), s = document.getElementById('insp-s'), body = document.getElementById('insp-body');
+    if (!sel) { t.textContent = 'Nothing selected'; s.textContent = 'Pick a stage or practice'; body.innerHTML = `<p class="empty">Select a practice to set its content, type and access — or a stage to name it and write its felt meaning.</p>`; return; }
+
+    if (sel.kind === 'practice') {
+      let owner, p;
+      for (const st of stages) { const f = st.practices.find(x => x.id === sel.id); if (f) { owner = st; p = f; break; } }
+      if (!p) { sel = null; return renderInspector(); }
+      t.textContent = p.title || 'Untitled practice'; s.textContent = 'Practice';
+      body.innerHTML = `
+        <div class="fld"><label>Title</label><input id="f-title" value="${(p.title || '').replace(/"/g, '&quot;')}"></div>
+        <p class="insp-group">Content</p>
+        <div class="media-slot"><span class="th">${gl(p.type)}</span><span class="nm">${p.title || 'Not set'}<small>linked content · tap to choose</small></span><button class="act">Choose…</button></div>
+        <p class="callout">A practice points at one piece of <b>content</b> (video, audio or written). Pick from your library or upload new — the same item can appear in more than one journey.</p>
+        <div class="row2" style="margin-top:1rem">
+          <div class="fld"><label>Type</label><select id="f-type">${selText(TYPE_OPTS, p.type)}</select></div>
+          <div class="fld"><label>Length (min)</label><input id="f-min" type="number" value="${p.min}"></div>
+        </div>
+        <p class="insp-group">Access</p>
+        <div class="fld"><select id="f-acc">${selText(ACC_OPTS, p.access)}</select><p class="hint">Free taste = playable before buying. Course-only = reachable only inside this journey, never sold on its own.</p></div>
+        <p class="insp-group">Completion</p>
+        <div class="fld"><select id="f-complete">${selText(COMPLETE_OPTS, p.complete)}</select><p class="hint">Written &amp; reflective practices ask the member to mark done; video/audio can complete when finished.</p></div>
+        <p class="insp-group">Stage</p>
+        <div class="fld"><select id="f-stage">${stages.map(st => `<option value="${st.id}" ${st === owner ? 'selected' : ''}>${st.name}</option>`).join('')}</select><p class="hint">Move this practice to another stage.</p></div>
+        <div class="insp-foot"><button id="dup">Duplicate</button><button class="del" id="del">Remove</button></div>`;
+
+      document.getElementById('f-title').addEventListener('input', e => { p.title = e.target.value; renderStructure(); t.textContent = p.title || 'Untitled practice'; });
+      document.getElementById('f-type').addEventListener('change', e => { p.type = e.target.value; renderStructure(); });
+      document.getElementById('f-min').addEventListener('input', e => { p.min = e.target.value; renderStructure(); });
+      document.getElementById('f-acc').addEventListener('change', e => { p.access = e.target.value; renderStructure(); });
+      document.getElementById('f-complete').addEventListener('change', e => { p.complete = e.target.value; });
+      document.getElementById('f-stage').addEventListener('change', e => {
+        const dest = stages.find(st => st.id === e.target.value); if (!dest || dest === owner) return;
+        owner.practices = owner.practices.filter(x => x.id !== p.id); dest.practices.push(p);
+        renderStructure(); renderInspector();
+      });
+      document.getElementById('dup').addEventListener('click', () => {
+        const copy = { ...p, id: 'p' + (uid++), title: p.title + ' (copy)' };
+        const i = owner.practices.indexOf(p); owner.practices.splice(i + 1, 0, copy);
+        sel = { kind: 'practice', id: copy.id }; renderStructure(); renderInspector();
+      });
+      document.getElementById('del').addEventListener('click', () => {
+        owner.practices = owner.practices.filter(x => x.id !== p.id); sel = null; renderStructure(); renderInspector();
+      });
+
+    } else { // stage
+      const st = stages.find(x => x.id === sel.id); if (!st) { sel = null; return renderInspector(); }
+      t.textContent = st.name || 'Untitled stage'; s.textContent = 'Stage';
+      body.innerHTML = `
+        <div class="fld"><label>Stage name</label><input id="s-name" value="${(st.name || '').replace(/"/g, '&quot;')}"></div>
+        <div class="fld"><label>Felt meaning</label><textarea id="s-gloss">${st.gloss || ''}</textarea><p class="hint">The one line a member reads at the top of the stage — what this part of the work is <em>for</em>.</p></div>
+        <p class="callout"><b>The gate.</b> This stage's practices are a free pool — members move among them in any order. ${stages.indexOf(st) < stages.length - 1 ? `The next stage opens once this one has been sat with.` : `This is the final stage.`}</p>
+        <div class="insp-foot"><button id="s-add">+ Practice</button><button class="del" id="s-del">Remove stage</button></div>`;
+      document.getElementById('s-name').addEventListener('input', e => { st.name = e.target.value; renderStructure(); t.textContent = st.name || 'Untitled stage'; });
+      document.getElementById('s-gloss').addEventListener('input', e => { st.gloss = e.target.value; renderStructure(); });
+      document.getElementById('s-add').addEventListener('click', () => addPractice(st.id));
+      document.getElementById('s-del').addEventListener('click', () => { stages.splice(stages.indexOf(st), 1); sel = null; renderStructure(); renderInspector(); });
+    }
+  }
+
+  /* ── actions ── */
+  function selectItem(kind, id) { sel = { kind, id }; renderStructure(); renderInspector(); }
+  function addPractice(stageId) {
+    const st = stages.find(s => s.id === stageId); if (!st) return;
+    const p = { id: 'p' + (uid++), title: 'New practice', type: 'practice', min: 8, access: 'incl', complete: 'auto' };
+    st.practices.push(p); sel = { kind: 'practice', id: p.id }; renderStructure(); renderInspector();
+  }
+  document.getElementById('addstage').addEventListener('click', () => {
+    const st = { id: 'st' + (uid++), name: 'New stage', gloss: 'What this part of the work is for.', practices: [] };
+    stages.push(st); sel = { kind: 'stage', id: st.id }; renderStructure(); renderInspector();
+  });
+
+  let tt; function toast(m) { const el = document.getElementById('toast'); el.textContent = m; el.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 1600); }
+  document.getElementById('save').addEventListener('click', () => toast('Draft saved'));
+
+  // publish pre-flight (F12): readiness before go-live
+  const pub = document.getElementById('publish');
+  const check = document.createElement('div');
+  check.className = 'pubcheck';
+  check.innerHTML =
+    `<h4>Ready to publish?</h4>
+     <ul>
+       <li><span class="c">✓</span><span>Curriculum built<small>5 stages · 14 practices</small></span></li>
+       <li><span class="c">✓</span><span>Every practice has content<small>none left empty</small></span></li>
+       <li><span class="c">✓</span><span>A way in is set<small>membership · £6/mo · £45 one-off</small></span></li>
+       <li><span class="c">✓</span><span>Sales page has a hero &amp; sections</span></li>
+     </ul>
+     <button class="go" id="pubgo">Publish Rootwork</button>`;
+  document.body.appendChild(check);
+  pub.addEventListener('click', (e) => { e.stopPropagation(); check.classList.toggle('open'); });
+  document.addEventListener('click', (e) => { if (!check.contains(e.target) && e.target !== pub) check.classList.remove('open'); });
+  check.querySelector('#pubgo').addEventListener('click', () => { check.classList.remove('open'); toast('Published (prototype)'); });
+
+  renderStructure(); renderInspector();
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

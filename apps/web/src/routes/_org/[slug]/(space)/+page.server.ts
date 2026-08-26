@@ -20,6 +20,7 @@
 
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { listPublishedJourneys } from '$lib/remote/journeys.remote';
 import { getContinueWatching } from '$lib/remote/library.remote';
 import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
 import { listTiers } from '$lib/remote/subscription.remote';
@@ -33,6 +34,17 @@ import type { ContentItem } from './feed-types';
 // truncation at the bottom grid.
 const MAX_CATALOGUE_ITEMS = 50;
 
+/**
+ * How many featured portals may take a slide in "Editor's picks".
+ *
+ * Capped where featured CONTENT is not, because the two are bounded differently:
+ * content picks are already limited by whatever is featured inside the 50-item
+ * catalogue window, whereas `listPublishedJourneys({ featured: true })` would
+ * return every promoted journey in the org. Four keeps the carousel a curated
+ * set rather than a second catalogue.
+ */
+const MAX_FEATURED_PORTALS = 4;
+
 export const load: PageServerLoad = async ({
   params: routeParams,
   setHeaders,
@@ -44,8 +56,33 @@ export const load: PageServerLoad = async ({
     slug: routeParams.slug,
     limit: 12,
   });
-
   const { org } = await parent();
+
+  /*
+    Featured PORTALS — the journeys a creator has promoted
+    (`landing_pages.featured`), which join the content picks as slides in
+    "Editor's picks" below.
+
+    AWAITED, unlike the `journeys` rail further down, and that difference is
+    deliberate. The picks carousel is built from awaited data; feeding it a
+    streamed source would grow the slide count after hydration, which shifts
+    layout, changes the dot count under the user, and re-runs the carousel's
+    IntersectionObserver effect. A carousel may not gain slides late.
+
+    Fired AFTER `parent()` so it can pass the org id `parent()` already resolved.
+    It used to run in the pre-`parent()` parallel group precisely BECAUSE it
+    re-derived the org from the request hostname — that made it independent, but
+    it also meant every call paid a redundant `getPublicInfo` hop, twice per
+    render counting the rail below. Passing `organizationId` puts these reads on
+    the same footing as the content/categories/stats reads (Codex-72k55), and
+    costs no wall-clock: it now runs concurrently with the catalogue fetch, which
+    is the longer of the two.
+  */
+  const featuredJourneysPromise = listPublishedJourneys({
+    featured: true,
+    limit: MAX_FEATURED_PORTALS,
+    organizationId: org.id,
+  }).catch(() => []);
 
   // Single catalogue fetch — the client slices it into every section below.
   const catalogueResult = await getPublicContent({
@@ -57,6 +94,9 @@ export const load: PageServerLoad = async ({
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
 
   const statsResult = await statsPromise.catch(() => null);
+  // In flight since just before the catalogue fetch — this await resolves an
+  // existing promise rather than starting a request.
+  const featuredJourneys = await featuredJourneysPromise;
 
   // Set cache headers only after the critical awaits. If `parent()` throws
   // (e.g. an auth/branding load failure), the resulting error response
@@ -113,6 +153,9 @@ export const load: PageServerLoad = async ({
 
   return {
     allContent,
+    // Awaited — see MAX_FEATURED_PORTALS. These become "Editor's picks" slides
+    // alongside featured content, so they must be present in the SSR HTML.
+    featuredJourneys,
     stats: statsResult,
     feedCategories,
     // Streamed: curated topic taxonomy for "Browse by topic" + browse chip.
@@ -120,6 +163,13 @@ export const load: PageServerLoad = async ({
     // Streamed: cross-device resume rail (server-backed via video_playback).
     // Anonymous visitors and any transport error resolve to an empty rail.
     continueWatching: getContinueWatching(undefined).catch(() => []),
+    // Streamed: guided journeys for this org (featured-first, capped). Hidden
+    // when the org has none; any transport error degrades to an empty rail.
+    // Takes the resolved org id for the same reason as the featured read above.
+    journeys: listPublishedJourneys({
+      limit: 12,
+      organizationId: org.id,
+    }).catch(() => []),
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],

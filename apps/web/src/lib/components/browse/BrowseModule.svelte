@@ -133,6 +133,7 @@
   <ContentCard
     variant="grid"
     {shape}
+    titleInCover
     chrome="transparent"
     id={item.id}
     title={item.title}

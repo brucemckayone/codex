@@ -10,6 +10,13 @@
     chroma?: number;
     /** Called on every selection change. */
     onchange?: (l: number, c: number) => void;
+    /**
+     * Fill mode: drop the fixed 256px cap + aspect ratio and grow to fill the
+     * parent (a flex column), with a taller paint buffer for sharpness. Used by
+     * the large picker in the `/studio/brand` colour focus so the area gets the
+     * full available height instead of a cramped 160px sliver.
+     */
+    fill?: boolean;
     /** Optional class forwarded to root — composition seam per R13 inverse. */
     class?: string;
   }
@@ -19,11 +26,16 @@
     lightness = $bindable(0.6),
     chroma = $bindable(0.15),
     onchange,
+    fill = false,
     class: className,
   }: Props = $props();
 
   const CANVAS_W = 256;
-  const CANVAS_H = 160;
+  // Taller paint buffer in fill mode keeps the gradient crisp when the element
+  // grows; the compact variant keeps its original 160px. `$derived` (not a bare
+  // read of the `fill` prop) so it re-resolves if `fill` ever changes and to
+  // avoid the state-referenced-locally warning.
+  const CANVAS_H = $derived(fill ? 200 : 160);
   const MAX_CHROMA = 0.4;
 
   // Keyboard step sizes — see 05-accessibility.md §"Custom 2D slider / color area".
@@ -86,13 +98,11 @@
           data[idx + 2] = rgb.b;
           data[idx + 3] = 255;
         } else {
-          // Out of gamut — subtle checkerboard
-          const checker = ((x >> 2) + (y >> 2)) % 2;
-          const v = checker ? 220 : 210;
-          data[idx] = v;
-          data[idx + 1] = v;
-          data[idx + 2] = v;
-          data[idx + 3] = 255;
+          // Out of gamut — TRANSPARENT so the panel shows through. This is
+          // always theme-correct (light or dark brand) with no token reading and
+          // no stale repaint on a theme flip; the gamut boundary stroke below
+          // still marks the limit.
+          data[idx + 3] = 0;
         }
       }
     }
@@ -235,7 +245,7 @@
   });
 </script>
 
-<div class="color-area {className ?? ''}">
+<div class="color-area {fill ? 'color-area--fill' : ''} {className ?? ''}">
   <!-- Canvas is paint surface only — no role, no tabindex, no ARIA.
        Per ref 05 §"Custom 2D slider / color area", the thumb owns all a11y. -->
   <canvas
@@ -276,6 +286,15 @@
     overflow: hidden;
     cursor: crosshair;
     touch-action: none;
+  }
+
+  /* Fill mode — drop the 256px cap and fill the container width; height follows
+     the taller paint buffer's aspect ratio (256×240), so the area is large and
+     crisp (no stretch) without fragile flex-fill math. The colour focus scrolls
+     as a whole if the total exceeds the rail height. */
+  .color-area--fill {
+    max-width: none;
+    aspect-ratio: 256 / 200;
   }
 
   .color-area__canvas {

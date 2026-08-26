@@ -1054,7 +1054,7 @@
   }
 
   .audio-player__btn--immersive:hover {
-    background: var(--color-primary-500);
+    background: var(--color-player-surface-hover);
     color: var(--color-player-text);
   }
 
@@ -1070,7 +1070,7 @@
     gap: var(--space-3);
     padding: var(--space-6);
     text-align: center;
-    color: var(--color-text-secondary);
+    color: var(--color-player-text-secondary);
   }
 
   .audio-player__error-message {

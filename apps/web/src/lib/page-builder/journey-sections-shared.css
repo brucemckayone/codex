@@ -1,0 +1,203 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   JOURNEY PUBLIC SECTIONS — the shared atoms.
+
+   The 11 public section components under `render/sections/` are each 100%
+   self-contained `<style>`, and the audit
+   (`docs/design/journey-sections/01-component-audit.md` §C.2) measured what that
+   costs: the eyebrow recipe re-declared in NINE components with FOUR different
+   trackings, the serif-heading recipe re-declared in ALL ELEVEN with four
+   different negative trackings, and the reduced-motion kill switch written
+   ELEVEN times, some of it with `!important`. Same design intent, independent
+   implementations, guaranteed to drift — and already drifted.
+
+   This file is the shared layer those duplicates collapse into. It is
+   deliberately SMALL: four atoms and one guard. Everything here is something the
+   audit found duplicated in the real files, not something that might be useful
+   later.
+
+   ── HOW IT RELATES TO THE AXES ─────────────────────────────────────────────
+   Every atom READS `journey-design.css`'s axis properties. That is what makes
+   the axes functional: a section that adopts `.jp-sec__heading` gets the `type`
+   axis for free, and one that adopts `.jp-reveal` gets the `motion` axis for
+   free. Adopting an atom and wiring an axis are the same edit.
+
+   ── COLOUR STAYS SEMANTIC (contract A11) ───────────────────────────────────
+   These atoms name `--color-*`, not `--jp-*`, for colour. The public sections
+   speak semantic tokens and `.journey-palette--page` re-points those onto the
+   `--jp-*` ladder, so they are ALREADY brand-derived and auto-contrasted. There
+   must not be a second colour vocabulary in the section tree. `--jp-*` appears
+   here only for roles that have no `--color-*` equivalent: measure, rhythm,
+   type scale, reveal distance.
+
+   ── ADOPTION IS PER WORK PACKAGE ───────────────────────────────────────────
+   Nothing consumes these classes yet — F-B1 may not touch `render/sections/*`.
+   Each component work package replaces its local duplicate with the atom and
+   re-measures its own section (contract A10). Expect one deliberate difference
+   when it does: see the tracking note on `.jp-sec__eyebrow`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── EYEBROW / KICKER ───────────────────────────────────────────────────────
+   The small uppercase label above a heading. Nine components, four trackings:
+   `.08em` in seven of them, then `.18em` (Ache's ceremonial chapter mark),
+   `.28em` (Feel) and `.32em` (Faq).
+
+   TRACKING IS A VARIABLE, NOT A CONSTANT, because those four are not all
+   mistakes — Ache's wider tracking is a deliberate ceremonial mark with flanking
+   hairlines. A section that wants it sets `--jp-eyebrow-tracking` and keeps the
+   rest of the recipe.
+
+   ONE DELIBERATE CHANGE ON ADOPTION: the default is `--tracking-wider`
+   (`0.05em`), not the majority's raw `0.08em`. `0.08em` has no token, and this
+   repo does not allow raw values in component styles. The visible delta is about
+   0.4px per character at `--text-sm`; whichever WP adopts this owns confirming
+   it, and can set `--jp-eyebrow-tracking` per section if the tighter reading
+   matters.
+
+   `--color-text-secondary` resolves to `--jp-dim` on a journey page (7.79:1 dark
+   / 11.05:1 light, measured) — comfortably AA at this size, which matters because
+   an eyebrow at `--text-sm` gets no large-text exemption. Do NOT default it to
+   `--color-text-muted`/`-tertiary`: both alias `--jp-faint`, the rung that was
+   failing AA in dark until Codex-rvkmc. */
+.jp-sec__eyebrow {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  letter-spacing: var(--jp-eyebrow-tracking, var(--tracking-wider));
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+/* ── DISPLAY HEADING ───────────────────────────────────────────────────────
+   The section's own headline. All four size/leading/tracking values come from
+   the `type` axis, so this recipe is where `type: monumental` versus
+   `type: restrained` actually happens.
+
+   Face and weight are NOT part of the type axis (research §2.3): they come from
+   `--brand-font-heading` / `--brand-heading-weight`, which is what lets one
+   `monumental` value serve both a light didone and a heavy grotesk. The brand
+   weight is read through the SEMANTIC `--heading-weight` (declared at
+   `[data-org-brand]`, org-brand.css:136) rather than the raw `--brand-*` token,
+   with `--font-normal` as the floor for any surface outside org scope.
+
+   READ THIS BEFORE SIZING ANY HEADING (contract A36). `--jp-display` is the
+   PAGE's display heading — the hero's `h1`, and nothing else. EVERY other
+   section's `h2` takes `--jp-heading-size` via `.jp-sec__heading--sub`. This is
+   load-bearing, not advice: at `type: monumental` `--jp-heading-size` IS
+   `--text-4xl` (48px), which is exactly what the section headings ship today,
+   while `--jp-display` is 80px. Wiring a section `h2` to `--jp-display` grows
+   every published page's heading by 67% — measured, and caught in round 2 only
+   because two worktrees independently distrusted an earlier wording of this
+   comment.
+
+   An earlier version of this comment offered "(a stage name, a card title)" as
+   the examples for `--jp-heading-size`. That was removed: read literally it makes
+   a stage name the same size as the section heading above it, and it implies a
+   section `h2` belongs on `--jp-display`. Both are wrong.
+
+   A card-scale third rung — a stage name, a card title, an FAQ question row, a
+   quote — is NOT in this file yet. Two components have derived it independently
+   (`clamp(--text-base, calc(--jp-heading-size * 0.5), --text-2xl)` and
+   `max(--text-lg, --jp-heading-size / 2)`); it is being promoted to a real
+   `--jp-body-size` rung (`Codex-8oznv`, contract A44). Until then, derive it from
+   `--jp-heading-size` rather than hardcoding a size, so the `type` axis still
+   reaches it. */
+.jp-sec__heading {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--heading-weight, var(--font-normal));
+  font-size: var(--jp-display);
+  line-height: var(--jp-display-leading);
+  letter-spacing: var(--jp-display-tracking);
+  color: var(--color-heading);
+  text-wrap: balance;
+}
+
+.jp-sec__heading--sub {
+  font-size: var(--jp-heading-size);
+}
+
+/* ── MEASURE ───────────────────────────────────────────────────────────────
+   Caps running body copy at a readable line length and centres it (or does not)
+   per the `align` axis. Width only — `text-align` stays with the section,
+   because a left-aligned measure inside a centred section is a real composition
+   and coupling the two would forbid it.
+
+   `--jp-measure` is a `ch` value, so it already tracks the element's own font
+   size and needs no re-declaration at org scope (unlike every `--text-*` step,
+   which is multiplied by `--brand-text-scale`). The `width` axis caps it at 78ch
+   in its widest value, which is the readability ceiling research §5.2 sets for
+   the editorial and technical families. */
+.jp-sec__measure {
+  max-width: var(--jp-measure);
+  margin-inline: var(--jp-measure-margin);
+}
+
+/* ── REVEAL ────────────────────────────────────────────────────────────────
+   The CSS half of `render/reveal.ts`. The action ships ZERO CSS and nine
+   components each wrote their own armed/in states, which is why the `motion`
+   axis had nowhere to land.
+
+   PROGRESSIVE ENHANCEMENT, and the ordering is the whole point: the hidden state
+   applies ONLY under `.reveal--armed`, which the action adds from JS. So
+   server-rendered HTML, no-JS clients and reduced-motion clients paint the
+   content fully revealed and can never get stuck invisible. Never move these
+   hidden states into static CSS.
+
+   Both properties come from the `motion` axis, so `motion: none` is a genuine
+   no-op (distance 0, duration 0ms) rather than a fast animation. */
+.reveal--armed .jp-reveal {
+  opacity: 0;
+  transform: translateY(var(--jp-reveal-distance));
+  transition:
+    opacity var(--jp-reveal-duration) var(--jp-reveal-ease),
+    transform var(--jp-reveal-duration) var(--jp-reveal-ease);
+}
+
+.reveal--armed.is-in .jp-reveal {
+  opacity: 1;
+  transform: none;
+}
+
+/* Stagger: `motion: stagger` and `motion: drift` want successive elements to
+   arrive in sequence. The step is an ordinal on the element, multiplied by the
+   axis's own stagger duration — so a section declares ORDER and the axis decides
+   how far apart the beats are. `motion: none` and `motion: fade` set the stagger
+   to `0ms`, which collapses every step to zero delay without needing a second
+   rule per value. */
+.jp-reveal[data-jp-step='1'] {
+  transition-delay: var(--jp-reveal-stagger);
+}
+.jp-reveal[data-jp-step='2'] {
+  transition-delay: calc(var(--jp-reveal-stagger) * 2);
+}
+.jp-reveal[data-jp-step='3'] {
+  transition-delay: calc(var(--jp-reveal-stagger) * 3);
+}
+.jp-reveal[data-jp-step='4'] {
+  transition-delay: calc(var(--jp-reveal-stagger) * 4);
+}
+.jp-reveal[data-jp-step='5'] {
+  transition-delay: calc(var(--jp-reveal-stagger) * 5);
+}
+
+/* ── REDUCED MOTION — INVIOLABLE ───────────────────────────────────────────
+   Research §5.1: every `motion` value must render as `none`, and continuous
+   decorative animation (the hero's motes, the ember breathe, the descent spark)
+   must STOP — not merely speed up. `--duration-*` collapsing to `0.01ms` handles
+   transitions, but a 0.01ms KEYFRAME animation still runs its cycle, and an
+   infinite one still repeats forever.
+
+   `journey-design.css` neutralises `--jp-reveal-distance` for the same reason,
+   because a 0.01ms transition to a translated end state still moves the element.
+
+   `!important` is warranted here and only here: it has to beat the `animation`
+   shorthands the sections set on themselves, and this is a WCAG obligation
+   rather than a preference. Eleven components currently each carry their own
+   version of this block; they collapse into it. */
+@media (prefers-reduced-motion: reduce) {
+  .jp-sec *,
+  .jp-sec *::before,
+  .jp-sec *::after {
+    animation: none !important;
+  }
+}

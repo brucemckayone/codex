@@ -1,161 +1,77 @@
+<!--
+  @component BrandEditorLogo
+
+  The Identity-group LOGO control for the brand studio rail (and the legacy
+  overlay). Codex-cijzb · WP-1.6 folds the retired settings/branding page's logo
+  upload into the workspace by delegating to the ONE reusable <LogoUpload>
+  affordance — drag-drop + multipart upload via `uploadLogoForm`, which
+  re-forwards the File through `forwardMultipartUpload` server-side (the workerd
+  filename-strip fix, PR #351).
+
+  This component is now a thin STORE ADAPTER: it owns no upload markup of its
+  own (the bespoke form that lived here in WP-1.5 was removed so there is exactly
+  ONE logo mechanism). It wires <LogoUpload> to the brand-editor store:
+    - upload success → `brandEditor.updateField('logoUrl', url)` so the WP-1.4
+      preview bridge live-updates the framed page and the change-ledger reflects
+      the edit. The file itself is already persisted to R2 + DB by
+      `uploadLogoForm` at upload time.
+    - remove → `deleteLogo` (server: clears the R2 object + DB column) FIRST,
+      then the store field — the Codex-ne00j ordering, so a failed delete never
+      leaves the store claiming "no logo" while the DB still has one. Delete
+      errors surface here (<LogoUpload> owns only upload/validation errors).
+-->
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import LogoUpload from '$lib/components/studio/LogoUpload.svelte';
   import { deleteLogo, uploadLogoForm } from '$lib/remote/branding.remote';
-  import Button from '$lib/components/ui/Button/Button.svelte';
 
-  let fileInput: HTMLInputElement;
+  const logoUrl = $derived(brandEditor.pending?.logoUrl ?? null);
+  const orgId = $derived(brandEditor.orgId ?? '');
+
   let deleting = $state(false);
   let deleteError = $state<string | null>(null);
 
-  const logoUrl = $derived(brandEditor.pending?.logoUrl ?? null);
-  const uploading = $derived(uploadLogoForm.pending > 0);
-
-  function handleFileSelect(e: Event) {
-    const input = e.target as HTMLInputElement;
-    if (!input.files?.length) return;
-    // Programmatically submit the hidden form
-    if (input.form) {
-      input.form.requestSubmit();
-    } else {
-      console.warn(
-        '[BrandEditorLogo] handleFileSelect: file input has no associated form; upload not triggered.'
-      );
-    }
+  // Upload success: <LogoUpload> hands us the new URL. Push it into the store's
+  // pending so the preview bridge + change-ledger both see it.
+  function handleUpload(url: string | null): void {
+    brandEditor.updateField('logoUrl', url);
   }
 
-  async function handleRemove() {
+  // Remove: clear the R2 object + DB column FIRST (deleteLogo), then the store
+  // field. The `deleting` guard makes double-clicks a no-op (the delete is a
+  // command, not the tracked form, so <LogoUpload> can't disable its button).
+  async function handleDelete(): Promise<void> {
     if (!brandEditor.orgId || deleting) return;
     deleting = true;
     deleteError = null;
     try {
-      // Call the server delete FIRST so the R2 object and DB column are
-      // actually cleared. Only mutate editor state after success —
-      // previously this only cleared editor state (Codex-ne00j); save
-      // payload schema had no `logoUrl` field, so the DB was untouched
-      // and the logo reappeared on reload.
       await deleteLogo(brandEditor.orgId);
       brandEditor.updateField('logoUrl', null);
     } catch (err) {
-      deleteError = err instanceof Error ? err.message : 'Failed to remove logo';
+      deleteError =
+        err instanceof Error ? err.message : 'Failed to remove logo';
     } finally {
       deleting = false;
     }
   }
-
-  // Handle upload success — update store with new logo URL
-  $effect(() => {
-    if (uploadLogoForm.result?.success && !uploading) {
-      const url = uploadLogoForm.result.data?.logoUrl;
-      if (url) brandEditor.updateField('logoUrl', url);
-    }
-  });
 </script>
 
-<div class="logo-level">
-  <div
-    class="logo-level__preview"
-    style:background-color={brandEditor.pending?.backgroundColor ?? null}
-  >
-    {#if logoUrl}
-      <img src={logoUrl} alt="Organization logo" class="logo-level__image" />
-    {:else}
-      <div class="logo-level__placeholder">
-        <span>No logo uploaded</span>
-      </div>
-    {/if}
-  </div>
-
-  <div class="logo-level__actions">
-    <form {...uploadLogoForm} enctype="multipart/form-data" class="logo-upload-form">
-      <input type="hidden" name="orgId" value={brandEditor.orgId ?? ''} />
-      <input
-        bind:this={fileInput}
-        type="file"
-        {...uploadLogoForm.fields.logo.as('file')}
-        accept="image/png,image/jpeg,image/webp,image/svg+xml"
-        hidden
-        onchange={handleFileSelect}
-      />
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onclick={() => fileInput?.click()}
-        disabled={uploading}
-        loading={uploading}
-      >
-        {uploading ? 'Uploading…' : 'Upload Logo'}
-      </Button>
-    </form>
-    {#if logoUrl}
-      <Button
-        variant="ghost"
-        size="sm"
-        onclick={handleRemove}
-        disabled={uploading || deleting}
-        loading={deleting}
-      >
-        {deleting ? 'Removing…' : 'Remove'}
-      </Button>
-    {/if}
-  </div>
-
-  {#if uploadLogoForm.result?.error}
-    <p class="logo-level__error">{uploadLogoForm.result.error}</p>
-  {/if}
-  {#if deleteError}
-    <p class="logo-level__error">{deleteError}</p>
-  {/if}
-
-  <p class="logo-level__hint">
-    PNG, SVG, or WebP. Max 2MB. Recommended: 400 x 100px.
-  </p>
-</div>
+{#if orgId}
+  <LogoUpload
+    {logoUrl}
+    {orgId}
+    {uploadLogoForm}
+    onupload={handleUpload}
+    ondelete={handleDelete}
+  />
+{/if}
+{#if deleteError}
+  <p class="logo-adapter__error" role="alert">{deleteError}</p>
+{/if}
 
 <style>
-  .logo-level {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .logo-level__preview {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: calc(var(--space-24) * 1.25); /* 120px at base density */
-    border-radius: var(--radius-lg);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    padding: var(--space-6);
-    background-color: var(--color-surface);
-  }
-
-  .logo-level__image {
-    max-width: 100%;
-    max-height: var(--space-20); /* 80px at base density */
-    object-fit: contain;
-  }
-
-  .logo-level__placeholder {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-  }
-
-  .logo-level__actions {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .logo-level__hint {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  .logo-upload-form {
-    display: contents;
-  }
-
-  .logo-level__error {
+  .logo-adapter__error {
+    margin: var(--space-2) 0 0;
     font-size: var(--text-xs);
     color: var(--color-error-500);
   }

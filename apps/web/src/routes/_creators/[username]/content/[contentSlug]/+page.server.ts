@@ -18,7 +18,7 @@ import {
   DENIED_ACCESS_RESULT,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
-  isPublicAccessType,
+  isPublicContent,
   loadAccessAndProgress,
   loadSubscriptionContext,
 } from '$lib/server/content-detail';
@@ -95,7 +95,7 @@ export const load: PageServerLoad = async ({
   // subscribers / paid / team) waits for the authenticated access check below
   // — this is what prevents a non-follower from reading the article text
   // through view-source or the SvelteKit load payload.
-  const isPublic = isPublicAccessType(content.accessType);
+  const isPublic = isPublicContent(content.isFree);
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
@@ -115,23 +115,21 @@ export const load: PageServerLoad = async ({
 
   // Subscription context (org-scoped content may have tier gating).
   // Skip the round-trip entirely for content that can't require a
-  // subscription — non-subscriber accessType and no minimum tier.
+  // subscription — no tier gate (includedInTierId == null, the WP-1
+  // successor of accessType 'subscribers').
   // Saves 2-3 round-trips per non-gated page load (Codex-585ie).
   const mayRequireSubscription =
-    !!content.organization?.id &&
-    (content.accessType === 'subscribers' || !!content.minimumTierId);
+    !!content.organization?.id && content.includedInTierId != null;
 
   const subContextPromise = mayRequireSubscription
     ? loadSubscriptionContext(
         content.organization!.id,
-        content.minimumTierId ?? null,
+        content.includedInTierId ?? null,
         platform,
-        cookies,
-        content.accessType
+        cookies
       ).catch(() => ({
         ...EMPTY_SUB_CONTEXT,
-        requiresSubscription:
-          content.accessType === 'subscribers' || !!content.minimumTierId,
+        requiresSubscription: content.includedInTierId != null,
       }))
     : Promise.resolve(EMPTY_SUB_CONTEXT);
 
@@ -167,7 +165,7 @@ export const load: PageServerLoad = async ({
         content.id,
         platform,
         cookies,
-        content.accessType
+        content.isFree
       ).catch(() => ({ ...DENIED_ACCESS_RESULT, hasAccess: isPublic })),
       subscriptionContext: subContextPromise,
       creatorProfile,
@@ -183,7 +181,7 @@ export const load: PageServerLoad = async ({
     content.id,
     platform,
     cookies,
-    content.accessType
+    content.isFree
   ).catch(() => DENIED_ACCESS_RESULT);
 
   const gatedBodyHtml = accessResult.hasAccess

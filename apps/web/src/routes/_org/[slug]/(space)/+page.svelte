@@ -12,11 +12,13 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import FeatureCarousel from '$lib/components/carousel/FeatureCarousel.svelte';
   import type { FeatureItem } from '$lib/components/carousel/feature-carousel.types';
-  import TopicGrid from '$lib/components/topic/TopicGrid.svelte';
+  import TopicCarousel from '$lib/components/topic/TopicCarousel.svelte';
   import type { TopicItem } from '$lib/components/topic/topic-card.types';
   import BrowseModule from '$lib/components/browse/BrowseModule.svelte';
   import type {
@@ -28,7 +30,7 @@
   import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import { extractPlainText } from '@codex/validation';
   import {
     eq,
@@ -128,7 +130,7 @@
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.
-  const featureItems = $derived<FeatureItem[]>(
+  const featureContentItems = $derived<FeatureItem[]>(
     data.allContent
       .filter((c) => c.featured)
       .map((c) => ({
@@ -143,6 +145,44 @@
         image: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
       }))
   );
+
+  /*
+    Featured PORTALS take slides in the SAME carousel, rather than getting a rail
+    of their own — a promoted journey is an editorial pick, and the page already
+    has a "Guided portals" rail for the un-promoted ones. Splitting promotion
+    across two surfaces would leave "Editor's picks" meaning "picked content"
+    rather than "picked".
+
+    The slide id is namespaced. Content ids come from `content` and portal ids
+    from `landing_pages`, so the carousel's `(item.id)` key would be mixing two
+    tables' primary keys in one keyspace; a prefix makes a collision impossible
+    instead of merely improbable.
+  */
+  const featurePortalItems = $derived<FeatureItem[]>(
+    (data.featuredJourneys ?? []).map((j) => ({
+      id: `portal:${j.pageId}`,
+      title: j.title,
+      kind: "Editor's pick",
+      contentType: 'portal',
+      description: j.tagline,
+      href: buildJourneyUrl(
+        page.url,
+        { slug: j.slug, id: j.pageId },
+        { surface: 'sales' }
+      ),
+      image: j.coverImageUrl,
+    }))
+  );
+
+  /*
+    Portals lead. This is a merchandising call, not a technical one: a journey is
+    the larger commitment and the higher-value offer, so it gets the first slide.
+    Flip the concat order to reverse it.
+  */
+  const featureItems = $derived<FeatureItem[]>([
+    ...featurePortalItems,
+    ...featureContentItems,
+  ]);
 
   // New this week: most-recent items minus anything already promoted in
   // Editor's picks (dedupe). `allContent` is server-sorted newest-first.
@@ -178,7 +218,7 @@
   // hides gracefully (the component checks `previewContent?.length > 0`).
   const subscribeGatedContent = $derived(
     data.allContent.filter(
-      (c) => c.accessType === 'subscribers' || c.accessType === 'followers'
+      (c) => c.includedInTierId != null || c.isFollowerGated === true
     )
   );
 
@@ -241,7 +281,7 @@
       category: c.category ?? null,
       categorySlugs: c.categorySlugs ?? [],
       featured: c.featured ?? false,
-      contentAccessType: c.accessType,
+      contentAccessType: deriveContentAccessKind(c),
       included: access.isIncluded(c),
       isFollower: access.isFollowing,
       tierName: access.getTierName(c),
@@ -542,6 +582,24 @@
   </section>
 
   <div class="content-area">
+  <!-- Editor's picks — contained multi-feature carousel over the creator's
+       promoted portals + content (R3 ⑥: sits within the page's content column,
+       not edge-to-edge).
+
+       FIRST in the feed, directly under the hero. It is the creator's own
+       curation — the one rail that says "start here" — so it leads rather than
+       sitting below the catalogue rails it is meant to introduce. Everything here
+       is AWAITED (`featuredJourneys` + `allContent`), so leading with it costs no
+       layout shift: the carousel cannot gain slides after hydration. -->
+  {#if featureItems.length > 0}
+    <section class="section">
+      <header class="lede">
+        <p class="lede__eyebrow">Editor's picks</p>
+      </header>
+      <FeatureCarousel items={featureItems} ariaLabel="Editor's picks" />
+    </section>
+  {/if}
+
   <!-- Continue watching — server-backed cross-device resume rail (WP-6).
        Streamed; hidden when empty (logged-out visitors get an empty list). -->
   {#await data.continueWatching then resume}
@@ -587,6 +645,55 @@
     {/if}
   {/await}
 
+  <!-- Guided portals — published course-journeys for this org (Codex-oi2w4).
+       Streamed; hidden only when the org has NO published portals at all.
+
+       Shows EVERY portal, including the ones promoted into "Editor's picks"
+       below. This rail is the org's complete set of portals, so omitting the
+       promoted ones made the most important portals the only ones missing from
+       the place a visitor goes to see them all — and on an org with one portal,
+       featuring it emptied the rail entirely. A pick appearing here as well is
+       repetition by design, the same way a shop's window display also sits on
+       the shelves; portals differ from featured CONTENT (which `newThisWeek`
+       still de-duplicates) because there are few enough of them that the full
+       set is the point. -->
+  {#await data.journeys then journeys}
+    {#if journeys.length > 0}
+      <section class="section section--tight">
+        <header class="lede">
+          <p class="lede__eyebrow">Go deeper</p>
+          <div class="lede__title-row">
+            <h2 class="lede__title">Guided portals</h2>
+            <a href="/explore" class="lede__view-all">
+              Explore all
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </header>
+        <!-- 15rem, not the 20rem this carried when the tile was 16/9: the shared
+             journey card is a 3:4 portrait now (matching the content tiles it
+             shares pages with), so a 20rem track made a ~34rem-tall rail. -->
+        <Carousel
+          items={journeys}
+          itemMinWidth="15rem"
+          gap="var(--space-4)"
+          ariaLabel="Guided portals"
+        >
+          {#snippet renderItem(journey)}
+            <JourneyCard
+              {journey}
+              href={buildJourneyUrl(
+                page.url,
+                { slug: journey.slug, id: journey.pageId },
+                { surface: 'sales' }
+              )}
+            />
+          {/snippet}
+        </Carousel>
+      </section>
+    {/if}
+  {/await}
+
   <!-- Shared grid/carousel tile. `shape` drives the per-section aspect ratio
        (WP-7); chrome="transparent" lets a tile sit on the section background
        and earn chrome only on hover. -->
@@ -594,6 +701,7 @@
     <ContentCard
       variant="grid"
       {shape}
+      titleInCover
       chrome="transparent"
       id={c.id}
       title={c.title}
@@ -611,7 +719,7 @@
       price={c.priceCents != null
         ? { amount: c.priceCents, currency: 'GBP' }
         : null}
-      contentAccessType={c.accessType}
+      contentAccessType={deriveContentAccessKind(c)}
       included={access.isIncluded(c)}
       isFollower={access.isFollowing}
       tierName={access.getTierName(c)}
@@ -620,21 +728,11 @@
     />
   {/snippet}
 
-  <!-- Editor's picks — contained multi-feature carousel over content.featured
-       (R3 ⑥: sits within the page's content column, not edge-to-edge). -->
-  {#if featureItems.length > 0}
-    <section class="section">
-      <header class="lede">
-        <p class="lede__eyebrow">Editor's picks</p>
-      </header>
-      <FeatureCarousel items={featureItems} ariaLabel="Editor's picks" />
-    </section>
-  {/if}
-
-  <!-- Browse by topic — image-led curated-category grid (streamed). Each topic
+  <!-- Browse by topic — image-led curated-category rail (streamed). Each topic
        is a curated on-ramp into the Explore page's dynamic filter: clicking one
        navigates to /explore?category=<slug> (R4 ⑬), not an inline landing
-       filter. -->
+       filter. A rail, not a grid: an auto-fill grid wrapped six topics into a
+       ragged part-filled second row. -->
   {#if resolvedCategories.length > 0}
     <section class="section section--tight">
       <header class="lede">
@@ -647,9 +745,10 @@
           </a>
         </div>
       </header>
-      <TopicGrid
+      <TopicCarousel
         items={resolvedCategories}
         hrefFor={(slug) => `/explore?category=${encodeURIComponent(slug)}`}
+        ariaLabel="Browse by topic"
       />
     </section>
   {/if}
@@ -1201,7 +1300,7 @@
   /* ══════════════════════════════════════════
      LANDING SECTION MODIFIERS
      The redesigned landing composes its bands from self-styled
-     primitives (FeatureCarousel / TopicGrid / BrowseModule / Carousel),
+     primitives (FeatureCarousel / TopicCarousel / BrowseModule / Carousel),
      so the page only needs section-rhythm modifiers here. Per-section
      card shape + transparent-until-hover chrome is now driven by the
      ContentCard `shape`/`chrome` props (WP-7), not page-level overrides.

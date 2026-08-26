@@ -1,0 +1,358 @@
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   HERO — "Of Blood and Bones" · Rootwork
+   Full-viewport, warm-dark, somatic. Breathing ember core + slow rising motes +
+   word-by-word kinetic headline. Pure CSS motion (zero JS, CSP-safe).
+   Namespace: .hero*  ·  reuses shared atoms .eyebrow / .cta / .cta--primary / .arrow
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+  padding: clamp(6rem, 13vh, 9rem) clamp(1.2rem, 4vw, 3rem) clamp(4.5rem, 10vh, 6.75rem);
+}
+
+/* ── atmosphere layers (all decorative, behind content) ── */
+.hero__atmos { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+/* breathing warm core — the "living light" behind the headline */
+.hero__glow {
+  position: absolute;
+  left: 50%; top: 40%;
+  width: min(92vw, 920px);
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  opacity: .72;
+  filter: blur(22px);
+  background:
+    radial-gradient(circle at 50% 46%,
+      color-mix(in oklab, var(--ember) 28%, transparent),
+      color-mix(in oklab, var(--blood) 15%, transparent) 46%,
+      transparent 70%);
+  animation: hero-breathe 11s ease-in-out infinite;
+}
+
+/* slow rising embers */
+.hero__motes { position: absolute; inset: 0; overflow: hidden; }
+.hero__mote {
+  position: absolute;
+  bottom: -12px;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(circle,
+    color-mix(in oklab, var(--ember) 92%, white),
+    color-mix(in oklab, var(--ember) 20%, transparent) 70%);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--ember) 55%, transparent);
+  animation: hero-rise linear infinite;
+}
+.hero__mote:nth-child(1)  { left: 7%;  width: 2px; height: 2px; --dx:  18px; --o: .40; animation-duration: 20s; animation-delay:  0s; }
+.hero__mote:nth-child(2)  { left: 15%; width: 3px; height: 3px; --dx: -15px; --o: .34; animation-duration: 25s; animation-delay:  3s; }
+.hero__mote:nth-child(3)  { left: 24%; width: 2px; height: 2px; --dx:  22px; --o: .48; animation-duration: 16s; animation-delay:  6s; }
+.hero__mote:nth-child(4)  { left: 33%; width: 4px; height: 4px; --dx: -10px; --o: .30; animation-duration: 28s; animation-delay:  1s; }
+.hero__mote:nth-child(5)  { left: 42%; width: 2px; height: 2px; --dx:  13px; --o: .52; animation-duration: 21s; animation-delay:  9s; }
+.hero__mote:nth-child(6)  { left: 50%; width: 3px; height: 3px; --dx: -21px; --o: .38; animation-duration: 26s; animation-delay:  4s; }
+.hero__mote:nth-child(7)  { left: 59%; width: 2px; height: 2px; --dx:  16px; --o: .46; animation-duration: 18s; animation-delay: 11s; }
+.hero__mote:nth-child(8)  { left: 67%; width: 3px; height: 3px; --dx: -12px; --o: .34; animation-duration: 23s; animation-delay:  2s; }
+.hero__mote:nth-child(9)  { left: 76%; width: 2px; height: 2px; --dx:  20px; --o: .50; animation-duration: 17s; animation-delay:  7s; }
+.hero__mote:nth-child(10) { left: 84%; width: 4px; height: 4px; --dx: -16px; --o: .28; animation-duration: 27s; animation-delay:  5s; }
+.hero__mote:nth-child(11) { left: 91%; width: 2px; height: 2px; --dx:  11px; --o: .44; animation-duration: 20s; animation-delay: 10s; }
+.hero__mote:nth-child(12) { left: 96%; width: 3px; height: 3px; --dx: -18px; --o: .36; animation-duration: 22s; animation-delay: 13s; }
+
+/* edge vignette + bottom fade to seat the cue and blend into the next section */
+.hero__vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(125% 95% at 50% 42%, transparent 55%, color-mix(in oklab, var(--ink) 58%, transparent) 100%),
+    linear-gradient(to bottom, transparent 68%, color-mix(in oklab, #0f0a06 88%, transparent) 100%);
+}
+
+/* ── content column ── */
+.hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 56rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1.25rem, 2.6vw, 1.85rem);
+}
+
+.hero__eyebrow { animation: hero-fade-up .8s var(--ease) .1s both; }
+
+.hero__headline {
+  max-width: 14ch;
+  margin-inline: auto;
+  font-weight: 300;
+  font-optical-sizing: auto;
+  font-size: clamp(2.7rem, 9vw, 7rem);
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.hero__word {
+  display: inline-block;
+  animation: hero-word-in .9s var(--ease) both;
+}
+.hero__headline .hero__word:nth-child(1) { animation-delay: .25s; }
+.hero__headline .hero__word:nth-child(2) { animation-delay: .35s; }
+.hero__headline .hero__word:nth-child(3) { animation-delay: .45s; }
+.hero__headline .hero__word:nth-child(4) { animation-delay: .55s; }
+.hero__headline .hero__word:nth-child(5) { animation-delay: .65s; }
+.hero__headline .hero__word:nth-child(6) { animation-delay: .75s; }
+.hero__headline .hero__word:nth-child(7) { animation-delay: .85s; }
+.hero__word--soften { animation-duration: 1.15s; animation-delay: .98s; }
+.hero__soften {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--rose);
+  text-shadow: 0 0 26px color-mix(in oklab, var(--rose) 42%, transparent);
+  animation: hero-soften-glow 7s ease-in-out 2.3s infinite;
+}
+
+.hero__lede {
+  max-width: 42ch;
+  margin-inline: auto;
+  color: var(--bone-dim);
+  font-size: clamp(1.05rem, 1.4vw, 1.25rem);
+  line-height: 1.62;
+  animation: hero-fade-up .8s var(--ease) 1.25s both;
+}
+.hero__wm { font-family: var(--serif); font-style: italic; font-weight: 400; color: var(--bone); }
+.hero__lede-accent {
+  display: block;
+  margin-top: .55rem;
+  color: var(--bone);
+  letter-spacing: .01em;
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem 1.6rem;
+  margin-top: .3rem;
+  animation: hero-fade-up .8s var(--ease) 1.45s both;
+}
+.hero__cta-sub { font-weight: 500; opacity: .82; }
+
+/* quiet secondary link */
+.hero__quiet {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--bone-faint);
+  font-family: var(--sans);
+  font-size: .95rem;
+  letter-spacing: .03em;
+  transition: color .25s var(--ease);
+}
+.hero__quiet::after {
+  content: "";
+  position: absolute; left: 0; bottom: -3px;
+  width: 100%; height: 1px;
+  background: linear-gradient(90deg, var(--ember), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .35s var(--ease);
+}
+.hero__quiet:hover { color: var(--bone); }
+.hero__quiet:hover::after { transform: scaleX(1); }
+.hero__quiet-arrow { transition: transform .25s var(--ease); }
+.hero__quiet:hover .hero__quiet-arrow { transform: translateY(3px); }
+
+.hero__trust {
+  display: inline-flex;
+  align-items: center;
+  color: var(--bone-faint);
+  font-size: .82rem;
+  letter-spacing: .02em;
+  animation: hero-fade-up .8s var(--ease) 1.62s both;
+}
+.hero__trust-dot {
+  width: 6px; height: 6px;
+  margin-right: .55rem;
+  border-radius: 50%;
+  background: var(--ember);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 70%, transparent);
+  animation: hero-heartbeat 4.5s ease-in-out infinite;
+}
+
+/* ── scroll cue: a light descending a hairline ── */
+.hero__cue {
+  position: absolute;
+  bottom: clamp(1.2rem, 3vh, 2rem);
+  left: 0; right: 0;
+  margin-inline: auto;
+  width: max-content;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .55rem;
+  color: var(--bone-faint);
+  animation: hero-fade-up .9s var(--ease) 1.85s both;
+}
+.hero__cue-line {
+  position: relative;
+  width: 1px; height: 46px;
+  overflow: hidden;
+  background: linear-gradient(to bottom,
+    transparent,
+    color-mix(in oklab, var(--bone) 22%, transparent) 45%,
+    transparent);
+}
+.hero__cue-spark {
+  position: absolute;
+  left: 50%; top: 0;
+  width: 3px; height: 11px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: linear-gradient(var(--ember), transparent);
+  box-shadow: 0 0 9px color-mix(in oklab, var(--ember) 80%, transparent);
+  animation: hero-spark 2.8s var(--ease) infinite;
+}
+.hero__cue-chevron {
+  color: var(--bone-faint);
+  animation: hero-cue-bob 2.8s ease-in-out infinite;
+  transition: color .25s var(--ease);
+}
+.hero__cue:hover { color: var(--bone); }
+.hero__cue:hover .hero__cue-chevron { color: var(--ember); }
+
+/* ── keyframes ── */
+@keyframes hero-word-in {
+  from { opacity: 0; transform: translateY(.42em); filter: blur(10px); }
+  to   { opacity: 1; transform: none;               filter: blur(0); }
+}
+@keyframes hero-fade-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes hero-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: .58; }
+  50%      { transform: translate(-50%, -50%) scale(1.09); opacity: .85; }
+}
+@keyframes hero-rise {
+  0%   { transform: translate3d(0, 0, 0);                            opacity: 0; }
+  12%  { opacity: var(--o, .42); }
+  50%  { transform: translate3d(calc(var(--dx, 12px) * .5), -48vh, 0); }
+  88%  { opacity: var(--o, .42); }
+  100% { transform: translate3d(var(--dx, 12px), -94vh, 0);          opacity: 0; }
+}
+@keyframes hero-soften-glow {
+  0%, 100% { text-shadow: 0 0 22px color-mix(in oklab, var(--rose) 36%, transparent); }
+  50%      { text-shadow: 0 0 34px color-mix(in oklab, var(--rose) 55%, transparent); }
+}
+@keyframes hero-heartbeat {
+  0%, 100% { transform: scale(1);    opacity: .9; }
+  50%      { transform: scale(1.35); opacity: .5; }
+}
+@keyframes hero-spark {
+  0%   { transform: translateY(0);    opacity: 0; }
+  22%  { opacity: 1; }
+  78%  { opacity: 1; }
+  100% { transform: translateY(37px); opacity: 0; }
+}
+@keyframes hero-cue-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(3px); }
+}
+
+/* ── responsive ── */
+@media (max-width: 560px) {
+  .hero__actions { flex-direction: column; gap: 1.1rem; }
+  .hero__cta { width: 100%; max-width: 20rem; justify-content: center; }
+}
+
+/* ── reduced motion: hold the final composed state, no movement ── */
+@media (prefers-reduced-motion: reduce) {
+  .hero__word,
+  .hero__eyebrow,
+  .hero__lede,
+  .hero__actions,
+  .hero__trust,
+  .hero__cue { opacity: 1 !important; transform: none !important; filter: none !important; }
+  .hero__glow { opacity: .7; }
+  .hero__motes,
+  .hero__cue-spark { display: none; }
+  .hero__soften { text-shadow: 0 0 22px color-mix(in oklab, var(--rose) 40%, transparent); }
+}
+</style>
+
+<header class="hero" id="top">
+  <div class="hero__atmos" aria-hidden="true">
+    <div class="hero__glow"></div>
+    <div class="hero__motes">
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+    </div>
+    <div class="hero__vignette"></div>
+  </div>
+
+  <div class="hero__inner">
+    <p class="eyebrow hero__eyebrow">The foundation course · a somatic practice</p>
+
+    <h1 class="hero__headline">
+      <span class="hero__word">Teach</span>
+      <span class="hero__word">your</span>
+      <span class="hero__word">body</span>
+      <span class="hero__word">it</span>
+      <span class="hero__word">is</span>
+      <span class="hero__word">safe</span>
+      <span class="hero__word">to</span>
+      <span class="hero__word hero__word--soften"><em class="hero__soften">soften.</em></span>
+    </h1>
+
+    <p class="hero__lede">
+      Rootwork is where <span class="hero__wm">Of Blood and Bones</span> begins — fourteen guided
+      practices that bring a braced nervous system back to ground.
+      <span class="hero__lede-accent">Not talked through. Felt through.</span>
+    </p>
+
+    <div class="hero__actions">
+      <a class="cta cta--primary hero__cta" href="#invite">
+        <span class="hero__cta-label">Begin free <span class="hero__cta-sub">· first practice</span></span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="hero__quiet" href="#map">
+        See the descent
+        <span class="hero__quiet-arrow" aria-hidden="true">↓</span>
+      </a>
+    </div>
+
+    <p class="hero__trust">
+      <span class="hero__trust-dot" aria-hidden="true"></span>
+      Practised by 2,400+ people finding their ground · cancel anytime
+    </p>
+  </div>
+
+  <a class="hero__cue" href="#map" aria-label="Descend to the next section">
+    <span class="hero__cue-line"><span class="hero__cue-spark"></span></span>
+    <svg class="hero__cue-chevron" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-hidden="true">
+      <path d="M1 1l7 7 7-7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </a>
+</header>

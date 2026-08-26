@@ -53,11 +53,19 @@ app.post(
       const { dispatchPromise } =
         await ctx.services.transcoding.triggerJobInternal(id, priority);
 
-      // dispatchRunPodJob is internally try/caught (marks media failed on
-      // error), so dispatchPromise should never reject. The .catch is
-      // belt-and-suspenders: any future change that lets a rejection
-      // escape will surface in obs instead of evaporating silently.
-      ctx.executionCtx.waitUntil(
+      // ctx.background, NOT ctx.executionCtx.waitUntil: the dispatch writes to
+      // the DB after the response is sent (the RunPod job id on success,
+      // status='failed' on error). A bare waitUntil races procedure()'s own
+      // waitUntil(cleanup()), which calls pool.end() and reliably wins — so
+      // both of those writes failed, every time. The success write was merely
+      // cosmetic (the webhook matches on mediaId), but the failure write is
+      // how a dead dispatch becomes visible at all; without it the row sits at
+      // 'transcoding' forever with no error recorded.
+      //
+      // dispatchRunPodJob is internally try/caught, so dispatchPromise should
+      // never reject. The .catch is belt-and-suspenders: any future change that
+      // lets a rejection escape will surface in obs instead of evaporating.
+      ctx.background(
         dispatchPromise.catch((err: unknown) => {
           ctx.obs?.error('Transcoding dispatch failed (waitUntil fallback)', {
             mediaId: id,

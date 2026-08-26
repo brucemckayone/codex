@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create a page · Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* Create flow — neutral studio chrome (same family as the builder).
+     Progressive + adaptive: pick a type → step 2 tailors itself to it. */
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.13);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489;
+  }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); }
+  body::before, body::after { display: none; }
+
+  .st-top { height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); }
+  .st-top .brand { font-weight: 700; font-size: .82rem; } .st-top .brand span { color: var(--st-gold); }
+  .st-top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .st-top .close { margin-left: auto; font-size: .82rem; color: var(--st-dim); }
+  .st-top .close:hover { color: var(--st-text); }
+
+  .wrapn { max-width: 940px; margin: 0 auto; padding: clamp(2.4rem,6vw,4.5rem) 1.4rem 5rem; }
+  .step-k { font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; color: var(--st-gold); }
+  .wrapn h1 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(2rem,5vw,2.9rem); margin: .4rem 0 .5rem; letter-spacing: -0.01em; }
+  .wrapn .lede { color: var(--st-dim); max-width: 52ch; margin-bottom: 2.2rem; line-height: 1.6; }
+
+  /* step 1 — page type */
+  .types { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; }
+  .type { text-align: left; padding: 1.4rem 1.3rem; border-radius: 16px; border: 1px solid var(--st-line-2); background: var(--st-panel); transition: border-color .16s, transform .15s var(--ease), background .16s; position: relative; }
+  .type:not(.soon):hover { transform: translateY(-3px); border-color: var(--st-gold); cursor: pointer; }
+  .type.sel { border-color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 8%, var(--st-panel)); }
+  .type.sel .check { opacity: 1; transform: scale(1); }
+  .type .check { position: absolute; top: 1rem; right: 1rem; width: 20px; height: 20px; border-radius: 50%; background: var(--st-gold); color: #241a09; display: grid; place-items: center; font-size: .7rem; opacity: 0; transform: scale(.6); transition: opacity .15s, transform .15s var(--ease); }
+  .type .ico { font-size: 1.5rem; }
+  .type h3 { font-size: 1.15rem; font-weight: 600; margin: .7rem 0 .3rem; color: var(--st-text); }
+  .type p { font-size: .82rem; color: var(--st-dim); line-height: 1.5; }
+  .type.soon { opacity: .55; }
+  .type .soontag { position: absolute; top: 1rem; right: 1rem; font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--st-faint); border: 1px solid var(--st-line-2); padding: .16rem .5rem; border-radius: 999px; }
+
+  /* step 2 — details (revealed + adaptive) */
+  .step2 { margin-top: 2.6rem; border-top: 1px solid var(--st-line); padding-top: 2.2rem; display: none; }
+  .step2.show { display: block; animation: rise .45s var(--ease) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  .step2 h2 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(1.6rem,4vw,2.2rem); margin: .35rem 0 1.2rem; }
+  .fld { margin-bottom: 1.2rem; max-width: 520px; }
+  .fld label { display: block; font-size: .78rem; color: var(--st-dim); margin-bottom: .4rem; }
+  .fld input { width: 100%; background: var(--st-panel); border: 1px solid var(--st-line-2); border-radius: 10px; color: var(--st-text); font: inherit; font-size: 1rem; padding: .8rem .9rem; }
+  .fld input:focus { outline: none; border-color: var(--st-gold); }
+  .fld .hint { font-size: .74rem; color: var(--st-faint); margin-top: .4rem; }
+
+  .starts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin-top: .7rem; }
+  .start { text-align: left; padding: 1.1rem 1.2rem; border-radius: 14px; border: 1px solid var(--st-line-2); background: var(--st-panel); transition: border-color .15s, background .15s; cursor: pointer; }
+  .start:hover { border-color: var(--st-line-2); }
+  .start.sel { border-color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 8%, var(--st-panel)); }
+  .start h4 { font-size: .98rem; font-weight: 600; margin-bottom: .3rem; }
+  .start p { font-size: .8rem; color: var(--st-dim); line-height: 1.5; }
+  .start .pre { margin-top: .7rem; display: flex; gap: .3rem; flex-wrap: wrap; }
+  .start .pre span { font-size: .64rem; color: var(--st-faint); background: var(--st-panel-2); padding: .2rem .5rem; border-radius: 999px; }
+
+  .creates { margin-top: 1.6rem; display: flex; gap: .7rem; align-items: flex-start; padding: .9rem 1rem; border-radius: 11px; background: var(--st-panel-2); border: 1px solid var(--st-line); max-width: 620px; }
+  .creates .i { color: var(--st-gold); flex: none; }
+  .creates p { font-size: .8rem; color: var(--st-dim); line-height: 1.55; }
+
+  .go-row { margin-top: 2.2rem; display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+  .go { font-size: .95rem; font-weight: 600; padding: .85rem 1.8rem; border-radius: 10px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); display: inline-flex; align-items: center; gap: .5rem; }
+  .go .arrow { transition: transform .2s var(--ease); }
+  .go:hover .arrow { transform: translateX(4px); }
+  .go-row .re { font-size: .8rem; color: var(--st-faint); max-width: 32ch; }
+</style>
+</head>
+<body>
+<header class="st-top">
+  <span class="brand">Studio<span>.</span></span>
+  <span class="doc">Create</span>
+  <a class="close" href="studio-journeys.html">✕ Cancel</a>
+</header>
+
+<div class="wrapn">
+  <p class="step-k">Step 1 of 2</p>
+  <h1>What are you making?</h1>
+  <p class="lede">Every page is built from the same blocks — pick a starting shape and change anything later. Nothing here is final.</p>
+
+  <div class="types" id="types">
+    <button class="type" data-t="course">
+      <span class="check">✓</span>
+      <div class="ico">◈</div><h3>Guided journey</h3>
+      <p>A course with stages and practices, a cinematic sales page, and a member dashboard.</p>
+    </button>
+    <button class="type" data-t="landing">
+      <span class="check">✓</span>
+      <div class="ico">▤</div><h3>Landing page</h3>
+      <p>A single marketing page for anything — an offering, a waitlist, an announcement.</p>
+    </button>
+    <button class="type soon" data-t="retreat">
+      <span class="soontag">soon</span>
+      <div class="ico">⛰</div><h3>Retreat</h3>
+      <p>Dates, place, what to bring, and a way to book a seat.</p>
+    </button>
+    <button class="type soon" data-t="bundle">
+      <span class="soontag">soon</span>
+      <div class="ico">❋</div><h3>Bundle</h3>
+      <p>Several journeys sold together as one path.</p>
+    </button>
+  </div>
+
+  <div class="step2" id="step2">
+    <p class="step-k">Step 2 of 2</p>
+    <h2 id="s2-title"></h2>
+    <div class="fld">
+      <label id="s2-namelabel"></label>
+      <input id="name" value="">
+      <p class="hint">You can rename it and set the web address before you publish.</p>
+    </div>
+
+    <p class="step-k" style="margin-top:1.6rem">Start from</p>
+    <div class="starts" id="starts"></div>
+
+    <div class="creates"><span class="i">✦</span><p id="s2-creates"></p></div>
+
+    <div class="go-row">
+      <a class="go" id="go" href="builder.html"><span id="go-label">Open in builder</span> <span class="arrow">→</span></a>
+      <span class="re" id="s2-re"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  /* one config drives the whole adaptive step 2 — add a type here, no new screen */
+  const TYPES = {
+    course: {
+      title: 'Name your journey', nameLabel: 'Working title', placeholder: 'e.g. Grief & the body', value: 'Rootwork',
+      creates: 'Creates a cinematic sales page, a member dashboard, and a curriculum of stages you fill with practices — all sharing one brand.',
+      cta: { href: 'course-editor.html', label: 'Build the curriculum' },
+      re: 'We start you in the curriculum — build the stages, then flip to the sales page to sell it.',
+      starts: [
+        { key: 'preset', h: 'Guided journey preset', p: 'The five somatic stages, ready to fill — the fastest way in.', pre: ['Regulation', 'Embodiment', 'Attunement', '+2'] },
+        { key: 'blank', h: 'Blank', p: 'One empty stage. Build the shape yourself.', pre: ['Stage I'] },
+      ],
+    },
+    landing: {
+      title: 'Name your page', nameLabel: 'Working title', placeholder: 'e.g. Winter offering', value: 'Winter offering',
+      creates: 'Creates a single page — no curriculum. Just the sections you arrange, with pricing and brand if you need them.',
+      cta: { href: 'builder.html', label: 'Open in builder' },
+      re: 'Sections, pricing and brand all come with sensible defaults — tweak what you want.',
+      starts: [
+        { key: 'offering', h: 'Offering', p: 'Sell one thing — hero, the detail, a price and a clear CTA.', pre: ['Hero', 'Details', 'Price'] },
+        { key: 'waitlist', h: 'Waitlist', p: 'Gather interest before you open the doors.', pre: ['Hero', 'Sign-up'] },
+        { key: 'announce', h: 'Announcement', p: 'One clear message and a single action.', pre: ['Message', 'CTA'] },
+        { key: 'blank', h: 'Blank', p: 'Start from an empty page.', pre: ['Hero'] },
+      ],
+    },
+  };
+
+  let selType = null, selStart = null;
+  const step2 = document.getElementById('step2');
+
+  function renderStep2(key) {
+    const t = TYPES[key];
+    document.getElementById('s2-title').textContent = t.title;
+    document.getElementById('s2-namelabel').textContent = t.nameLabel;
+    const nameInput = document.getElementById('name');
+    nameInput.value = t.value; nameInput.placeholder = t.placeholder;
+    document.getElementById('s2-creates').textContent = t.creates;
+    document.getElementById('go').href = t.cta.href;
+    document.getElementById('go-label').textContent = t.cta.label;
+    document.getElementById('s2-re').textContent = t.re;
+
+    selStart = t.starts[0].key;
+    document.getElementById('starts').innerHTML = t.starts.map((s, i) =>
+      `<button class="start ${i === 0 ? 'sel' : ''}" data-s="${s.key}">
+        <h4>${s.h}</h4><p>${s.p}</p>
+        <div class="pre">${s.pre.map(x => `<span>${x}</span>`).join('')}</div>
+      </button>`).join('');
+    document.querySelectorAll('#starts .start').forEach(el => el.addEventListener('click', () => {
+      document.querySelectorAll('#starts .start').forEach(s => s.classList.remove('sel'));
+      el.classList.add('sel'); selStart = el.dataset.s;
+    }));
+
+    if (!step2.classList.contains('show')) step2.classList.add('show');
+    else { step2.classList.remove('show'); void step2.offsetWidth; step2.classList.add('show'); } // replay reveal on retype
+  }
+
+  document.querySelectorAll('#types .type').forEach(el => {
+    if (el.classList.contains('soon')) return;
+    el.addEventListener('click', () => {
+      document.querySelectorAll('#types .type').forEach(t => t.classList.remove('sel'));
+      el.classList.add('sel'); selType = el.dataset.t;
+      renderStep2(selType);
+      step2.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  });
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

@@ -129,6 +129,31 @@ export const CacheType = {
     organizationId
       ? `categories:org:${organizationId}`
       : `categories:creator:${creatorId ?? ''}`,
+
+  /**
+   * Server KV only — an org's PUBLIC portal (journey) discovery lists: the
+   * landing page's featured rail + portals rail, and /explore's portals rail.
+   *
+   * Bumped by BOTH sides, because a portal card is part page, part course and
+   * part CONTENT:
+   * - a journey write (page save/publish, offer price, featured toggle, cover
+   *   put/delete, curriculum save) — the page/course half; and
+   * - content publish/unpublish/delete — the content half. `practiceCount` and
+   *   `stageCount` on each card come from `loadPublishedCurriculumCounts`, which
+   *   counts only practices whose content is PUBLISHED, so unpublishing one
+   *   practice changes a card that names no content at all.
+   *
+   * Deliberately a SEPARATE key from {@link COLLECTION_ORG_CONTENT} rather than
+   * riding it, mirroring {@link CATEGORIES}: both are content-derived public
+   * reads, and both want a content publish to reach them WITHOUT a portal
+   * publish staling every cached content filter combo in the org.
+   *
+   * Not tracked in the client manifest — portal rails SSR from this
+   * server-authoritative slot and carry no per-user state. The per-user reads
+   * (`/api/journeys/enrolled`) are NOT cached here: enrolled progress changes on
+   * every completion, so it is read live.
+   */
+  COLLECTION_ORG_JOURNEYS: (orgId: string): string => `org:${orgId}:journeys`,
 } as const;
 
 /**

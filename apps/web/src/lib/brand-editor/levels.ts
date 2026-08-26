@@ -4,7 +4,7 @@ import type { LevelId, LevelMeta } from './types';
  * Navigation level definitions for the brand editor breadcrumb drill-down.
  *
  * Level 0: Home (category list + presets)
- * Level 1: Category editors (colors, typography, shape, shadows, logo)
+ * Level 1: Category editors (colors, typography, shape, logo)
  * Level 2: Fine-tune (per-token overrides)
  */
 export const LEVELS: Record<LevelId, LevelMeta> = {
@@ -38,14 +38,6 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     icon: '⬡',
     description: 'Radius and density',
   },
-  shadows: {
-    id: 'shadows',
-    depth: 1,
-    label: 'Shadows',
-    parent: 'home',
-    icon: '◐',
-    description: 'Depth and tint',
-  },
   logo: {
     id: 'logo',
     depth: 1,
@@ -69,14 +61,6 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     parent: 'home',
     icon: '◈',
     description: 'Animated shader backgrounds',
-  },
-  'intro-video': {
-    id: 'intro-video',
-    depth: 1,
-    label: 'Intro Video',
-    parent: 'home',
-    icon: '▶',
-    description: 'Upload hero video',
   },
   'header-layout': {
     id: 'header-layout',
@@ -111,4 +95,14 @@ export function getBreadcrumb(levelId: LevelId): LevelMeta[] {
   }
 
   return trail;
+}
+
+/**
+ * Runtime guard for a persisted level id. Crash-recovery restores read the
+ * level from sessionStorage, which may hold an id that no longer exists (e.g.
+ * a level removed since the session was saved). Callers fall back to `home`
+ * rather than indexing `LEVELS` with a stale key.
+ */
+export function isLevelId(value: unknown): value is LevelId {
+  return typeof value === 'string' && value in LEVELS;
 }

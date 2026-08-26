@@ -36,12 +36,6 @@
   }
 }
 
-/* List view variant (used with data-view="list" attribute) */
-.content-grid[data-view='list'] {
-  grid-template-columns: 1fr;
-  gap: var(--space-3);
-}
-
 /* ── Masonry Modifier ──
    Opt-in heterogeneous packing for catalog surfaces (Discover, Explore)
    where short audio rows sit alongside taller video/article tiles. Curated
@@ -53,10 +47,9 @@
    with zero JS. Tradeoff is column-first source order (Pinterest-
    style) — fine for non-curated feeds.
 
-   Mobile (<sm) inherits the base 1-col flow. data-view='list' opts out
-   so the explore/library list toggle keeps its compact rhythm. */
+   Mobile (<sm) inherits the base 1-col flow. */
 @media (--breakpoint-sm) {
-  .content-grid--masonry:not([data-view='list']) {
+  .content-grid--masonry {
     display: block;
     column-width: 18rem;
     column-gap: var(--space-4);
@@ -64,7 +57,7 @@
     grid-auto-rows: auto;
   }
 
-  .content-grid--masonry:not([data-view='list']) > * {
+  .content-grid--masonry > * {
     /* Block + width 100% is required for `break-inside: avoid` to work
        reliably across Chromium/WebKit/Gecko inside CSS Columns. */
     display: block;
@@ -77,13 +70,13 @@
   /* Native CSS Masonry — Firefox 137+ default, Safari TP partial as of
      early 2026. Where supported, swap to Grid for row-first source order. */
   @supports (grid-template-rows: masonry) {
-    .content-grid--masonry:not([data-view='list']) {
+    .content-grid--masonry {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
       grid-template-rows: masonry;
       gap: var(--space-4);
     }
-    .content-grid--masonry:not([data-view='list']) > * {
+    .content-grid--masonry > * {
       margin-bottom: 0;
     }
   }

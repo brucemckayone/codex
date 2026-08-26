@@ -26,6 +26,34 @@
   --container-xl: var(--breakpoint-xl);
   --container-max: 80rem;    /* 1280px max content width */
 
+  /* Studio content-column cap. The studio shell
+   * (routes/_org/[slug]/studio/+layout.svelte) is the ONLY consumer — studio
+   * pages MUST NOT redeclare an outer max-width. Deliberately generous: at a
+   * 1920px viewport the column measures ~1808px, so this cap does not engage
+   * until ~1984px. It exists purely to stop data-table rows spanning an
+   * ultrawide monitor. Do NOT "align" it with --container-max (80rem) — that
+   * is narrower than the column the studio already renders at 1440px and
+   * would visibly regress every studio page. */
+  --container-studio: 120rem; /* 1920px */
+
+  /* Edge-panel drawer cap (FilterDrawer and any future right-edge panel).
+   * FilterDrawer referenced `var(--container-drawer, 24rem)` while the token
+   * was defined NOWHERE, so the fallback was always the real value — and it
+   * never even applied, because Dialog's scoped `.dialog-content[data-size]`
+   * rule outranked the drawer's `:global()` override and rendered the panel at
+   * the 42rem modal width. Declaring it here makes the intent a token rather
+   * than a fallback nobody could find. */
+  --container-drawer: 24rem;  /* 384px */
+
+  /* ========================================
+   * CONTROL WIDTHS
+   * ========================================
+   * Inline form/filter control cap — stops selects, filters and other
+   * bare controls stretching to fill a full-width studio column. Sits
+   * between --container-sm and the spacing scale, neither of which has a
+   * step in the 240–260px control range. */
+  --control-width-md: 16rem;  /* 256px */
+
   /* ========================================
    * APP CHROME WIDTHS
    * ========================================
@@ -36,6 +64,20 @@
    */
   --app-sidebar-width: var(--space-16);  /* 64px collapsed rail */
   --app-sidebar-width-expanded: 15rem;   /* 240px hover-expanded rail */
+
+  /* Brand-studio control rail width — single source of truth for the
+   * `/studio/brand` two-pane workspace (Codex-cijzb). Wider than the nav
+   * rail because it hosts the full brand control surface (WP-1.5). */
+  --brand-studio-rail-width: 24rem;      /* 384px control rail */
+  --brand-studio-rail-collapsed-width: 3rem; /* 48px strip — holds only the expand control */
+
+  /* Brand-studio device-preview widths — the viewport the live-preview canvas
+   * iframe is constrained to per device (Codex-cijzb WP-1.3). Named constants,
+   * NOT breakpoint tokens: they model real device VIEWPORTS, not layout
+   * breakpoints. Mobile ≈ iPhone-class handset; tablet = iPad portrait (which
+   * coincides with --breakpoint-md). Desktop is fluid (no cap). */
+  --brand-studio-preview-mobile: 23.4375rem; /* 375px — iPhone-class handset */
+  --brand-studio-preview-tablet: 48rem;      /* 768px — iPad portrait */
 
   /* ========================================
    * PLAYER HEIGHTS

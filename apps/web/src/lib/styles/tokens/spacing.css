@@ -17,11 +17,43 @@
   --space-6: calc(var(--space-unit) * 6); /* 24px * density */
   --space-7: calc(var(--space-unit) * 7); /* 28px * density */
   --space-8: calc(var(--space-unit) * 8); /* 32px * density */
+  /* R12 — `--space-9` and `--space-14` used to exist ONLY inside
+     `[data-org-brand]` (org-brand.css:91, :95), so this `:root` scale and the
+     org-scope re-declaration had DIFFERENT MEMBERS. Every consumer outside org
+     scope went invalid-at-computed-value-time and fell back to `auto`:
+     `FilterTriggerButton` (`width/height: var(--space-9)`) collapsed from 36×36
+     to ~18×18 on `(platform)/library` — under WCAG 2.5.8's 24×24 AA floor —
+     and `SearchPill` lost its height on the same row. Nine components consume
+     `--space-9`; four consume `--space-14`. The formulas are copied verbatim
+     from org-brand.css so the density re-declaration there still wins at org
+     scope. Keep the two scales in lockstep: a rung declared for branded orgs
+     but not here is a silent layout break on every platform route. */
+  --space-9: calc(var(--space-unit) * 9); /* 36px * density */
   --space-10: calc(var(--space-unit) * 10); /* 40px * density */
   --space-11: calc(var(--space-unit) * 11); /* 44px * density */
   --space-12: calc(var(--space-unit) * 12); /* 48px * density */
+  --space-14: calc(var(--space-unit) * 14); /* 56px * density */
   --space-16: calc(var(--space-unit) * 16); /* 64px * density */
   --space-20: calc(var(--space-unit) * 20); /* 80px * density */
   --space-24: calc(var(--space-unit) * 24); /* 96px * density */
   --space-32: calc(var(--space-unit) * 32); /* 128px * density */
+
+  /* ─── GUARDRAIL: the WCAG 2.5.5 minimum target size ──────────────────────
+     44px, and DENSITY MAY ONLY EVER MAKE IT LARGER.
+
+     The obvious spelling is `var(--space-11)`, which is "44px x density" — and
+     that multiplication is the bug. `--space-11` derives from `--space-unit`,
+     which derives from `--brand-density-scale`, so an org that sets a density
+     below 1 silently drops the token under 44px: at 0.9 it yields 39.6px. A
+     floor a brand setting can lower is not a floor. `max()` keeps the density
+     scale in the chain for orgs that want ROOMIER targets while making 2.75rem
+     absolute. Asserted at a sub-1 density in
+     `page-builder/journey-design.test.ts`.
+
+     Also re-declared at `[data-org-brand]` in `org-brand.css` for the R12
+     reason documented on `--space-9` above: a `:root` declaration substitutes
+     `var(--space-11)` ONCE, against :root's density-1 scale, and descendants
+     inherit the already-resolved length — so without the org-scope twin an
+     org's density never reaches it at all. Keep the two in lockstep. */
+  --tap-target-min: max(2.75rem, var(--space-11));
 }

@@ -1,13 +1,33 @@
 /**
  * Shared helpers for content detail server loads and actions.
  *
- * Both the org content detail (`_org/[slug]/(space)/content/[contentSlug]`)
- * and the creator content detail (`_creators/[username]/content/[contentSlug]`)
- * perform the same authenticated-user access check and purchase checkout flow.
+ * # Single shared access seam — two routes, one source of truth
  *
- * This module extracts that duplicated logic:
+ * TWO content-detail routes call these helpers with identical arguments and
+ * MUST stay in lockstep. They form ONE access seam — access logic lives here,
+ * never per-route:
+ *
+ *   1. org content     — `routes/_org/[slug]/(space)/content/[contentSlug]/+page.server.ts`
+ *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
+ *
+ * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
+ * content.isFree)` in both of its branches — streamed on the free
+ * fast-path, awaited on the gated path — so there are four call sites but a
+ * single signature. Neither `+page.server.ts` may add its own grant/deny
+ * logic; keeping the decision here is what stops the two routes diverging.
+ *
+ * ## WP-2 swap point (Codex-2pryk journeys)
+ *
+ * The `@codex/access` rewire (canView / canEnterCourse) replaces exactly ONE
+ * function — {@link resolveAccessGranted} — with an explicit entitlement
+ * resolver. Because both routes reach the grant decision only through that
+ * function, the swap rewires both at once and cannot diverge by route. See
+ * its doc block for the behaviour that must be preserved through the swap.
+ *
+ * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
- * - `handlePurchaseAction` — Stripe checkout session creation with error handling
+ * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
+ * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
@@ -86,15 +106,9 @@ function extractRevocationReason(
 }
 
 /**
- * `accessType` values recognised by the content schema. Mirrors the DB CHECK
- * constraint in packages/database/src/schema/content.ts.
- */
-type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
-
-/**
  * Empty subscription-context fallback used by content detail loaders when
- * the content does not require a subscription (free / paid / followers /
- * team accessTypes with no minimum tier). Both the org and creators content
+ * the content does not require a subscription (any content with no tier gate —
+ * `includedInTierId == null`). Both the org and creators content
  * detail loaders return this exact 5-field shape — extracted here so the
  * shape can only drift in one place. Truth-source for the field set is
  * `SubscriptionContext` in `$lib/types`.
@@ -103,8 +117,8 @@ type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
  * `requiresSubscription` from content state, so it stays inline rather than
  * sharing this constant.
  *
- * Iter-027 F3 — see proof test
- * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ * Shape pinned by `content-detail.test.ts` so the field set can only drift in
+ * one place (originally the removed iter-027 F3 denoise proof).
  */
 export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
   requiresSubscription: false,
@@ -124,8 +138,8 @@ export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
  * literal but with `hasAccess: isPublic` rather than `false`, so it can't
  * share this constant directly without a wrapper.
  *
- * Iter-027 F3 — see proof test
- * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ * Shape pinned by `content-detail.test.ts` so the field set can only drift in
+ * one place (originally the removed iter-027 F3 denoise proof).
  */
 export const DENIED_ACCESS_RESULT: AccessAndProgress = {
   hasAccess: false,
@@ -143,15 +157,58 @@ export const DENIED_ACCESS_RESULT: AccessAndProgress = {
  * authenticated user (because signed R2 URLs are issued per-user), but the
  * page shell should not be gated behind that.
  *
- * All other access types (paid / followers / subscribers / team) keep the
- * body gated behind the authenticated access check: anonymous visitors see
- * the paywall teaser, signed-in users fall through to `loadAccessAndProgress`
+ * Gated content (`isFree=false` — purchasable / follower / tier / team) keeps
+ * the body behind the authenticated access check: anonymous visitors see the
+ * paywall teaser, signed-in users fall through to `loadAccessAndProgress`
  * which asks the backend authoritatively.
  */
-export function isPublicAccessType(
-  accessType: string | null | undefined
+export function isPublicContent(isFree: boolean | null | undefined): boolean {
+  return isFree === true;
+}
+
+/** The server-side API surface returned by `createServerApi`. */
+type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * Resolved payload of the access worker's `/stream` endpoint
+ * (`api.access.getStreamingUrl`). Threaded through {@link resolveAccessGranted}
+ * as `StreamResult | null`, where `null` means the call threw — a 403
+ * `AccessDeniedError`, a network error, or a 5xx — i.e. the backend did not
+ * grant access.
+ */
+type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
+
+/**
+ * ── ACCESS-GRANT SEAM · single WP-2 swap point ───────────────────────────
+ *
+ * Decides whether the authenticated user may view this content. This is the
+ * ONE place both content-detail routes resolve "granted?" — see the module
+ * header for the two routes and the lockstep contract.
+ *
+ * BEHAVIOUR (preserved): access is inferred from the `/stream` response. A
+ * resolved response — *even one whose `streamingUrl` is null* (written articles
+ * have no media to sign) — means the backend access check passed. A thrown call
+ * (captured by the caller as `streamResult === null`) means denied. This is the
+ * historical "getStreamingUrl-throws" gate; the null-streamingUrl-but-granted
+ * case must not regress.
+ *
+ * WP-2 (Codex-2pryk · `@codex/access` rewire) LANDED: the content-api worker's
+ * `getStreamingUrl` now gates on the collapsed `canView` entitlement resolver
+ * (`ContentAccessService.canView`, which folds the §6.1 policy flags + purchase
+ * + subscription-tier + stored `entitlements` grants + course entitlements). So
+ * a resolved `/stream` response now reflects `canView === true`, and this seam
+ * transitively resolves `canView` for BOTH content routes at once.
+ *
+ * The resolver is NOT imported here: `@codex/access` is worker-only and must
+ * never enter the SSR bundle (see {@link AccessRevocationReason}). It is invoked
+ * over the `/stream` API instead — so the single decision point stays in the
+ * worker while this remains the single web-side seam both routes reach through.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export function resolveAccessGranted(
+  streamResult: StreamResult | null
 ): boolean {
-  return accessType === 'free';
+  return streamResult !== null;
 }
 
 /**
@@ -160,16 +217,20 @@ export function isPublicAccessType(
  * Returns `{ hasAccess, streamingUrl, progress }`.
  * Gracefully handles 403 / network errors by returning hasAccess=false.
  *
- * `accessType` short-circuits the result for free content: `hasAccess` is
- * forced to `true` even if the stream fetch fails, so the body stays visible
- * when the stream worker is degraded. Authenticated streaming still runs so
- * we can render the player when the URL is available.
+ * Shared verbatim by both content-detail routes (see module header). The
+ * access-grant decision is isolated in {@link resolveAccessGranted} — the
+ * single WP-2 swap point; everything else here is response assembly.
+ *
+ * `isFree` short-circuits the result for free content: `hasAccess` is forced
+ * to `true` even if the stream fetch fails, so the body stays visible when the
+ * stream worker is degraded. Authenticated streaming still runs so we can
+ * render the player when the URL is available.
  */
 export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  accessType?: string | null
+  isFree?: boolean | null
 ): Promise<AccessAndProgress> {
   const api = createServerApi(platform, cookies);
 
@@ -177,7 +238,6 @@ export async function loadAccessAndProgress(
   // revocation `reason` from AccessDeniedError without bubbling the error
   // out of the server load. `.catch(() => null)` would swallow the detail
   // — we need the ApiError instance.
-  type StreamResult = Awaited<ReturnType<typeof api.access.getStreamingUrl>>;
   let streamResult: StreamResult | null = null;
   let streamError: unknown = null;
 
@@ -196,8 +256,10 @@ export async function loadAccessAndProgress(
   // A successful response from /stream means the access check passed,
   // even when streamingUrl is null (written articles — no media to sign).
   // Only a thrown error (403 denied, network failure) means no access.
-  const accessGranted = streamResult !== null;
-  const hasAccess = isPublicAccessType(accessType) || accessGranted;
+  // Single access-grant seam — WP-2 swaps `resolveAccessGranted` for an
+  // explicit `@codex/access` canView resolver (see its doc block).
+  const accessGranted = resolveAccessGranted(streamResult);
+  const hasAccess = isPublicContent(isFree) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =
@@ -240,15 +302,14 @@ export async function loadAccessAndProgress(
  */
 export async function loadSubscriptionContext(
   orgId: string,
-  contentMinimumTierId: string | null,
+  includedInTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies,
-  contentAccessType?: string
+  cookies: Cookies
 ): Promise<SubscriptionContext> {
-  // Content requires a subscription if accessType is 'subscribers' OR if a minimum tier is set.
-  // When accessType is 'subscribers' with no minimumTierId, any active subscription grants access.
-  const isSubscriberContent =
-    contentAccessType === 'subscribers' || !!contentMinimumTierId;
+  // Content requires a subscription when it is tier-gated — the WP-1
+  // successor of accessType 'subscribers' is a non-null includedInTierId.
+  // Any active subscription meeting the tier's sortOrder grants access.
+  const isSubscriberContent = includedInTierId != null;
 
   if (!isSubscriberContent) {
     return {
@@ -280,10 +341,10 @@ export async function loadSubscriptionContext(
   let subscriptionCoversContent = false;
 
   if (isAccessGranting && currentSubscription) {
-    if (!contentMinimumTierId) {
+    if (!includedInTierId) {
       subscriptionCoversContent = true;
     } else {
-      const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
+      const contentTier = tiers.find((t) => t.id === includedInTierId);
       if (contentTier) {
         subscriptionCoversContent =
           currentSubscription.tier.sortOrder >= contentTier.sortOrder;

@@ -2,7 +2,7 @@
   @component LibraryToolbar
 
   Pinned command bar for the library:
-    [🔎 search]   [▦ filter trigger]   [grid|list view toggle]
+    [🔎 search]   [▦ filter trigger]
 
   Tapping the trigger opens the responsive LibraryFilterDrawer (right-side
   panel on desktop, bottom sheet on mobile) which holds Sort + all facets.
@@ -20,7 +20,6 @@
 -->
 <script lang="ts">
   import LibraryFilterDrawer from './LibraryFilterDrawer.svelte';
-  import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { StickyToolbar } from '$lib/components/ui/StickyToolbar';
   import { SearchPill } from '$lib/components/ui/SearchPill';
   import { FilterTriggerButton } from '$lib/components/ui/FilterTriggerButton';
@@ -45,10 +44,8 @@
     filters: FilterValues;
     sort: string;
     sortOptions: SortOption[];
-    viewMode: 'grid' | 'list';
     onFilterChange: (filters: FilterValues) => void;
     onSortChange: (value: string | undefined) => void;
-    onViewChange: (value: 'grid' | 'list') => void;
     onClearAll: () => void;
   }
 
@@ -56,10 +53,8 @@
     filters,
     sort,
     sortOptions,
-    viewMode,
     onFilterChange,
     onSortChange,
-    onViewChange,
     onClearAll,
   }: Props = $props();
 
@@ -172,9 +167,6 @@
 </script>
 
 <StickyToolbar>
-  <!-- Container query host: the bar contents establish the inline-size
-       container so ViewToggle can hide below 560px without media queries.
-       Width 100% so the host fills the sticky row. -->
   <div class="lt-row" data-testid="library-toolbar">
     <SearchPill
       value={filters.search}
@@ -187,13 +179,11 @@
       activeCount={triggerActiveCount}
       onClick={() => setDrawerOpen(true)}
       expanded={drawerOpen}
-      ariaLabel={`${m.library_filters_and_sort()}${triggerActiveCount > 0 ? ` (${triggerActiveCount} active)` : ''}`}
+      ariaLabel={triggerActiveCount > 0
+        ? `${m.library_filters_and_sort()} (${m.filters_active_count({ count: triggerActiveCount })})`
+        : m.library_filters_and_sort()}
       title={m.library_filters_and_sort()}
     />
-
-    <div class="lt-row__utils">
-      <ViewToggle value={viewMode} onchange={onViewChange} />
-    </div>
   </div>
 </StickyToolbar>
 
@@ -228,21 +218,5 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-3) var(--space-4);
-    container-type: inline-size;
-    container-name: library-toolbar;
-  }
-
-  .lt-row__utils {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-inline-start: auto;
-  }
-
-  /* Mobile: view toggle hidden — the drawer is the all-in-one surface. */
-  @container library-toolbar (max-width: 560px) {
-    .lt-row__utils {
-      display: none;
-    }
   }
 </style>

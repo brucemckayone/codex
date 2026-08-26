@@ -22,7 +22,12 @@ import {
   orgFixture,
   parseCookieString,
 } from '@codex/test-utils/e2e';
-import type { BrowserContext, Page } from '@playwright/test';
+import {
+  type BrowserContext,
+  expect,
+  type Locator,
+  type Page,
+} from '@playwright/test';
 import { aliasSessionCookies } from './auth-cookies';
 
 export const E2E_BASE_PORT = 5173;
@@ -142,6 +147,58 @@ export function ownerRevenueSharePath(orgSlug: string): string {
 /** Creator negotiations portfolio URL — uses the `creators` subdomain. */
 export function creatorNegotiationsUrl(): string {
   return `http://creators.lvh.me:${E2E_BASE_PORT}/studio/negotiations`;
+}
+
+/**
+ * Locate a creator's row in the owner roster's "No agreement yet" group.
+ *
+ * The owner roster is GROUPED (`roster` in
+ * `studio/monetisation/revenue-share/+page.svelte`): each team member is
+ * classified into `attention` / `agreed` / `waiting` / `none`, and only the
+ * first three render an `<AgreementCard>` (i.e. an
+ * `article[aria-label="Agreement for …"]`). A member with no active agreement
+ * and no open proposal falls into `none`, which renders a COMPACT
+ * `<li class="revenue-share-page__roster-row">` instead — 16 creators with zero
+ * agreements used to be 2758px of identical two-panel cards.
+ *
+ * So `article[aria-label*=name]` is the WRONG locator for a freshly seeded
+ * topology, and equally wrong after a decline (terminal → neither active nor
+ * pending → back to `none`). Because the row only exists inside the `none`
+ * branch, its presence is itself the assertion that the creator is in the
+ * "No agreement yet" group.
+ */
+export function rosterRowFor(page: Page, creatorName: string): Locator {
+  return page
+    .locator('li.revenue-share-page__roster-row')
+    .filter({ hasText: creatorName });
+}
+
+/**
+ * Click the propose button for one revenue type on a creator's roster row.
+ *
+ * The two per-type buttons carry an `aria-label`
+ * (`monetisation_revshare_propose_aria` — "Propose a {type} revenue split with
+ * {name}") which OVERRIDES their visible text, so the accessible name is what
+ * has to match. The row scope supplies the creator and the regex supplies the
+ * revenue type, which keeps this off the "Propose a …" prefix copy entirely and
+ * means no `.first()` is needed — the match is unique inside the row.
+ */
+export async function proposeFromRoster(
+  page: Page,
+  creatorName: string,
+  revenueType: 'subscription' | 'content_purchase' = 'subscription'
+): Promise<void> {
+  const row = rosterRowFor(page, creatorName);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+
+  await row
+    .getByRole('button', {
+      name:
+        revenueType === 'subscription'
+          ? /subscription revenue split/i
+          : /content purchase revenue split/i,
+    })
+    .click();
 }
 
 /**

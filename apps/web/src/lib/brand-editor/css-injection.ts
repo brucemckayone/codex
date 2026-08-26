@@ -20,7 +20,7 @@ import type { BrandEditorState, CssVarMapping } from './types';
 
 /** Override keys that get --brand- prefix (consumed by org-brand.css rules).
  *  All other override keys get --color- prefix (direct token replacement). */
-const BRAND_PREFIX_KEYS = new Set([
+export const BRAND_PREFIX_KEYS = new Set([
   'text-scale',
   'heading-weight',
   'body-weight',
@@ -50,6 +50,7 @@ const BRAND_PREFIX_KEYS = new Set([
   'player-border',
   'player-overlay',
   'player-overlay-heavy',
+  'player-gradient-bottom',
   // Glass morphism
   'glass-tint',
   // Card interaction (WP-05)

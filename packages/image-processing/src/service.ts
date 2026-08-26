@@ -258,6 +258,65 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Process and store a COURSE (journey) cover image — the still poster the
+   * journey card and the sales-page share sheet render (Codex-eqh0z).
+   *
+   * Identical in shape to {@link processCategoryCover}, and deliberately so: a
+   * course cover is a still image, and `media_items` is CHECK-constrained to
+   * ('video','audio'), so the cover cannot be a media-item ref. It reuses the
+   * same sm/md/lg WebP → R2 pipeline and the same "caller owns the DB write"
+   * split — `CourseJourneyService.setCourseCoverImageKey` persists the returned
+   * key org-scoped, so no scope logic is duplicated in the image layer.
+   *
+   * Keys are namespaced by `courseId` (`courses/{id}/cover/{size}.webp`) and are
+   * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
+   * cover never orphans an R2 object.
+   *
+   * @param courseId - Owning course (keys are namespaced under it)
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   */
+  async processCourseCover(
+    courseId: string,
+    file: File
+  ): Promise<{
+    coverImageKey: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
+    const { buffer } = await validateImageFile(file, false);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const coverImageKey = `courses/${courseId}/cover`;
+    const keys: VariantKeys = {
+      sm: `${coverImageKey}/sm.webp`,
+      md: `${coverImageKey}/md.webp`,
+      lg: `${coverImageKey}/lg.webp`,
+    };
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Course cover',
+    });
+
+    return {
+      coverImageKey,
+      // The md variant — journey cards serve `${key}/md.webp`, so the
+      // immediately-usable URL matches what renders.
+      url: `${this.r2PublicUrlBase}/${keys.md}`,
+      size: variants.md.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
    * Process and store user avatar
    * Uploads to R2 and updates user record
    */

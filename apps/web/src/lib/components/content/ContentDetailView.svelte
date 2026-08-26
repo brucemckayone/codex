@@ -142,6 +142,14 @@
      * and either grants access or surfaces the next gate.
      */
     onaccessrestored?: () => void;
+    /**
+     * Journey cross-link (Codex-2pryk.3.10). When this content is a practice in
+     * a PUBLISHED course, the resolved course title + sales-page href. Drives
+     * the breadcrumb signpost (F19), the "part of a journey" context, and the
+     * free-content upsell (F20). Null / omitted → no journey chrome renders, so
+     * the creator content page (which never passes it) is unaffected.
+     */
+    journeyLink?: { title: string; salesHref: string } | null;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
   }
@@ -166,6 +174,7 @@
     accessLoading = false,
     revocationReason = null,
     onaccessrestored,
+    journeyLink = null,
     creatorAttribution,
     purchaseForm,
   }: Props = $props();
@@ -238,10 +247,10 @@
     !hasAccess && requiresSubscription && !subscriptionCoversContent
   );
   const isFollowersOnly = $derived(
-    !hasAccess && content.accessType === 'followers'
+    !hasAccess && content.isFollowerGated === true
   );
   const isTeamOnly = $derived(
-    !hasAccess && content.accessType === 'team'
+    !hasAccess && content.isTeamOnly === true
   );
 
   // Follow state — read from the localStorage-backed store hydrated by the
@@ -626,6 +635,21 @@
   >
     {accessAnnouncement}
   </div>
+
+  <!--
+    Breadcrumb signpost (Codex-2pryk.3.10 · F19) — when this piece belongs to a
+    published course, name that journey in the trail and link to its sales page.
+    Omitted entirely for standalone (non-course) content.
+  -->
+  {#if journeyLink}
+    <nav class="content-detail__breadcrumb" aria-label="Breadcrumb">
+      <a class="content-detail__breadcrumb-link" href={journeyLink.salesHref}>
+        {journeyLink.title}
+      </a>
+      <span class="content-detail__breadcrumb-sep" aria-hidden="true">›</span>
+      <span class="content-detail__breadcrumb-current">{contentTypeBadge}</span>
+    </nav>
+  {/if}
 
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
@@ -1024,6 +1048,42 @@
     {/if}
 
     <!--
+      Journey cross-link (Codex-2pryk.3.10). When this piece is a practice in a
+      published course, sit its journey context in the "ways in" area:
+        - FREE content → the F20 upsell ("keep going with {course}").
+        - everything else → the "part of a journey" context (owns-it-or-not).
+      Both link to the journey's sales page; omitted when journeyLink is null.
+    -->
+    {#if journeyLink}
+      <aside
+        class="content-detail__journey"
+        class:content-detail__journey--free={isFree}
+      >
+        <div class="content-detail__journey-text">
+          <p class="content-detail__journey-kicker">
+            {isFree
+              ? m.content_detail_journey_free_kicker()
+              : m.content_detail_journey_part_of_kicker()}
+          </p>
+          <h2 class="content-detail__journey-title">
+            {isFree
+              ? m.content_detail_journey_free_title({ course: journeyLink.title })
+              : journeyLink.title}
+          </h2>
+          <p class="content-detail__journey-body">
+            {isFree
+              ? m.content_detail_journey_free_body({ course: journeyLink.title })
+              : m.content_detail_journey_part_of_body({ course: journeyLink.title })}
+          </p>
+        </div>
+        <a class="content-detail__journey-cta" href={journeyLink.salesHref}>
+          {m.content_detail_journey_see_journey({ course: journeyLink.title })}
+          <span class="content-detail__journey-arrow" aria-hidden="true">→</span>
+        </a>
+      </aside>
+    {/if}
+
+    <!--
       Full "About" section — skipped when the short lede above already
       showed the entire description (avoids duplicate copy). Codex-8i22f.
     -->
@@ -1088,6 +1148,38 @@
     .content-detail {
       padding-bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
     }
+  }
+
+  /* Breadcrumb signpost (F19) — journey trail above the player */
+  .content-detail__breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .content-detail__breadcrumb-link {
+    color: var(--color-interactive);
+    text-decoration: none;
+    font-weight: var(--font-medium);
+    transition: var(--transition-colors);
+  }
+
+  .content-detail__breadcrumb-link:hover {
+    color: var(--color-interactive-hover);
+  }
+
+  .content-detail__breadcrumb-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
+  }
+
+  .content-detail__breadcrumb-sep {
+    color: var(--color-text-muted);
   }
 
   /* Player / Preview */
@@ -1594,6 +1686,104 @@
   :global(.content-detail__benefits-icon) {
     color: var(--color-success-600);
     flex-shrink: 0;
+  }
+
+  /* Journey cross-link card (F19/F20) — "part of a journey" + free upsell */
+  .content-detail__journey {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    background: var(--color-surface);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* Free-content upsell earns a touch more chrome — the brand-tinted card
+     signals the invitation to continue without shouting. */
+  .content-detail__journey--free {
+    background: var(--color-brand-primary-subtle);
+    border-color: var(--color-brand-accent);
+  }
+
+  .content-detail__journey-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .content-detail__journey-kicker {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: var(--text-transform-label, uppercase);
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-interactive-active);
+    margin: 0;
+  }
+
+  .content-detail__journey-title {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    margin: 0;
+  }
+
+  .content-detail__journey-body {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed);
+    margin: 0;
+  }
+
+  .content-detail__journey-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    align-self: flex-start;
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-interactive);
+    text-decoration: none;
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-md);
+    transition: var(--transition-colors);
+  }
+
+  .content-detail__journey-cta:hover {
+    color: var(--color-interactive-hover);
+    background: var(--color-surface-secondary);
+  }
+
+  .content-detail__journey-cta:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  /* Free variant: the CTA is the filled invitation, matching the purchase CTA. */
+  .content-detail__journey--free .content-detail__journey-cta {
+    background: var(--color-brand-accent);
+    color: var(--color-text-inverse);
+    border-color: transparent;
+  }
+
+  .content-detail__journey--free .content-detail__journey-cta:hover {
+    background: var(--color-brand-accent-hover);
+    color: var(--color-text-inverse);
+  }
+
+  .content-detail__journey-arrow {
+    transition: transform var(--duration-fast) var(--ease-default);
+  }
+
+  .content-detail__journey-cta:hover .content-detail__journey-arrow {
+    transform: translateX(var(--space-1));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .content-detail__journey-arrow {
+      transition: none;
+    }
   }
 
   /* Description ("About") */

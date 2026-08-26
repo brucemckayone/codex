@@ -1,0 +1,309 @@
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     THE DESCENT MAP — five gated depths, each a concurrent pool of practices.
+     A vertical ember spine draws downward on scroll; every gate + its practices
+     ignite in turn. Sequential gates (a bottleneck) · concurrent practices (peers).
+     Self-contained fragment · prefix .descent · built from window.COURSE · no assets.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .descent {
+    --descent-node: clamp(46px, 5.2vw, 62px);
+    --descent-spine-x: calc(var(--descent-node) / 2);
+    position: relative;
+    padding: clamp(3.5rem, 7.5vw, 6rem) 0 clamp(4rem, 9vw, 7rem);
+  }
+  .descent__inner { max-width: 1080px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem); }
+
+  /* ── header ── */
+  .descent__head { text-align: center; max-width: 52ch; margin: 0 auto clamp(2.6rem, 5.5vw, 4rem); }
+  .descent__head .eyebrow { display: block; margin-bottom: 1rem; }
+  .descent__title {
+    font-family: var(--serif); font-weight: 300; color: var(--bone);
+    font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.04; letter-spacing: -0.015em;
+  }
+  .descent__sub {
+    color: var(--bone-dim); margin: 1.05rem auto 0; max-width: 48ch;
+    font-size: clamp(1rem, 1.25vw, 1.14rem); line-height: 1.68;
+  }
+  .descent__stats {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .55rem;
+    margin-top: clamp(1.4rem, 3vw, 2rem);
+  }
+  .descent__stat {
+    display: inline-flex; align-items: baseline; gap: .4rem;
+    padding: .42rem .9rem; border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background: color-mix(in oklab, var(--ink-3) 45%, transparent);
+    font-size: .76rem; letter-spacing: .02em; color: var(--bone-dim);
+  }
+  .descent__stat b { font-family: var(--serif); font-weight: 500; color: var(--ember); font-size: .98rem; }
+
+  /* ── the spine + stack ── */
+  .descent__body { position: relative; }
+  .descent__spine { position: absolute; top: 0; bottom: 0; left: var(--descent-spine-x); width: 2px; transform: translateX(-50%); z-index: 0; pointer-events: none; }
+  .descent__spine-track {
+    position: absolute; inset: 0; border-radius: 2px;
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bone) 3%, transparent),
+      color-mix(in oklab, var(--bone) 15%, transparent) 12%,
+      color-mix(in oklab, var(--bone) 15%, transparent) 88%,
+      color-mix(in oklab, var(--bone) 3%, transparent));
+  }
+  .descent__spine-draw {
+    position: absolute; top: 0; left: 0; width: 100%; height: 0; border-radius: 2px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--ember) 45%, transparent), var(--ember));
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 60%, transparent);
+    transition: height .22s var(--ease);
+  }
+  .descent__spine-draw::after {
+    content: ""; position: absolute; bottom: -3px; left: 50%; width: 9px; height: 9px;
+    transform: translateX(-50%); border-radius: 50%; background: var(--ember);
+    box-shadow: 0 0 12px 2px color-mix(in oklab, var(--ember) 75%, transparent);
+  }
+
+  .descent__stages { position: relative; z-index: 1; list-style: none; display: flex; flex-direction: column; gap: clamp(2.2rem, 4.6vw, 3.4rem); }
+
+  /* ── a band: [gate] [concurrent practices] ── */
+  .descent-band {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(210px, 264px) minmax(0, 1fr);
+    column-gap: clamp(1.4rem, 3.5vw, 3rem);
+    align-items: start;
+  }
+
+  /* gate = spine node + name/gloss */
+  .descent-gate {
+    display: grid;
+    grid-template-columns: var(--descent-node) minmax(0, 1fr);
+    column-gap: clamp(.75rem, 1.6vw, 1.05rem);
+    align-items: start;
+  }
+  .descent-gate__node {
+    grid-row: 1 / span 2;
+    width: var(--descent-node); height: var(--descent-node); border-radius: 50%;
+    display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 38%, var(--ink-3), var(--ink-2));
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--bone) 10%, transparent);
+    opacity: .48; transform: scale(.94);
+    transition: opacity .6s var(--ease), transform .6s var(--ease), border-color .6s, box-shadow .6s, background .6s;
+  }
+  .descent-gate__rn { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: clamp(1.1rem, 1.7vw, 1.42rem); color: var(--bone-faint); transition: color .6s; }
+  .descent-band.is-lit .descent-gate__node {
+    opacity: 1; transform: none;
+    border-color: color-mix(in oklab, var(--ember) 60%, transparent);
+    background: radial-gradient(circle at 50% 34%, color-mix(in oklab, var(--ember) 26%, var(--ink-3)), var(--ink-2));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--ember) 22%, transparent), 0 10px 34px -14px color-mix(in oklab, var(--ember) 80%, black), inset 0 1px 0 color-mix(in oklab, var(--bone) 12%, transparent);
+  }
+  .descent-band.is-lit .descent-gate__rn { color: var(--ember); }
+
+  .descent-gate__meta { padding-top: .1rem; opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+  .descent-band.is-lit .descent-gate__meta { opacity: 1; transform: none; }
+  .descent-gate__name {
+    font-family: var(--serif); font-weight: 400; color: var(--bone);
+    font-size: clamp(1.35rem, 2.2vw, 1.85rem); line-height: 1.08; letter-spacing: -0.01em;
+  }
+  .descent-gate__gloss { color: var(--bone-faint); margin-top: .5rem; font-size: clamp(.9rem, 1vw, 1rem); line-height: 1.55; }
+
+  /* the concurrent pool — peers side by side, wrap as needed */
+  .descent-practices { display: flex; flex-wrap: wrap; gap: clamp(.7rem, 1.4vw, 1rem); }
+
+  .descent-card {
+    position: relative; flex: 1 1 178px; min-width: 0;
+    padding: 1rem 1.1rem 1.05rem; border-radius: 14px;
+    background: color-mix(in oklab, var(--ink-3) 50%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 8%, transparent);
+    opacity: 0; transform: translateY(20px);
+    transition: opacity .7s var(--ease), transform .7s var(--ease), border-color .3s var(--ease), background .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .descent-band.is-lit .descent-card { opacity: 1; transform: none; }
+  .descent-band.is-lit .descent-card:nth-child(2) { transition-delay: .06s; }
+  .descent-band.is-lit .descent-card:nth-child(3) { transition-delay: .12s; }
+  .descent-band.is-lit .descent-card:nth-child(4) { transition-delay: .18s; }
+  .descent-card:hover {
+    border-color: color-mix(in oklab, var(--ember) 45%, transparent);
+    background: color-mix(in oklab, var(--ink-3) 82%, transparent);
+    box-shadow: 0 12px 34px -20px color-mix(in oklab, var(--ember) 60%, black);
+  }
+  .descent-card__top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .55rem; }
+  .descent-card__type { display: inline-flex; align-items: center; gap: .38rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--bone-dim); }
+  .descent-card__glyph { color: var(--ember); font-size: .82rem; }
+  .descent-card__lock { font-size: .82rem; color: var(--bone-faint); flex: none; }
+  .descent-card__title { font-family: var(--serif); font-weight: 400; color: var(--bone); font-size: clamp(1.02rem, 1.25vw, 1.16rem); line-height: 1.16; }
+  .descent-card__min { margin-top: .45rem; font-size: .74rem; letter-spacing: .02em; color: var(--bone-faint); }
+
+  /* the free opening — the one door already ajar */
+  .descent-card--free {
+    border-color: color-mix(in oklab, var(--ember) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--blood) 26%, var(--ink-3)), color-mix(in oklab, var(--ink-3) 92%, transparent));
+    box-shadow: 0 10px 30px -18px color-mix(in oklab, var(--blood) 80%, black);
+  }
+  .descent-card--free .descent-card__lock { color: var(--ember); }
+  .descent-card--free:hover { border-color: var(--ember); }
+  .descent-card__flag {
+    position: absolute; top: -9px; left: 1rem;
+    background: var(--ember); color: #241a09;
+    font-size: .6rem; letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
+    padding: .16rem .55rem; border-radius: 999px;
+  }
+
+  /* closing note */
+  .descent__foot {
+    margin-top: clamp(2.6rem, 5vw, 3.6rem); padding-top: clamp(1.4rem, 3vw, 2rem);
+    border-top: 1px solid color-mix(in oklab, var(--ember) 14%, transparent);
+    text-align: center; color: var(--bone-faint); font-size: .92rem; letter-spacing: .01em;
+  }
+  .descent__foot b { color: var(--bone-dim); font-weight: 500; }
+
+  .descent-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* ── mobile: stack cleanly — gate (node + name + gloss), then its practices ── */
+  @media (max-width: 720px) {
+    .descent-band {
+      display: block; position: relative;
+      padding-left: calc(var(--descent-node) + clamp(.85rem, 3.5vw, 1.15rem));
+    }
+    .descent-gate { display: block; }
+    .descent-gate__node { position: absolute; top: 0; left: 0; }
+    .descent-gate__meta { padding-top: .15rem; }
+    .descent-gate__gloss { max-width: 46ch; }
+    .descent-practices { margin-top: clamp(.9rem, 3.5vw, 1.15rem); }
+    .descent-card { flex: 1 1 132px; }
+  }
+
+  @media (max-width: 380px) {
+    .descent-card { flex-basis: 100%; }
+  }
+
+  /* ── reduced motion: everything shown, nothing draws ── */
+  @media (prefers-reduced-motion: reduce) {
+    .descent-gate__node { opacity: 1; transform: none; transition: none; }
+    .descent-gate__meta, .descent-card { opacity: 1; transform: none; transition: none; }
+    .descent__spine-draw { transition: none; }
+    .descent__spine-draw::after { display: none; }
+  }
+</style>
+
+<section class="descent" id="map" aria-labelledby="descent-title">
+  <div class="descent__inner">
+    <header class="descent__head">
+      <span class="eyebrow">The whole descent</span>
+      <h2 class="descent__title" id="descent-title">Everything you'll walk.</h2>
+      <p class="descent__sub">Five gated depths. Within each, a handful of practices to move among freely — settle one ground before the next opens.</p>
+      <div class="descent__stats" id="descent-stats" aria-hidden="true"></div>
+    </header>
+
+    <div class="descent__body">
+      <div class="descent__spine" aria-hidden="true">
+        <span class="descent__spine-track"></span>
+        <span class="descent__spine-draw" id="descent-draw"></span>
+      </div>
+      <ol class="descent__stages" id="descent-stages"></ol>
+    </div>
+
+    <p class="descent__foot" id="descent-foot"></p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var C = window.COURSE, TM = window.TYPE_META || {};
+    var section = document.getElementById('map');
+    if (!C || !section) return;
+
+    var ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'];
+    var stagesEl = section.querySelector('#descent-stages');
+    var statsEl = section.querySelector('#descent-stats');
+    var footEl = section.querySelector('#descent-foot');
+    var body = section.querySelector('.descent__body');
+    var draw = section.querySelector('#descent-draw');
+
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    /* ── build the stack from the shared course object ── */
+    var bands = [];
+    (C.stages || []).forEach(function (s, si) {
+      var cards = (s.lessons || []).map(function (l) {
+        var meta = TM[l.type] || { label: l.type, glyph: '•' };
+        var free = !!l.free;
+        var srState = free
+          ? '<span class="descent-sr">free preview</span>'
+          : '<span class="descent-sr">included with membership</span>';
+        return '<article class="descent-card' + (free ? ' descent-card--free' : '') + '">'
+          + (free ? '<span class="descent-card__flag">free</span>' : '')
+          + '<div class="descent-card__top">'
+            + '<span class="descent-card__type"><span class="descent-card__glyph" aria-hidden="true">' + meta.glyph + '</span>' + esc(meta.label) + '</span>'
+            + '<span class="descent-card__lock" aria-hidden="true">' + (free ? '▶' : '🔒') + '</span>'
+          + '</div>'
+          + '<h4 class="descent-card__title">' + esc(l.t) + '</h4>'
+          + '<p class="descent-card__min">' + esc(l.min) + ' min</p>'
+          + srState
+        + '</article>';
+      }).join('');
+
+      var band = document.createElement('li');
+      band.className = 'descent-band';
+      band.innerHTML =
+        '<div class="descent-gate">'
+          + '<span class="descent-gate__node" aria-hidden="true"><span class="descent-gate__rn">' + (ROMAN[si] || (si + 1)) + '</span></span>'
+          + '<div class="descent-gate__meta">'
+            + '<h3 class="descent-gate__name">' + esc(s.n) + '</h3>'
+            + '<p class="descent-gate__gloss">' + esc(s.gloss) + '</p>'
+          + '</div>'
+        + '</div>'
+        + '<div class="descent-practices">' + cards + '</div>';
+      stagesEl.appendChild(band);
+      bands.push(band);
+    });
+
+    /* ── header stats + closing note, derived from the data ── */
+    var t = C.totals || {};
+    if (statsEl) {
+      statsEl.innerHTML =
+        '<span class="descent__stat"><b>' + (C.stages ? C.stages.length : 0) + '</b> gated depths</span>'
+        + '<span class="descent__stat"><b>' + (t.total || 0) + '</b> practices</span>'
+        + '<span class="descent__stat">≈ <b>' + (t.minutes || 0) + '</b> min in all</span>';
+    }
+    if (footEl) {
+      footEl.innerHTML = 'One door is already ajar. <b>' + esc(C.priceNote || 'Included with membership · £12 a month') + '</b>';
+    }
+
+    /* ── the descent: a single monotonic scroll value grows the spine and,
+          as the ember passes each gate node, ignites that gate + its practices ── */
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function lightAll() {
+      bands.forEach(function (b) { b.classList.add('is-lit'); });
+      if (draw) draw.style.height = '100%';
+    }
+    if (reduce) { lightAll(); return; }
+
+    var maxDrawn = 0, ticking = false;
+    function update() {
+      ticking = false;
+      var br = body.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var ref = vh * 0.62;                                   // the descending "reach" line
+      var drawn = Math.max(0, Math.min(br.height, ref - br.top));
+      if (drawn > maxDrawn) maxDrawn = drawn;                // monotonic — the path stays walked
+      if (draw) draw.style.height = maxDrawn + 'px';
+      for (var i = 0; i < bands.length; i++) {
+        if (bands[i].classList.contains('is-lit')) continue;
+        var node = bands[i].querySelector('.descent-gate__node');
+        var r = node.getBoundingClientRect();
+        var cy = (r.top - br.top) + r.height / 2;            // node centre, relative to body top
+        if (maxDrawn >= cy - 6) bands[i].classList.add('is-lit');
+      }
+    }
+    function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(update); } }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', function () { maxDrawn = 0; onScroll(); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(onScroll);
+    requestAnimationFrame(update);
+    setTimeout(update, 400);
+  })();
+</script>

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rootwork · your journey · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ── Rootwork · JOURNEY PORTAL ──────────────────────────────────
+     One job: the map + the threshold. Shows the whole arc, how far
+     you are, and ONE way back in (Continue). It does NOT play — the
+     player lives on content-incourse.html. Single column, the PAGE
+     scrolls (no fixed-height rail), so mobile is first-class. */
+  body { background: #100b07; }
+  .portal { max-width: 780px; margin: 53px auto 0; padding: clamp(1.8rem,5vw,3.4rem) clamp(1.1rem,4vw,2rem) 5rem; }
+
+  /* header */
+  .p-head .k { font-size: .7rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ember); }
+  .p-head h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(2.4rem,7vw,3.6rem); line-height: 1; margin: .35rem 0 .6rem; }
+  .p-head .lede { color: var(--bone-dim); font-size: 1.02rem; max-width: 52ch; line-height: 1.6; }
+  .p-prog { margin-top: 1.5rem; }
+  .p-prog .bar { height: 7px; border-radius: 999px; background: color-mix(in oklab, var(--bone) 12%, transparent); overflow: hidden; }
+  .p-prog .bar > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--blood), var(--ember)); }
+  .p-prog .lbl { margin-top: .6rem; font-size: .82rem; color: var(--bone-faint); }
+  .p-prog .lbl b { color: var(--bone-dim); font-weight: 500; }
+
+  /* ── the Continue card — the single threshold ── */
+  .cont { display: flex; gap: 1.2rem; align-items: stretch; margin: 2.2rem 0 2.8rem; padding: 1rem; border-radius: 20px;
+    background: color-mix(in oklab, var(--ember) 9%, var(--ink-2)); border: 1px solid color-mix(in oklab, var(--ember) 30%, transparent);
+    box-shadow: 0 20px 60px -30px color-mix(in oklab, var(--ember) 60%, black); transition: transform .18s var(--ease), border-color .18s; }
+  .cont:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--ember) 55%, transparent); }
+  .cont__media { flex: none; width: clamp(120px, 30vw, 200px); border-radius: 13px; position: relative; display: grid; place-items: center; overflow: hidden;
+    background: radial-gradient(130% 120% at 50% 0%, color-mix(in oklab, var(--blood) 52%, var(--ink-2)), #0c0805); }
+  .cont__media .play { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; font-size: 1.15rem; color: #241a09;
+    background: color-mix(in oklab, var(--ember) 92%, white); box-shadow: 0 8px 26px -6px color-mix(in oklab, var(--ember) 70%, black); }
+  .cont__media .pct { position: absolute; bottom: .5rem; left: .6rem; font-size: .7rem; color: var(--bone-dim); background: color-mix(in oklab, #0c0805 70%, transparent); padding: .12rem .45rem; border-radius: 999px; }
+  .cont__body { display: flex; flex-direction: column; justify-content: center; padding: .5rem .6rem .5rem 0; min-width: 0; }
+  .cont__body .ck { font-size: .68rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ember); }
+  .cont__body h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(1.5rem,4.5vw,2rem); line-height: 1.1; margin: .3rem 0 .35rem; color: var(--bone); }
+  .cont__body .cmeta { font-size: .84rem; color: var(--bone-faint); }
+  .cont__body .cresume { margin-top: 1rem; align-self: flex-start; display: inline-flex; align-items: center; gap: .5rem; padding: .7rem 1.3rem; border-radius: 999px; font-weight: 600; font-size: .92rem;
+    background: linear-gradient(180deg, var(--ember), var(--ochre)); color: #241a09; }
+  .cont__body .cresume .arrow { transition: transform .18s var(--ease); }
+  .cont:hover .cresume .arrow { transform: translateX(3px); }
+
+  /* ── the map — stages as an accordion ── */
+  .map-k { font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; color: var(--bone-faint); margin-bottom: 1rem; }
+  .stage { border: 1px solid color-mix(in oklab, var(--bone) 9%, transparent); border-radius: 15px; margin-bottom: .7rem; overflow: hidden; background: color-mix(in oklab, var(--ink) 45%, transparent); }
+  .stage[open] { border-color: color-mix(in oklab, var(--bone) 16%, transparent); background: color-mix(in oklab, var(--ink-2) 55%, transparent); }
+  .stage.is-cur { border-color: color-mix(in oklab, var(--ember) 34%, transparent); }
+  .stage__head { display: flex; align-items: center; gap: .85rem; padding: 1.05rem 1.2rem; cursor: pointer; list-style: none; }
+  .stage__head::-webkit-details-marker { display: none; }
+  .stage__head .rn { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-style: italic; font-size: .92rem;
+    color: var(--bone-dim); border: 1px solid color-mix(in oklab, var(--bone) 18%, transparent); }
+  .stage.is-done .rn { background: color-mix(in oklab, var(--ember) 20%, transparent); border-color: transparent; color: var(--ember); }
+  .stage.is-cur .rn { border-color: var(--ember); color: var(--ember); box-shadow: 0 0 12px 1px color-mix(in oklab, var(--ember) 35%, transparent); }
+  .stage__head .col { min-width: 0; flex: 1; }
+  .stage__head .sn { font-family: var(--serif); font-size: 1.2rem; color: var(--bone); display: block; line-height: 1.15; }
+  .stage__head .sg { font-size: .82rem; color: var(--bone-faint); display: block; margin-top: .12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage__head .scount { flex: none; font-size: .76rem; color: var(--bone-faint); font-variant-numeric: tabular-nums; }
+  .stage__head .chev { flex: none; color: var(--bone-faint); transition: transform .2s var(--ease); }
+  .stage[open] .chev { transform: rotate(90deg); }
+
+  .stage__lessons { padding: 0 .7rem .7rem; }
+  .lrow { display: flex; gap: .8rem; align-items: center; padding: .65rem .7rem; border-radius: 11px; transition: background .15s; }
+  .lrow:hover { background: color-mix(in oklab, var(--bone) 6%, transparent); }
+  .lrow.cur { background: color-mix(in oklab, var(--ember) 12%, transparent); }
+  .lrow .ic { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: .68rem;
+    border: 1.5px solid color-mix(in oklab, var(--bone) 26%, transparent); color: var(--bone-faint); }
+  .lrow .ic.done { background: var(--ember); border-color: var(--ember); color: #241a09; }
+  .lrow .ic.cur { border-color: var(--ember); color: var(--ember); box-shadow: 0 0 10px 1px color-mix(in oklab, var(--ember) 40%, transparent); }
+  .lrow .col { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+  .lrow .lt { font-family: var(--serif); font-size: 1.02rem; color: var(--bone); line-height: 1.2; }
+  .lrow.done .lt { color: var(--bone-dim); }
+  .lrow .lm { font-size: .72rem; color: var(--bone-faint); margin-top: .12rem; }
+  .lrow .go { flex: none; font-size: .78rem; color: var(--ember); opacity: 0; transition: opacity .15s; }
+  .lrow.cur .go, .lrow:hover .go { opacity: 1; }
+
+  @media (max-width: 560px) {
+    .cont { flex-direction: column; }
+    .cont__media { width: 100%; aspect-ratio: 16/8; }
+    .stage__head .sg { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Rootwork · your journey</span>
+  <nav>
+    <a href="course-sell.html">The course</a>
+    <a href="course-dashboard.html" class="on">Your journey</a>
+    <a href="library.html">Library</a>
+  </nav>
+</div>
+
+<div class="portal">
+  <header class="p-head">
+    <p class="k">Your journey</p>
+    <h1 id="p-title"></h1>
+    <p class="lede" id="p-lede"></p>
+    <div class="p-prog">
+      <div class="bar"><i id="p-bar"></i></div>
+      <p class="lbl" id="p-label"></p>
+    </div>
+  </header>
+
+  <!-- the single threshold back in -->
+  <a class="cont" id="cont" href="content-incourse.html">
+    <div class="cont__media"><span class="play" id="c-play">▶</span><span class="pct" id="c-pct"></span></div>
+    <div class="cont__body">
+      <p class="ck">Continue where you left off</p>
+      <h2 id="c-title"></h2>
+      <p class="cmeta" id="c-meta"></p>
+      <span class="cresume">Resume <span class="arrow">→</span></span>
+    </div>
+  </a>
+
+  <!-- the whole arc -->
+  <section class="map">
+    <p class="map-k">The whole arc — five stages</p>
+    <div id="stages"></div>
+  </section>
+</div>
+
+<script src="course-data.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, TM = window.TYPE_META;
+  const roman = ['i','ii','iii','iv','v','vi'];
+
+  // ?state=new forces the first-run "Begin" arrival — nothing done, the current practice is the
+  // very first one — mirroring library.html's ?state=new. The COURSE seed ships with done:4, so
+  // without this override the dashboard can never reach its own first-run branch. Purely a render
+  // override; the shared COURSE seed is left untouched. (F: New-Member arrival walkable end-to-end)
+  const firstRun = new URLSearchParams(location.search).get('state') === 'new';
+  const t = firstRun ? { ...C.totals, done: 0, pct: 0 } : C.totals;
+  const isDone = (l) => !firstRun && l.done;
+  const isCur = (l, si, li) => firstRun ? (si === 0 && li === 0) : !!l.current;
+
+  // header
+  document.getElementById('p-title').textContent = C.title;
+  document.getElementById('p-lede').textContent = C.lede;
+  document.getElementById('p-bar').style.width = t.pct + '%';
+  document.getElementById('p-label').innerHTML =
+    `<b>${t.done} of ${t.total}</b> practices · ${t.pct}% through`;
+
+  // flat index of each stage's first lesson — link the card & rows straight to the practice
+  const stageOffset = []; { let a = 0; C.stages.forEach((s, i) => { stageOffset[i] = a; a += s.lessons.length; }); }
+
+  // continue card = the current lesson (or first if none marked)
+  const cur = firstRun ? C.flat[0] : (C.flat.find(l => l.current) || C.flat.find(l => !l.done) || C.flat[0]);
+  const cm = TM[cur.type];
+  const curIdx = C.flat.indexOf(cur);
+  document.getElementById('cont').setAttribute('href', 'content-incourse.html?i=' + curIdx);
+  document.getElementById('c-play').textContent = cur.type === 'reflection' ? '✎' : '▶';
+  document.getElementById('c-pct').textContent = `${t.pct}%`;
+  document.getElementById('c-title').textContent = cur.t;
+  document.getElementById('c-meta').textContent =
+    `Stage ${roman[cur.stageIndex]} · ${cur.stage} · ${cm.label} · ${cur.min} min`;
+
+  // state-aware framing — a brand-new member hasn't "left off" anywhere; a finisher revisits
+  const ck = document.querySelector('.cont .ck'), resume = document.querySelector('.cont .cresume');
+  if (t.done === 0) { ck.textContent = 'Begin your journey'; resume.innerHTML = 'Begin <span class="arrow">→</span>'; }
+  else if (t.done === t.total) { ck.textContent = 'You’ve walked this whole journey'; resume.innerHTML = 'Revisit <span class="arrow">→</span>'; }
+  else { ck.textContent = 'Continue where you left off'; resume.innerHTML = 'Resume <span class="arrow">→</span>'; }
+
+  // the map — one <details> per stage; current stage open, done stages collapsed
+  const wrap = document.getElementById('stages');
+  C.stages.forEach((s, si) => {
+    const done = s.lessons.filter(l => isDone(l)).length;
+    const hasCur = s.lessons.some((l, li) => isCur(l, si, li));
+    const allDone = done === s.lessons.length;
+    const cls = 'stage' + (hasCur ? ' is-cur' : (allDone ? ' is-done' : ''));
+
+    const det = document.createElement('details');
+    det.className = cls;
+    if (hasCur) det.open = true;
+
+    const lessons = s.lessons.map((l, li) => {
+      const m = TM[l.type];
+      const fi = stageOffset[si] + li;
+      const state = isDone(l) ? 'done' : (isCur(l, si, li) ? 'cur' : 'up');
+      const glyph = isDone(l) ? '✓' : (isCur(l, si, li) ? '●' : m.glyph);
+      return `<a class="lrow ${state}" href="content-incourse.html?i=${fi}">
+          <span class="ic ${state}">${glyph}</span>
+          <span class="col"><span class="lt">${l.t}</span><span class="lm">${m.label} · ${l.min} min</span></span>
+          <span class="go">${isCur(l, si, li) ? 'Resume →' : 'Open →'}</span>
+        </a>`;
+    }).join('');
+
+    det.innerHTML =
+      `<summary class="stage__head">
+        <span class="rn">${roman[si]}</span>
+        <span class="col"><span class="sn">${s.n}</span><span class="sg">${s.gloss}</span></span>
+        <span class="scount">${done}/${s.lessons.length}</span>
+        <span class="chev">›</span>
+      </summary>
+      <div class="stage__lessons">${lessons}</div>`;
+    wrap.appendChild(det);
+  });
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

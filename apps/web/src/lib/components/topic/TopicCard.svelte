@@ -1,14 +1,27 @@
 <!--
   @component TopicCard
 
-  An image-led "Browse by topic" card: a cover photo (or brand-duotone gradient
-  fallback when the category has no cover) under a legibility scrim, with the
-  topic name — plus an optional glyph and blurb — anchored at the bottom.
+  An image-led "Browse by topic" plate: a cover photo under a legibility scrim,
+  with the topic name — plus an optional blurb — anchored at the bottom behind a
+  short editorial rule.
+
+  IMAGE TREATMENT: none. Covers render in their own colour. A previous revision
+  greyscaled each photo and re-tinted it through the brand hue
+  (`mix-blend-mode: color`) to force a mismatched set into one family; that read
+  as out-of-brand and was reverted — brand belongs in the chrome (rule, ink,
+  fallback gradient), not painted over photography. The only hover treatment is
+  a slow scale, so nothing about the image's colour changes on interaction.
+
+  NO EMOJI. An emoji glyph is painted by the platform's colour-emoji font, so it
+  ignores every colour, weight and family token in the system — it is the one
+  element the design system cannot style. Categories may still CARRY an `icon`
+  in the database; this card deliberately does not render it. Identity here is
+  typographic: the heading face, and (when there is no cover) a large ghosted
+  initial behind the label.
 
   The whole card is a SINGLE stretched anchor (one tab stop, one focus ring),
-  mirroring CreatorCarouselCard and the approved mockup. Because the card has no
-  nested interactive element, no `::after` escape trick is needed — the `<a>`
-  IS the card.
+  mirroring CreatorCarouselCard. Because the card has no nested interactive
+  element, no `::after` escape trick is needed — the `<a>` IS the card.
 
   Dual interaction contract:
     • It ALWAYS renders a real `href`, so with JS disabled — and for
@@ -25,9 +38,8 @@
   @prop {string} name - Topic display name; the card's primary label + a11y name.
   @prop {string} slug - Topic slug; passed to `onselect` for inline filtering.
   @prop {string} href - Deep-link destination (real navigation / JS-off / new tab).
-  @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient fallback.
-  @prop {string | null} [icon] - Emoji glyph rendered as text above the name.
-  @prop {string | null} [description] - Optional one-line blurb under the name.
+  @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient + initial.
+  @prop {string | null} [description] - Optional short blurb under the name.
   @prop {(slug: string) => void} [onselect] - Optional inline-filter hook (WP-10).
 -->
 <script lang="ts">
@@ -36,7 +48,6 @@
     slug: string;
     href: string;
     coverImageUrl?: string | null;
-    icon?: string | null;
     description?: string | null;
     onselect?: (slug: string) => void;
   }
@@ -46,10 +57,16 @@
     slug,
     href,
     coverImageUrl = null,
-    icon = null,
     description = null,
     onselect,
   }: Props = $props();
+
+  /**
+   * Ghosted initial for the no-cover plate — the typographic stand-in that
+   * replaced the emoji glyph. Empty string when the name is blank/whitespace, so
+   * the mark simply does not render rather than painting a stray box.
+   */
+  const markGlyph = $derived(name.trim().charAt(0).toUpperCase());
 
   /**
    * Left-click with `onselect` set → filter inline instead of navigating.
@@ -81,11 +98,12 @@
       <img src={coverImageUrl} alt="" loading="lazy" decoding="async" />
     {/if}
   </div>
+  {#if !coverImageUrl && markGlyph}
+    <span class="topic-card__mark" aria-hidden="true">{markGlyph}</span>
+  {/if}
   <div class="topic-card__scrim" aria-hidden="true"></div>
   <div class="topic-card__label">
-    {#if icon}
-      <span class="topic-card__icon" aria-hidden="true">{icon}</span>
-    {/if}
+    <span class="topic-card__rule" aria-hidden="true"></span>
     <h3 class="topic-card__name">{name}</h3>
     {#if description}
       <p class="topic-card__desc">{description}</p>
@@ -98,9 +116,15 @@
     position: relative;
     display: flex;
     align-items: flex-end;
+    /* Wide and shallow: a topic is a signpost, not a piece of content, so it
+       reads as a band rather than a block. 4:3 made the rail tower over the
+       portrait content cards it sits beside. */
     aspect-ratio: 16 / 9;
     border-radius: var(--radius-card);
     overflow: hidden;
+    /* Contains this card's internal z-index stack (media / mark / scrim /
+       label) so those values can't interleave with page-level stacked UI. */
+    isolation: isolate;
     border: var(--border-width) var(--border-style) var(--color-border);
     text-decoration: none;
     transition:
@@ -137,7 +161,7 @@
     transform: scale(var(--card-image-hover-scale, 1.05));
   }
 
-  /* No cover → soft brand duotone that re-themes per org and stays legible
+  /* No cover → soft brand gradient that re-themes per org and stays legible
      under the scrim on both light and dark backgrounds (each brand hue is
      mixed toward --color-surface so it never blows out). */
   .topic-card__media--fallback {
@@ -155,35 +179,68 @@
       );
   }
 
+  /* Typographic stand-in for the retired emoji: the topic's initial, set in the
+     heading face and ghosted back so it reads as texture, not a label. Only
+     ever paired with the no-cover gradient. */
+  .topic-card__mark {
+    position: absolute;
+    z-index: 1;
+    /* Fully inside the plate. Letting it bleed off the top edge got clipped by
+       the border radius and read as a rendering fault rather than a device. */
+    top: var(--space-2);
+    right: var(--space-3);
+    font-family: var(--font-heading);
+    /* One step down from --text-display: on the shallow band that token
+       (up to 5rem) filled ~40% of the plate and stopped reading as texture. */
+    font-size: var(--text-5xl);
+    line-height: var(--leading-none);
+    color: color-mix(in srgb, var(--media-glyph) 13%, transparent);
+    pointer-events: none;
+    user-select: none;
+  }
+
   /* Bottom-anchored legibility scrim built from --media-scrim (WP-7) so the
-     label keeps contrast over any cover on any brand. */
+     label keeps contrast over any cover on any brand.
+
+     Stops are tuned to the plate's aspect, not chosen freely: --media-scrim is
+     an OPAQUE colour, so all the alpha comes from the ramp. The label block
+     covers the bottom ~61% of a 16:9 plate (it covered ~46% of the old 4:3
+     one), so the mid stop has to sit higher or the hairline rule and the top of
+     a two-line name fall into the faded zone — which is exactly what happens on
+     a bright cover. */
   .topic-card__scrim {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 2;
     background: linear-gradient(
       to top,
       var(--media-scrim),
-      color-mix(in srgb, var(--media-scrim) 55%, transparent) 45%,
-      transparent 80%
+      color-mix(in srgb, var(--media-scrim) 66%, transparent) 55%,
+      transparent
     );
   }
 
   .topic-card__label {
     position: relative;
-    z-index: 2;
+    z-index: 3;
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--space-1-5);
     width: 100%;
+    /* Tighter top pad than the old 4:3 plate — on a shallow band the label
+       block is a larger share of the height, so extra lead-in crowds it. */
     padding: var(--space-4);
     /* Near-white, brand-tinted ink — never dark-on-dark over the scrim. */
     color: var(--media-glyph);
   }
 
-  .topic-card__icon {
-    font-size: var(--text-xl);
-    line-height: var(--leading-tight);
+  /* Short editorial rule, echoing the section lede's hairline — the visual
+     anchor the emoji used to (badly) provide. */
+  .topic-card__rule {
+    width: var(--space-6);
+    height: var(--border-width);
+    margin-bottom: var(--space-0-5);
+    background: color-mix(in srgb, var(--media-glyph) 45%, transparent);
   }
 
   .topic-card__name {
@@ -192,6 +249,16 @@
     font-size: var(--text-xl);
     line-height: var(--leading-tight);
     color: var(--media-glyph);
+    /* Two lines: a long topic name ("Ancestral Medicine") must not be clipped
+       to an ellipsis mid-word the way a single line forced. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    /* Long single words (a slug-ish name) shrink the min-content width instead
+       of overflowing the plate. */
+    overflow-wrap: anywhere;
   }
 
   .topic-card__desc {
@@ -199,12 +266,14 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     color: color-mix(in srgb, var(--media-glyph) 82%, transparent);
-    /* One line — the blurb is a hint, not the headline. */
+    /* Two lines — enough for a real sentence to land, so the blurb stops
+       truncating mid-word after four words. */
     display: -webkit-box;
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    overflow-wrap: anywhere;
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -12,6 +12,7 @@
 import {
   buildContentUrl as buildContentUrlInner,
   buildCreatorsUrl as buildCreatorsUrlInner,
+  buildJourneyUrl as buildJourneyUrlInner,
   buildOrgUrl as buildOrgUrlInner,
   buildPlatformUrl as buildPlatformUrlInner,
   parseHost,
@@ -52,6 +53,8 @@ export const buildOrgUrl = buildOrgUrlInner;
 export const buildCreatorsUrl = buildCreatorsUrlInner;
 export const buildPlatformUrl = buildPlatformUrlInner;
 export const buildContentUrl = buildContentUrlInner;
+/** Journeys build (Codex-2pryk · WP-0) — sibling of buildContentUrl for course pages. */
+export const buildJourneyUrl = buildJourneyUrlInner;
 
 /**
  * Determine the context type from a hostname.

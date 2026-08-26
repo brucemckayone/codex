@@ -1,0 +1,280 @@
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     THE GUIDE — credibility, warmly. Candlelit abstract "poster" that doubles as a
+     "meet your guide" video play-frame (mock — no real video, no external assets).
+     Self-contained fragment · prefix .guide · CSP-safe.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .guide { position: relative; padding: clamp(4.5rem, 10vw, 8rem) 0; }
+  .guide__inner {
+    max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem);
+    display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+    gap: clamp(2.2rem, 5.5vw, 4.75rem); align-items: center;
+  }
+
+  /* ── the play-frame: candlelit abstract poster, now an interactive button ── */
+  .guide__player {
+    position: relative; display: block; aspect-ratio: 4 / 5; width: 100%;
+    padding: 0; text-align: left; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: clamp(20px, 3vw, 28px); overflow: hidden; isolation: isolate;
+    border: 1px solid color-mix(in oklab, var(--ember) 20%, transparent);
+    /* stacked warmth: firelight rising from lower-centre, clay presence upper-left, deep body */
+    background:
+      radial-gradient(46% 58% at 50% 64%, color-mix(in oklab, var(--ember) 60%, transparent), transparent 68%),
+      radial-gradient(90% 72% at 32% 26%, color-mix(in oklab, var(--clay) 62%, transparent), transparent 66%),
+      radial-gradient(120% 120% at 62% 8%, color-mix(in oklab, var(--rose) 26%, transparent), transparent 55%),
+      linear-gradient(178deg, color-mix(in oklab, var(--blood-deep) 78%, #160d0a), #150c0a 82%);
+    box-shadow:
+      0 40px 90px -50px color-mix(in oklab, var(--blood) 90%, black),
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 14%, transparent);
+    transition: box-shadow .4s var(--ease), transform .4s var(--ease);
+  }
+  .guide__player:hover { box-shadow: 0 48px 100px -48px color-mix(in oklab, var(--blood) 95%, black), inset 0 1px 0 color-mix(in oklab, var(--bone) 18%, transparent); }
+  .guide__player:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; }
+
+  /* inner vignette — darkens the edges so the warm centre reads as depth */
+  .guide__player::before {
+    content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+    background: radial-gradient(78% 78% at 50% 52%, transparent 42%, color-mix(in oklab, #100a06 88%, transparent) 100%);
+  }
+  /* top sheen — candlelight catching the upper edge */
+  .guide__player::after {
+    content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 10%, transparent), transparent 22%);
+  }
+  /* the ember: a soft, tall, warm glow that breathes like a lit form */
+  .guide__ember {
+    position: absolute; left: 50%; bottom: 14%; z-index: 1;
+    width: 58%; aspect-ratio: 3 / 4; transform: translateX(-50%);
+    background: radial-gradient(50% 50% at 50% 55%, color-mix(in oklab, var(--ember) 78%, transparent), color-mix(in oklab, var(--ochre) 30%, transparent) 55%, transparent 72%);
+    filter: blur(14px);
+    animation: guide-breathe 7.5s var(--ease) infinite;
+  }
+  /* fine grain for texture */
+  .guide__grain {
+    position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: .14;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='gn'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23gn)'/%3E%3C/svg%3E");
+  }
+  /* scrim — dims the poster while "playing" so the pause + progress read clearly */
+  .guide__scrim {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    background: color-mix(in oklab, #100a06 55%, transparent);
+    opacity: 0; transition: opacity .5s var(--ease);
+  }
+  .guide__player.is-playing .guide__scrim { opacity: 1; }
+
+  /* corner label — top-left, soft video title */
+  .guide__watch {
+    position: absolute; z-index: 6; top: clamp(.9rem, 2.2vw, 1.2rem); left: clamp(.9rem, 2.4vw, 1.2rem);
+    display: inline-flex; align-items: center; gap: .5em;
+    padding: .38rem .7rem; border-radius: 999px;
+    font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+    color: color-mix(in oklab, var(--bone) 78%, transparent);
+    background: color-mix(in oklab, var(--ink) 52%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent);
+    backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  }
+  .guide__watch::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 80%, transparent); }
+
+  /* duration badge — bottom-right */
+  .guide__duration {
+    position: absolute; z-index: 6; right: clamp(.9rem, 2.4vw, 1.2rem); bottom: clamp(.9rem, 2.2vw, 1.2rem);
+    padding: .26rem .55rem; border-radius: 8px;
+    font-size: .72rem; font-weight: 600; letter-spacing: .04em; font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--bone) 88%, transparent);
+    background: color-mix(in oklab, var(--ink) 62%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  }
+
+  /* ── centre play button + rings ── */
+  .guide__play {
+    position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: clamp(62px, 12vw, 84px); aspect-ratio: 1; border-radius: 50%;
+    display: grid; place-items: center;
+    color: #2a1c08;
+    background: linear-gradient(180deg, var(--ember), var(--ochre));
+    box-shadow: 0 12px 34px -8px color-mix(in oklab, var(--ember) 70%, black);
+    transition: transform .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .guide__player:hover .guide__play { transform: translate(-50%, -50%) scale(1.07); box-shadow: 0 16px 42px -8px color-mix(in oklab, var(--ember) 82%, black); }
+  /* static rim ring */
+  .guide__play::before {
+    content: ""; position: absolute; inset: -9px; border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 40%, transparent);
+  }
+  /* continuous invitation pulse (idle only) */
+  .guide__play::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 1.5px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: guide-ping 3.2s var(--ease) infinite;
+  }
+  .guide__player.is-playing .guide__play::after { animation: none; opacity: 0; }
+
+  /* one-shot ripple fired on each click */
+  .guide__ripple {
+    position: absolute; inset: 0; border-radius: 50%; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle, color-mix(in oklab, var(--ember) 45%, transparent), transparent 65%);
+  }
+  .guide__ripple.is-on { animation: guide-ripple .7s var(--ease); }
+
+  /* play / pause icons cross-fade */
+  .guide__icon { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity .32s var(--ease), transform .32s var(--ease); }
+  .guide__icon--play svg { display: block; margin-left: 3px; } /* optical centring of the triangle */
+  .guide__icon--pause { gap: 5px; }
+  .guide__icon--pause i { width: 5px; height: 22px; border-radius: 2px; background: currentColor; display: block; }
+  .guide__player:not(.is-playing) .guide__icon--pause { opacity: 0; transform: scale(.6); }
+  .guide__player.is-playing .guide__icon--play { opacity: 0; transform: scale(.6); }
+
+  /* faux progress bar along the bottom edge (visible while playing) */
+  .guide__progress { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in oklab, var(--bone) 12%, transparent); opacity: 0; transition: opacity .4s var(--ease); }
+  .guide__player.is-playing .guide__progress { opacity: 1; }
+  .guide__progress-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ochre), var(--ember)); }
+  .guide__player.is-playing .guide__progress-fill { animation: guide-progress 9s linear forwards; }
+
+  /* ── the copy ── */
+  .guide__text { max-width: 40rem; }
+  .guide__role {
+    font-family: var(--sans); font-size: .76rem; font-weight: 600;
+    letter-spacing: .3em; text-transform: uppercase; color: var(--ember);
+    margin-bottom: 1rem;
+  }
+  .guide__heading {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.05rem); line-height: 1.06; letter-spacing: -0.015em;
+    color: var(--bone); max-width: 22ch;
+  }
+  .guide__body {
+    color: var(--bone-dim); font-size: clamp(1.02rem, 1.15vw, 1.12rem);
+    line-height: 1.72; max-width: 46ch; margin-top: 1.5rem;
+  }
+  /* ── pull quote: the emotional climax — big italic serif, ember accent ── */
+  .guide__quote {
+    position: relative; margin-top: clamp(2rem, 3.5vw, 2.75rem);
+    padding-left: clamp(1.2rem, 2.4vw, 1.7rem);
+    border-left: 2px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    max-width: 27ch;
+  }
+  .guide__quote::before {
+    content: "\201C"; position: absolute; left: clamp(.7rem, 1.8vw, 1.1rem); top: -.35em;
+    font-family: var(--serif); font-size: clamp(2.6rem, 6vw, 4rem); line-height: 1;
+    color: color-mix(in oklab, var(--ember) 34%, transparent); pointer-events: none;
+  }
+  .guide__quote p {
+    font-family: var(--serif); font-style: italic; font-weight: 300;
+    font-size: clamp(1.5rem, 3.2vw, 2.15rem); line-height: 1.28; letter-spacing: -0.01em;
+    color: color-mix(in oklab, var(--rose) 55%, var(--bone));
+  }
+
+  /* ── reveal-on-scroll (namespaced; toggled by this section's own IIFE) ── */
+  .guide-reveal { opacity: 0; transform: translateY(22px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--gd, 0s); }
+  .guide-reveal.is-in { opacity: 1; transform: none; }
+  .guide__player.guide-reveal { transform: translateY(22px) scale(.985); }
+  .guide__player.guide-reveal.is-in { transform: none; }
+
+  @keyframes guide-breathe {
+    0%, 100% { opacity: .55; transform: translateX(-50%) scale(1); }
+    50%      { opacity: .9;  transform: translateX(-50%) translateY(-2%) scale(1.06); }
+  }
+  @keyframes guide-ping {
+    0%   { transform: scale(1);    opacity: .7; }
+    70%, 100% { transform: scale(1.7); opacity: 0; }
+  }
+  @keyframes guide-ripple {
+    0%   { transform: scale(.4); opacity: .55; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  @keyframes guide-progress {
+    0% { width: 0; } 100% { width: 100%; }
+  }
+
+  /* ── mobile: stack, poster first, capped so it doesn't dominate ── */
+  @media (max-width: 860px) {
+    .guide__inner { grid-template-columns: 1fr; gap: clamp(2rem, 7vw, 3rem); }
+    .guide__player { max-width: 420px; margin: 0 auto; aspect-ratio: 5 / 6; }
+    .guide__text { max-width: none; }
+    .guide__heading, .guide__body, .guide__quote { max-width: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .guide__ember { animation: none; }
+    .guide__play::after { animation: none; opacity: 0; }
+    .guide__ripple.is-on { animation: none; }
+    .guide__player.is-playing .guide__progress-fill { animation: none; width: 40%; } /* final state, no motion */
+    .guide-reveal, .guide__player.guide-reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+
+<section class="guide" id="guide" aria-labelledby="guide-heading">
+  <div class="guide__inner">
+    <button type="button" class="guide__player guide-reveal" aria-pressed="false"
+            aria-label="Play the meet-your-guide video, 2 minutes 4 seconds">
+      <span class="guide__ember" aria-hidden="true"></span>
+      <span class="guide__grain" aria-hidden="true"></span>
+      <span class="guide__scrim" aria-hidden="true"></span>
+
+      <span class="guide__watch" aria-hidden="true">Watch · meet your guide</span>
+      <span class="guide__duration" aria-hidden="true">2:04</span>
+
+      <span class="guide__play" aria-hidden="true">
+        <span class="guide__ripple"></span>
+        <span class="guide__icon guide__icon--play">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">
+            <path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.14-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/>
+          </svg>
+        </span>
+        <span class="guide__icon guide__icon--pause"><i></i><i></i></span>
+      </span>
+
+      <span class="guide__progress" aria-hidden="true"><span class="guide__progress-fill"></span></span>
+    </button>
+
+    <div class="guide__text">
+      <p class="guide__role guide-reveal" style="--gd:.06s">Your guide</p>
+      <h2 class="guide__heading guide-reveal" id="guide-heading" style="--gd:.14s">Made by someone who had to find the ground first.</h2>
+      <p class="guide__body guide-reveal" style="--gd:.24s">Of Blood and Bones grew out of one practitioner's own long descent — years of somatic training, trauma-informed practice, and the slow relearning of safety in the body. Rootwork is the map they wished they'd been handed at the start.</p>
+      <blockquote class="guide__quote guide-reveal" style="--gd:.34s">
+        <p>I couldn't think my way home. I had to feel the way down.</p>
+      </blockquote>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('guide');
+    if (!section) return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* reveal-on-scroll */
+    var items = section.querySelectorAll('.guide-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('is-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+      items.forEach(function (el) { io.observe(el); });
+    }
+
+    /* mock "meet your guide" play/pause — no real video, purely presentational */
+    var player = section.querySelector('.guide__player');
+    if (!player) return;
+    var watch = player.querySelector('.guide__watch');
+    var ripple = player.querySelector('.guide__ripple');
+    var PLAY_LABEL = 'Play the meet-your-guide video, 2 minutes 4 seconds';
+
+    player.addEventListener('click', function () {
+      var playing = player.classList.toggle('is-playing');
+      player.setAttribute('aria-pressed', playing ? 'true' : 'false');
+      player.setAttribute('aria-label', playing ? 'Pause the meet-your-guide video' : PLAY_LABEL);
+      if (watch) watch.textContent = playing ? 'Now playing…' : 'Watch · meet your guide';
+      if (ripple && !reduce) { /* restart the one-shot ripple */
+        ripple.classList.remove('is-on'); void ripple.offsetWidth; ripple.classList.add('is-on');
+      }
+    });
+  })();
+</script>

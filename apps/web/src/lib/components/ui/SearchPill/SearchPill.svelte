@@ -46,16 +46,40 @@
     clearLabel = 'Clear search',
   }: Props = $props();
 
-  // svelte-ignore state_referenced_locally — seeded once from initial prop
+  // Seeded once from the initial prop; `value` is not tracked here on purpose.
+  // (Keep the svelte-ignore comment code-only — trailing prose on the same line
+  // is parsed as further ignore codes and reported as unused.)
+  // svelte-ignore state_referenced_locally
   let local = $state(value);
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  // External reset (e.g. parent's Clear all) re-syncs the local mirror
-  // when there's no pending debounce flush.
+  /**
+   * External reset (e.g. the parent's Clear all, or a back/forward navigation
+   * that changes `?q=`) re-syncs the local mirror.
+   *
+   * It MUST key off the PROP changing, not off `value !== local`. The old
+   * condition made submit-only mode (Explore) impossible to type into: every
+   * keystroke wrote `local`, the effect re-ran because it READ `local`, found
+   * `value` (still the committed `''`) !== `local`, found `timer === null`
+   * (submit-only mode never sets a debounce timer), and reset `local` straight
+   * back to `''`. Three trials of typing "fire" left the input empty and Enter
+   * committed nothing — the search box only worked by hand-editing the URL.
+   *
+   * `lastValue` is a plain variable, NOT `$state`: it is a comparison key
+   * written from inside the effect, and making it reactive would re-trigger the
+   * effect on its own write. The effect now reads only `value`, so a local edit
+   * cannot re-enter it at all.
+   *
+   * The `timer` guard stays: in live mode a pending debounce flush means the
+   * user's in-flight text is newer than any prop echo, so don't clobber it.
+   */
+  // svelte-ignore state_referenced_locally
+  let lastValue = value;
   $effect(() => {
-    if (value !== local && timer === null) {
-      local = value;
-    }
+    if (value === lastValue) return;
+    lastValue = value;
+    if (timer !== null) return;
+    local = value;
   });
 
   function flushNow(v: string) {

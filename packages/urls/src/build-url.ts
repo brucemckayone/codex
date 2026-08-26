@@ -237,3 +237,83 @@ export function buildContentUrl(
 
   return contentPath;
 }
+
+/**
+ * A journey (course landing page) URL target. Mirrors {@link buildContentUrl}'s
+ * `content` shape: prefer the slug, fall back to the id, and carry the owning
+ * org's slug so a cross-org link resolves to a full URL.
+ */
+export interface JourneyUrlTarget {
+  slug?: string | null;
+  id: string;
+  organizationSlug?: string | null;
+}
+
+/**
+ * Which journey surface to link to. All are sub-paths of `/journeys/{slug}` on
+ * the org subdomain (SPEC confirms the URL segment `journeys`; HARDENING §E route
+ * table). `sales` is the public landing/sell page; `checkout` the offer/pay step;
+ * `dashboard` the authed member journey portal.
+ *
+ * The deep in-course `practice/[contentSlug]` surface is intentionally NOT here:
+ * it is always reached same-origin from inside the course and takes a second
+ * (content) slug, so WP-4 builds it from its own route with
+ * {@link buildContentUrl}-style handling.
+ */
+export type JourneySurface = 'sales' | 'checkout' | 'dashboard';
+
+export interface BuildJourneyUrlOptions {
+  /** The journey surface to target. Defaults to `'sales'`. */
+  surface?: JourneySurface;
+}
+
+const JOURNEY_SURFACE_SUFFIX: Record<JourneySurface, string> = {
+  sales: '',
+  checkout: '/checkout',
+  dashboard: '/dashboard',
+};
+
+/**
+ * Build a URL to a guided-journey (course) page, handling cross-org subdomain
+ * routing. Net-new sibling of {@link buildContentUrl} for the Journeys build
+ * (Codex-2pryk); same rules:
+ *
+ * - On the journey's own org subdomain → root-relative `/journeys/{slug}[/…]`
+ *   (the slug lives in the hostname, never the path).
+ * - On a different origin (platform, another org) → a full URL via
+ *   {@link buildOrgUrl} (a different origin needs an absolute URL, not a path).
+ * - Falls back to the journey id when `slug` is missing.
+ * - `options.surface` selects the sub-path (default `'sales'`).
+ *
+ * Slugs are URL-safe by construction (validated on write), so — like
+ * {@link buildContentUrl} — the path segment is not re-encoded.
+ *
+ * @example
+ * buildJourneyUrl(new URL('https://acme.revelations.studio/explore'), { slug: 'rootwork', id: 'c1' })
+ * // → '/journeys/rootwork'  (same org → root-relative)
+ *
+ * @example
+ * buildJourneyUrl(new URL('https://revelations.studio/'), { slug: 'rootwork', id: 'c1', organizationSlug: 'acme' })
+ * // → 'https://acme.revelations.studio/journeys/rootwork'  (cross-org → full URL)
+ *
+ * @example
+ * buildJourneyUrl(new URL('http://acme.lvh.me:3000/'), { id: 'c1' }, { surface: 'dashboard' })
+ * // → '/journeys/c1/dashboard'  (no slug → id fallback)
+ */
+export function buildJourneyUrl(
+  currentUrl: URL,
+  journey: JourneyUrlTarget,
+  options: BuildJourneyUrlOptions = {}
+): string {
+  const surface = options.surface ?? 'sales';
+  const journeyPath = `/journeys/${journey.slug ?? journey.id}${JOURNEY_SURFACE_SUFFIX[surface]}`;
+
+  if (journey.organizationSlug) {
+    const { subdomain } = parseHost(currentUrl.hostname);
+    if (subdomain !== journey.organizationSlug) {
+      return buildOrgUrl(currentUrl, journey.organizationSlug, journeyPath);
+    }
+  }
+
+  return journeyPath;
+}

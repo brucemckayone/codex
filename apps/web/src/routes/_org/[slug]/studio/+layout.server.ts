@@ -116,6 +116,11 @@ export const load: LayoutServerLoad = async ({
       id: org.id,
       name: org.name,
       slug: org.slug,
+      // Carried through from the parent org layout so studio surfaces (e.g. the
+      // brand editor's Hero-text control) can seed the org subheading. Without
+      // it this child `org` shadows the parent's richer one and description is
+      // undefined → the field falls back to its placeholder.
+      description: org.description,
       logoUrl: org.logoUrl,
       brandColors: org.brandColors,
     },

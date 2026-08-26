@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside Rootwork · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ── Rootwork · IN-COURSE CONTENT PAGE = the player ─────────────
+     The ONLY place a practice plays and the ONLY home for "Next".
+     The rail is the WHOLE journey map (same accordion primitive as the
+     portal) so you can jump to any module without going back to the
+     dashboard. Player is FIRST in the DOM; grid-template-areas puts the
+     map rail LEFT on desktop but BELOW the player on mobile — so you land
+     on the work, and the collapsed map waits quietly beneath. */
+  body { background: #100b07; }
+  .ic { display: grid; grid-template-columns: 320px 1fr; grid-template-areas: "rail main"; align-items: start; min-height: calc(100svh - 53px); margin-top: 53px; }
+  .ic-main { grid-area: main; overflow-y: auto; }
+  .ic-rail { grid-area: rail; border-right: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); background: color-mix(in oklab, var(--ink) 60%, transparent); padding: 1.4rem 1rem; position: sticky; top: 53px; max-height: calc(100svh - 53px); overflow-y: auto; }
+
+  /* ── main: the practice ── */
+  .ic-inner { max-width: 780px; margin: 0 auto; padding: clamp(1.4rem,3.5vw,2.6rem) clamp(1.2rem,4vw,3rem) 4rem; }
+  .ic-crumb { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .78rem; color: var(--bone-faint); }
+  .ic-crumb a:hover { color: var(--ember); }
+  .ic-crumb .here { color: var(--ember); }
+  .ic-crumb .sep { opacity: .5; }
+  .ic-badge { margin-top: 1rem; display: inline-flex; align-items: center; gap: .5rem; font-size: .66rem; letter-spacing: .14em; text-transform: uppercase; padding: .3rem .7rem; border-radius: 999px; color: var(--ember); background: color-mix(in oklab, var(--ember) 12%, transparent); border: 1px solid color-mix(in oklab, var(--ember) 30%, transparent); }
+  .ic-main h1 { font-family: var(--serif); font-size: clamp(2rem,5.2vw,3rem); font-weight: 300; margin: .7rem 0 .3rem; line-height: 1.05; }
+  .ic-type { font-size: .9rem; color: var(--bone-faint); }
+  .media { position: relative; margin-top: 1.6rem; aspect-ratio: 16/9; border-radius: 20px; overflow: hidden; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 0%, color-mix(in oklab, var(--blood) 46%, var(--ink-2)), #0c0805); border: 1px solid color-mix(in oklab, var(--ember) 18%, transparent); }
+  .media .play { width: 78px; height: 78px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in oklab, var(--ember) 92%, white); color: #241a09; font-size: 1.5rem; box-shadow: 0 12px 40px -8px color-mix(in oklab, var(--ember) 70%, black); transition: transform .2s var(--ease); }
+  .media:hover .play { transform: scale(1.06); }
+  .media .mdur { position: absolute; bottom: 1rem; right: 1.1rem; font-size: .8rem; color: var(--bone-dim); }
+  .why { margin-top: 1.6rem; padding-left: 1rem; border-left: 2px solid color-mix(in oklab, var(--ember) 40%, transparent); color: var(--bone-faint); font-family: var(--serif); font-style: italic; font-size: 1.05rem; }
+  .desc { margin-top: 1.4rem; color: var(--bone-dim); font-size: 1.05rem; max-width: 60ch; line-height: 1.65; }
+
+  /* actions — ONE next, lives only here */
+  .ic-actions { margin-top: 2.2rem; display: flex; gap: .9rem; flex-wrap: wrap; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .85rem 1.5rem; border-radius: 999px; font-weight: 600; font-size: .92rem; cursor: pointer; }
+  .btn--done { border: 1px solid color-mix(in oklab, var(--bone) 28%, transparent); color: var(--bone); background: transparent; }
+  .btn--done:hover { border-color: var(--ember); }
+  .btn--done.is-done { background: var(--ember); border-color: var(--ember); color: #241a09; }
+  .btn--next { background: linear-gradient(180deg, var(--ember), var(--ochre)); color: #241a09; }
+  .btn--next .arrow { transition: transform .18s var(--ease); }
+  .btn--next:hover .arrow { transform: translateX(3px); }
+  .btn--next[hidden] { display: none; }
+  /* playback (audio/video) completes on resume — a status, not a button (SPEC D7) */
+  .auto-note { display: inline-flex; align-items: center; gap: .5rem; padding: .85rem 1.3rem; border-radius: 999px; font-size: .86rem; color: var(--bone-faint); border: 1px solid color-mix(in oklab, var(--bone) 14%, transparent); }
+  .auto-note .g { color: var(--ember); }
+  .auto-note.is-done { color: var(--bone); border-color: color-mix(in oklab, var(--ember) 40%, transparent); }
+
+  /* footer — prev + back to overview (NO second next) */
+  .ic-foot { margin-top: 3rem; padding-top: 1.4rem; border-top: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); display: flex; justify-content: space-between; gap: 1rem; }
+  .ic-foot a { display: flex; flex-direction: column; gap: .2rem; font-size: .9rem; color: var(--bone-dim); max-width: 48%; }
+  .ic-foot a:hover { color: var(--ember); }
+  .ic-foot a .l { font-size: .66rem; letter-spacing: .18em; text-transform: uppercase; color: var(--bone-faint); }
+  .ic-foot a.tomap { text-align: right; align-items: flex-end; }
+
+  /* ── rail: the WHOLE journey map (accordion navigator) ── */
+  .ic-rail .back { font-size: .8rem; color: var(--bone-faint); display: inline-flex; gap: .4rem; align-items: center; }
+  .ic-rail .back:hover { color: var(--ember); }
+  .rail-prog { margin: 1.1rem 0 1.3rem; }
+  .rail-prog .rp-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .5rem; }
+  .rail-prog .rp-title { font-family: var(--serif); font-size: 1.25rem; color: var(--bone); }
+  .rail-prog .rp-pct { font-size: .78rem; color: var(--bone-faint); font-variant-numeric: tabular-nums; }
+  .rail-prog .rp-bar { height: 5px; border-radius: 999px; background: color-mix(in oklab, var(--bone) 12%, transparent); overflow: hidden; }
+  .rail-prog .rp-bar > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--blood), var(--ember)); }
+  .rk { font-size: .62rem; letter-spacing: .2em; text-transform: uppercase; color: var(--bone-faint); margin-bottom: .55rem; }
+
+  /* stage accordion — compact rail variant of the portal's map */
+  .stage { border: 1px solid transparent; border-radius: 12px; margin-bottom: .3rem; overflow: hidden; }
+  .stage[open] { background: color-mix(in oklab, var(--ink-2) 55%, transparent); border-color: color-mix(in oklab, var(--bone) 10%, transparent); }
+  .stage.is-cur { border-color: color-mix(in oklab, var(--ember) 30%, transparent); }
+  .stage__head { display: flex; align-items: center; gap: .6rem; padding: .6rem .55rem; cursor: pointer; list-style: none; border-radius: 12px; }
+  .stage__head:hover { background: color-mix(in oklab, var(--bone) 5%, transparent); }
+  .stage__head::-webkit-details-marker { display: none; }
+  .stage__head .rn { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-style: italic; font-size: .78rem; color: var(--bone-dim); border: 1px solid color-mix(in oklab, var(--bone) 18%, transparent); }
+  .stage.is-done .rn { background: color-mix(in oklab, var(--ember) 20%, transparent); border-color: transparent; color: var(--ember); }
+  .stage.is-cur .rn { border-color: var(--ember); color: var(--ember); box-shadow: 0 0 10px 1px color-mix(in oklab, var(--ember) 32%, transparent); }
+  .stage__head .sn { flex: 1; min-width: 0; font-family: var(--serif); font-size: 1.02rem; color: var(--bone); line-height: 1.15; }
+  .stage__head .scount { flex: none; font-size: .72rem; color: var(--bone-faint); font-variant-numeric: tabular-nums; }
+  .stage__head .chev { flex: none; color: var(--bone-faint); transition: transform .2s var(--ease); }
+  .stage[open] .chev { transform: rotate(90deg); }
+
+  .stage__lessons { padding: 0 .3rem .4rem; }
+  .lrow { display: flex; gap: .6rem; align-items: center; padding: .5rem .55rem; border-radius: 10px; transition: background .15s; }
+  .lrow:hover { background: color-mix(in oklab, var(--bone) 6%, transparent); }
+  .lrow.cur { background: color-mix(in oklab, var(--ember) 13%, transparent); }
+  .lrow .lic { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: .62rem; border: 1.5px solid color-mix(in oklab, var(--bone) 26%, transparent); color: var(--bone-faint); }
+  .lrow .lic.done { background: var(--ember); border-color: var(--ember); color: #241a09; }
+  .lrow .lic.cur { border-color: var(--ember); color: var(--ember); box-shadow: 0 0 9px 1px color-mix(in oklab, var(--ember) 40%, transparent); }
+  .lrow .col { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+  .lrow .lt { font-family: var(--serif); font-size: .96rem; color: var(--bone); line-height: 1.18; }
+  .lrow.done .lt { color: var(--bone-dim); }
+  .lrow .lm { font-size: .68rem; color: var(--bone-faint); margin-top: .1rem; }
+  .lrow .go { flex: none; font-size: .72rem; color: var(--ember); opacity: 0; transition: opacity .15s; }
+  .lrow.cur .go, .lrow:hover .go { opacity: 1; }
+
+  .gate { margin-top: 1.1rem; padding: .8rem .9rem; border-radius: 12px; border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent); background: color-mix(in oklab, var(--ember) 5%, transparent); font-size: .76rem; color: var(--bone-dim); line-height: 1.5; }
+  .gate b { color: var(--ember); font-weight: 600; }
+
+  /* stage-cleared note (goal-gradient payoff at a gate) + journey completion (peak-end) */
+  .stage-cleared { margin-top: 1.6rem; padding: .9rem 1.1rem; border-radius: 12px; display: flex; align-items: center; gap: .7rem; font-size: .9rem; color: var(--bone-dim); border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent); background: color-mix(in oklab, var(--ember) 7%, transparent); }
+  .stage-cleared .s { color: var(--ember); font-weight: 700; }
+  .ic-complete { margin-top: 2.4rem; text-align: center; padding: clamp(1.8rem,4vw,2.6rem) 1.4rem; border-radius: 20px; border: 1px solid color-mix(in oklab, var(--ember) 28%, transparent); background: radial-gradient(120% 130% at 50% 0%, color-mix(in oklab, var(--ember) 13%, var(--ink-2)), transparent); }
+  .ic-complete .seal { width: 62px; height: 62px; margin: 0 auto 1.1rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; color: #241a09; background: radial-gradient(circle at 40% 30%, var(--ember), var(--ochre)); box-shadow: 0 14px 40px -12px color-mix(in oklab, var(--ember) 70%, black); }
+  .ic-complete h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(1.6rem,4vw,2.3rem); color: var(--bone); line-height: 1.1; }
+  .ic-complete p { color: var(--bone-dim); max-width: 42ch; margin: .7rem auto 1.6rem; line-height: 1.6; }
+  .ic-complete .row { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+
+  @media (max-width: 860px) {
+    .ic { grid-template-columns: 1fr; grid-template-areas: "main" "rail"; }
+    .ic-rail { position: static; max-height: none; overflow: visible; border-right: none; border-top: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); padding-top: 1.6rem; }
+    .ic-rail .back { display: none; } /* the crumb up top already links back */
+  }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Inside Rootwork</span>
+  <nav>
+    <a href="course-dashboard.html">Your journey</a>
+    <a href="library.html">Library</a>
+    <a href="explore.html">Explore</a>
+  </nav>
+</div>
+
+<div class="ic">
+  <main class="ic-main">
+    <div class="ic-inner">
+      <nav class="ic-crumb">
+        <a href="course-dashboard.html">Rootwork</a><span class="sep">›</span>
+        <span id="cb-stage"></span><span class="sep">›</span>
+        <span class="here" id="cb-here"></span>
+      </nav>
+      <span class="ic-badge">◈ part of your journey</span>
+      <h1 id="title"></h1>
+      <p class="ic-type" id="ctype"></p>
+      <div class="media">
+        <div class="play" id="play">▶</div>
+        <div class="mdur" id="dur"></div>
+      </div>
+      <p class="why" id="why"></p>
+      <p class="desc" id="desc"></p>
+      <div class="ic-actions">
+        <button class="btn btn--done" id="markdone">✓ Mark complete</button>
+        <button class="btn btn--next" id="nextbtn">Next practice <span class="arrow">→</span></button>
+      </div>
+      <div id="ic-complete"></div>
+      <nav class="ic-foot" id="foot"></nav>
+    </div>
+  </main>
+
+  <aside class="ic-rail">
+    <a class="back" href="course-dashboard.html">← Rootwork overview</a>
+    <div class="rail-prog">
+      <div class="rp-top"><span class="rp-title">Rootwork</span><span class="rp-pct" id="rp-pct"></span></div>
+      <div class="rp-bar"><i id="rp-bar"></i></div>
+    </div>
+    <p class="rk">The whole journey</p>
+    <div id="rail-map"></div>
+    <div class="gate" id="gate"></div>
+  </aside>
+</div>
+
+<script src="course-data.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, TM = window.TYPE_META, t = C.totals;
+  const roman = ['i','ii','iii','iv','v','vi'];
+  const BLURB = {
+    practice:   'Find a quiet place to lie or sit. Follow the guide and let the body set the pace — there is nothing to get right.',
+    audio:      'Put something in your ears, soften your eyes, and let the voice lead. Stay exactly where you are.',
+    reflection: 'A few minutes with a journal, or simply your attention. No right answers — only what is true right now.',
+  };
+
+  // flat index of the first lesson of each stage — lets the rail link by ?i=
+  const stageOffset = []; { let a = 0; C.stages.forEach((s, i) => { stageOffset[i] = a; a += s.lessons.length; }); }
+
+  // Which practice? URL ?i=<flat index> drives the walkable sequence (Next/Prev/rail).
+  // Default = the current lesson (what the portal's "Resume" points at).
+  const params = new URLSearchParams(location.search);
+  const qi = parseInt(params.get('i'), 10);
+  const defaultCur = C.flat.find(l => l.current) || C.flat.find(l => !l.done) || C.flat[0];
+  const cur = (Number.isInteger(qi) && C.flat[qi]) ? C.flat[qi] : defaultCur;
+  const stage = C.stages[cur.stageIndex];
+  const cm = TM[cur.type];
+
+  /* ── main player ── */
+  document.getElementById('cb-stage').textContent = stage.n;
+  document.getElementById('cb-here').textContent = cur.t;
+  document.getElementById('title').textContent = cur.t;
+  document.getElementById('ctype').textContent = `${cm.label} · ${cur.min} min`;
+  document.getElementById('dur').textContent = cur.min + ' min';
+  document.getElementById('play').textContent = cur.type === 'reflection' ? '✎' : '▶';
+  document.getElementById('why').textContent = stage.gloss;
+  document.getElementById('desc').textContent = BLURB[cur.type];
+
+  // completion (SPEC D7): explicit for practice/reflection (things you DO or write);
+  // audio & video complete on playback/resume — shown as a status, never a redundant button.
+  const md = document.getElementById('markdone');
+  const autoComplete = (cur.type === 'audio' || cur.type === 'video');
+  if (autoComplete) {
+    const verb = cur.type === 'audio' ? 'listen' : 'watch';
+    const note = document.createElement('span');
+    note.className = 'auto-note' + (cur.done ? ' is-done' : '');
+    note.innerHTML = cur.done
+      ? '<span class="g">✓</span> Completed · your place is saved'
+      : `<span class="g">↺</span> Saves as you ${verb} · completes when you finish`;
+    md.replaceWith(note);
+  } else {
+    if (cur.done) { md.classList.add('is-done'); md.textContent = '✓ Completed'; }
+    md.addEventListener('click', () => {
+      md.classList.toggle('is-done');
+      md.textContent = md.classList.contains('is-done') ? '✓ Completed' : '✓ Mark complete';
+    });
+  }
+
+  // prev / next in course order — the walkable sequence
+  const idx = C.flat.indexOf(cur);
+  const prev = C.flat[idx - 1], next = C.flat[idx + 1];
+  const nextbtn = document.getElementById('nextbtn');   // the SINGLE "next"
+  const stepHref = i => 'content-incourse.html?i=' + i;
+
+  // crossing into a new stage? frame Next as the gate opening (goal-gradient payoff)
+  if (next && next.stageIndex !== cur.stageIndex) {
+    nextbtn.innerHTML = `Open ${C.stages[next.stageIndex].n} <span class="arrow">→</span>`;
+  }
+
+  if (next) nextbtn.addEventListener('click', () => location.href = stepHref(idx + 1));
+  else {
+    // last practice → the journey closes (peak-end completion moment)
+    nextbtn.hidden = true;
+    document.getElementById('ic-complete').innerHTML =
+      `<div class="ic-complete">
+        <div class="seal">✓</div>
+        <h2>You’ve walked the whole of ${C.title}.</h2>
+        <p>The ground is in you now. Return to any practice whenever you need it — or let the next journey find you.</p>
+        <div class="row">
+          <a class="btn btn--next" href="explore.html">Find your next journey <span class="arrow">→</span></a>
+          <a class="btn btn--done" href="library.html">Back to your library</a>
+        </div>
+      </div>`;
+  }
+
+  document.getElementById('foot').innerHTML =
+    (prev ? `<a href="${stepHref(idx - 1)}"><span class="l">← Previous</span><span>${prev.t}</span></a>` : '<span></span>') +
+    `<a class="tomap" href="course-dashboard.html"><span class="l">↩ Back to</span><span>${C.title} overview</span></a>`;
+
+  /* ── rail: the whole journey map (same accordion as the portal) ── */
+  document.getElementById('rp-pct').textContent = `${t.done}/${t.total} · ${t.pct}%`;
+  document.getElementById('rp-bar').style.width = t.pct + '%';
+
+  const wrap = document.getElementById('rail-map');
+  C.stages.forEach((s, si) => {
+    const done = s.lessons.filter(l => l.done).length;
+    const hasCur = si === cur.stageIndex;
+    const allDone = done === s.lessons.length;
+    const det = document.createElement('details');
+    det.className = 'stage' + (hasCur ? ' is-cur' : (allDone ? ' is-done' : ''));
+    if (hasCur) det.open = true;                          // land with the current stage open
+
+    const lessons = s.lessons.map((l, li) => {
+      const m = TM[l.type];
+      const fi = stageOffset[si] + li;
+      const isHere = si === cur.stageIndex && l.t === cur.t;
+      const state = l.done ? 'done' : (isHere ? 'cur' : 'up');
+      const glyph = l.done ? '✓' : (isHere ? '●' : m.glyph);
+      return `<a class="lrow ${state}" href="${stepHref(fi)}">
+          <span class="lic ${state}">${glyph}</span>
+          <span class="col"><span class="lt">${l.t}</span><span class="lm">${m.label} · ${l.min} min</span></span>
+          <span class="go">${isHere ? 'Here' : 'Open →'}</span>
+        </a>`;
+    }).join('');
+
+    det.innerHTML =
+      `<summary class="stage__head">
+        <span class="rn">${roman[si]}</span>
+        <span class="sn">${s.n}</span>
+        <span class="scount">${done}/${s.lessons.length}</span>
+        <span class="chev">›</span>
+      </summary>
+      <div class="stage__lessons">${lessons}</div>`;
+    wrap.appendChild(det);
+  });
+
+  // the "gate" is a suggested arc, not a lock — access is by entitlement, progress is display-only (SPEC D4)
+  const nextStage = C.stages[cur.stageIndex + 1];
+  document.getElementById('gate').innerHTML = nextStage
+    ? `<b>Move at your own pace.</b> The whole path stays open — ${nextStage.n} is here whenever ${stage.n} feels settled.`
+    : `<b>The last stage.</b> Move through ${stage.n} as slowly as you need. There’s no finish line but your own.`;
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

@@ -118,7 +118,7 @@
 	{#if expanded}
 		<div class="user-section-unauth">
 			<a href="/login" class="sign-in-link">
-				<LogInIcon size={20} />
+				<LogInIcon />
 				<span class="sign-in-link__label">{m.sidebar_sign_in()}</span>
 			</a>
 			<a href="/register" class="register-link">{m.sidebar_register()}</a>
@@ -130,7 +130,7 @@
 			aria-label={m.sidebar_sign_in()}
 			use:melt={$tooltipTrigger}
 		>
-			<LogInIcon size={22} />
+			<LogInIcon />
 		</a>
 		{#if $tooltipOpen}
 			<div use:melt={$tooltipContent} class="user-tooltip">
@@ -304,6 +304,20 @@
 	.user-section-unauth--collapsed:hover {
 		background-color: var(--color-surface-secondary);
 		color: var(--color-text);
+	}
+
+	/* Rail-strip glyphs are sized from the density-aware scale rather than a
+	   literal `size` prop, so they grow with the rail instead of staying pinned
+	   while the org's density inflates everything around them. --rail-glyph is
+	   inherited from .sidebar-rail; the fallback keeps this component correct in
+	   isolation. `max-width: none` defeats reset.css's `max-width: 100%` on svg,
+	   which would otherwise cap the width at the content box while `height`
+	   obeys, yielding a squashed non-square glyph. */
+	.user-section-unauth :global(svg) {
+		flex-shrink: 0;
+		max-width: none;
+		width: var(--rail-glyph, var(--space-5-5));
+		height: var(--rail-glyph, var(--space-5-5));
 	}
 
 	.sign-in-link {

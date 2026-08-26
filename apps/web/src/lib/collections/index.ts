@@ -38,7 +38,14 @@ export {
   libraryCollection,
   loadLibraryFromServer,
 } from './library';
-export { progressCollection } from './progress';
+export {
+  isPracticeComplete,
+  loadCourseCompletionsFromServer,
+  markPracticeComplete,
+  type PlaybackProgress,
+  progressCollection,
+  syncCompletionsToServer,
+} from './progress';
 // QueryClient is defined in ./query-client.ts to avoid circular dependencies.
 // Collections import it directly from there; we re-export for external consumers.
 export { queryClient } from './query-client';

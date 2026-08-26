@@ -15,7 +15,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { ACCESS_TYPES, FEES, PURCHASE_STATUS } from '@codex/constants';
+import {
+  ACCESS_TYPES,
+  type ContentAccessGrantType,
+  FEES,
+  PURCHASE_STATUS,
+} from '@codex/constants';
 import type { Purchase } from '@codex/database/schema';
 import { contentAccess, purchases } from '@codex/database/schema';
 import type { Database } from './database';
@@ -32,7 +37,7 @@ export interface SeedPurchaseWithAccessInput {
   /** Stripe intent ID. Auto-generated unique value if omitted. */
   stripePaymentIntentId?: string;
   /** Access type granted. Default: `'purchased'`. */
-  accessType?: string;
+  accessType?: ContentAccessGrantType;
 }
 
 /**

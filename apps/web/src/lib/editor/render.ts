@@ -59,3 +59,27 @@ export async function renderContentBody(content: {
 
   return null;
 }
+
+/**
+ * Sanitize an ALREADY-RENDERED HTML string with the exact same
+ * `isomorphic-dompurify` pass `renderContentBody` applies to freshly-generated
+ * markup. Use this when trusted-shaped HTML arrives pre-rendered from another
+ * source (e.g. a content-api journey payload) and needs the XSS scrub WITHOUT
+ * the TipTap/markdown render step — so the value can safely reach an `{@html}`.
+ *
+ * Soft-degrades to `''` on failure (never throws, never returns the input): a
+ * sanitize error must not surface unsanitized HTML to the client, and must not
+ * 500 the caller. An empty string renders as "no body", matching how the
+ * loaders treat a null body.
+ */
+export async function sanitizeContentHtml(html: string): Promise<string> {
+  try {
+    const DOMPurify = (await import('isomorphic-dompurify')).default;
+    return DOMPurify.sanitize(html);
+  } catch (error) {
+    logger.error('Failed to sanitize content HTML', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return '';
+  }
+}

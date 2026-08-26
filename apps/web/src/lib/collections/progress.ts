@@ -14,16 +14,36 @@
 import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import type {
+  CompletionSource,
+  PracticeCompletionRecord,
+} from '$lib/journeys/types';
 import { logger } from '$lib/observability';
+import { markPracticeCompleted } from '$lib/remote/journeys.remote';
 import {
   getPlaybackProgress,
   savePlaybackProgress,
 } from '$lib/remote/library.remote';
 
 /**
- * Playback progress data structure
+ * Playback + course-completion progress for one content item.
+ *
+ * F19 (HARDENING §E): this is the SINGLE progress store — the course dashboard
+ * / in-course player extend it rather than forking a parallel store. Two
+ * distinct concerns share one row (keyed by `contentId`):
+ *
+ *   1. PLAYBACK (`positionSeconds`/`completed`/`percentComplete`) — the resume
+ *      heartbeat. `completed` flips at the 95% `VIDEO_PROGRESS.COMPLETION_THRESHOLD`
+ *      and is a WATCHED/RESUME signal only.
+ *   2. COURSE COMPLETION (`practiceCompleted*`) — the `practice_completions`
+ *      row, the SOURCE OF TRUTH for course progress (SPEC §11 / D-E). Written
+ *      explicitly for `written` practices and auto on genuine 100% finish for
+ *      media. NEVER derived from the 95% playback flag.
+ *
+ * The completion fields are optional so pre-existing localStorage rows (and the
+ * playback-only `updateLocalProgress` insert path) remain valid.
  */
-interface PlaybackProgress {
+export interface PlaybackProgress {
   contentId: string;
   positionSeconds: number;
   durationSeconds: number;
@@ -31,6 +51,16 @@ interface PlaybackProgress {
   percentComplete: number;
   updatedAt: string;
   syncedAt: string | null; // null = not yet synced to server
+  /**
+   * ISO timestamp of the `practice_completions` row (source of truth). Set =
+   * this practice is complete; absent/null = not complete. Distinct from the
+   * 95% `completed` playback flag.
+   */
+  practiceCompletedAt?: string | null;
+  /** How the completion was recorded — 'manual' (explicit) or 'auto' (finish). */
+  practiceCompletionSource?: CompletionSource | null;
+  /** null = completion written locally but not yet persisted server-side. */
+  practiceCompletionSyncedAt?: string | null;
 }
 
 /**
@@ -192,6 +222,150 @@ export async function syncProgressToServer(): Promise<void> {
         error: error instanceof Error ? error.message : String(error),
       });
       // Will retry next sync
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Course completion (practice_completions — SPEC §11 / D-E)
+//
+// The completion ROW is the source of truth for course progress, kept in the
+// same store as playback (F19). Completion is a once-per-user event: an explicit
+// "Mark complete" for written practices, an auto-write on genuine 100% finish
+// for media. Optimistic: mutate locally now, persist via the mark-complete
+// command; `syncCompletionsToServer` retries the ones that didn't land.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Whether this content has a completion row (locally or synced). */
+export function isPracticeComplete(contentId: string): boolean {
+  return Boolean(progressCollection?.state.get(contentId)?.practiceCompletedAt);
+}
+
+/**
+ * Mark a practice complete (optimistic). Idempotent — completion is
+ * once-per-user, so a second call for an already-complete practice is a no-op
+ * (mirrors the `uq_practice_completion_user_content` unique index). Writes the
+ * store immediately, then fires the server write; failures are retried by
+ * `syncCompletionsToServer`.
+ *
+ * @param source 'manual' for an explicit action, 'auto' for a media finish.
+ */
+export function markPracticeComplete(
+  contentId: string,
+  source: CompletionSource = 'manual'
+): void {
+  if (!progressCollection) return;
+  const now = new Date().toISOString();
+  const existing = progressCollection.state.get(contentId);
+
+  if (existing) {
+    if (existing.practiceCompletedAt) return; // already complete — idempotent
+    progressCollection.update(contentId, (draft) => {
+      draft.practiceCompletedAt = now;
+      draft.practiceCompletionSource = source;
+      draft.practiceCompletionSyncedAt = null;
+    });
+  } else {
+    progressCollection.insert({
+      contentId,
+      positionSeconds: 0,
+      durationSeconds: 0,
+      completed: false,
+      percentComplete: 0,
+      updatedAt: now,
+      syncedAt: null,
+      practiceCompletedAt: now,
+      practiceCompletionSource: source,
+      practiceCompletionSyncedAt: null,
+    });
+  }
+
+  // Fire the server write; retried on failure by syncCompletionsToServer.
+  void syncCompletionsToServer();
+}
+
+/** Completion entries written locally but not yet persisted server-side. */
+export function getUnsyncedCompletions(): PlaybackProgress[] {
+  if (!progressCollection) return [];
+  const all: PlaybackProgress[] = [];
+  progressCollection.state.forEach((value) => {
+    if (value.practiceCompletedAt && !value.practiceCompletionSyncedAt) {
+      all.push(value);
+    }
+  });
+  return all;
+}
+
+/**
+ * Persist locally-marked completions to the server. Mirrors
+ * `syncProgressToServer`: retry on transient failure, and on a 403 (access
+ * revoked) mark the entry synced so we stop hammering the endpoint — the local
+ * completion is preserved and the user learns of the change on next navigation.
+ */
+export async function syncCompletionsToServer(): Promise<void> {
+  if (!browser || !progressCollection) return;
+
+  for (const entry of getUnsyncedCompletions()) {
+    try {
+      await markPracticeCompleted({
+        contentId: entry.contentId,
+        source: entry.practiceCompletionSource ?? 'manual',
+      });
+      progressCollection.update(entry.contentId, (draft) => {
+        draft.practiceCompletionSyncedAt = new Date().toISOString();
+      });
+    } catch (error) {
+      if (isForbiddenError(error)) {
+        logger.info('Completion save forbidden — access revoked, dropping', {
+          contentId: entry.contentId,
+        });
+        progressCollection.update(entry.contentId, (draft) => {
+          draft.practiceCompletionSyncedAt = new Date().toISOString();
+        });
+        continue;
+      }
+      logger.error('Failed to sync completion', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Will retry next sync.
+    }
+  }
+}
+
+/**
+ * Hydrate the store with the server's known completions (the
+ * `practice_completions` rows). Reconciles into the single store so live
+ * queries over the dashboard / player reflect server truth on first paint.
+ * Server rows are authoritative and land as already-synced; local unsynced
+ * completions (never seen by the server yet) are left untouched.
+ */
+export function loadCourseCompletionsFromServer(
+  completions: readonly PracticeCompletionRecord[]
+): void {
+  if (!progressCollection) return;
+  const now = new Date().toISOString();
+
+  for (const record of completions) {
+    const existing = progressCollection.state.get(record.contentId);
+    if (existing) {
+      progressCollection.update(record.contentId, (draft) => {
+        draft.practiceCompletedAt = record.completedAt;
+        draft.practiceCompletionSource = record.source;
+        draft.practiceCompletionSyncedAt = now;
+      });
+    } else {
+      progressCollection.insert({
+        contentId: record.contentId,
+        positionSeconds: 0,
+        durationSeconds: 0,
+        completed: false,
+        percentComplete: 0,
+        updatedAt: record.completedAt,
+        syncedAt: now,
+        practiceCompletedAt: record.completedAt,
+        practiceCompletionSource: record.source,
+        practiceCompletionSyncedAt: now,
+      });
     }
   }
 }

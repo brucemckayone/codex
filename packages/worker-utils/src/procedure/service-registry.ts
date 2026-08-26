@@ -6,7 +6,14 @@
  * creation of unused services and enabling proper cleanup.
  */
 
-import { AccessRevocation, ContentAccessService } from '@codex/access';
+import {
+  AccessRevocation,
+  ContentAccessService,
+  CourseAccessService,
+  CourseInsightsService,
+  CourseJourneyService,
+  EntitlementsService,
+} from '@codex/access';
 import {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -45,6 +52,7 @@ import {
 import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
+  CourseSubscriptionService,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -136,6 +144,7 @@ export function createServiceRegistry(
   let _categories: CategoriesService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
+  let _entitlements: EntitlementsService | undefined;
   let _imageProcessing: ImageProcessingService | undefined;
   let _organization: OrganizationService | undefined;
   let _devDomain: DevDomainService | undefined;
@@ -153,6 +162,10 @@ export function createServiceRegistry(
   let _subscription: SubscriptionService | undefined;
   let _tier: TierService | undefined;
   let _connectAccount: ConnectAccountService | undefined;
+  let _courseSubscription: CourseSubscriptionService | undefined;
+  let _courseAccess: CourseAccessService | undefined;
+  let _courseJourney: CourseJourneyService | undefined;
+  let _courseInsights: CourseInsightsService | undefined;
   let _agreements: AgreementService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
@@ -380,6 +393,18 @@ export function createServiceRegistry(
         });
       }
       return _access;
+    },
+
+    get entitlements() {
+      if (!_entitlements) {
+        // READ resolution of stored `entitlements` grants (Codex-2pryk.2.3).
+        // Read-only — the write path (grant-on-purchase / course-sub) is WP-6.
+        _entitlements = new EntitlementsService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _entitlements;
     },
 
     get imageProcessing() {
@@ -799,6 +824,61 @@ export function createServiceRegistry(
         }
       }
       return _connectAccount;
+    },
+
+    get courseSubscription() {
+      if (!_courseSubscription) {
+        // Course-sub payouts resolve fees via the same 3-tier fallback chain as
+        // purchases/subscriptions; Stripe client is deferred (read-only course
+        // pages never construct it) — same pattern as `subscription`/`tier`.
+        _courseSubscription = new CourseSubscriptionService(
+          {
+            db: getSharedDb(),
+            environment: getEnvironment(),
+            feeConfig: registry.feeConfig,
+          },
+          getLazyStripeClient()
+        );
+      }
+      return _courseSubscription;
+    },
+
+    get courseAccess() {
+      if (!_courseAccess) {
+        // Pure DB (no Stripe). Uses the shared WS client because `setTierAccess`
+        // replaces a course's tier-access rows inside a transaction.
+        _courseAccess = new CourseAccessService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseAccess;
+    },
+
+    get courseJourney() {
+      if (!_courseJourney) {
+        // Pure DB member-surface reads (Round-D): dashboard curriculum + progress
+        // rollup, in-course practice/playlist, idempotent completion write.
+        // Shares the WS client like the sibling course services.
+        _courseJourney = new CourseJourneyService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseJourney;
+    },
+
+    get courseInsights() {
+      if (!_courseInsights) {
+        // Pure DB studio reporting reads (Round-D · WP-7): course-scoped financial
+        // + engagement aggregation for the owner/admin insights surface. Shares
+        // the WS client like the sibling course services.
+        _courseInsights = new CourseInsightsService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseInsights;
     },
 
     // ========================================================================

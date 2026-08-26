@@ -1,0 +1,295 @@
+<style>
+  /* ══ FAQ · "The honest answers" — objection-handling accordion ══
+     Namespaced .faq / .faq-*. Native <details>/<summary> for a11y + no-JS
+     fallback; the IIFE only choreographs the open/close height. */
+  .faq {
+    padding: clamp(4.5rem, 9vw, 7rem) 0;
+  }
+  .faq-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 clamp(1.2rem, 4vw, 2rem);
+  }
+
+  /* ── header ── */
+  .faq-head {
+    text-align: center;
+    margin-bottom: clamp(2.4rem, 5vw, 3.6rem);
+  }
+  .faq-head .eyebrow { display: block; }
+  .faq-head h2 {
+    font-family: var(--serif);
+    font-weight: 300;
+    color: var(--bone);
+    font-size: clamp(2rem, 4.6vw, 3.1rem);
+    line-height: 1.04;
+    letter-spacing: -0.012em;
+    margin-top: 1rem;
+  }
+  .faq-rule {
+    width: 46px;
+    height: 1px;
+    margin: 1.5rem auto 0;
+    background: linear-gradient(90deg,
+      transparent,
+      color-mix(in oklab, var(--ember) 60%, transparent),
+      transparent);
+  }
+
+  /* ── list ── */
+  .faq-list {
+    border-top: 1px solid color-mix(in oklab, var(--bone) 11%, transparent);
+  }
+  .faq-item {
+    border-bottom: 1px solid color-mix(in oklab, var(--bone) 11%, transparent);
+  }
+
+  /* summary = the question row */
+  .faq-q {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: clamp(1rem, 3vw, 1.75rem);
+    padding: clamp(1.15rem, 2.4vw, 1.5rem) 0;
+    list-style: none;
+    cursor: pointer;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .faq-q::-webkit-details-marker { display: none; }
+  .faq-q::marker { content: ""; }
+
+  .faq-q-text {
+    flex: 1;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.08rem, 1.9vw, 1.32rem);
+    line-height: 1.32;
+    letter-spacing: -0.005em;
+    color: color-mix(in oklab, var(--bone) 84%, var(--ink));
+    transition: color .28s var(--ease);
+  }
+  .faq-item:hover .faq-q-text,
+  .faq-item[open] .faq-q-text { color: var(--bone); }
+
+  /* keyboard focus ring lives on the text, not the whole row */
+  .faq-q:focus-visible .faq-q-text {
+    color: var(--bone);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--ember) 70%, transparent);
+    text-underline-offset: 5px;
+  }
+
+  /* ── the +/− indicator ── */
+  .faq-ic {
+    position: relative;
+    flex: none;
+    width: clamp(30px, 4vw, 36px);
+    height: clamp(30px, 4vw, 36px);
+    margin-top: 2px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 26%, transparent);
+    transition: border-color .3s var(--ease), background .3s var(--ease);
+  }
+  .faq-item:hover .faq-ic,
+  .faq-item[open] .faq-ic {
+    border-color: color-mix(in oklab, var(--ember) 62%, transparent);
+    background: color-mix(in oklab, var(--ember) 8%, transparent);
+  }
+  .faq-ic::before,
+  .faq-ic::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 12px; height: 1.5px;
+    border-radius: 2px;
+    background: var(--ember);
+    transform: translate(-50%, -50%);
+    transition: transform .4s var(--ease), opacity .3s var(--ease);
+  }
+  /* vertical bar of the plus — collapses to leave a minus on open */
+  .faq-ic::after { transform: translate(-50%, -50%) rotate(90deg); }
+  .faq-item[open] .faq-ic::after {
+    transform: translate(-50%, -50%) rotate(0deg);
+    opacity: 0;
+  }
+
+  /* ── answer panel ── */
+  .faq-panel {
+    overflow: hidden;
+    transition: height .42s var(--ease);
+  }
+  .faq-panel-inner {
+    padding: 0 clamp(2.6rem, 8vw, 3.5rem) clamp(1.3rem, 3vw, 1.65rem) 0;
+  }
+  .faq-a {
+    font-family: var(--sans);
+    font-size: clamp(0.98rem, 1.25vw, 1.06rem);
+    line-height: 1.72;
+    color: var(--bone-dim);
+    max-width: 60ch;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity .45s var(--ease), transform .45s var(--ease);
+  }
+  .faq-item[open] .faq-a { opacity: 1; transform: none; }
+
+  /* reveal-on-scroll (self-contained, driven by this section's IIFE) */
+  .faq-reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+  }
+  .faq-reveal.faq-in { opacity: 1; transform: none; }
+  .faq-r1 { transition-delay: .05s; }
+  .faq-r2 { transition-delay: .12s; }
+  .faq-r3 { transition-delay: .19s; }
+  .faq-r4 { transition-delay: .26s; }
+  .faq-r5 { transition-delay: .33s; }
+
+  @media (max-width: 560px) {
+    .faq-panel-inner { padding-right: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .faq-q-text, .faq-ic, .faq-ic::before, .faq-ic::after,
+    .faq-panel, .faq-a { transition: none !important; }
+    .faq-a { opacity: 1; transform: none; }
+    .faq-reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+
+<section class="faq" aria-labelledby="faq-title">
+  <div class="faq-wrap">
+    <header class="faq-head faq-reveal">
+      <span class="eyebrow">Before you begin</span>
+      <h2 id="faq-title">The honest answers.</h2>
+      <div class="faq-rule" aria-hidden="true"></div>
+    </header>
+
+    <div class="faq-list">
+      <details class="faq-item faq-reveal faq-r1">
+        <summary class="faq-q">
+          <span class="faq-q-text">I've never done somatic work. Is that a problem?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">Not at all — Rootwork assumes nothing. The earliest practices are the gentlest, and the order is built to hold your hand the whole way down.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r2">
+        <summary class="faq-q">
+          <span class="faq-q-text">What if I can't feel anything in my body?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">That's common, and it's welcome. Numbness is information too — several of the practices are designed to begin exactly there, with patience.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r3">
+        <summary class="faq-q">
+          <span class="faq-q-text">How much time does it take?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">Most practices run 6–12 minutes. Ten minutes a day is plenty; the work is in the returning, not the length.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r4">
+        <summary class="faq-q">
+          <span class="faq-q-text">Is this therapy?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">No. Rootwork is a practice, not treatment — a companion alongside support, never a replacement for it.</p>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var root = document.currentScript
+      ? document.currentScript.previousElementSibling
+      : document.querySelector('.faq');
+    if (!root || !root.classList.contains('faq')) {
+      root = document.querySelector('.faq');
+    }
+    if (!root) return;
+
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ── reveal-on-scroll ── */
+    var reveals = root.querySelectorAll('.faq-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      reveals.forEach(function (el) { el.classList.add('faq-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add('faq-in');
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+      reveals.forEach(function (el) { io.observe(el); });
+    }
+
+    /* ── smooth accordion height (native <details> stays the source of truth) ── */
+    root.querySelectorAll('.faq-item').forEach(function (item) {
+      var summary = item.querySelector('.faq-q');
+      var panel = item.querySelector('.faq-panel');
+      if (!summary || !panel) return;
+
+      summary.addEventListener('click', function (e) {
+        // reduced motion (or no support): let the browser toggle instantly
+        if (reduce) return;
+        e.preventDefault();
+        if (item.dataset.animating) return;
+
+        if (item.open) {
+          // ── closing ──
+          item.dataset.animating = '1';
+          panel.style.height = panel.scrollHeight + 'px';
+          requestAnimationFrame(function () {
+            panel.style.height = '0px';
+          });
+          panel.addEventListener('transitionend', function te(ev) {
+            if (ev.propertyName !== 'height') return;
+            panel.removeEventListener('transitionend', te);
+            item.open = false;
+            panel.style.height = '';
+            delete item.dataset.animating;
+          });
+        } else {
+          // ── opening ──
+          item.dataset.animating = '1';
+          item.open = true;                 // reveal content so it can be measured
+          var target = panel.scrollHeight;
+          panel.style.height = '0px';
+          requestAnimationFrame(function () {
+            panel.style.height = target + 'px';
+          });
+          panel.addEventListener('transitionend', function te(ev) {
+            if (ev.propertyName !== 'height') return;
+            panel.removeEventListener('transitionend', te);
+            panel.style.height = '';        // let it flow at natural height
+            delete item.dataset.animating;
+          });
+        }
+      });
+    });
+  })();
+</script>

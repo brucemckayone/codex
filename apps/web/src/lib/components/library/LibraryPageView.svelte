@@ -2,7 +2,7 @@
   @component LibraryPageView
 
   Shared library page template used by both the platform and org library routes.
-  Handles: heading, error state, empty state, continue watching, sort/filter/view toggle,
+  Handles: heading, error state, empty state, continue watching, sort/filter,
   content grid, and pagination.
 
   @prop {string} title - Page title (e.g. "My Library" or "Org Library")
@@ -20,6 +20,10 @@
   @prop {string} browseHref - Link for the "browse" action in empty state
   @prop {string} browseLabel - Label for the browse action
   @prop {Snippet} [headerExtra] - Optional extra header content (e.g. "view full library" link)
+  @prop {Snippet} [journeysRail] - Optional shelf rendered under the header, above the content
+    branches (e.g. the org library's "Your journeys" enrolled rail). Rendered
+    independently of the empty/error state so it shows even when the owned-content
+    grid is empty.
   @prop {(value: string | undefined) => void} onSortChange - Sort change handler
   @prop {(filters: any) => void} onFilterChange - Filter change handler
   @prop {() => void} onClearFilters - Clear all filters handler
@@ -36,7 +40,6 @@
   import ContinueWatching from './ContinueWatching.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { BackToTop } from '$lib/components/ui/BackToTop';
-  import { useViewMode } from '$lib/utils/view-mode.svelte';
   import { subscriptionCollection, useLiveQuery } from '$lib/collections';
   import type { SubscriptionItem } from '$lib/collections';
   import {
@@ -68,6 +71,7 @@
     browseHref: string;
     browseLabel: string;
     headerExtra?: Snippet;
+    journeysRail?: Snippet;
     onSortChange: (value: string | undefined) => void;
     onFilterChange: (filters: { contentType: string; progressStatus: string; accessType?: string; search: string }) => void;
     onClearFilters: () => void;
@@ -93,14 +97,13 @@
     browseHref,
     browseLabel,
     headerExtra,
+    journeysRail,
     onSortChange,
     onFilterChange,
     onClearFilters,
     onPageChange,
     buildItemHref,
   }: Props = $props();
-
-  const { viewMode, handleViewChange } = useViewMode();
 
   const sortOptions = $derived([
     { value: 'recent', label: m.library_sort_recent_purchase() },
@@ -163,6 +166,10 @@
     {/if}
   </div>
 
+  {#if journeysRail}
+    {@render journeysRail()}
+  {/if}
+
   {#if error}
     <ErrorBanner
       title={defaultErrorTitle}
@@ -198,10 +205,8 @@
       }}
       sort={currentSort}
       {sortOptions}
-      {viewMode}
       onFilterChange={onFilterChange}
       {onSortChange}
-      onViewChange={handleViewChange}
       onClearAll={handleClearFilters}
     />
 
@@ -218,12 +223,13 @@
         {/snippet}
       </EmptyState>
     {:else}
-      <div class="content-grid content-grid--compact" data-view={viewMode}>
+      <div class="content-grid content-grid--compact">
         {#each items as item (item.content.id)}
           {@const access = stateForItem(item)}
           <ContentCard
-            variant={viewMode === 'list' ? 'list' : 'grid'}
-            shape={viewMode === 'list' ? undefined : '1:1'}
+            variant="grid"
+            shape="3:4"
+            titleInCover={true}
             chrome="transparent"
             id={item.content.id}
             title={item.content.title}

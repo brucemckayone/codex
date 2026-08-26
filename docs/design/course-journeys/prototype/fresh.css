@@ -1,0 +1,122 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   FRESH — "Of Blood and Bones" · guided journeys landing
+   Purpose-first concepts. NOT the Codex design system. Warm-dark, earthy, ritual.
+   Shared: palette + reset + switcher bar + a few common atoms. Concept-specific
+   layout lives in each page's own <style>.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --ink:        #140e09;
+  --ink-2:      #1d140c;
+  --ink-3:      #271a10;
+  --blood:      #8a2b22;
+  --blood-deep: #5e1a15;
+  --ember:      #d8a94e;
+  --ochre:      #c2913f;
+  --bone:       #f1e8d6;
+  --bone-dim:   #c9baa0;
+  --bone-faint: #8f8168;
+  --clay:       #b0876a;
+  --rose:       #cf9382;
+
+  --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --sans:  'Inter', system-ui, -apple-system, sans-serif;
+
+  --maxw: 1180px;
+  --ease: cubic-bezier(.22, .61, .36, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: var(--sans);
+  color: var(--bone-dim);
+  background: var(--ink);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* warm-dark atmosphere: layered radial glow + fine grain, fixed behind everything */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% -10%, color-mix(in oklab, var(--blood) 34%, transparent), transparent 60%),
+    radial-gradient(90% 70% at 85% 110%, color-mix(in oklab, var(--ochre) 16%, transparent), transparent 55%),
+    linear-gradient(180deg, var(--ink-2), var(--ink) 55%, #0f0a06);
+}
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+h1, h2, h3 { font-family: var(--serif); color: var(--bone); font-weight: 400; line-height: 1.05; letter-spacing: -0.01em; }
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: none; }
+
+::selection { background: var(--blood); color: var(--bone); }
+
+/* ── mock switcher (concept navigation — presentation only) ── */
+.switch {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; gap: 1.2rem;
+  padding: .7rem 1.4rem;
+  background: color-mix(in oklab, var(--ink) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border-bottom: 1px solid color-mix(in oklab, var(--ember) 16%, transparent);
+  font-size: .78rem;
+}
+.switch__brand { font-family: var(--serif); font-size: .95rem; color: var(--bone); letter-spacing: .01em; white-space: nowrap; }
+.switch__brand b { color: var(--rose); font-weight: 600; }
+.switch__tag { color: var(--bone-faint); font-size: .68rem; text-transform: uppercase; letter-spacing: .18em; }
+.switch nav { display: flex; gap: .3rem; margin-left: auto; flex-wrap: wrap; }
+.switch nav a {
+  padding: .32rem .7rem; border-radius: 999px; color: var(--bone-dim);
+  letter-spacing: .02em; transition: background .2s, color .2s; white-space: nowrap;
+}
+.switch nav a:hover { color: var(--bone); background: color-mix(in oklab, var(--bone) 8%, transparent); }
+.switch nav a.on { color: var(--ink); background: var(--ember); font-weight: 600; }
+@media (max-width: 720px) {
+  .switch { gap: .7rem; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: .6rem .9rem; }
+  .switch::-webkit-scrollbar { display: none; }
+  .switch { scrollbar-width: none; }
+  .switch__tag { display: none; }
+  .switch nav { flex-wrap: nowrap; }
+}
+
+/* ── common atoms ── */
+.eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .32em; color: var(--ember); font-weight: 600; }
+
+.cta {
+  display: inline-flex; align-items: center; gap: .6rem;
+  padding: .95rem 1.7rem; border-radius: 999px;
+  font-family: var(--sans); font-weight: 600; font-size: .98rem; letter-spacing: .01em;
+  transition: transform .18s var(--ease), box-shadow .25s, background .25s, border-color .25s;
+}
+.cta:hover { transform: translateY(-2px); }
+.cta--primary { background: linear-gradient(180deg, var(--blood), var(--blood-deep)); color: var(--bone); box-shadow: 0 10px 30px -12px color-mix(in oklab, var(--blood) 80%, black); }
+.cta--primary:hover { box-shadow: 0 16px 40px -12px color-mix(in oklab, var(--blood) 90%, black); }
+.cta--ember { background: linear-gradient(180deg, var(--ember), var(--ochre)); color: #2a1c08; box-shadow: 0 10px 30px -12px color-mix(in oklab, var(--ember) 70%, black); }
+.cta--ghost { border: 1px solid color-mix(in oklab, var(--bone) 32%, transparent); color: var(--bone); }
+.cta--ghost:hover { border-color: var(--ember); color: var(--bone); }
+.cta .arrow { transition: transform .2s var(--ease); }
+.cta:hover .arrow { transform: translateX(4px); }
+
+/* scroll-reveal (opt-in via .reveal; fresh.js toggles .is-in) */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
+.reveal.is-in { opacity: 1; transform: none; }
+.reveal.d1 { transition-delay: .08s; } .reveal.d2 { transition-delay: .16s; }
+.reveal.d3 { transition-delay: .24s; } .reveal.d4 { transition-delay: .32s; } .reveal.d5 { transition-delay: .4s; }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 3rem); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; scroll-behavior: auto !important; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .cta:hover { transform: none; }
+}

@@ -99,12 +99,18 @@
     },
     {
       label: 'Player Chrome',
-      description: 'Video and audio player controls',
+      description: 'Video and audio player controls (shown on a dark player surface). Play buttons, the waveform and the progress bar follow your Primary colour.',
       tokens: [
-        { key: 'player-text', name: 'Player Text', auto: 'White controls on dark background', brandPrefix: true, defaultSeed: '#ffffff' },
-        { key: 'player-text-secondary', name: 'Secondary', auto: 'Timestamps, secondary labels', brandPrefix: true, defaultSeed: '#cccccc' },
-        { key: 'player-surface', name: 'Button Bg', auto: 'Translucent button/track backgrounds', brandPrefix: true, defaultSeed: '#ffffff' },
-        { key: 'player-overlay', name: 'Dark Overlay', auto: 'Dark background behind controls', brandPrefix: true, defaultSeed: '#000000' },
+        { key: 'player-text', name: 'Controls', auto: 'Icons, play glyphs and primary labels', brandPrefix: true, defaultSeed: '#ffffff' },
+        { key: 'player-text-secondary', name: 'Timestamps', auto: 'Elapsed/duration and secondary labels', brandPrefix: true, defaultSeed: '#cccccc' },
+        { key: 'player-text-muted', name: 'Muted Labels', auto: 'De-emphasised hints and captions', brandPrefix: true, defaultSeed: '#999999' },
+        { key: 'player-surface', name: 'Button Background', auto: 'Translucent button and track backgrounds', brandPrefix: true, defaultSeed: '#ffffff' },
+        { key: 'player-surface-hover', name: 'Button Hover', auto: 'Button/track background on hover', brandPrefix: true, defaultSeed: '#ffffff' },
+        { key: 'player-surface-active', name: 'Button Active / Buffered', auto: 'Pressed buttons and buffered track fill', brandPrefix: true, defaultSeed: '#ffffff' },
+        { key: 'player-border', name: 'Dividers', auto: 'Control borders and separators', brandPrefix: true, defaultSeed: '#ffffff' },
+        { key: 'player-overlay', name: 'Control Overlay', auto: 'Dark scrim behind floating controls', brandPrefix: true, defaultSeed: '#000000' },
+        { key: 'player-overlay-heavy', name: 'Heavy Overlay', auto: 'Stronger scrim for active/hover states', brandPrefix: true, defaultSeed: '#000000' },
+        { key: 'player-gradient-bottom', name: 'Video Scrim', auto: 'Gradient behind the video control bar', brandPrefix: true, defaultSeed: '#000000' },
       ],
     },
     {
@@ -215,7 +221,7 @@
 </script>
 
 <div class="fine-tune">
-  {#each TOKEN_GROUPS as group}
+  {#each TOKEN_GROUPS as group (group.label)}
     {@const isExpanded = expandedGroup === group.label}
     {@const overrideCount = group.tokens.filter((t) => getOverride(t.key) != null).length}
     <section class="fine-tune__group">
@@ -240,7 +246,7 @@
             <p class="fine-tune__group-desc">{group.description}</p>
           {/if}
 
-          {#each group.tokens as token}
+          {#each group.tokens as token (token.key)}
             {@const override = getOverride(token.key)}
 
             {#if token.inputType === 'slider' && token.sliderConfig}
@@ -288,7 +294,7 @@
                     else setOverride(token.key, v);
                   }}
                 >
-                  {#each token.selectOptions as opt}
+                  {#each token.selectOptions as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
                   {/each}
                 </select>

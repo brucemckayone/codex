@@ -5,6 +5,7 @@
  *   - buildPlatformUrl(currentUrl, path?)
  *   - buildCreatorsUrl(currentUrl, path?)
  *   - buildContentUrl(currentUrl, content)
+ *   - buildJourneyUrl(currentUrl, journey, options?)  ← NEW (Codex-2pryk · WP-0)
  *
  * Test contract: must produce identical output to the historical
  * apps/web/src/lib/utils/subdomain.ts builders. Existing 35-test
@@ -17,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildContentUrl,
   buildCreatorsUrl,
+  buildJourneyUrl,
   buildOrgUrl,
   buildOrgUrlFromEnv,
   buildPlatformUrl,
@@ -263,5 +265,129 @@ describe('buildContentUrl (cross-org-aware)', () => {
         organizationSlug: 'studio-beta',
       })
     ).toBe('https://studio-beta.dev.revelations.studio/content/first-video');
+  });
+});
+
+describe('buildJourneyUrl (cross-org-aware, surface-aware)', () => {
+  // ── Cross-org routing + slug/id fallback (mirrors buildContentUrl) ──
+  it('returns root-relative path when the journey is on the current org subdomain', () => {
+    expect(
+      buildJourneyUrl(new URL('http://acme.lvh.me:3000/'), {
+        id: 'course-123',
+        slug: 'rootwork',
+        organizationSlug: 'acme',
+      })
+    ).toBe('/journeys/rootwork');
+  });
+
+  it('returns a full cross-org URL when the journey is on another org', () => {
+    expect(
+      buildJourneyUrl(new URL('http://acme.lvh.me:3000/'), {
+        id: 'course-456',
+        slug: 'grief-and-the-body',
+        organizationSlug: 'other-studio',
+      })
+    ).toBe('http://other-studio.lvh.me:3000/journeys/grief-and-the-body');
+  });
+
+  it('returns a full URL when the current page is on the platform apex', () => {
+    expect(
+      buildJourneyUrl(new URL('http://lvh.me:3000/discover'), {
+        id: 'course-789',
+        slug: 'sleep',
+        organizationSlug: 'rest-studio',
+      })
+    ).toBe('http://rest-studio.lvh.me:3000/journeys/sleep');
+  });
+
+  it('falls back to the journey id when slug is null', () => {
+    expect(
+      buildJourneyUrl(new URL('http://acme.lvh.me:3000/'), {
+        id: 'course-abc',
+        slug: null,
+        organizationSlug: 'acme',
+      })
+    ).toBe('/journeys/course-abc');
+  });
+
+  it('falls back to the journey id when slug is missing', () => {
+    expect(
+      buildJourneyUrl(new URL('http://acme.lvh.me:3000/'), {
+        id: 'course-def',
+        organizationSlug: 'acme',
+      })
+    ).toBe('/journeys/course-def');
+  });
+
+  it('returns root-relative path when organizationSlug is missing', () => {
+    expect(
+      buildJourneyUrl(new URL('http://lvh.me:3000/'), {
+        id: 'course-xyz',
+        slug: 'standalone-journey',
+      })
+    ).toBe('/journeys/standalone-journey');
+  });
+
+  it('handles deployed dev cross-org navigation', () => {
+    expect(
+      buildJourneyUrl(new URL('https://studio-alpha.dev.revelations.studio/'), {
+        id: 'course-1',
+        slug: 'rootwork',
+        organizationSlug: 'studio-beta',
+      })
+    ).toBe('https://studio-beta.dev.revelations.studio/journeys/rootwork');
+  });
+
+  // ── Surface variants (all sub-paths of /journeys/{slug}) ──
+  it('defaults to the sales surface (no options == { surface: "sales" })', () => {
+    const journey = {
+      id: 'course-1',
+      slug: 'rootwork',
+      organizationSlug: 'acme',
+    };
+    const currentUrl = new URL('http://acme.lvh.me:3000/');
+    expect(buildJourneyUrl(currentUrl, journey)).toBe(
+      buildJourneyUrl(currentUrl, journey, { surface: 'sales' })
+    );
+  });
+
+  it('appends /dashboard for the dashboard surface (same org → root-relative)', () => {
+    expect(
+      buildJourneyUrl(
+        new URL('http://acme.lvh.me:3000/'),
+        { id: 'course-1', slug: 'rootwork', organizationSlug: 'acme' },
+        { surface: 'dashboard' }
+      )
+    ).toBe('/journeys/rootwork/dashboard');
+  });
+
+  it('appends /checkout for the checkout surface', () => {
+    expect(
+      buildJourneyUrl(
+        new URL('http://acme.lvh.me:3000/'),
+        { id: 'course-1', slug: 'rootwork', organizationSlug: 'acme' },
+        { surface: 'checkout' }
+      )
+    ).toBe('/journeys/rootwork/checkout');
+  });
+
+  it('applies the surface suffix on a cross-org full URL', () => {
+    expect(
+      buildJourneyUrl(
+        new URL('http://lvh.me:3000/'),
+        { id: 'course-1', slug: 'rootwork', organizationSlug: 'acme' },
+        { surface: 'dashboard' }
+      )
+    ).toBe('http://acme.lvh.me:3000/journeys/rootwork/dashboard');
+  });
+
+  it('combines the id fallback with a surface suffix', () => {
+    expect(
+      buildJourneyUrl(
+        new URL('http://acme.lvh.me:3000/'),
+        { id: 'course-2', organizationSlug: 'acme' },
+        { surface: 'dashboard' }
+      )
+    ).toBe('/journeys/course-2/dashboard');
   });
 });

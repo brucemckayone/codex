@@ -65,8 +65,8 @@ describe('isAccessGrantingSubscription', () => {
   });
 });
 
-describe('decideIsIncluded — followers-only (Codex-xybr3 hierarchy)', () => {
-  const followersItem = { accessType: 'followers', minimumTierId: null };
+describe('decideIsIncluded — follower-gated (Codex-xybr3 hierarchy)', () => {
+  const followersItem = { isFollowerGated: true };
 
   it('returns true when an active subscription exists at any tier', () => {
     expect(decideIsIncluded(followersItem, makeSub(), TIERS)).toBe(true);
@@ -78,15 +78,15 @@ describe('decideIsIncluded — followers-only (Codex-xybr3 hierarchy)', () => {
     ).toBe(true);
   });
 
-  it('returns true regardless of minimumTierId — followers-only is tier-agnostic', () => {
-    // backend ignores minimumTierId for followers-only content (xybr3) —
-    // any active tier counts. The pure helper preserves that semantic so
-    // the badge decision matches the streaming-gate decision.
-    const followersItemWithMinTier = {
-      accessType: 'followers',
-      minimumTierId: 'tier-gold',
+  it('returns true regardless of includedInTierId — follower-gated is tier-agnostic', () => {
+    // backend ignores the tier for follower-gated content (xybr3) — any active
+    // subscription counts. The pure helper preserves that semantic so the badge
+    // decision matches the streaming-gate decision.
+    const followersItemWithTier = {
+      isFollowerGated: true,
+      includedInTierId: 'tier-gold',
     };
-    expect(decideIsIncluded(followersItemWithMinTier, makeSub(), TIERS)).toBe(
+    expect(decideIsIncluded(followersItemWithTier, makeSub(), TIERS)).toBe(
       true
     );
   });
@@ -96,14 +96,17 @@ describe('decideIsIncluded — followers-only (Codex-xybr3 hierarchy)', () => {
   });
 });
 
-describe('decideIsIncluded — subscribers (tier-aware)', () => {
-  it('returns true when no minimumTierId is set (any tier covers)', () => {
-    const item = { accessType: 'subscribers', minimumTierId: null };
-    expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(true);
+describe('decideIsIncluded — tier-gated (includedInTierId)', () => {
+  it('returns false when not tier-gated and not follower-gated', () => {
+    // WP-1 §6.1: a null includedInTierId is the "not tier-gated" state, not
+    // "any tier covers". With no follower gate either, the item is not
+    // subscription-included.
+    const item = { includedInTierId: null };
+    expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
   });
 
-  it('returns true when user tier sortOrder >= minimum tier sortOrder', () => {
-    const item = { accessType: 'subscribers', minimumTierId: 'tier-silver' };
+  it('returns true when user tier sortOrder >= gating tier sortOrder', () => {
+    const item = { includedInTierId: 'tier-silver' };
     const goldSub = makeSub({
       tier: { id: 'tier-gold', name: 'Gold', sortOrder: 3 },
     });
@@ -111,34 +114,33 @@ describe('decideIsIncluded — subscribers (tier-aware)', () => {
   });
 
   it('returns true at exact tier match', () => {
-    const item = { accessType: 'subscribers', minimumTierId: 'tier-silver' };
+    const item = { includedInTierId: 'tier-silver' };
     const silverSub = makeSub({
       tier: { id: 'tier-silver', name: 'Silver', sortOrder: 2 },
     });
     expect(decideIsIncluded(item, silverSub, TIERS)).toBe(true);
   });
 
-  it('returns false when user tier is below minimum', () => {
-    const item = { accessType: 'subscribers', minimumTierId: 'tier-gold' };
+  it('returns false when user tier is below the gating tier', () => {
+    const item = { includedInTierId: 'tier-gold' };
     const bronzeSub = makeSub();
     expect(decideIsIncluded(item, bronzeSub, TIERS)).toBe(false);
   });
 
-  it('returns false when minimumTierId is unknown to the resolved tiers', () => {
+  it('returns false when includedInTierId is unknown to the resolved tiers', () => {
     // Defensive: if the tier list is stale and the content references a
     // tier we don't recognise, the badge stays neutral rather than
     // optimistically claiming inclusion.
-    const item = { accessType: 'subscribers', minimumTierId: 'tier-platinum' };
+    const item = { includedInTierId: 'tier-platinum' };
     expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
   });
 });
 
-describe('decideIsIncluded — non-eligible access types', () => {
+describe('decideIsIncluded — non-eligible content', () => {
   it.each([
-    { accessType: 'free', minimumTierId: null },
-    { accessType: 'paid', minimumTierId: null },
-    { accessType: 'team', minimumTierId: null },
-  ])('returns false for $accessType content', (item) => {
+    { label: 'free', item: {} },
+    { label: 'purchasable', item: { isPurchasable: true } },
+  ])('returns false for $label content', ({ item }) => {
     expect(decideIsIncluded(item, makeSub(), TIERS)).toBe(false);
   });
 });

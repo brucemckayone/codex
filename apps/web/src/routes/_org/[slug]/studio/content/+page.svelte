@@ -267,7 +267,6 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: var(--container-studio);
   }
 
   .content-body {

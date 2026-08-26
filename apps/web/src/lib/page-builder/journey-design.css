@@ -1,0 +1,599 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   JOURNEY SECTION DESIGN AXES — the nine knobs, as CSS.
+
+   `docs/design/journey-sections/00-design-language-research.md` §2.3 is the
+   specification for this file, value by value;
+   `docs/design/journey-sections/02-axis-contract.md` amends it. Read both before
+   changing a number here — several of these values are measured, not chosen.
+
+   ── WHAT THIS FILE IS ──────────────────────────────────────────────────────
+   `variant` says WHICH composition a section draws. `design` says WHAT
+   TREATMENT it draws in, and unlike `variant` it is UNIVERSAL: every axis value
+   means the same thing on all 11 section types. `resolveDesign`
+   (`section-catalog.ts`) resolves nine closed enums per section
+   (section → page → default) and `render/SectionRenderer.svelte` emits them as
+   `data-jp-*` attributes on the `.jp-sec` wrapper. This file turns those
+   attributes into custom properties. That is the whole mechanism.
+
+   ── THE ONE CONSTRAINT THAT KEEPS THIS SMALL ───────────────────────────────
+   EVERY AXIS VALUE SETS ONLY CUSTOM PROPERTIES. No axis value writes a layout
+   rule — no `display`, no `padding`, no `grid-template`, nothing that paints.
+
+   That is not a style preference, it is what holds the file at 39 rules and
+   keeps it out of a specificity war. A section's own `<style>` is Svelte-scoped
+   and cannot reach an ancestor attribute, so sections can only ever READ these
+   properties; because they only read, an attribute selector at (0,1,0) never
+   competes with them, and no axis ever needs a per-section override. The moment
+   one axis value paints something, some section needs to out-specify it and the
+   file starts growing per type.
+
+   `@layer` is deliberately not used: this repo has not adopted cascade layers,
+   and introducing one file's worth would put these rules in a layer that every
+   unlayered rule beats. Plain attribute selectors are correct here.
+
+   ── WHERE IT IS LOADED ─────────────────────────────────────────────────────
+   ONE import, in `render/SectionFrame.svelte` — the component that EMITS the
+   attributes — so the rules cannot go missing from a surface that has the
+   markup. Every host arrives through it: the public journey page and WP-5's
+   live-preview iframe via `SectionRenderer`'s array loop, and the studio canvas
+   via its own loop over the same frame.
+
+   It was two imports until consolidation, one per section tree, the second being
+   `render-edit/journey-sections.css`. The canvas emitted no `data-jp-*` at all
+   then, so every control on the design panel was inert in the one place a
+   creator is looking while they use it. Both the second tree and that gap are
+   gone (contract A16, Codex-eckbx W1–W3).
+
+   Deliberately NOT imported from `journey-palette.css`, even though the ladder
+   this file reads lives there: the palette has two further consumers with no
+   sections at all (the checkout and the member dashboard), and they should not
+   carry section CSS.
+
+   ── WHAT THIS FILE MAY AND MAY NOT NAME ────────────────────────────────────
+   Contract A11: the public sections speak semantic `--color-*`, which
+   `.journey-palette--page` re-points onto the `--jp-*` ladder. COLOUR THEREFORE
+   STAYS `--color-*` in the sections; this file must not open a parallel colour
+   vocabulary. What it names are roles with no `--color-*` equivalent — rhythm,
+   measure, reveal distance, edge width, media aspect, display scale.
+
+   The one deliberate exception is `--jp-accent-*`, which IS colour. It is a thin
+   indirection over the ember tokens and that is its entire purpose:
+   `accent: none` becomes five declarations instead of a repo-wide replace.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── AXIS DEFAULTS + THE ROLE ALIASES ───────────────────────────────────────
+   `resolveDesign` is TOTAL — it always emits all nine attributes — so in the
+   public tree every axis rule below matches and these defaults are belt-and
+   braces. They are not optional, though: the canvas tree renders `.jp-sec` with
+   NO `data-jp-*` attributes at all, and a section reading
+   `calc(var(--space-6) * var(--jp-rhythm))` against an undefined property goes
+   invalid-at-computed-value-time and loses its padding entirely.
+
+   `:where()` drops this rule to specificity ZERO, so every axis rule below wins
+   regardless of source order. Without it the defaults and the axis rules would
+   both be (0,1,0) and the file's correctness would depend on the order its
+   blocks happen to appear in — which survives exactly until someone sorts it. */
+:where(.jp-sec) {
+  /* width */
+  --jp-content-max: 64rem;
+  --jp-measure: var(--measure-lede);
+
+  /* density */
+  --jp-rhythm: 1;
+
+  /* surface */
+  --jp-sec-bg: transparent;
+  --jp-sec-radius: var(--radius-none);
+  --jp-sec-atmos: 0;
+
+  /* edge */
+  --jp-edge-width: var(--border-width);
+  --jp-edge-color: var(--jp-line);
+  --jp-edge-shadow: var(--shadow-xs);
+
+  /* align */
+  --jp-align: center;
+  --jp-text-align: center;
+  --jp-measure-margin: auto;
+
+  /* type */
+  --jp-display: var(--text-4xl);
+  --jp-heading-size: var(--text-2xl);
+  /* The `type` axis's THIRD rung, for CARD-SCALE text — a testimonial quote, an
+     FAQ question row, a map stage name, a guide bio, a feel inclusion. Neither
+     heading step fits those, and without a rung of their own the bulk of most
+     sections sits outside this axis's reach, because the alternative is a
+     hardcoded size, which puts it out of reach permanently. Contract A44,
+     `Codex-8oznv`.
+
+     DERIVED, not declared per value, and that is deliberate. `--jp-display` and
+     `--jp-heading-size` get four explicit declarations because they are the axis's
+     own vocabulary. This rung is promoted from two components that had each already
+     invented it — WT-5 as `clamp(--text-base, calc(--jp-heading-size * 0.5),
+     --text-2xl)` and WT-4 as `max(--text-lg, calc(--jp-heading-size / 2))` — and
+     WT-5's expression is preserved here BYTE FOR BYTE so no published page changes.
+
+     Four explicit declarations (`--text-base` / `--text-base` / `--text-lg` /
+     `--text-xl`) would read better and match the pattern above, and they equal this
+     clamp exactly at desktop. They diverge by ~2px at narrow viewports, because the
+     clamp floors on `--text-base`'s own minimum while a plain token floors on its
+     own. That is a live appearance change on 7 published pages for a legibility
+     gain, which A3/D8 does not permit without measuring and accepting it first.
+     Promote it once someone does; until then this form is the safe one.
+
+     Resolution note, because it is subtle: a custom property referencing another
+     resolves on the element it is DECLARED on, not where it is used. That is correct
+     here only because `[data-jp-type='…']` also lands on `.jp-sec` and outranks
+     `:where(.jp-sec)`, so the type-specific `--jp-heading-size` wins. Moving this
+     declaration to an ANCESTOR of `.jp-sec` would silently freeze it at balanced.
+
+     Measured, desktop: 17 / 17 / 20 / 24px across restrained / balanced /
+     expressive / monumental. At `monumental` that is `--text-xl` — exactly what the
+     proof quote, the FAQ question and the map stage name shipped before the axes
+     existed, which is how the 0.5 was solved backwards. */
+  --jp-body-size: clamp(
+    var(--text-base),
+    calc(var(--jp-heading-size) * 0.5),
+    var(--text-2xl)
+  );
+  --jp-display-leading: var(--leading-tight);
+  --jp-display-tracking: var(--tracking-normal);
+
+  /* accent */
+  --jp-accent-text: var(--jp-ember-text);
+  --jp-accent-fill: var(--jp-ember);
+  --jp-accent-on-fill: var(--jp-on-ember);
+  /* Small decorative brand marks — dots, nodes, sparks. NEVER use
+     `--jp-accent-fill` for these: it is `transparent` at `accent: text` and
+     `accent: edge`, so the mark disappears on two of five values (WT-3 pilot). */
+  --jp-accent-mark: var(--jp-ember-text);
+  --jp-accent-edge: var(--jp-ember);
+  --jp-accent-glow: none;
+
+  /* motion */
+  --jp-reveal-distance: var(--space-4);
+  --jp-reveal-duration: var(--duration-slow);
+  --jp-reveal-stagger: var(--duration-fast);
+  --jp-reveal-ease: var(--ease-out);
+
+  /* media */
+  --jp-media-display: block;
+  --jp-media-radius: var(--radius-lg);
+  --jp-media-inset: 0px;
+  --jp-media-aspect: 16 / 9;
+  --jp-media-scrim: none;
+  --jp-media-mask: none;
+
+  /* ── ROLE ALIASES — declared once, not per axis value ────────────────────
+     `--jp-rhythm` is a bare multiplier, and leaving all 11 sections to spell
+     out the same clamp around it is how the `clamp(2rem, 6cqw, 4.4rem)`
+     literals got 8 slightly different spellings in the first place. These two
+     are the shapes research §2.3 specifies, written once.
+
+     The org's global density stays in the chain: `--space-*` derives from
+     `--space-unit` → `--brand-density-scale`, so the axis MULTIPLIES the org's
+     density rather than replacing it.
+
+     MUST BE CONSUMED ON A DESCENDANT of `.jp-sec`, never on `.jp-sec` itself.
+     `.jp-sec` carries `container-type: inline-size`, and an element is not its
+     own query container — `cqw` inside its own declarations resolves against
+     the nearest ANCESTOR container, which is the page. On a descendant it
+     resolves against the section, which is the point of A14. */
+  --jp-sec-pad-block: clamp(
+    calc(var(--space-8) * var(--jp-rhythm)),
+    6cqw,
+    calc(var(--space-20) * var(--jp-rhythm))
+  );
+  --jp-sec-pad-inline: clamp(
+    var(--space-5),
+    6cqw,
+    calc(var(--space-14) * var(--jp-rhythm))
+  );
+  --jp-sec-gap: calc(var(--space-6) * var(--jp-rhythm));
+}
+
+/* ═══════════════════ 1 · width ════════════════════════════════════════════
+   TWO properties, because they diverge. `--jp-content-max` caps the section's
+   inner wrapper; `--jp-measure` caps running body copy INSIDE it. A `wide`
+   technical section is a 80rem grid holding 78ch rows, and `full` means the
+   SURFACE is edge-to-edge while the copy still caps — per the standing rule
+   that "full width" describes the surface, not the text. */
+[data-jp-width='narrow'] {
+  --jp-content-max: 48rem;
+  --jp-measure: var(--measure-narrow);
+}
+[data-jp-width='text'] {
+  --jp-content-max: 64rem;
+  --jp-measure: var(--measure-lede);
+}
+[data-jp-width='wide'] {
+  --jp-content-max: var(--container-max);
+  --jp-measure: var(--measure-wide);
+}
+[data-jp-width='full'] {
+  --jp-content-max: 100%;
+  --jp-measure: var(--measure-wide);
+}
+
+/* ═══════════════════ 2 · density ══════════════════════════════════════════
+   Unitless on purpose. `--brand-density-scale` is org-global and single-valued;
+   this is per-section and multiplies onto it. See `--jp-sec-pad-block` above
+   for the consumption shape. */
+[data-jp-density='compact'] {
+  --jp-rhythm: 0.75;
+}
+[data-jp-density='regular'] {
+  --jp-rhythm: 1;
+}
+[data-jp-density='airy'] {
+  --jp-rhythm: 1.25;
+}
+[data-jp-density='vast'] {
+  --jp-rhythm: 1.6;
+}
+
+/* ═══════════════════ 3 · surface ══════════════════════════════════════════ */
+[data-jp-surface='bare'] {
+  --jp-sec-bg: transparent;
+  /* No painted box, so no inline padding of its own — the page gutter carries
+     it. This is the only value that zeroes it. */
+  --jp-sec-pad-inline: 0px;
+}
+/* `tint` and `panel` — A LIFTED SURFACE MUST RE-DERIVE ITS OWN TEXT LADDER.
+
+   The obvious spelling is `--jp-sec-bg: var(--jp-ink-2)`, and it fails AA. The
+   whole text ladder is derived from `--jp-ink`, so painting a LIGHTER background
+   behind it without re-anchoring costs every rung the lift: on `panel` (12%),
+   `--jp-faint` measures 4.43:1 in dark on the golden org and 4.17:1 on the
+   platform default, against a 4.5 floor. That is exactly the "vanishing card"
+   research §5.2 predicts for the contemporary family, and research §5.1 states
+   the rule: "Any axis introducing a new surface must re-derive, never hardcode."
+
+   So these re-point `--jp-ink` instead, and every rung re-derives against the
+   section's own surface. Measured after: `--jp-faint` on `panel` goes 4.43 →
+   5.21 (golden dark) and 4.17 → 4.83 (platform dark). Nothing regresses; every
+   rung improves.
+
+   THE PAINTED COLOUR IS UNCHANGED, exactly. `--jp-heading` is
+   `autoContrast(--jp-ink)` and `--jp-pole-b` is `autoContrast(--jp-pole-a)` by
+   the identical formula, and outside `invert` `--jp-ink` IS `--jp-pole-a` — so
+   `color-mix(pole-a 94%, pole-b 6%)` and `color-mix(ink 94%, heading 6%)` are the
+   same colour (verified to zero component delta on four backgrounds). The lift
+   is spelled in POLES rather than in ladder rungs for the cycle reason:
+   `--jp-ink: var(--jp-ink-2)` would define the ink in terms of something derived
+   from the ink, which is the same trap `invert` documents below. The poles depend
+   on nothing this rule redefines. */
+[data-jp-surface='tint'] {
+  --jp-ink: color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%);
+  --jp-sec-bg: var(--jp-ink);
+}
+[data-jp-surface='panel'] {
+  --jp-ink: color-mix(in oklab, var(--jp-pole-a) 88%, var(--jp-pole-b) 12%);
+  --jp-sec-bg: var(--jp-ink);
+  --jp-sec-radius: var(--radius-card);
+}
+
+/* `invert` — the one axis value that cannot be written naively.
+
+   `--jp-ink: var(--jp-heading)` would be a custom-property cycle, because
+   `--jp-heading` derives FROM `--jp-ink`; and nesting does not save it, because
+   custom properties inherit as unresolved token streams so an intermediate
+   alias re-substitutes the child's own `--jp-ink` one level down. The fix is the
+   two-pole refactor in `journey-palette.css`: both poles are declared once at
+   the palette root, from the ONE input, and `--jp-ink` merely POINTS at a pole.
+   Inverting re-points it. Everything downstream — `--jp-ink-2/3/4`,
+   `--jp-heading`, `--jp-text/dim/faint`, all four `--jp-line-*`, the atmosphere
+   veil — re-derives from this single declaration with no cycle.
+
+   Invert is IDEMPOTENT: an inverted section nested inside an inverted section
+   resolves to pole B again, not back to pole A. Both poles are fixed at the
+   palette root, so "the other pole" is the meaning rather than "flip once
+   more" — which is also why it cannot recurse.
+
+   `--jp-sec-bg` is an ADDITION to research §2.3, which lists only the `--jp-ink`
+   re-point. Without it the section flips its text colour and paints nothing, so
+   an inverted section on a cream page renders bone-on-cream — an invisible
+   section, not an inverted one. It reads `var(--jp-ink)` rather than
+   `var(--jp-pole-b)` directly so the surface always paints whatever ink the
+   section actually resolved. */
+[data-jp-surface='invert'] {
+  --jp-ink: var(--jp-pole-b);
+  --jp-sec-bg: var(--jp-ink);
+}
+
+/* `media` unlocks the cinematic atmosphere layer. `--jp-sec-atmos` is a 0/1
+   gate the bloom / vignette / motes markup multiplies its opacities by, so that
+   markup can stay mounted and simply resolve to zero opacity on every other
+   surface value — cheaper and lower-risk than conditionally rendering it. */
+[data-jp-surface='media'] {
+  --jp-sec-bg: transparent;
+  --jp-sec-atmos: 1;
+}
+
+/* ═══════════════════ 4 · edge ═════════════════════════════════════════════
+   Border width and elevation are DELIBERATELY FUSED into one axis. They co-vary
+   across all nine design families: nobody pairs hairline borders with a huge
+   coloured glow, and nobody pairs 2px brutalist borders with soft diffuse
+   elevation. Splitting them gives 20 combinations of which about five are
+   coherent. `soft` exists precisely so "elevation, no border" stays reachable.
+
+   MEASURED CAVEAT (`04-contrast-baseline.md`): `--jp-line` measures 1.79:1
+   light / 1.49:1 dark against a 3:1 floor. So `hairline` may not be the ONLY
+   signal for a boundary that carries meaning — pair it with space or a heading.
+   And per research §5.1, `none` and `soft` remove borders but must NEVER remove
+   a focus ring. */
+[data-jp-edge='none'] {
+  /* `0px`, NOT a bare `0`. A unitless zero is a `<number>`, not a `<length>`, so
+     any math on this token mixes types and invalidates the WHOLE declaration at
+     computed-value time. `MapSection` shipped
+     `border: max(var(--jp-edge-width), var(--border-width)) solid …` on its four
+     card selectors to floor the width so cards could not dissolve — and because
+     `edge: none` IS Candlelit, the shorthand went invalid on every published
+     page and `border-style` stayed `none`, doing the exact opposite of what the
+     floor intended. `dev@013e2d42` ships those cards with a real hairline
+     (`border: var(--border-width) solid var(--color-border-subtle)`), so this is
+     a RESTORATION, not a new look. `InviteSection` measured and documented the
+     trap in round 3 and asked for this one-character fix; nobody swept the tree.
+     Keeping the unit here fixes the whole CLASS of bug rather than the one
+     instance, so component math on the token is safe from now on. The twelve
+     plain `border: var(--jp-edge-width) solid X` consumers are unaffected —
+     `0px` and `0` are identical there. */
+  --jp-edge-width: 0px;
+  --jp-edge-shadow: none;
+}
+[data-jp-edge='hairline'] {
+  --jp-edge-width: var(--border-width);
+  --jp-edge-color: var(--jp-line);
+  --jp-edge-shadow: var(--shadow-xs);
+}
+[data-jp-edge='soft'] {
+  /* `0px` for the same reason as `none` above — see that comment. */
+  --jp-edge-width: 0px;
+  --jp-edge-shadow: var(--shadow-lg);
+}
+[data-jp-edge='heavy'] {
+  --jp-edge-width: var(--border-width-thick);
+  --jp-edge-color: var(--jp-accent-edge);
+  --jp-edge-shadow: none;
+}
+[data-jp-edge='offset'] {
+  --jp-edge-width: var(--border-width-thick);
+  --jp-edge-color: var(--jp-line-strong);
+  --jp-edge-shadow: var(--space-1) var(--space-1) 0 0 var(--jp-line-strong);
+}
+
+/* ═══════════════════ 5 · align ════════════════════════════════════════════
+   `--jp-align` is the LOGICAL value, for `justify-items` / `align-items`
+   consumers that must stay writing-mode correct. `--jp-text-align` is the
+   physical value `text-align` needs. `--jp-measure-margin` is what centres (or
+   does not centre) a measure-capped block inside a wider wrapper. */
+[data-jp-align='start'] {
+  --jp-align: start;
+  --jp-text-align: left;
+  --jp-measure-margin: 0px;
+}
+[data-jp-align='center'] {
+  --jp-align: center;
+  --jp-text-align: center;
+  --jp-measure-margin: auto;
+}
+
+/* ═══════════════════ 6 · type ═════════════════════════════════════════════
+   The SCALE, not the face. Face and weight come from `--brand-font-heading` and
+   `--brand-heading-weight` and are deliberately outside this axis — that is
+   what lets `monumental` serve both luxury-minimal (light didone) and brutalist
+   (heavy grotesk) from one value.
+
+   All eight sizes are existing `--text-*` steps, so they already carry
+   `--brand-text-scale` at org scope.
+
+   A11Y (research §5.1): `restrained` headings are small enough that they do NOT
+   qualify for the 3:1 large-text allowance and must clear the full 4.5:1. And
+   `type` is visual scale ONLY — it must never promote a heading LEVEL. */
+[data-jp-type='restrained'] {
+  --jp-display: var(--text-2xl);
+  --jp-heading-size: var(--text-xl);
+  --jp-display-leading: var(--leading-snug);
+  --jp-display-tracking: var(--tracking-normal);
+}
+[data-jp-type='balanced'] {
+  --jp-display: var(--text-4xl);
+  --jp-heading-size: var(--text-2xl);
+  --jp-display-leading: var(--leading-tight);
+  --jp-display-tracking: var(--tracking-normal);
+}
+[data-jp-type='expressive'] {
+  --jp-display: var(--text-5xl);
+  --jp-heading-size: var(--text-3xl);
+  --jp-display-leading: var(--leading-tight);
+  --jp-display-tracking: var(--tracking-tight);
+}
+[data-jp-type='monumental'] {
+  --jp-display: var(--text-display);
+  --jp-heading-size: var(--text-4xl);
+  --jp-display-leading: var(--leading-none);
+  --jp-display-tracking: var(--tracking-tighter);
+}
+
+/* ═══════════════════ 7 · accent ═══════════════════════════════════════════
+   THE SINGLE MOST LIKELY REGRESSION IN THIS PROGRAMME, per the research, and
+   the baseline measured it: `--jp-ember` used as TEXT is 8.49:1 light but
+   2.04:1 DARK on the golden org — a hard AA fail that a light-theme-only check
+   passes. `--jp-ember-text` (13.93 light / 5.40 dark) is the mitigation and it
+   works. So `--jp-accent-text` resolves to `--jp-ember-text` on every value
+   that tints text, NEVER to `--jp-ember`. Keep `--jp-ember` for fills, borders
+   and glows, where it sits under `--jp-on-ember`.
+
+   `accent: none` still resolves `--jp-accent-fill` to `--jp-ink-4` rather than
+   transparent, because a price-bearing CTA must stay the visually dominant
+   element even in a monochrome family — the luxury-minimal signature failure is
+   exactly the page where the CTA becomes indistinguishable from body text.
+
+   `--jp-accent-mark` EXISTS BECAUSE `--jp-accent-fill` IS `transparent` ON TWO
+   OF FIVE VALUES. Added after the WT-3 pilot: the hero's trust dot, its motes
+   and its scroll-cue spark all VANISHED at `accent: text` and `accent: edge`,
+   because a small decorative brand mark had nothing to paint with. `fill` is the
+   right role for a CTA plate and the wrong one for a 6px dot.
+
+   So `--jp-accent-mark` is always a REAL colour: the accent hue where the value
+   tints anything, and `--jp-heading` at `accent: none` (so a monochrome family
+   gets a neutral mark rather than an invisible one). It tracks `--jp-accent-text`
+   deliberately — a mark is closer to text than to a fill, and that inherits the
+   AA-safe `--jp-ember-text` rather than the 2.04:1-in-dark `--jp-ember`.
+
+   WT-4 (the descent spine and its gate nodes), WT-5 and WT-7 (accent dots) all
+   need this. Use it for any small decorative brand element; never
+   `--jp-accent-fill`. */
+[data-jp-accent='text'] {
+  --jp-accent-text: var(--jp-ember-text);
+  --jp-accent-fill: transparent;
+  --jp-accent-mark: var(--jp-ember-text);
+  --jp-accent-edge: var(--jp-line);
+  --jp-accent-glow: none;
+}
+[data-jp-accent='fill'] {
+  --jp-accent-text: var(--jp-ember-text);
+  --jp-accent-fill: var(--jp-ember);
+  --jp-accent-on-fill: var(--jp-on-ember);
+  --jp-accent-mark: var(--jp-ember-text);
+  --jp-accent-edge: var(--jp-ember);
+  --jp-accent-glow: none;
+}
+[data-jp-accent='edge'] {
+  --jp-accent-text: var(--jp-text);
+  --jp-accent-fill: transparent;
+  --jp-accent-mark: var(--jp-ember-text);
+  --jp-accent-edge: var(--jp-ember);
+  --jp-accent-glow: none;
+}
+[data-jp-accent='glow'] {
+  --jp-accent-text: var(--jp-ember-text);
+  --jp-accent-fill: var(--jp-ember);
+  --jp-accent-on-fill: var(--jp-on-ember);
+  --jp-accent-mark: var(--jp-ember-text);
+  --jp-accent-edge: color-mix(in oklab, var(--jp-ember) 45%, transparent);
+  --jp-accent-glow: 0 var(--space-6) var(--space-14)
+    calc(var(--space-10) * -1) var(--jp-blood);
+}
+[data-jp-accent='none'] {
+  --jp-accent-text: var(--jp-heading);
+  --jp-accent-fill: var(--jp-ink-4);
+  --jp-accent-on-fill: var(--jp-heading);
+  --jp-accent-mark: var(--jp-heading);
+  --jp-accent-edge: var(--jp-line);
+  --jp-accent-glow: none;
+}
+
+/* ═══════════════════ 8 · motion ═══════════════════════════════════════════
+   Every duration resolves through `--duration-*`, which `tokens/motion.css`
+   already collapses to `0.01ms` under `prefers-reduced-motion: reduce` — so
+   every value degrades to `none`'s TIMING for free.
+
+   That is not sufficient on its own, and this is the trap: a 0.01ms animation
+   to a TRANSLATED end state still moves the element. The distance has to be
+   neutralised explicitly, which is what the reduced-motion block at the bottom
+   of this file does. */
+[data-jp-motion='none'] {
+  --jp-reveal-distance: 0px;
+  --jp-reveal-duration: 0ms;
+  --jp-reveal-stagger: 0ms;
+  --jp-reveal-ease: linear;
+}
+[data-jp-motion='fade'] {
+  --jp-reveal-distance: 0px;
+  --jp-reveal-duration: var(--duration-slower);
+  --jp-reveal-stagger: 0ms;
+  --jp-reveal-ease: var(--ease-out);
+}
+[data-jp-motion='rise'] {
+  --jp-reveal-distance: var(--space-4);
+  --jp-reveal-duration: var(--duration-slow);
+  --jp-reveal-stagger: var(--duration-fast);
+  --jp-reveal-ease: var(--ease-out);
+}
+[data-jp-motion='stagger'] {
+  --jp-reveal-distance: var(--space-6);
+  --jp-reveal-duration: var(--duration-slow);
+  --jp-reveal-stagger: var(--duration-normal);
+  --jp-reveal-ease: var(--ease-spring);
+}
+[data-jp-motion='drift'] {
+  --jp-reveal-distance: var(--space-8);
+  --jp-reveal-duration: var(--duration-slowest);
+  --jp-reveal-stagger: var(--duration-normal);
+  --jp-reveal-ease: var(--ease-smooth);
+}
+
+/* ═══════════════════ 9 · media ════════════════════════════════════════════
+   ASPECT RATIO AND SCRIM ARE COUPLED, and this is a known trap. Changing a
+   media box's `aspect-ratio` moves where an opaque scrim's gradient stops fall
+   relative to the text sitting on it, which silently changes that text's
+   contrast. `bleed` is the ONLY value shipping a scrim, and its 21:9 aspect and
+   62% stop are tuned together. Any future aspect change on `bleed` requires
+   re-measuring the text contrast over it — this is not a free parameter.
+
+   Consequence for compositions (research §5.1): any composition placing text
+   OVER media must use `bleed`, not `frame`. `frame` has no scrim.
+
+   `--jp-media-mask` is a `clip-path` value. `mask` is an arch: a wide ellipse
+   across the top two corners, the standard radius at the bottom two, expressed
+   in percentages so it tracks the box rather than needing a raw px path(). */
+[data-jp-media='bleed'] {
+  --jp-media-radius: 0px;
+  --jp-media-inset: 0px;
+  --jp-media-aspect: 21 / 9;
+  --jp-media-scrim: linear-gradient(to top, var(--jp-ink), transparent 62%);
+  --jp-media-mask: none;
+}
+[data-jp-media='frame'] {
+  --jp-media-radius: var(--radius-lg);
+  --jp-media-inset: 0px;
+  --jp-media-aspect: 16 / 9;
+  --jp-media-scrim: none;
+  --jp-media-mask: none;
+}
+[data-jp-media='mask'] {
+  --jp-media-radius: var(--radius-xl);
+  --jp-media-inset: 0px;
+  --jp-media-aspect: 4 / 5;
+  --jp-media-scrim: none;
+  --jp-media-mask: inset(
+    0 round 48% 48% var(--radius-xl) var(--radius-xl) / 34% 34%
+      var(--radius-xl) var(--radius-xl)
+  );
+}
+[data-jp-media='inset'] {
+  --jp-media-radius: var(--radius-none);
+  --jp-media-inset: var(--space-12);
+  --jp-media-aspect: 3 / 2;
+  --jp-media-scrim: none;
+  --jp-media-mask: none;
+}
+[data-jp-media='none'] {
+  --jp-media-display: none;
+}
+
+/* ═══════════════════ REDUCED MOTION — INVIOLABLE ══════════════════════════
+   `--duration-*` already collapse to `0.01ms`, which handles the timing. This
+   block handles the DISTANCE, and it is the half that is easy to miss: a 0.01ms
+   animation to `translateY(var(--space-8))` still moves the element to a new
+   place — it just does it instantly, which is a jump rather than a reveal.
+
+   Specificity: the motion axis rules above are (0,1,0), so this has to beat
+   them on the same element. `.jp-sec[data-jp-motion]` is (0,2,0) and matches
+   whatever value is set; the `:where(.jp-sec)` half is the fallback for a
+   `.jp-sec` carrying no `data-jp-motion` at all. Nothing hits that half today —
+   `SectionFrame` always emits the attribute — and it is kept rather than dropped
+   because a host that mounts a section WITHOUT the frame would otherwise get no
+   reduced-motion handling at all. It used to cover the canvas tree, which
+   emitted none of the nine axes.
+
+   Stopping keyframe ANIMATIONS is the section CSS's job, not an axis's — see
+   the `prefers-reduced-motion` block in `journey-sections-shared.css`. */
+@media (prefers-reduced-motion: reduce) {
+  :where(.jp-sec),
+  .jp-sec[data-jp-motion] {
+    --jp-reveal-distance: 0px;
+    --jp-reveal-stagger: 0ms;
+  }
+}

@@ -77,11 +77,9 @@ export type LevelId =
   | 'colors'
   | 'typography'
   | 'shape'
-  | 'shadows'
   | 'logo'
   | 'presets'
   | 'hero-effects'
-  | 'intro-video'
   | 'header-layout'
   | 'fine-tune-colors'
   | 'fine-tune-typography';

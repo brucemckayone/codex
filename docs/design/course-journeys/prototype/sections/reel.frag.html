@@ -1,0 +1,494 @@
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     REEL — "See it in motion". A cinematic practice-preview clip that sits just
+     before the curriculum map. Deliberately NOT the intro film: an ultrawide
+     letterbox (2.4:1), an editorial split header, a small inline play tucked into
+     a minimal player-chrome bar, a waveform scrubber with a sweeping playhead, and
+     whispered subtitle captions — the language of a guided somatic practice, not a
+     talking-head film. Poster is pure CSS/SVG: candlelight that breathes, a body
+     at rest catching warm rim light, vignette + grain. Mock only — no real video.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .reel {
+    position: relative;
+    padding: clamp(4.5rem, 11vh, 8rem) 0;
+  }
+
+  /* ── editorial split header: title left, whisper right ── */
+  .reel-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: clamp(1.4rem, 4vw, 3.5rem);
+    flex-wrap: wrap;
+    margin-bottom: clamp(1.8rem, 4.5vw, 3rem);
+  }
+  .reel-lead { max-width: 30ch; }
+  .reel-eyebrow { margin-bottom: clamp(.9rem, 2vw, 1.2rem); }
+  .reel-title {
+    font-size: clamp(2rem, 5.4vw, 3.5rem);
+    font-weight: 300;
+    letter-spacing: -0.015em;
+    line-height: 1.02;
+    color: var(--bone);
+  }
+  .reel-title em {
+    font-style: italic;
+    color: var(--rose);
+  }
+  .reel-sub {
+    font-family: var(--sans);
+    font-size: clamp(1rem, 1.5vw, 1.18rem);
+    line-height: 1.6;
+    color: var(--bone-faint);
+    max-width: 30ch;
+    text-align: right;
+    padding-bottom: .35rem;
+  }
+
+  /* ── the cinematic stage ── */
+  .reel-stage { position: relative; transform-origin: center bottom; }
+
+  .reel-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2.4 / 1;
+    border-radius: clamp(12px, 1.6vw, 18px);
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--ember) 20%, transparent);
+    background: var(--ink);
+    box-shadow:
+      0 44px 110px -46px rgba(0,0,0,.85),
+      0 8px 30px -18px rgba(0,0,0,.7);
+    isolation: isolate;
+  }
+  /* thin top sheen — reads like the surface of a screen */
+  .reel-frame::before {
+    content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--bone) 10%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 5%, transparent), transparent 12%);
+  }
+
+  /* ── poster: layered warm-dark atmosphere ── */
+  .reel-poster { position: absolute; inset: 0; z-index: 0; }
+  .reel-poster > * { position: absolute; inset: 0; pointer-events: none; }
+
+  /* warm base — a touch of lift where the candle sits */
+  .reel-base {
+    background:
+      radial-gradient(150% 130% at 26% 34%,
+        color-mix(in oklab, var(--ink-3) 88%, var(--ember) 12%) 0%,
+        var(--ink-2) 42%, var(--ink) 70%, #0b0704 100%);
+  }
+  /* the reclining body — a low warm mass catching light from the flame */
+  .reel-body {
+    background:
+      radial-gradient(78% 130% at 58% 138%,
+        color-mix(in oklab, var(--clay) 26%, transparent) 0%,
+        color-mix(in oklab, var(--blood-deep) 20%, transparent) 34%,
+        transparent 62%);
+    mix-blend-mode: screen;
+    opacity: .9;
+  }
+  /* rim light — the skin edge grazed by candlelight */
+  .reel-rim {
+    background:
+      radial-gradient(42% 60% at 38% 74%,
+        color-mix(in oklab, var(--rose) 34%, transparent) 0%,
+        transparent 56%);
+    mix-blend-mode: screen;
+    opacity: .8;
+  }
+  /* candlelight — bloom + brighter core; breathes */
+  .reel-glow {
+    background:
+      radial-gradient(closest-side at 25% 40%,
+        color-mix(in oklab, var(--ember) 92%, white 8%) 0%,
+        color-mix(in oklab, var(--ember) 55%, transparent) 20%,
+        color-mix(in oklab, var(--ochre) 22%, transparent) 46%,
+        transparent 66%);
+    mix-blend-mode: screen;
+    transform-origin: 25% 40%;
+    animation: reel-breath 8s var(--ease) infinite;
+  }
+  /* incense/haze drifting slowly across the frame */
+  .reel-haze {
+    background:
+      radial-gradient(60% 90% at 70% 20%, color-mix(in oklab, var(--ochre) 10%, transparent), transparent 60%);
+    mix-blend-mode: screen;
+    opacity: .6;
+    animation: reel-drift 22s ease-in-out infinite alternate;
+  }
+  .reel-vignette {
+    background:
+      radial-gradient(125% 120% at 50% 40%,
+        transparent 38%,
+        color-mix(in oklab, var(--ink) 55%, transparent) 74%,
+        color-mix(in oklab, #000 55%, var(--ink)) 100%);
+  }
+  .reel-grain {
+    opacity: .07; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='rn'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23rn)'/%3E%3C/svg%3E");
+  }
+
+  @keyframes reel-breath {
+    0%, 100% { transform: scale(1);    opacity: .82; }
+    50%      { transform: scale(1.07); opacity: 1; }
+  }
+  @keyframes reel-drift {
+    from { transform: translate3d(-4%, 2%, 0); }
+    to   { transform: translate3d(5%, -3%, 0); }
+  }
+
+  /* ── viewfinder corner marks — "this is framed footage" ── */
+  .reel-corner {
+    position: absolute; z-index: 4; width: clamp(16px, 2.2vw, 26px); height: clamp(16px, 2.2vw, 26px);
+    border: 0 solid color-mix(in oklab, var(--ember) 55%, transparent);
+    opacity: .55; pointer-events: none;
+  }
+  .reel-corner--tl { top: clamp(.9rem,2.2vw,1.4rem); left: clamp(.9rem,2.2vw,1.4rem); border-top-width: 1.5px; border-left-width: 1.5px; }
+  .reel-corner--tr { top: clamp(.9rem,2.2vw,1.4rem); right: clamp(.9rem,2.2vw,1.4rem); border-top-width: 1.5px; border-right-width: 1.5px; }
+  .reel-corner--bl { bottom: clamp(.9rem,2.2vw,1.4rem); left: clamp(.9rem,2.2vw,1.4rem); border-bottom-width: 1.5px; border-left-width: 1.5px; }
+  .reel-corner--br { bottom: clamp(.9rem,2.2vw,1.4rem); right: clamp(.9rem,2.2vw,1.4rem); border-bottom-width: 1.5px; border-right-width: 1.5px; }
+
+  /* ── top meta: authenticity tag + total duration ── */
+  .reel-topmeta {
+    position: absolute; z-index: 4; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: clamp(1rem, 2.8vw, 1.75rem) clamp(1.2rem, 3vw, 2rem);
+    pointer-events: none;
+  }
+  .reel-tag {
+    display: inline-flex; align-items: center; gap: .55rem;
+    font-family: var(--sans); font-size: .66rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .28em;
+    color: color-mix(in oklab, var(--bone) 74%, transparent);
+    text-shadow: 0 1px 6px rgba(0,0,0,.6);
+  }
+  .reel-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ember);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 80%, transparent);
+    animation: reel-pulse 4s var(--ease) infinite;
+  }
+  @keyframes reel-pulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+  .reel-dur {
+    font-family: var(--sans); font-size: .74rem; font-weight: 600;
+    letter-spacing: .06em; font-variant-numeric: tabular-nums;
+    color: var(--bone);
+    padding: .28rem .6rem; border-radius: 999px;
+    background: color-mix(in oklab, var(--ink) 55%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+  }
+
+  /* ── lower block: whispered caption + player chrome (never overlap) ── */
+  .reel-scrim {
+    position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 62%;
+    pointer-events: none;
+    background: linear-gradient(0deg,
+      color-mix(in oklab, var(--ink) 90%, transparent) 0%,
+      color-mix(in oklab, var(--ink) 55%, transparent) 42%,
+      transparent 100%);
+  }
+  .reel-lower {
+    position: absolute; z-index: 4; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column;
+    gap: clamp(.7rem, 2vw, 1.15rem);
+    padding: clamp(1rem, 3vw, 2rem);
+  }
+
+  .reel-caption {
+    align-self: center; text-align: center;
+    font-family: var(--serif); font-style: italic; font-weight: 300;
+    font-size: clamp(1.02rem, 2.5vw, 1.55rem);
+    line-height: 1.35; letter-spacing: .005em;
+    color: color-mix(in oklab, var(--bone) 90%, transparent);
+    text-shadow: 0 2px 14px rgba(0,0,0,.7);
+    max-width: 32ch;
+    transition: opacity .42s var(--ease);
+  }
+  .reel-caption::before { content: "\201C"; opacity: .4; margin-right: .06em; }
+  .reel-caption::after  { content: "\201D"; opacity: .4; margin-left: .06em; }
+
+  /* player-chrome bar: small play · waveform scrubber · elapsed time */
+  .reel-chrome {
+    display: flex; align-items: center;
+    gap: clamp(.7rem, 2vw, 1.15rem);
+  }
+
+  .reel-play {
+    flex: none;
+    width: clamp(2.7rem, 4.4vw, 3.3rem); height: clamp(2.7rem, 4.4vw, 3.3rem);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--bone);
+    background: color-mix(in oklab, var(--ember) 16%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ember) 60%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 8px 26px -12px rgba(0,0,0,.7);
+    transition: transform .18s var(--ease), background .25s, border-color .25s;
+  }
+  .reel-play:hover { transform: translateY(-2px); background: color-mix(in oklab, var(--ember) 26%, transparent); }
+  .reel-play:active { transform: translateY(0) scale(.96); }
+  .reel-play:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; }
+  .reel-play svg { width: 44%; height: 44%; display: block; fill: currentColor; }
+  .reel-play svg { grid-area: 1 / 1; }
+  /* gentle invitation ring — only when not playing */
+  .reel-play::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: reel-ring 2.8s var(--ease) infinite;
+  }
+  .reel-frame.reel--playing .reel-play::after { animation-play-state: paused; opacity: 0; }
+  @keyframes reel-ring {
+    0%   { transform: scale(1);    opacity: .7; }
+    70%  { transform: scale(1.55); opacity: 0; }
+    100% { transform: scale(1.55); opacity: 0; }
+  }
+  /* icon swap play <-> pause */
+  .reel-ico--pause { opacity: 0; }
+  .reel-frame.reel--playing .reel-ico--play  { opacity: 0; }
+  .reel-frame.reel--playing .reel-ico--pause { opacity: 1; }
+
+  /* waveform scrubber */
+  .reel-track {
+    position: relative; flex: 1 1 auto; min-width: 0;
+    height: clamp(24px, 3.4vw, 38px);
+  }
+  .reel-wave { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .reel-wave--base { color: color-mix(in oklab, var(--bone) 30%, transparent); }
+  .reel-wave--fill {
+    color: var(--ember);
+    clip-path: inset(0 100% 0 0);              /* hidden until played */
+    filter: drop-shadow(0 0 5px color-mix(in oklab, var(--ember) 55%, transparent));
+  }
+  .reel-frame.reel--started .reel-wave--fill {
+    animation: reel-scrub var(--reel-len, 48s) linear forwards;
+    animation-play-state: paused;
+  }
+  .reel-frame.reel--started.reel--playing .reel-wave--fill { animation-play-state: running; }
+  @keyframes reel-scrub { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+  .reel-playhead {
+    position: absolute; top: -12%; bottom: -12%; left: 0; width: 2px;
+    background: var(--bone);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 90%, transparent);
+    opacity: 0; transform: translateX(-1px);
+  }
+  .reel-playhead::before {
+    content: ""; position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--bone);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 90%, transparent);
+  }
+  .reel-frame.reel--started .reel-playhead {
+    opacity: 1;
+    animation: reel-head var(--reel-len, 48s) linear forwards;
+    animation-play-state: paused;
+  }
+  .reel-frame.reel--started.reel--playing .reel-playhead { animation-play-state: running; }
+  @keyframes reel-head { from { left: 0; } to { left: 100%; } }
+
+  .reel-time {
+    flex: none;
+    font-family: var(--sans); font-size: .8rem; font-weight: 600;
+    letter-spacing: .04em; font-variant-numeric: tabular-nums;
+    color: var(--bone-dim);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+    min-width: 2.6em; text-align: right;
+  }
+
+  /* ── reveal-on-scroll (self-contained, prefixed) ── */
+  .reel-reveal {
+    opacity: 0; transform: translateY(26px);
+    transition: opacity .9s var(--ease), transform .9s var(--ease);
+  }
+  .reel-reveal.reel-in { opacity: 1; transform: none; }
+  .reel-reveal.reel-d1 { transition-delay: .1s; }
+  .reel-reveal.reel-d2 { transition-delay: .2s; }
+  .reel-stage.reel-reveal { transform: translateY(34px) scale(.985); }
+  .reel-stage.reel-reveal.reel-in { transform: none; }
+
+  /* ── responsive: keep the letterbox graceful, give the clip room ── */
+  @media (max-width: 760px) {
+    .reel-head { align-items: flex-start; }
+    .reel-sub { text-align: left; padding-bottom: 0; max-width: 40ch; }
+    .reel-frame { aspect-ratio: 4 / 3; min-height: 280px; }
+    .reel-caption::before, .reel-caption::after { content: none; }
+  }
+  @media (max-width: 420px) {
+    .reel-frame { aspect-ratio: 3 / 3.4; }
+    .reel-tag { letter-spacing: .2em; }
+  }
+
+  /* ── reduced motion: show the final, composed still — no movement ── */
+  @media (prefers-reduced-motion: reduce) {
+    .reel-reveal { opacity: 1; transform: none; transition: none; }
+    .reel-glow, .reel-haze, .reel-dot,
+    .reel-play::after, .reel-wave--fill, .reel-playhead {
+      animation: none !important;
+    }
+    .reel-glow { opacity: 1; transform: scale(1.04); }
+    .reel-play::after { opacity: 0; }
+  }
+</style>
+
+<section class="reel" aria-labelledby="reel-heading">
+  <div class="wrap">
+    <header class="reel-head">
+      <div class="reel-lead reel-reveal">
+        <p class="eyebrow reel-eyebrow">See it in motion</p>
+        <h2 class="reel-title" id="reel-heading">This is what a <em>descent</em> looks like.</h2>
+      </div>
+      <p class="reel-sub reel-reveal reel-d1">A glimpse of a real practice — before you walk it yourself.</p>
+    </header>
+
+    <figure class="reel-stage reel-reveal reel-d2">
+      <div class="reel-frame" style="--reel-len: 48s;">
+        <!-- poster (decorative) -->
+        <div class="reel-poster" aria-hidden="true">
+          <span class="reel-base"></span>
+          <span class="reel-body"></span>
+          <span class="reel-rim"></span>
+          <span class="reel-glow"></span>
+          <span class="reel-haze"></span>
+          <span class="reel-vignette"></span>
+          <span class="reel-grain"></span>
+        </div>
+
+        <span class="reel-corner reel-corner--tl" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--tr" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--bl" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--br" aria-hidden="true"></span>
+
+        <div class="reel-topmeta" aria-hidden="true">
+          <span class="reel-tag"><span class="reel-dot"></span>unedited · one take</span>
+          <span class="reel-dur">0:48</span>
+        </div>
+
+        <span class="reel-scrim" aria-hidden="true"></span>
+
+        <div class="reel-lower">
+          <p class="reel-caption">let the breath reach the base of the spine.</p>
+
+          <div class="reel-chrome">
+            <button class="reel-play" type="button" aria-pressed="false"
+                    aria-label="Play the practice preview (48 seconds, mock — no audio)">
+              <svg class="reel-ico--play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              <svg class="reel-ico--pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            </button>
+
+            <div class="reel-track" aria-hidden="true">
+              <!-- one waveform shape, drawn once, reused for base + played layers -->
+              <svg class="reel-wave reel-wave--base" viewBox="0 0 480 40" preserveAspectRatio="none">
+                <g id="reelWave" fill="currentColor">
+                  <rect x="4"   y="15" width="7" height="10" rx="3"/><rect x="19"  y="13" width="7" height="14" rx="3"/>
+                  <rect x="34"  y="10" width="7" height="20" rx="3"/><rect x="49"  y="7"  width="7" height="26" rx="3"/>
+                  <rect x="64"  y="9"  width="7" height="22" rx="3"/><rect x="79"  y="12" width="7" height="16" rx="3"/>
+                  <rect x="94"  y="14" width="7" height="12" rx="3"/><rect x="109" y="11" width="7" height="18" rx="3"/>
+                  <rect x="124" y="6"  width="7" height="28" rx="3"/><rect x="139" y="3"  width="7" height="34" rx="3"/>
+                  <rect x="154" y="5"  width="7" height="30" rx="3"/><rect x="169" y="9"  width="7" height="22" rx="3"/>
+                  <rect x="184" y="13" width="7" height="14" rx="3"/><rect x="199" y="15" width="7" height="10" rx="3"/>
+                  <rect x="214" y="12" width="7" height="16" rx="3"/><rect x="229" y="8"  width="7" height="24" rx="3"/>
+                  <rect x="244" y="4"  width="7" height="32" rx="3"/><rect x="259" y="6"  width="7" height="28" rx="3"/>
+                  <rect x="274" y="10" width="7" height="20" rx="3"/><rect x="289" y="14" width="7" height="12" rx="3"/>
+                  <rect x="304" y="12" width="7" height="16" rx="3"/><rect x="319" y="9"  width="7" height="22" rx="3"/>
+                  <rect x="334" y="5"  width="7" height="30" rx="3"/><rect x="349" y="7"  width="7" height="26" rx="3"/>
+                  <rect x="364" y="11" width="7" height="18" rx="3"/><rect x="379" y="14" width="7" height="12" rx="3"/>
+                  <rect x="394" y="15" width="7" height="10" rx="3"/><rect x="409" y="12" width="7" height="16" rx="3"/>
+                  <rect x="424" y="9"  width="7" height="22" rx="3"/><rect x="439" y="11" width="7" height="18" rx="3"/>
+                  <rect x="454" y="14" width="7" height="12" rx="3"/><rect x="469" y="16" width="7" height="8"  rx="3"/>
+                </g>
+              </svg>
+              <svg class="reel-wave reel-wave--fill" viewBox="0 0 480 40" preserveAspectRatio="none">
+                <use href="#reelWave"/>
+              </svg>
+              <span class="reel-playhead"></span>
+            </div>
+
+            <span class="reel-time" role="status" aria-live="off">0:00</span>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const root = (document.currentScript && document.currentScript.closest('.reel'))
+      || document.querySelector('.reel');
+    if (!root) return;
+
+    const frame  = root.querySelector('.reel-frame');
+    const btn    = root.querySelector('.reel-play');
+    const timeEl = root.querySelector('.reel-time');
+    const capEl  = root.querySelector('.reel-caption');
+    const reveals = root.querySelectorAll('.reel-reveal');
+    const reduce  = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const DURATION = 48;
+    const CAPS = [
+      'let the breath reach the base of the spine.',
+      'feel the whole weight of you meet the floor.',
+      'nothing to fix here. only to feel.'
+    ];
+
+    /* reveal-on-scroll */
+    if (reduce || !('IntersectionObserver' in window)) {
+      reveals.forEach(el => el.classList.add('reel-in'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+          if (e.isIntersecting) { e.target.classList.add('reel-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+      reveals.forEach(el => io.observe(el));
+    }
+
+    /* honest mock player — clock + subtitle cycle drive the "in motion" feel */
+    let elapsed = 0, capIdx = 0, clock = null, capTimer = null;
+    const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+
+    function startTimers() {
+      if (reduce) return;                       // motion off: static "playing" still
+      clock = setInterval(() => {
+        elapsed += 1;
+        if (timeEl) timeEl.textContent = fmt(elapsed);
+        if (elapsed >= DURATION) end();
+      }, 1000);
+      capTimer = setInterval(() => {
+        capIdx = (capIdx + 1) % CAPS.length;
+        if (!capEl) return;
+        capEl.style.opacity = '0';
+        setTimeout(() => { capEl.textContent = CAPS[capIdx]; capEl.style.opacity = ''; }, 420);
+      }, 5600);
+    }
+    function stopTimers() {
+      clearInterval(clock); clearInterval(capTimer);
+      clock = capTimer = null;
+    }
+    function play() {
+      frame.classList.add('reel--started', 'reel--playing');
+      btn.setAttribute('aria-pressed', 'true');
+      startTimers();
+    }
+    function pause() {
+      frame.classList.remove('reel--playing');   // freezes CSS animations in place
+      btn.setAttribute('aria-pressed', 'false');
+      stopTimers();
+    }
+    function end() {
+      stopTimers();
+      frame.classList.remove('reel--started', 'reel--playing');
+      btn.setAttribute('aria-pressed', 'false');
+      elapsed = 0; capIdx = 0;
+      if (timeEl) timeEl.textContent = '0:00';
+      if (capEl) { capEl.style.opacity = ''; capEl.textContent = CAPS[0]; }
+    }
+
+    btn.addEventListener('click', () => {
+      frame.classList.contains('reel--playing') ? pause() : play();
+    });
+  })();
+</script>

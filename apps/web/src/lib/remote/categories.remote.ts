@@ -65,7 +65,7 @@ export const getCategories = query(
 /**
  * List an org's published topic categories for the public landing page.
  *
- * Unauthenticated + org-scoped (by id) — powers the "Browse by topic" grid and
+ * Unauthenticated + org-scoped (by id) — powers the "Browse by topic" rail and
  * resolves the active-topic chip name in the browse module. Maps the public
  * endpoint rows straight to the `TopicItem` card contract (dropping `sortOrder`,
  * which the endpoint already applied as the array order). Distinct from
@@ -78,12 +78,13 @@ export const getPublicCategories = query(
     const api = createServerApi(platform, cookies);
 
     const rows = await api.content.getPublicCategories(orgId);
+    // `row.icon` is intentionally dropped: the endpoint still serves the emoji
+    // column, but `TopicItem` no longer carries it (see topic-card.types.ts).
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       slug: row.slug,
       description: row.description,
-      icon: row.icon,
       coverImageUrl: row.coverImageUrl,
     }));
   }

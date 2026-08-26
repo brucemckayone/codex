@@ -57,9 +57,29 @@ const config = {
     // `media-src`). The same origins on `media-src` cover the
     // `<audio src=master.m3u8>` (HLS) playback path.
     //
-    // `frame-ancestors 'none'` is the modern equivalent of X-Frame-Options
-    // DENY (the hooks.server.ts header still says SAMEORIGIN — keep both
-    // for defence in depth; modern browsers prefer the CSP directive).
+    // `frame-ancestors 'self'` (Codex-cijzb WP-1.2): the brand-editor
+    // workspace at /studio/brand embeds the org's own public pages in a
+    // same-origin <iframe> for live preview (WP-1.3). `frame-ancestors`
+    // governs who may FRAME us — 'self' permits only our own origin to do
+    // so. It was `'none'` (X-Frame-Options DENY equivalent) before this WP,
+    // which blocked ALL framing, including same-origin. hooks.server.ts
+    // still sends `X-Frame-Options: SAMEORIGIN` as a legacy fallback for
+    // pre-CSP3 browsers — SAMEORIGIN and 'self' are equivalent, so the two
+    // headers agree rather than conflict.
+    //
+    // Residual clickjacking surface: 'self' only lets pages already on
+    // *our own* origin frame our pages — a third-party site still cannot.
+    // The only way to abuse this is to already control a same-origin page,
+    // a far smaller blast radius than `frame-ancestors '*'`. This is the
+    // reviewed, intended trade-off for WP-1.2.
+    //
+    // `frame-ancestors` only controls who may EMBED us — it says nothing
+    // about whether WE may embed same-origin content ourselves. That's
+    // `frame-src` (falls back to `child-src`, then `default-src`, per the
+    // CSP3 spec: https://w3c.github.io/webappsec-csp/#directive-frame-src).
+    // Neither `frame-src` nor `child-src` is declared below, so
+    // `default-src 'self'` already permits /studio/brand to load a
+    // same-origin <iframe> — no separate frame-src entry is needed.
     //
     // `form-action` permits:
     //   1. Stripe Checkout / Customer Portal redirects — server-side 303
@@ -215,7 +235,9 @@ const config = {
         ],
         'object-src': ['none'],
         'base-uri': ['self'],
-        'frame-ancestors': ['none'],
+        // Same-origin framing only (Codex-cijzb WP-1.2) — see the header
+        // comment above for the full clickjacking-surface rationale.
+        'frame-ancestors': ['self'],
         'form-action': [
           'self',
           'https://checkout.stripe.com',

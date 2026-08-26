@@ -1,0 +1,296 @@
+<style>
+  /* ═══ THE TURN — the pivot, and the descent into the five-stage arc ═══
+     Namespaced under .turn / .turn__*. Compound selectors (.turn .turn__x)
+     deliberately out-specify any legacy `.turn h2` / `.turn p` in sell.css. */
+
+  .turn {
+    position: relative;
+    padding: clamp(5rem, 12vw, 9rem) 0;
+    overflow: hidden;
+    isolation: isolate;
+    text-align: left;                         /* override legacy centered .turn */
+  }
+
+  /* a warm well the eye descends toward — atmosphere, not decoration */
+  .turn::before {
+    content: "";
+    position: absolute; z-index: -1;
+    left: 62%; bottom: -16%;
+    width: min(115%, 960px); aspect-ratio: 1;
+    transform: translateX(-50%);
+    background: radial-gradient(circle at 50% 50%,
+      color-mix(in oklab, var(--ember) 15%, transparent),
+      color-mix(in oklab, var(--blood) 11%, transparent) 40%,
+      transparent 66%);
+    filter: blur(22px);
+    pointer-events: none;
+  }
+  @media (max-width: 899px) {
+    .turn::before { left: 50%; bottom: 4%; width: min(140%, 700px); }
+  }
+
+  .turn__inner {
+    max-width: 1080px; margin: 0 auto;
+    padding: 0 clamp(1.3rem, 4vw, 3rem);
+  }
+
+  .turn__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(2.6rem, 6vw, 4rem);
+  }
+  @media (min-width: 900px) {
+    .turn__grid {
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: clamp(2.6rem, 5vw, 5rem);
+      align-items: center;
+    }
+  }
+
+  /* ── left: the statement (pain → promise) ── */
+  .turn__head { max-width: 32ch; }
+  .turn .turn__eyebrow { display: block; margin-bottom: clamp(1rem, 2vw, 1.4rem); }
+  .turn .turn__statement {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2.3rem, 4.7vw, 3.9rem);
+    line-height: 1.03; letter-spacing: -0.02em;
+    color: var(--bone); text-wrap: balance;
+  }
+  .turn .turn__statement em { font-style: italic; color: var(--ember); }
+  .turn .turn__lede {
+    margin-top: clamp(1.2rem, 2vw, 1.7rem);
+    max-width: 40ch;
+    color: var(--bone-dim);
+    font-size: clamp(1.05rem, 1.4vw, 1.2rem);
+    line-height: 1.62;
+  }
+  /* decorative thread — the descent begins here, and flows into the arc */
+  .turn__thread {
+    margin-top: clamp(1.6rem, 3vw, 2.4rem);
+    width: clamp(3rem, 6vw, 5rem); height: 2px;
+    border-radius: 2px;
+    transform-origin: left center;
+    background: linear-gradient(90deg, var(--ember), transparent);
+    opacity: .85;
+  }
+
+  /* ── right: the descent arc (five stages) ── */
+  .turn__arc {
+    position: relative;
+    padding-left: clamp(.2rem, 0.6vw, .5rem);
+  }
+  /* the thread: faint base rail + ember progress that draws downward */
+  .turn__arc::before,
+  .turn__arc::after {
+    content: ""; position: absolute;
+    left: 5px; width: 2px;
+    top: clamp(1.2rem, 2.5vw, 1.8rem);
+    bottom: clamp(1.2rem, 2.5vw, 1.8rem);
+    transform: translateX(-1px);
+    border-radius: 2px;
+  }
+  .turn__arc::before {
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bone) 24%, transparent),
+      color-mix(in oklab, var(--ember) 55%, transparent));
+    opacity: .32;
+  }
+  .turn__arc::after {                          /* ember progress (default: full) */
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--ember) 28%, transparent), var(--ember));
+    box-shadow: 0 0 12px color-mix(in oklab, var(--ember) 45%, transparent);
+    transform: translateX(-1px) scaleY(1); transform-origin: top center;
+  }
+  /* the root — where the descent lands */
+  .turn__root {
+    position: absolute; left: 5px; bottom: clamp(1.2rem, 2.5vw, 1.8rem);
+    width: 13px; height: 13px; border-radius: 50%;
+    transform: translate(-50%, 50%);
+    background: radial-gradient(circle, var(--ember),
+      color-mix(in oklab, var(--ember) 22%, transparent) 66%, transparent);
+    box-shadow: 0 0 18px 3px color-mix(in oklab, var(--ember) 42%, transparent);
+  }
+
+  .turn__stages { list-style: none; }
+
+  .turn__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: clamp(3rem, 6vw, 4.4rem) 1fr;
+    column-gap: clamp(.7rem, 1.8vw, 1.3rem);
+    align-items: baseline;
+    padding-block: clamp(.95rem, 2vw, 1.5rem);
+  }
+  .turn__stage + .turn__stage {
+    border-top: 1px solid color-mix(in oklab, var(--bone) 8%, transparent);
+  }
+
+  .turn__num {
+    grid-column: 1;
+    justify-self: start;
+    padding-left: clamp(.7rem, 1.6vw, 1.2rem);   /* hang just off the thread */
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: clamp(1.9rem, 3.4vw, 2.9rem);
+    line-height: 1; letter-spacing: .02em;
+    color: var(--ember);                                          /* fallback */
+    color: color-mix(in oklab, var(--ember) calc(58% + var(--d, 0) * 10%), var(--bone-dim));
+    transition: color .8s var(--ease);
+  }
+
+  .turn__body {
+    grid-column: 2;
+    padding-left: calc(var(--d, 0) * clamp(0px, 1vw, 15px));       /* steps deeper */
+  }
+  .turn .turn__name {
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(1.25rem, 2vw, 1.65rem);
+    line-height: 1.12; color: var(--bone);
+    letter-spacing: -0.005em;
+  }
+  .turn .turn__gloss {
+    margin-top: .5rem;
+    max-width: 46ch;
+    color: var(--bone-dim);
+    font-size: clamp(.98rem, 1.15vw, 1.08rem);
+    line-height: 1.55;
+  }
+
+  /* ── motion (opt-in; added by the IIFE only when motion is welcome) ── */
+  .turn--motion .turn__eyebrow,
+  .turn--motion .turn__statement,
+  .turn--motion .turn__lede {
+    opacity: 0; transform: translateY(16px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+  }
+  .turn--motion .turn__statement { transition-delay: .06s; }
+  .turn--motion .turn__lede { transition-delay: .12s; }
+  .turn--motion.is-in .turn__eyebrow,
+  .turn--motion.is-in .turn__statement,
+  .turn--motion.is-in .turn__lede { opacity: 1; transform: none; }
+
+  .turn--motion .turn__thread {
+    opacity: 0; transform: scaleX(0);
+    transition: transform .9s var(--ease) .2s, opacity .5s var(--ease) .2s;
+  }
+  .turn--motion.is-in .turn__thread { opacity: .85; transform: none; }
+
+  .turn--motion .turn__stage {
+    opacity: 0; transform: translateY(18px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+    transition-delay: calc(var(--d) * 110ms);
+  }
+  .turn--motion.is-in .turn__stage { opacity: 1; transform: none; }
+
+  .turn--motion .turn__num { color: var(--bone-faint); }
+  .turn--motion.is-in .turn__num {
+    color: color-mix(in oklab, var(--ember) calc(58% + var(--d, 0) * 10%), var(--bone-dim));
+  }
+
+  .turn--motion .turn__arc::after {
+    transform: translateX(-1px) scaleY(0);
+    transition: transform 1.5s var(--ease) .15s;
+  }
+  .turn--motion.is-in .turn__arc::after { transform: translateX(-1px) scaleY(1); }
+
+  .turn--motion .turn__root {
+    opacity: 0; transform: translate(-50%, 50%) scale(.4);
+    transition: opacity .7s var(--ease) 1s, transform .7s var(--ease) 1s;
+  }
+  .turn--motion.is-in .turn__root { opacity: 1; transform: translate(-50%, 50%) scale(1); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .turn--motion .turn__eyebrow,
+    .turn--motion .turn__statement,
+    .turn--motion .turn__lede,
+    .turn--motion .turn__stage,
+    .turn--motion .turn__thread,
+    .turn--motion .turn__root {
+      opacity: 1 !important; transform: none !important; transition: none !important;
+    }
+    .turn--motion .turn__arc::after { transform: translateX(-1px) scaleY(1) !important; }
+    .turn--motion .turn__num { color: var(--ember) !important; }
+  }
+</style>
+
+<section class="turn section" id="turn">
+  <div class="turn__inner">
+    <div class="turn__grid">
+
+      <div class="turn__head">
+        <p class="eyebrow turn__eyebrow">The five stages</p>
+        <h2 class="turn__statement">There is a way <em>down</em>. It begins at the root.</h2>
+        <p class="turn__lede">Rootwork is a descent — five stages the body walks to find its ground again. You don't climb toward calm. You settle into it.</p>
+        <div class="turn__thread" aria-hidden="true"></div>
+      </div>
+
+      <div class="turn__arc">
+        <span class="turn__root" aria-hidden="true"></span>
+        <ol class="turn__stages" aria-label="The five stages of the descent">
+          <li class="turn__stage" style="--d: 0">
+            <span class="turn__num" aria-hidden="true">i</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Regulation</h3>
+              <p class="turn__gloss">Finding the ground. Teaching the body it is safe enough to soften.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 1">
+            <span class="turn__num" aria-hidden="true">ii</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Embodiment</h3>
+              <p class="turn__gloss">Coming back into sensation — feeling what is actually here.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 2">
+            <span class="turn__num" aria-hidden="true">iii</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Attunement</h3>
+              <p class="turn__gloss">Listening inward; letting need and impulse be known.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 3">
+            <span class="turn__num" aria-hidden="true">iv</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Co-regulation</h3>
+              <p class="turn__gloss">Being met by another. The body settling in company.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 4">
+            <span class="turn__num" aria-hidden="true">v</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Reclamation</h3>
+              <p class="turn__gloss">Living from wholeness — taking back what was held away.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('turn');
+    if (!section) return;
+
+    var prefersReduced = window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // No JS-driven motion when reduced-motion or IO is unavailable:
+    // leaving off .turn--motion means the composed final state renders as-is.
+    if (prefersReduced || !('IntersectionObserver' in window)) return;
+
+    section.classList.add('turn--motion');
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          section.classList.add('is-in');
+          io.disconnect();
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+
+    io.observe(section);
+  })();
+</script>

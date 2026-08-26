@@ -20,6 +20,10 @@
 /* Themes */
 @import './themes/light.css';
 @import './themes/dark.css';
+/* Status surfaces — derived from --color-surface/-border/-text, so they follow
+   both the theme and the org background. Self-contained (owns its own
+   light-before-dark ordering); only needs to be in the cascade. */
+@import './themes/status.css';
 
 /* Org Brand Overrides (CSS relative colors, activated by [data-org-brand]) */
 @import './tokens/org-brand.css';

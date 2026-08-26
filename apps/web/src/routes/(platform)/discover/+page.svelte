@@ -12,6 +12,7 @@
   import type { PageData } from './$types';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
@@ -77,7 +78,8 @@
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
         <ContentCard
-          autoPromoteAudio
+          shape="3:4"
+          titleInCover
           id={item.id}
           title={item.title}
           thumbnail={item.mediaItem?.thumbnailUrl ?? null}
@@ -92,7 +94,7 @@
             amount: item.priceCents,
             currency: 'GBP',
           } : null}
-          contentAccessType={item.accessType}
+          contentAccessType={deriveContentAccessKind(item)}
           featured={item.featured ?? false}
         />
       {/each}

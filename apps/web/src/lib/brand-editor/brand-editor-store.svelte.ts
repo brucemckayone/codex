@@ -14,7 +14,7 @@ import {
   injectBrandVars,
   loadGoogleFont,
 } from './css-injection';
-import { getBreadcrumb, LEVELS } from './levels';
+import { getBreadcrumb, isLevelId, LEVELS } from './levels';
 import type {
   BrandEditorState,
   BrandPreset,
@@ -164,7 +164,9 @@ function open(orgId: string, saved: BrandEditorState): void {
             restored.pending.darkTokenOverrides = saved.darkTokenOverrides;
           }
           state.pending = restored.pending;
-          state.level = restored.level ?? 'home';
+          // Guard against a stale/removed level id in persisted state — fall
+          // back to home rather than indexing LEVELS with an unknown key.
+          state.level = isLevelId(restored.level) ? restored.level : 'home';
           state.panel = 'open';
           return;
         }
@@ -405,10 +407,50 @@ function setThemeFont(which: 'body' | 'heading', value: string | null): void {
   if (value && browser) loadGoogleFont(value);
 }
 
+/**
+ * Codex-cijzb · WP-1.4 — apply an inbound preview snapshot inside the framed
+ * public page (driven by the postMessage bridge, `brand-preview-bridge.ts`).
+ *
+ * Drives the WP-1.1 injection seam directly:
+ *   - sets `pending` so the injection $effect (initEffects) re-runs
+ *     `injectBrandVars(pending)`, emitting `--brand-*` onto `.org-layout`;
+ *   - opens the panel so the layout's `isOpen ? pending : server` bindings
+ *     (logo, hero-layout, hero-visibility toggles, shader gate) read `pending`.
+ * No reload is needed for any field.
+ *
+ * Deliberately does NOT set `orgId`: the sessionStorage crash-recovery $effect
+ * is guarded on `orgId`, so a preview frame never pollutes a real editor
+ * session's storage (both share this origin's sessionStorage). This is a pure
+ * applier — it never posts a message, so it cannot echo back to the sender.
+ */
+function applyPreviewVars(vars: BrandEditorState): void {
+  initEffects();
+  state.pending = vars;
+  state.panel = 'open';
+}
+
 function discard(): void {
   if (!state.saved) return;
   state.pending = $state.snapshot(state.saved) as BrandEditorState;
   clearStorage();
+}
+
+/**
+ * Codex-cijzb · WP-1.5 — revert a SINGLE field to its saved value, leaving
+ * every other pending edit intact. Powers the control-rail change-ledger's
+ * per-field Reset. Reuses the same `saved`/`pending` spine as `discard`, but
+ * scoped to one key. `$state.snapshot` deep-clones object-valued fields
+ * (`tokenOverrides`, `darkOverrides`, `darkTokenOverrides`) so the restored
+ * value can never alias the saved reference and drift later.
+ *
+ * No-op when there is nothing to reset (closed editor) or the field already
+ * equals its saved value.
+ */
+function resetField<K extends keyof BrandEditorState>(field: K): void {
+  if (!state.pending || !state.saved) return;
+  state.pending[field] = $state.snapshot(
+    state.saved[field]
+  ) as BrandEditorState[K];
 }
 
 function getSavePayload(): BrandEditorState | null {
@@ -492,7 +534,11 @@ export const brandEditor = {
   // Per-theme fonts (dark variant via darkTokenOverrides).
   getThemeFont,
   setThemeFont,
+  // Codex-cijzb · WP-1.4: apply an inbound live-preview snapshot in the iframe.
+  applyPreviewVars,
   discard,
+  // Codex-cijzb · WP-1.5: per-field revert for the control-rail change-ledger.
+  resetField,
   getSavePayload,
   markSaved,
 };

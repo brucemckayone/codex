@@ -34,7 +34,17 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY handler/ ./handler/
+COPY local_server.py .
 
 ENV PYTHONPATH=/app
 
-CMD ["python3", "-u", "handler/main.py", "--rp_serve_api", "--rp_api_host=0.0.0.0", "--rp_api_port=8000"]
+# Serve via local_server.py, NOT runpod's `--rp_serve_api`.
+#
+# runpod's local `/run` is a stub that never invokes the handler, and its
+# `/runsync` blocks for the whole transcode — which trips media-api's 30s
+# dispatch timeout and makes it mark still-running jobs as failed. local_server
+# reproduces the cloud contract instead: accept, return a job id immediately,
+# transcode on a background thread, webhook on completion.
+#
+# See local_server.py and LOCAL_DEV.md for the full reasoning.
+CMD ["python3", "-u", "local_server.py"]

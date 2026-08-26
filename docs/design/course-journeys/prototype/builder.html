@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page builder · Rootwork · Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ═══════════════════════════════════════════════════════════════
+     PAGE BUILDER — three panes linked by SELECTION.
+       Outline  (what's on the page + page-level settings)
+       Canvas   (the live, on-brand page — click a block to select,
+                 type directly into text)
+       Inspector(schema-driven fields for whatever is selected)
+     Tool chrome = cool grey. Canvas = the warm brand page. The two
+     never share a palette, so the tool never masquerades as content.
+     ═══════════════════════════════════════════════════════════════ */
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.13);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489; --st-ok: #7fb98a;
+  }
+  html, body { height: 100%; overflow: hidden; }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); }
+  body::before, body::after { display: none; }
+
+  /* top bar */
+  .st-top { height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); }
+  .st-top .brand { font-weight: 700; font-size: .82rem; } .st-top .brand span { color: var(--st-gold); }
+  .st-top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .st-top .doc b { color: var(--st-text); font-weight: 600; }
+  .st-top .doc .draft { margin-left: .5rem; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 16%, transparent); padding: .16rem .5rem; border-radius: 999px; }
+  /* primary artifact switch — Curriculum ⇄ Sales page */
+  .artswitch { display: flex; gap: .2rem; background: var(--st-panel-2); padding: .22rem; border-radius: 9px; margin-left: .4rem; }
+  .artswitch a { font-size: .78rem; padding: .42rem .85rem; border-radius: 7px; color: var(--st-dim); display: inline-flex; gap: .45rem; align-items: center; }
+  .artswitch a:hover { color: var(--st-text); }
+  .artswitch a.on { background: var(--st-panel-3); color: var(--st-text); }
+  .st-seg { margin-left: auto; display: flex; gap: .2rem; background: var(--st-panel-2); padding: .22rem; border-radius: 9px; }
+  .st-seg button { font-size: .74rem; padding: .35rem .7rem; border-radius: 7px; color: var(--st-dim); }
+  .st-seg button.on { background: var(--st-panel-3); color: var(--st-text); }
+  .st-top .save { font-size: .8rem; padding: .5rem .9rem; border-radius: 8px; color: var(--st-dim); border: 1px solid var(--st-line-2); }
+  .st-top .save:hover { color: var(--st-text); }
+  .st-top .publish { font-size: .8rem; font-weight: 600; padding: .52rem 1.1rem; border-radius: 8px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); }
+  /* publish pre-flight checklist (error prevention, Nielsen #5) */
+  .pubcheck { position: fixed; top: 56px; right: 12px; z-index: 60; width: 300px; background: var(--st-panel); border: 1px solid var(--st-line-2); border-radius: 12px; box-shadow: 0 24px 60px -20px #000; padding: 1rem 1.1rem; opacity: 0; transform: translateY(-6px); pointer-events: none; transition: opacity .16s, transform .16s; }
+  .pubcheck.open { opacity: 1; transform: none; pointer-events: auto; }
+  .pubcheck h4 { font-size: .84rem; font-weight: 600; color: var(--st-text); margin-bottom: .8rem; }
+  .pubcheck ul { list-style: none; display: grid; gap: .55rem; margin-bottom: .9rem; }
+  .pubcheck li { display: flex; gap: .55rem; font-size: .82rem; color: var(--st-text); align-items: baseline; }
+  .pubcheck li .c { color: var(--st-gold); flex: none; }
+  .pubcheck li small { color: var(--st-faint); display: block; margin-top: .1rem; }
+  .pubcheck .go { width: 100%; text-align: center; font-size: .82rem; font-weight: 600; padding: .62rem; border-radius: 8px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); }
+
+  /* mode tabs — page-wide switch (Design = blocks; the rest = page settings) */
+  .st-modes { display: flex; align-items: stretch; height: 44px; padding: 0 .8rem; gap: .1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); }
+  .st-modes button { padding: 0 1.05rem; font-size: .8rem; color: var(--st-dim); border-bottom: 2px solid transparent; }
+  .st-modes button:hover { color: var(--st-text); }
+  .st-modes button.on { color: var(--st-text); border-bottom-color: var(--st-gold); }
+  .st-modes .div { width: 1px; background: var(--st-line-2); margin: .7rem .6rem; }
+  .st-modes .grp { align-self: center; font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--st-faint); margin-right: .3rem; }
+
+  .st-shell { display: grid; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 52px - 44px); }
+  .st-shell.mode-design { grid-template-columns: 244px 1fr 348px; grid-template-areas: "outline canvas inspector"; }
+  .st-shell.mode-settings { grid-template-columns: 380px 1fr; grid-template-areas: "settings canvas"; }
+  .st-outline { grid-area: outline; }
+  .st-settings { grid-area: settings; }
+  .st-canvas { grid-area: canvas; }
+  .st-insp { grid-area: inspector; }
+  .mode-design .st-settings { display: none; }
+  .mode-settings .st-outline, .mode-settings .st-insp { display: none; }
+
+  /* ── OUTLINE ── */
+  .st-outline { min-height: 0; border-right: 1px solid var(--st-line); background: var(--st-panel); overflow-y: auto; padding: 1rem .8rem 3rem; }
+
+  /* ── SETTINGS column (page-wide modes; reuses inspector inner styles) ── */
+  .st-settings { min-height: 0; border-right: 1px solid var(--st-line); background: var(--st-panel); overflow-y: auto; padding: 0 0 3rem; }
+  .ol-group { font-size: .64rem; letter-spacing: .16em; text-transform: uppercase; color: var(--st-faint); margin: 1.3rem .3rem .5rem; }
+  .ol-group:first-child { margin-top: .2rem; }
+  .ol { display: flex; align-items: center; gap: .55rem; padding: .55rem .6rem; border-radius: 9px; border: 1px solid transparent; margin-bottom: .25rem; cursor: pointer; transition: background .14s, border-color .14s; }
+  .ol:hover { background: var(--st-panel-2); }
+  .ol.sel { border-color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 10%, var(--st-panel-2)); }
+  .ol .grip { color: var(--st-faint); cursor: grab; font-size: .82rem; }
+  .ol .ic { color: var(--st-dim); font-size: .82rem; width: 1rem; text-align: center; }
+  .ol .nm { flex: 1; font-size: .84rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ol .nm small { display: block; color: var(--st-faint); font-size: .68rem; }
+  .ol .eye { width: 24px; height: 20px; border-radius: 5px; display: grid; place-items: center; color: var(--st-faint); font-size: .78rem; }
+  .ol .eye:hover { background: var(--st-panel-3); color: var(--st-text); }
+  .ol.off { opacity: .45; }
+  .ol.off .nm { text-decoration: line-through; }
+  .ol.drag-over { border-top: 2px solid var(--st-gold); }
+  .ol-add { width: 100%; text-align: center; padding: .55rem; border-radius: 9px; border: 1px dashed var(--st-line-2); color: var(--st-dim); font-size: .8rem; margin-top: .35rem; }
+  .ol-add:hover { color: var(--st-text); border-color: var(--st-gold); }
+
+  /* ── CANVAS ── */
+  .st-canvas { background: repeating-conic-gradient(#15171b 0% 25%, #171a1e 0% 50%) 50% / 22px 22px; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .st-canvas__bar { display: flex; align-items: center; gap: .8rem; padding: .5rem 1rem; border-bottom: 1px solid var(--st-line); background: color-mix(in oklab, var(--st-panel) 82%, transparent); }
+  .st-canvas__bar .live { font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--st-ok); display: inline-flex; align-items: center; gap: .4rem; }
+  .st-canvas__bar .live .d { width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 8px 1px color-mix(in oklab, var(--st-ok) 70%, transparent); }
+  .st-canvas__bar .url { font-size: .74rem; color: var(--st-faint); }
+  .st-canvas__bar .hint { margin-left: auto; font-size: .7rem; color: var(--st-faint); }
+  .st-canvas__stage { overflow: auto; display: grid; place-items: start center; padding: 1.4rem; }
+
+  /* the page itself — warm brand, rendered from the model */
+  #cvpage { width: 100%; max-width: 1080px; background: #100b07; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 80px -30px #000; border: 1px solid var(--st-line-2); transition: max-width .3s var(--ease); color: var(--bone); }
+  #cvpage.mobile { max-width: 380px; }
+
+  .cv-sec { position: relative; cursor: pointer; }
+  .cv-sec::after { content: ""; position: absolute; inset: 0; pointer-events: none; outline: 0 solid transparent; transition: outline-color .12s; }
+  .cv-sec:hover::after { outline: 1px solid color-mix(in oklab, var(--st-gold) 45%, transparent); outline-offset: -1px; }
+  .cv-sec.sel::after { outline: 2px solid var(--st-gold); outline-offset: -2px; }
+  .cv-tag { position: absolute; top: 0; left: 0; transform: translateY(-100%); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: #241a09; background: var(--st-gold); padding: .16rem .5rem; border-radius: 5px 5px 0 0; opacity: 0; pointer-events: none; white-space: nowrap; }
+  .cv-sec:hover .cv-tag, .cv-sec.sel .cv-tag { opacity: 1; }
+  /* editable text affordance */
+  .cv-sec [data-field] { transition: background .12s, box-shadow .12s; border-radius: 4px; }
+  .cv-sec [data-field]:hover { background: color-mix(in oklab, var(--st-gold) 12%, transparent); }
+  .cv-sec [data-field]:focus { outline: none; background: color-mix(in oklab, var(--st-gold) 10%, transparent); box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--st-gold) 70%, transparent); }
+
+  /* section renderers (compact but on-brand) */
+  .cvs { padding: clamp(1.8rem, 4vw, 3.2rem) clamp(1.4rem, 5vw, 3.4rem); border-bottom: 1px solid color-mix(in oklab, var(--bone) 6%, transparent); }
+  .cv-hero { background: radial-gradient(130% 120% at 50% -10%, color-mix(in oklab, var(--blood) 52%, var(--ink-2)), #0c0805); text-align: center; padding-block: clamp(2.6rem, 6vw, 4.4rem); }
+  .cv-hero .eyebrow { font-size: .72rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ember); }
+  .cv-hero h1 { font-family: var(--serif); font-weight: 300; font-size: clamp(2rem, 5.5vw, 3.4rem); line-height: 1.05; margin: .5rem auto .6rem; max-width: 18ch; }
+  .cv-hero .sub { color: var(--bone-dim); max-width: 46ch; margin: 0 auto 1.4rem; line-height: 1.6; }
+  .cv-hero .btn { display: inline-block; padding: .8rem 1.7rem; border-radius: 999px; font-weight: 600; background: linear-gradient(180deg, var(--ember), var(--ochre)); color: #241a09; }
+  .cv-kick { font-size: .68rem; letter-spacing: .22em; text-transform: uppercase; color: var(--ember); }
+  .cvs h2 { font-family: var(--serif); font-weight: 300; font-size: clamp(1.5rem, 3.4vw, 2.2rem); margin: .35rem 0 .6rem; line-height: 1.15; }
+  .cvs .body { color: var(--bone-dim); max-width: 56ch; line-height: 1.7; }
+  .cv-media { aspect-ratio: 16/9; border-radius: 16px; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 0%, color-mix(in oklab, var(--blood) 40%, var(--ink-2)), #0c0805); border: 1px solid color-mix(in oklab, var(--ember) 16%, transparent); margin-top: 1.2rem; }
+  .cv-media .p { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in oklab, var(--ember) 92%, white); color: #241a09; }
+  .cv-stages { display: grid; gap: .5rem; margin-top: 1.2rem; }
+  .cv-stage { display: flex; align-items: center; gap: .7rem; padding: .7rem .9rem; border-radius: 11px; background: color-mix(in oklab, var(--ink-2) 55%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 7%, transparent); }
+  .cv-stage .rn { font-family: var(--serif); font-style: italic; color: var(--ember); }
+  .cv-stage .sn { font-family: var(--serif); color: var(--bone); }
+  .cv-stage .ct { margin-left: auto; font-size: .74rem; color: var(--bone-faint); }
+  .cv-proof { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.2rem; }
+  .cv-quote { padding: 1.1rem 1.2rem; border-radius: 14px; background: color-mix(in oklab, var(--ink-2) 55%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 7%, transparent); font-family: var(--serif); font-style: italic; color: var(--bone-dim); font-size: .96rem; line-height: 1.5; }
+  .cv-invite { text-align: center; background: color-mix(in oklab, var(--ember) 8%, var(--ink-2)); }
+  .cv-invite .price { font-family: var(--serif); font-size: clamp(1.8rem, 4vw, 2.6rem); color: var(--bone); margin: .3rem 0; }
+  .cv-invite .price small { font-size: .9rem; color: var(--bone-faint); }
+  .cv-invite .btn { display: inline-block; margin-top: .6rem; padding: .8rem 1.8rem; border-radius: 999px; font-weight: 600; background: linear-gradient(180deg, var(--ember), var(--ochre)); color: #241a09; }
+  .cv-faq .q { padding: .8rem 0; border-bottom: 1px solid color-mix(in oklab, var(--bone) 8%, transparent); color: var(--bone); }
+  .cv-faq .q:last-child { border: none; }
+
+  /* ── INSPECTOR ── */
+  .st-insp { min-height: 0; border-left: 1px solid var(--st-line); background: var(--st-panel); overflow-y: auto; padding: 0 0 3rem; }
+  .insp-head { position: sticky; top: 0; background: var(--st-panel); border-bottom: 1px solid var(--st-line); padding: 1rem 1.1rem; z-index: 2; }
+  .insp-head .t { font-size: 1rem; font-weight: 600; }
+  .insp-head .s { font-size: .72rem; color: var(--st-faint); margin-top: .15rem; }
+  .insp-body { padding: 1.1rem; }
+  .fld { margin-bottom: 1rem; }
+  .fld label { display: block; font-size: .72rem; color: var(--st-dim); margin-bottom: .35rem; }
+  .fld input, .fld textarea, .fld select { width: 100%; background: var(--st-panel-2); border: 1px solid var(--st-line-2); border-radius: 8px; color: var(--st-text); font: inherit; font-size: .85rem; padding: .55rem .7rem; }
+  .fld input:focus, .fld textarea:focus, .fld select:focus { outline: none; border-color: var(--st-gold); }
+  .fld textarea { resize: vertical; min-height: 62px; line-height: 1.5; }
+  .fld .hint { font-size: .7rem; color: var(--st-faint); margin-top: .3rem; line-height: 1.4; }
+  .insp-group { font-size: .64rem; letter-spacing: .16em; text-transform: uppercase; color: var(--st-faint); margin: 1.4rem 0 .7rem; }
+  .insp-group:first-child { margin-top: 0; }
+  .media-slot { display: flex; align-items: center; gap: .7rem; padding: .6rem .7rem; border-radius: 9px; border: 1px solid var(--st-line-2); margin-bottom: .5rem; }
+  .media-slot .th { width: 54px; height: 34px; border-radius: 5px; background: radial-gradient(120% 120% at 40% 20%, color-mix(in oklab, var(--ember) 55%, #2c2f36), #191c21); display: grid; place-items: center; color: #241a09; flex: none; font-size: .8rem; }
+  .media-slot .nm { font-size: .8rem; } .media-slot .nm small { display: block; color: var(--st-faint); font-size: .68rem; }
+  .media-slot .act { margin-left: auto; font-size: .74rem; color: var(--st-gold); }
+  .path { display: flex; align-items: center; gap: .7rem; padding: .7rem .8rem; border-radius: 10px; border: 1px solid var(--st-line-2); margin-bottom: .5rem; }
+  .path .sw { width: 34px; height: 20px; border-radius: 999px; background: var(--st-panel-3); position: relative; flex: none; transition: background .15s; cursor: pointer; }
+  .path .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--st-dim); transition: transform .15s, background .15s; }
+  .path.on .sw { background: color-mix(in oklab, var(--ember) 55%, var(--st-panel-3)); }
+  .path.on .sw::after { transform: translateX(14px); background: var(--ember); }
+  .path .nm { font-size: .82rem; flex: 1; } .path .nm small { display: block; color: var(--st-faint); font-size: .68rem; }
+  .path .price { font-family: var(--serif); color: var(--st-text); font-size: .92rem; }
+  .path .price input { width: 4.6rem; text-align: right; font-family: var(--serif); background: var(--st-panel-3); border: 1px solid var(--st-line-2); border-radius: 6px; color: var(--st-text); padding: .25rem .4rem; }
+  .callout { font-size: .74rem; color: var(--st-faint); padding: .7rem .8rem; border-radius: 9px; background: var(--st-panel-2); border: 1px solid var(--st-line); margin-top: .5rem; line-height: 1.5; }
+  .callout b { color: var(--st-gold); }
+  .swrow { display: flex; align-items: center; gap: .7rem; padding: .6rem 0; border-bottom: 1px solid var(--st-line); }
+  .swrow:last-of-type { border: none; }
+  .swrow .lbl { font-size: .84rem; flex: 1; } .swrow .lbl small { display: block; color: var(--st-faint); font-size: .68rem; }
+  .swrow .sw { width: 34px; height: 20px; border-radius: 999px; background: var(--st-panel-3); position: relative; flex: none; cursor: pointer; }
+  .swrow.on .sw { background: color-mix(in oklab, var(--ember) 55%, var(--st-panel-3)); }
+  .swrow .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--st-dim); transition: transform .15s; }
+  .swrow.on .sw::after { transform: translateX(14px); background: var(--ember); }
+  .swatches { display: flex; gap: .5rem; margin-top: .6rem; }
+  .swatches i { width: 30px; height: 30px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; }
+  .swatches i.sel { border-color: var(--st-text); }
+  .insp-foot { margin-top: 1.6rem; padding-top: 1.1rem; border-top: 1px solid var(--st-line); display: flex; gap: .5rem; }
+  .insp-foot button { flex: 1; font-size: .76rem; padding: .55rem; border-radius: 8px; border: 1px solid var(--st-line-2); color: var(--st-dim); }
+  .insp-foot button:hover { color: var(--st-text); border-color: var(--st-line-2); }
+  .insp-foot button.del:hover { color: #e88; border-color: color-mix(in oklab, #e88 40%, transparent); }
+
+  .toast { position: fixed; bottom: 1.2rem; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--st-panel-3); border: 1px solid var(--st-line-2); color: var(--st-text); padding: .6rem 1.1rem; border-radius: 999px; font-size: .82rem; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .st-narrow { display: none; }
+  @media (max-width: 1120px) {
+    .st-shell { display: none; }
+    .st-narrow { display: grid; place-items: center; height: calc(100vh - 52px); padding: 2rem; text-align: center; color: var(--st-dim); }
+    .st-narrow p { max-width: 34ch; line-height: 1.6; }
+  }
+</style>
+</head>
+<body>
+<header class="st-top">
+  <a class="brand" href="studio-journeys.html" title="Studio home">Studio<span>.</span></a>
+  <span class="doc">Journey · <b>Rootwork</b><span class="draft">draft</span></span>
+  <div class="artswitch">
+    <a href="course-editor.html">◈ Curriculum</a>
+    <a href="builder.html" class="on">▤ Sales page</a>
+    <a href="reporting.html">↗ Insights</a>
+  </div>
+  <div class="st-seg" id="dev">
+    <button class="on" data-d="desktop">Desktop</button>
+    <button data-d="mobile">Mobile</button>
+  </div>
+  <button class="save" id="save">Save</button>
+  <button class="publish" id="publish">Publish</button>
+</header>
+
+<nav class="st-modes" id="modes">
+  <button class="on" data-m="design">Design</button>
+  <span class="div"></span>
+  <span class="grp">Page</span>
+  <button data-m="pricing">Pricing</button>
+  <button data-m="brand">Brand</button>
+  <button data-m="seo">SEO</button>
+</nav>
+
+<div class="st-shell mode-design">
+  <!-- OUTLINE (Design mode) -->
+  <aside class="st-outline">
+    <p class="ol-group">Sections · drag to reorder</p>
+    <div id="ol-sections"></div>
+    <button class="ol-add">+ Add a section</button>
+  </aside>
+
+  <!-- SETTINGS (page-wide modes) -->
+  <aside class="st-settings">
+    <div class="insp-head"><div class="t" id="set-t"></div><div class="s" id="set-s"></div></div>
+    <div class="insp-body" id="set-body"></div>
+  </aside>
+
+  <!-- CANVAS -->
+  <section class="st-canvas">
+    <div class="st-canvas__bar">
+      <span class="live"><span class="d"></span> Live</span>
+      <span class="url">ofbloodandbones.co / journeys / rootwork</span>
+      <span class="hint">Click a block to edit · type directly into text</span>
+    </div>
+    <div class="st-canvas__stage">
+      <div id="cvpage"></div>
+    </div>
+  </section>
+
+  <!-- INSPECTOR -->
+  <aside class="st-insp">
+    <div class="insp-head"><div class="t" id="insp-t">Hero</div><div class="s" id="insp-s">Section</div></div>
+    <div class="insp-body" id="insp-body"></div>
+  </aside>
+</div>
+
+<div class="st-narrow"><p>The page builder needs a little more room — open it on a wider screen to see the live canvas.</p></div>
+<div class="toast" id="toast"></div>
+
+<script src="course-data.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, TM = window.TYPE_META, roman = ['i','ii','iii','iv','v','vi'];
+
+  /* ── the page model (single source of truth) ───────────────────
+     Each section carries a TYPE (which decides its field schema +
+     how it renders) and its own content. This is "form fields as
+     part of the component": the Inspector renders SCHEMA[type]. */
+  const page = {
+    sections: [
+      { id: 's1', type: 'hero', name: 'Hero', on: true, f: { eyebrow: 'The foundation course', headline: 'Before any journey, the ground.', sub: 'Rootwork teaches the body the basics of safety and settling — the practices everything else grows from.', button: 'Begin free', bg: 'Shader · ember descent', layout: 'Centered' } },
+      { id: 's2', type: 'film', name: 'Intro film', on: true, f: { heading: 'Meet the work', clip: 'Intro film · 1:24' } },
+      { id: 's3', type: 'prose', name: 'The ache', on: true, f: { kicker: 'If this is you', heading: 'A body that never quite feels safe.', body: 'The tight chest. The shallow breath. The sense of bracing for something that never comes. You have tried to think your way out. The body does not speak in thoughts.' } },
+      { id: 's4', type: 'prose', name: 'The turn', on: true, f: { kicker: 'What changes', heading: 'Safety is a skill the body can learn.', body: 'Not insight — practice. Small, repeatable practices that teach the nervous system it is allowed to settle. That is all Rootwork is: the ground beneath every other journey.' } },
+      { id: 's5', type: 'reel', name: 'See it in motion', on: true, f: { heading: 'A practice, in real time' } },
+      { id: 's6', type: 'curriculum', name: 'The descent map', on: true, f: { heading: 'Five stages, in order', note: 'Move freely within a stage; the next opens when it settles.' } },
+      { id: 's7', type: 'prose', name: 'Feels like', on: false, f: { kicker: 'What to expect', heading: 'Quiet. Slow. Yours.', body: 'No performance, no getting it right. Just you, a quiet room, and a voice that lets the body set the pace.' } },
+      { id: 's8', type: 'proof', name: 'Proof', on: true, f: { heading: 'From people who began here', a: 'The first time in years my shoulders came down from my ears.', b: 'I stopped bracing. I did not know I had been bracing my whole life.' } },
+      { id: 's9', type: 'guide', name: 'The guide', on: true, f: { heading: 'Who holds this', body: 'Luzura is a somatic practitioner of fifteen years. Rootwork is the ground she returns every client to.' } },
+      { id: 's10', type: 'faq', name: 'FAQ', on: true, f: { heading: 'Before you begin', q1: 'Do I need any experience?', q2: 'What if I can only manage five minutes?', q3: 'Can I keep the practices after?' } },
+      { id: 's11', type: 'invitation', name: 'The invitation', on: true, f: { heading: 'Begin with the ground.', button: 'Start Rootwork' } },
+    ],
+    page: {
+      pricing: { tier: { on: true, note: '2 tiers' }, sub: { on: true, price: '6' }, oneoff: { on: false, price: '45' } },
+      brand: { inherit: true, override: false, primary: '#d8a94e', shader: 'Inherit (ember descent)' },
+      seo: { slug: 'rootwork', title: 'Rootwork — the foundation course', desc: 'Somatic practices that teach the body the basics of safety and settling.' },
+    },
+  };
+  const byId = Object.fromEntries(page.sections.map(s => [s.id, s]));
+
+  /* ── field schemas per section type (the component contract) ── */
+  const SCHEMA = {
+    hero: [
+      { k: 'eyebrow', label: 'Eyebrow', type: 'text' },
+      { k: 'headline', label: 'Headline', type: 'textarea' },
+      { k: 'sub', label: 'Sub-line', type: 'textarea' },
+      { k: 'button', label: 'Primary button', type: 'text' },
+      { k: 'bg', label: 'Background', type: 'select', opts: ['Shader · ember descent', 'Shader · blood tide', 'Still · warm dark'], hint: 'Uses the org brand shader unless overridden in Brand & theme.' },
+      { k: 'layout', label: 'Layout', type: 'select', opts: ['Centered', 'Left-aligned', 'Full-bleed'] },
+    ],
+    film: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'clip', label: 'Video', type: 'media' } ],
+    reel: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'clip', label: 'Preview clip', type: 'media' } ],
+    prose: [ { k: 'kicker', label: 'Kicker', type: 'text' }, { k: 'heading', label: 'Heading', type: 'textarea' }, { k: 'body', label: 'Body', type: 'textarea' } ],
+    proof: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'a', label: 'Quote one', type: 'textarea' }, { k: 'b', label: 'Quote two', type: 'textarea' } ],
+    guide: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'body', label: 'Bio', type: 'textarea' } ],
+    faq: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'q1', label: 'Question 1', type: 'text' }, { k: 'q2', label: 'Question 2', type: 'text' }, { k: 'q3', label: 'Question 3', type: 'text' } ],
+    curriculum: [ { k: 'heading', label: 'Heading', type: 'text' }, { k: 'note', label: 'Note', type: 'textarea' } ],
+    invitation: [ { k: 'heading', label: 'Heading', type: 'textarea' }, { k: 'button', label: 'Button', type: 'text' } ],
+  };
+  const TYPE_LABEL = { hero: 'Hero section', film: 'Video section', reel: 'Video section', prose: 'Text section', proof: 'Testimonials', guide: 'Guide bio', faq: 'FAQ section', curriculum: 'Curriculum (from the course)', invitation: 'Price + CTA' };
+
+  /* ── state ──
+     mode = the top-level tab: 'design' (block builder) | 'pricing' | 'brand' | 'seo' (page-wide).
+     sel  = which SECTION is selected inside Design mode. Two levels, two homes. */
+  let mode = 'design';
+  let sel = { id: 's1' };
+
+  /* ── CANVAS renderers ───────────────────────────────────────── */
+  const ed = (s, k, cls) => `<span class="${cls || ''}" data-field="${k}" contenteditable="true" spellcheck="false">${s.f[k]}</span>`;
+  const RENDER = {
+    hero: s => `<div class="cvs cv-hero">
+        <p class="eyebrow">${ed(s, 'eyebrow')}</p>
+        <h1>${ed(s, 'headline')}</h1>
+        <p class="sub">${ed(s, 'sub')}</p>
+        <span class="btn">${ed(s, 'button')}</span>
+      </div>`,
+    film: s => `<div class="cvs"><p class="cv-kick">Watch</p><h2>${ed(s, 'heading')}</h2><div class="cv-media"><span class="p">▶</span></div></div>`,
+    reel: s => `<div class="cvs"><p class="cv-kick">In motion</p><h2>${ed(s, 'heading')}</h2><div class="cv-media"><span class="p">▶</span></div></div>`,
+    prose: s => `<div class="cvs"><p class="cv-kick">${ed(s, 'kicker')}</p><h2>${ed(s, 'heading')}</h2><p class="body">${ed(s, 'body')}</p></div>`,
+    proof: s => `<div class="cvs"><h2>${ed(s, 'heading')}</h2><div class="cv-proof"><div class="cv-quote">${ed(s, 'a')}</div><div class="cv-quote">${ed(s, 'b')}</div></div></div>`,
+    guide: s => `<div class="cvs"><h2>${ed(s, 'heading')}</h2><p class="body">${ed(s, 'body')}</p></div>`,
+    faq: s => `<div class="cvs cv-faq"><h2>${ed(s, 'heading')}</h2><div class="q">${ed(s, 'q1')}</div><div class="q">${ed(s, 'q2')}</div><div class="q">${ed(s, 'q3')}</div></div>`,
+    curriculum: s => `<div class="cvs"><p class="cv-kick">The path</p><h2>${ed(s, 'heading')}</h2><div class="cv-stages">${
+        C.stages.map((st, i) => `<div class="cv-stage"><span class="rn">${roman[i]}</span><span class="sn">${st.n}</span><span class="ct">${st.lessons.length} practices</span></div>`).join('')
+      }</div><p class="body" style="margin-top:1rem">${ed(s, 'note')}</p></div>`,
+    invitation: s => `<div class="cvs cv-invite"><h2>${ed(s, 'heading')}</h2><div class="price">£45 <small>or included with membership</small></div><span class="btn">${ed(s, 'button')}</span></div>`,
+  };
+
+  function renderCanvas() {
+    const el = document.getElementById('cvpage');
+    el.innerHTML = page.sections.filter(s => s.on).map(s =>
+      `<div class="cv-sec" data-sec="${s.id}"><span class="cv-tag">${s.name}</span>${RENDER[s.type](s)}</div>`).join('');
+
+    // click a block → select it (but let clicks inside editable text place the caret)
+    el.querySelectorAll('.cv-sec').forEach(node => {
+      node.addEventListener('mousedown', () => selectSection(node.dataset.sec, false));
+    });
+    // inline text edits → write model, mirror to inspector
+    el.querySelectorAll('[data-field]').forEach(node => {
+      node.addEventListener('input', () => {
+        const s = byId[node.closest('.cv-sec').dataset.sec];
+        s.f[node.dataset.field] = node.textContent;
+        const inspF = document.querySelector(`#insp-body [data-inspfield="${node.dataset.field}"]`);
+        if (inspF && sel.id === s.id) inspF.value = node.textContent;
+      });
+    });
+    highlightCanvas();
+  }
+
+  function highlightCanvas() {
+    document.querySelectorAll('#cvpage .cv-sec').forEach(n =>
+      n.classList.toggle('sel', mode === 'design' && n.dataset.sec === sel.id));
+  }
+
+  /* ── OUTLINE (sections only — page-wide settings live in mode tabs) ── */
+  function renderOutline() {
+    document.getElementById('ol-sections').innerHTML = page.sections.map(s =>
+      `<div class="ol ${s.on ? '' : 'off'} ${sel.id === s.id ? 'sel' : ''}" draggable="true" data-sec="${s.id}">
+        <span class="grip">⠿</span>
+        <span class="nm">${s.name}<small>${TYPE_LABEL[s.type]}</small></span>
+        <span class="eye" title="Show / hide">${s.on ? '👁' : '⃠'}</span>
+      </div>`).join('');
+
+    // section rows: select + show/hide + drag reorder
+    document.querySelectorAll('#ol-sections .ol').forEach(row => {
+      const id = row.dataset.sec;
+      row.addEventListener('click', e => { if (!e.target.classList.contains('eye')) selectSection(id, true); });
+      row.querySelector('.eye').addEventListener('click', e => {
+        e.stopPropagation(); byId[id].on = !byId[id].on; renderOutline(); renderCanvas();
+      });
+      row.addEventListener('dragstart', e => { e.dataTransfer.setData('id', id); row.style.opacity = '.4'; });
+      row.addEventListener('dragend', () => { row.style.opacity = ''; });
+      row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('drag-over'); });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault(); row.classList.remove('drag-over');
+        const from = page.sections.findIndex(s => s.id === e.dataTransfer.getData('id'));
+        const to = page.sections.findIndex(s => s.id === id);
+        if (from === -1 || to === -1 || from === to) return;
+        const [m] = page.sections.splice(from, 1); page.sections.splice(to, 0, m);
+        renderOutline(); renderCanvas();
+      });
+    });
+  }
+
+  /* ── INSPECTOR ──────────────────────────────────────────────── */
+  function field(f, s) {
+    const val = s.f[f.k] ?? '';
+    const attr = `data-inspfield="${f.k}"`;
+    if (f.type === 'textarea') return `<div class="fld"><label>${f.label}</label><textarea ${attr}>${val}</textarea>${f.hint ? `<p class="hint">${f.hint}</p>` : ''}</div>`;
+    if (f.type === 'select') return `<div class="fld"><label>${f.label}</label><select ${attr}>${f.opts.map(o => `<option ${o === val ? 'selected' : ''}>${o}</option>`).join('')}</select>${f.hint ? `<p class="hint">${f.hint}</p>` : ''}</div>`;
+    if (f.type === 'media') return `<div class="fld"><label>${f.label}</label><div class="media-slot"><span class="th">▶</span><span class="nm">${val}<small>30s public-safe clip</small></span><button class="act">Replace</button></div></div>`;
+    return `<div class="fld"><label>${f.label}</label><input ${attr} value="${val.replace(/"/g, '&quot;')}">${f.hint ? `<p class="hint">${f.hint}</p>` : ''}</div>`;
+  }
+
+  function renderInspector() {
+    const head = { t: document.getElementById('insp-t'), s: document.getElementById('insp-s') }, body = document.getElementById('insp-body');
+    const s = byId[sel.id] || byId[page.sections[0].id];
+    { // Design-mode inspector always shows the selected SECTION
+      head.t.textContent = s.name; head.s.textContent = TYPE_LABEL[s.type];
+      let html = SCHEMA[s.type].map(f => field(f, s)).join('');
+      if (s.type === 'curriculum') html += `<p class="callout">This section shows the course's stages. To edit the actual stages &amp; practices, open the <b>course editor</b> — the page only presents them.</p>`;
+      html += `<div class="insp-foot">
+          <button id="dup">Duplicate</button>
+          <button id="hide">${s.on ? 'Hide' : 'Show'}</button>
+          <button class="del" id="del">Delete</button>
+        </div>`;
+      body.innerHTML = html;
+      // field edits → model + canvas node
+      body.querySelectorAll('[data-inspfield]').forEach(inp => {
+        inp.addEventListener('input', () => {
+          s.f[inp.dataset.inspfield] = inp.value;
+          const node = document.querySelector(`#cvpage .cv-sec[data-sec="${s.id}"] [data-field="${inp.dataset.inspfield}"]`);
+          if (node && node.textContent !== inp.value) node.textContent = inp.value;
+          if (inp.dataset.inspfield === 'bg' || inp.dataset.inspfield === 'layout') { /* style-only: no text node */ }
+        });
+      });
+      document.getElementById('hide').addEventListener('click', () => { s.on = !s.on; renderOutline(); renderCanvas(); renderInspector(); });
+      document.getElementById('del').addEventListener('click', () => {
+        page.sections = page.sections.filter(x => x.id !== s.id); delete byId[s.id];
+        sel = { id: page.sections[0].id }; renderOutline(); renderCanvas(); renderInspector();
+      });
+      document.getElementById('dup').addEventListener('click', () => toast('Duplicated (prototype)'));
+    }
+  }
+
+  function renderPagePanel(key, head, body) {
+    const p = page.page;
+    if (key === 'pricing') {
+      head.t.textContent = 'Access & pricing'; head.s.textContent = 'The journey’s offer · one source of truth';
+      body.innerHTML = `
+        <p class="callout">This is the <b>journey’s offer</b> — set once here, shown on the sales page and honoured wherever the course appears.</p>
+        <p class="insp-group">Ways in · turn on any combination</p>
+        <div class="path ${p.pricing.tier.on ? 'on' : ''}" data-p="tier"><span class="sw"></span><span class="nm">Membership tiers<small>which tiers include this</small></span><span class="price">${p.pricing.tier.note}</span></div>
+        <div class="path ${p.pricing.sub.on ? 'on' : ''}" data-p="sub"><span class="sw"></span><span class="nm">Course subscription<small>a gentler monthly entry</small></span><span class="price">£<input value="${p.pricing.sub.price}">/mo</span></div>
+        <div class="path ${p.pricing.oneoff.on ? 'on' : ''}" data-p="oneoff"><span class="sw"></span><span class="nm">One-off purchase<small>buy outright</small></span><span class="price">£<input value="${p.pricing.oneoff.price}"></span></div>
+        <p class="callout"><b>Membership</b> unlocks every journey — the buyer should feel it's more than this one course.</p>
+        <p class="insp-group">Per-practice access</p>
+        <div class="callout">Each practice can be <b>free</b>, purchasable, subscription-only, or <b>course-only</b> (reachable only inside the journey). Set on the practice in the course editor.</div>`;
+      body.querySelectorAll('.path').forEach(row => row.querySelector('.sw').addEventListener('click', () => {
+        const k = row.dataset.p; p.pricing[k].on = !p.pricing[k].on; row.classList.toggle('on', p.pricing[k].on);
+      }));
+    } else if (key === 'brand') {
+      head.t.textContent = 'Brand & theme'; head.s.textContent = 'Page-level · overrides the org brand';
+      const cols = ['#8a2b22', '#d8a94e', '#6a7b52', '#3f5c72', '#7a5c8a'];
+      body.innerHTML = `
+        <div class="swrow ${p.brand.inherit ? 'on' : ''}" data-b="inherit"><span class="lbl">Inherit org brand<small>Of Blood and Bones</small></span><span class="sw"></span></div>
+        <div class="swrow ${p.brand.override ? 'on' : ''}" data-b="override"><span class="lbl">Override primary colour<small>only this page</small></span><span class="sw"></span></div>
+        <div class="swatches" id="sw">${cols.map(c => `<i class="${c === p.brand.primary ? 'sel' : ''}" style="background:${c}" data-c="${c}"></i>`).join('')}</div>
+        <p class="insp-group">Hero shader</p>
+        <div class="fld"><select id="shader">${['Inherit (ember descent)', 'Blood tide', 'Silk', 'Lava', 'None'].map(o => `<option ${o === p.brand.shader ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+        <p class="callout">Every page inherits the org's brand tokens. Overrides here affect <b>only this page</b>.</p>`;
+      body.querySelectorAll('.swrow').forEach(row => row.querySelector('.sw').addEventListener('click', () => {
+        const k = row.dataset.b; p.brand[k] = !p.brand[k]; row.classList.toggle('on', p.brand[k]);
+      }));
+      body.querySelectorAll('#sw i').forEach(i => i.addEventListener('click', () => {
+        body.querySelectorAll('#sw i').forEach(x => x.classList.remove('sel')); i.classList.add('sel'); p.brand.primary = i.dataset.c;
+      }));
+      document.getElementById('shader').addEventListener('change', e => p.brand.shader = e.target.value);
+    } else {
+      head.t.textContent = 'SEO & web address'; head.s.textContent = 'Page-level';
+      body.innerHTML = `
+        <div class="fld"><label>Web address</label><input value="${p.seo.slug}"><p class="hint">ofbloodandbones.co / journeys / <b>${p.seo.slug}</b></p></div>
+        <div class="fld"><label>Meta title</label><input value="${p.seo.title}"></div>
+        <div class="fld"><label>Meta description</label><textarea>${p.seo.desc}</textarea></div>
+        <p class="insp-group">Share image</p>
+        <div class="media-slot"><span class="th">🖼</span><span class="nm">Social preview<small>1200×630</small></span><button class="act">Upload</button></div>`;
+    }
+  }
+
+  /* ── selection (within Design mode) ── */
+  function selectSection(id, scroll) {
+    sel = { id };
+    renderOutline(); highlightCanvas(); renderInspector();
+    if (scroll) {
+      const n = document.querySelector(`#cvpage .cv-sec[data-sec="${id}"]`);
+      const stage = document.querySelector('.st-canvas__stage');
+      if (n && stage) { // scroll ONLY the canvas stage — never let it bubble to the document
+        const nr = n.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+        stage.scrollTo({ top: stage.scrollTop + (nr.top - sr.top) - (stage.clientHeight - nr.height) / 2, behavior: 'smooth' });
+      }
+    }
+  }
+
+  /* ── top-level mode switch: Design (blocks) vs page-wide settings ── */
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+    const shell = document.querySelector('.st-shell');
+    shell.classList.toggle('mode-design', m === 'design');
+    shell.classList.toggle('mode-settings', m !== 'design');
+    highlightCanvas();
+    if (m !== 'design') {
+      renderPagePanel(m, { t: document.getElementById('set-t'), s: document.getElementById('set-s') }, document.getElementById('set-body'));
+    }
+  }
+  document.querySelectorAll('#modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+
+  /* ── device toggle + save toast ── */
+  document.querySelectorAll('#dev button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#dev button').forEach(x => x.classList.remove('on')); b.classList.add('on');
+    document.getElementById('cvpage').classList.toggle('mobile', b.dataset.d === 'mobile');
+  }));
+  let tt; function toast(msg) { const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), 1600); }
+  document.getElementById('save').addEventListener('click', () => toast('Draft saved'));
+
+  // publish pre-flight (F12): show readiness before going live, never publish blind
+  const pub = document.getElementById('publish');
+  const check = document.createElement('div');
+  check.className = 'pubcheck';
+  check.innerHTML =
+    `<h4>Ready to publish?</h4>
+     <ul>
+       <li><span class="c">✓</span><span>Curriculum built<small>5 stages · 14 practices</small></span></li>
+       <li><span class="c">✓</span><span>A way in is set<small>membership · £6/mo · £45 one-off</small></span></li>
+       <li><span class="c">✓</span><span>Sales page has a hero &amp; sections</span></li>
+       <li><span class="c">✓</span><span>Web address set<small>/journeys/rootwork</small></span></li>
+     </ul>
+     <button class="go" id="pubgo">Publish Rootwork</button>`;
+  document.body.appendChild(check);
+  pub.addEventListener('click', (e) => { e.stopPropagation(); check.classList.toggle('open'); });
+  document.addEventListener('click', (e) => { if (!check.contains(e.target) && e.target !== pub) check.classList.remove('open'); });
+  check.querySelector('#pubgo').addEventListener('click', () => { check.classList.remove('open'); toast('Published (prototype)'); });
+
+  /* boot */
+  renderOutline(); renderCanvas(); renderInspector();
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

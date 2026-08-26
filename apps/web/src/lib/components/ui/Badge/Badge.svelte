@@ -1,3 +1,21 @@
+<!--
+  @component Badge
+
+  Small non-interactive status/label pill. This IS the studio's status pill —
+  `payouts/+page.svelte` and `sales/+page.svelte` both render their row status
+  through it, so there is no separate pill implementation.
+
+  Status variants read `styles/themes/status.css`, which derives each surface
+  from the page's own `--color-surface` / `--color-border` / `--color-text`.
+  `accent` stays on the brand tokens (declared at `:root` in both themes, so
+  system-scope safe).
+
+  Sized as a quiet chip: half-step padding + medium weight. It renders a
+  non-interactive `<div>`, so WCAG 2.5.8 target size does not apply.
+
+  @prop {'neutral'|'success'|'warning'|'error'|'info'|'accent'} [variant='neutral']
+  @prop {Snippet} children - Label content
+-->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -10,60 +28,66 @@
   const { children, variant = 'neutral', class: className, ...restProps }: Props = $props();
 </script>
 
-<div class="badge {className}" data-variant={variant} {...restProps}>
+<div class="badge {className ?? ''}" data-variant={variant} {...restProps}>
   {@render children()}
 </div>
 
 <style>
   .badge {
+    /* Seeded with the neutral triple to match the `variant = 'neutral'` prop
+       default, so an unrecognised data-variant still renders as a chip. */
+    --_surface: var(--color-surface-secondary);
+    --_border: var(--color-border);
+    --_text: var(--color-text);
+
     display: inline-flex;
     align-items: center;
     border-radius: var(--radius-full);
-    border: var(--border-width) var(--border-style) transparent;
-    padding: var(--space-2) var(--space-4);
+    padding: var(--space-1-5) var(--space-2-5);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
+    font-weight: var(--font-medium);
     line-height: var(--leading-none);
     transition: var(--transition-colors);
     white-space: nowrap;
+    background-color: var(--_surface);
+    border: var(--border-width) var(--border-style) var(--_border);
+    color: var(--_text);
   }
 
-  /* Variants */
-  .badge[data-variant="neutral"] {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text);
-    border-color: var(--color-border);
+  .badge[data-variant='neutral'] {
+    --_surface: var(--color-surface-secondary);
+    --_border: var(--color-border);
+    --_text: var(--color-text);
   }
 
-  .badge[data-variant="success"] {
-    /* background-color is already defined above */
-    background-color: var(--color-success-50);
-    color: var(--color-success-700);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
+  .badge[data-variant='success'] {
+    --_surface: var(--color-status-success-surface);
+    --_border: var(--color-status-success-border);
+    --_text: var(--color-status-success-text);
   }
 
-  .badge[data-variant="warning"] {
-    background-color: var(--color-warning-50);
-    color: var(--color-warning-700);
-    border: var(--border-width) var(--border-style) var(--color-warning-200);
+  .badge[data-variant='warning'] {
+    --_surface: var(--color-status-warning-surface);
+    --_border: var(--color-status-warning-border);
+    --_text: var(--color-status-warning-text);
   }
 
-  .badge[data-variant="error"] {
-    background-color: var(--color-error-50);
-    color: var(--color-error-700);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
+  .badge[data-variant='error'] {
+    --_surface: var(--color-status-error-surface);
+    --_border: var(--color-status-error-border);
+    --_text: var(--color-status-error-text);
   }
 
-  .badge[data-variant="info"] {
-    background-color: var(--color-info-50);
-    color: var(--color-info-700);
-    border: var(--border-width) var(--border-style) var(--color-info-200);
+  .badge[data-variant='info'] {
+    --_surface: var(--color-status-info-surface);
+    --_border: var(--color-status-info-border);
+    --_text: var(--color-status-info-text);
   }
 
-  .badge[data-variant="accent"] {
-    background-color: var(--color-brand-accent-subtle);
-    color: var(--color-brand-accent);
-    border: var(--border-width) var(--border-style) var(--color-brand-accent);
+  .badge[data-variant='accent'] {
+    --_surface: var(--color-brand-accent-subtle);
+    --_border: var(--color-brand-accent);
+    --_text: var(--color-brand-accent);
   }
 </style>

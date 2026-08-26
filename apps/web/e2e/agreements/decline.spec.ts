@@ -21,6 +21,8 @@ import {
   creatorNegotiationsUrl,
   injectAgreementCookies,
   ownerRevenueSharePath,
+  proposeFromRoster,
+  rosterRowFor,
 } from '../helpers/agreements';
 
 test.describe('Agreements — Decline + re-propose', () => {
@@ -48,14 +50,9 @@ test.describe('Agreements — Decline + re-propose', () => {
       ownerPage.getByRole('heading', { name: 'Team revenue share' })
     ).toBeVisible({ timeout: 30_000 });
 
-    const creatorCard = ownerPage.locator(
-      `article[aria-label*="${creator.user.name}"]`
-    );
-    await expect(creatorCard).toBeVisible({ timeout: 15_000 });
-    await creatorCard
-      .getByRole('button', { name: /propose agreement/i })
-      .first()
-      .click();
+    // Fresh topology → "No agreement yet" group → compact roster row, not an
+    // AgreementCard.
+    await proposeFromRoster(ownerPage, creator.user.name);
 
     const proposeDialog = ownerPage.getByRole('dialog');
     await expect(proposeDialog).toBeVisible({ timeout: 5000 });
@@ -104,21 +101,21 @@ test.describe('Agreements — Decline + re-propose', () => {
     await expect(
       ownerPage.getByRole('heading', { name: 'Team revenue share' })
     ).toBeVisible({ timeout: 30_000 });
-    const creatorCardAfter = ownerPage.locator(
-      `article[aria-label*="${creator.user.name}"]`
-    );
-    await expect(creatorCardAfter).toBeVisible({ timeout: 15_000 });
+    // Declining is terminal: the proposal is neither active nor open, so the
+    // creator drops back out of `waiting` and into the roster's "No agreement
+    // yet" group. The row only exists inside that group's branch, so its
+    // return IS the "terminal thread allows a brand-new round-1" guarantee —
+    // and it carries the propose control that used to live on the card.
+    const creatorRowAfter = rosterRowFor(ownerPage, creator.user.name);
+    await expect(creatorRowAfter).toBeVisible({ timeout: 15_000 });
     await expect(
-      creatorCardAfter
-        .getByRole('button', { name: /propose agreement/i })
-        .first()
+      creatorRowAfter.getByRole('button', {
+        name: /subscription revenue split/i,
+      })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Owner re-proposes; toast confirms ──────────────────────────
-    await creatorCardAfter
-      .getByRole('button', { name: /propose agreement/i })
-      .first()
-      .click();
+    await proposeFromRoster(ownerPage, creator.user.name);
     const reproposeDialog = ownerPage.getByRole('dialog');
     await expect(reproposeDialog).toBeVisible({ timeout: 5000 });
     await reproposeDialog

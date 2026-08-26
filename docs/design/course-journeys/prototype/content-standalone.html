@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nervous system 101 · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  body { background: #100b07; }
+  main { max-width: 760px; margin: 0 auto; padding: calc(53px + clamp(1.6rem,4vw,3rem)) clamp(1.2rem,4vw,3rem) 6rem; }
+
+  .sa-top { display: flex; align-items: flex-start; gap: 1rem; }
+  .sa-top > div:first-child { flex: 1; min-width: 0; }
+  .sa-crumb { font-size: .78rem; color: var(--bone-faint); }
+  .sa-crumb a:hover { color: var(--ember); }
+  .sa-type { margin-top: 1.2rem; display: inline-flex; align-items: center; gap: .5rem; font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; color: var(--bone-dim); }
+  .sa-type .g { color: var(--ember); }
+  h1 { font-size: clamp(2.2rem,5.5vw,3.4rem); font-weight: 300; margin: .5rem 0 .3rem; }
+  .sa-by { color: var(--bone-faint); font-size: .92rem; }
+  .sa-by b { color: var(--rose); font-family: var(--serif); font-weight: 500; }
+
+  /* preview-as toggle (prototype affordance — flip visitor / member state) */
+  .peek { flex-shrink: 0; display: flex; align-items: center; gap: .5rem; margin-top: .2rem; }
+  .peek .lbl { font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--bone-faint); }
+  .peek .seg { display: flex; background: color-mix(in oklab, var(--ink-2) 70%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); border-radius: 999px; padding: .16rem; }
+  .peek button { font-size: .72rem; padding: .3rem .7rem; border-radius: 999px; color: var(--bone-dim); }
+  .peek button.on { background: var(--ember); color: #241a09; font-weight: 600; }
+
+  .media { position: relative; margin-top: 1.8rem; aspect-ratio: 16/9; border-radius: 20px; overflow: hidden; display: grid; place-items: center; background: radial-gradient(120% 120% at 50% 0%, color-mix(in oklab, var(--blood) 46%, var(--ink-2)), #0c0805); border: 1px solid color-mix(in oklab, var(--ember) 18%, transparent); }
+  .media .play { width: 78px; height: 78px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in oklab, var(--ember) 92%, white); color: #241a09; font-size: 1.5rem; box-shadow: 0 12px 40px -8px color-mix(in oklab, var(--ember) 70%, black); transition: transform .2s var(--ease); cursor: pointer; }
+  .media:hover .play { transform: scale(1.06); }
+  .media .mdur { position: absolute; bottom: 1rem; right: 1.1rem; font-size: .8rem; color: var(--bone-dim); }
+  /* locked (visitor) overlay — offers a 30s taste, mirrors SPEC preview.m3u8 */
+  .media .locked { position: absolute; inset: 0; display: grid; place-items: center; gap: .4rem; align-content: center; background: color-mix(in oklab, var(--ink) 46%, transparent); backdrop-filter: blur(2px); }
+  .media .locked .taste { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem 1rem; border-radius: 999px; font-size: .82rem; color: var(--bone); border: 1px solid color-mix(in oklab, var(--bone) 26%, transparent); background: color-mix(in oklab, var(--ink) 40%, transparent); cursor: pointer; }
+  .media .locked .taste:hover { border-color: var(--ember); color: #fff; }
+  .media .locked .note { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--bone-faint); }
+
+  .desc { margin-top: 1.8rem; color: var(--bone-dim); font-size: 1.08rem; line-height: 1.75; }
+
+  /* ── owned (member) state ── */
+  .owned { margin-top: 1.6rem; display: none; }
+  .owned.show { display: block; }
+  .owned .bar { display: flex; align-items: center; gap: .7rem; padding: .85rem 1.1rem; border-radius: 12px; background: color-mix(in oklab, var(--ember) 8%, var(--ink-2)); border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent); font-size: .9rem; color: var(--bone-dim); }
+  .owned .bar .g { color: var(--ember); }
+  .owned .bar .via { margin-left: auto; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--bone-faint); }
+  .owned .injourney { margin-top: 1.2rem; display: flex; align-items: center; gap: 1rem; padding: 1.1rem 1.3rem; border-radius: 16px; border: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); background: color-mix(in oklab, var(--ink-2) 55%, transparent); }
+  .owned .injourney .txt { flex: 1; }
+  .owned .injourney .txt .k { font-size: .66rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ember); }
+  .owned .injourney .txt h4 { font-family: var(--serif); font-weight: 400; color: var(--bone); font-size: 1.2rem; margin-top: .15rem; }
+  .owned .injourney .txt p { font-size: .82rem; color: var(--bone-faint); margin-top: .1rem; }
+
+  /* ── the "ways in" block — visitor state, the multi-path payment CTA ── */
+  .ways { margin-top: 1.8rem; display: none; border-radius: 20px; border: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); background: color-mix(in oklab, var(--ink-2) 46%, transparent); padding: 1.5rem 1.5rem 1.6rem; }
+  .ways.show { display: block; }
+  .ways__k { font-size: .68rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ember); }
+  .ways__ctx { color: var(--bone-dim); font-size: .95rem; margin: .3rem 0 1.2rem; }
+  .ways__ctx b { color: var(--bone); font-family: var(--serif); font-weight: 500; }
+  .wi { display: grid; gap: .7rem; }
+  .offer { position: relative; display: grid; grid-template-columns: 22px 1fr auto; gap: .9rem; align-items: start; padding: 1rem 1.1rem; border-radius: 14px; cursor: pointer; border: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); background: color-mix(in oklab, var(--ink-2) 55%, transparent); transition: border-color .18s, background .18s, transform .15s var(--ease); }
+  .offer:hover { transform: translateY(-1px); border-color: color-mix(in oklab, var(--ember) 40%, transparent); }
+  .offer.sel { border-color: var(--ember); background: color-mix(in oklab, var(--ember) 9%, transparent); box-shadow: 0 0 0 1px var(--ember) inset; }
+  .offer__radio { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid color-mix(in oklab, var(--bone) 34%, transparent); margin-top: .15rem; display: grid; place-items: center; }
+  .offer.sel .offer__radio { border-color: var(--ember); }
+  .offer.sel .offer__radio::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--ember); }
+  .offer h3 { font-size: 1.1rem; font-weight: 500; }
+  .offer .blurb { font-size: .84rem; color: var(--bone-faint); margin-top: .2rem; line-height: 1.5; }
+  .offer__price { text-align: right; white-space: nowrap; }
+  .offer__price .p { font-family: var(--serif); font-size: 1.45rem; color: var(--bone); }
+  .offer__price .per { display: block; font-size: .7rem; color: var(--bone-faint); }
+  .offer__best { position: absolute; top: -9px; left: 1.1rem; font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; padding: .2rem .55rem; border-radius: 999px; background: var(--ember); color: #241a09; font-weight: 700; }
+  .offer.is-course { background: radial-gradient(120% 130% at 90% 0%, color-mix(in oklab, var(--ember) 12%, var(--ink-2)), color-mix(in oklab, var(--ink-2) 55%, transparent)); }
+  .offer .save { display: inline-block; margin-top: .5rem; font-size: .7rem; letter-spacing: .06em; color: var(--ember); border: 1px solid color-mix(in oklab, var(--ember) 34%, transparent); border-radius: 999px; padding: .16rem .55rem; }
+
+  .ways__act { margin-top: 1.3rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .ways__act .cta { padding: .85rem 1.7rem; }
+  .ways__act .fine { font-size: .76rem; color: var(--bone-faint); max-width: 32ch; }
+
+  .related { margin-top: 3rem; }
+  .related .k { font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: var(--bone-faint); }
+  .related ul { list-style: none; margin-top: 1rem; display: grid; gap: .5rem; }
+  .related li { display: flex; gap: .8rem; align-items: center; padding: .8rem 1rem; border-radius: 12px; background: color-mix(in oklab, var(--ink-2) 50%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 7%, transparent); cursor: pointer; }
+  .related li:hover { border-color: color-mix(in oklab, var(--ember) 28%, transparent); }
+  .related li .g { color: var(--ember); }
+  .related li .t { font-family: var(--serif); color: var(--bone); }
+  .related li .m { margin-left: auto; font-size: .76rem; color: var(--bone-faint); }
+
+  @media (max-width: 620px) {
+    .sa-top { flex-direction: column; }
+    .offer { grid-template-columns: 20px 1fr; }
+    .offer__price { grid-column: 2; text-align: left; margin-top: .3rem; }
+  }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Practice</span>
+  <nav>
+    <a href="explore.html">Explore</a>
+    <a href="library.html">Library</a>
+    <a href="course-sell.html">Rootwork</a>
+  </nav>
+</div>
+
+<main>
+  <div class="sa-top">
+    <div>
+      <nav class="sa-crumb"><a href="explore.html">Explore</a> › <span id="cb-type"></span></nav>
+      <p class="sa-type"><span class="g" id="glyph"></span> <span id="typelabel"></span></p>
+      <h1 id="title"></h1>
+      <p class="sa-by">A practice by <b id="by"></b></p>
+    </div>
+    <div class="peek">
+      <span class="lbl">Preview as</span>
+      <div class="seg">
+        <button id="asVisitor" class="on">Visitor</button>
+        <button id="asMember">Member</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="media">
+    <div class="play" id="play">▶</div>
+    <div class="mdur" id="dur"></div>
+    <div class="locked" id="locked">
+      <span class="taste">▶ Watch a 30-second taste</span>
+      <span class="note">Preview</span>
+    </div>
+  </div>
+
+  <p class="desc" id="desc"></p>
+
+  <!-- VISITOR: every way into this piece -->
+  <section class="ways" id="ways">
+    <p class="ways__k">Ways in</p>
+    <p class="ways__ctx" id="ways-ctx"></p>
+    <div class="wi" id="wi"></div>
+    <div class="ways__act">
+      <a class="cta cta--ember" id="go">Continue <span class="arrow">→</span></a>
+      <span class="fine" id="fine"></span>
+    </div>
+  </section>
+
+  <!-- MEMBER: owned — play + journey context -->
+  <section class="owned" id="owned">
+    <div class="bar"><span class="g">✓</span> You have access to this practice. <span class="via" id="owned-via"></span></div>
+    <div class="injourney" id="injourney"></div>
+  </section>
+
+  <section class="related">
+    <p class="k">More like this</p>
+    <ul id="related"></ul>
+  </section>
+</main>
+
+<script src="course-data.js"></script>
+<script src="mock-data.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, TM = window.TYPE_META;
+  // ?free renders the always-free "Orienting" taste (the free-content state) — no paywall,
+  // just play + a gentle door into the journey. Otherwise the locked showcase item.
+  const isFree = new URLSearchParams(location.search).has('free');
+  // ?member forces the owned/member state directly — the post-purchase seam from checkout lands here.
+  const asMember = new URLSearchParams(location.search).has('member');
+  const item = isFree
+    ? { title: 'Orienting', type: 'practice', min: 8, by: 'Of Blood and Bones',
+        policy: { isFree: true }, courses: ['Rootwork'],
+        blurb: 'The very first practice — a way to arrive in the body and feel the ground beneath you. Free to try, always. There is nothing to get right; just a few minutes of coming back to yourself.' }
+    : window.CONTENT_SHOWCASE;
+  const cm = TM[item.type] || { glyph: '▶', label: 'Video' };
+
+  // breadcrumb signpost (F19): when a piece belongs to a journey, name it in the trail
+  const crumbCourse = (item.courses || [])[0];
+  document.getElementById('cb-type').innerHTML = crumbCourse
+    ? `<a href="course-sell.html">${crumbCourse}</a> › ${cm.label}`
+    : cm.label;
+  document.getElementById('glyph').textContent = cm.glyph;
+  document.getElementById('typelabel').textContent = `${cm.label} · ${item.min} min`;
+  document.getElementById('title').textContent = item.title;
+  document.getElementById('by').textContent = item.by;
+  document.getElementById('dur').textContent = item.min + ' min';
+  document.getElementById('desc').textContent = item.blurb;
+
+  // ── ways in (derived from the item's access policy) ──
+  const paths = window.waysInFor(item);
+  const courseName = (item.courses || [])[0];
+  document.getElementById('ways-ctx').innerHTML = courseName
+    ? `This practice stands on its own — or arrives inside <b>${courseName}</b>. However you come to it, here are the doors.`
+    : `A few ways to make this practice yours.`;
+
+  let selected = paths.find(p => p.best)?.id || paths[0].id;
+  const wrap = document.getElementById('wi');
+  function renderPaths() {
+    wrap.innerHTML = paths.map(p => `
+      <label class="offer ${p.id === selected ? 'sel' : ''} ${p.kind === 'course' ? 'is-course' : ''}" data-id="${p.id}">
+        ${p.best ? '<span class="offer__best">Best value</span>' : ''}
+        <span class="offer__radio"></span>
+        <div>
+          <h3>${p.name}</h3>
+          <p class="blurb">${p.blurb}</p>
+          ${p.kind === 'course' ? `<span class="save">Own the journey ${item.bundlePrice} · better value than pieces</span>` : ''}
+        </div>
+        <div class="offer__price"><span class="p">${p.price}</span><span class="per">${p.per === 'once' ? 'one-off' : 'per ' + p.per}</span></div>
+      </label>`).join('');
+    wrap.querySelectorAll('.offer').forEach(el =>
+      el.addEventListener('click', () => { selected = el.dataset.id; renderPaths(); updateGo(); }));
+  }
+  function updateGo() {
+    const p = paths.find(x => x.id === selected);
+    const go = document.getElementById('go');
+    if (p.kind === 'course') {
+      go.innerHTML = `See the ${p.course} journey <span class="arrow">→</span>`;
+      go.setAttribute('href', p.href);
+      document.getElementById('fine').textContent = `${item.title} is one step of ${p.course}. Subscribe from £6/mo or own it outright.`;
+    } else if (p.kind === 'content_purchase') {
+      go.innerHTML = `Buy for ${p.price} <span class="arrow">→</span>`;
+      go.setAttribute('href', 'checkout.html?offer=buy');   // carry the choice through (F18)
+      document.getElementById('fine').textContent = 'One payment. This practice stays in your library for good.';
+    } else {
+      go.innerHTML = `Start membership <span class="arrow">→</span>`;
+      go.setAttribute('href', 'checkout.html?offer=membership');   // pre-select on checkout (F18)
+      document.getElementById('fine').textContent = 'Billed £12/mo. Unlocks this and every other practice & journey. Cancel anytime.';
+    }
+  }
+  renderPaths(); updateGo();
+
+  // ── owned state ──
+  // Derive the "via" label from the member's ACTUAL entitlement over this item, not a hardcoded
+  // string. Wren holds 'Nervous system 101' via a content_purchase (mock-data.js entitlements +
+  // LIBRARY), so this reads "purchased" — the label follows the source across content/course. (F4)
+  function ownedViaLabel(it) {
+    const ents = (window.MOCK && window.MOCK.entitlements) || [];
+    const direct = ents.find(e => e.resourceType === 'content' && e.resourceId === it.title);
+    const src = direct ? direct.source
+      : ((it.courses || []).map(c => ents.find(e => e.resourceType === 'course' && e.resourceId === c)).find(Boolean) || {}).source;
+    return { content_purchase: 'purchased', course_subscription: 'via Rootwork monthly', membership: 'via full membership' }[src] || 'via membership';
+  }
+  document.getElementById('owned-via').textContent = ownedViaLabel(item);
+  // F9: owning a practice ≠ being enrolled in its course. canView(content) vs canEnterCourse(course).
+  // ?notenrolled forces the own-the-piece-but-not-the-journey state for review.
+  const forceNotEnrolled = new URLSearchParams(location.search).has('notenrolled');
+  const enrolled = courseName && !forceNotEnrolled &&
+    (window.MOCK ? window.MOCK.canEnterCourse(courseName) : true);
+  document.getElementById('injourney').innerHTML = !courseName ? '' : (enrolled ? `
+    <div class="txt">
+      <p class="k">Part of your journey</p>
+      <h4>${courseName}</h4>
+      <p>You're on this path. Open it in sequence to keep your place and mark practices complete.</p>
+    </div>
+    <a class="cta cta--ghost" href="content-incourse.html?i=0">Open in ${courseName} <span class="arrow">→</span></a>` : `
+    <div class="txt">
+      <p class="k">Also part of a journey</p>
+      <h4>${courseName}</h4>
+      <p>You own this practice on its own. It’s also part of ${courseName} — enter the whole journey whenever you’re ready.</p>
+    </div>
+    <a class="cta cta--ghost" href="course-sell.html">See the ${courseName} journey <span class="arrow">→</span></a>`);
+
+  // ── related ──
+  const others = C.flat.filter(l => l.t !== item.title).slice(0, 3);
+  document.getElementById('related').innerHTML = others.map(l => {
+    const m = TM[l.type];
+    return `<li onclick="location.href='content-standalone.html'"><span class="g">${m.glyph}</span><span class="t">${l.t}</span><span class="m">${m.label} · ${l.min} min</span></li>`;
+  }).join('');
+
+  // ── visitor / member toggle ──
+  function setState(member) {
+    document.getElementById('asMember').classList.toggle('on', member);
+    document.getElementById('asVisitor').classList.toggle('on', !member);
+    document.getElementById('ways').classList.toggle('show', !member);
+    document.getElementById('owned').classList.toggle('show', member);
+    document.getElementById('locked').style.display = member ? 'none' : '';
+  }
+  document.getElementById('asVisitor').addEventListener('click', () => setState(false));
+  document.getElementById('asMember').addEventListener('click', () => setState(true));
+
+  if (isFree) {
+    // free-content state: no visitor/member toggle, no paywall — just the practice + a door in
+    document.querySelector('.peek').style.display = 'none';
+    document.getElementById('ways').classList.remove('show');
+    document.getElementById('owned').classList.remove('show');
+    document.getElementById('locked').style.display = 'none';
+    const nudge = document.createElement('section');
+    nudge.className = 'owned show';
+    // F20: at the peak right after the free practice, present the offer (contextual, transformation-framed)
+    nudge.innerHTML =
+      `<div class="bar"><span class="g">✓</span> This practice is free — press play, and stay as long as you like. <span class="via">free</span></div>
+       <div class="injourney"><div class="txt">
+         <p class="k">If that landed…</p><h4>Keep going with Rootwork</h4>
+         <p>Orienting is the first of fourteen practices. Continue the work you just felt — the whole path opens with membership.</p>
+       </div>
+       <div style="display:flex;flex-direction:column;gap:.5rem;align-items:stretch">
+         <a class="cta cta--ember" href="checkout.html?offer=membership">Continue the practice <span class="arrow">→</span></a>
+         <a class="cta cta--ghost" href="course-sell.html" style="text-align:center">See the whole journey</a>
+       </div></div>`;
+    document.querySelector('main').insertBefore(nudge, document.querySelector('.related'));
+  } else {
+    setState(asMember);
+  }
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

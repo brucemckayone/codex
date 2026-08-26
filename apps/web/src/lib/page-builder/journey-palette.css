@@ -1,0 +1,401 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   JOURNEY PAGE PALETTE — the ONE derivation, shared by every journey surface.
+
+   (Codex-gfg50) There used to be TWO derivations: the builder canvas derived its
+   palette from the brand BACKGROUND with auto-contrasted text, while the live
+   sales page and the checkout derived theirs from the brand PRIMARY at a
+   HARDCODED dark lightness with no light branch at all. That is why a creator
+   could set a light theme, see light in the builder, and get a dark red live
+   page — and why the per-page `brandOverrides` background looked inert (it was
+   computed and injected correctly, then overwritten one level down).
+
+   The builder's approach is the correct one and this file is now its only home.
+   A course sales page is a BROWSING surface, not an immersive player surface, so
+   it must not force dark: it follows the background the creator actually chose.
+   A creator who wants the candlelit reading gets it by choosing a dark
+   background, and then gets it on all three surfaces at once.
+
+   ── WHY TWO CLASSES ────────────────────────────────────────────────────────
+   `.journey-palette` derives the ladder and re-points the semantic TEXT tokens.
+   `.journey-palette--page` additionally re-points the BACKGROUND, SURFACE and
+   BORDER tokens.
+
+   The base class is deliberately an exact match for what the builder canvas
+   already did, so adopting this file changes the canvas by nothing at all. The
+   split falls where it does because two independent constraints agree on it:
+
+   1. CYCLE SAFETY. `--jp-ink` falls back to `--color-background`, so re-pointing
+      `--color-background: var(--jp-ink)` on the SAME element would be a custom
+      property cycle (CSS cycle detection counts `var()` references inside
+      fallbacks), making both invalid at computed-value time and painting
+      nothing. The modifier therefore belongs on a DESCENDANT, which merely
+      inherits an already-resolved `--jp-ink`. The text tokens have no such
+      problem — nothing in the ladder reads them — which is precisely why the
+      builder has been able to re-point them safely all along.
+
+   2. THE BUILDER'S EDIT CHROME. `.jbc-block__tag/__bar/__btn` and `.jbc-empty`
+      are editor affordances rendered INSIDE the canvas page, and they read
+      `--color-surface*` / `--color-border*`. They must stay studio-neutral and
+      legible against any page palette — a red page must not produce a red-on-red
+      block toolbar. So the canvas takes the base class only.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── SPECIFICITY: why the class is repeated ─────────────────────────────────
+   org-brand.css sets these SAME semantic tokens twice:
+     `[data-org-brand]`                        → (0,1,0)   tokens/org-brand.css:18
+     `[data-theme='dark'] [data-org-brand]`    → (0,2,0)   tokens/org-brand.css:342
+   and our wrapper carries `data-org-brand` ITSELF whenever the page has per-page
+   overrides, so both rules match the SAME element and would win on source order.
+   The repeated class raises this rule to (0,3,0) so the page palette wins under
+   either theme.
+
+   This point was previously supplied by accident: these declarations lived in a
+   Svelte component `<style>`, where scoping appends a hash class and quietly
+   made the selector (0,2,0). Extracting them to a shared global file dropped
+   that, and the symptom was headings falling back to the org's brand-derived
+   `--color-heading` — visible only on pages that HAVE per-page overrides, which
+   is exactly the case originally reported.
+
+   `.journey-palette--page` deliberately does NOT need this: it sits on a
+   descendant that carries no `data-org-brand`, so neither org-brand rule matches
+   it and a directly-declared value beats an inherited one at any specificity. */
+.journey-palette.journey-palette.journey-palette {
+  /* ── the ink: the page's own background ──────────────────────────────────
+     The per-page override (`brandOverrides.backgroundColor` → `--brand-bg` on a
+     nested `[data-org-brand]`), else the inherited org brand background, else
+     the neutral design token. This is the ONE input the whole ladder hangs off:
+     every rung below is auto-contrasted from it, so a light ink and a dark ink
+     are both correct without any rung needing its own branch.
+
+     This declaration is the LIGHT pole. The dark pole re-points this single
+     property and nothing else — see THE DARK POLE below.
+
+     ── WHY TWO POLES AND NOT ONE INPUT ─────────────────────────────────────
+     `surface: invert` (the design-axis value, `journey-design.css`) needs a
+     section to render on the ink's CONTRAST partner instead of the ink. The
+     naive implementation is a cycle:
+
+       [data-jp-surface='invert'] { --jp-ink: var(--jp-heading); }   <- WRONG
+
+     `--jp-heading` is derived FROM `--jp-ink`, so that makes both invalid at
+     computed-value time. Nesting does not save it either: custom properties
+     inherit as UNRESOLVED token streams, so an intermediate alias
+     re-substitutes the child's own `--jp-ink` and the cycle reappears one
+     level down. Same class of failure as the `--color-background` cycle
+     documented above.
+
+     The fix is to declare BOTH poles here, from the ONE input, so neither pole
+     reads a property the invert rule redefines. `--jp-ink` then merely POINTS
+     at a pole, and inverting re-points it — one declaration, no cycle, and the
+     entire ladder below (`--jp-ink-2/3/4`, `--jp-heading`, the text ladder,
+     all four hairlines, the veil) re-derives correctly inside an inverted
+     section because every rung hangs off `--jp-ink`.
+
+     Note invert is IDEMPOTENT, not a toggle: an inverted section nested inside
+     an inverted section resolves to pole B again, because both poles are fixed
+     at the palette root. "The other pole" is the meaning, not "flip once
+     more" — which is also why it cannot recurse into a cycle. */
+  --jp-pole-a: var(--brand-bg, var(--color-background));
+
+  /* Pole B is pole A's auto-contrast partner, by the SAME formula `--jp-heading`
+     uses below — so on a cream page pole B is near-black, and an inverted
+     section reads as ink-on-bone. It depends only on pole A, which nothing
+     downstream overrides. */
+  --jp-pole-b: oklch(
+    from var(--jp-pole-a) clamp(0.05, (0.62 - l) * 100, 0.96) calc(c * 0.25) h
+  );
+
+  --jp-ink: var(--jp-pole-a);
+}
+
+/* ═══ THE DERIVATION — every rung, RE-DERIVED PER SECTION ═══════════════════
+   MEASURED CORRECTION to research §2.4, which claims that re-pointing `--jp-ink`
+   on a section makes "the entire ladder re-derive correctly inside an inverted
+   section with one declaration". It does not, and the failure is total rather
+   than subtle: measured in Chrome on the golden page, an inverted section
+   rendered its heading at **1.00:1** against its own background — ink `#010000`
+   on a `#010000` surface, i.e. an invisible section.
+
+   WHY. A custom property's `var()` references are substituted at COMPUTED-VALUE
+   TIME ON THE ELEMENT WHERE THE PROPERTY IS DECLARED, and only the substituted
+   result inherits. Declared on the palette root, `--jp-heading` computes to
+   `oklch(from #F6EFE6 …)` — pole A already baked in — and every descendant
+   inherits that literal. A section re-pointing its own `--jp-ink` therefore
+   changes NOTHING downstream: `--jp-heading`, the three insets, the text ladder
+   and all four hairlines keep the colours they were given by the root.
+
+   This is the same "unresolved token streams" mechanic §2.4 correctly cites as
+   the reason an intermediate alias cannot break the cycle — but the consequence
+   runs the other way too, and the research only drew the first conclusion.
+
+   THE FIX, and why it is a selector change rather than a second derivation: the
+   ladder must be DECLARED on the element whose `--jp-ink` it should follow. So
+   the identical block is applied to the palette root AND to every `.jp-sec`
+   wrapper. One derivation, written once, in this file — the Codex-gfg50
+   invariant is intact; it just has two selectors now.
+
+   Cycle-free at every depth, because nothing here reads a property the `surface`
+   axis redefines except `--jp-ink` itself, and `--jp-ink` reads only the poles,
+   which are declared exclusively on the root above. On a `bare` section
+   `--jp-ink` is the root's inherited value, so the whole block recomputes to
+   exactly the same colours — the reason this changes nothing on a page that
+   sets no surface axis.
+
+   Specificity: `.journey-palette .jp-sec` is (0,2,0). It does not need the
+   triple-class trick the root does, because a `.jp-sec` never carries
+   `data-org-brand` itself, so neither org-brand.css rule matches it — and a
+   value declared on the element beats an inherited one at any specificity. */
+.journey-palette.journey-palette.journey-palette,
+.journey-palette .jp-sec {
+  /* ── auto-contrast ───────────────────────────────────────────────────────
+     The heading colour is derived from the ink's OWN lightness, so it flips to
+     bone on a dark ink and to near-black on a light one. The `* 100` makes it a
+     near-step function about l=0.62 with a narrow transition band, rather than a
+     gradual ramp that would spend most of its range illegible. Chroma is damped
+     to a quarter so the text carries a hint of the brand's warmth without
+     reading as coloured text. */
+  --jp-heading: oklch(
+    from var(--jp-ink) clamp(0.05, (0.62 - l) * 100, 0.96) calc(c * 0.25) h
+  );
+
+  /* Insets lift TOWARD the contrast colour rather than to a fixed lightness, so
+     the direction is right in both readings: cards go lighter on a dark ink and
+     subtly darker on a light one. */
+  --jp-ink-2: color-mix(in oklab, var(--jp-ink) 94%, var(--jp-heading) 6%);
+  --jp-ink-3: color-mix(in oklab, var(--jp-ink) 88%, var(--jp-heading) 12%);
+  --jp-ink-4: color-mix(in oklab, var(--jp-ink) 82%, var(--jp-heading) 18%);
+
+  /* Text ladder — descending presence, all measured off the same two anchors. */
+  --jp-text: color-mix(in oklab, var(--jp-heading) 82%, var(--jp-ink));
+  --jp-dim: color-mix(in oklab, var(--jp-heading) 70%, var(--jp-ink));
+
+  /* ── `--jp-faint` was 50% and failed AA in DARK (Codex-rvkmc) ────────────
+     Measured on the golden page (`docs/design/journey-sections/04-contrast-baseline.md`,
+     canvas `getImageData` readback): 5.22:1 light, **4.11:1 dark**, against a
+     4.5 floor. It passed in light and failed in dark, which is why the bead's
+     single number was misleading — a fix validated in light theme only would
+     have looked correct and shipped the bug.
+
+     50% is a literal half-way mix of text and background, so it fails by
+     construction rather than by accident. And this token is WIDE: it is
+     aliased to `--color-text-muted` AND `--color-text-tertiary` below, so
+     every component inside a journey page that asks for ordinary muted text
+     silently received the failing mix — 12 declarations across 6 public
+     sections, several of them at `--text-xs`, where the small-text 4.5 floor
+     applies with no large-text exemption.
+
+     58% is chosen by measurement, not feel. Modelling this exact derivation
+     (oklch auto-contrast → oklab mix → WCAG ratio) reproduces the browser
+     baseline to ±0.03, and across sixteen plausible org backgrounds — warm and
+     cool, light and dark — 58% floors at **5.30:1** (charcoal `#1C1C1E`, the
+     worst case) versus 4.87 at 55%. On the golden page it lands 7.11 light /
+     5.37 dark.
+
+     Deliberately NOT pushed further: `--jp-faint` is a real rung, one step
+     below `--jp-dim` (70% → 11.06 light / 7.82 dark). At 58% the step is still
+     legible as a step; at 65%+ the two tiers stop reading as different. Note
+     the floor applies to the token, not to the design: `--jp-faint` remains
+     the quietest text on the page. */
+  --jp-faint: color-mix(in oklab, var(--jp-heading) 58%, var(--jp-ink));
+
+  /* Hairlines — the same lift, at four strengths. */
+  --jp-line-subtle: color-mix(in oklab, var(--jp-ink) 88%, var(--jp-heading) 12%);
+  --jp-line: color-mix(in oklab, var(--jp-ink) 80%, var(--jp-heading) 20%);
+  --jp-line-strong: color-mix(in oklab, var(--jp-ink) 68%, var(--jp-heading) 32%);
+  --jp-line-hover: color-mix(in oklab, var(--jp-ink) 56%, var(--jp-heading) 44%);
+
+  /* ── brand accents ──────────────────────────────────────────────────────
+     Left on the brand's own colours: the accent and its on-accent label already
+     read correctly against both inks. */
+  --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
+  --jp-blood: var(--brand-secondary, var(--jp-ember));
+  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
+  --jp-rose: var(--brand-accent, var(--jp-ember));
+  /* The upper bound is 1, not 0.98, and that single character is the whole of
+     this fix. `--color-text-on-brand` uses `clamp(0, (0.62 - l) * 1000, 1)`;
+     this token used to stop at 0.98, so on a mid-lightness fill it handed back
+     #f8f8f8 where the platform hands back #ffffff. On `studio-alpha`'s #E11D48
+     (OKLCH L = 0.5858) that is 4.45:1 versus 4.70:1 — one side of the 4.5 floor
+     each. The bead and the `KNOWN_OPEN` note both recorded this token as already
+     mirroring `--color-text-on-brand`, which is why the fix was scoped as a
+     platform-wide design decision and deferred; measured (WT-7, round 3) they
+     were never the same expression. The PIVOT genuinely does not fix it — 0.60,
+     0.62 and 0.65 all measure identical because #E11D48 saturates every one of
+     them — so the earlier finding was right about the threshold and wrong about
+     the range. Note the floor stays 0.05 rather than the platform's 0: this is
+     now a mirror at the light end only, deliberately, because darkening the ink
+     on a light fill is a separate sweep. */
+  --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0);
+
+  /* ── the ember AS TEXT ───────────────────────────────────────────────────
+     `--jp-ember` is tuned to be a FILL, with `--jp-on-ember` written on top of
+     it. Used directly as small text ON the page it is a legibility bug in both
+     directions: measured on a mid-lightness brand orange it lands at 2.98:1
+     against a dark ink and 2.46:1 against a light one, where AA needs 4.5.
+
+     Pulling it toward `--jp-heading` fixes both readings at once with no branch,
+     because the heading is already auto-contrasted to the ink — so this mix
+     lightens the ember on a dark ink and darkens it on a light one. 60% keeps
+     the hue unmistakably brand while clearing AA on both poles. Chroma rides
+     along with the mix, which is why it stays a warm accent and not grey.
+
+     Use this for accent TEXT. Keep `--jp-ember` for fills, borders and glows.
+
+     ── 60% → 55%, and why (F-B1's axis contrast sweep) ─────────────────────
+     60% cleared AA on the page background but only just: 5.40:1 on the golden
+     org in dark, 0.9 above the floor. The `surface` axis introduced a case that
+     spends that headroom — `surface: panel` lifts the section background 12%
+     toward the contrast pole, and accent text on a panel measured **4.45:1**
+     in dark. Twelve of the sweep's 100 `surface`x`accent`x`type` combinations
+     failed there, and three of the five `accent` values put text in that
+     position, so a preset combining `panel` with `accent: text` shipped an AA
+     failure.
+
+     55% fixes every one of them with no branch — worst case 4.99:1 (golden
+     dark, on a panel) and 5.75-8.7 elsewhere — because pulling further toward
+     `--jp-heading` raises contrast monotonically at both poles. The cost is 5
+     percentage points of the ember's chroma (60% → 55% retained): measured
+     `#927bb6` → `#9b84bb` on the golden org. The hue is unchanged and still
+     unmistakably brand. Cheap for removing a measured AA failure from two axis
+     values. */
+  --jp-ember-text: color-mix(in oklab, var(--jp-ember) 55%, var(--jp-heading));
+
+  /* ── atmosphere ─────────────────────────────────────────────────────────
+     The ember bloom is a fixed-strength gradient; this veil is what makes its
+     APPARENT strength track the ink's darkness. It is the ink's own colour, so
+     outside the bloom it paints ink-over-ink and is invisible; over the bloom it
+     washes it back. Alpha rises only once the ink passes mid-lightness:
+
+       dark ink  (l≈0.16) → 0      full candlelight, bloom untouched
+       mid  ink  (l≈0.62) → 0.21   moderate warmth
+       light ink (l≈0.95) → 0.78   a faint warm tint, not a salmon wash
+
+     Expressed as an alpha inside a relative colour because `l` is only in scope
+     there — CSS cannot extract a channel to a bare number for use in a
+     standalone `calc()`. */
+  --jp-atmos-veil: oklch(from var(--jp-ink) l c h / clamp(0, (l - 0.5) * 1.75, 0.78));
+
+  /* ── semantic TEXT tokens ───────────────────────────────────────────────
+     Re-pointed here, in the BASE class, because inherited base rules must
+     resolve to this subtree's ladder — notably org-brand.css's
+     `[data-org-brand] :is(h1..h6), [class*="__title"], [class*="-title"]`
+     (specificity 0,1,1), which would otherwise force every heading back to the
+     neutral `--color-heading`. Re-pointing the custom property it reads is far
+     cleaner than a per-heading specificity war.
+
+     Safe in the base class (unlike the background/surface/border tokens) because
+     nothing in the ladder above reads a `--color-text*` or `--color-heading`
+     value, so there is no cycle to create. */
+  --color-heading: var(--jp-heading);
+  --color-text: var(--jp-text);
+  --color-text-primary: var(--jp-heading);
+  --color-text-secondary: var(--jp-dim);
+  --color-text-muted: var(--jp-faint);
+  --color-text-tertiary: var(--jp-faint);
+}
+
+/* ── THE DARK POLE ──────────────────────────────────────────────────────────
+   (Codex-a1tz6) The rule above delivers the CREATOR's chosen background. It did
+   NOT deliver the VISITOR's light/dark choice: it reads `--brand-bg`, which is
+   only the LIGHT pole, so a journey stayed cream for a visitor in dark mode.
+   Those are two independent axes and both are satisfiable — a creator's cream
+   brand has a dark companion, and dark-mode visitors should get it.
+
+   This is not new infrastructure. `tokens/org-brand.css` already carries a
+   two-pole brand background and switches on theme:
+
+     [data-org-bg]                     → --color-background: var(--brand-bg)
+     [data-theme='dark'] [data-org-bg] → --color-background: var(--brand-bg-dark, var(--brand-bg, …))
+
+   `--brand-bg-dark` is injected by the org layout alongside `--brand-bg`. The
+   chain below is deliberately IDENTICAL to org-brand.css's, so a journey surface
+   resolves its background exactly like every other org surface.
+
+   Re-pointing `--jp-pole-a` ALONE is sufficient for the whole page. Every rung
+   above — heading, the text ladder, the three insets, all four hairlines, and
+   the atmosphere veil's alpha — is derived from `--jp-ink`'s OWN lightness, so
+   they all invert from this single input with no further branching. The veil in
+   particular returns to alpha 0 on a dark ink, which is what restores the full
+   candlelight bloom.
+
+   ── WHY BOTH SELECTOR FORMS ────────────────────────────────────────────────
+   The theme-init script in `app.html` sets `data-theme` on <html> AND adds a
+   matching `.dark`/`.light` CLASS, and org-brand.css keys its dark branches on
+   BOTH forms. A rule written against only one of them is beaten by the
+   org-brand rule written against the other. Both are required.
+
+   Specificity: `.dark` + three classes = (0,4,0), clearing the (0,3,0) base
+   above and org-brand.css's `[data-theme='dark'] [data-org-brand]` (0,2,0).
+
+   NOTE (known limitation, deliberately not papered over): a page whose
+   `brandOverrides` sets `backgroundColor` injects only `--brand-bg`, so in dark
+   mode `--brand-bg-dark` — inherited from the org — wins and the per-page
+   background applies in light mode only. Deriving a dark companion from the
+   override would be guesswork about the creator's intent; it needs a real
+   decision (and probably a dark-background control in the brand editor). */
+.dark .journey-palette.journey-palette.journey-palette,
+[data-theme='dark'] .journey-palette.journey-palette.journey-palette {
+  /* The dark pole re-points the INPUT, not `--jp-ink`. `--jp-pole-b` is
+     declared in terms of `--jp-pole-a` in the base rule, and custom-property
+     substitution happens per element AFTER the cascade picks a winner — so
+     pole B re-derives from the dark background here for free, and
+     `surface: invert` keeps working in dark mode with no second branch. */
+  --jp-pole-a: var(--brand-bg-dark, var(--brand-bg, var(--color-background)));
+}
+
+/* ── background / surface / border ──────────────────────────────────────────
+   MUST be applied to a DESCENDANT of `.journey-palette`, never the same element
+   (see CYCLE SAFETY above).
+
+   THE `.jp-sec` TWIN exists for the same reason the ladder has one: these are
+   the tokens the public sections actually read (contract A11 — `--jp-*` appears
+   0x in `render/sections/*`), so without it `surface: invert` / `tint` / `panel`
+   would flip the section's `--jp-*` ladder and leave every section reading the
+   PAGE's `--color-*`. The axis would be inert in exactly the tree it is for.
+
+   Still not a cycle on the section: `--jp-pole-a` is the property that falls
+   back to `--color-background`, and it is declared only on the palette root, so
+   on a `.jp-sec` it is an inherited already-resolved colour. The chain here is
+   `--color-background` → `--jp-ink` → (inherited) `--jp-pole-a/b`, which
+   terminates. These are the tokens the live sales sections and the
+   checkout consume — the builder's sections use the `--jp-*` names directly and
+   so deliberately do not get this class.
+
+   `--color-brand-*`, `--color-text-on-brand`, `--color-focus` and
+   `--color-text-inverse` are deliberately NOT re-pointed anywhere in this file —
+   they are the brand accent and its companions, owned by org-brand.css.
+
+   HISTORY, corrected 2026-07-30 (Codex-5wgwf): a caveat here used to report that
+   `--color-text-on-brand` was broken in dark mode and measured 2.26:1 on
+   `of-blood-and-bones`. Both halves of that are now out of date.
+
+   The structural defect was real and is FIXED — org-brand.css's dark branch now
+   re-derives `--color-text-on-brand` (and its two same-shape siblings
+   `--color-border-focus` and `--color-primary-600`) from `--brand-color-dark`
+   rather than leaving them resolving through the light brand. Do not re-fix it.
+
+   The 2.26:1 measurement, however, was never reproducible. `#EA580C` measures
+   OKLCH L = 0.646079 — ABOVE the token's 0.62 step threshold — so the light brand
+   already yielded a black label. Verified by re-injecting the pre-fix declaration
+   inline: pre and post both resolve `#000000` at 9.28:1. The fix changes behaviour
+   only where an org's light and dark brands straddle L 0.62.
+
+   What DOES fail AA on brand surfaces is a different token: the surfaces painting
+   `--color-brand-primary` mostly consume `--color-text-inverse` (see
+   `Button.svelte`'s primary variant) or `--media-glyph`, neither of which
+   auto-contrasts. That is tracked separately, and repointing them is not a
+   one-liner — `--color-text-on-brand` is only auto-contrasting under
+   `[data-org-brand]`; on the platform path it is a static `#ffffff`. */
+.journey-palette--page,
+.journey-palette--page .jp-sec {
+  --color-background: var(--jp-ink);
+  --color-surface: var(--jp-ink-2);
+  --color-surface-secondary: var(--jp-ink-3);
+  --color-surface-tertiary: var(--jp-ink-4);
+  --color-surface-elevated: var(--jp-ink-3);
+
+  --color-border-subtle: var(--jp-line-subtle);
+  --color-border: var(--jp-line);
+  --color-border-strong: var(--jp-line-strong);
+  --color-border-hover: var(--jp-line-hover);
+}
