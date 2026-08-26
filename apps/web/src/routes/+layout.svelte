@@ -15,6 +15,7 @@
     type VisibilityState,
   } from '$lib/auth/session-visibility-sync';
   import { shouldScrollToTopOnNav } from '$lib/auth/scroll-reset-on-nav';
+  import { reconcileStateOwner } from '$lib/client/user-scoped-state';
   import type { LayoutData } from './$types';
   import '../lib/styles/global.css';
 
@@ -22,6 +23,50 @@
   const AUTH_RECHECK_COOLDOWN_MS = 60_000;
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  // ── Identity-change guard (Codex-1g5lh.17) ────────────────────────────
+  // Persisted client state (`codex-following`, `codex-library`,
+  // `codex-playback-progress`, …) lives under GLOBAL storage keys with no user
+  // id, so without this the next user to sign in on this browser reads the
+  // previous user's data. `reconcileStateOwner` compares the authenticated
+  // user against the owner marker recorded on THIS origin and wipes the
+  // user-scoped stores on a mismatch.
+  //
+  // Called here, in the root layout, for two reasons:
+  //   1. It is the only component that renders on EVERY origin — platform,
+  //      `{slug}.<base-domain>`, and `creators.<base-domain>`. localStorage is
+  //      partitioned per origin, so a guard on any one origin cannot fix the
+  //      others; this one runs wherever the user actually lands.
+  //   2. It is called SYNCHRONOUSLY in the script body, not in `onMount`.
+  //      Svelte runs child `onMount` callbacks before the parent's, so an
+  //      `onMount` here would fire AFTER `_org/[slug]/+layout.svelte` has
+  //      already consulted `followingStore.has()` to decide whether to
+  //      hydrate from the server — and a stale `true` there suppresses the
+  //      very fetch that would correct it. Init order puts the wipe ahead of
+  //      every descendant's init and every `onMount` in the tree.
+  //
+  // Reading `data` at init is the POINT here — the whole job is to act on the
+  // identity this document was loaded with, before anything reads the stores.
+  // Later changes are picked up by the `$effect` below.
+  // svelte-ignore state_referenced_locally
+  reconcileStateOwner(data.user?.id);
+
+  // A client-side navigation can change identity with no new document —
+  // `invalidate('app:auth')` below, or login's `use:enhance` → `update()` →
+  // `invalidateAll()`, both re-run the root load and swap `data.user` in
+  // place. `$effect` catches those; the synchronous call above already
+  // handled the first render, so this is a no-op until the id actually moves.
+  // Plain `let`, deliberately NOT `$state`: it is a snapshot of what we last
+  // reconciled, and making it reactive would put it in the effect's own
+  // dependency set — the effect would re-run once on every write for nothing.
+  // svelte-ignore state_referenced_locally
+  let reconciledUserId: string | null | undefined = data.user?.id;
+  $effect(() => {
+    const currentUserId = data.user?.id;
+    if (currentUserId === reconciledUserId) return;
+    reconciledUserId = currentUserId;
+    reconcileStateOwner(currentUserId);
+  });
 
   // ── Cross-subdomain + cross-device auth sync ──────────────────────────
   // Decision logic lives in $lib/auth/session-visibility-sync (unit-tested

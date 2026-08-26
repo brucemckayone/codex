@@ -552,7 +552,8 @@ import * as m from '$paraglide/messages';
 | `src/lib/collections/progress.ts` | localStorage progress collection |
 | `src/lib/collections/progress-sync.ts` | `initProgressSync`, `forceSync`, `cleanupProgressSync` |
 | `src/lib/collections/use-live-query-ssr.ts` | SSR-safe `useLiveQuery` wrapper |
-| `src/lib/client/version-manifest.ts` | `getStaleKeys`, `updateStoredVersions`, `clearClientState` |
+| `src/lib/client/version-manifest.ts` | `getStaleKeys`, `updateStoredVersions` |
+| `src/lib/client/user-scoped-state.ts` | `reconcileStateOwner`, `clearUserScopedState`, `registerUserScopedReset` — the user-scoped-vs-device-scoped key inventory and the clear-on-identity-change primitive |
 | `src/lib/brand-editor/` | Brand editor store, CSS injection, palette generator, presets |
 | `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildOrgUrl` |
 | `src/lib/remote/*.remote.ts` | Remote function wrappers |

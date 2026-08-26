@@ -13,6 +13,8 @@
  */
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { registerUserScopedReset } from '$lib/client/user-scoped-state';
+import { purgeLocalCollection } from './purge-collection';
 
 export interface DismissalItem {
   /** Caller-defined key — collection key. */
@@ -29,6 +31,11 @@ export const dismissalCollection = browser
       })
     )
   : undefined;
+
+// Codex-1g5lh.17 — THIS user's dismissed CTAs and banners. `clearUserScopedState()`
+// removes the localStorage key; this drops the in-memory rows, which is
+// what readers actually consult. See collections/purge-collection.ts.
+registerUserScopedReset(() => purgeLocalCollection(dismissalCollection));
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
