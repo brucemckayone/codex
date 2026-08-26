@@ -4,9 +4,20 @@ name: Bootstrap Dev Infrastructure
 # R2 buckets for the dev environment. Re-running is safe — every step
 # checks for the resource and skips if it already exists.
 #
-# Custom domain bindings for each worker are handled automatically by
-# `wrangler deploy --env dev` (via `custom_domain: true` in each
-# workers/*/wrangler.jsonc), so they're not in this workflow.
+# STALE AS OF 2026-08-26 — READ BEFORE RUNNING (Codex-kgrdp.12).
+# This workflow describes a DEPLOYED dev environment that no longer exists.
+# It used to say custom domain bindings were handled by
+# `wrangler deploy --env dev` via `custom_domain: true` in each
+# workers/*/wrangler.jsonc. Neither is true any more:
+#   - no worker config declares a `dev` env (only `test` and `production`);
+#     `apps/web` is the sole exception and routes dev.revelations.studio/*
+#   - no workflow anywhere runs `wrangler deploy --env dev`
+#   - the 8 orphaned *-dev API workers left behind by that removal were
+#     deleted on 2026-08-26 after a credential scanner hit auth-worker-dev
+#     ~6,275 times in 24 minutes, burning account-wide KV write quota
+# So running this provisions DNS + R2 for an environment with no API workers
+# to serve it. Dev is local-only (`pnpm dev`). Retiring the remaining
+# codex-web-dev worker and dev.revelations.studio DNS is tracked separately.
 #
 # Trigger: manual via `gh workflow run "Bootstrap Dev Infrastructure"`
 #          or the GitHub Actions UI → "Run workflow" button.
