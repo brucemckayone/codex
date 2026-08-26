@@ -11,6 +11,7 @@
   import { updateProfileForm } from '$lib/remote/account.remote';
   import { avatarUploadForm } from '$lib/remote/avatar-upload.remote';
   import { avatarDeleteForm } from '$lib/remote/avatar-delete.remote';
+  import { keepValuesOnSave } from '$lib/utils/remote-form';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
@@ -158,6 +159,20 @@
   const { displayName, username, bio, website, twitter, youtube, instagram } =
     updateProfileForm.fields;
 
+  /**
+   * NOT the bare `{...updateProfileForm}` spread — its default attachment
+   * resets the <form> after a successful save, which blanked every field
+   * (they are driven by `fields.set(...)`, so their DOM default is `''`) and
+   * re-derived the field state from the empty DOM. The 100ms `setTimeout`
+   * re-seed above and the unguarded re-seed below were papering over exactly
+   * that: the user saw the whole profile empty until one of them landed. With
+   * `enhance` nothing resets, so the values simply stay. The avatar
+   * upload/delete forms below keep the bare spread on purpose — clearing the
+   * file input after an upload is correct. (Codex-1g5lh.2 · see
+   * `keepValuesOnSave`)
+   */
+  const profileFormAttrs = keepValuesOnSave(updateProfileForm);
+
   // Populate form fields from profile data on mount and after load re-runs
   $effect(() => {
     if (profile) {
@@ -289,7 +304,7 @@
     which is required for E2E tests to verify custom server-side error states.
   -->
   <Card.Root>
-    <form {...updateProfileForm} novalidate>
+    <form {...profileFormAttrs} novalidate>
       <Card.Header>
         <Card.Title level={2}>{m.account_personal_information()}</Card.Title>
       </Card.Header>
