@@ -1,6 +1,18 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "media-api",
+  // Public exposure: OFF by default (Codex-kgrdp.12).
+  // With this unset, Cloudflare defaults BOTH the workers.dev route and the
+  // preview URL to ENABLED for any deploy that has no `routes` — which is how
+  // 8 orphaned *-dev workers ended up answering the public internet and
+  // absorbing a credential scanner (~6,275 requests in 24 minutes on
+  // auth-worker-dev, 2026-08-26). KV quota is billed per ACCOUNT, so that
+  // traffic burned production's daily write allowance.
+  // Envs that declare `routes` already infer false; being explicit here means
+  // a future env that forgets its routes fails closed instead of open.
+  // MUST live in config: disabling it only in the dashboard is silently
+  // re-enabled by the next `wrangler deploy`.
+  "workers_dev": false,
   "main": "dist/index.js",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
