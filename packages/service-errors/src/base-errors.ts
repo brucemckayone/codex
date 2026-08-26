@@ -154,6 +154,46 @@ export class UnsupportedCurrencyError extends ServiceError {
 }
 
 /**
+ * Stripe is not configured on this worker (500)
+ *
+ * Thrown when a Stripe-backed service is asked to make a real Stripe call but
+ * the worker has no `STRIPE_SECRET_KEY` binding. This is an OPERATOR
+ * misconfiguration — a deploy that never provisioned the secret — not a client
+ * error, so the status stays an honest 500. What changes is the `code`.
+ *
+ * Codex-1g5lh.1: `organization-api-production` was deployed without
+ * `STRIPE_SECRET_KEY` (the deploy workflow uploaded it to ecom-api only), so
+ * `POST /api/organizations/:id/tiers` reached
+ * `stripe.products.create` and the service registry threw a PLAIN `Error`.
+ * `mapErrorToResponse` masks any non-`ServiceError` as
+ * `500 INTERNAL_ERROR / "An unexpected error occurred"`, which is
+ * indistinguishable from a DB fault, a Stripe outage or a genuine bug — the
+ * owner saw a bare 500 with nothing to act on. A typed error with a stable code
+ * makes the next occurrence triageable straight off the wire.
+ *
+ * Deliberately says nothing about WHICH binding is missing: `mapErrorToResponse`
+ * forwards a `ServiceError`'s `message` AND its `context` to the client
+ * verbatim, so both must stay free of configuration and secret material. The
+ * `STRIPE_NOT_CONFIGURED` code is the operator's pointer; the remediation lives
+ * in each worker's `wrangler.jsonc` secret block.
+ *
+ * Distinct from `ConnectPlatformNotConfiguredError` (@codex/subscription), which
+ * means the platform's Stripe account exists but has not been enabled for
+ * Connect. Different cause, different fix — hence a separate code rather than
+ * reusing that one.
+ */
+export class StripeNotConfiguredError extends ServiceError {
+  constructor(context?: Record<string, unknown>) {
+    super(
+      'Payment processing is not available right now. Please try again later or contact support.',
+      'STRIPE_NOT_CONFIGURED',
+      500,
+      context
+    );
+  }
+}
+
+/**
  * Type guard to check if error is a ServiceError
  */
 export function isServiceError(error: unknown): error is ServiceError {

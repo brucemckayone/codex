@@ -19,11 +19,21 @@
  *
  * WHY ecom-api and not content-api, where the sibling journey-studio routes live:
  * `createPlan` talks to Stripe, and production content-api is never given
- * `STRIPE_SECRET_KEY` (see the content-api secret block in
- * `.github/workflows/deploy-production.yml` — Stripe secrets go to ecom-api only).
- * content-api's `.dev.vars` DOES carry the key, so a content-api route would pass
- * every local test and every CI run, then fail in production alone. ecom-api owns
- * Stripe and the commerce webhooks, so plan management belongs here.
+ * `STRIPE_SECRET_KEY` (see the content-api block in
+ * `.github/scripts/upload-worker-secrets.sh` — content-api's uploaded secret set
+ * has no Stripe key). content-api's `.dev.vars` DOES carry the key, so a
+ * content-api route would pass every local test and every CI run, then fail in
+ * production alone. ecom-api owns Stripe and the commerce webhooks, so plan
+ * management belongs here.
+ *
+ * Codex-1g5lh.1 is that exact failure, realised on a DIFFERENT worker:
+ * organization-api owns subscription-tier creation (tiers are org-scoped) and
+ * had shipped without the key, so `createTier` returned a bare 500 in
+ * production only. organization-api is now provisioned with `STRIPE_SECRET_KEY`
+ * too, so ecom-api is no longer the sole Stripe-holding worker — but the rule
+ * this comment states still holds: a Stripe-calling route belongs in a worker
+ * whose UPLOADED secret set includes the key, and `.dev.vars` is not evidence
+ * of that.
  *
  * WHY a separate router from `routes/courses.ts`: that one is the PUBLIC offer
  * read mounted at `/courses` with `auth: 'optional'`. Mounting these mutations at

@@ -49,6 +49,7 @@ import {
   FeeConfigService,
   PurchaseService,
 } from '@codex/purchase';
+import { StripeNotConfiguredError } from '@codex/service-errors';
 import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
@@ -80,7 +81,7 @@ type StripeClient = ReturnType<typeof createStripeClient>;
  *
  * WP-12 (Codex-fc5oh.12): the Stripe-backed service getters built their
  * constructor argument by calling the resolver EAGERLY. The resolver throws
- * 'STRIPE_SECRET_KEY not configured' when the key is falsy, so merely accessing
+ * `StripeNotConfiguredError` when the key is falsy, so merely accessing
  * `ctx.services.connect` (or subscription/tier/purchase) threw at construction —
  * BEFORE the handler ran. That turned read-only zero-state endpoints (a brand
  * new creator's empty Connect status returns DISCONNECTED without ever calling
@@ -91,8 +92,10 @@ type StripeClient = ReturnType<typeof createStripeClient>;
  * (and its missing-key throw) runs lazily on the FIRST property access — i.e.
  * the first real Stripe API call. Services store the proxy as `this.stripe` and
  * only touch it inside async methods, so read paths never trip the guard, while
- * a genuine misconfiguration still surfaces (as the same thrown error) the
- * moment a Stripe call is actually attempted.
+ * a genuine misconfiguration still surfaces (as `StripeNotConfiguredError`,
+ * code `STRIPE_NOT_CONFIGURED`) the moment a Stripe call is actually attempted.
+ * Codex-1g5lh.1 is precisely that case: `createTier`'s Connect check is a pure
+ * DB read, so the proxy stayed unresolved until `stripe.products.create`.
  */
 export function createLazyStripeProxy(
   resolve: () => StripeClient
@@ -107,6 +110,44 @@ export function createLazyStripeProxy(
       return typeof value === 'function' ? value.bind(client) : value;
     },
   });
+}
+
+/**
+ * Resolve the worker's Stripe secret, or throw the typed misconfiguration
+ * error.
+ *
+ * Codex-1g5lh.1: this guard used to throw a plain `Error`
+ * ('STRIPE_SECRET_KEY not configured…'). `mapErrorToResponse` masks any
+ * non-`ServiceError` as `500 INTERNAL_ERROR / "An unexpected error occurred"`,
+ * so a worker deployed without the secret answered
+ * `POST /api/organizations/:id/tiers` with a bare 500 that was
+ * indistinguishable from a DB fault, a Stripe outage or a real bug — there was
+ * nothing on the wire to act on. `StripeNotConfiguredError` carries the stable
+ * `STRIPE_NOT_CONFIGURED` code instead, so the next occurrence is triageable
+ * from the response alone.
+ *
+ * Nothing identifying the binding is put in the error's message or context:
+ * `mapErrorToResponse` forwards a `ServiceError`'s message AND context to the
+ * client verbatim. The operator detail goes to observability only.
+ *
+ * Exported for tests — the guard is the whole defect, and the throw is
+ * otherwise only reachable through a real Stripe call.
+ */
+export function requireStripeSecretKey(
+  env: Pick<Bindings, 'STRIPE_SECRET_KEY'>,
+  environment?: string,
+  obs?: ObservabilityClient
+): string {
+  const stripeKey = env.STRIPE_SECRET_KEY;
+  if (!stripeKey) {
+    obs?.error('Stripe client requested but no secret is bound', {
+      source: 'service-registry.getStripeClient',
+      binding: 'STRIPE_SECRET_KEY',
+      environment,
+    });
+    throw new StripeNotConfiguredError();
+  }
+  return stripeKey;
 }
 
 /**
@@ -195,14 +236,9 @@ export function createServiceRegistry(
 
   function getStripeClient() {
     if (!_stripeClient) {
-      const stripeKey = env.STRIPE_SECRET_KEY;
-      if (!stripeKey) {
-        throw new Error(
-          'STRIPE_SECRET_KEY not configured. ' +
-            'Add secret to worker environment for Stripe operations.'
-        );
-      }
-      _stripeClient = createStripeClient(stripeKey);
+      _stripeClient = createStripeClient(
+        requireStripeSecretKey(env, getEnvironment(), _obs)
+      );
     }
     return _stripeClient;
   }

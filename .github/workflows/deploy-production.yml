@@ -298,12 +298,24 @@ jobs:
             --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
             --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
+      # Codex-1g5lh.1: STRIPE_SECRET_KEY is REQUIRED here, not optional.
+      # organization-api owns the subscription-tier write path
+      # (POST /api/organizations/:id/tiers -> TierService.createTier ->
+      # stripe.products.create / stripe.prices.create) because tiers are
+      # org-scoped. Deployed without the key, tier creation returned a bare
+      # 500 in production while passing every local run and every CI run —
+      # workers/organization-api/.dev.vars carries the key locally.
+      # NOTE: ecom-api is no longer the only Stripe-holding worker. Before
+      # adding a Stripe-calling route to any OTHER worker, add the key to that
+      # worker's upload step too, or prefer moving the route to a worker that
+      # already holds it (see workers/ecom-api/src/routes/course-monetisation.ts).
       - name: Upload organization-api secrets
         run: .github/scripts/upload-worker-secrets.sh production organization-api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           R2_BUCKET_ASSETS: ${{ vars.R2_BUCKET_ASSETS }}
