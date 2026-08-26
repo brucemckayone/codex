@@ -40,6 +40,37 @@ vi.mock('@codex/subscription', () => ({
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
   invalidateForUser: vi.fn(),
+  // Codex-4y8pt: the handler constructs CourseSubscriptionService for EVERY
+  // subscription event (course subs are mode=subscription on this same webhook,
+  // discriminated later by `type: 'course_subscription'` metadata). A vi.mock
+  // factory is a CLOSED namespace, so omitting this export made vitest throw on
+  // the ACCESS at subscription-webhook.ts:277 — before any test assertion ran.
+  // Stubbed rather than left bare so a future course-sub test gets a mock method
+  // instead of a TypeError; no test here routes through that branch.
+  // The handler ALSO calls the STATIC `isCourseSubscription` to discriminate
+  // (three sites), so the mock needs both halves: a constructor for the
+  // instance and the static on the mock function itself.
+  CourseSubscriptionService: Object.assign(
+    vi.fn().mockImplementation(() => ({
+      handleCourseSubscriptionCreated: vi.fn().mockResolvedValue(undefined),
+      handleCourseSubscriptionUpdated: vi.fn().mockResolvedValue(undefined),
+      handleCourseSubscriptionDeleted: vi.fn().mockResolvedValue(undefined),
+      handleCourseInvoicePaymentSucceeded: vi.fn().mockResolvedValue(undefined),
+    })),
+    {
+      // MIRRORS the real predicate rather than hardcoding `false`
+      // (course-subscription-service.ts:677 — metadata.type ===
+      // COURSE_SUBSCRIPTION_METADATA_TYPE). A constant `false` would pass today,
+      // because every fixture here is an ORG subscription, and would then
+      // silently mis-route the first test that does add course metadata. The
+      // literal is inlined because a vi.mock factory is hoisted above imports
+      // and so cannot reference the exported constant.
+      isCourseSubscription: vi.fn(
+        (sub: { metadata?: Record<string, string> | null }) =>
+          (sub?.metadata?.type ?? null) === 'course_subscription'
+      ),
+    }
+  ),
 }));
 
 // The subscription-webhook handler dispatches emails via `sendEmailToWorker`
