@@ -25,8 +25,22 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 /**
- * Write-through: invalidate + re-warm the tier cache.
+ * Write-through the tier cache after a mutation.
  * Fire-and-forget via waitUntil — never blocks the mutation response.
+ *
+ * `cache.set` puts the freshly-listed tiers straight into the current slot:
+ * 1 read + 1 write, where the previous `invalidate()` + `get()` pair cost
+ * 2 writes + 2 reads and spent its second write re-fetching from the DB a
+ * value this handler was about to hold anyway (Codex-kgrdp.8). On the free
+ * tier's account-wide 1,000 writes/day, halving the writes on every
+ * create/update/delete/reorder is the point.
+ *
+ * The version is deliberately NOT bumped any more. A tier change does not
+ * alter org members or org settings, which share this `id`, so staling them
+ * only forced each to spend a write of its own on its next read.
+ *
+ * `set` awaits its own put, so this single waitUntil genuinely covers the
+ * write — no second waitUntil inside the cache is needed.
  */
 function warmTierCache(
   ctx: {
@@ -37,28 +51,11 @@ function warmTierCache(
   orgId: string
 ): void {
   if (!ctx.env.CACHE_KV) return;
-  // The `waitUntil` around the IIFE below is NOT enough on its own
-  // (Codex-e32xz): `cache.get` resolves as soon as the fetcher does and does
-  // not await its own data-slot put, so the IIFE — and with it the outer
-  // waitUntil — settles while the write is still in flight, and workerd
-  // cancels it. That is why `ORG_TIERS` had a version key and no data key in
-  // production despite this warm running on every tier mutation. Handing the
-  // cache its own waitUntil registers the put as a first-class task.
-  const cache = new VersionedCache({
-    kv: ctx.env.CACHE_KV,
-    waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-  });
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
   ctx.executionCtx.waitUntil(
     (async () => {
-      await cache.invalidate(orgId);
-      await cache.get(
-        orgId,
-        CacheType.ORG_TIERS,
-        () => ctx.services.tier.listTiers(orgId),
-        {
-          ttl: 86400,
-        }
-      );
+      const tiers = await ctx.services.tier.listTiers(orgId);
+      await cache.set(orgId, CacheType.ORG_TIERS, tiers, { ttl: 86400 });
     })().catch(() => {})
   );
 }

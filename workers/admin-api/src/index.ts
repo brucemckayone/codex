@@ -20,7 +20,12 @@
  */
 
 import type { CONTENT_STATUS } from '@codex/constants';
-import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
+import {
+  combineSubjects,
+  presentedSessionSubject,
+  rateLimit,
+  trustedIpSubject,
+} from '@codex/security';
 import {
   adminActivityQuerySchema,
   adminContentIdParamsSchema,
@@ -68,7 +73,8 @@ const app = createWorker<AdminApiEnv>({
   enableGlobalAuth: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: the limiter below counts in RATE_LIMIT_API.
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 
@@ -76,11 +82,29 @@ const app = createWorker<AdminApiEnv>({
 // Custom Middleware
 // ============================================================================
 
-// Rate limiting for all API endpoints
+/**
+ * Rate limiting for all API endpoints (100 req/min, `api` preset).
+ *
+ * Two buckets, either of which can block:
+ *   - the presented session (`presentedSessionSubject`, which reads the
+ *     forwarded cookie because `sessionSubject()` needs `c.get('user')` and
+ *     this mount runs before procedure() populates it), covering the
+ *     legitimate path — apps/web calls admin-api server-side, so the transport
+ *     address is a Cloudflare egress address and NOT the operator's;
+ *   - the client address, which covers a direct hit on the public
+ *     admin-api.revelations.studio custom domain, where it genuinely is the
+ *     caller's.
+ * Keying on the address alone is what collapsed every operator into one shared
+ * 100-per-minute bucket (Codex-kgrdp.16); counting in the native binding is
+ * what takes the KV read+write off every admin call (Codex-kgrdp.17).
+ */
 app.use('/api/*', (c, next) => {
+  const { RATE_LIMIT_API } = c.env;
+
   return rateLimit({
-    kv: c.env.RATE_LIMIT_KV,
-    ...RATE_LIMIT_PRESETS.api, // 100 req/min
+    preset: 'api',
+    binding: RATE_LIMIT_API,
+    subject: combineSubjects(presentedSessionSubject(), trustedIpSubject()),
   })(c, next);
 });
 

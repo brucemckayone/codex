@@ -1,12 +1,22 @@
-import { SERVICE_PORTS } from '@codex/constants';
+import { SERVICE_PORTS, type WORKER_SUBDOMAINS } from '@codex/constants';
 import type { EnvName, ServiceName } from './types';
 
 /**
  * Service → subdomain prefix. The dot-separated apex follows from `ENV_HOSTS`.
  *
  * `content` and `access` share the same worker deployment (content-api).
+ *
+ * Typed against `WORKER_SUBDOMAINS` (@codex/constants) rather than `string`:
+ * that array is the axis the reserved-subdomain guard generates every worker
+ * hostname from, and it is pinned to the `routes[].pattern` values in
+ * each worker's `wrangler.jsonc`. A prefix that is not a real deployed worker
+ * subdomain therefore cannot be written here without failing the build — this
+ * map used to be a second, independently-drifting copy of that list.
  */
-export const SERVICE_SUBDOMAIN: Record<ServiceName, string> = {
+export const SERVICE_SUBDOMAIN: Record<
+  ServiceName,
+  (typeof WORKER_SUBDOMAINS)[number]
+> = {
   auth: 'auth',
   content: 'content-api',
   access: 'content-api',

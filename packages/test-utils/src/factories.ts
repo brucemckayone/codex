@@ -560,7 +560,8 @@ export interface MockCachedSessionData {
  * const cached = createMockCachedSession({
  *   user: { role: 'admin' }
  * });
- * mockKV._storage.set(`session:${cached.session.token}`, cached);
+ * // The bare token is BetterAuth's own key and the only one read.
+ * mockKV._storage.set(cached.session.token, cached);
  * ```
  */
 export function createMockCachedSession(overrides?: {

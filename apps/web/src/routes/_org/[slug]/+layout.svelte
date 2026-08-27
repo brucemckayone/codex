@@ -291,30 +291,76 @@
   });
 
   onMount(() => {
-    // Re-check KV versions on tab return — detects content published/unpublished
-    // while this tab was hidden, or org settings changed on another device.
-    // Throttled to avoid hammering the server on rapid tab switches.
+    /*
+      Version staleness re-check (Codex-kgrdp.6).
+
+      `invalidate('cache:org-versions')` re-runs the org layout server load. The
+      comment that used to sit on the poll below called that "Cheap: 3-4 parallel
+      KV reads (~10ms)" — a latency judgement that ignored BILLED OPERATIONS.
+      Each re-run is one request to the SvelteKit worker, a `getPublicInfo`
+      subrequest, a tiers subrequest and (now) 1-3 KV `getVersion` reads. At the
+      old fixed 5-minute interval an idle-but-visible tab paid that 12 times an
+      hour forever, and KV quota is billed ACCOUNT-wide.
+
+      Two changes, neither of which touches WHAT staleness detection can see:
+
+      1. One shared cooldown. `lastVersionCheck` was previously only consulted
+         by the visibility handler; the interval called `invalidate` directly, so
+         returning to a tab a second before the timer fired produced two
+         re-runs back to back. Every check now goes through the same throttle.
+
+      2. The poll is activity-gated. It fires only if the user has actually
+         touched this tab since the last check. An idle open tab — the case in
+         the bead — now costs ZERO requests per hour rather than 12, because
+         nobody is looking at the data it would refresh. The moment the user
+         does anything, the next tick refreshes.
+
+      Cross-device staleness detection is intact: the two signals that matter
+      both survive. Returning to the tab still checks immediately (throttled),
+      and an actively-used tab still polls. A purchase or subscription change
+      made on THIS device never depended on the poll at all — those paths
+      invalidate their collections directly.
+    */
     let lastVersionCheck = 0;
     const VERSION_CHECK_COOLDOWN_MS = 60_000; // 60 seconds
 
+    /** Returns whether a check actually ran (false = suppressed by the cooldown). */
+    function checkVersions() {
+      const now = Date.now();
+      if (now - lastVersionCheck < VERSION_CHECK_COOLDOWN_MS) return false;
+      lastVersionCheck = now;
+      void invalidate('cache:org-versions');
+      return true;
+    }
+
     function handleVisibility() {
-      if (document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - lastVersionCheck < VERSION_CHECK_COOLDOWN_MS) return;
-        lastVersionCheck = now;
-        void invalidate('cache:org-versions');
-      }
+      if (document.visibilityState === 'visible') checkVersions();
     }
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Activity flag for the poll below. Passive + capture so it sees the event
+    // regardless of what any handler does with it, and does no work beyond
+    // setting a boolean.
+    let interactedSinceCheck = false;
+    const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'wheel', 'scroll'] as const;
+    function markInteraction() {
+      interactedSinceCheck = true;
+    }
+    for (const type of ACTIVITY_EVENTS) {
+      document.addEventListener(type, markInteraction, { passive: true, capture: true });
+    }
+
     // Periodic version check — catches staleness during long browsing sessions
     // where visibilitychange never fires (user stays on tab for 20+ min).
-    // Cheap: 3-4 parallel KV reads (~10ms). Only polls when tab is visible.
+    // Only polls when the tab is visible AND has been interacted with since the
+    // last check; see the block comment above.
     const VERSION_POLL_INTERVAL_MS = 5 * 60 * 1000;
     const versionPollInterval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void invalidate('cache:org-versions');
-      }
+      if (document.visibilityState !== 'visible') return;
+      if (!interactedSinceCheck) return;
+      // Only consume the flag when a check really ran, so a tick suppressed by
+      // the cooldown doesn't silently swallow the interaction.
+      if (checkVersions()) interactedSinceCheck = false;
     }, VERSION_POLL_INTERVAL_MS);
 
     // Fetch following status client-side and hydrate the store — but
@@ -354,6 +400,9 @@
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
+      for (const type of ACTIVITY_EVENTS) {
+        document.removeEventListener(type, markInteraction, { capture: true });
+      }
       clearInterval(versionPollInterval);
       cleanupProgressSync();
       teardownBrandPreview();

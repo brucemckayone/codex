@@ -5,7 +5,12 @@ import {
   type UpdatePlaybackProgressResponse,
   verifyHlsToken,
 } from '@codex/access';
-import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
+import {
+  combineSubjects,
+  type RateLimitSubjectResolver,
+  rateLimit,
+  trustedIpSubject,
+} from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   canEnterCourseParamsSchema,
@@ -34,15 +39,40 @@ const HLS_PLAYLIST_HEADERS = {
 } as const;
 
 /**
+ * Count against the HLS token the caller presented.
+ *
+ * These two routes carry no session: the video player authenticates with the
+ * short-lived token in the query string, so `sessionSubject()` names nothing
+ * and — when the player is reached through a worker hop — `trustedIpSubject()`
+ * names nothing either. The token is the one subject this surface can ALWAYS
+ * name, so keying on it is what keeps the limiter from permanently failing
+ * open here. It is per-user and per-media, which is exactly the granularity a
+ * segment-refresh budget wants. The middleware SHA-256s the value before it
+ * reaches a bucket key or a log line.
+ *
+ * A random-token flood still mints a fresh bucket per request; the address
+ * bucket beside it is what covers that, and the token is verified immediately
+ * after, so a bogus one costs a signature check and a 403.
+ */
+const hlsTokenSubject = (): RateLimitSubjectResolver => (c) => {
+  const token = c.req.query('token');
+  return token ? { kind: 'credential', value: token } : null;
+};
+
+/**
  * Streaming rate-limit middleware for the raw HLS proxy routes. Built inline
- * (rather than at module load) so it can read `RATE_LIMIT_KV` from the
- * per-request env — mirrors the `streaming` preset the `procedure()`-based
- * `/stream` route uses.
+ * (rather than at module load) so it can read the per-request env — mirrors
+ * the `streaming` preset the `procedure()`-based `/stream` route declares.
+ *
+ * Mounted per-route rather than with `app.use`, so it does NOT double-charge
+ * the procedure() routes in this file, which enforce their own declared preset
+ * (Codex-kgrdp.9).
  */
 const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
   rateLimit({
-    kv: c.env.RATE_LIMIT_KV,
-    ...RATE_LIMIT_PRESETS.streaming,
+    preset: 'streaming',
+    binding: c.env.RATE_LIMIT_STREAMING,
+    subject: combineSubjects(hlsTokenSubject(), trustedIpSubject()),
   })(c, next)
 );
 

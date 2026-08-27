@@ -115,6 +115,42 @@ const safe = redactSensitiveData({ password: 'secret', email: 'user@example.com'
 
 **Don't use `trackError()`** for expected business logic errors (not-found, forbidden) — those are normal flow, use `info()` or `warn()`.
 
+## KV Operation Budget
+
+A Worker cannot read its own account-wide KV quota counters, so `kv-budget.ts`
+counts what the code path itself does and recognises a quota-shaped rejection
+when KV returns one. It issues **zero** KV, DO or subrequest operations of its
+own — counters are integers in a module-scope map keyed by binding name.
+
+Already adopted once, in `packages/worker-utils/src/worker-factory.ts`, which
+covers all 10 workers and every swallowing KV path (`VersionedCache`,
+`createKVSecondaryStorage`, `cacheSessionInKV`, the rate limiter):
+
+```typescript
+app.use('*', createKvBudgetMiddleware({ obs }));
+```
+
+`withKvBudget(kv, { obs, binding })` wraps a single namespace in a transparent
+`Proxy` (same type in, same type out); `instrumentKvBindings(env, { obs })`
+returns a shallow copy of `env` with every KV-like `*_KV` value wrapped.
+
+Two `signal` values to alert on:
+
+| Signal | Level | Meaning |
+|---|---|---|
+| `kv_quota_exhausted` | `error` | A KV op was rejected 429/limit-shaped. Fires once per binding per isolate, at the moment exhaustion starts, even though the caller swallows the failure. The error is re-thrown unchanged. |
+| `kv_write_budget` | `info` → `warn` → `error` | Rollup every N writes (default 25) with reads, writes, quotaFailures, otherFailures and `projectedDailyWrites`. |
+
+**`projectedDailyWrites` is ONE isolate's rate extrapolated to a day, not the
+account total** — the account total is the sum across every isolate of every
+worker. It is therefore a LOWER BOUND: over the cap on one isolate means
+definitely over the cap on the account, but under it proves nothing. Never
+relabel it as an account-level figure.
+
+`isKvQuotaError(error)` is exported so a fail-open path can distinguish quota
+exhaustion (an account-wide capacity event) from a transient KV error. Both
+fail open; they should not look identical in the logs.
+
 ## Strict Rules
 
 - **MUST** use `ObservabilityClient` for ALL logging — NEVER use `console.log` directly
@@ -126,3 +162,4 @@ const safe = redactSensitiveData({ password: 'secret', email: 'user@example.com'
 
 - `packages/observability/src/index.ts` — `ObservabilityClient`, `createRequestTimer`, `trackRequestError`, redaction exports
 - `packages/observability/src/redact.ts` — `redactSensitiveData`, `REDACTION_PRESETS`
+- `packages/observability/src/kv-budget.ts` — `createKvBudgetMiddleware`, `withKvBudget`, `instrumentKvBindings`, `isKvQuotaError`, `kvBudgetSnapshot`

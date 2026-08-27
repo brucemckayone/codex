@@ -4,163 +4,152 @@
  * Behavioural coverage for the rate-limit middleware applied to
  * /unsubscribe/* in workers/notifications-api/src/index.ts.
  *
- * Per `feedback_security_deep_test`: HMAC/auth/rate-limit changes
- * MUST have unit + integration tests for BOTH positive and negative
- * paths before closing.
+ * Per `feedback_security_deep_test`: HMAC/auth/rate-limit changes MUST have
+ * unit + integration tests for BOTH positive and negative paths.
  *
- * Background (Codex-ttavz.8 / denoise iter-002 F2): the unsubscribe
- * routes bypass procedure() because they use HMAC token verification,
- * not session auth. Without app-level rate limiting, anyone with a
- * leaked token URL (or none at all) can replay /unsubscribe/<random>
- * as fast as TCP allows — each request pays an HMAC verify cost and
- * the POST mutates `notification_preferences`.
+ * Background (Codex-ttavz.8 / denoise iter-002 F2): the unsubscribe routes
+ * bypass procedure() because they use HMAC token verification, not session
+ * auth. Without app-level rate limiting, anyone with a leaked token URL (or
+ * none at all) can replay /unsubscribe/<random> as fast as TCP allows — each
+ * request pays an HMAC verify cost and the POST mutates
+ * `notification_preferences`.
  *
- * The middleware uses `RATE_LIMIT_PRESETS.api` (100 requests / 60s)
- * keyed by `${cf-connecting-ip}:${pathname}` — permissive enough for
- * a human retrying an unsubscribe link, tight enough to stop scripted
- * DoS.
+ * ## What changed, and why these assertions changed with it (Codex-kgrdp.17)
  *
- * Test strategy:
- *   - Positive path: 100 requests within budget all return non-429
- *     and carry X-RateLimit-* headers
- *   - Negative path: the 101st request returns 429 with Retry-After
- *   - Per-route isolation: GET and POST share the path so they share
- *     a budget — but a different token-path (different pathname) has
- *     a fresh budget (defaultKeyGenerator includes pathname)
- *   - Per-IP isolation: a different CF-Connecting-IP gets a fresh
- *     budget on the same path
+ * The limiter used to count in KV, keyed on `${cf-connecting-ip}:${pathname}`,
+ * and emitted `X-RateLimit-*` on every response. Two things are now different,
+ * and both are deliberate:
  *
- * The route handler will return 200 (with valid:false for bad tokens)
- * because WORKER_SHARED_SECRET is not bound in test env — but the
- * rate-limit middleware runs BEFORE the handler, so the gate works
- * regardless of token validity. We assert on the rate-limit headers
- * and 429 status, not on body shape.
+ *  1. Counting moved to Cloudflare's native Workers Rate Limiting binding,
+ *     whose `limit()` returns `{ success }` alone. Remaining and reset are
+ *     genuinely unknowable, so `X-RateLimit-*` are NOT emitted rather than
+ *     guessed. The witness that the middleware ran is therefore the 429 at the
+ *     budget edge, not a header.
+ *  2. The key is no longer the transport address alone. apps/web proxies BOTH
+ *     unsubscribe hops server-side, so the address arriving here is a
+ *     Cloudflare egress address and `trustedIpSubject()` correctly withholds
+ *     it — an IP-only key would have been null on every real unsubscribe. The
+ *     primary subject is now the token in the path, with the address as a
+ *     second signal where it can be believed. `combineSubjects` blocks if
+ *     EITHER bucket is exhausted, which is what the isolation tests below
+ *     assert: isolation holds only when BOTH signals differ.
+ *
+ * The route handler returns 200 (with valid:false for bad tokens) because
+ * WORKER_SHARED_SECRET is not bound in the test env — but the middleware runs
+ * BEFORE the handler, so the gate works regardless of token validity. We
+ * assert on status, never on body shape.
  */
 
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-// RATE_LIMIT_PRESETS.api = 100 requests per 60s. We keep tests tight
-// to avoid slow runs, but must still cross the boundary.
+// RATE_LIMIT_PRESETS.api = 100 requests per 60s.
 const BUDGET = 100;
 
 /**
- * Hit the unsubscribe endpoint with a stable IP and path.
- * Each call increments the rate-limit counter for `${ip}:${path}`.
+ * Hit the unsubscribe endpoint. Each call charges the token bucket for `path`
+ * and the address bucket for `ip`.
  */
 async function hit(
   path: string,
   ip: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  return SELF.fetch(`http://localhost${path}`, {
+  const res = await SELF.fetch(`http://localhost${path}`, {
     ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      'cf-connecting-ip': ip,
-    },
+    headers: { ...(init.headers ?? {}), 'cf-connecting-ip': ip },
   });
+  // Drain so the stream is freed even when the caller only reads status.
+  await res.text();
+  return res;
 }
 
-describe('unsubscribe rate-limit middleware (Codex-ttavz.8)', () => {
-  it('applies X-RateLimit-* headers to /unsubscribe/* responses (positive path)', async () => {
-    // Use a unique IP+path per test to avoid cross-test budget bleed.
-    const ip = '203.0.113.10';
-    const path = '/unsubscribe/positive-headers-token';
-
+/** Spend the whole budget on one (path, ip) pair. */
+async function burnBudget(path: string, ip: string): Promise<void> {
+  for (let i = 0; i < BUDGET; i++) {
     const res = await hit(path, ip);
+    // Sanity: while still under budget, never 429.
+    expect(res.status).not.toBe(429);
+  }
+}
 
-    // Whether token is valid is irrelevant — we only assert the
-    // middleware ran and tagged the response.
-    expect(res.headers.get('X-RateLimit-Limit')).toBe(String(BUDGET));
-    const remaining = res.headers.get('X-RateLimit-Remaining');
-    expect(remaining).not.toBeNull();
-    expect(Number(remaining)).toBeLessThanOrEqual(BUDGET - 1);
-    expect(res.headers.get('X-RateLimit-Reset')).not.toBeNull();
-    // Below budget → never 429
+describe('unsubscribe rate-limit middleware (Codex-ttavz.8 / kgrdp.17)', () => {
+  it('binds the RATE_LIMIT_API namespace, so the limiter is not a silent fail-open', () => {
+    // Without the binding, rateLimit() fails OPEN — it logs
+    // `rate_limit.fail_open` at error level and lets every request through.
+    // A missing binding would make every other test in this file pass
+    // vacuously, so this guard comes first.
+    expect(env.RATE_LIMIT_API).toBeDefined();
+  });
+
+  it('stays below budget without 429 (positive path)', async () => {
+    const res = await hit('/unsubscribe/positive-path-token', '203.0.113.10');
     expect(res.status).not.toBe(429);
   });
 
-  it('returns 429 once the per-IP per-path budget is exceeded (negative path)', async () => {
-    const ip = '203.0.113.20';
+  it('does NOT emit X-RateLimit-* — the native binding cannot know them', async () => {
+    // Asserted rather than merely absent from the positive test: guessing
+    // these values would tell a client something the store never reported.
+    const res = await hit('/unsubscribe/headers-token', '203.0.113.11');
+    expect(res.headers.get('X-RateLimit-Limit')).toBeNull();
+    expect(res.headers.get('X-RateLimit-Remaining')).toBeNull();
+    expect(res.headers.get('X-RateLimit-Reset')).toBeNull();
+  });
+
+  it('returns 429 with Retry-After once the budget is exceeded (negative path)', async () => {
     const path = '/unsubscribe/exhaust-budget-token';
+    const ip = '203.0.113.20';
 
-    // Burn through the entire budget. We do this serially to avoid
-    // KV write races (the limiter is read-modify-write).
-    let lastBelow: Response | undefined;
-    for (let i = 0; i < BUDGET; i++) {
-      lastBelow = await hit(path, ip);
-      // Sanity: while we're still under budget, never 429.
-      expect(lastBelow.status).not.toBe(429);
-    }
-    // Drain bodies to free streams.
-    if (lastBelow) await lastBelow.text();
+    await burnBudget(path, ip);
 
-    // The (BUDGET+1)th request must be rejected.
     const overBudget = await hit(path, ip);
     expect(overBudget.status).toBe(429);
     expect(overBudget.headers.get('Retry-After')).not.toBeNull();
-
-    const body = (await overBudget.json()) as {
-      error?: string;
-      retryAfter?: number;
-    };
-    expect(body.error).toBe('Too many requests');
-    expect(typeof body.retryAfter).toBe('number');
   });
 
-  it('keeps separate budgets per (IP, path) tuple', async () => {
-    // After exhausting one (ip, path), a different path on the same
-    // IP must still be allowed. defaultKeyGenerator hashes by
-    // `${ip}:${pathname}` so this proves the keying is right.
+  it('keeps separate budgets per token: a fresh token AND a fresh address pass', async () => {
     const ip = '203.0.113.30';
-    const exhausted = '/unsubscribe/path-isolation-a';
-    const fresh = '/unsubscribe/path-isolation-b';
+    await burnBudget('/unsubscribe/token-isolation-a', ip);
+    expect((await hit('/unsubscribe/token-isolation-a', ip)).status).toBe(429);
 
-    for (let i = 0; i < BUDGET; i++) {
-      const res = await hit(exhausted, ip);
-      await res.text();
-    }
-    const blocked = await hit(exhausted, ip);
-    expect(blocked.status).toBe(429);
-    await blocked.text();
+    // Both signals must differ. The address bucket for .30 is spent too, so a
+    // fresh token on the SAME address is still blocked — that is
+    // combineSubjects working, not a keying bug.
+    expect((await hit('/unsubscribe/token-isolation-b', ip)).status).toBe(429);
 
-    // Different path on the same IP → fresh budget.
-    const allowed = await hit(fresh, ip);
-    expect(allowed.status).not.toBe(429);
-    expect(allowed.headers.get('X-RateLimit-Limit')).toBe(String(BUDGET));
-  });
-
-  it('keeps separate budgets per IP on the same path', async () => {
-    const path = '/unsubscribe/ip-isolation-token';
-    const blockedIp = '203.0.113.40';
-    const freshIp = '203.0.113.41';
-
-    for (let i = 0; i < BUDGET; i++) {
-      const res = await hit(path, blockedIp);
-      await res.text();
-    }
-    const blocked = await hit(path, blockedIp);
-    expect(blocked.status).toBe(429);
-    await blocked.text();
-
-    // Different IP on the same path → fresh budget.
-    const allowed = await hit(path, freshIp);
+    // Fresh token + fresh address → both buckets fresh → allowed.
+    const allowed = await hit('/unsubscribe/token-isolation-b', '203.0.113.31');
     expect(allowed.status).not.toBe(429);
   });
 
-  it('does NOT apply unsubscribe rate limit to unrelated routes (/health)', async () => {
-    // /health must not advertise unsubscribe rate-limit headers.
-    // (Even if other middleware adds its own headers, the /unsubscribe
-    // budget must not be charged.)
+  it('the token bucket blocks even from an untouched address', async () => {
+    // The inverse of the case above, and the one that matters for the DB
+    // write-amplification threat: replaying ONE valid token is capped no
+    // matter how many addresses the replay comes from.
+    const path = '/unsubscribe/token-bucket-token';
+    await burnBudget(path, '203.0.113.40');
+    expect((await hit(path, '203.0.113.40')).status).toBe(429);
+
+    const otherAddress = await hit(path, '203.0.113.41');
+    expect(otherAddress.status).toBe(429);
+  });
+
+  // `/health` composes `standardDatabaseCheck`, so every probe is a real Neon
+  // round trip (~3s in CI). Four of them serially blows the 5s default, which
+  // is a property of the health check, not of the limiter — so the repeats run
+  // concurrently and the test carries an explicit allowance.
+  it('does NOT charge the unsubscribe budget for unrelated routes (/health)', async () => {
     const res = await SELF.fetch('http://localhost/health');
     // Health may return 200 or 503 depending on DB availability.
     expect([200, 503]).toContain(res.status);
-    // A few hits to /health should never exhaust the unsubscribe budget.
-    for (let i = 0; i < 3; i++) {
-      const r = await SELF.fetch('http://localhost/health');
+    await res.text();
+
+    const repeats = await Promise.all(
+      [0, 1, 2].map(() => SELF.fetch('http://localhost/health'))
+    );
+    for (const r of repeats) {
       expect(r.status).not.toBe(429);
       await r.text();
     }
-  });
+  }, 30_000);
 });

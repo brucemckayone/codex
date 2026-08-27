@@ -10,12 +10,16 @@ import type { WaitUntilFn } from './helpers/invalidate';
 
 /**
  * Options for cache operations
+ *
+ * There is deliberately only ONE TTL here. A `versionTtl` used to sit alongside
+ * `ttl` at 144x its value, and correctness depended on the two staying in the
+ * right order while being tuned in different places (Codex-kgrdp.5). Version
+ * keys no longer expire at all, so a data TTL can never outlive the version key
+ * that stales it — and there is no second number left to drift.
  */
 export interface CacheOptions {
   /** Time-to-live for cached data in seconds (default: 600 = 10 minutes) */
   ttl?: number;
-  /** Time-to-live for version key in seconds (default: 86400 = 1 day) */
-  versionTtl?: number;
 }
 
 /**
@@ -84,6 +88,17 @@ export interface CacheStats {
   misses: number;
   /** Number of invalidations */
   invalidations: number;
+  /**
+   * KV read operations issued. The free tier allows 100,000/day per ACCOUNT.
+   */
+  reads: number;
+  /**
+   * KV mutating operations issued — puts AND deletes, which share one bucket of
+   * 1,000/day per ACCOUNT. This is the scarce resource and therefore the number
+   * to watch: a healthy `hitRate` with a climbing `writes` still means the
+   * cache is losing.
+   */
+  writes: number;
   /** Hit rate (0-1) */
   hitRate: number;
 }

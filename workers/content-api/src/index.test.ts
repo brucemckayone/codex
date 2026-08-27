@@ -79,8 +79,20 @@ describe('Content API Worker', () => {
   });
 
   describe('Environment Bindings', () => {
-    it('should have RATE_LIMIT_KV binding available', () => {
-      expect(env.RATE_LIMIT_KV).toBeDefined();
+    // RATE_LIMIT_KV is gone (Codex-kgrdp.17). procedure() now enforces
+    // policy.rateLimit, and a missing binding makes it fail OPEN and log
+    // `rate_limit.fail_open` on every request — so the bindings for the
+    // presets this worker's routes reach (strict, streaming and api) are what must exist.
+    it('should have the RATE_LIMIT_STRICT binding available', () => {
+      expect(env.RATE_LIMIT_STRICT).toBeDefined();
+    });
+
+    it('should have the RATE_LIMIT_STREAMING binding available', () => {
+      expect(env.RATE_LIMIT_STREAMING).toBeDefined();
+    });
+
+    it('should have the RATE_LIMIT_API binding available', () => {
+      expect(env.RATE_LIMIT_API).toBeDefined();
     });
   });
 

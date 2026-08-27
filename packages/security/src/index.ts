@@ -3,7 +3,7 @@
  *
  * Shared security utilities for Cloudflare Workers
  * - Security headers middleware
- * - Rate limiting (KV-based)
+ * - Rate limiting (native binding + SQLite Durable Object)
  * - Worker-to-worker authentication
  * - User session authentication
  */
@@ -19,10 +19,31 @@ export {
   type SecondaryStorage,
 } from './kv-secondary-storage';
 export {
+  combineSubjects,
+  credentialSubject,
+  isCloudflareEgressIp,
+  presentedSessionSubject,
   RATE_LIMIT_PRESETS,
   type RateLimitOptions,
+  type RateLimitPresetName,
+  type RateLimitSubject,
+  type RateLimitSubjectKind,
+  type RateLimitSubjectResolver,
   rateLimit,
+  sessionSubject,
+  trustedClientIp,
+  trustedIpSubject,
 } from './rate-limit';
+export {
+  limitViaDurableObject,
+  type RateLimitDecision,
+  RateLimitDO,
+  type RateLimitNamespace,
+  type RateLimitStub,
+  type RateLimitStubResponse,
+  type RateLimitWindow,
+  rateLimitShardName,
+} from './rate-limit-do';
 export {
   type CachedSessionData,
   optionalAuth,
@@ -31,6 +52,7 @@ export {
   type SessionAuthRow,
   type UserAuthRow,
 } from './session-auth';
+export { extractSessionCookie } from './session-cookie';
 export {
   generateWorkerSignature,
   type WorkerAuthOptions,

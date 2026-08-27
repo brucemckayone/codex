@@ -58,9 +58,28 @@ export type Bindings = {
   API_URL?: string;
 
   /**
-   * Rate limiting KV namespace
+   * Native Workers Rate Limiting bindings, one per preset.
+   *
+   * Names are the canonical `bindingName` values in
+   * `RATE_LIMIT_PRESETS` (@codex/constants) and MUST match the `ratelimits`
+   * entries in each worker's wrangler config. These replaced the retired
+   * `RATE_LIMIT_KV` namespace, which spent a KV read AND a KV write out of the
+   * account-wide 1,000-writes/day budget on every single request
+   * (Codex-kgrdp.17).
    */
-  RATE_LIMIT_KV?: import('@cloudflare/workers-types').KVNamespace;
+  RATE_LIMIT_STRICT?: import('@cloudflare/workers-types').RateLimit;
+  RATE_LIMIT_STREAMING?: import('@cloudflare/workers-types').RateLimit;
+  RATE_LIMIT_API?: import('@cloudflare/workers-types').RateLimit;
+  RATE_LIMIT_WEB?: import('@cloudflare/workers-types').RateLimit;
+
+  /**
+   * `RateLimitDO` namespace — the SQLite Durable Object store.
+   *
+   * Only the `auth` preset needs it: 5 requests per 15 minutes is not
+   * expressible on the native binding, whose period must be exactly 10 or 60
+   * seconds. Bound on the auth worker only.
+   */
+  RATE_LIMIT_DO?: import('@cloudflare/workers-types').DurableObjectNamespace;
 
   /**
    * Session caching KV namespace

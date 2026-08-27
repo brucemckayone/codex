@@ -46,7 +46,6 @@ export {
   createObservabilityErrorHandler,
   createObservabilityMiddleware,
   createR2Check,
-  createRateLimitWrapper,
   createRequestTrackingMiddleware,
   createSecurityHeadersMiddleware,
   createSecurityHeadersWrapper,

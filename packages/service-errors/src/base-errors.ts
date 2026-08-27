@@ -14,7 +14,16 @@ interface ErrorConstructorWithStackTrace {
 /**
  * Valid HTTP error status codes for API responses
  */
-export type ErrorStatusCode = 400 | 401 | 402 | 403 | 404 | 409 | 422 | 500;
+export type ErrorStatusCode =
+  | 400
+  | 401
+  | 402
+  | 403
+  | 404
+  | 409
+  | 422
+  | 429
+  | 500;
 
 /**
  * Base error class for all service errors
@@ -102,6 +111,26 @@ export class ForbiddenError extends ServiceError {
 export class ConflictError extends ServiceError {
   constructor(message: string, context?: Record<string, unknown>) {
     super(message, 'CONFLICT', 409, context);
+  }
+}
+
+/**
+ * Rate limit exceeded error (429)
+ * Thrown when the rate-limit preset declared by a route's policy is exhausted.
+ *
+ * Lives here rather than at the enforcement site so `procedure()` can map it
+ * through the normal envelope: `mapErrorToResponse()` forwards `statusCode`
+ * untouched, and `context.retryAfter` reaches the client as
+ * `details.retryAfter` alongside the `Retry-After` header.
+ */
+export class RateLimitExceededError extends ServiceError {
+  constructor(retryAfterSeconds: number, context?: Record<string, unknown>) {
+    super(
+      `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
+      'RATE_LIMIT_EXCEEDED',
+      429,
+      { retryAfter: retryAfterSeconds, ...context }
+    );
   }
 }
 

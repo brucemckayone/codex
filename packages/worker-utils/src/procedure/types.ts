@@ -41,6 +41,7 @@ import type {
 } from '@codex/organization';
 import type { PlatformSettingsFacade } from '@codex/platform-settings';
 import type { FeeConfigService, PurchaseService } from '@codex/purchase';
+import type { RateLimitPresetName } from '@codex/security';
 import type {
   Bindings,
   HonoEnv,
@@ -255,9 +256,17 @@ export interface ProcedurePolicy {
   requireOrgManagement?: boolean;
 
   /**
-   * Rate limiting preset
+   * Rate limiting preset, enforced by `enforcePolicyInline`.
+   *
+   * Typed as `RateLimitPresetName` rather than a hand-written union so the two
+   * cannot drift: the previous literals included 'public' (never a preset) and
+   * 'webhook' (deleted — Stripe and RunPod are HMAC-authenticated), which the
+   * type would have accepted on a route and the limiter could not honour.
+   *
+   * Omitted means 'api' (100/min per subject), not "unlimited". `auth:
+   * 'worker'` routes are exempt whatever this says.
    */
-  rateLimit?: 'api' | 'auth' | 'strict' | 'public' | 'webhook' | 'streaming';
+  rateLimit?: RateLimitPresetName;
 
   /**
    * IP whitelist

@@ -1,63 +1,63 @@
 /**
- * Rate-limit behaviour tests for ecom-api mutation routes (Codex-agvv).
+ * Rate-limit contract tests for ecom-api mutation routes (Codex-agvv).
  *
- * The hard-coded preset choices on individual endpoints are compile-time
- * constants in the route files — if someone removes `rateLimit: 'strict'`
- * on `/subscriptions/cancel`/`/subscriptions/reactivate`, typecheck won't
- * catch it. So this file verifies:
+ * The preset choices on individual endpoints are string literals in the route
+ * files — if someone drops `rateLimit: 'strict'` from `/subscriptions/cancel`
+ * or `/subscriptions/reactivate`, typecheck will not catch it. And since
+ * Codex-kgrdp.9 those literals are actually ENFORCED by `procedure()`, which
+ * makes a second failure mode possible: a declared preset whose binding this
+ * worker does not bind fails OPEN, logging `rate_limit.fail_open` on every
+ * request while capping nothing. A green typecheck and a green deploy both
+ * look identical in that state.
  *
- *   1. The presets exported from `@codex/security` still cap at their
- *      intended values (positive: 20/min for 'strict', 100/min for 'api').
- *   2. Behavioural: the rate limiter actually rejects the 21st request
- *      inside a single window (negative — enforces the cap, not just
- *      exposes the numbers).
+ * So this file pins both halves of the contract:
  *
- * A full integration test that runs the ecom-api worker with a real
- * session cookie + KV counter against `/subscriptions/cancel` would be
- * higher-fidelity but is heavier than this configuration guard warrants.
- * The route handlers themselves are reviewed during PR — these assertions
- * are a safety net on the shared preset contract.
+ *   1. The presets exported from `@codex/security` still cap where intended
+ *      (20/min for 'strict', 100/min for 'api') and still name the binding the
+ *      wrangler config has to supply.
+ *   2. Every preset this worker's routes can reach is actually BOUND here, so
+ *      the enforcement declared in the route files is real rather than a
+ *      permanent fail-open.
+ *
+ * `procedure()`'s own enforcement behaviour — the 21st 'strict' request being
+ * rejected, subject isolation, the fail-open paths — is covered against the
+ * real limiter in
+ * packages/worker-utils/src/procedure/__tests__/procedure-rate-limit.test.ts.
+ * Reproducing it per worker would only re-test the shared substrate.
  */
 
-import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
-import { Hono } from 'hono';
+import { env } from 'cloudflare:test';
+import { RATE_LIMIT_PRESETS } from '@codex/security';
 import { describe, expect, it } from 'vitest';
 
 describe('ecom-api rate-limit presets (Codex-agvv)', () => {
-  it("'strict' preset is 20 req / minute", () => {
+  it("'strict' preset is 20 req / minute on the native binding", () => {
     expect(RATE_LIMIT_PRESETS.strict.maxRequests).toBe(20);
-    expect(RATE_LIMIT_PRESETS.strict.windowMs).toBe(60_000);
+    expect(RATE_LIMIT_PRESETS.strict.periodSeconds).toBe(60);
+    expect(RATE_LIMIT_PRESETS.strict.store).toBe('binding');
+    expect(RATE_LIMIT_PRESETS.strict.bindingName).toBe('RATE_LIMIT_STRICT');
   });
 
-  it("'api' preset is 100 req / minute", () => {
+  it("'api' preset is 100 req / minute on the native binding", () => {
     expect(RATE_LIMIT_PRESETS.api.maxRequests).toBe(100);
-    expect(RATE_LIMIT_PRESETS.api.windowMs).toBe(60_000);
+    expect(RATE_LIMIT_PRESETS.api.periodSeconds).toBe(60);
+    expect(RATE_LIMIT_PRESETS.api.store).toBe('binding');
+    expect(RATE_LIMIT_PRESETS.api.bindingName).toBe('RATE_LIMIT_API');
   });
 
-  it("rate limiter rejects the 21st 'strict' request within a single window", async () => {
-    // Create the middleware *once* so the in-memory store persists across
-    // requests. The `rateLimit()` factory news up a single InMemoryStore
-    // when kv is undefined, so we must reuse that factory result.
-    const mw = rateLimit({
-      kv: undefined,
-      ...RATE_LIMIT_PRESETS.strict,
-    });
-    const app = new Hono();
-    app.use('*', mw);
-    app.post('/go', (c) => c.text('OK'));
+  it('binds every preset its routes declare, so enforcement is not a silent fail-open', () => {
+    // 'strict' is declared on the commerce mutations; 'api' is both declared
+    // explicitly and applied by procedure() as the default where a route
+    // declares nothing, so it is reachable from every route in this worker.
+    expect(env.RATE_LIMIT_STRICT).toBeDefined();
+    expect(env.RATE_LIMIT_API).toBeDefined();
+  });
 
-    const headers = { 'CF-Connecting-IP': '10.0.0.42' };
-    const statuses: number[] = [];
-    for (let i = 0; i < 21; i++) {
-      const res = await app.request(
-        new Request('http://localhost/go', { method: 'POST', headers })
-      );
-      statuses.push(res.status);
-    }
-
-    // Positive: first 20 succeed.
-    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
-    // Negative: 21st is 429.
-    expect(statuses[20]).toBe(429);
+  it('has no `webhook` preset to re-mount on the Stripe webhook', () => {
+    // Deliberate (Codex-kgrdp.17): the webhook is authenticated by Stripe's
+    // HMAC signature, so a per-IP cap adds no security there and can only
+    // reject a legitimate retry burst. This asserts the preset stays deleted
+    // rather than quietly returning.
+    expect(RATE_LIMIT_PRESETS).not.toHaveProperty('webhook');
   });
 });

@@ -97,6 +97,7 @@ These rules are MANDATORY. Every agent working anywhere in this codebase MUST fo
 - **MUST** validate all input with Zod schemas via `procedure({ input: { body: schema } })` — no unvalidated input reaches handlers
 - **MUST** use `policy: { auth: 'worker' }` with HMAC-SHA256 for worker-to-worker calls
 - **MUST** use rate limiting on all auth endpoints (`rateLimit: 'auth'` = 5 req/15min)
+- `procedure()` ENFORCES `policy.rateLimit`. An omitted `rateLimit` means the `api` preset (100 req/min per subject), NOT "unlimited"; `auth: 'worker'` routes are exempt. A preset a worker has no `ratelimits` binding for fails OPEN and logs `rate_limit.fail_open` at error level on every request — so a new preset on a route needs the matching binding in that worker's wrangler config, in the same change
 - **NEVER** expose internal error details (stack traces, SQL, DB URLs) in API responses — `mapErrorToResponse()` handles this
 - **NEVER** log PII (passwords, tokens, emails) — use `@codex/observability` redaction
 

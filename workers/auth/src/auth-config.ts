@@ -91,14 +91,25 @@ export function createAuthInstance(options: AuthConfigOptions) {
       },
     }),
 
-    // KV-backed secondary storage for session caching
-    // This enables unified session caching across all workers
+    // KV-backed secondary storage for session caching.
+    //
+    // This is the SINGLE OWNER of session entries in AUTH_SESSION_KV
+    // (Codex-kgrdp.7): BetterAuth writes `<sessionToken> -> { session, user }`
+    // (plus `active-sessions-<userId>`) from inside this worker's request, and
+    // deletes them on sign-out / revocation. Every other worker's session
+    // middleware reads those keys and never writes them, so there is exactly
+    // one key format in the namespace. Do not add a second writer.
     secondaryStorage: createKVSecondaryStorage(env.AUTH_SESSION_KV),
 
     session: {
       expiresIn: 60 * 60 * 24, // 24 hours
       updateAge: 60 * 60 * 24, // Update session every 24 hours
       cookieName: COOKIES.SESSION_NAME,
+      // MUST stay true. The `sessions` rows are the fallback every other
+      // worker's session middleware falls back to when the KV entry is absent
+      // or lapsed (@codex/security `optionalAuth`, @codex/worker-utils
+      // `createSessionMiddleware`). Turning this off would make KV the only
+      // record of a session, so a KV miss would log every user out.
       storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,

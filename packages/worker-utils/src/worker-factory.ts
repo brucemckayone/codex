@@ -5,6 +5,7 @@
  * Enhanced with request tracking, network security, and declarative configuration.
  */
 
+import { createKvBudgetMiddleware } from '@codex/observability';
 import { workerAuth } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import { type Context, Hono } from 'hono';
@@ -235,6 +236,23 @@ export function createWorker<TEnv extends HonoEnv = HonoEnv>(
 
   // Observability (after tracking so requestId is available for log correlation)
   app.use('*', createObservabilityMiddleware(serviceName));
+
+  // KV operation budget (Codex-kgrdp.14).
+  //
+  // One mount instruments every `*_KV` binding on `c.env` for the whole
+  // worker, which covers VersionedCache, the BetterAuth secondary storage and
+  // the session cache at once — all three take their namespace from `c.env`,
+  // and the replacement is a transparent proxy of the same type, so no call
+  // site changes. It issues no KV operations of its own; it counts them, and
+  // it names a quota-shaped rejection that those call sites all swallow.
+  //
+  // Mounted after the observability middleware so the signal carries the
+  // request-scoped client.
+  app.use('*', (c, next) => {
+    const obs = c.get('obs');
+    if (!obs) return next();
+    return createKvBudgetMiddleware({ obs })(c, next);
+  });
 
   if (enableCors) {
     app.use('*', createCorsMiddleware());

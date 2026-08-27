@@ -13,6 +13,9 @@
  * each `.catch()`-guarded so a failure degrades to an empty section rather than
  * crashing the load.
  *
+ * Every fan-out sits BELOW `await parent()`, so an unknown org slug issues no
+ * subrequests from this load at all — see the comment on that await.
+ *
  * `feedCategories` (derived from `allContent`) still powers the hero pills;
  * `categories` (the curated taxonomy) powers "Browse by topic" + the browse
  * module's active-topic chip. See +page.svelte for render + URL sync.
@@ -50,13 +53,43 @@ export const load: PageServerLoad = async ({
   setHeaders,
   parent,
 }) => {
-  // Fire queries that don't need org.id in parallel with the parent() await.
-  const statsPromise = getPublicStats(routeParams.slug);
+  /*
+    `parent()` FIRST — nothing fans out until the org is known to exist.
+
+    Codex-kgrdp.20. `getPublicStats` and `getPublicCreators` take the route slug,
+    not `org.id`, so they used to be fired here BEFORE this await purely to
+    overlap with it. For a real org that parallelism was free; for an unknown
+    slug it was pure waste, and the wildcard subdomain route means unknown slugs
+    are the bulk of the traffic under a scan — two subrequests and two Neon
+    queries issued before anything had checked the org existed, on a request
+    whose only possible outcome was 404.
+
+    Worse, neither promise carried a `.catch()` at the point it was created:
+    when `parent()` threw 404 the load unwound with two live rejections nobody
+    was waiting on, which is exactly the unhandled-rejection crash the
+    streaming rules in apps/web/CLAUDE.md prohibit.
+
+    Moving them below the await costs no first paint. This is the same trade
+    `featuredJourneysPromise` already makes a few lines down: they are fired
+    immediately after `parent()` resolves and awaited only after the catalogue
+    fetch, so they run CONCURRENTLY with the longer of the two reads rather than
+    with `parent()`. Shell + stream is preserved — the catalogue and stats stay
+    awaited (first paint + SEO), creators stays streamed.
+  */
+  const { org } = await parent();
+
+  // `.catch()` at the point of creation, not at the point of use: a rejection
+  // that arrives before its `await` must already be handled.
+  const statsPromise = getPublicStats(routeParams.slug).catch(() => null);
   const creatorsPromise = getPublicCreators({
     slug: routeParams.slug,
     limit: 12,
-  });
-  const { org } = await parent();
+  })
+    .then((r) => ({
+      items: r?.items ?? [],
+      total: r?.pagination?.total ?? 0,
+    }))
+    .catch(() => ({ items: [], total: 0 }));
 
   /*
     Featured PORTALS — the journeys a creator has promoted
@@ -93,9 +126,10 @@ export const load: PageServerLoad = async ({
 
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
 
-  const statsResult = await statsPromise.catch(() => null);
-  // In flight since just before the catalogue fetch — this await resolves an
-  // existing promise rather than starting a request.
+  // Both in flight since just before the catalogue fetch — these awaits resolve
+  // existing promises rather than starting requests. Already `.catch()`-guarded
+  // at creation, so neither can reject here.
+  const statsResult = await statsPromise;
   const featuredJourneys = await featuredJourneysPromise;
 
   // Set cache headers only after the critical awaits. If `parent()` throws
@@ -170,12 +204,8 @@ export const load: PageServerLoad = async ({
       limit: 12,
       organizationId: org.id,
     }).catch(() => []),
-    creators: creatorsPromise
-      .then((r) => ({
-        items: r?.items ?? [],
-        total: r?.pagination?.total ?? 0,
-      }))
-      .catch(() => ({ items: [], total: 0 })),
+    // Streamed: already shaped + `.catch()`-guarded where it was created.
+    creators: creatorsPromise,
     subscriptionPricing: tiersPromise,
   };
 };
