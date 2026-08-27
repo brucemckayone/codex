@@ -68,6 +68,25 @@
   } = createCombobox<PickerValue>({
     forceVisible: true,
     portal: null,
+    /**
+     * NEVER lock the page scroll (Codex-1g5lh.8).
+     *
+     * Melt's listbox — which `createCombobox` is built on — defaults
+     * `preventScroll: true`, and on open runs its `removeScroll()` helper, which
+     * assigns `overflow: hidden` to `document.body`. This app's `global.css`
+     * gives `html` and `body` `height: 100%`, so a body that also clips its
+     * overflow stops propagating scroll to the viewport: the document collapses
+     * to exactly one viewport tall, the browser clamps `scrollY` to 0, and the
+     * page SNAPS TO THE TOP and cannot be scrolled while the menu is open. The
+     * media picker sits far down the content form, so the menu the creator just
+     * opened was left below the fold and unreachable — the reported workaround
+     * was zooming the browser out until the whole form fitted on screen.
+     *
+     * A scroll lock is for a modal surface that owns the viewport. This menu is
+     * anchored to its trigger (`portal: null`) and floating-ui's `autoUpdate`
+     * keeps it there while the page scrolls, so there is nothing to lock.
+     */
+    preventScroll: false,
     defaultSelected: untrack(() =>
       value != null
         ? { value, label: mediaItems.find((item) => item.id === value)?.title ?? '' }
@@ -403,12 +422,24 @@
     color: var(--color-text-muted);
   }
 
-  /* ── Dropdown ────────────────────────────────────────────────────── */
+  /* ── Dropdown ──────────────────────────────────────────────────────
+     Bounded against the VIEWPORT, not just against a row count. The search
+     header and the library-link footer are pinned; only the option list
+     scrolls, so the whole menu can never grow past `max-height` and overrun
+     the screen on a laptop or at high zoom. `dvh` (not `vh`) so mobile
+     browser chrome does not push the real bottom off-screen — the same choice
+     FilterDrawer and MobileBottomSheet make. The `rem` half of the `min()` is
+     a literal for the reason FontPicker documents: there is still no
+     list-max-height token in the design system, and one cap used by three
+     components does not yet earn one. */
   .picker-dropdown {
     position: absolute;
     top: calc(100% + var(--space-1));
     left: 0;
     right: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: min(50dvh, 22rem);
     background-color: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -424,6 +455,8 @@
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
     border-bottom: var(--border-width) var(--border-style) var(--color-border);
+    /* Pinned: the scrolling list absorbs the height squeeze, not this row. */
+    flex-shrink: 0;
   }
 
   .search-icon {
@@ -446,10 +479,20 @@
     color: var(--color-text-muted);
   }
 
-  /* ── Option list ─────────────────────────────────────────────────── */
+  /* ── Option list ───────────────────────────────────────────────────
+     Takes the height the pinned header/footer leave over and scrolls INSIDE
+     it. `min-height: 0` is what makes that work — a flex item's default
+     `min-height: auto` refuses to shrink below its content, so without it the
+     list ignores the wrapper's `max-height` and the menu grows to fit every
+     option (this replaces a fixed `max-height: 260px`, which bounded the list
+     but not the header + list + footer stack around it).
+     `overscroll-behavior: contain` stops a flick past the last option from
+     chaining into the page behind the menu. */
   .dropdown-list {
-    max-height: 260px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-1);
   }
 
@@ -560,6 +603,8 @@
   .dropdown-footer {
     padding: var(--space-2) var(--space-3);
     border-top: var(--border-width) var(--border-style) var(--color-border);
+    /* Pinned, as .dropdown-search — the library link stays reachable. */
+    flex-shrink: 0;
   }
 
   .library-link {
