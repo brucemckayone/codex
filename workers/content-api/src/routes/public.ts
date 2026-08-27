@@ -85,12 +85,23 @@ app.get(
     handler: async (ctx) => {
       const { orgId } = ctx.input.query;
 
+      // Returns a PLAIN `{ items, pagination }`, NOT a PaginatedResult.
+      //
+      // Codex-e32xz: this fetcher used to build the `PaginatedResult` itself and
+      // hand it straight to `cache.get`, which round-trips it through
+      // JSON.stringify/parse. A cache HIT therefore returned a plain object,
+      // `procedure()`'s `result instanceof PaginatedResult` check failed, and
+      // the list envelope silently degraded to `{ data: { items, pagination } }`
+      // — breaking every client of this endpoint. It was invisible only because
+      // the data slot never landed, so there was never a hit. Cache the plain
+      // shape and re-wrap AFTER the cache, exactly as
+      // `organization-api /public/:slug/creators` already does.
       const fetchContent = async () => {
         const result = await ctx.services.content.listPublic(ctx.input.query);
-        return new PaginatedResult(
-          resolveR2Urls(result.items, ctx.env.R2_PUBLIC_URL_BASE),
-          result.pagination
-        );
+        return {
+          items: resolveR2Urls(result.items, ctx.env.R2_PUBLIC_URL_BASE),
+          pagination: result.pagination,
+        };
       };
 
       // KV cache-aside for org-scoped browse queries only.
@@ -102,16 +113,23 @@ app.get(
         shouldCachePublicContentQuery(ctx.input.query) &&
         ctx.env.CACHE_KV
       ) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        return getCachedPublicContent(
+        // `waitUntil` is REQUIRED on a read path (Codex-e32xz) — without it the
+        // data-slot put is cancelled when the response returns.
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
+        const cached = await getCachedPublicContent(
           cache,
           orgId,
           ctx.input.query,
           fetchContent
         );
+        return new PaginatedResult(cached.items, cached.pagination);
       }
 
-      return fetchContent();
+      const uncached = await fetchContent();
+      return new PaginatedResult(uncached.items, uncached.pagination);
     },
   })
 );
@@ -153,7 +171,10 @@ app.get(
       };
 
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
         return cache.get(
           CacheType.CATEGORIES(orgId),
           'public:topics',

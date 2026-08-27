@@ -12,7 +12,13 @@
  *
  * @example
  * ```typescript
- * const cache = new VersionedCache({ kv: env.CACHE_KV });
+ * // ALWAYS pass waitUntil on a READ path — without it the data-slot write is
+ * // cancelled when the response returns and the cache never gets a hit
+ * // (Codex-e32xz).
+ * const cache = new VersionedCache({
+ *   kv: env.CACHE_KV,
+ *   waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+ * });
  *
  * // Get with cache-aside (fetcher called on miss)
  * const profile = await cache.get(
@@ -55,6 +61,7 @@ export class VersionedCache {
   private readonly kv: KVNamespace;
   private readonly prefix: string;
   private readonly obs?: ObservabilityClient;
+  private readonly waitUntil?: VersionedCacheConfig['waitUntil'];
 
   // Cache statistics (per-instance, not persisted)
   private stats = {
@@ -68,6 +75,64 @@ export class VersionedCache {
     this.kv = config.kv;
     this.prefix = config.prefix ?? 'cache';
     this.obs = config.obs;
+    this.waitUntil = config.waitUntil;
+  }
+
+  /**
+   * Write one data slot after a cache miss — NEVER awaited by the caller.
+   *
+   * Codex-e32xz. The put used to be a bare floating promise. In workerd the
+   * request's IoContext is destroyed the moment the response is returned and
+   * every un-awaited task is cancelled, so the write never reached KV: a
+   * production census of `CACHE_KV_PRODUCTION` found 62 version keys (put with
+   * `await`, three lines earlier in the same function) and ZERO data keys. The
+   * cache therefore had a literal 0% hit rate and every request paid the full
+   * DB cost while still paying for the KV reads.
+   *
+   * The fix is `waitUntil`, not `await`: awaiting inline would add KV write
+   * latency to every miss response, which is precisely what the fire-and-forget
+   * was there to avoid. `waitUntil` keeps the response fast AND keeps the
+   * context alive until the put settles.
+   *
+   * When no `waitUntil` was supplied the promise is left floating exactly as
+   * before — best-effort, non-blocking, and never throwing. That keeps every
+   * existing consumer (unit tests, SvelteKit dev without a real
+   * ExecutionContext, helper call sites) working unchanged.
+   */
+  private writeCacheSlot(
+    cacheKey: string,
+    data: unknown,
+    ttl: number,
+    id: string,
+    type: string
+  ): void {
+    const write = this.kv
+      .put(cacheKey, JSON.stringify(data), {
+        expirationTtl: ttl,
+      } as KVNamespacePutOptions)
+      .catch((err) => {
+        this.obs?.warn('Cache write failed', {
+          id,
+          type,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+    if (!this.waitUntil) return;
+
+    // A caller-supplied waitUntil is foreign code. If it throws (a stale
+    // ExecutionContext, a Hono context with no executionCtx) the miss must
+    // still return its freshly fetched data — never re-enter the fetcher and
+    // never surface a cache-plumbing failure to the request.
+    try {
+      this.waitUntil(write);
+    } catch (err) {
+      this.obs?.warn('Cache write could not be scheduled on waitUntil', {
+        id,
+        type,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**
@@ -133,18 +198,9 @@ export class VersionedCache {
 
       const data = await fetcher();
 
-      // Fire-and-forget cache set (don't block on cache writes)
-      this.kv
-        .put(cacheKey, JSON.stringify(data), {
-          expirationTtl: ttl,
-        } as KVNamespacePutOptions)
-        .catch((err) => {
-          this.obs?.warn('Cache write failed', {
-            id,
-            type,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
+      // Non-blocking cache set — registered on waitUntil when one was supplied
+      // so the write actually survives the response. See writeCacheSlot.
+      this.writeCacheSlot(cacheKey, data, ttl, id, type);
 
       return data;
     } catch (error) {
@@ -202,17 +258,9 @@ export class VersionedCache {
       this.stats.misses++;
       const data = await fetcher();
 
-      this.kv
-        .put(cacheKey, JSON.stringify(data), {
-          expirationTtl: ttl,
-        } as KVNamespacePutOptions)
-        .catch((err) => {
-          this.obs?.warn('Cache write failed', {
-            id,
-            type,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
+      // Same waitUntil-backed write as get() — getWithResult had an identical
+      // copy of the dropped fire-and-forget put (Codex-e32xz).
+      this.writeCacheSlot(cacheKey, data, ttl, id, type);
 
       return { data, hit: false };
     } catch (error) {

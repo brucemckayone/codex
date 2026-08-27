@@ -347,7 +347,13 @@ app.get(
       // The cache key is the org slug — we don't know the orgId yet.
       // The fetcher resolves slug → org + branding from DB on cache miss.
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        // `waitUntil` is REQUIRED on a read path (Codex-e32xz): the data-slot
+        // put is not awaited, so without it workerd cancels the write when the
+        // response returns and this cache can never hit.
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
         return cache.get(
           slug,
           CacheType.ORG_CONFIG,
@@ -386,7 +392,10 @@ app.get(
       const slug = ctx.input.params.slug;
 
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
         return cache.get(
           slug,
           CacheType.ORG_STATS,
@@ -438,7 +447,10 @@ app.get(
         ctx.services.organization.getPublicCreators(slug, { page, limit });
 
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        });
         const result = await cache.get(
           slug,
           `${CacheType.ORG_CREATORS}:${page}:${limit}`,
