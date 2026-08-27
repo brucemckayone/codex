@@ -25,6 +25,7 @@
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
   import { formatRelativeTime } from '$lib/utils/format';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
+  import { extractPlainText } from '@codex/validation';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -67,13 +68,35 @@
   // TODO i18n — studio_content_updated_prefix = "Updated"
   const updatedLabel = $derived(`Updated ${formatRelativeTime(item.updatedAt)}`);
 
-  // Narrative strapline — "4-word strap or description fallback"
-  const strap = $derived(
-    item.description && item.description.trim().length > 0
-      ? item.description.slice(0, 160)
-      : // TODO i18n — studio_content_slab_no_desc = "No description yet — add one so it reads well in search and share cards."
-        'No description yet — add one so it reads well in search and share cards.'
-  );
+  // Narrative strapline — plain-text lede lifted from the description.
+  //
+  // `description` is authored with RichTextEditor (ContentDetails.svelte), which
+  // serialises the TipTap doc via `JSON.stringify(editor.getJSON())` — so rows
+  // saved by the current form hold a JSON *string*, while older rows hold plain
+  // text. `extractPlainText` walks the doc's node tree for the JSON shape and
+  // returns its input unchanged for anything that isn't a TipTap doc, so both
+  // shapes read as prose and neither throws. This is the same helper the public
+  // surfaces use for this exact field (ContentDetailView, ContentCard,
+  // Spotlight, ArticleEditorial). (Codex-1g5lh.10)
+  //
+  // Truncation MUST happen after extraction, never before: slicing the raw
+  // column was the defect — it cut the serialised doc mid-token and printed
+  // `{"type":"doc","content":[...` into the card. The 160-char cap matches
+  // ContentCard/ArticleEditorial; `.slab-strap`'s `-webkit-line-clamp: 3`
+  // still bounds it visually.
+  //
+  // Emptiness is judged on the EXTRACTED text, not the raw column: an emptied
+  // rich-text field still serialises to a non-empty string
+  // (`{"type":"doc","content":[{"type":"paragraph"}]}`), which the old raw
+  // `.trim().length > 0` check read as "has a description".
+  const strap = $derived.by(() => {
+    const text = extractPlainText(item.description).trim();
+    if (!text) {
+      // TODO i18n — studio_content_slab_no_desc = "No description yet — add one so it reads well in search and share cards."
+      return 'No description yet — add one so it reads well in search and share cards.';
+    }
+    return text.length > 160 ? `${text.slice(0, 157).trimEnd()}…` : text;
+  });
 </script>
 
 <article class="slab" data-status={statusMeta.variant}>

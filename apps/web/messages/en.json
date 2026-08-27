@@ -793,6 +793,7 @@
   "studio_content_form_section_media": "Media",
   "studio_content_form_section_media_desc": "Select the media file for this content.",
   "studio_content_form_media_hint": "No ready media available. Upload files in the Media library first.",
+  "studio_content_form_thumbnail_uploaded": "Thumbnail uploaded",
   "media_picker_placeholder": "Select media...",
   "media_picker_search": "Search media...",
   "media_picker_no_media": "No media attached",

@@ -11,6 +11,8 @@
   @prop {string | null} [contentId] - Content ID (required for file upload, null in create mode)
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
+  import * as m from '$paraglide/messages';
   import { ImageIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { Button } from '$lib/components/ui';
   import { useDropZone } from '$lib/utils/use-drop-zone.svelte';
@@ -85,16 +87,39 @@
     fileInput?.click();
   }
 
-  // Watch for upload result
+  // Watch for upload result.
+  //
+  // Identity-tracked ref: handle each upload result exactly once, and only when
+  // it was produced by a submission in THIS mount.
+  //
+  // SEED with the singleton's CURRENT result (not null): `uploadThumbnailForm`
+  // is a module-level `form()` whose `result` persists across unmount and
+  // navigation. Seeded to `null`, a fresh mount of /studio/content/new read the
+  // PREVIOUS page's successful upload and immediately replayed its side effects
+  // — writing a stale thumbnailUrl into the new draft and firing a
+  // "Thumbnail uploaded" toast with no user action. Seeding to the current
+  // result marks any pre-existing value already-handled, so only a genuinely
+  // new result object fires the handler. Mirrors the same fix in
+  // ContentForm.svelte. (Codex-1g5lh.11)
+  //
+  // Both branches are identity-gated, not just the success one: a stale FAILED
+  // upload would otherwise replay its error toast on mount too.
+  let lastHandledResult: unknown = untrack(() => uploadThumbnailForm.result);
   $effect(() => {
     const result = uploadThumbnailForm.result;
     if (!result) return;
+    if (result === lastHandledResult) return;
+    lastHandledResult = result;
 
     uploading = false;
     if (result.success && result.thumbnailUrl) {
       form.fields.thumbnailUrl.set(result.thumbnailUrl);
-      toast.success('Thumbnail uploaded');
+      toast.success(m.studio_content_form_thumbnail_uploaded());
     } else if (!result.success && result.error) {
+      // Pass-through by design: `result.error` is an ApiError message authored
+      // by the content worker, so it has no stable key to translate against.
+      // Localising it needs a server-side error-code contract — tracked
+      // separately, and the upload path itself is owned by Codex-1g5lh.3/.4.
       toast.error(result.error);
     }
   });
