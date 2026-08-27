@@ -12,29 +12,16 @@ import { browser, dev } from '$app/environment';
 
 const MANIFEST_KEY = 'codex-versions';
 
-/** All localStorage keys owned by Codex client state */
-const CODEX_STORAGE_KEYS = [
-  MANIFEST_KEY,
-  'codex-library',
-  'codex-playback-progress',
-  'codex-following',
-  'codex-subscription',
-] as const;
-
 /**
- * Clear all Codex client state from localStorage.
- * Called on logout to prevent stale user data persisting.
+ * The key inventory and the clear routine that used to live here moved to
+ * `$lib/client/user-scoped-state.ts` (Codex-1g5lh.17). The list here was
+ * incomplete (no `codex-dismissals`, `codex-recent-searches`,
+ * `codex-library-schema`, no sessionStorage keys), it did not reset the
+ * in-memory copies those keys seed at module init, and its single caller ran
+ * on the platform login page — a DIFFERENT ORIGIN from the org subdomain
+ * whose state it was meant to clear. See that module's header for the full
+ * account.
  */
-export function clearClientState(): void {
-  if (!browser) return;
-  for (const key of CODEX_STORAGE_KEYS) {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // localStorage blocked — silent fail
-    }
-  }
-}
 
 type VersionMap = Record<string, string | null>;
 

@@ -14,6 +14,7 @@
 import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { registerUserScopedReset } from '$lib/client/user-scoped-state';
 import type {
   CompletionSource,
   PracticeCompletionRecord,
@@ -24,6 +25,7 @@ import {
   getPlaybackProgress,
   savePlaybackProgress,
 } from '$lib/remote/library.remote';
+import { purgeLocalCollection } from './purge-collection';
 
 /**
  * Playback + course-completion progress for one content item.
@@ -88,6 +90,11 @@ export const progressCollection = browser
       })
     )
   : undefined;
+
+// Codex-1g5lh.17 — THIS user's playback positions. `clearUserScopedState()`
+// removes the localStorage key; this drops the in-memory rows, which is
+// what readers actually consult. See collections/purge-collection.ts.
+registerUserScopedReset(() => purgeLocalCollection(progressCollection));
 
 /**
  * Update progress (writes to localStorage immediately)

@@ -11,6 +11,7 @@
  * Pattern reference: brand-editor-store.svelte.ts
  */
 import { browser } from '$app/environment';
+import { registerUserScopedReset } from './user-scoped-state';
 
 const STORAGE_KEY = 'codex-following';
 
@@ -33,6 +34,26 @@ function writeStore(data: Record<string, boolean>) {
 }
 
 const data = $state<Record<string, boolean>>(readStore());
+
+/**
+ * Drop every follow entry from the in-memory `$state`.
+ *
+ * `data` is seeded from localStorage at MODULE INIT, which happens when the
+ * bundle loads — before any layout runs. So clearing `codex-following` alone
+ * leaves the previous user's map live in memory for the rest of the document's
+ * life, and `has()` keeps returning true, which keeps
+ * `_org/[slug]/+layout.svelte` from hydrating the correct value from the
+ * server. Mutating the existing object (rather than reassigning) is required:
+ * `data` is the reactive proxy every `$derived` reader is subscribed to.
+ */
+function reset(): void {
+  for (const orgId of Object.keys(data)) delete data[orgId];
+}
+
+// Codex-1g5lh.17 — wipe follow state when a different user is observed on
+// this origin. Registered at module scope so it is armed as soon as anything
+// imports the store.
+registerUserScopedReset(reset);
 
 export const followingStore = {
   /** Read follow state — reactive when used in $derived */

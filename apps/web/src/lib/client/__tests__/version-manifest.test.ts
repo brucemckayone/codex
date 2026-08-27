@@ -14,14 +14,13 @@
  * per-navigation SSR, which is fine but misses the cross-tab path.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // `dev: true` exercises resolveStaleCacheTargets' dev-only unmapped-key warning;
 // its tests spy on console.warn (see the describe below) so nothing prints.
 vi.mock('$app/environment', () => ({ browser: true, dev: true }));
 
 import {
-  clearClientState,
   getStaleKeys,
   resolveStaleCacheTargets,
   updateStoredVersions,
@@ -178,36 +177,10 @@ describe('updateStoredVersions', () => {
   });
 });
 
-describe('clearClientState', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  it('removes the version manifest', () => {
-    localStorage.setItem(MANIFEST_KEY, JSON.stringify({ foo: 'bar' }));
-    clearClientState();
-    expect(localStorage.getItem(MANIFEST_KEY)).toBeNull();
-  });
-
-  it('removes all Codex-owned keys (library, progress, following, subscription)', () => {
-    localStorage.setItem(MANIFEST_KEY, '{}');
-    localStorage.setItem('codex-library', '[]');
-    localStorage.setItem('codex-playback-progress', '[]');
-    localStorage.setItem('codex-following', '[]');
-    localStorage.setItem('codex-subscription', '[]');
-    localStorage.setItem('other-app-key', 'keep-me');
-
-    clearClientState();
-
-    expect(localStorage.getItem(MANIFEST_KEY)).toBeNull();
-    expect(localStorage.getItem('codex-library')).toBeNull();
-    expect(localStorage.getItem('codex-playback-progress')).toBeNull();
-    expect(localStorage.getItem('codex-following')).toBeNull();
-    expect(localStorage.getItem('codex-subscription')).toBeNull();
-    // Non-Codex keys are untouched.
-    expect(localStorage.getItem('other-app-key')).toBe('keep-me');
-  });
-});
+// The `clearClientState` suite that used to sit here moved to
+// `user-scoped-state.test.ts` along with the function itself (Codex-1g5lh.17).
+// The key inventory it asserted was incomplete and its only caller ran on the
+// wrong ORIGIN to clear the state it named — see that module's header.
 
 describe('publish → stale → refresh round-trip', () => {
   beforeEach(() => {
