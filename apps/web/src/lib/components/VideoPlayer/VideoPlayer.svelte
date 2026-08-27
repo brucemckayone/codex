@@ -26,7 +26,7 @@
   />
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
   import { loadPlayerPreferences, savePlayerPreferences } from './preferences';
@@ -110,6 +110,29 @@
    * mid-playback.
    */
   let lastInitialisedSrc: string | null = null;
+  /**
+   * The content id `lastInitialisedSrc` belongs to. This is what separates a
+   * DIFFERENT item (in-course navigation: hard stop, reload from the top) from
+   * the SAME item re-signed (follow / subscribe unlock: swap the manifest under
+   * the playhead). Both arrive as a bare `src` change, and they need opposite
+   * handling — see the src-change `$effect`.
+   */
+  let lastInitialisedContentId: string | null = null;
+  /**
+   * Monotonic token claimed by every path that builds a player (`initPlayer`,
+   * `handleUrlExpired`, `retry`). Each awaits at least once, so a build that
+   * was still in flight when the viewer navigated would otherwise install the
+   * OLD item's stream on top of the new one. A stale continuation destroys the
+   * handle it built instead of adopting it.
+   */
+  let initToken = 0;
+  /**
+   * Non-reactive mirror of `videoEl`. Svelte nulls `bind:this` refs while
+   * unmounting and `onDestroy` is not guaranteed to run first, so the release
+   * path keeps its own handle — otherwise "stop the video" would silently
+   * become a no-op exactly when it matters.
+   */
+  let mediaEl: HTMLVideoElement | null = null;
   /**
    * Preserve playback position across a refresh-and-reload cycle. The 403
    * recovery path destroys the HLS instance, which resets the video element;
@@ -519,6 +542,28 @@
   }
 
   /**
+   * Hard-stop the media element and drop its source.
+   *
+   * `teardownHls()` is NOT sufficient. On the native branch (`attachNative` in
+   * hls.ts assigns `media.src` directly — taken whenever MSE is unavailable,
+   * and for plain non-HLS URLs) there is no HLS.js instance to destroy, so the
+   * element keeps its source and keeps playing. A detached element with a live
+   * `src` can keep buffering too, so unmount needs this as much as a source
+   * swap does.
+   *
+   * `removeAttribute` rather than `src = ''`: an empty string resolves against
+   * the document URL, so the element would fetch the PAGE as media and fire a
+   * spurious `error`. Removing the attribute leaves it in NETWORK_EMPTY.
+   */
+  function releaseMedia() {
+    const el = videoEl ?? mediaEl;
+    if (!el) return;
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  }
+
+  /**
    * Wire up HLS.js events that drive the quality picker.
    *
    * We need two signals:
@@ -565,6 +610,9 @@
     hasStartedPlayback = false;
     clearBuffering();
     lastInitialisedSrc = src;
+    lastInitialisedContentId = contentId;
+    mediaEl = videoEl;
+    const token = ++initToken;
 
     try {
       // Import media-chrome dynamically on the client
@@ -589,6 +637,12 @@
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        // A newer item claimed the element while we were awaiting.
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
@@ -684,8 +738,9 @@
         lastCurrentTime = videoEl.currentTime;
       }
       teardownHls();
+      const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
-      if (!videoEl) return;
+      if (!videoEl || token !== initToken) return;
       lastInitialisedSrc = fresh.streamingUrl;
       loading = true;
       errorMessage = '';
@@ -705,6 +760,11 @@
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
@@ -763,8 +823,9 @@
     // refresh it before reinitialising — otherwise Retry would 403 again.
     teardownHls();
     try {
+      const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
-      if (!videoEl) return;
+      if (!videoEl || token !== initToken) return;
       lastInitialisedSrc = fresh.streamingUrl;
       loading = true;
       errorMessage = '';
@@ -784,6 +845,11 @@
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       void attachQualityListeners();
@@ -803,28 +869,68 @@
   });
 
   /**
-   * React to `src` prop changes. Parents update `src` when the server-side
-   * access flow re-runs (follow/subscribe unlock) and returns a freshly
-   * signed URL. Without this effect the player would keep streaming the
-   * old URL until unmounted.
+   * React to `src` / `contentId` prop changes.
+   *
+   * Two different events arrive as a `src` change and they need opposite
+   * handling (Codex-1g5lh.12) — `contentId` is the discriminator:
+   *
+   *   1. SAME `contentId`, new `src` — the same item re-signed, because the
+   *      server-side access flow re-ran (follow / subscribe unlock). Swap the
+   *      manifest under the playhead so the viewer keeps their position.
+   *   2. DIFFERENT `contentId` — a different item, i.e. in-course navigation
+   *      between two sessions on the SAME component instance (SvelteKit reuses
+   *      the page and its children when only the route params change). The
+   *      outgoing video must STOP, not carry on into the new one: flush its
+   *      position under the OUTGOING id, detach the tracker, destroy HLS.js,
+   *      pause and release the element, then load the new source from the top.
+   *
+   * Before the split, case 2 took the `loadSource()` fast path: the element was
+   * never paused and the tracker kept writing the old playhead against the new
+   * item's id.
+   *
+   * `errorMessage` is deliberately not read here — it is `$state`, so reading
+   * it would re-run this effect on every error, and after a mid-session URL
+   * refresh `lastInitialisedSrc` no longer matches the (stale) `src` prop, so
+   * the rebuild would reload the expired URL. The error handlers null
+   * `hlsInstance` instead, which already routes an errored player down the
+   * full-rebuild branch.
    */
   $effect(() => {
+    // Tracked reads first, then `untrack` — the swap below writes plenty of
+    // `$state` and none of it should become a dependency of this effect.
+    const nextSrc = src;
+    const nextContentId = contentId;
+    const el = videoEl;
     if (typeof window === 'undefined') return;
-    if (!videoEl) return;
-    if (!src) return;
-    if (src === lastInitialisedSrc) return;
-    // Belt-and-braces: any prior error forces a full rebuild, even if the
-    // error handlers failed to null `hlsInstance` for some reason. Otherwise
-    // a stuck-error state can stay visible after navigating to a new video.
-    if (hlsInstance && !errorMessage) {
-      lastInitialisedSrc = src;
-      hlsInstance.loadSource(src);
-      scheduleRefresh();
-    } else {
+    if (!el || !nextSrc) return;
+    if (nextSrc === lastInitialisedSrc) return;
+
+    untrack(() => {
+      const sameItem =
+        lastInitialisedContentId !== null &&
+        lastInitialisedContentId === nextContentId;
+
+      if (sameItem && hlsInstance) {
+        lastInitialisedSrc = nextSrc;
+        hlsInstance.loadSource(nextSrc);
+        scheduleRefresh();
+        return;
+      }
+
+      if (!sameItem) {
+        // The props already answer with the incoming item, so name the
+        // outgoing one explicitly. Detaching before the pause in
+        // `releaseMedia` also stops the tracker's own `pause` handler from
+        // re-saving the old position under the new id.
+        tracker.detach(lastInitialisedContentId);
+      }
+
       teardownHls();
+      releaseMedia();
+      lastInitialisedSrc = null;
       void initPlayer();
       scheduleRefresh();
-    }
+    });
   });
 
   /**
@@ -838,7 +944,9 @@
   });
 
   onDestroy(() => {
-    tracker.detach();
+    // Flush against the id the element's media actually belongs to, not
+    // whatever the props answer with at teardown time.
+    tracker.detach(lastInitialisedContentId);
     clearHideTimer();
     teardownRefresh();
     if (seekIndicatorTimer) clearTimeout(seekIndicatorTimer);
@@ -854,6 +962,11 @@
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }
     teardownHls();
+    // A detached media element with a live `src` can keep playing/buffering,
+    // so stop it explicitly — `teardownHls()` only covers the HLS.js branch.
+    releaseMedia();
+    lastInitialisedSrc = null;
+    lastInitialisedContentId = null;
   });
 
   /**
