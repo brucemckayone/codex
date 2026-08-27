@@ -29,6 +29,7 @@
   owner|admin gate lives server-side in `+page.server.ts`.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     createCategoryForm,
     deleteCategory,
@@ -155,30 +156,41 @@
   const previewSlug = $derived(selected?.slug ?? 'new-topic');
 
   // ── Result effects (fire once per distinct result object) ────────────
-  let lastCreateResult: unknown = null;
+  //
+  // SEED each guard with the form's CURRENT result, not null. A remote `form()`
+  // is a MODULE-level singleton whose `result` outlives unmount and navigation,
+  // so a fresh mount of this `ssr=false` page can still be holding a prior
+  // successful create / update / upload. Seeded to null, the effects below read
+  // that stale result as brand new and replay its side effects — a "Topic
+  // created" toast (and, before Codex-1g5lh.7, a selection jump) that no submit
+  // in this mount produced. Seeding to the current value marks it
+  // already-handled, so only a result minted by a submit HERE fires. Same
+  // pattern and reasoning as `ContentForm.svelte`'s `lastHandledResult`.
+  let lastCreateResult: unknown = untrack(() => createCategoryForm.result);
   $effect(() => {
     const r = createCategoryForm.result;
     if (r && r !== lastCreateResult && createCategoryForm.pending === 0) {
       lastCreateResult = r;
       if (r.success) {
         toast.success('Topic created');
+        // Return the inspector to an EMPTY ADD STATE and leave the selection
+        // alone (Codex-1g5lh.7). This used to hand the creator straight into
+        // editing the row it had just inserted (`selectedId = r.category.id`),
+        // on the theory that a cover upload was the obvious next step. It made
+        // serial entry — the common path, a creator laying out their whole
+        // taxonomy in one sitting — feel broken: the inspector was now an EDIT
+        // form for the previous topic, so typing the second topic renamed the
+        // first. Editing what you just made is the rare case and is one click
+        // away in the list beside it.
         createName = '';
         createDescription = '';
-        // Hand the creator straight to the new topic — a cover can only be
-        // uploaded against an existing id, so this is the next step anyway.
-        // Seeded inline rather than via selectRow(), whose toggle behaviour
-        // reads `selectedId` and would make this effect depend on state it sets.
-        selectedId = r.category.id;
-        editName = r.category.name;
-        editDescription = r.category.description ?? '';
-        editIcon = r.category.icon ?? '';
       } else {
         toast.error(r.error ?? 'Failed to create category');
       }
     }
   });
 
-  let lastUpdateResult: unknown = null;
+  let lastUpdateResult: unknown = untrack(() => updateCategoryForm.result);
   $effect(() => {
     const r = updateCategoryForm.result;
     if (r && r !== lastUpdateResult && updateCategoryForm.pending === 0) {
@@ -191,7 +203,7 @@
     }
   });
 
-  let lastCoverResult: unknown = null;
+  let lastCoverResult: unknown = untrack(() => uploadCategoryCoverForm.result);
   $effect(() => {
     const r = uploadCategoryCoverForm.result;
     if (r && r !== lastCoverResult && uploadCategoryCoverForm.pending === 0) {
@@ -523,8 +535,8 @@
                 </div>
               </form>
               <p class="cover-hint">
-                A cover image can be added once the topic exists — it opens here
-                automatically after you add it.
+                A cover image can be added once the topic exists — select the
+                topic in your list and the upload appears here.
               </p>
             {/if}
           </div>
