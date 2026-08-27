@@ -166,6 +166,7 @@
   //   wrangler secret put R2_ACCESS_KEY_ID --env production
   //   wrangler secret put R2_SECRET_ACCESS_KEY --env production
   //   wrangler secret put R2_BUCKET_MEDIA --env production
+  //   wrangler secret put STRIPE_SECRET_KEY --env production
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
@@ -174,4 +175,12 @@
   //   - R2_ACCESS_KEY_ID: R2 access key ID
   //   - R2_SECRET_ACCESS_KEY: R2 secret access key
   //   - R2_BUCKET_MEDIA: R2 bucket name for media storage
+  //   - STRIPE_SECRET_KEY: Stripe API secret key. REQUIRED — subscription
+  //     tiers are org-scoped, so POST /api/organizations/:id/tiers lives here
+  //     and TierService.createTier calls stripe.products.create /
+  //     stripe.prices.create. Absent, tier creation fails with
+  //     STRIPE_NOT_CONFIGURED (500) while /health and every tier READ still
+  //     pass — this is how Codex-1g5lh.1 shipped unnoticed. The production
+  //     deploy provisions it (.github/scripts/upload-worker-secrets.sh);
+  //     this line documents the requirement for manual/recovery setup.
 }

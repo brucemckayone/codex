@@ -8,7 +8,7 @@
 #   DATABASE_URL - Neon database connection string
 #   DB_METHOD - Database connection method (NEON_BRANCH)
 #   BETTER_AUTH_SECRET - Auth secret (optional, has default)
-#   STRIPE_SECRET_KEY - Stripe API key (for ecom-api, content-api)
+#   STRIPE_SECRET_KEY - Stripe API key (for ecom-api, organization-api, content-api)
 #   STRIPE_WEBHOOK_SECRET_BOOKING - Stripe webhook secret
 #   R2_ACCOUNT_ID - Cloudflare R2 account ID
 #   R2_ACCESS_KEY_ID - R2 access key
@@ -60,6 +60,15 @@ case "${WORKER}" in
     cat >> "${VARS_FILE}" << EOF
 STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 STRIPE_WEBHOOK_SECRET_BOOKING=${STRIPE_WEBHOOK_SECRET_BOOKING}
+EOF
+    ;;
+  "organization-api")
+    # Codex-1g5lh.1: organization-api reaches Stripe via TierService.createTier
+    # (tiers are org-scoped, so POST /api/organizations/:id/tiers lives here).
+    # The CI test env must mirror what production is given, otherwise a
+    # Stripe-touching organization-api route can only ever be exercised locally.
+    cat >> "${VARS_FILE}" << EOF
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
 EOF
     ;;
   "content-api")

@@ -15,6 +15,7 @@ export {
   isServiceError,
   NotFoundError,
   ServiceError,
+  StripeNotConfiguredError,
   UnauthorizedError,
   UnsupportedCurrencyError,
   ValidationError,
