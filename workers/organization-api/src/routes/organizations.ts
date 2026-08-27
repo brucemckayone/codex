@@ -46,7 +46,11 @@ import {
   organizationQuerySchema,
   uuidSchema,
 } from '@codex/validation';
-import { PaginatedResult, procedure } from '@codex/worker-utils';
+import {
+  invalidateOrgSlugCacheEntry,
+  PaginatedResult,
+  procedure,
+} from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -575,6 +579,18 @@ app.patch(
         if (oldSlug && updated.slug !== oldSlug) {
           invalidations.push(cache.invalidate(oldSlug));
         }
+
+        // The `slug -> organization id` cache read by
+        // extractOrganizationFromSubdomain on every org-scoped request is
+        // stored WITHOUT a TTL, so a rename must delete both keys or the old
+        // subdomain keeps resolving and the new one is never populated
+        // (Codex-kgrdp.23 defect 1).
+        const slugIdKv = ctx.env.CACHE_KV;
+        invalidations.push(invalidateOrgSlugCacheEntry(slugIdKv, updated.slug));
+        if (oldSlug && updated.slug !== oldSlug) {
+          invalidations.push(invalidateOrgSlugCacheEntry(slugIdKv, oldSlug));
+        }
+
         ctx.executionCtx.waitUntil(Promise.all(invalidations).catch(() => {}));
       }
 
@@ -646,6 +662,11 @@ app.delete(
         if (ctx.env.CACHE_KV) {
           const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
           invalidations.push(cache.invalidate(org.slug));
+          // Drop the TTL-less `slug -> id` entry too, so the freed hostname
+          // stops resolving from cache (Codex-kgrdp.23 defect 1).
+          invalidations.push(
+            invalidateOrgSlugCacheEntry(ctx.env.CACHE_KV, org.slug)
+          );
         }
         if (invalidations.length > 0) {
           ctx.executionCtx.waitUntil(
