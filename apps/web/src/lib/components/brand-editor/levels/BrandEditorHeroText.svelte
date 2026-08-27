@@ -24,6 +24,7 @@
   import { brandEditor } from '$lib/brand-editor';
   import { Button } from '$lib/components/ui';
   import { updateOrganizationForm } from '$lib/remote/org.remote';
+  import { keepValuesOnSave } from '$lib/utils/remote-form';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -42,6 +43,18 @@
 
   const orgId = $derived(brandEditor.orgId ?? '');
   const saving = $derived(updateOrganizationForm.pending > 0);
+
+  /**
+   * NOT the bare `{...updateOrganizationForm}` spread: its default attachment
+   * calls `HTMLFormElement.reset()` on every successful save, which blanked
+   * both inputs (they are driven by `fields.<name>.as('text')`, so their DOM
+   * default is `''`) and re-derived the field state from the empty DOM. The
+   * save itself had already landed, which is why the live site showed the new
+   * hero text while the editor showed two empty boxes — and why a second Save
+   * would have posted the blanks. `enhance` submits identically but never
+   * resets. (Codex-1g5lh.5 · see `keepValuesOnSave`)
+   */
+  const formAttrs = keepValuesOnSave(updateOrganizationForm);
 
   const nameIssues = $derived(updateOrganizationForm.fields.name.issues() ?? []);
   const descriptionIssues = $derived(
@@ -89,7 +102,7 @@
   });
 </script>
 
-<form {...updateOrganizationForm} class="hero-text">
+<form {...formAttrs} class="hero-text">
   <input type="hidden" name="orgId" value={orgId} />
 
   <div class="hero-text__field">

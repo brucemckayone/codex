@@ -50,6 +50,7 @@
   } from '$lib/components/ui';
   import { PlusIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import { keepValuesOnSave } from '$lib/utils/remote-form';
 
   let { data } = $props();
 
@@ -85,6 +86,20 @@
    * MISSING `icon` into null, so omitting it entirely would wipe the column.
    */
   let editIcon = $state('');
+
+  /**
+   * The EDIT form deliberately does not use the bare `{...updateCategoryForm}`
+   * spread: its default attachment resets the <form> after a successful save.
+   * `bind:value` sets the input PROPERTY, never the `value` attribute, so the
+   * DOM default of both controls is `''` — reset() emptied them on screen
+   * while `editName` / `editDescription` (and therefore the live TopicCard
+   * preview) still held the text, and because FormData is read from the DOM a
+   * second Save would have posted an empty name. Nothing re-seeded them: the
+   * update-result effect only fires a toast. The CREATE form below keeps the
+   * bare spread on purpose — an add form SHOULD clear. (Codex-1g5lh.2 · see
+   * `keepValuesOnSave`)
+   */
+  const updateFormAttrs = keepValuesOnSave(updateCategoryForm);
 
   // ── Delete confirmation ─────────────────────────────────────────────
   let deleteTarget = $state<StudioCategory | null>(null);
@@ -359,7 +374,7 @@
                   {updateCategoryForm.result.error ?? 'Failed to update category'}
                 </Alert>
               {/if}
-              <form {...updateCategoryForm} class="category-form" novalidate>
+              <form {...updateFormAttrs} class="category-form" novalidate>
                 <input type="hidden" name="organizationId" value={orgId} />
                 <input type="hidden" name="categoryId" value={selected.id} />
                 <!-- Preserves any pre-existing emoji; see the component note. -->

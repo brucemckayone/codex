@@ -13,6 +13,8 @@
  * StubField.test.svelte.
  */
 
+import { createAttachmentKey } from 'svelte/attachments';
+
 export type OrgFormResult =
   | { success: true; data: unknown }
   | { success: false; error: string }
@@ -54,6 +56,22 @@ export const updateOrganizationForm = {
     name: stubField(fieldSets.name),
     description: stubField(fieldSets.description),
   },
+  /**
+   * The component spreads `keepValuesOnSave(form)` rather than the bare form
+   * (Codex-1g5lh.5), so the double must offer the same COMPLETE-replacement
+   * shape kit's `enhance` does: `method` + `action` + one symbol-keyed
+   * attachment. The attachment is INERT here — these tests drive the submit
+   * lifecycle through `setPending` / `setResult` rather than through a real
+   * submit event. The reset-on-save regression itself is covered by
+   * `BrandEditorHeroText.form-reset.svelte.test.ts`, which mounts the same
+   * component against the full runtime double in
+   * `$tests/utils/fake-remote-form.svelte`.
+   */
+  enhance: (_callback: unknown) => ({
+    method: 'POST' as const,
+    action: '?/updateOrganizationForm',
+    [createAttachmentKey()]: (_node: HTMLFormElement) => {},
+  }),
 };
 
 /** Drive the submit lifecycle from a test. */

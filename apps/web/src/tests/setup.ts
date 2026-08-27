@@ -72,6 +72,35 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   });
 }
 
+// JSDOM shim: IntersectionObserver and ResizeObserver are not implemented in
+// jsdom. Studio surfaces construct them unconditionally in `onMount` / `$effect`
+// (e.g. ContentFormSectionRail's scroll-spy, ContentForm's command-bar height
+// measurement), so mounting those components in a unit test throws
+// "IntersectionObserver is not defined" before any assertion runs. These stubs
+// observe nothing and never fire a callback — layout-dependent behaviour is not
+// something jsdom can tell the truth about anyway, and is covered by E2E /
+// in-browser verification.
+class NoopObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): [] {
+    return [];
+  }
+  readonly root = null;
+  readonly rootMargin = '';
+  readonly thresholds: readonly number[] = [];
+}
+
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver =
+    NoopObserver as unknown as typeof IntersectionObserver;
+}
+
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = NoopObserver as unknown as typeof ResizeObserver;
+}
+
 // Clean up DOM after each test (only if running in DOM environment)
 afterEach(() => {
   if (typeof document !== 'undefined' && document.body) {
