@@ -421,7 +421,16 @@
       padding: var(--space-3) var(--space-4);
     }
     .bar-identity { grid-area: identity; }
-    .bar-filters  { grid-area: filters; overflow-x: auto; flex-wrap: nowrap; }
+    /* max-width is what actually constrains this row. The element is a
+       scroll container, so its automatic minimum size is already 0 and
+       `min-width: 0` is a no-op here — measured at 390px, computed
+       min-width was already 0px while the box sat at 631px. Without an
+       UPPER bound the row sizes to its content, grows past the bar, and
+       an ancestor clips it: the filters are cut off and unreachable
+       rather than scrollable, which is the reported mobile header bug.
+       With max-width the row clamps to the bar (326px) and scrolls
+       inside itself, which is what overflow-x: auto was written to do. */
+    .bar-filters  { grid-area: filters; overflow-x: auto; flex-wrap: nowrap; max-width: 100%; }
     .bar-actions  { grid-area: actions; }
   }
 

@@ -180,10 +180,26 @@
      * consumers still pass this; WP-11 migrates them to `shape`.
      */
     normalizeRatio?: boolean;
+    /**
+     * `sizes` for the cover <img>. Defaults to `DEFAULT_SIZES`, which declares
+     * 200px below a 640px viewport — measured against the org-landing rails at
+     * 390px, the real slot is 318-359 CSS px, so the browser picks the 200w
+     * srcset candidate for a 318px box on a DPR-3 phone (~200px of data across
+     * ~954 device pixels). `sizes` drives resource SELECTION, not layout, so
+     * the symptom is a soft/wrong-looking image rather than a broken one, and
+     * desktop escapes it because DEFAULT_SIZES over-declares there.
+     *
+     * A caller that knows its own geometry should pass it, the way
+     * CataloguePreviewTile already does. Left as a prop rather than corrected
+     * globally because `compact`/`featured` slots are genuinely smaller and
+     * over-declaring there would download lg.webp for a thumbnail.
+     */
+    sizes?: string;
   }
 
   const {
     variant = 'grid',
+    sizes = DEFAULT_SIZES,
     layout = 'default',
     autoPromoteAudio = false,
     id,
@@ -506,7 +522,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            sizes={DEFAULT_SIZES}
+            {sizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -535,7 +551,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            sizes={DEFAULT_SIZES}
+            {sizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -553,7 +569,7 @@
         <img
           src={thumbnail}
           srcset={getThumbnailSrcset(thumbnail)}
-          sizes={DEFAULT_SIZES}
+          {sizes}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
           decoding="async"
