@@ -16,7 +16,11 @@ set -e
 #   - DATABASE_URL (secret)
 #   - R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (secrets)
 #   - R2_BUCKET_MEDIA, R2_BUCKET_ASSETS, R2_BUCKET_PLATFORM, R2_BUCKET_RESOURCES (vars)
-#   - STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only)
+#   - STRIPE_SECRET_KEY (secret, every worker that makes a Stripe API call:
+#     ecom-api — purchase/subscription/connect/course-subscription — and
+#     organization-api, which owns subscription-tier creation. No other worker
+#     reaches a Stripe-backed service; do not add it elsewhere without one.)
+#   - STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only — it owns all Stripe webhooks)
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
 #   - RUNPOD_* (secrets, media-api only)
 #   - WORKER_SHARED_SECRET (secret, every worker that makes or receives a
@@ -134,11 +138,22 @@ EOF
     # DevDomainService to provision Cloudflare Workers Custom Domains
     # for new orgs in the dev environment. They're harmless to inject
     # in non-dev environments (the service no-ops outside ENVIRONMENT=dev).
+    #
+    # STRIPE_SECRET_KEY required (Codex-1g5lh.1): organization-api owns the
+    # subscription-tier write path — POST /api/organizations/:id/tiers ->
+    # TierService.createTier -> stripe.products.create — because tiers are
+    # org-scoped. It is OPTIONAL at boot, so a missing key passes /health and
+    # every tier READ, then fails only when a creator actually creates a tier;
+    # that is what shipped, and it returned a bare 500. Same failure shape as
+    # media-api's RunPod secrets below, so the same ${VAR:?} fail-fast applies:
+    # abort the deploy rather than upload an empty secret. Safe because this
+    # script is only ever invoked for `production` (deploy-production.yml).
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
   "CLOUDFLARE_API_TOKEN":"${CLOUDFLARE_API_TOKEN:-}",
   "CLOUDFLARE_ACCOUNT_ID":"${CLOUDFLARE_ACCOUNT_ID:-}",
+  "STRIPE_SECRET_KEY":"${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required for organization-api subscription-tier creation}",
   "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF

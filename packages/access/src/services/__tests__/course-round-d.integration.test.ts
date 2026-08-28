@@ -266,12 +266,13 @@ describe('Round-D read services (Codex-776gg)', () => {
   let u3: string;
   let u4: string;
   let u5: string;
+  let u6: string;
   let orgAId: string;
   let orgBId: string;
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId, u1, u2, u3, u4, u5] = await seedTestUsers(db, 6);
+    [creatorId, u1, u2, u3, u4, u5, u6] = await seedTestUsers(db, 7);
 
     const [orgA] = await db
       .insert(organizations)
@@ -725,6 +726,103 @@ describe('Round-D read services (Codex-776gg)', () => {
       expect(entry?.progress.status).toBe('in-progress');
       expect(entry?.progress.nextPracticeSlug).toBe(p2.slug);
       expect(entry?.enrollmentSource).toBe('course_purchase');
+    });
+
+    it("listEnrolledCourses: batched loader keeps each course's curriculum and completion date its own (Codex-kgrdp.23)", async () => {
+      // The shelf now loads every enrolled course's stages in ONE pair of
+      // queries and every completion in ONE more, instead of 3 round trips per
+      // course. Two failure modes that batching can introduce, both asserted:
+      //   1. stages cross-assigned between courses  -> wrong `total`
+      //   2. completions not narrowed per course    -> `lastCompletedAt` bleeds
+      //      across cards, because rollUpEnrollment reduces over everything it
+      //      is handed.
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+
+      // Deliberately DIFFERENT practice counts so a grouping mix-up cannot
+      // produce a coincidentally-correct total.
+      const courseM = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const stageM = await createStage(db, courseM.id, 1);
+      const m1 = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stageM,
+        sortOrder: 1,
+      });
+      await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stageM,
+        sortOrder: 2,
+      });
+      await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stageM,
+        sortOrder: 3,
+      });
+
+      const courseN = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const stageN = await createStage(db, courseN.id, 1);
+      const n1 = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stageN,
+        sortOrder: 1,
+      });
+
+      await insertEnrollment(db, {
+        userId: u6,
+        courseId: courseM.id,
+        enrolledAt: daysAgo(20),
+      });
+      await insertEnrollment(db, {
+        userId: u6,
+        courseId: courseN.id,
+        enrolledAt: daysAgo(19),
+      });
+
+      // Distinct completion dates, far enough apart to be unambiguous.
+      const oldCompletion = daysAgo(10);
+      const recentCompletion = daysAgo(1);
+      await db.insert(practiceCompletions).values({
+        userId: u6,
+        contentId: m1.contentId,
+        source: 'manual',
+        completedAt: oldCompletion,
+      });
+      await db.insert(practiceCompletions).values({
+        userId: u6,
+        contentId: n1.contentId,
+        source: 'manual',
+        completedAt: recentCompletion,
+      });
+
+      const list = await journey.listEnrolledCourses(u6, orgAId);
+      const entryM = list.find((e) => e.course.id === courseM.id);
+      const entryN = list.find((e) => e.course.id === courseN.id);
+      expect(entryM).toBeDefined();
+      expect(entryN).toBeDefined();
+
+      // Curriculum stayed with its own course.
+      expect(entryM?.progress.total).toBe(3);
+      expect(entryM?.progress.done).toBe(1);
+      expect(entryN?.progress.total).toBe(1);
+      expect(entryN?.progress.done).toBe(1);
+      expect(entryN?.progress.status).toBe('completed');
+      expect(entryM?.progress.status).toBe('in-progress');
+
+      // Completion dates stayed with their own course — courseM must NOT
+      // inherit courseN's newer completion.
+      expect(entryM?.progress.lastCompletedAt).toBe(
+        oldCompletion.toISOString()
+      );
+      expect(entryN?.progress.lastCompletedAt).toBe(
+        recentCompletion.toISOString()
+      );
     });
 
     it('recordPracticeCompletion is idempotent (repeat is a no-op returning the canonical row)', async () => {

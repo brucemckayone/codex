@@ -97,6 +97,7 @@ These rules are MANDATORY. Every agent working anywhere in this codebase MUST fo
 - **MUST** validate all input with Zod schemas via `procedure({ input: { body: schema } })` — no unvalidated input reaches handlers
 - **MUST** use `policy: { auth: 'worker' }` with HMAC-SHA256 for worker-to-worker calls
 - **MUST** use rate limiting on all auth endpoints (`rateLimit: 'auth'` = 5 req/15min)
+- `procedure()` ENFORCES `policy.rateLimit`. An omitted `rateLimit` means the `api` preset (100 req/min per subject), NOT "unlimited"; `auth: 'worker'` routes are exempt. A preset a worker has no `ratelimits` binding for fails OPEN and logs `rate_limit.fail_open` at error level on every request — so a new preset on a route needs the matching binding in that worker's wrangler config, in the same change
 - **NEVER** expose internal error details (stack traces, SQL, DB URLs) in API responses — `mapErrorToResponse()` handles this
 - **NEVER** log PII (passwords, tokens, emails) — use `@codex/observability` redaction
 
@@ -262,18 +263,31 @@ The studio uses `export const ssr = false` (`_org/[slug]/studio/+layout.ts`) —
 Workers use `@codex/cache` `VersionedCache` for KV-backed cache-aside. Pattern:
 
 ```typescript
-const cache = new VersionedCache({ kv: env.CACHE_KV });
+// READ PATH: `waitUntil` is MANDATORY. The data-slot put is deliberately not
+// awaited (so a cache write never delays a response), and workerd CANCELS an
+// un-awaited promise the moment the response returns — production KV held 62
+// version keys and 0 data keys, a literal 0% hit rate (Codex-e32xz).
+const cache = new VersionedCache({
+  kv: env.CACHE_KV,
+  waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+});
 
-// Cache-aside: try cache, fall back to DB, write-through
-const data = await cache.get(CacheType.ORG_CONFIG, orgSlug, async () => {
+// Cache-aside: try cache, fall back to DB, write-through.
+// Signature is get(id, type, fetcher, options) — id FIRST. Swapping them
+// fragments the version namespace so the write-side invalidate never lands.
+const data = await cache.get(orgSlug, CacheType.ORG_CONFIG, async () => {
   return await service.getPublicInfo(slug); // fetcher on miss
 }, { ttl: 30 * 60 }); // 30 min TTL
 
 // Invalidate on mutation (fire-and-forget via waitUntil)
 executionCtx.waitUntil(
-  cache.invalidate(CacheType.ORG_CONFIG, orgSlug).catch(() => {})
+  cache.invalidate(orgSlug).catch(() => {})
 );
 ```
+
+**Never cache a class instance.** Values round-trip through JSON, so a cached
+`PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
+instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
 **Currently cached:** User profile (10min), user preferences (10min), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
 

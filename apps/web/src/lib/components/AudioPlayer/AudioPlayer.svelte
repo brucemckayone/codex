@@ -13,7 +13,7 @@
   @prop {string} [title] - Content title (for mini-player)
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
   import { refreshStreamingUrl } from '$lib/remote/library.remote';
@@ -85,8 +85,41 @@
   let waveformData: number[] | null = $state(null);
   let waveformLoaded = $state(false);
 
-  // Track initialized src to prevent duplicate init on prop change
-  let initializedSrc = $state('');
+  /**
+   * The src we last handed to a player, and the content id it belongs to.
+   *
+   * Deliberately plain `let`, not `$state`: the src-change `$effect` below
+   * both reads and writes these, and a reactive read would re-trigger the
+   * effect on its own write.
+   *
+   * `initializedContentId` is what makes an in-course item change
+   * distinguishable from a re-signed URL for the SAME item — the two need
+   * opposite handling (hard stop + reload vs. seamless source swap).
+   */
+  let initializedSrc: string | null = null;
+  let initializedContentId: string | null = null;
+  /**
+   * Monotonic token claimed by every path that builds a player (`initPlayer`,
+   * `handleUrlExpired`, `retry`). Each awaits at least once, so a build that
+   * was in flight when the user navigated would otherwise install the OLD
+   * item's stream on top of the new one. A stale continuation destroys the
+   * handle it built instead of adopting it.
+   */
+  let initToken = 0;
+  /**
+   * One-shot resume position for the NEXT `initPlayer()`, overriding the
+   * `initialProgress` prop. Set when a rebuild must preserve the playhead
+   * (same item, freshly signed URL, no HLS.js instance to swap under).
+   * `null` = use `initialProgress`.
+   */
+  let pendingResumeSeconds: number | null = null;
+  /**
+   * Non-reactive mirror of `audioEl`. Svelte nulls `bind:this` refs while
+   * unmounting, and `onDestroy` is not guaranteed to run first, so the release
+   * path keeps its own handle — otherwise "stop the audio" would silently
+   * become a no-op exactly when it matters.
+   */
+  let mediaEl: HTMLAudioElement | null = null;
 
   // Mini-player
   let miniMode = $state(false);
@@ -225,6 +258,11 @@
       errorMessage = 'Failed to load audio. Please check your connection and try again.';
     }
     loading = false;
+    // hls.ts may already have destroyed the instance on its fatal path; our
+    // local reference is what the src-change effect branches on, so null it
+    // rather than let a later swap call loadSource() on a dead instance.
+    hlsInstance = null;
+    initializedSrc = null;
   }
 
   async function loadWaveform() {
@@ -271,6 +309,9 @@
     // Guard: skip re-init if src hasn't changed (prevents duplicate init on reactive prop updates)
     if (initializedSrc === src) return;
     initializedSrc = src;
+    initializedContentId = contentId;
+    mediaEl = audioEl;
+    const token = ++initToken;
 
     loading = true;
     errorMessage = '';
@@ -284,23 +325,37 @@
         onError: (msg) => {
           errorMessage = msg;
           loading = false;
+          // The instance may already have been destroyed inside hls.ts's
+          // fatal path — null our reference so the src-change effect rebuilds
+          // instead of calling loadSource() on a dead instance.
+          hlsInstance = null;
+          initializedSrc = null;
         },
         onUrlExpired: () => {
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        // A newer item claimed the element while we were awaiting.
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
 
-      // Set initial progress (resume position)
-      if (initialProgress > 0) {
+      // Resume position: the one-shot override if a rebuild is preserving the
+      // playhead, otherwise the server-supplied `initialProgress`.
+      const resumeAt = pendingResumeSeconds ?? initialProgress;
+      pendingResumeSeconds = null;
+      if (resumeAt > 0) {
         if (audioEl.readyState >= 1) {
-          audioEl.currentTime = initialProgress;
+          audioEl.currentTime = resumeAt;
         } else {
           audioEl.addEventListener(
             'loadedmetadata',
             () => {
-              if (audioEl) audioEl.currentTime = initialProgress;
+              if (audioEl) audioEl.currentTime = resumeAt;
             },
             { once: true }
           );
@@ -331,6 +386,31 @@
   }
 
   /**
+   * Hard-stop the media element and drop its source.
+   *
+   * `teardownHls()` alone is NOT enough. On the native branch (`attachNative`
+   * in hls.ts, which assigns `media.src` directly — taken whenever MSE is
+   * unavailable, and for plain non-HLS URLs) there is no HLS.js instance to
+   * destroy, so the element keeps its source and keeps playing. That is the
+   * "previous track carries on" half of Codex-1g5lh.12, and it survives even a
+   * `{#key}` remount because a detached element with a live `src` can keep
+   * buffering.
+   *
+   * `removeAttribute` rather than `src = ''`: an empty string resolves against
+   * the document URL and makes the element fetch the PAGE as media, which
+   * fires a spurious `error`. Removing the attribute leaves the element in
+   * NETWORK_EMPTY with no error. `load()` then aborts any in-flight fetch and
+   * resets currentTime/duration.
+   */
+  function releaseMedia() {
+    const el = audioEl ?? mediaEl;
+    if (!el) return;
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  }
+
+  /**
    * Signed-URL expiry recovery — mirrors VideoPlayer. Audio and waveform
    * share an expiry (both signed in the same `getStreamingUrl` access
    * call), so a single refresh swaps both URLs.
@@ -343,8 +423,9 @@
         lastCurrentTime = audioEl.currentTime;
       }
       teardownHls();
+      const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
-      if (!audioEl) return;
+      if (!audioEl || token !== initToken) return;
       initializedSrc = fresh.streamingUrl;
       loading = true;
       errorMessage = '';
@@ -354,11 +435,18 @@
         onError: (msg) => {
           errorMessage = msg;
           loading = false;
+          hlsInstance = null;
+          initializedSrc = null;
         },
         onUrlExpired: () => {
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       if (lastCurrentTime > 0) {
@@ -420,8 +508,9 @@
     // Retry doesn't immediately 403 again.
     teardownHls();
     try {
+      const token = ++initToken;
       const fresh = await refreshStreamingUrl(contentId);
-      if (!audioEl) return;
+      if (!audioEl || token !== initToken) return;
       initializedSrc = fresh.streamingUrl;
       loading = true;
       errorMessage = '';
@@ -431,11 +520,18 @@
         onError: (msg) => {
           errorMessage = msg;
           loading = false;
+          hlsInstance = null;
+          initializedSrc = null;
         },
         onUrlExpired: () => {
           void handleUrlExpired();
         },
       });
+      if (token !== initToken) {
+        handle.cleanup();
+        handle.hls?.destroy();
+        return;
+      }
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
       currentWaveformUrl = fresh.waveformUrl;
@@ -446,7 +542,7 @@
     } catch {
       // Refresh endpoint itself failed — reset the init guard and try the
       // original src path; transient network blips may self-heal.
-      initializedSrc = '';
+      initializedSrc = null;
       await initPlayer();
     }
   }
@@ -479,6 +575,105 @@
   });
 
   /**
+   * React to `src` / `contentId` prop changes.
+   *
+   * THE in-course navigation fix (Codex-1g5lh.12). The in-course player route
+   * (`/journeys/[journeySlug]/practice/[contentSlug]`) keeps the SAME component
+   * instance across sessions — SvelteKit reuses the page and its children when
+   * only the route params change — so moving to the next session updates
+   * `src` + `contentId` on a live player. `initPlayer()` ran once in `onMount`
+   * and nothing re-ran it, so the previous track kept playing and the new
+   * manifest was never loaded. (`VideoPlayer` has had this effect all along;
+   * `AudioPlayer` never got it.)
+   *
+   * Two cases, deliberately handled differently:
+   *
+   *   1. `contentId` changed → a DIFFERENT item. Hard stop: flush the outgoing
+   *      item's position under the OUTGOING id, detach the tracker, destroy
+   *      HLS.js, pause and release the element, reset the UI, then load the
+   *      new manifest from the top. Nothing about the old item survives.
+   *   2. `contentId` is the same → the same item re-signed (the follow /
+   *      subscribe unlock re-runs the access flow and returns a fresh signed
+   *      URL). Swap the source underneath the playhead so the listener keeps
+   *      their position.
+   *
+   * Only `src`, `contentId` and `audioEl` are reactive reads here. `errorMessage`
+   * is deliberately NOT consulted: it is `$state`, so reading it would make
+   * every error re-run this effect, and after a mid-session URL refresh
+   * `initializedSrc` no longer matches the (stale) `src` prop — the rebuild
+   * would then reload the expired URL. The error handlers null `hlsInstance`
+   * instead, which routes an errored player down the full-rebuild branch.
+   */
+  $effect(() => {
+    // Tracked reads first, then `untrack` — the swap below touches plenty of
+    // `$state` (analysis frame, loading, errorMessage) and must not make any
+    // of it a dependency of this effect.
+    const nextSrc = src;
+    const nextContentId = contentId;
+    const el = audioEl;
+    if (typeof window === 'undefined') return;
+    if (!el || !nextSrc) return;
+    if (nextSrc === initializedSrc) return;
+
+    untrack(() => {
+      const sameItem =
+        initializedContentId !== null && initializedContentId === nextContentId;
+
+      if (sameItem) {
+        if (hlsInstance) {
+          // HLS.js can swap the manifest under the playhead — nothing else to do.
+          initializedSrc = nextSrc;
+          hlsInstance.loadSource(nextSrc);
+          scheduleRefresh();
+          return;
+        }
+        // Native branch (or an errored instance): the element has to be rebuilt,
+        // so remember where the listener was and seek back after the reload.
+        pendingResumeSeconds = Number.isFinite(el.currentTime)
+          ? el.currentTime
+          : 0;
+      } else {
+        // Attribute the final save to the item that was actually playing — the
+        // props already answer with the incoming one. Detaching BEFORE the pause
+        // in `releaseMedia` also stops the tracker's own `pause` handler from
+        // re-saving the old position under the new id.
+        tracker.detach(initializedContentId);
+        resetPlaybackState();
+        pendingResumeSeconds = null;
+      }
+
+      teardownHls();
+      releaseMedia();
+      initializedSrc = null;
+      void initPlayer();
+      scheduleRefresh();
+    });
+  });
+
+  /**
+   * Clear everything that describes the OUTGOING item so the incoming one
+   * doesn't inherit its waveform, playhead, duration or immersive overlay.
+   * Volume / mute / rate are user preferences and deliberately survive.
+   */
+  function resetPlaybackState() {
+    stopAnalysisLoop();
+    if (analyserHandle) {
+      analyserHandle.destroy();
+      analyserHandle = null;
+    }
+    audioAnalysis = null;
+    isPlaying = false;
+    currentTime = 0;
+    duration = 0;
+    lastCurrentTime = 0;
+    miniMode = false;
+    showImmersive = false;
+    waveformData = null;
+    waveformLoaded = false;
+    errorMessage = '';
+  }
+
+  /**
    * React to `waveformUrl` prop changes. Parents update this after a
    * server-side access-re-run returns a freshly signed bundle; keeping
    * the local cached copy in sync lets `loadWaveform` and
@@ -506,7 +701,9 @@
   });
 
   onDestroy(() => {
-    tracker.detach();
+    // Flush against the id the element's media actually belongs to, not
+    // whatever the props answer with at teardown time.
+    tracker.detach(initializedContentId);
     stopAnalysisLoop();
     teardownRefresh();
     if (analyserHandle) {
@@ -514,6 +711,11 @@
       analyserHandle = null;
     }
     teardownHls();
+    // A detached media element with a live `src` can keep playing/buffering,
+    // so stop it explicitly — `teardownHls()` only covers the HLS.js branch.
+    releaseMedia();
+    initializedSrc = null;
+    initializedContentId = null;
   });
 
   const RATES = [0.5, 1, 1.5, 2] as const;

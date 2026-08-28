@@ -6,15 +6,20 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import type { ObservabilityClient } from '@codex/observability';
+import type { WaitUntilFn } from './helpers/invalidate';
 
 /**
  * Options for cache operations
+ *
+ * There is deliberately only ONE TTL here. A `versionTtl` used to sit alongside
+ * `ttl` at 144x its value, and correctness depended on the two staying in the
+ * right order while being tuned in different places (Codex-kgrdp.5). Version
+ * keys no longer expire at all, so a data TTL can never outlive the version key
+ * that stales it — and there is no second number left to drift.
  */
 export interface CacheOptions {
   /** Time-to-live for cached data in seconds (default: 600 = 10 minutes) */
   ttl?: number;
-  /** Time-to-live for version key in seconds (default: 86400 = 1 day) */
-  versionTtl?: number;
 }
 
 /**
@@ -27,6 +32,29 @@ export interface VersionedCacheConfig {
   prefix?: string;
   /** Observability client for logging cache operations */
   obs?: ObservabilityClient;
+  /**
+   * `ExecutionContext.waitUntil` for the in-flight request.
+   *
+   * WITHOUT this the data-slot write in `get()`/`getWithResult()` is a bare
+   * floating promise. The Workers runtime tears the request's IoContext down as
+   * soon as the response is returned and cancels any un-awaited work, so on a
+   * cache MISS the version key lands (it is awaited) and the data slot does
+   * NOT — a permanent 0% hit rate (Codex-e32xz: production CACHE_KV held 62
+   * version keys and 0 data keys).
+   *
+   * Supply it and the put is registered on the execution context: the response
+   * still returns without waiting for KV (no added latency), but the runtime
+   * keeps the context alive until the write completes.
+   *
+   * Optional so existing consumers without an ExecutionContext (unit tests,
+   * SvelteKit dev, helper call sites that only `invalidate()`) keep working
+   * unchanged — they retain the old non-blocking, best-effort behaviour.
+   *
+   * Pass a wrapped closure, NOT a bare method reference:
+   * `(p) => ctx.executionCtx.waitUntil(p)`. An unbound
+   * `executionCtx.waitUntil` throws "Illegal invocation" in workerd.
+   */
+  waitUntil?: WaitUntilFn;
 }
 
 /**
@@ -60,6 +88,17 @@ export interface CacheStats {
   misses: number;
   /** Number of invalidations */
   invalidations: number;
+  /**
+   * KV read operations issued. The free tier allows 100,000/day per ACCOUNT.
+   */
+  reads: number;
+  /**
+   * KV mutating operations issued — puts AND deletes, which share one bucket of
+   * 1,000/day per ACCOUNT. This is the scarce resource and therefore the number
+   * to watch: a healthy `hitRate` with a climbing `writes` still means the
+   * cache is losing.
+   */
+  writes: number;
   /** Hit rate (0-1) */
   hitRate: number;
 }

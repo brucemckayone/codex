@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { enhance } from '$app/forms';
   import { page } from '$app/state';
-  import { clearClientState } from '$lib/client/version-manifest';
+  import { clearUserScopedState } from '$lib/client/user-scoped-state';
   import AuthLayout from '$lib/components/auth/AuthLayout.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import Input from '$lib/components/ui/Input/Input.svelte';
@@ -12,10 +12,16 @@
   const { data, form } = $props();
   let loading = $state(false);
 
-  // Clear client caches after logout redirect
+  // Clear client caches after a logout redirect. This is the DEFINITIVE
+  // sign-out signal, so it fires immediately rather than waiting for the next
+  // user to be observed — but note it only clears THIS origin. `/logout`
+  // always redirects to the platform domain (`buildPlatformUrl`), while org
+  // state lives on `{slug}.<base-domain>`, a separate localStorage partition.
+  // The org origin is corrected by `reconcileStateOwner()` in the root layout
+  // on the next user's first visit there (Codex-1g5lh.17).
   onMount(() => {
     if (page.url.searchParams.has('logout')) {
-      clearClientState();
+      clearUserScopedState();
     }
   });
 

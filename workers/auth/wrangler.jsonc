@@ -1,6 +1,17 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "auth-worker",
+  // Public exposure: OFF by default (Codex-kgrdp.12). With this unset,
+  // Cloudflare defaults BOTH the workers.dev route and the preview URL to
+  // ENABLED for any deploy that has no `routes` — which is how 8 orphaned *-dev
+  // workers ended up answering the public internet and absorbing a credential
+  // scanner (~6,275 requests in 24 minutes on auth-worker-dev, 2026-08-26). KV
+  // quota is billed per ACCOUNT, so that traffic burned production's daily
+  // write allowance. Envs that declare `routes` already infer false; being
+  // explicit here means a future env that forgets its routes fails closed
+  // instead of open. MUST live in config: disabling it only in the dashboard is
+  // silently re-enabled by the next `wrangler deploy`.
+  "workers_dev": false,
   "main": "dist/index.js",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -10,20 +21,48 @@
     "enabled": true
   },
 
+  // Durable Objects
+  //
+  // RATE_LIMIT_DO backs the `auth` rate-limit preset. The native Workers Rate
+  // Limiting binding only accepts a 10s or 60s window and the credential
+  // surfaces need 5 requests per 15 MINUTES, so that one preset counts rows in
+  // SQLite inside a Durable Object instead. The class is `RateLimitDO` from
+  // `@codex/security`, re-exported from src/index.ts — a DO binding whose class
+  // is not a named export of the entrypoint fails at deploy.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RATE_LIMIT_DO",
+        "class_name": "RateLimitDO"
+      }
+    ]
+  },
+
+  // Migrations for Durable Objects (new_sqlite_classes: the only DO backend the
+  // free plan supports). `migrations` inherits into every env; the
+  // `durable_objects` bindings above do NOT, so each env repeats them.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RateLimitDO"]
+    }
+  ],
+
   // KV Namespaces
+  //
+  // No RATE_LIMIT_KV: rate-limit counters moved off KV (Codex-kgrdp.17), which
+  // was spending a read + a write per request against an ACCOUNT-wide quota.
+  // The dev namespace id it used (cea7153364974737b16870df08f31083) had also
+  // already been deleted from the account, so the binding could not resolve.
   "kv_namespaces": [
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
-    },
-    {
-      "binding": "RATE_LIMIT_KV",
-      "id": "cea7153364974737b16870df08f31083"
     }
   ],
 
-  // Note: R2 buckets are not used by auth worker
-  // R2 storage is only used by content-api worker for media management
+  // Note: R2 buckets are not used by auth worker R2 storage is only used by
+  // content-api worker for media management
 
   // Default environment variables (local development)
   "vars": {
@@ -38,10 +77,19 @@
 
   // Environment configurations
   "env": {
-    // Test environment (E2E tests)
-    // Note: DB_METHOD is set via .dev.vars.test (NEON_BRANCH in CI, LOCAL_PROXY locally)
+    // Test environment (E2E tests) Note: DB_METHOD is set via .dev.vars.test
+    // (NEON_BRANCH in CI, LOCAL_PROXY locally)
     "test": {
       "name": "auth-worker-test",
+      // Bindings are not inherited into a named env — each needs its own copy.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "RATE_LIMIT_DO",
+            "class_name": "RateLimitDO"
+          }
+        ]
+      },
       "vars": {
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
@@ -55,10 +103,6 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
-        },
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
         }
       ]
     },
@@ -66,6 +110,15 @@
     // Production environment
     "production": {
       "name": "auth-worker-production",
+      // Bindings are not inherited into a named env — each needs its own copy.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "RATE_LIMIT_DO",
+            "class_name": "RateLimitDO"
+          }
+        ]
+      },
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -79,10 +132,6 @@
         {
           "binding": "AUTH_SESSION_KV",
           "id": "aab4025dcb5c44ad8d1156bcfda055d2"
-        },
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "06b7205ce78042ca9cad7b7e582ddf21"
         }
       ],
       "routes": [
@@ -112,5 +161,5 @@
   //   - DATABASE_URL: PostgreSQL connection string
   //   - BETTER_AUTH_SECRET: BetterAuth secret key (min 32 characters)
   //   - AUTH_SESSION_KV: KV namespace binding for session caching
-  //   - RATE_LIMIT_KV: KV namespace binding for rate limiting
+  //   - RATE_LIMIT_DO: Durable Object binding for the auth rate limiter
 }

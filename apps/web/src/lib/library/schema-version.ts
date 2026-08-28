@@ -37,9 +37,12 @@
  * localStorage key the library collection persists into. Single source of
  * truth — imported by `library.ts` for the collection's `storageKey`.
  *
- * NOTE: `version-manifest.ts` keeps its own copy of this literal in
- * `CODEX_STORAGE_KEYS` (for logout-clear). That module is being reworked in
- * parallel (CE-5); once it settles it should import this constant too.
+ * NOTE: `$lib/client/user-scoped-state.ts` keeps its own copy of this literal
+ * (and of `LIBRARY_SCHEMA_STORAGE_KEY`) in `USER_SCOPED_LOCAL_KEYS`, so that
+ * both are wiped when a different user is observed on this origin. It cannot
+ * import them from here: this module pulls in the migration table, and the
+ * clear primitive must stay dependency-free enough to run in the root layout's
+ * synchronous init on every origin.
  */
 export const LIBRARY_STORAGE_KEY = 'codex-library';
 

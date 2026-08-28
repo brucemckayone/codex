@@ -3,10 +3,15 @@
  *
  * Bug: the service registry built the Stripe-backed services
  * (purchase/subscription/tier/connect) by resolving the Stripe client EAGERLY.
- * The resolver throws 'STRIPE_SECRET_KEY not configured' when the key is falsy,
- * so merely *accessing* `ctx.services.connect` threw at construction — turning a
- * brand-new creator's read-only Connect/earnings page (which never calls Stripe)
- * into a 500 INTERNAL_ERROR.
+ * The resolver throws when the key is falsy, so merely *accessing*
+ * `ctx.services.connect` threw at construction — turning a brand-new creator's
+ * read-only Connect/earnings page (which never calls Stripe) into a
+ * 500 INTERNAL_ERROR.
+ *
+ * These tests cover the proxy MECHANISM with a synthetic resolver. The real
+ * resolver's behaviour — and the typed `STRIPE_NOT_CONFIGURED` error it throws
+ * since Codex-1g5lh.1 — is covered in `stripe-not-configured.test.ts`, which
+ * drives the actual `createServiceRegistry`.
  *
  * Fix: inject a Proxy that defers resolution until the first property access.
  * These tests lock down that contract:
@@ -42,8 +47,11 @@ describe('createLazyStripeProxy', () => {
   });
 
   it('propagates the resolver throw on access, not at creation', () => {
+    // Synthetic marker, not the production message: the proxy is agnostic to
+    // what the resolver throws. The real throw is `StripeNotConfiguredError`
+    // and is asserted in `stripe-not-configured.test.ts`.
     const resolve = vi.fn(() => {
-      throw new Error('STRIPE_SECRET_KEY not configured.');
+      throw new Error('resolver refused');
     });
 
     // Creation must succeed even when the key is missing — this is what lets a
@@ -52,7 +60,7 @@ describe('createLazyStripeProxy', () => {
     expect(resolve).not.toHaveBeenCalled();
 
     // A real Stripe call still surfaces the misconfiguration.
-    expect(() => proxy.accounts).toThrow('STRIPE_SECRET_KEY not configured.');
+    expect(() => proxy.accounts).toThrow('resolver refused');
   });
 
   it('binds methods to the real client so `this` resolves correctly', async () => {

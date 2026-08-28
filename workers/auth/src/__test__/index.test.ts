@@ -81,8 +81,12 @@ describe('Auth Worker', () => {
       expect(env.AUTH_SESSION_KV).toBeDefined();
     });
 
-    it('should have RATE_LIMIT_KV binding available', () => {
-      expect(env.RATE_LIMIT_KV).toBeDefined();
+    // RATE_LIMIT_KV is gone (Codex-kgrdp.17). The auth preset is 5 requests
+    // per 15 minutes, a window the native binding cannot express, so it counts
+    // in RateLimitDO. Without this namespace the limiter fails OPEN, so its
+    // presence is the thing worth asserting.
+    it('should have the RATE_LIMIT_DO namespace available', () => {
+      expect(env.RATE_LIMIT_DO).toBeDefined();
     });
   });
 });

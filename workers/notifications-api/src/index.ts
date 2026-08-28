@@ -4,7 +4,7 @@
  * Cloudflare Worker for email template management and sending.
  *
  * Security Features:
- * - Rate limiting via KV namespace
+ * - Rate limiting via the native Workers Rate Limiting binding
  * - Security headers (CSP, XFO, etc.)
  * - Error sanitization (no internal details exposed)
  *
@@ -19,7 +19,12 @@
  * - /api/templates/* - Template management endpoints
  */
 
-import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
+import {
+  combineSubjects,
+  type RateLimitSubjectResolver,
+  rateLimit,
+  trustedIpSubject,
+} from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import {
   createEnvValidationMiddleware,
@@ -47,7 +52,8 @@ const app = createWorker({
   enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: the unsubscribe limiter counts in RATE_LIMIT_API.
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 
@@ -59,7 +65,7 @@ const app = createWorker({
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'RATE_LIMIT_KV', 'WORKER_SHARED_SECRET'],
+    required: ['DATABASE_URL', 'WORKER_SHARED_SECRET'],
     optional: [
       'ENVIRONMENT',
       'WEB_APP_URL',
@@ -78,6 +84,26 @@ app.use(
 // ============================================================================
 
 /**
+ * Count against the unsubscribe token in the URL.
+ *
+ * The token is the only subject this surface can always name: apps/web proxies
+ * both hops server-side (`routes/unsubscribe/[token]/+page.server.ts` and
+ * `routes/api/unsubscribe/[token]/+server.ts`), so despite the link being
+ * clicked in a mail client the transport address that arrives here is a
+ * Cloudflare egress address, not the reader's.
+ *
+ * A token bucket caps repeated hits on ONE token, which is the write
+ * amplification path — a flood of *random* tokens mints a fresh bucket per
+ * request and is only capped by the address bucket beside it.
+ */
+const unsubscribeTokenSubject = (): RateLimitSubjectResolver => (c) => {
+  const token = c.req.path.split('/').filter(Boolean).pop();
+  return token && token !== 'unsubscribe'
+    ? { kind: 'credential', value: token }
+    : null;
+};
+
+/**
  * Rate limit unsubscribe endpoints (CAN-SPAM/GDPR public routes).
  *
  * The /unsubscribe/* routes bypass procedure() because they use HMAC-token
@@ -90,15 +116,19 @@ app.use(
  *
  * Uses the `api` preset (100 req/min) — permissive enough for legitimate
  * humans retrying an unsubscribe link, tight enough to stop scripted DoS.
- * Keyed per-IP per-route via the default keyGenerator (CF-Connecting-IP).
+ * Counted in the native binding rather than KV, so it no longer spends a KV
+ * read + write per request (Codex-kgrdp.17).
  *
  * Mounted BEFORE app.route('/unsubscribe', ...) so it intercepts every
  * request to that subtree. See denoise iter-002 F2 (Codex-ttavz.8).
  */
 app.use('/unsubscribe/*', (c, next) => {
+  const { RATE_LIMIT_API } = c.env;
+
   return rateLimit({
-    kv: c.env.RATE_LIMIT_KV,
-    ...RATE_LIMIT_PRESETS.api,
+    preset: 'api',
+    binding: RATE_LIMIT_API,
+    subject: combineSubjects(unsubscribeTokenSubject(), trustedIpSubject()),
   })(c, next);
 });
 

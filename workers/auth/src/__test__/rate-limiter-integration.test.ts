@@ -4,7 +4,21 @@
  * Behavioural coverage for `createAuthRateLimiter()` mounted in
  * `workers/auth/src/index.ts`. These tests exercise the full middleware
  * chain through `SELF.fetch` (via `cloudflare:test`), so we hit the
- * real KV-backed limiter and the live mounted handler.
+ * real limiter and the live mounted handler.
+ *
+ * The store is `RateLimitDO`, a SQLite Durable Object (Codex-kgrdp.17) — the
+ * `auth` preset's 15-minute window is not expressible on Cloudflare's native
+ * rate-limit binding, whose period may only be 10 or 60 seconds. Because the
+ * DO knows the exact hit count and window end, `X-RateLimit-*` stay accurate
+ * here and are still asserted below; binding-backed presets elsewhere cannot
+ * produce them and deliberately omit them.
+ *
+ * The subject is `combineSubjects(credentialSubject(), trustedIpSubject())`,
+ * and the route path is carried in the bucket KEY PREFIX rather than the
+ * subject — so a user who fumbles sign-in still has a request-password-reset
+ * budget, which is the recovery they need at exactly that moment. The bodies
+ * below carry no credential field, so the address is the only countable
+ * subject in these cases, which is what makes the per-IP assertions sharp.
  *
  * Per `feedback_security_deep_test`: HMAC/auth/rate-limit changes
  * MUST have unit + integration tests for BOTH positive and negative

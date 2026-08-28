@@ -42,7 +42,7 @@ import {
  *     iteration could add a DB teardown.
  *
  * Prereqs:
- *   - auth (42069), ecom-api (42072), organization-api (42075) up
+ *   - auth (42069), ecom-api (42072), organization-api (42071) up
  *   - Seeded DB with `pnpm db:seed` (STRIPE_SECRET_KEY set so Studio
  *     Alpha has Connect active + alphaStandard/alphaPro tier rows)
  */
@@ -108,11 +108,11 @@ test.describe('Studio Tier CRUD', () => {
       test.skip(true, 'Ecom-api worker not running on port 42072');
     }
     try {
-      const res = await request.get('http://localhost:42075/health');
+      const res = await request.get('http://localhost:42071/health');
       if (!res.ok())
-        test.skip(true, 'Organization-api worker not running on port 42075');
+        test.skip(true, 'Organization-api worker not running on port 42071');
     } catch {
-      test.skip(true, 'Organization-api worker not running on port 42075');
+      test.skip(true, 'Organization-api worker not running on port 42071');
     }
 
     // One-shot login — captures cookies for both tests.

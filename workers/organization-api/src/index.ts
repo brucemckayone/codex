@@ -51,7 +51,8 @@ const app = createWorker({
   enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: rate-limit counters moved off KV (Codex-kgrdp.17).
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 
@@ -63,7 +64,7 @@ const app = createWorker({
 app.use(
   '*',
   createEnvValidationMiddleware({
-    required: ['DATABASE_URL', 'RATE_LIMIT_KV'],
+    required: ['DATABASE_URL'],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
   })
 );

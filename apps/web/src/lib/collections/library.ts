@@ -14,12 +14,14 @@ import type { UserLibraryResponse } from '@codex/access';
 import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { registerUserScopedReset } from '$lib/client/user-scoped-state';
 import {
   LIBRARY_STORAGE_KEY,
   reconcileLibrarySchemaVersion,
 } from '$lib/library/schema-version';
 import { logger } from '$lib/observability';
 import { getUserLibrary } from '$lib/remote/library.remote';
+import { purgeLocalCollection } from './purge-collection';
 
 /**
  * Library item type extracted from UserLibraryResponse
@@ -72,6 +74,11 @@ export const libraryCollection = browser
       })
     )
   : undefined;
+
+// Codex-1g5lh.17 — THIS user's owned content. `clearUserScopedState()`
+// removes the localStorage key; this drops the in-memory rows, which is
+// what readers actually consult. See collections/purge-collection.ts.
+registerUserScopedReset(() => purgeLocalCollection(libraryCollection));
 
 /**
  * Largest page the API will serve (`paginationSchema.limit.max`). Asking for

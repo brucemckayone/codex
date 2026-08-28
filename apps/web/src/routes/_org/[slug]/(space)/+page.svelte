@@ -646,7 +646,12 @@
   {/await}
 
   <!-- Guided portals — published course-journeys for this org (Codex-oi2w4).
-       Streamed; hidden only when the org has NO published portals at all.
+       Hidden only when the org has NO published portals at all.
+
+       AWAITED, not streamed (Codex-kgrdp.23): ONE `listPublishedJourneys` read
+       now serves this rail AND the featured picks above, so this array is
+       already resolved when the load returns, so it needs no await block. It
+       was two calls to the same endpoint — see +page.server.ts.
 
        Shows EVERY portal, including the ones promoted into "Editor's picks"
        below. This rail is the org's complete set of portals, so omitting the
@@ -657,50 +662,54 @@
        the shelves; portals differ from featured CONTENT (which `newThisWeek`
        still de-duplicates) because there are few enough of them that the full
        set is the point. -->
-  {#await data.journeys then journeys}
-    {#if journeys.length > 0}
-      <section class="section section--tight">
-        <header class="lede">
-          <p class="lede__eyebrow">Go deeper</p>
-          <div class="lede__title-row">
-            <h2 class="lede__title">Guided portals</h2>
-            <a href="/explore" class="lede__view-all">
-              Explore all
-              <span aria-hidden="true">→</span>
-            </a>
-          </div>
-        </header>
-        <!-- 15rem, not the 20rem this carried when the tile was 16/9: the shared
-             journey card is a 3:4 portrait now (matching the content tiles it
-             shares pages with), so a 20rem track made a ~34rem-tall rail. -->
-        <Carousel
-          items={journeys}
-          itemMinWidth="15rem"
-          gap="var(--space-4)"
-          ariaLabel="Guided portals"
-        >
-          {#snippet renderItem(journey)}
-            <JourneyCard
-              {journey}
-              href={buildJourneyUrl(
-                page.url,
-                { slug: journey.slug, id: journey.pageId },
-                { surface: 'sales' }
-              )}
-            />
-          {/snippet}
-        </Carousel>
-      </section>
-    {/if}
-  {/await}
+  {#if data.journeys.length > 0}
+    <section class="section section--tight">
+      <header class="lede">
+        <p class="lede__eyebrow">Go deeper</p>
+        <div class="lede__title-row">
+          <h2 class="lede__title">Guided portals</h2>
+          <a href="/explore" class="lede__view-all">
+            Explore all
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </header>
+      <!-- 15rem, not the 20rem this carried when the tile was 16/9: the shared
+           journey card is a 3:4 portrait now (matching the content tiles it
+           shares pages with), so a 20rem track made a ~34rem-tall rail. -->
+      <Carousel
+        items={data.journeys}
+        itemMinWidth="15rem"
+        gap="var(--space-4)"
+        ariaLabel="Guided portals"
+      >
+        {#snippet renderItem(journey)}
+          <JourneyCard
+            {journey}
+            href={buildJourneyUrl(
+              page.url,
+              { slug: journey.slug, id: journey.pageId },
+              { surface: 'sales' }
+            )}
+          />
+        {/snippet}
+      </Carousel>
+    </section>
+  {/if}
 
   <!-- Shared grid/carousel tile. `shape` drives the per-section aspect ratio
        (WP-7); chrome="transparent" lets a tile sit on the section background
        and earn chrome only on hover. -->
   {#snippet gridCard(c: ContentItem, shape: '16:9' | '1:1' | '3:4' | '3:2')}
+    <!-- sizes is measured, not guessed: at a 390px viewport every rail on this
+         page renders its card at 318-359 CSS px (on a phone a carousel item is
+         ~90vw whatever the rail's itemMinWidth), and 382-396px on desktop.
+         DEFAULT_SIZES declares 200px below 640px, so the browser was selecting
+         the 200w srcset candidate for a 318px box on a DPR-3 screen. -->
     <ContentCard
       variant="grid"
       {shape}
+      sizes="(max-width: 640px) 92vw, (max-width: 1024px) 45vw, 384px"
       titleInCover
       chrome="transparent"
       id={c.id}

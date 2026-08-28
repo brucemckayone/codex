@@ -7,15 +7,17 @@
  * Security Features:
  * - Request tracking (UUID request IDs, IP tracking, user agent)
  * - Security headers (CSP, XFO, etc.)
- * - Rate limiting for webhook endpoints
  * - Stripe signature verification
  * - No authentication required for webhooks (Stripe signature serves as auth)
+ *
+ * Webhooks are deliberately NOT rate-limited: an HMAC signature is already the
+ * authentication, so a per-caller cap adds no security and can only reject a
+ * legitimate Stripe retry burst (Codex-kgrdp.17).
  *
  * Configuration:
  * - enableGlobalAuth: false (webhooks use signature auth, checkout uses procedure())
  */
 
-import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
@@ -57,7 +59,8 @@ const app = createWorker({
   enableGlobalAuth: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: nothing in this worker counts in KV any more.
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 
@@ -80,7 +83,6 @@ app.use(
       'STRIPE_WEBHOOK_SECRET_PAYMENT',
       'STRIPE_WEBHOOK_SECRET_SUBSCRIPTION',
       'STRIPE_WEBHOOK_SECRET_CONNECT',
-      'RATE_LIMIT_KV',
     ],
     optional: [
       'ENVIRONMENT',
@@ -95,18 +97,6 @@ app.use(
     ],
   })
 );
-
-// ============================================================================
-// Custom Middleware
-// ============================================================================
-
-// Rate limiting for webhook endpoints
-app.use('/webhooks/*', (c, next) => {
-  return rateLimit({
-    kv: c.env.RATE_LIMIT_KV,
-    ...RATE_LIMIT_PRESETS.webhook, // 1000 req/min
-  })(c, next);
-});
 
 // ============================================================================
 // API Routes

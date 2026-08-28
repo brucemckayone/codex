@@ -180,10 +180,26 @@
      * consumers still pass this; WP-11 migrates them to `shape`.
      */
     normalizeRatio?: boolean;
+    /**
+     * `sizes` for the cover <img>. Defaults to `DEFAULT_SIZES`, which declares
+     * 200px below a 640px viewport — measured against the org-landing rails at
+     * 390px, the real slot is 318-359 CSS px, so the browser picks the 200w
+     * srcset candidate for a 318px box on a DPR-3 phone (~200px of data across
+     * ~954 device pixels). `sizes` drives resource SELECTION, not layout, so
+     * the symptom is a soft/wrong-looking image rather than a broken one, and
+     * desktop escapes it because DEFAULT_SIZES over-declares there.
+     *
+     * A caller that knows its own geometry should pass it, the way
+     * CataloguePreviewTile already does. Left as a prop rather than corrected
+     * globally because `compact`/`featured` slots are genuinely smaller and
+     * over-declaring there would download lg.webp for a thumbnail.
+     */
+    sizes?: string;
   }
 
   const {
     variant = 'grid',
+    sizes = DEFAULT_SIZES,
     layout = 'default',
     autoPromoteAudio = false,
     id,
@@ -506,7 +522,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            sizes={DEFAULT_SIZES}
+            {sizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -535,7 +551,7 @@
           <img
             src={thumbnail}
             srcset={getThumbnailSrcset(thumbnail)}
-            sizes={DEFAULT_SIZES}
+            {sizes}
             alt={m.content_thumbnail_alt({ title })}
             loading="lazy"
             decoding="async"
@@ -553,7 +569,7 @@
         <img
           src={thumbnail}
           srcset={getThumbnailSrcset(thumbnail)}
-          sizes={DEFAULT_SIZES}
+          {sizes}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
           decoding="async"
@@ -1978,6 +1994,20 @@
        natural aspect (mixed rows). `stretch` grows the tile beyond its aspect
        floor so the cover image + scrimmed title reach down to the caption. */
     align-self: stretch;
+    /* MUST be explicit, and it pairs with the `align-self: stretch` above.
+       `justify-self` defaults to `normal`, which stretches only while the box
+       is FREE to stretch: once `align-self: stretch` pins the block axis to a
+       row SHORTER than the 3/4 ratio wants, the ratio takes over the inline
+       axis and derives width from that height instead. Measured on an iPhone
+       at 430px in a mixed carousel row: row 166px tall -> thumb 124.6px wide
+       (166 x 3/4) inside a 350.6px column, leaving ~2/3 of the card empty and
+       the cover reduced to a sliver. Isolated repro: uncapped the thumb
+       correctly takes the full column (352.6 x 470.1); cap the row at 222px
+       and it collapses to 129.8 x 173 — adding this line restores 352.6.
+       The comment above reasoned about a card stretched PAST the media's
+       natural aspect; this is the opposite case, a row SHORTER than it, where
+       the same stretch squeezes the width. (Codex-hsjoc) */
+    justify-self: stretch;
     /* Match the card radius so the media fills to the rounded card edge. */
     border-radius: var(--radius-xl);
   }

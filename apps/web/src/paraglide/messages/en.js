@@ -6367,6 +6367,14 @@ export const studio_content_form_media_hint = () => `No ready media available. U
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_thumbnail_uploaded = () => `Thumbnail uploaded`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const media_picker_placeholder = () => `Select media...`
 
 

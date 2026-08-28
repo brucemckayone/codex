@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import { AUTH_COOKIES, COOKIES } from '@codex/constants';
+import { COOKIES } from '@codex/constants';
 import { createDbClient, type DbEnvVars, schema } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 
@@ -8,6 +8,7 @@ const fallbackObs = new ObservabilityClient('session-auth');
 
 import { and, eq, gt } from 'drizzle-orm';
 import type { Context, Next } from 'hono';
+import { extractSessionCookie } from './session-cookie';
 
 /**
  * Auth-row shape: the session record as joined from the database during
@@ -72,8 +73,10 @@ function isCachedSessionData(value: unknown): value is CachedSessionData {
  */
 export interface SessionAuthConfig {
   /**
-   * KV namespace for session caching (optional)
-   * If not provided, sessions will be queried from database on every request
+   * KV namespace holding the BetterAuth-owned session cache (optional).
+   * Read-only from here — see `getSessionFromCache` for the ownership rule.
+   * If not provided (and `env.AUTH_SESSION_KV` is absent), sessions are
+   * queried from the database on every request.
    */
   kv?: KVNamespace;
 
@@ -87,60 +90,6 @@ export interface SessionAuthConfig {
    * When enabled, logs will NOT include sensitive session data
    */
   enableLogging?: boolean;
-}
-
-/**
- * Extract session cookie from request headers
- *
- * SECURITY: Uses regex to safely extract cookie value without eval or injection risks
- *
- * BetterAuth Format: The cookie value is `{token}.{signature}` format.
- * We extract only the token part (before the dot) for database queries,
- * as BetterAuth stores just the token in the sessions table.
- *
- * @param cookieHeader - Raw Cookie header value
- * @param cookieName - Name of the session cookie
- * @returns Session token or null if not found
- */
-function extractSessionCookie(
-  cookieHeader: string | undefined,
-  cookieName: string
-): string | null {
-  if (!cookieHeader) return null;
-
-  const cookieNames = [
-    cookieName,
-    `__Secure-${cookieName}`,
-    AUTH_COOKIES.BETTER_AUTH,
-    `__Secure-${AUTH_COOKIES.BETTER_AUTH}`,
-  ];
-  let matchedValue: string | null = null;
-
-  for (const name of new Set(cookieNames)) {
-    // SECURITY: Escape special regex characters in cookie name
-    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`${escapedName}=([^;]+)`);
-    const match = cookieHeader.match(regex);
-
-    if (match?.[1]) {
-      matchedValue = match[1];
-      break;
-    }
-  }
-
-  if (!matchedValue) return null;
-
-  // URL decode the cookie value first
-  const decodedValue = decodeURIComponent(matchedValue);
-
-  // BetterAuth uses `{token}.{signature}` format - extract just the token
-  // The token part is stored in the database
-  const dotIndex = decodedValue.indexOf('.');
-  if (dotIndex > 0) {
-    return decodedValue.substring(0, dotIndex);
-  }
-
-  return decodedValue;
 }
 
 /**
@@ -230,53 +179,24 @@ async function querySessionFromDatabase(
 }
 
 /**
- * Cache session data in KV with TTL based on session expiration
+ * Retrieve a session from the shared AUTH_SESSION_KV cache.
  *
- * SECURITY:
- * - Uses session expiration time as KV TTL to auto-cleanup
- * - Cache key format: `session:${token}` for namespacing
+ * OWNERSHIP: BetterAuth's `secondaryStorage` adapter — `createKVSecondaryStorage`
+ * from this package, wired in `workers/auth/src/auth-config.ts` — is the ONLY
+ * writer of session entries in this namespace. It stores them under the bare
+ * session token as `{ session, user }`, with a KV TTL equal to the session's
+ * remaining lifetime, and deletes them on sign-out / revocation. This
+ * middleware is a read-only consumer of those entries.
  *
- * @param kv - KV namespace
- * @param sessionToken - Session token (used as cache key)
- * @param data - Session and user data to cache
- * @param obs - Optional observability client for structured logging
- */
-async function cacheSessionInKV(
-  kv: KVNamespace,
-  sessionToken: string,
-  data: CachedSessionData,
-  obs?: ObservabilityClient
-): Promise<void> {
-  try {
-    // Calculate TTL in seconds until session expires
-    const expiresAt =
-      typeof data.session.expiresAt === 'string'
-        ? new Date(data.session.expiresAt)
-        : data.session.expiresAt;
-
-    const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
-
-    // SECURITY: Only cache if TTL is positive (session not expired)
-    if (ttl > 0) {
-      await kv.put(`session:${sessionToken}`, JSON.stringify(data), {
-        expirationTtl: ttl,
-      });
-    }
-  } catch (error) {
-    // SECURITY: Cache failure should not break authentication flow
-    // Log error but continue (graceful degradation to database-only mode)
-    obs?.error('Failed to cache session in KV', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-      // SECURITY: Don't log session token or data
-    });
-  }
-}
-
-/**
- * Retrieve session from KV cache
+ * History (Codex-kgrdp.7): this module used to be a second writer, keyed
+ * `session:${token}`, and probed that key BEFORE the bare token. A census of
+ * AUTH_SESSION_KV in production on 2026-08-26 found 8 keys and zero with a
+ * `session:` prefix, so the prefixed probe was a guaranteed miss that doubled
+ * the KV reads on every session validation. Reconciled to one namespace, one
+ * writer, one read.
  *
  * @param kv - KV namespace
- * @param sessionToken - Session token (cache key)
+ * @param sessionToken - Session token (the cache key BetterAuth writes)
  * @param obs - Optional observability client for structured logging
  * @returns Cached session data or null if not found
  */
@@ -286,18 +206,15 @@ async function getSessionFromCache(
   obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
-    const keys = [`session:${sessionToken}`, sessionToken];
-    for (const key of keys) {
-      const cached = await kv.get(key, 'json');
-      if (isCachedSessionData(cached)) {
-        return cached;
-      }
-    }
-    return null;
+    const cached = await kv.get(sessionToken, 'json');
+    return isCachedSessionData(cached) ? cached : null;
   } catch (error) {
-    // SECURITY: Cache read failure should not break authentication
-    obs?.error('Failed to read session from KV', {
+    // SECURITY: Cache read failure must not break authentication — fall
+    // through to the database. Log through the module fallback when no
+    // request-scoped client is present so a degraded KV never fails silently.
+    (obs ?? fallbackObs).error('Failed to read session from KV', {
       error: error instanceof Error ? error.message : 'Unknown error',
+      // SECURITY: Don't log the session token
     });
     return null;
   }
@@ -311,7 +228,8 @@ async function getSessionFromCache(
  *
  * SECURITY FEATURES:
  * - Validates session expiration from database
- * - Uses KV cache for performance (with database fallback)
+ * - Reads (never writes) the BetterAuth-owned session cache in
+ *   AUTH_SESSION_KV for performance, with database fallback
  * - Gracefully handles cache failures (degrades to DB-only)
  * - Gracefully handles database errors (proceeds without auth)
  * - Never exposes sensitive data in errors
@@ -370,23 +288,18 @@ export function optionalAuth(config?: SessionAuthConfig) {
           c.set('user', cachedSession.user);
           return next();
         } else {
-          // SECURITY: Expired session in cache - clear it
-          if (enableLogging) {
-            obs?.warn('Expired session found in cache', {
-              userId: cachedSession.user.id,
-              expiresAt: cachedSession.session.expiresAt,
-            });
-          }
-          // Don't await - fire and forget cache cleanup
-          try {
-            kv.delete(`session:${sessionToken}`).catch((err: unknown) =>
-              obs?.error('Failed to delete expired session from cache', {
-                error: err instanceof Error ? err.message : String(err),
-              })
-            );
-          } catch {
-            // Ignore synchronous errors (e.g., if delete is not a function)
-          }
+          // SECURITY: An expired cached session must not authenticate — fall
+          // through to the database, which re-checks against current state.
+          //
+          // We deliberately do NOT delete the entry: BetterAuth owns this
+          // namespace and set the entry's KV TTL from the same expiry, so KV
+          // reaps it on its own within the expiration lag. Deleting here would
+          // make this read-only consumer a writer again (Codex-kgrdp.7) and
+          // spend a KV write on the auth hot path to no effect.
+          (obs ?? fallbackObs).warn('Expired session found in cache', {
+            userId: cachedSession.user.id,
+            expiresAt: cachedSession.session.expiresAt,
+          });
         }
       }
     }
@@ -415,20 +328,16 @@ export function optionalAuth(config?: SessionAuthConfig) {
       c.set('session', sessionData.session);
       c.set('user', sessionData.user);
 
-      // Cache it for next time (if KV available)
-      if (kv) {
-        // Don't await - fire and forget cache write
-        cacheSessionInKV(kv, sessionToken, sessionData, obs).catch((err) =>
-          obs?.error('Failed to cache session', {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-      }
+      // No cache write-back: BetterAuth's secondaryStorage is the single
+      // owner of session entries in AUTH_SESSION_KV (see getSessionFromCache).
+      // It populates the entry inside the auth worker's own request, where the
+      // write is awaited; the fire-and-forget write this middleware used to do
+      // was cancelled with the request context and never landed.
 
       if (enableLogging) {
         (obs ?? fallbackObs).info('Session authenticated', {
           userId: sessionData.user.id,
-          method: kv ? 'database' : 'database-only',
+          cache: kv ? 'miss' : 'unavailable',
         });
       }
     } else {

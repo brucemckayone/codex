@@ -1,7 +1,6 @@
 import {
   CSP_PRESETS,
   RATE_LIMIT_PRESETS,
-  rateLimit,
   securityHeaders,
 } from '@codex/security';
 import { Hono } from 'hono';
@@ -72,31 +71,16 @@ describe('Stripe Webhook Handler - Security Integration', () => {
     });
   });
 
-  describe('Rate Limiting Middleware', () => {
-    it('should apply rate limiting with webhook preset', async () => {
-      const app = new Hono();
-
-      // Apply rate limiting (same config as worker)
-      app.use('*', (c, next) => {
-        return rateLimit({
-          kv: undefined, // Falls back to in-memory
-          ...RATE_LIMIT_PRESETS.webhook,
-        })(c, next);
-      });
-
-      app.get('/test', (c) => c.text('OK'));
-
-      const res = await app.request('/test');
-
-      // Verify rate limit headers are present
-      expect(res.headers.get('x-ratelimit-limit')).toBe('1000');
-      expect(res.headers.get('x-ratelimit-remaining')).toBeTruthy();
-    });
-
-    it('should use webhook preset (1000 req/min)', () => {
-      // Verify the preset configuration is correct
-      expect(RATE_LIMIT_PRESETS.webhook.maxRequests).toBe(1000);
-      expect(RATE_LIMIT_PRESETS.webhook.windowMs).toBe(60 * 1000); // 1 minute
+  describe('Rate Limiting', () => {
+    // This worker deliberately mounts NO rate-limit middleware any more
+    // (Codex-kgrdp.17). The Stripe webhook is authenticated by its HMAC
+    // signature, so a per-IP cap adds no security and can only reject a
+    // legitimate retry burst — which is why the `webhook` preset was deleted
+    // rather than re-pointed at the new substrate. Its mutation routes are
+    // capped by the `strict` preset they declare, enforced by procedure()
+    // (see routes/__tests__/rate-limits.test.ts).
+    it('does not offer a webhook preset to re-mount on /webhooks/*', () => {
+      expect(RATE_LIMIT_PRESETS).not.toHaveProperty('webhook');
     });
   });
 

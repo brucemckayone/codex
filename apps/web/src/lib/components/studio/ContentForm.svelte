@@ -30,6 +30,7 @@
   } from '$lib/remote/content.remote';
   import { getMyConnectStatus } from '$lib/remote/subscription.remote';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
+  import { keepValuesOnSave } from '$lib/utils/remote-form';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
 
@@ -82,6 +83,23 @@
 
   const isEdit = $derived(!!content);
   const form = $derived(isEdit ? updateContentForm : createContentForm);
+
+  /**
+   * Attributes for the <form> element — deliberately NOT the bare `{...form}`
+   * spread, whose default attachment calls `HTMLFormElement.reset()` after
+   * every successful save. Every input here is driven by
+   * `fields.<name>.as(...)`, so reset() blanked the whole form and re-derived
+   * the field state from the empty DOM; the next Save then posted an empty
+   * title + slug and the server rejected it ("Title is required" / "Slug is
+   * required"). See `keepValuesOnSave` for the full mechanism. (Codex-1g5lh.2)
+   *
+   * Built ONCE per branch rather than inside the `$derived`: `enhance()` mints
+   * a fresh attachment key on every call, and a key that changed identity on
+   * re-render would tear down and re-install the submit listener each time.
+   */
+  const createFormAttrs = keepValuesOnSave(createContentForm);
+  const updateFormAttrs = keepValuesOnSave(updateContentForm);
+  const formAttrs = $derived(isEdit ? updateFormAttrs : createFormAttrs);
 
   // Stripe Connect payout readiness gates the paid/subscriber access options
   // (Codex-eb00a.10). The backend authoritatively blocks publishing monetised
@@ -207,23 +225,39 @@
         });
       });
     } else if (!isEdit) {
-      createContentForm.fields.set({
-        organizationId: organizationId ?? '',
-        title: '',
-        slug: '',
-        description: '',
-        contentType: 'video',
-        mediaItemId: '',
-        contentBody: '',
-        accessType: 'free',
-        visibility: 'public',
-        price: '0.00',
-        category: '',
-        categoryIds: '[]',
-        tags: '[]',
-        thumbnailUrl: '',
-        shaderPreset: '',
-        featured: '',
+      // Symmetrical with the edit branch above, which set the flag and
+      // untracked its write; this branch did neither. `form()` is a MODULE
+      // singleton whose field state outlives this component, so a fresh
+      // /content/new must start from blanks — but ONCE. Unflagged, the effect
+      // re-ran on any change to a tracked read (`organizationId`, the `content`
+      // prop) and re-blanked whatever the creator had typed. Both /content/new
+      // pages happen to pass values that never change after mount, so this was
+      // latent rather than live — the flag closes it anyway, and costs nothing:
+      // the `organizationId` the server sees comes from the hidden input below,
+      // not from this seed, so pinning the seed to one run cannot stale it.
+      // `untrack` is defence in depth (a root `fields.set` is a pure write to
+      // kit's field state today, so it creates no dependency of its own) and
+      // keeps the two branches readable as one shape. (Codex-1g5lh.2)
+      formInitialized = true;
+      untrack(() => {
+        createContentForm.fields.set({
+          organizationId: organizationId ?? '',
+          title: '',
+          slug: '',
+          description: '',
+          contentType: 'video',
+          mediaItemId: '',
+          contentBody: '',
+          accessType: 'free',
+          visibility: 'public',
+          price: '0.00',
+          category: '',
+          categoryIds: '[]',
+          tags: '[]',
+          thumbnailUrl: '',
+          shaderPreset: '',
+          featured: '',
+        });
       });
     }
   });
@@ -471,7 +505,7 @@
 
 <div class="content-page">
   <form
-    {...form}
+    {...formAttrs}
     bind:this={layoutEl}
     class="content-form-layout"
     novalidate

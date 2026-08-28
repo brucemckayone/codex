@@ -27,11 +27,26 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
-  function save(): void {
+  /**
+   * Write the element's current position to the local progress collection.
+   *
+   * `contentId` may be given EXPLICITLY because a player instance can outlive
+   * the item it is playing. On in-course navigation the parent swaps `src` and
+   * `contentId` on the SAME component instance, so by the time the outgoing
+   * media is flushed `getContentId()` already answers with the INCOMING item —
+   * saving then files the old item's position against the new item and
+   * corrupts its resume point. Any caller handing one item off to another
+   * passes the OUTGOING id.
+   */
+  function save(contentId?: string): void {
     const video = getMedia();
     if (!video || !video.duration || Number.isNaN(video.duration)) return;
 
-    updateLocalProgress(getContentId(), video.currentTime, video.duration);
+    updateLocalProgress(
+      contentId ?? getContentId(),
+      video.currentTime,
+      video.duration
+    );
   }
 
   function startInterval(): void {
@@ -88,7 +103,14 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     }
   }
 
-  function detach(): void {
+  /**
+   * Stop listening and flush one last save.
+   *
+   * @param flushAs - Content id the final save belongs to. Pass the OUTGOING
+   *   item's id when detaching because the player is being handed to a new
+   *   item (see `save`); omit it for a plain teardown.
+   */
+  function detach(flushAs?: string | null): void {
     const video = getMedia();
     if (video) {
       video.removeEventListener('play', handlePlay);
@@ -103,7 +125,7 @@ export function createProgressTracker(options: ProgressTrackerOptions) {
     stopInterval();
 
     // Final save on detach
-    save();
+    save(flushAs ?? undefined);
   }
 
   return {

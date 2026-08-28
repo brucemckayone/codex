@@ -14,7 +14,16 @@ interface ErrorConstructorWithStackTrace {
 /**
  * Valid HTTP error status codes for API responses
  */
-export type ErrorStatusCode = 400 | 401 | 402 | 403 | 404 | 409 | 422 | 500;
+export type ErrorStatusCode =
+  | 400
+  | 401
+  | 402
+  | 403
+  | 404
+  | 409
+  | 422
+  | 429
+  | 500;
 
 /**
  * Base error class for all service errors
@@ -106,6 +115,26 @@ export class ConflictError extends ServiceError {
 }
 
 /**
+ * Rate limit exceeded error (429)
+ * Thrown when the rate-limit preset declared by a route's policy is exhausted.
+ *
+ * Lives here rather than at the enforcement site so `procedure()` can map it
+ * through the normal envelope: `mapErrorToResponse()` forwards `statusCode`
+ * untouched, and `context.retryAfter` reaches the client as
+ * `details.retryAfter` alongside the `Retry-After` header.
+ */
+export class RateLimitExceededError extends ServiceError {
+  constructor(retryAfterSeconds: number, context?: Record<string, unknown>) {
+    super(
+      `Rate limit exceeded. Try again in ${retryAfterSeconds} seconds.`,
+      'RATE_LIMIT_EXCEEDED',
+      429,
+      { retryAfter: retryAfterSeconds, ...context }
+    );
+  }
+}
+
+/**
  * Business logic error (422)
  * Thrown when operation violates business rules
  */
@@ -150,6 +179,46 @@ export class UnsupportedCurrencyError extends ServiceError {
     );
     this.received = received;
     this.supported = supported;
+  }
+}
+
+/**
+ * Stripe is not configured on this worker (500)
+ *
+ * Thrown when a Stripe-backed service is asked to make a real Stripe call but
+ * the worker has no `STRIPE_SECRET_KEY` binding. This is an OPERATOR
+ * misconfiguration — a deploy that never provisioned the secret — not a client
+ * error, so the status stays an honest 500. What changes is the `code`.
+ *
+ * Codex-1g5lh.1: `organization-api-production` was deployed without
+ * `STRIPE_SECRET_KEY` (the deploy workflow uploaded it to ecom-api only), so
+ * `POST /api/organizations/:id/tiers` reached
+ * `stripe.products.create` and the service registry threw a PLAIN `Error`.
+ * `mapErrorToResponse` masks any non-`ServiceError` as
+ * `500 INTERNAL_ERROR / "An unexpected error occurred"`, which is
+ * indistinguishable from a DB fault, a Stripe outage or a genuine bug — the
+ * owner saw a bare 500 with nothing to act on. A typed error with a stable code
+ * makes the next occurrence triageable straight off the wire.
+ *
+ * Deliberately says nothing about WHICH binding is missing: `mapErrorToResponse`
+ * forwards a `ServiceError`'s `message` AND its `context` to the client
+ * verbatim, so both must stay free of configuration and secret material. The
+ * `STRIPE_NOT_CONFIGURED` code is the operator's pointer; the remediation lives
+ * in each worker's `wrangler.jsonc` secret block.
+ *
+ * Distinct from `ConnectPlatformNotConfiguredError` (@codex/subscription), which
+ * means the platform's Stripe account exists but has not been enabled for
+ * Connect. Different cause, different fix — hence a separate code rather than
+ * reusing that one.
+ */
+export class StripeNotConfiguredError extends ServiceError {
+  constructor(context?: Record<string, unknown>) {
+    super(
+      'Payment processing is not available right now. Please try again later or contact support.',
+      'STRIPE_NOT_CONFIGURED',
+      500,
+      context
+    );
   }
 }
 

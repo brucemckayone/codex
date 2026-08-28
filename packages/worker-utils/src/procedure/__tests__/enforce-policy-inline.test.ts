@@ -38,8 +38,31 @@ vi.mock('../org-helpers', () => ({
     `membership:${orgId}:${userId}`,
 }));
 
+// `enforcePolicyInline` now also pulls the rate limiter out of @codex/security,
+// and a vi.mock factory is closed — every export the SUT destructures has to be
+// present here or the whole file dies on a TypeError. The subject resolvers
+// return null so `enforceRateLimit` short-circuits before it reaches a store:
+// enforcement itself is proven in procedure-rate-limit.test.ts against the REAL
+// limiter. `RATE_LIMIT_PRESETS` is stubbed anyway so this file cannot depend on
+// that ordering.
 vi.mock('@codex/security', () => ({
   workerAuth: vi.fn(),
+  RATE_LIMIT_PRESETS: {
+    api: {
+      store: 'binding',
+      maxRequests: 100,
+      periodSeconds: 60,
+      bindingName: 'RATE_LIMIT_API',
+      keyPrefix: 'rl:api:',
+    },
+  },
+  rateLimit: () => async (_c: unknown, next: () => Promise<void>) => {
+    await next();
+    return undefined;
+  },
+  combineSubjects: () => () => null,
+  sessionSubject: () => () => null,
+  trustedIpSubject: () => () => null,
 }));
 
 vi.mock('@codex/database', () => ({

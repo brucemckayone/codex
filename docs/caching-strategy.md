@@ -96,6 +96,53 @@ cache:{type}:{id}:v{version}     → cached data
 
 **Invalidation:** bump the version key → all old versioned data instantly stale → expires via TTL. Single atomic KV write.
 
+### The data-slot write MUST be handed a `waitUntil` (Codex-e32xz)
+
+`get()` / `getWithResult()` do NOT await their data-slot put — a cache write must
+never add latency to a cache-miss response. In workerd an un-awaited promise is
+not merely slower, it is **cancelled**: the request's IoContext is destroyed the
+moment the response is returned.
+
+That is a real production outage, not a theory. A census of
+`CACHE_KV_PRODUCTION` found **62 version keys and 0 data keys** — the version key
+is written with `await` three lines earlier in the same function, in the same
+namespace, in the same request, so the only difference was the await. The cache
+had a literal 0% hit rate: every request paid the full DB cost AND the KV reads.
+
+So on any READ path, construct the cache with a `waitUntil`:
+
+```ts
+// In a procedure() handler
+const cache = new VersionedCache({
+  kv: ctx.env.CACHE_KV,
+  waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+});
+
+// In a SvelteKit server load (platform.context is absent under vite dev)
+const cache = new VersionedCache({
+  kv: platform.env.CACHE_KV as KVNamespace,
+  waitUntil: platform.context
+    ? (p: Promise<unknown>) => platform.context.waitUntil(p)
+    : undefined,
+});
+```
+
+`waitUntil` is **not** `ctx.background`. `ctx.background` exists so DB work
+finishes before `procedure()` tears down the per-request Postgres pool; chaining
+a KV put onto it would hold a DB connection open for the duration of a KV write
+for no reason. A KV put touches no pool, so plain `waitUntil` is correct.
+
+Every `VersionedCache` built by the service registry gets this automatically.
+`waitUntil` stays optional so invalidate-only call sites and unit tests are
+unaffected — they keep the old best-effort, non-blocking behaviour.
+
+**Corollary: never cache a class instance.** The cache round-trips values through
+`JSON.stringify`/`JSON.parse`, so class identity does not survive a hit. Caching a
+`PaginatedResult` made `procedure()`'s `instanceof` check fail on every hit and
+silently degraded the list envelope to `{ data: { items, pagination } }`. Cache the
+plain `{ items, pagination }` and re-wrap in `new PaginatedResult(...)` **after**
+the cache call.
+
 **Currently wired up:**
 - `IdentityService.getProfile()` → `USER_PROFILE`, 10 min TTL
 - `IdentityService.getNotificationPreferences()` → `USER_PREFERENCES`, 10 min TTL

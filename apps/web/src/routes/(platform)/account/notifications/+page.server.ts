@@ -19,8 +19,20 @@ export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
     redirect(303, '/login?redirect=/account/notifications');
   }
 
+  // `waitUntil` is what makes the cache-aside WRITE survive (Codex-e32xz):
+  // `getWithResult` does not await its data-slot put, and the Workers runtime
+  // cancels un-awaited work the moment the response is returned. `platform`
+  // (and its `context`) is absent under `vite dev`, so this stays optional —
+  // VersionedCache then keeps its old best-effort behaviour.
+  const cacheWaitUntil = platform?.context
+    ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+    : undefined;
+
   const cache = platform?.env?.CACHE_KV
-    ? new VersionedCache({ kv: platform.env.CACHE_KV as KVNamespace })
+    ? new VersionedCache({
+        kv: platform.env.CACHE_KV as KVNamespace,
+        waitUntil: cacheWaitUntil,
+      })
     : null;
 
   const api = createServerApi(platform, cookies);

@@ -29,7 +29,7 @@ import {
  *              activates real-Stripe Connect; chargesEnabled=true).
  *
  * Prereqs:
- *   - auth-worker (42069), organization-api (42075), ecom-api (42072) up
+ *   - auth-worker (42069), organization-api (42071), ecom-api (42072) up
  *     (playwright.config.ts auto-starts these on local).
  *   - SvelteKit dev server on lvh.me:5173 (also auto-started).
  *   - For 1.c: `pnpm db:seed` has run with STRIPE_SECRET_KEY set.
@@ -76,11 +76,11 @@ test.describe('Studio Stripe Connect Onboarding', () => {
       test.skip(true, 'Ecom-api worker not running on port 42072');
     }
     try {
-      const res = await request.get('http://localhost:42075/health');
+      const res = await request.get('http://localhost:42071/health');
       if (!res.ok())
-        test.skip(true, 'Organization-api worker not running on port 42075');
+        test.skip(true, 'Organization-api worker not running on port 42071');
     } catch {
-      test.skip(true, 'Organization-api worker not running on port 42075');
+      test.skip(true, 'Organization-api worker not running on port 42071');
     }
 
     // One fresh org-owner user with NO Connect account yet.

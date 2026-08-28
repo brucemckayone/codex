@@ -8,8 +8,10 @@
 
 import { AUTH_ROLES, ERROR_CODES } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
+import type { RateLimitPresetName } from '@codex/security';
 import {
   ForbiddenError,
+  RateLimitExceededError,
   UnauthorizedError,
   ValidationError,
 } from '@codex/service-errors';
@@ -158,6 +160,86 @@ export function enforceIPWhitelist(
       clientIP,
     });
   }
+}
+
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+/**
+ * Enforce the preset declared in `policy.rateLimit` (Codex-kgrdp.9).
+ *
+ * The field was declared on ~150 routes and read by nothing: `mergedPolicy`
+ * carried it and no branch below consumed it, so every `rateLimit: 'strict'`
+ * on Stripe Checkout, Connect onboarding and subscriptions was decorative.
+ *
+ * What the counter is keyed on follows the auth level, because the auth level
+ * is what decides which subject exists at all:
+ *   - `auth: 'none'`  → the transport address, the only subject available
+ *   - everything else → the session, with the address as a second signal
+ *
+ * `auth: 'worker'` is exempt. That caller is HMAC-authenticated and internal,
+ * so a per-hop cap adds no security and can only break a legitimate fan-out —
+ * the same reason the `webhook` preset was deleted.
+ *
+ * A limiter fault does NOT block: `rateLimit()` fails open and emits
+ * `RATE_LIMIT_FAIL_OPEN_SIGNAL` at error level, per the platform decision that
+ * an unavailable backend must not turn every endpoint into a 429.
+ *
+ * @throws RateLimitExceededError when the preset's budget is exhausted
+ */
+async function enforceRateLimit(
+  c: Context<HonoEnv>,
+  preset: RateLimitPresetName,
+  authLevel: AuthLevel,
+  obs?: ObservabilityClient
+): Promise<void> {
+  const {
+    combineSubjects,
+    RATE_LIMIT_PRESETS,
+    rateLimit,
+    sessionSubject,
+    trustedIpSubject,
+  } = await import('@codex/security');
+
+  const resolveSubjects =
+    authLevel === 'none'
+      ? trustedIpSubject()
+      : combineSubjects(sessionSubject(), trustedIpSubject());
+
+  const resolved = await resolveSubjects(c);
+  const subjects = Array.isArray(resolved)
+    ? resolved
+    : resolved
+      ? [resolved]
+      : [];
+
+  // Nothing countable: an anonymous request that arrived over a worker hop, or
+  // from a Cloudflare egress address (see `trustedClientIp`) — which is every
+  // SSR-driven public read. The real client sits upstream of that hop, so
+  // there is nothing to throttle at this layer, and letting the middleware
+  // announce a fail-open on each of them would bury the signal that exists to
+  // catch a genuinely dead backend.
+  if (subjects.length === 0) return;
+
+  const config = RATE_LIMIT_PRESETS[preset];
+  const env = c.env;
+
+  const enforce = rateLimit({
+    preset,
+    // Already resolved above — the middleware would otherwise redo the work.
+    subject: () => subjects,
+    binding: config.store === 'binding' ? env[config.bindingName] : undefined,
+    namespace:
+      config.store === 'durable-object' ? env.RATE_LIMIT_DO : undefined,
+    obs,
+    handler: (blockedCtx, decision) => {
+      blockedCtx.header('Retry-After', decision.retryAfterSeconds.toString());
+      throw new RateLimitExceededError(decision.retryAfterSeconds, { preset });
+    },
+  });
+
+  await enforce(c, async () => {});
 }
 
 // ============================================================================
@@ -417,15 +499,19 @@ async function enforceOrganizationAccess(
  * so that individual branches are testable and readable. Execution order:
  *
  *   1. IP whitelist
- *   2. `auth: 'none'`            → short-circuit return
- *   3. `auth: 'worker'`          → HMAC via workerAuth, return
+ *   2. `auth: 'none'`            → rate limit on the address, return
+ *   3. `auth: 'worker'`          → HMAC via workerAuth, return (exempt)
  *   4. Session auth              → required|optional|platform_owner
- *   5. `auth: 'optional'`        → short-circuit return
- *   6. Platform-owner role gate + auto-resolve org
- *   7. Role-based access control
- *   8. Organization membership (+management)
+ *   5. Rate limit                → keyed on the session, address as a second
+ *                                  signal; before the org lookups so a
+ *                                  throttled caller does not pay for them
+ *   6. `auth: 'optional'`        → short-circuit return
+ *   7. Platform-owner role gate + auto-resolve org
+ *   8. Role-based access control
+ *   9. Organization membership (+management)
  *
  * @throws UnauthorizedError | ForbiddenError | ValidationError
+ * @throws RateLimitExceededError when the declared preset is exhausted
  */
 export async function enforcePolicyInline(
   c: Context<HonoEnv>,
@@ -437,7 +523,9 @@ export async function enforcePolicyInline(
     roles: policy.roles ?? [],
     requireOrgMembership: policy.requireOrgMembership ?? false,
     requireOrgManagement: policy.requireOrgManagement ?? false,
-    rateLimit: policy.rateLimit ?? 'api',
+    // Consumed by enforceRateLimit below. The 'api' fallback is the policy an
+    // undeclared route inherits — 100 requests/minute per subject.
+    rateLimit: policy.rateLimit ?? ('api' as RateLimitPresetName),
     allowedIPs: policy.allowedIPs ?? [],
   };
 
@@ -445,7 +533,10 @@ export async function enforcePolicyInline(
     enforceIPWhitelist(getClientIP(c), mergedPolicy.allowedIPs);
   }
 
-  if (mergedPolicy.auth === 'none') return;
+  if (mergedPolicy.auth === 'none') {
+    await enforceRateLimit(c, mergedPolicy.rateLimit, 'none', obs);
+    return;
+  }
 
   if (mergedPolicy.auth === 'worker') {
     await authenticateWorker(c);
@@ -456,6 +547,8 @@ export async function enforcePolicyInline(
     mergedPolicy.auth === 'required' ||
     mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER;
   await authenticateSession(c, requiresSession);
+
+  await enforceRateLimit(c, mergedPolicy.rateLimit, mergedPolicy.auth, obs);
 
   if (mergedPolicy.auth === 'optional') return;
 

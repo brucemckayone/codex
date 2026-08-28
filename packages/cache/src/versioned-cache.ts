@@ -10,9 +10,46 @@
  * - Works naturally across distributed workers
  * - Old keys expire via TTL automatically
  *
+ * ## KV economics — read this before changing an op count
+ *
+ * The daily KV quota is billed PER CLOUDFLARE ACCOUNT, so every worker in the
+ * account (including dev workers) draws on production's allowance. The two
+ * buckets are wildly asymmetric:
+ *
+ * | bucket                      | free tier / day |
+ * |-----------------------------|-----------------|
+ * | keys read                   | 100,000         |
+ * | keys written **+ deleted**  | 1,000           |
+ *
+ * A read is therefore worth 1/100th of a write. Two consequences drive the
+ * shape of this class:
+ *
+ * 1. **The read path must never spend a write on bookkeeping.** A cache HIT
+ *    costs 2 reads (version key, then versioned data key) and ZERO writes. The
+ *    2 reads are inherent to entity-level version indirection — the reader
+ *    cannot know which data key is current without reading the version first,
+ *    and collapsing them would mean giving up one-write-invalidates-everything
+ *    (Codex-kgrdp.4). At 2 reads per hit the read bucket supports ~50k hits/day,
+ *    which is an order of magnitude more headroom than 1,000 writes gives. Reads
+ *    are not the binding constraint; writes are. Do not contort the key layout
+ *    chasing the second read.
+ * 2. **A cache is most wasteful at LOW traffic**, which is the opposite of the
+ *    usual intuition. Under sustained load a data slot is written once and read
+ *    many times. At near-zero traffic each entity is read once, the slot expires
+ *    unread, and the next read pays for the write all over again — the cache is
+ *    pure overhead. Nothing in this class can fix that; it is a property of TTL
+ *    caching. What this class MUST avoid is amplifying it, which is what
+ *    Codex-kgrdp.5 was: see {@link VersionedCache.invalidate}.
+ *
  * @example
  * ```typescript
- * const cache = new VersionedCache({ kv: env.CACHE_KV });
+ * // ALWAYS pass waitUntil on a READ path — without it the data-slot write is
+ * // cancelled when the response returns and the cache never gets a hit
+ * // (Codex-e32xz).
+ * const cache = new VersionedCache({
+ *   kv: env.CACHE_KV,
+ *   waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+ * });
  *
  * // Get with cache-aside (fetcher called on miss)
  * const profile = await cache.get(
@@ -32,7 +69,11 @@ import type {
   KVNamespacePutOptions,
 } from '@cloudflare/workers-types';
 import type { ObservabilityClient } from '@codex/observability';
-import { buildVersionedCacheKey, buildVersionKey } from './cache-keys';
+import {
+  BASE_VERSION,
+  buildVersionedCacheKey,
+  buildVersionKey,
+} from './cache-keys';
 import type { CacheOptions, CacheResult, VersionedCacheConfig } from './types';
 
 /**
@@ -41,9 +82,17 @@ import type { CacheOptions, CacheResult, VersionedCacheConfig } from './types';
 const DEFAULT_TTL = 600;
 
 /**
- * Default TTL for version keys (1 day)
+ * Outcome of the two-read version+data lookup.
+ *
+ * `cacheKey` is `null` ONLY when KV itself was unreachable. That distinction
+ * matters: with no version read there is no way to name the current slot, so a
+ * write would land under a key no reader will ever look up — a wasted write out
+ * of a 1,000/day budget. A `null` cacheKey means "serve the fetcher, write
+ * nothing".
  */
-const DEFAULT_VERSION_TTL = 86400;
+type CacheLookup =
+  | { hit: true; value: unknown; cacheKey: string }
+  | { hit: false; cacheKey: string | null };
 
 /**
  * Versioned Cache Class
@@ -55,6 +104,7 @@ export class VersionedCache {
   private readonly kv: KVNamespace;
   private readonly prefix: string;
   private readonly obs?: ObservabilityClient;
+  private readonly waitUntil?: VersionedCacheConfig['waitUntil'];
 
   // Cache statistics (per-instance, not persisted)
   private stats = {
@@ -62,22 +112,129 @@ export class VersionedCache {
     hits: 0,
     misses: 0,
     invalidations: 0,
+    reads: 0,
+    writes: 0,
   };
 
   constructor(config: VersionedCacheConfig) {
     this.kv = config.kv;
     this.prefix = config.prefix ?? 'cache';
     this.obs = config.obs;
+    this.waitUntil = config.waitUntil;
+  }
+
+  /**
+   * Write one data slot after a cache miss — NEVER awaited by the caller.
+   *
+   * Codex-e32xz. The put used to be a bare floating promise. In workerd the
+   * request's IoContext is destroyed the moment the response is returned and
+   * every un-awaited task is cancelled, so the write never reached KV: a
+   * production census of `CACHE_KV_PRODUCTION` found 62 version keys (put with
+   * `await`, three lines earlier in the same function) and ZERO data keys. The
+   * cache therefore had a literal 0% hit rate and every request paid the full
+   * DB cost while still paying for the KV reads.
+   *
+   * The fix is `waitUntil`, not `await`: awaiting inline would add KV write
+   * latency to every miss response, which is precisely what the fire-and-forget
+   * was there to avoid. `waitUntil` keeps the response fast AND keeps the
+   * context alive until the put settles.
+   *
+   * When no `waitUntil` was supplied the promise is left floating exactly as
+   * before — best-effort, non-blocking, and never throwing. That keeps every
+   * existing consumer (unit tests, SvelteKit dev without a real
+   * ExecutionContext, helper call sites) working unchanged.
+   */
+  private writeCacheSlot(
+    cacheKey: string,
+    data: unknown,
+    ttl: number,
+    id: string,
+    type: string
+  ): void {
+    this.stats.writes++;
+    const write = this.kv
+      .put(cacheKey, JSON.stringify(data), {
+        expirationTtl: ttl,
+      } as KVNamespacePutOptions)
+      .catch((err) => {
+        this.obs?.warn('Cache write failed', {
+          id,
+          type,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+    if (!this.waitUntil) return;
+
+    // A caller-supplied waitUntil is foreign code. If it throws (a stale
+    // ExecutionContext, a Hono context with no executionCtx) the miss must
+    // still return its freshly fetched data — never re-enter the fetcher and
+    // never surface a cache-plumbing failure to the request.
+    try {
+      this.waitUntil(write);
+    } catch (err) {
+      this.obs?.warn('Cache write could not be scheduled on waitUntil', {
+        id,
+        type,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Resolve the current version for an entity — READ ONLY, never writes.
+   *
+   * Returns {@link BASE_VERSION} when no version key exists, which is the
+   * normal state for an entity that has never been invalidated. See
+   * {@link invalidate} for why the read path must not mint one.
+   */
+  private async readVersion(id: string): Promise<string> {
+    this.stats.reads++;
+    const version = await this.kv.get(buildVersionKey(id), 'text');
+    return version ?? BASE_VERSION;
+  }
+
+  /**
+   * The two KV reads that back every `get()` — version key, then data key.
+   *
+   * Never throws: a KV failure resolves to a miss with a `null` cacheKey so the
+   * caller serves the fetcher and skips the write.
+   */
+  private async lookup(id: string, type: string): Promise<CacheLookup> {
+    try {
+      const version = await this.readVersion(id);
+      const cacheKey = buildVersionedCacheKey(this.prefix, type, id, version);
+
+      this.stats.reads++;
+      const cached = await this.kv.get(cacheKey, 'json');
+
+      return cached === null
+        ? { hit: false, cacheKey }
+        : { hit: true, value: cached, cacheKey };
+    } catch (error) {
+      // Loud, and accurate about who failed: this branch is reached ONLY when a
+      // KV operation threw. A fetcher failure is deliberately not caught here
+      // — see getWithResult.
+      this.obs?.error('Cache lookup failed, serving from the fetcher', {
+        id,
+        type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { hit: false, cacheKey: null };
+    }
   }
 
   /**
    * Get cached data with automatic versioning
    *
    * Uses the cache-aside pattern:
-   * 1. Get current version (create if not exists)
-   * 2. Try cache with versioned key
+   * 1. Read the current version (BASE_VERSION when none exists — no write)
+   * 2. Try cache with the versioned key
    * 3. On miss, call fetcher and cache the result
-   * 4. On KV error, fallback to fetcher (graceful degradation)
+   * 4. On KV error, fall back to the fetcher (graceful degradation)
+   *
+   * Cost: 2 reads on a hit; 2 reads + 1 write on a miss; 2 reads and NO write
+   * when the fetcher throws.
    *
    * @param id - Entity identifier (userId, orgId, etc.)
    * @param type - Cache type (e.g., 'user:profile', 'org:config')
@@ -101,61 +258,8 @@ export class VersionedCache {
     fetcher: () => Promise<T>,
     options: CacheOptions = {}
   ): Promise<T> {
-    const { ttl = DEFAULT_TTL, versionTtl = DEFAULT_VERSION_TTL } = options;
-
-    this.stats.gets++;
-
-    try {
-      // Step 1: Get or create version
-      const versionKey = buildVersionKey(id);
-      let version = await this.kv.get(versionKey, 'text');
-
-      if (!version) {
-        version = String(Date.now());
-        await this.kv.put(versionKey, version, {
-          expirationTtl: versionTtl,
-        });
-      }
-
-      // Step 2: Try cache with versioned key
-      const cacheKey = buildVersionedCacheKey(this.prefix, type, id, version);
-      const cached = await this.kv.get(cacheKey, 'json');
-
-      if (cached !== null) {
-        this.stats.hits++;
-        this.obs?.debug('Cache hit', { id, type, cacheKey });
-        return cached as T;
-      }
-
-      // Step 3: Cache miss - fetch and cache
-      this.stats.misses++;
-      this.obs?.debug('Cache miss', { id, type, cacheKey });
-
-      const data = await fetcher();
-
-      // Fire-and-forget cache set (don't block on cache writes)
-      this.kv
-        .put(cacheKey, JSON.stringify(data), {
-          expirationTtl: ttl,
-        } as KVNamespacePutOptions)
-        .catch((err) => {
-          this.obs?.warn('Cache write failed', {
-            id,
-            type,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-
-      return data;
-    } catch (error) {
-      // Graceful degradation: log but don't fail
-      this.obs?.error('Cache get failed, falling back to fetcher', {
-        id,
-        type,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return fetcher();
-    }
+    const { data } = await this.getWithResult(id, type, fetcher, options);
+    return data;
   }
 
   /**
@@ -163,6 +267,10 @@ export class VersionedCache {
    *
    * Same as get() but returns a CacheResult with hit status.
    * Useful for monitoring cache effectiveness.
+   *
+   * This is the single implementation of the read path; `get()` delegates to
+   * it. The two used to carry byte-identical copies of the same body, which is
+   * how Codex-e32xz managed to exist twice and be fixed once.
    *
    * @param id - Entity identifier
    * @param type - Cache type
@@ -176,53 +284,90 @@ export class VersionedCache {
     fetcher: () => Promise<T>,
     options: CacheOptions = {}
   ): Promise<CacheResult<T>> {
-    const { ttl = DEFAULT_TTL, versionTtl = DEFAULT_VERSION_TTL } = options;
+    const { ttl = DEFAULT_TTL } = options;
 
     this.stats.gets++;
 
+    const lookup = await this.lookup(id, type);
+
+    if (lookup.hit) {
+      this.stats.hits++;
+      this.obs?.debug('Cache hit', { id, type, cacheKey: lookup.cacheKey });
+      return { data: lookup.value as T, hit: true };
+    }
+
+    this.stats.misses++;
+    this.obs?.debug('Cache miss', { id, type, cacheKey: lookup.cacheKey });
+
+    // The fetcher runs OUTSIDE any catch, deliberately.
+    //
+    // This used to sit inside a try whose catch re-invoked the fetcher, so a
+    // fetcher failure cost TWO round trips to the origin and logged "Cache get
+    // failed" — blaming KV for a DB or service error. Both halves matter under
+    // the bot traffic that opened this epic: `organizations.ts` uses the URL
+    // slug as the cache `id`, so an enumeration scan of bogus slugs doubled the
+    // DB queries AND buried the real NotFoundError signal. A fetcher error is
+    // the caller's to handle; it propagates untouched so `procedure()` still
+    // maps the typed ServiceError.
+    const data = await fetcher();
+
+    // `null` means the version read failed, so there is no key worth writing.
+    if (lookup.cacheKey !== null) {
+      this.writeCacheSlot(lookup.cacheKey, data, ttl, id, type);
+    }
+
+    return { data, hit: false };
+  }
+
+  /**
+   * Write-through: put a known-fresh value straight into the current slot.
+   *
+   * For the "I just mutated this row and I already hold the new value" case.
+   * Costs 1 read + 1 write, versus 2 writes + 2 reads for the
+   * invalidate-then-re-read pattern it replaces (Codex-kgrdp.8) — which spent
+   * its second write re-fetching from the DB a value the caller was already
+   * holding.
+   *
+   * Deliberately does NOT bump the version. A write-through only claims to
+   * refresh the ONE type it was handed; bumping would also stale every other
+   * type sharing this `id`, forcing each of them to spend a write of its own on
+   * its next read. When a mutation really does invalidate sibling types, call
+   * {@link invalidate} instead — or call it as well, and accept the cost
+   * knowingly.
+   *
+   * Awaits the put, so a caller's single `waitUntil(cache.set(...))` genuinely
+   * covers the write. Never throws: a failed write costs at most `ttl` seconds
+   * of staleness and must not fail the mutation that already succeeded.
+   *
+   * @param id - Entity identifier
+   * @param type - Cache type to refresh
+   * @param data - The value to store
+   * @param options - TTL options
+   */
+  async set<T>(
+    id: string,
+    type: string,
+    data: T,
+    options: CacheOptions = {}
+  ): Promise<void> {
+    const { ttl = DEFAULT_TTL } = options;
+
     try {
-      const versionKey = buildVersionKey(id);
-      let version = await this.kv.get(versionKey, 'text');
-
-      if (!version) {
-        version = String(Date.now());
-        await this.kv.put(versionKey, version, {
-          expirationTtl: versionTtl,
-        });
-      }
-
+      const version = await this.readVersion(id);
       const cacheKey = buildVersionedCacheKey(this.prefix, type, id, version);
-      const cached = await this.kv.get(cacheKey, 'json');
 
-      if (cached !== null) {
-        this.stats.hits++;
-        return { data: cached as T, hit: true };
-      }
+      this.stats.writes++;
+      await this.kv.put(cacheKey, JSON.stringify(data), {
+        expirationTtl: ttl,
+      } as KVNamespacePutOptions);
 
-      this.stats.misses++;
-      const data = await fetcher();
-
-      this.kv
-        .put(cacheKey, JSON.stringify(data), {
-          expirationTtl: ttl,
-        } as KVNamespacePutOptions)
-        .catch((err) => {
-          this.obs?.warn('Cache write failed', {
-            id,
-            type,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-
-      return { data, hit: false };
+      this.obs?.debug('Cache slot written', { id, type, cacheKey });
     } catch (error) {
-      this.obs?.error('Cache get failed, falling back to fetcher', {
+      this.obs?.warn('Cache set failed', {
         id,
         type,
         error: error instanceof Error ? error.message : String(error),
       });
-      const data = await fetcher();
-      return { data, hit: false };
     }
   }
 
@@ -231,6 +376,42 @@ export class VersionedCache {
    *
    * Single atomic write - all old keys become stale immediately.
    * Old keys will expire via TTL, so no manual cleanup needed.
+   *
+   * ## Version keys do not expire (Codex-kgrdp.5)
+   *
+   * This is the ONLY method that writes a version key, and it writes one with
+   * no `expirationTtl`. Both halves of that are load-bearing.
+   *
+   * The class used to carry two independent TTLs — `DEFAULT_TTL` at 600s and a
+   * `DEFAULT_VERSION_TTL` at 86400s, 144x larger — and the read path minted a
+   * version key whenever it found none. That produced three separate faults:
+   *
+   * - **A write on the read path.** `get()` awaited a version-key put on every
+   *   first read of an entity. Since `id` is sometimes caller-controlled (the
+   *   org slug in `organizations.ts`), a bot enumerating slugs could burn the
+   *   entire 1,000-write/day ACCOUNT budget in 1,000 requests — a remote quota
+   *   DoS against production, from the read path, for entities that do not
+   *   exist.
+   * - **Spurious client invalidation.** A minted version is `Date.now()`. When
+   *   the 86400s version key expired and the next read minted a fresh
+   *   timestamp, `getVersion()` reported a changed version with no underlying
+   *   data change, and every client tracking it refetched.
+   * - **A drift-dependent staleness bug.** If a data TTL ever exceeded the
+   *   version TTL, the version key could expire while data keys written before
+   *   the last bump were still alive — and reads would fall back to a version
+   *   that resurrected them. Correctness depended on two numbers, tuned in
+   *   different places, staying in the right order.
+   *
+   * The fix is structural rather than a retune: there is now exactly ONE TTL in
+   * this class. A version key is created only by an actual mutation and then
+   * outlives every data key it stales, forever and by construction, so the two
+   * cannot drift apart — there is no second number to drift. Reads resolve a
+   * missing version key to {@link BASE_VERSION} instead of writing one, so the
+   * read path spends zero writes and the enumeration vector closes.
+   *
+   * The cost is one permanent ~100-byte key per entity that has ever been
+   * mutated, against a 1GB storage allowance. Storage is the abundant resource
+   * here; writes are not.
    *
    * @param id - Entity identifier to invalidate
    *
@@ -244,9 +425,8 @@ export class VersionedCache {
     const newVersion = String(Date.now());
 
     try {
-      await this.kv.put(versionKey, newVersion, {
-        expirationTtl: DEFAULT_VERSION_TTL,
-      });
+      this.stats.writes++;
+      await this.kv.put(versionKey, newVersion);
 
       this.stats.invalidations++;
       this.obs?.info('Cache invalidated', { id, version: newVersion });
@@ -267,14 +447,18 @@ export class VersionedCache {
    * Works for both entity IDs (userId, orgId) and collection IDs
    * ('content:published', `org:${orgId}:content`).
    *
-   * Returns null if the version key doesn't exist yet (no data has been
-   * cached for this ID) or if KV lookup fails (graceful degradation).
+   * Returns null if the version key doesn't exist yet (the entity has never
+   * been invalidated) or if KV lookup fails (graceful degradation). Callers
+   * treat the value as an opaque token, so a stable `null` is a stable
+   * "unchanged" — which is the point: this no longer flips to a fresh timestamp
+   * just because a version key expired.
    *
    * @param id - Entity or collection identifier
    */
   async getVersion(id: string): Promise<string | null> {
     const versionKey = buildVersionKey(id);
     try {
+      this.stats.reads++;
       const version = await this.kv.get(versionKey, 'text');
       this.obs?.debug('getVersion', { id, version: version ?? 'not-found' });
       return version;
@@ -290,7 +474,8 @@ export class VersionedCache {
   /**
    * Explicitly delete a specific cache entry
    *
-   * Note: This is less efficient than invalidate() for most cases.
+   * Note: This is less efficient than invalidate() for most cases, and a KV
+   * delete draws on the same 1,000/day bucket as a write.
    * Use invalidate() unless you need to delete a specific type only.
    *
    * @param id - Entity identifier
@@ -298,10 +483,10 @@ export class VersionedCache {
    */
   async delete(id: string, type: string): Promise<void> {
     try {
-      const versionKey = buildVersionKey(id);
-      const version = (await this.kv.get(versionKey, 'text')) || '0';
+      const version = await this.readVersion(id);
       const cacheKey = buildVersionedCacheKey(this.prefix, type, id, version);
 
+      this.stats.writes++;
       await this.kv.delete(cacheKey);
       this.obs?.debug('Cache entry deleted', { id, type, cacheKey });
     } catch (error) {
@@ -319,15 +504,22 @@ export class VersionedCache {
    * Returns per-instance stats since cache creation.
    * Not persisted across restarts.
    *
+   * `reads` and `writes` count actual KV operations, so they are the numbers to
+   * reason about against the daily quota — `hitRate` alone cannot tell you
+   * whether the cache is paying for itself. `writes` counts puts AND deletes
+   * because both draw on the same 1,000/day bucket.
+   *
    * @returns Cache statistics
    */
   getStats() {
-    const { gets, hits, misses, invalidations } = this.stats;
+    const { gets, hits, misses, invalidations, reads, writes } = this.stats;
     return {
       gets,
       hits,
       misses,
       invalidations,
+      reads,
+      writes,
       hitRate: gets > 0 ? hits / gets : 0,
     };
   }
@@ -343,6 +535,8 @@ export class VersionedCache {
       hits: 0,
       misses: 0,
       invalidations: 0,
+      reads: 0,
+      writes: 0,
     };
   }
 }

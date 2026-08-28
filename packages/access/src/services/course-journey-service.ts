@@ -891,10 +891,31 @@ export class CourseJourneyService extends BaseService {
 
       if (rows.length === 0) return [];
 
+      // THREE queries for the whole shelf, not three PER COURSE. The Neon HTTP
+      // driver makes one round trip per statement, so the old per-row
+      // `loadStages` + `loadCompletions` pair was O(N) round trips in
+      // catalogue size (Codex-kgrdp.23 defect 2).
+      const stagesByCourse = await this.loadStagesForCourses(
+        rows.map((row) => row.courseId)
+      );
+      const allCompletions = await this.loadCompletions(
+        userId,
+        [...stagesByCourse.values()].flat()
+      );
+
       const summaries: EnrolledCourseSummary[] = [];
       for (const row of rows) {
-        const stages = await this.loadStages(row.courseId);
-        const completions = await this.loadCompletions(userId, stages);
+        const stages = stagesByCourse.get(row.courseId) ?? [];
+        // Completions MUST be narrowed to this course's practices before the
+        // rollup: `rollUpEnrollment` derives `lastCompletedAt` by reducing over
+        // every record it is handed, so a cross-course superset would report
+        // another journey's completion date on this card.
+        const courseContentIds = new Set(
+          stages.flatMap((stage) => stage.practices.map((p) => p.contentId))
+        );
+        const completions = allCompletions.filter((c) =>
+          courseContentIds.has(c.contentId)
+        );
         summaries.push({
           course: {
             id: row.courseId,
@@ -2898,22 +2919,56 @@ export class CourseJourneyService extends BaseService {
    * their PUBLISHED, non-deleted practice content (by `stage_practices.sortOrder`).
    * Two bounded queries (stages, then practices) so a stage with no practices
    * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item.
+   *
+   * Thin wrapper over {@link loadStagesForCourses} so the grouping logic exists
+   * once. Callers loading MORE THAN ONE course must call the batched form
+   * directly — see Codex-kgrdp.23 defect 2.
    */
   private async loadStages(courseId: string): Promise<JourneyStage[]> {
+    const byCourse = await this.loadStagesForCourses([courseId]);
+    return byCourse.get(courseId) ?? [];
+  }
+
+  /**
+   * Batched {@link loadStages}: the curriculum for MANY courses in TWO queries
+   * total, regardless of how many courses are asked for.
+   *
+   * WHY THIS EXISTS: `packages/database` builds its client on
+   * `drizzle-orm/neon-http`, which makes one HTTPS round trip PER SQL STATEMENT
+   * (no pooling, no pipelining) at ~81ms each. A per-course loop therefore costs
+   * 3 serialized round trips per enrolled course — O(N) in catalogue size, and a
+   * measured contributor to edge 504s on `/journeys/**` (Codex-kgrdp.23).
+   * Statement count is round-trip count here, so batching is the only lever.
+   *
+   * Courses with no stages are absent from the returned map; callers coalesce
+   * with `?? []`.
+   */
+  private async loadStagesForCourses(
+    courseIds: readonly string[]
+  ): Promise<Map<string, JourneyStage[]>> {
+    const byCourse = new Map<string, JourneyStage[]>();
+    if (courseIds.length === 0) return byCourse;
+
+    const uniqueCourseIds = [...new Set(courseIds)];
+
     const stageRows = await this.db
       .select({
         id: courseStages.id,
+        courseId: courseStages.courseId,
         name: courseStages.name,
         gloss: courseStages.gloss,
         sortOrder: courseStages.sortOrder,
       })
       .from(courseStages)
       .where(
-        and(eq(courseStages.courseId, courseId), isNull(courseStages.deletedAt))
+        and(
+          inArray(courseStages.courseId, uniqueCourseIds),
+          isNull(courseStages.deletedAt)
+        )
       )
       .orderBy(asc(courseStages.sortOrder));
 
-    if (stageRows.length === 0) return [];
+    if (stageRows.length === 0) return byCourse;
 
     const stageIds = stageRows.map((s) => s.id);
 
@@ -2957,15 +3012,24 @@ export class CourseJourneyService extends BaseService {
       else practicesByStage.set(row.stageId, [practice]);
     }
 
-    return stageRows.map((stage) => ({
-      id: stage.id,
-      name: stage.name,
-      gloss: stage.gloss,
-      sortOrder: stage.sortOrder,
-      practices: (practicesByStage.get(stage.id) ?? []).sort(
-        (a, b) => a.sortOrder - b.sortOrder
-      ),
-    }));
+    // `stageRows` is already ascending by `sortOrder`, so grouping in row order
+    // preserves per-course stage order.
+    for (const stage of stageRows) {
+      const journeyStage: JourneyStage = {
+        id: stage.id,
+        name: stage.name,
+        gloss: stage.gloss,
+        sortOrder: stage.sortOrder,
+        practices: (practicesByStage.get(stage.id) ?? []).sort(
+          (a, b) => a.sortOrder - b.sortOrder
+        ),
+      };
+      const existing = byCourse.get(stage.courseId);
+      if (existing) existing.push(journeyStage);
+      else byCourse.set(stage.courseId, [journeyStage]);
+    }
+
+    return byCourse;
   }
 
   /**

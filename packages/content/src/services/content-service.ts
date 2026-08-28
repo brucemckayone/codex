@@ -265,6 +265,19 @@ export class ContentService extends BaseService {
             category: validated.category || null,
             tags: validated.tags || [],
             thumbnailUrl: validated.thumbnailUrl || null,
+            // Codex-1g5lh.9: immersive-playback presentation. These three were
+            // validated by `createContentSchema` and then silently dropped —
+            // this insert uses an explicit field list and Zod's default
+            // `.strip()` discards anything the list omits, so the studio's
+            // shader pick / featured toggle never survived a create. (update()
+            // spreads the whole partial, so it always persisted there; the
+            // create/update asymmetry is what made this look intermittent.)
+            // `|| null` on the varchar mirrors thumbnailUrl/category and folds
+            // an empty selection to NULL; `?? null` on the jsonb record because
+            // there is no falsy-empty form to collapse (cf. priceCents).
+            shaderPreset: validated.shaderPreset || null,
+            shaderConfig: validated.shaderConfig ?? null,
+            featured: validated.featured ?? false,
             // Content access POLICY flags (SPEC §6.1) — hard-replace the old
             // (accessType, minimumTierId). Flags are separable/non-exclusive.
             isPurchasable: validated.isPurchasable ?? false,
@@ -489,6 +502,16 @@ export class ContentService extends BaseService {
           .set({
             ...restValidated,
             ...bodyFields,
+            // Codex-1g5lh.9: `shaderPreset` already round-trips here via the
+            // spread above — this only normalises an explicit EMPTY selection
+            // to NULL so an update matches create()'s `|| null` and reads back
+            // as "no shader" rather than the empty string. The `in` guard is
+            // load-bearing: `.partial()` omits absent keys entirely (verified),
+            // so an update that never mentions the preset must not clobber the
+            // stored one, and only a key the caller actually sent is rewritten.
+            ...('shaderPreset' in restValidated
+              ? { shaderPreset: restValidated.shaderPreset || null }
+              : {}),
             ...(clearTier ? { includedInTierId: null } : {}),
             // Clamp AFTER the spread so it overrides a stale `isFree:false` the
             // partial may carry alongside the gate it just cleared.

@@ -30,7 +30,18 @@ declare module 'cloudflare:test' {
     DB_METHOD?: 'LOCAL_PROXY' | 'NEON_BRANCH' | 'PRODUCTION';
 
     // Common KV namespaces (workers can override/extend)
-    RATE_LIMIT_KV?: KVNamespace;
+    AUTH_SESSION_KV?: KVNamespace;
+    CACHE_KV?: KVNamespace;
+
+    // Rate limiting (Codex-kgrdp.17). RATE_LIMIT_KV is gone: counters moved to
+    // Cloudflare's native Workers Rate Limiting bindings, plus RateLimitDO for
+    // the `auth` preset, whose 15-minute window the binding cannot express.
+    // A worker only declares the ones its wrangler config binds.
+    RATE_LIMIT_STRICT?: RateLimit;
+    RATE_LIMIT_STREAMING?: RateLimit;
+    RATE_LIMIT_API?: RateLimit;
+    RATE_LIMIT_WEB?: RateLimit;
+    RATE_LIMIT_DO?: DurableObjectNamespace;
   }
 }
 

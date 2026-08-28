@@ -14,7 +14,9 @@
  */
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import { registerUserScopedReset } from '$lib/client/user-scoped-state';
 import { logger } from '$lib/observability';
+import { purgeLocalCollection } from './purge-collection';
 
 export interface SubscriptionItem {
   /** The org this subscription belongs to — collection key */
@@ -88,6 +90,11 @@ export const subscriptionCollection = browser
       })
     )
   : undefined;
+
+// Codex-1g5lh.17 — THIS user's per-org subscription state. `clearUserScopedState()`
+// removes the localStorage key; this drops the in-memory rows, which is
+// what readers actually consult. See collections/purge-collection.ts.
+registerUserScopedReset(() => purgeLocalCollection(subscriptionCollection));
 
 /**
  * Fetch subscription from server and reconcile with localStorage.

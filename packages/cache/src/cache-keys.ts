@@ -11,6 +11,21 @@
 const CACHE_PREFIX = 'cache';
 
 /**
+ * Version used for an entity that has never been invalidated.
+ *
+ * A version key exists ONLY once `invalidate()` has written one — the read path
+ * never creates one (Codex-kgrdp.5). Until then every read and write for that
+ * entity resolves to this fixed base version, so a first read still lands in a
+ * durable data slot and the read after it hits, all without spending a KV write
+ * on bookkeeping.
+ *
+ * `delete()` has always used `'0'` as its fallback, so this is the value the
+ * key space was already built around — naming it makes `get()`, `set()` and
+ * `delete()` provably agree on which slot they are talking about.
+ */
+export const BASE_VERSION = '0';
+
+/**
  * Cache type identifiers for different data categories
  *
  * These are used as the "type" parameter in buildCacheKey()
@@ -62,20 +77,28 @@ export const CacheType = {
 
   /**
    * Fee config — platform singleton row.
-   * Version-bumped on every UPDATE; NO TTL. Reads cached by entity version.
+   * Version-bumped on every UPDATE. Reads cached by entity version.
    * Used by FeeConfigService in @codex/purchase. (Codex-m644n)
+   *
+   * NOTE: "NO TTL" is what these three keys WANT, not what they get.
+   * `FeeConfigService.readPlatformFees`/`readOrgFees`/`readCreatorOverride`
+   * pass no options, so each slot expires on `DEFAULT_TTL` (600s) and every
+   * 10-minute window with traffic in it costs another KV write — for config
+   * that changes maybe monthly, and on a path that runs on every purchase.
+   * Their invalidation is complete (every mutation calls `invalidateAsync`), so
+   * a long explicit `ttl` is both safe and much cheaper. See Codex-kgrdp.5.
    */
   FEE_CONFIG_PLATFORM: 'fee:platform',
 
   /**
    * Fee config — per-org override row.
-   * Version-bumped on every UPDATE; NO TTL.
+   * Version-bumped on every UPDATE. See the TTL note on FEE_CONFIG_PLATFORM.
    */
   FEE_CONFIG_ORG: 'fee:org',
 
   /**
    * Fee config — per-creator-per-org override row.
-   * Version-bumped on every UPDATE; NO TTL.
+   * Version-bumped on every UPDATE. See the TTL note on FEE_CONFIG_PLATFORM.
    */
   FEE_CONFIG_OVERRIDE: 'fee:override',
 

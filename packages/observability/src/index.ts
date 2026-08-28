@@ -438,6 +438,23 @@ export function trackRequestError(
   });
 }
 
+// Re-export KV operation-budget instrumentation
+//
+// The package builds from this single entry, so a module the barrel does not
+// reach is never emitted to dist and no consumer can import it.
+export {
+  createKvBudgetMiddleware,
+  instrumentKvBindings,
+  isKvQuotaError,
+  KV_FREE_TIER_DAILY_READS,
+  KV_FREE_TIER_DAILY_WRITES,
+  type KvBudgetOptions,
+  type KvBudgetSnapshot,
+  type KvOpClass,
+  kvBudgetSnapshot,
+  resetKvBudget,
+  withKvBudget,
+} from './kv-budget';
 // Re-export redaction utilities
 export {
   REDACTION_PRESETS,

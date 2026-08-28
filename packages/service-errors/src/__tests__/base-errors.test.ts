@@ -18,6 +18,7 @@ import {
   isServiceError,
   NotFoundError,
   ServiceError,
+  StripeNotConfiguredError,
   ValidationError,
   wrapError,
 } from '../base-errors';
@@ -240,6 +241,36 @@ describe('Base Service Errors', () => {
         operation: 'query',
         table: 'users',
       });
+    });
+  });
+
+  describe('StripeNotConfiguredError (Codex-1g5lh.1)', () => {
+    it('should extend ServiceError so mapErrorToResponse forwards its code', () => {
+      // The whole point: the registry previously threw a plain Error here, and
+      // mapErrorToResponse masks anything that is not a ServiceError as a bare
+      // 500 INTERNAL_ERROR.
+      expect(new StripeNotConfiguredError()).toBeInstanceOf(ServiceError);
+    });
+
+    it('should carry the stable STRIPE_NOT_CONFIGURED code', () => {
+      expect(new StripeNotConfiguredError().code).toBe('STRIPE_NOT_CONFIGURED');
+    });
+
+    it('should be a 500 — it is a server misconfiguration, not client error', () => {
+      expect(new StripeNotConfiguredError().statusCode).toBe(500);
+    });
+
+    it('should keep the human copy generic and free of config/secret material', () => {
+      // mapErrorToResponse forwards a ServiceError's message VERBATIM to the
+      // client, so the message must never name the binding or a key.
+      const { message } = new StripeNotConfiguredError();
+      expect(message).not.toContain('STRIPE_SECRET_KEY');
+      expect(message).not.toContain('sk_');
+      expect(message).toMatch(/payment processing/i);
+    });
+
+    it('should default to no context, since context is echoed to the client', () => {
+      expect(new StripeNotConfiguredError().context).toBeUndefined();
     });
   });
 
