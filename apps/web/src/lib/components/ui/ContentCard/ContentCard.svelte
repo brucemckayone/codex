@@ -1994,6 +1994,20 @@
        natural aspect (mixed rows). `stretch` grows the tile beyond its aspect
        floor so the cover image + scrimmed title reach down to the caption. */
     align-self: stretch;
+    /* MUST be explicit, and it pairs with the `align-self: stretch` above.
+       `justify-self` defaults to `normal`, which stretches only while the box
+       is FREE to stretch: once `align-self: stretch` pins the block axis to a
+       row SHORTER than the 3/4 ratio wants, the ratio takes over the inline
+       axis and derives width from that height instead. Measured on an iPhone
+       at 430px in a mixed carousel row: row 166px tall -> thumb 124.6px wide
+       (166 x 3/4) inside a 350.6px column, leaving ~2/3 of the card empty and
+       the cover reduced to a sliver. Isolated repro: uncapped the thumb
+       correctly takes the full column (352.6 x 470.1); cap the row at 222px
+       and it collapses to 129.8 x 173 — adding this line restores 352.6.
+       The comment above reasoned about a card stretched PAST the media's
+       natural aspect; this is the opposite case, a row SHORTER than it, where
+       the same stretch squeezes the width. (Codex-hsjoc) */
+    justify-self: stretch;
     /* Match the card radius so the media fills to the rounded card edge. */
     border-radius: var(--radius-xl);
   }
