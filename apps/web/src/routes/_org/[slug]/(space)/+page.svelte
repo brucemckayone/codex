@@ -701,9 +701,15 @@
        (WP-7); chrome="transparent" lets a tile sit on the section background
        and earn chrome only on hover. -->
   {#snippet gridCard(c: ContentItem, shape: '16:9' | '1:1' | '3:4' | '3:2')}
+    <!-- sizes is measured, not guessed: at a 390px viewport every rail on this
+         page renders its card at 318-359 CSS px (on a phone a carousel item is
+         ~90vw whatever the rail's itemMinWidth), and 382-396px on desktop.
+         DEFAULT_SIZES declares 200px below 640px, so the browser was selecting
+         the 200w srcset candidate for a 318px box on a DPR-3 screen. -->
     <ContentCard
       variant="grid"
       {shape}
+      sizes="(max-width: 640px) 92vw, (max-width: 1024px) 45vw, 384px"
       titleInCover
       chrome="transparent"
       id={c.id}

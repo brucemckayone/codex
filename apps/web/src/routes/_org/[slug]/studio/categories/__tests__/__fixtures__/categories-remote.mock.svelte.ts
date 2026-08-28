@@ -13,9 +13,18 @@
  * a remote `form()` is a module singleton whose `result` survives navigation, so
  * a test can pre-load a stale result and mount the page on top of it.
  *
+ * The form doubles get their SURFACE from `createFakeRemoteForm()` — the
+ * repo's single transcription of kit's client form runtime — and only their
+ * `pending` / `result` from the state below. See `formDouble()`.
+ *
  * A `.svelte.ts` module (runes compiled), NOT a `*.test.*` file → never
  * collected as a suite.
  */
+
+import {
+  createFakeRemoteForm,
+  type FakeRemoteForm,
+} from '$tests/utils/fake-remote-form.svelte';
 
 export interface MockCategory {
   id: string;
@@ -87,49 +96,83 @@ export function getPublicCategories(_organizationId: string) {
 }
 
 // ── form() ──────────────────────────────────────────────────────────────
-export const createCategoryForm = {
-  method: 'POST',
-  action: '?/createCategoryForm',
-  onsubmit: () => {},
-  get pending() {
-    return state.createPending;
-  },
-  get result() {
-    return state.createResult;
-  },
-  fields: {},
-};
+/** `__reset()` for every kit instance handed out below. */
+const kitResets: Array<() => void> = [];
 
-export const updateCategoryForm = {
-  method: 'POST',
-  action: '?/updateCategoryForm',
-  onsubmit: () => {},
-  get pending() {
-    return state.updatePending;
-  },
-  get result() {
-    return state.updateResult;
-  },
-  fields: {},
-};
+/**
+ * One `form()` double.
+ *
+ * `createFakeRemoteForm()` supplies kit's real client-form SURFACE: `method`,
+ * `action`, the symbol-keyed default submit attachment that a bare
+ * `{...form}` spread installs, the `fields.<name>.as(type)` proxy — and
+ * `enhance(callback)`, which returns the COMPLETE replacement spread. That last
+ * one is not optional decoration. The page pipes the EDIT form through
+ * `keepValuesOnSave()` (Codex-1g5lh.2), which is a thin wrapper over
+ * `enhance()`, so a double lacking the method makes `+page.svelte` throw
+ * `form.enhance is not a function` while its `<script>` runs — before any
+ * markup exists, which is why every case in the suite fails identically rather
+ * than one assertion going red.
+ *
+ * `pending` and `result` are then re-pointed at the module state above: these
+ * tests land a COMPLETED submission directly (`landCreateSuccess()`) instead of
+ * driving one through the DOM, because the behaviour under test is what the
+ * page's `$effect` does with a result, not how the result was produced.
+ *
+ * Delegating keeps ONE transcription of kit's form runtime in the repo. A
+ * second hand-rolled `enhance()` here is exactly how the two drift apart.
+ *
+ * ENUMERABILITY IS PART OF THE CONTRACT. A real instance exposes only `method`,
+ * `action` and the symbol-keyed attachment enumerably — everything else is
+ * installed with `Object.defineProperties`, so `<form {...form}>` puts exactly
+ * three things on the element. Declare `fields` / `result` / `enhance` as plain
+ * object literal keys instead and Svelte spreads them onto the `<form>` as
+ * ATTRIBUTES: the `fields` proxy answers every `get` with an object, so jsdom's
+ * DOMString conversion calls the proxy's "toString" and dies on `object is not
+ * a function`. Hence defineProperties here too.
+ */
+function formDouble<Result>(
+  action: string,
+  read: () => { pending: number; result: Result },
+  extra: Record<string, unknown> = {}
+) {
+  const kit = createFakeRemoteForm();
+  kitResets.push(() => kit.__reset());
 
-export const uploadCategoryCoverForm = {
-  method: 'POST',
-  action: '?/uploadCategoryCoverForm',
-  enctype: 'multipart/form-data',
-  onsubmit: () => {},
-  get pending() {
-    return state.coverPending;
-  },
-  get result() {
-    return state.coverResult;
-  },
-  fields: {
-    cover: {
-      as: (_type: string) => ({ type: 'file', name: 'cover' }),
+  // The spread surface: `method` and the default submit attachment from kit,
+  // this form's own `action`, plus any real extra form attribute (`enctype`).
+  const double: Record<string | symbol, unknown> = { ...kit, action, ...extra };
+
+  Object.defineProperties(double, {
+    fields: { get: () => kit.fields },
+    validate: { value: kit.validate },
+    enhance: {
+      value: (callback: Parameters<FakeRemoteForm['enhance']>[0]) => ({
+        ...kit.enhance(callback),
+        action,
+      }),
     },
-  },
-};
+    pending: { get: () => read().pending },
+    result: { get: () => read().result },
+  });
+
+  return double;
+}
+
+export const createCategoryForm = formDouble('?/createCategoryForm', () => ({
+  pending: state.createPending,
+  result: state.createResult,
+}));
+
+export const updateCategoryForm = formDouble('?/updateCategoryForm', () => ({
+  pending: state.updatePending,
+  result: state.updateResult,
+}));
+
+export const uploadCategoryCoverForm = formDouble(
+  '?/uploadCategoryCoverForm',
+  () => ({ pending: state.coverPending, result: state.coverResult }),
+  { enctype: 'multipart/form-data' }
+);
 
 // ── command() ───────────────────────────────────────────────────────────
 export const deleteCalls: string[] = [];
@@ -204,4 +247,8 @@ export function reset(): void {
   state.coverResult = undefined;
   deleteCalls.length = 0;
   reorderCalls.length = 0;
+  // The kit doubles are created once per module load, so their internal field
+  // state outlives a mount exactly as the real singletons do. Clear it too, or
+  // a later test inherits whatever the last one typed.
+  for (const resetKit of kitResets) resetKit();
 }

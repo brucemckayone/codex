@@ -701,16 +701,23 @@ describe('OrganizationService', () => {
         ]);
       });
 
-      it('should return paginated list of members', async () => {
+      it('should return paginated list of members, excluding removed ones', async () => {
         const result = await service.listMembers(memberMgmtTestOrgId, {
           page: 1,
           limit: 10,
         });
 
-        expect(result.items).toHaveLength(4); // owner + admin + 2 members
+        // The fixture seeds four memberships, but userIds[3] is 'inactive' —
+        // i.e. soft-deleted by removeMember. The default list must not return
+        // it, or a removed member reappears on the team page.
+        expect(result.items).toHaveLength(3); // owner + admin + 1 active member
+        expect(result.items.map((m) => m.userId)).not.toContain(
+          memberMgmtTestUserIds[3]
+        );
+        expect(result.items.every((m) => m.status !== 'inactive')).toBe(true);
         expect(result.pagination.page).toBe(1);
         expect(result.pagination.limit).toBe(10);
-        expect(result.pagination.total).toBe(4);
+        expect(result.pagination.total).toBe(3);
         expect(result.pagination.totalPages).toBe(1);
       });
 
@@ -1044,6 +1051,77 @@ describe('OrganizationService', () => {
         });
 
         expect(membership?.status).toBe('inactive');
+      });
+
+      /**
+       * Regression: the removal is a SOFT delete, so the read view has to
+       * exclude the tombstone or the member reappears the instant the team
+       * page refreshes and removal reads as a silent no-op.
+       *
+       * The existing tests above all assert the DB row directly, which is why
+       * this survived — the write was always correct. These assert the
+       * round-trip through the path the UI actually calls.
+       */
+      it('should drop a removed member from listMembers', async () => {
+        const before = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 50,
+        });
+        expect(before.items.map((m) => m.userId)).toContain(
+          memberMgmtTestUserIds[1]
+        );
+
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[1]
+        );
+
+        const after = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 50,
+        });
+        expect(after.items.map((m) => m.userId)).not.toContain(
+          memberMgmtTestUserIds[1]
+        );
+        expect(after.pagination.total).toBe(before.pagination.total - 1);
+      });
+
+      it('should keep invited members visible in listMembers', async () => {
+        // Negative control for the filter predicate: it must exclude the
+        // 'inactive' tombstone WITHOUT allow-listing only 'active', because
+        // MemberTable renders pending invites as ordinary rows.
+        const [invitedUserId] = await seedTestUsers(db, 1);
+        await db.insert(schema.organizationMemberships).values({
+          organizationId: memberMgmtTestOrgId,
+          userId: invitedUserId,
+          role: 'member',
+          status: 'invited',
+          invitedBy: memberMgmtInviterUserId,
+        });
+
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 50,
+        });
+
+        expect(result.items.map((m) => m.userId)).toContain(invitedUserId);
+      });
+
+      it('should still return inactive members when status is asked for explicitly', async () => {
+        await service.removeMember(
+          memberMgmtTestOrgId,
+          memberMgmtTestUserIds[2]
+        );
+
+        const result = await service.listMembers(memberMgmtTestOrgId, {
+          page: 1,
+          limit: 50,
+          status: 'inactive',
+        });
+
+        expect(result.items.map((m) => m.userId)).toContain(
+          memberMgmtTestUserIds[2]
+        );
       });
     });
   });

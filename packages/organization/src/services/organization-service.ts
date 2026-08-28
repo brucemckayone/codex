@@ -49,6 +49,7 @@ import {
   ilike,
   inArray,
   isNull,
+  ne,
   or,
   sql,
   sum,
@@ -628,6 +629,15 @@ export class OrganizationService extends BaseService {
       }
       if (query.status) {
         conditions.push(eq(organizationMemberships.status, query.status));
+      } else {
+        // removeMember soft-deletes by flipping status to 'inactive' (the row
+        // survives for audit). Without this the removed member reappears the
+        // moment the team page refreshes, so removal reads as a no-op.
+        //
+        // Excluding the tombstone rather than allow-listing 'active' keeps
+        // 'invited' members visible — the team table has no status column, so
+        // pending invites are rendered as ordinary rows and must not vanish.
+        conditions.push(ne(organizationMemberships.status, 'inactive'));
       }
 
       const members = await this.db
