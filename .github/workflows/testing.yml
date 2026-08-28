@@ -14,13 +14,22 @@ permissions:
 env:
   EXPIRES_IN_DAYS: 1
 
+# Deduplicates runs for the SAME ref (this is what cancels the `push` twin of a
+# pull_request run, and supersedes an earlier push to the same branch).
+#
+# Deliberately NOT keyed on the Neon project. A workflow may declare only one
+# concurrency group, so a project-wide key would replace this per-ref dedup with
+# whole-repo serialisation: with cancel-in-progress it would cancel an in-flight
+# release the moment any PR pushed, and without it every run would queue behind
+# every other. Cross-run database isolation is solved where it belongs — by
+# per-run ephemeral branch names — not by refusing to let runs overlap.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   # Reclaim ONLY stale (leaked) Neon branches before creating new ones, so we
-  # stay under the 9-branch free-tier limit WITHOUT deleting a branch that a
+  # stay under the free plan's 10-branch project limit WITHOUT deleting one that a
   # concurrently-running workflow is still using.
   #
   # Why age-based and NOT "delete everything except production/dev":
@@ -198,13 +207,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use a single reusable branch name for CI unit tests
-      # The cleanup job deletes this at the start of each run
+      # The ephemeral branch name MUST be unique per run AND per attempt.
+      #
+      # neondatabase/create-branch-action does NOT fail when the name is taken —
+      # it ADOPTS. Internally it runs `neonctl branches create ... 2> branch_err
+      # || true`, and on "already exists" it looks the branch up BY NAME and
+      # emits that branch's id as its own `branch_id` output. So a shared name
+      # does not surface as a collision error the job can react to: two
+      # concurrent runs silently receive ONE database, both migrate and seed
+      # into it, and whichever finishes first deletes it out from under the
+      # other (see the comment on `cleanup-neon-branches`).
       - name: Generate Neon Branch Name
         id: branch-name
         run: |
-          # Unique branch per run to avoid race conditions with concurrent workflows
-          echo "name=ci-unit-tests-${{ github.run_id }}" >> $GITHUB_OUTPUT
+          echo "name=ci-unit-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
 
       # Create Neon branch for unit tests
       - name: Create Neon branch for tests
@@ -384,12 +400,28 @@ jobs:
     environment: test
     strategy:
       fail-fast: false
+      # Every matrix job forks its OWN ephemeral Neon branch, and the free plan
+      # caps this project at 10 branches total (`production` is permanent, so 9
+      # ephemeral slots). Shared branch names used to cap branch usage by
+      # accident: any number of concurrent runs reused the same 7 names. Now
+      # that names are per-run, 7 matrix jobs from two overlapping runs would
+      # want 14 slots. Capping parallelism keeps two concurrent runs inside the
+      # budget: 4 + 4 + production = 9.
+      #
+      # Three simultaneous runs that ALL fire the whole matrix would still
+      # exceed 9 — but that needs three concurrent pushes each touching
+      # worker-utils/database/security (the only filters that fan out to all 7),
+      # and the failure mode is now LOUD and correctly attributed: the action's
+      # `elif [[ $(cat branch_err) == *"ERROR:"* ]]` branch exits 1 in the job
+      # that could not get a database, rather than silently handing it someone
+      # else's. Raise this only alongside the plan's branch limit.
+      max-parallel: 4
       matrix:
         include:
           - name: Auth Worker
             worker: auth
             dir: workers/auth
-            branch_name: ci-auth-tests
+            branch_prefix: ci-auth-tests
             turbo_key: auth-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -398,7 +430,7 @@ jobs:
           - name: Content API
             worker: content-api
             dir: workers/content-api
-            branch_name: ci-content-api-tests
+            branch_prefix: ci-content-api-tests
             turbo_key: content-api-test
             # Secrets: R2, STRIPE, BETTER_AUTH_SECRET
             needs_r2: true
@@ -407,7 +439,7 @@ jobs:
           - name: Identity API
             worker: identity-api
             dir: workers/identity-api
-            branch_name: ci-identity-api-tests
+            branch_prefix: ci-identity-api-tests
             turbo_key: identity-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -416,7 +448,7 @@ jobs:
           - name: Admin API
             worker: admin-api
             dir: workers/admin-api
-            branch_name: ci-admin-api-tests
+            branch_prefix: ci-admin-api-tests
             turbo_key: admin-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -425,7 +457,7 @@ jobs:
           - name: Ecom API
             worker: ecom-api
             dir: workers/ecom-api
-            branch_name: ci-ecom-api-tests
+            branch_prefix: ci-ecom-api-tests
             turbo_key: ecom-api-test
             # Secrets: STRIPE, BETTER_AUTH_SECRET
             needs_r2: false
@@ -434,7 +466,7 @@ jobs:
           - name: Organization API
             worker: organization-api
             dir: workers/organization-api
-            branch_name: ci-organization-api-tests
+            branch_prefix: ci-organization-api-tests
             turbo_key: organization-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -443,7 +475,7 @@ jobs:
           - name: Notifications API
             worker: notifications-api
             dir: workers/notifications-api
-            branch_name: ci-notifications-api-tests
+            branch_prefix: ci-notifications-api-tests
             turbo_key: notifications-api-test
             # Secrets: BETTER_AUTH_SECRET only
             needs_r2: false
@@ -504,7 +536,10 @@ jobs:
         uses: neondatabase/create-branch-action@v5
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ${{ matrix.branch_name }}
+          # branch_prefix is a PREFIX, never a usable branch name on its own:
+          # run_id + run_attempt are what stop two concurrent runs sharing one
+          # database. See "Generate Neon Branch Name" in the `test` job.
+          branch_name: ${{ matrix.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
           parent: production
           username: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
@@ -642,9 +677,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Unique per run AND per attempt — a shared name hands two concurrent
+      # runs one database. See the `test` job's equivalent step for the
+      # adopt-on-conflict behaviour that makes this silent.
       - name: Generate Neon Branch Name
         id: branch-name
-        run: echo "name=ci-e2e-api-tests" >> $GITHUB_OUTPUT
+        run: echo "name=ci-e2e-api-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
 
       - name: Create Neon branch for E2E API tests
         id: create-branch
@@ -816,10 +854,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use a single reusable branch name for E2E web tests
+      # Unique per run AND per attempt — a shared name hands two concurrent
+      # runs one database. See the `test` job's equivalent step for the
+      # adopt-on-conflict behaviour that makes this silent.
       - name: Generate Neon Branch Name
         id: branch-name
-        run: echo "name=ci-e2e-web-tests" >> $GITHUB_OUTPUT
+        run: echo "name=ci-e2e-web-tests-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
 
       # Create Neon branch for E2E tests
       - name: Create Neon branch for E2E
@@ -1251,6 +1291,15 @@ jobs:
   # Note: Each test job already cleans up its own branch immediately after completion.
   # This job serves as a final safety net only for the unit test and E2E jobs
   # (worker-tests matrix jobs all clean up their own branches inline).
+  #
+  # Every delete here — and every inline "Cleanup Neon branch" step — is keyed on
+  # the `branch_id` that THIS run's create-branch step returned, never on a
+  # branch name or a name pattern. Keep it that way, and keep branch names
+  # per-run: those two rules are load-bearing together, not separately. The Neon
+  # create-branch action adopts an existing branch of the same name and returns
+  # ITS id, so under a shared name this "delete only my own id" step was handed
+  # another run's id and deleted that run's live database mid-test. Deleting by
+  # id is only self-scoped because no other run can produce the same name.
   # ============================================================================
 
   cleanup-neon-branches:
