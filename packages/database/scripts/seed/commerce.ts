@@ -303,7 +303,28 @@ async function ensureSeededConnectAccount(
     console.log(
       `  ♻ Reusing existing seed Connect account for org ${config.orgId} (${accountId})`
     );
-  } else {
+    // Return WITHOUT re-running activateConnectAccount. An account that is
+    // already `charges_enabled` is already VERIFIED, and Stripe rejects any
+    // attempt to re-submit `individual[verification][document][front]` on a
+    // verified account:
+    //
+    //   StripeInvalidRequestError: You cannot change
+    //   `individual[verification][document][front]` via API if an account is
+    //   verified. (400, param individual[verification][document][front])
+    //
+    // Re-applying the prefill here made the seed succeed EXACTLY ONCE — the
+    // run that verified these accounts — and fail on every run afterwards.
+    // The Neon database is fresh each CI run but the Stripe test account is
+    // shared and persistent, so CI reuses these same verified accounts and
+    // would have hit this 400 on the very next build. Nothing needs
+    // submitting: the account is in the state the prefill exists to reach.
+    return {
+      accountId,
+      chargesEnabled: existingSeed.charges_enabled ?? false,
+      payoutsEnabled: existingSeed.payouts_enabled ?? false,
+    };
+  }
+  {
     if (existingSeed) {
       console.log(
         `  ⚠ Abandoning unusable seed Connect account ${existingSeed.id} for org ${config.orgId} ` +
