@@ -20,10 +20,11 @@
  * - Tests share database (cleanup helpers still work if needed)
  *
  * **CI/CD** (Isolated by test domain):
- * - GitHub Actions creates dedicated Neon branch per domain:
- *   - ci-unit-tests (shared by all package tests)
- *   - ci-auth-tests, ci-content-api-tests, etc. (per worker)
- *   - ci-e2e-api-tests, ci-e2e-web-tests (E2E tests)
+ * - GitHub Actions creates a dedicated Neon branch per domain per run, named
+ *   `<domain>-<run_id>-<run_attempt>` so concurrent runs never share one:
+ *   - ci-unit-tests-* (shared by all package tests)
+ *   - ci-auth-tests-*, ci-content-api-tests-*, etc. (per worker)
+ *   - ci-e2e-api-tests-*, ci-e2e-web-tests-* (E2E tests)
  * - DATABASE_URL set at workflow level
  * - Tests share branch within their domain
  * - Branches cleaned up after workflow completes
@@ -180,8 +181,9 @@ export function setupTestDatabase(): Database {
  * Deletes test data from content tables while preserving users.
  *
  * Test isolation is provided at the workflow level via dedicated Neon
- * branches per CI domain (ci-unit-tests, ci-content-api-tests, etc.) — each
- * branch is fresh per workflow run. Use this helper only when you need to
+ * branches per CI domain and run (ci-unit-tests-<run_id>-<attempt>,
+ * ci-content-api-tests-<run_id>-<attempt>, ...) — each branch is fresh per
+ * workflow run AND private to it. Use this helper only when you need to
  * reset state between tests within the same file.
  *
  * Deletion order (respects foreign keys):

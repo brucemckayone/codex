@@ -6,14 +6,17 @@
  *
  * NEW STRATEGY (GitHub Actions workflow-level branches):
  * ======================================================
- * - Each test domain gets ONE dedicated Neon branch (7 total per CI run):
- *   - ci-unit-tests (shared by all package tests)
- *   - ci-auth-tests (auth worker)
- *   - ci-content-api-tests (content-api worker)
- *   - ci-identity-api-tests (identity-api worker)
- *   - ci-ecom-api-tests (ecom-api worker)
- *   - ci-e2e-api-tests (root E2E tests)
- *   - ci-e2e-web-tests (web app E2E tests)
+ * - Each test domain gets ONE dedicated Neon branch per CI run, named
+ *   `<domain>-<run_id>-<run_attempt>` so that two concurrent runs can never
+ *   share a database (a shared name silently handed both runs one branch —
+ *   see .github/workflows/testing.yml, "Generate Neon Branch Name"):
+ *   - ci-unit-tests-* (shared by all package tests)
+ *   - ci-auth-tests-* (auth worker)
+ *   - ci-content-api-tests-* (content-api worker)
+ *   - ci-identity-api-tests-* (identity-api worker)
+ *   - ci-ecom-api-tests-* (ecom-api worker)
+ *   - ci-e2e-api-tests-* (root E2E tests)
+ *   - ci-e2e-web-tests-* (web app E2E tests)
  *
  * COST SAVINGS:
  * - Before: 200+ ephemeral branches per CI run (per-test-file)
