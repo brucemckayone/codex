@@ -14,6 +14,10 @@ import {
   type BrowserCookie,
   parseSetCookieStrings,
 } from './auth-cookies';
+import {
+  loadValidatedSeededCreatorCookies,
+  saveSeededCreatorCookies,
+} from './seeded-creator-session';
 
 /**
  * The seeded creator @ Studio Alpha (commerce.ts seed).
@@ -105,16 +109,35 @@ function buildBrowserCookies(setCookieHeaders: string[]): BrowserCookie[] {
 }
 
 /**
- * Capture the seeded creator's session cookies via a single direct call to
- * the auth worker, returning a Playwright-compatible cookie set scoped to
- * `.lvh.me` (works on every `*.lvh.me` subdomain).
+ * Capture the seeded creator's session cookies, signing in at most ONCE per
+ * run (Codex-ty7ly): the run-scoped cache in
+ * {@link ./seeded-creator-session.ts} is validated against the unlimited
+ * `get-session` endpoint, and only a dead cache pays a rate-limited sign-in.
  *
- * Designed for `test.beforeAll` use: spend one auth slot, then re-use the
- * cookies across all tests in the describe block via
- * `page.context().addCookies(...)`. Bypasses the auth worker rate limiter
- * via a synthetic CF-Connecting-IP header (per-process random IP).
+ * Designed for `test.beforeAll` use: re-use the cookies across all tests in
+ * the describe block via `page.context().addCookies(...)`. The live sign-in
+ * (when needed) carries a synthetic CF-Connecting-IP header so its trusted-ip
+ * bucket is unique per call; the credential bucket it shares with every other
+ * sign-in as this user is why the cache exists.
  */
 export async function captureSeededCreatorCookies(): Promise<BrowserCookie[]> {
+  const cached = await loadValidatedSeededCreatorCookies(SEEDED_CREATOR.email);
+  if (cached) return cached;
+
+  const cookies = await signInSeededCreatorForCapture();
+  await saveSeededCreatorCookies(cookies);
+  return cookies;
+}
+
+/**
+ * The live sign-in behind {@link captureSeededCreatorCookies} — a single
+ * direct call to the auth worker, returning a Playwright-compatible cookie
+ * set scoped to `.lvh.me` (works on every `*.lvh.me` subdomain). Exported
+ * for the Playwright globalSetup to prime the cache before workers start.
+ */
+export async function signInSeededCreatorForCapture(): Promise<
+  BrowserCookie[]
+> {
   // The auth worker rate-limits `/api/auth/sign-in/email` at 5 req / 15min
   // per IP (`RATE_LIMIT_PRESETS.auth`). On localhost the IP fallback is the
   // string "unknown", which means EVERY developer / CI process shares one

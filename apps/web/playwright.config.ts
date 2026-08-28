@@ -19,14 +19,21 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env.test') });
  * - tests/visual/ - Visual regression tests
  */
 export default defineConfig({
+  // Prime the seeded-creator session cache once per run (Codex-ty7ly): the
+  // rate-limited /api/auth/sign-in/email path must be charged at most once,
+  // no matter how many specs, retries, or workers need those cookies. Runs
+  // after webServers are up, before workers start. See e2e/global-setup.ts.
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
   // CI: 2 workers (raised from 1). WP-4 of beads epic Codex-498na — the
   // shared seeded helper (loginAsSeedViewer + fast-signin) and the
-  // CF-Connecting-IP rate-limit bypass (captureSeededCreatorCookies,
-  // createFreshOwnerWithBypass) have eliminated the auth-worker rate-limit
-  // contention that originally forced workers=1.
+  // globalSetup-primed seeded-creator cache (captureSeededCreatorCookies,
+  // Codex-ty7ly) keep the auth-worker rate-limit budget unspent at this
+  // parallelism. The limiter keys on the CREDENTIAL, so a synthetic
+  // CF-Connecting-IP alone no longer protects a repeated seeded sign-in —
+  // the cache does.
   //
   // Memory [feedback_e2e_vitest_forks_neon_contention] caps at 2 — going
   // beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers
