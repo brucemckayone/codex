@@ -404,11 +404,13 @@ describe('FeeConfigService — real-DB write integration', () => {
       await Promise.resolve();
 
       const versionKey = `cache:version:override:${organizationId}:${creatorId}`;
-      expect(kv.put).toHaveBeenCalledWith(
-        versionKey,
-        expect.any(String),
-        expect.anything()
-      );
+      // TWO arguments, not three. `VersionedCache.invalidate` writes the
+      // version key with NO put options (Codex-kgrdp.5): `versionTtl` was
+      // removed from `CacheOptions` because a version key that expires can
+      // resurrect data it had already staled, so version keys never expire
+      // while data slots still carry `expirationTtl`. Re-adding a third
+      // matcher here would make this assertion unsatisfiable again.
+      expect(kv.put).toHaveBeenCalledWith(versionKey, expect.any(String));
     });
 
     it('no-op update does NOT bump the cache version', async () => {
@@ -435,11 +437,15 @@ describe('FeeConfigService — real-DB write integration', () => {
       const versionKey = `cache:version:org:${organizationId}`;
       // `kv.put` must never have been called with the version key — the
       // no-op early-returns before reaching invalidateAsync.
-      expect(kv.put).not.toHaveBeenCalledWith(
-        versionKey,
-        expect.anything(),
-        expect.anything()
-      );
+      //
+      // ARITY IS LOAD-BEARING ON A NEGATIVE ASSERTION. This matcher carried a
+      // THIRD `expect.anything()` until Codex-kgrdp.5 dropped put options from
+      // version-key writes, at which point it stopped matching the real
+      // two-argument call — so it passed VACUOUSLY and would have kept passing
+      // even if a no-op update did bump the version. The sibling test above
+      // asserts this exact two-argument shape POSITIVELY and passes, which is
+      // what proves this matcher can still match, and therefore still fail.
+      expect(kv.put).not.toHaveBeenCalledWith(versionKey, expect.anything());
     });
   });
 });
