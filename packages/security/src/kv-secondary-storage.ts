@@ -9,7 +9,19 @@
  * - Session caching (reduces database queries)
  * - Token storage (verification tokens, password reset tokens)
  *
- * Key format: Better Auth internally manages the key structure.
+ * SINGLE OWNER of session entries in AUTH_SESSION_KV (Codex-kgrdp.7). Better
+ * Auth writes them from inside the auth worker's own request, where the write
+ * is awaited, and deletes them on sign-out / revocation. Nothing else may
+ * write a session entry into this namespace — the session middleware in
+ * `session-auth.ts` and `@codex/worker-utils` are read-only consumers.
+ *
+ * Key format (Better Auth 1.4, `db/internal-adapter`):
+ * - `<sessionToken>`          -> `{ session, user }`, TTL = session lifetime
+ * - `active-sessions-<userId>` -> `[{ token, expiresAt }]`, TTL = furthest expiry
+ * A reader looks the session up under the BARE token. There is deliberately no
+ * `session:` prefix: a second implementation used one, wrote nothing that
+ * survived the response, and cost a guaranteed-miss KV read per validation.
+ *
  * TTL: Set based on session/token expiration times.
  */
 

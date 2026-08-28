@@ -63,7 +63,8 @@ const app = createWorker({
     // smoke gate would have missed media-api DB regressions on deploy,
     // even though the transcoding routes query the DB on every request.
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: rate-limit counters moved off KV (Codex-kgrdp.17).
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 
@@ -81,7 +82,6 @@ app.use(
       'RUNPOD_ENDPOINT_ID',
       'RUNPOD_WEBHOOK_SECRET',
       'WORKER_SHARED_SECRET',
-      'RATE_LIMIT_KV',
     ],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
   })

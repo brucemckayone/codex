@@ -20,9 +20,10 @@ Versioned KV cache for Cloudflare Workers. Cache-aside pattern with atomic versi
 |---|---|---|
 | `get<T>(id, type, fetcher, options?)` | `(string, CacheType, () => Promise<T>, { ttl? }) => Promise<T>` | Cache-aside; fetcher called on miss or KV failure |
 | `getWithResult<T>(id, type, fetcher, options?)` | Same + returns `{ data: T, hit: boolean }` | Cache-aside with hit/miss tracking |
-| `invalidate(id)` | `(string) => Promise<void>` | Bump version — all cached data for this id becomes stale |
+| `set<T>(id, type, data, options?)` | `(string, CacheType, T, { ttl? }) => Promise<void>` | Write-through: put a value you already hold into the current slot. 1 read + 1 write |
+| `invalidate(id)` | `(string) => Promise<void>` | Bump version — all cached data for this id becomes stale. The ONLY writer of version keys |
 | `delete(id, type)` | `(string, CacheType) => Promise<void>` | Delete one specific cache entry |
-| `getStats()` | `() => CacheStats` | Hit rate, misses, total requests |
+| `getStats()` | `() => CacheStats` | Hit rate, misses, total requests, and KV `reads` / `writes` |
 | `resetStats()` | `() => void` | Reset in-process stats |
 
 ```ts
@@ -94,6 +95,36 @@ Example: invalidating `userId = 'abc'` increments `cache:version:abc` from `v1` 
 | Content metadata | 300s (5 min) |
 | Content access / permissions | 60–300s (1–5 min) |
 
+There is only ONE TTL now. `versionTtl` is gone (Codex-kgrdp.5): **version keys
+never expire**, and `invalidate()` is the only method that writes one. That
+removes a whole class of bug — the class used to carry two independent TTLs 144x
+apart, and if a data TTL ever exceeded the version TTL the version key could
+expire while the data keys it was supposed to stale outlived it.
+
+### The binding constraint is WRITES, not reads
+
+The free tier allows 100,000 KV reads/day but only **1,000 writes/day**, and
+the quota is **account-wide** — a dev worker can exhaust production's budget.
+So a short TTL on rarely-mutating config is a bad trade: it re-writes the slot
+once per window forever. Prefer a long TTL plus complete version-based
+invalidation. `getStats()` reports actual `reads` / `writes` (deletes count as
+writes, because KV bills them from the same bucket) precisely so you can tell
+whether a cache is paying for itself — a healthy hit rate with climbing writes
+still means it is losing.
+
+Two reads on a HIT is inherent to entity-level version indirection: a reader
+cannot know which data key is current without reading the version first. That
+is not the binding constraint and should not be "optimised" away — folding the
+version into the value would give up one-write-invalidates-all-types.
+
+### The read path never writes
+
+`get()` used to mint a version key when it found none — a KV **write on a read
+path**, awaited. Since `id` is sometimes caller-controlled (the org slug in
+`organizations.ts`), a bot enumerating slugs could burn the entire account
+write budget in 1,000 requests, for orgs that do not exist. A missing version
+now resolves to the exported `BASE_VERSION` sentinel instead.
+
 ## Cache writes need a waitUntil (Codex-e32xz)
 
 `get()`/`getWithResult()` never await the data-slot put — a cache write must not add latency to a miss response. But in workerd an un-awaited promise is **cancelled**, not merely deferred: the request's IoContext is destroyed as soon as the response is returned.
@@ -134,6 +165,8 @@ If KV fails (read or write), `get()` calls the fetcher and returns the result �
 ## Strict Rules
 
 - **MUST** invalidate AFTER successful DB write, NEVER before
+- **MUST** prefer `set()` over `invalidate()` + `get()` when the caller already holds the new value — the pair costs 2 writes + 2 reads and re-fetches from the DB a value you are holding (Codex-kgrdp.8)
+- **NEVER** write a version key outside `invalidate()`
 - **MUST** use `CacheType` constants — NEVER hand-craft cache key strings
 - **MUST** use fire-and-forget for invalidation in route handlers: `ctx.executionCtx.waitUntil(cache.invalidate(...).catch(() => {}))`
 - **MUST** pass `waitUntil` when the cache is used for a READ (`get`/`getWithResult`) — omitting it means the data slot is never written (Codex-e32xz)

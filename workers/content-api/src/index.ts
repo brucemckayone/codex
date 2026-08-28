@@ -54,7 +54,8 @@ const app = createWorker({
   enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+    // RATE_LIMIT_KV is gone: rate-limit counters moved off KV (Codex-kgrdp.17).
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
     checkR2: createR2Check(['MEDIA_BUCKET']),
   },
 });
@@ -73,7 +74,6 @@ app.use(
       'R2_ACCESS_KEY_ID',
       'R2_SECRET_ACCESS_KEY',
       'R2_BUCKET_MEDIA',
-      'RATE_LIMIT_KV',
     ],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
   })

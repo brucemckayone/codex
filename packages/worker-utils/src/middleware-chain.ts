@@ -4,12 +4,14 @@
  * Creates standardized middleware chains for Cloudflare Workers.
  * Eliminates repetitive middleware setup across custom workers.
  *
+ * Rate limiting is NOT part of this chain — `procedure()` enforces
+ * `policy.rateLimit` (Codex-kgrdp.9).
+ *
  * @module middleware-chain
  */
 
-import type { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
-import type { Context, Hono, MiddlewareHandler, Next } from 'hono';
+import type { Hono, MiddlewareHandler } from 'hono';
 import {
   createObservabilityMiddleware,
   createRequestTrackingMiddleware,
@@ -52,20 +54,15 @@ export interface MiddlewareChainOptions {
 
 /**
  * Configuration for applying middleware chain to specific routes
+ *
+ * Rate limiting is NOT configured here. It is enforced by `procedure()` from
+ * `policy.rateLimit` (Codex-kgrdp.9), which knows the auth level and therefore
+ * which subject the counter can honestly be keyed on. The `rateLimitPreset`
+ * option this interface used to carry mounted the limiter with no subject at
+ * all, which collapsed every caller into one bucket; it had no callers and was
+ * removed rather than ported.
  */
-export interface ApplyMiddlewareChainOptions extends MiddlewareChainOptions {
-  /**
-   * Rate limit preset to apply to the route
-   * If provided, rate limiting middleware will be included
-   */
-  rateLimitPreset?: keyof typeof RATE_LIMIT_PRESETS;
-
-  /**
-   * Custom rate limit configuration
-   * If provided along with rateLimitPreset, this overrides preset values
-   */
-  rateLimitConfig?: Parameters<typeof rateLimit>[0];
-}
+export type ApplyMiddlewareChainOptions = MiddlewareChainOptions;
 
 /**
  * Creates a standard middleware chain for Cloudflare Workers
@@ -163,20 +160,6 @@ export function createStandardMiddlewareChain(
  * });
  * ```
  *
- * @example Apply to specific routes with rate limiting
- * ```typescript
- * const app = new Hono();
- * applyMiddlewareChain(app, '/api/*', {
- *   serviceName: 'my-api',
- *   rateLimitPreset: 'api',
- * });
- *
- * applyMiddlewareChain(app, '/webhooks/*', {
- *   serviceName: 'my-api',
- *   rateLimitPreset: 'webhook',
- * });
- * ```
- *
  * @example With custom middleware
  * ```typescript
  * applyMiddlewareChain(app, '/admin/*', {
@@ -185,7 +168,6 @@ export function createStandardMiddlewareChain(
  *     createAuthMiddleware(),
  *     createAdminCheckMiddleware(),
  *   ],
- *   rateLimitPreset: 'strict',
  * });
  * ```
  */
@@ -194,30 +176,12 @@ export function applyMiddlewareChain<T extends HonoEnv = HonoEnv>(
   path: string,
   options: ApplyMiddlewareChainOptions
 ): void {
-  const { rateLimitPreset, rateLimitConfig, ...chainOptions } = options;
-
   // Create standard middleware chain
-  const middleware = createStandardMiddlewareChain(chainOptions);
+  const middleware = createStandardMiddlewareChain(options);
 
   // Apply each middleware to the path
   for (const handler of middleware) {
     app.use(path, handler);
-  }
-
-  // Apply rate limiting if configured
-  if (rateLimitPreset) {
-    // Import rateLimit and RATE_LIMIT_PRESETS dynamically to avoid circular dependencies
-    app.use(path, async (c: Context<T>, next: Next) => {
-      // Rate limiting requires importing at runtime
-      const { rateLimit, RATE_LIMIT_PRESETS } = await import('@codex/security');
-
-      const config = rateLimitConfig || RATE_LIMIT_PRESETS[rateLimitPreset];
-
-      return rateLimit({
-        kv: c.env?.RATE_LIMIT_KV,
-        ...config,
-      })(c, next);
-    });
   }
 }
 
@@ -242,8 +206,7 @@ export function applyMiddlewareChain<T extends HonoEnv = HonoEnv>(
  *
  * // Apply to different routes with different configs
  * applyMiddleware(app, '*', {});
- * applyMiddleware(app, '/api/*', { rateLimitPreset: 'api' });
- * applyMiddleware(app, '/webhooks/*', { rateLimitPreset: 'webhook' });
+ * applyMiddleware(app, '/api/*', { skipSecurityHeaders: true });
  * ```
  */
 export function createMiddlewareChainBuilder(

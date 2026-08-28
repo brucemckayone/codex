@@ -51,7 +51,7 @@ describe('VersionedCache', () => {
   });
 
   describe('get', () => {
-    it('should create version on first access and cache miss', async () => {
+    it('caches at the BASE version on first access, writing no version key', async () => {
       const fetcher = vi
         .fn()
         .mockResolvedValue({ name: 'Test User', email: 'test@example.com' });
@@ -65,19 +65,16 @@ describe('VersionedCache', () => {
       expect(result).toEqual({ name: 'Test User', email: 'test@example.com' });
       expect(fetcher).toHaveBeenCalledTimes(1);
 
-      // Verify version was created
+      // The data slot lands at v0 — the BASE version, not a minted timestamp.
       expect(mockKV.put).toHaveBeenCalledWith(
-        'cache:version:user-123',
-        expect.any(String),
-        expect.objectContaining({ expirationTtl: 86400 })
-      );
-
-      // Verify data was cached
-      expect(mockKV.put).toHaveBeenCalledWith(
-        expect.stringMatching(/cache:user:profile:user-123:v\d+/),
+        'cache:user:profile:user-123:v0',
         JSON.stringify({ name: 'Test User', email: 'test@example.com' }),
         expect.objectContaining({ expirationTtl: 600 })
       );
+
+      // And the read path spent NO write on version bookkeeping
+      // (Codex-kgrdp.5) — the data slot is the only put.
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
     });
 
     it('should return cached data on subsequent access (cache hit)', async () => {
@@ -125,19 +122,12 @@ describe('VersionedCache', () => {
       expect(typeof calls[0][1]).toBe('string'); // version timestamp
     });
 
-    it('should use custom TTL options', async () => {
+    it('should use custom TTL option', async () => {
       const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
 
       await cache.get('user-123', CacheType.USER_PROFILE, fetcher, {
         ttl: 300, // 5 minutes
-        versionTtl: 3600, // 1 hour
       });
-
-      expect(mockKV.put).toHaveBeenCalledWith(
-        'cache:version:user-123',
-        expect.any(String),
-        expect.objectContaining({ expirationTtl: 3600 })
-      );
 
       expect(mockKV.put).toHaveBeenCalledWith(
         expect.stringMatching(/cache:user:profile:user-123:v\d+/),
@@ -228,14 +218,21 @@ describe('VersionedCache', () => {
       const initialVersion = '1712345678';
 
       await mockKV.put('cache:version:user-123', initialVersion);
+      // Clear the priming call above, so the assertion can only be satisfied
+      // by invalidate's own put — otherwise the 2-arg priming call matches and
+      // the arity check below is vacuous.
+      mockKV.put.mockClear();
 
       await cache.invalidate('user-123');
 
+      // No third argument: a version key MUST NOT expire (Codex-kgrdp.5).
+      // `toHaveBeenCalledWith` is exact on arity, so re-adding an
+      // `expirationTtl` fails here.
       expect(mockKV.put).toHaveBeenCalledWith(
         'cache:version:user-123',
-        expect.stringMatching(/^\d+$/),
-        expect.objectContaining({ expirationTtl: 86400 })
+        expect.stringMatching(/^\d+$/)
       );
+      expect(mockKV.put).toHaveBeenCalledTimes(1);
     });
 
     it('should generate new version on each invalidation', async () => {
@@ -349,6 +346,7 @@ describe('VersionedCache', () => {
       const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
 
       await cache.get('id-1', 'type:a', fetcher);
+      await cache.invalidate('id-1');
 
       // The version key MUST be `cache:version:id-1` exactly — NO `type`
       // fragment. A regression that re-introduces the id/type swap would
@@ -374,15 +372,24 @@ describe('VersionedCache', () => {
         await cache.get(orgId, typeFor(i), fetchers[i]);
       }
 
-      // Only ONE version key should exist, regardless of how many types
-      // were primed.
-      const versionKeys = [...mockKV._storage.keys()].filter((k) =>
-        k.startsWith('cache:version:')
-      );
-      expect(versionKeys).toEqual([`cache:version:${orgId}`]);
+      // Priming five types creates NO version key at all — reads never mint
+      // one (Codex-kgrdp.5), so five cold filter combos cost five writes, not
+      // six.
+      expect(
+        [...mockKV._storage.keys()].filter((k) =>
+          k.startsWith('cache:version:')
+        )
+      ).toEqual([]);
 
-      // One invalidate must stale all five types in one atomic write.
+      // One invalidate must stale all five types in one atomic write, and it
+      // is the ONLY version key that ever appears for this id.
       await cache.invalidate(orgId);
+      expect(
+        [...mockKV._storage.keys()].filter((k) =>
+          k.startsWith('cache:version:')
+        )
+      ).toEqual([`cache:version:${orgId}`]);
+
       for (let i = 0; i < fetchers.length; i++) {
         await cache.get(orgId, typeFor(i), fetchers[i]);
         expect(fetchers[i]).toHaveBeenCalledTimes(2);
@@ -586,14 +593,11 @@ describe('VersionedCache', () => {
 
   describe('cache keys', () => {
     it('should use correct key structure for version key', async () => {
-      const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
-
-      await cache.get('test-id', 'test:type', fetcher);
+      await cache.invalidate('test-id');
 
       expect(mockKV.put).toHaveBeenCalledWith(
         'cache:version:test-id',
-        expect.any(String),
-        expect.any(Object)
+        expect.any(String)
       );
     });
 

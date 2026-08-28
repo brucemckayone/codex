@@ -14,6 +14,7 @@ export {
   InternalServiceError,
   isServiceError,
   NotFoundError,
+  RateLimitExceededError,
   ServiceError,
   StripeNotConfiguredError,
   UnauthorizedError,

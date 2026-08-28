@@ -69,7 +69,16 @@ function isCachedSessionData(value: unknown): value is CachedSessionData {
 }
 
 /**
- * Retrieve session from KV cache
+ * Retrieve session from KV cache.
+ *
+ * ONE read, against BetterAuth's own key (the bare token). BetterAuth's
+ * `secondaryStorage` is the SINGLE OWNER of session entries in
+ * AUTH_SESSION_KV — see `createKVSecondaryStorage` — and this middleware is a
+ * read-only consumer of them (Codex-kgrdp.7).
+ *
+ * The `session:${token}` fallback this used to probe second is gone: nothing
+ * writes that key any more, so it was a guaranteed miss costing an extra KV
+ * read on every cache miss.
  */
 async function getSessionFromCache(
   kv: KVNamespace,
@@ -77,48 +86,13 @@ async function getSessionFromCache(
   obs?: ObservabilityClient
 ): Promise<CachedSessionData | null> {
   try {
-    // Try raw token first (matches BetterAuth's secondary storage key format),
-    // then fall back to prefixed key for backward compatibility with older entries.
-    const keys = [sessionToken, `session:${sessionToken}`];
-    for (const key of keys) {
-      const cached = await kv.get(key, 'json');
-      if (isCachedSessionData(cached)) {
-        return cached;
-      }
-    }
-    return null;
+    const cached = await kv.get(sessionToken, 'json');
+    return isCachedSessionData(cached) ? cached : null;
   } catch (error) {
     obs?.error('[SessionMiddleware] Failed to read session from KV', {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
     return null;
-  }
-}
-
-/**
- * Cache session data in KV with TTL based on session expiration
- */
-async function cacheSessionInKV(
-  kv: KVNamespace,
-  sessionToken: string,
-  data: CachedSessionData,
-  obs?: ObservabilityClient
-): Promise<void> {
-  try {
-    const expiresAt = new Date(data.session.expiresAt);
-    const ttl = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
-
-    if (ttl > 0) {
-      // Write with raw token key — aligned with BetterAuth's secondary storage format.
-      // All workers and BetterAuth now share the same key, maximizing cache hit rate.
-      await kv.put(sessionToken, JSON.stringify(data), {
-        expirationTtl: ttl,
-      });
-    }
-  } catch (error) {
-    obs?.error('[SessionMiddleware] Failed to cache session in KV', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
   }
 }
 
@@ -258,8 +232,15 @@ export function createSessionMiddleware(
               role: cachedSession.user.role,
             });
           } else {
-            // Expired session in cache - clear it
-            kv.delete(splitToken).catch(() => {});
+            // Present but expired. Deliberately NOT deleted: this middleware is
+            // a read-only consumer of BetterAuth's key space, and BetterAuth
+            // already set the entry's expirationTtl from the same expiresAt, so
+            // KV reaps it on its own. Requests in the meantime fall through to
+            // the DB and are rejected there.
+            obs?.warn('[SessionMiddleware] Expired session found in cache', {
+              userId: cachedSession.user.id,
+              expiresAt: cachedSession.session.expiresAt,
+            });
           }
         }
       }
@@ -303,48 +284,14 @@ export function createSessionMiddleware(
             role: sessionData.user.role,
           });
 
-          // Cache it for next time (if KV available)
-          if (kv) {
-            const cacheData: CachedSessionData = {
-              session: {
-                id: sessionData.id,
-                userId: sessionData.userId,
-                token: sessionData.token,
-                expiresAt:
-                  sessionData.expiresAt instanceof Date
-                    ? sessionData.expiresAt.toISOString()
-                    : sessionData.expiresAt,
-                ipAddress: sessionData.ipAddress ?? null,
-                userAgent: sessionData.userAgent ?? null,
-                createdAt:
-                  sessionData.createdAt instanceof Date
-                    ? sessionData.createdAt.toISOString()
-                    : sessionData.createdAt,
-                updatedAt:
-                  sessionData.updatedAt instanceof Date
-                    ? sessionData.updatedAt.toISOString()
-                    : sessionData.updatedAt,
-              },
-              user: {
-                id: sessionData.user.id,
-                email: sessionData.user.email,
-                name: sessionData.user.name,
-                emailVerified: sessionData.user.emailVerified,
-                image: sessionData.user.image ?? null,
-                role: sessionData.user.role,
-                createdAt:
-                  sessionData.user.createdAt instanceof Date
-                    ? sessionData.user.createdAt.toISOString()
-                    : sessionData.user.createdAt,
-                updatedAt:
-                  sessionData.user.updatedAt instanceof Date
-                    ? sessionData.user.updatedAt.toISOString()
-                    : sessionData.user.updatedAt,
-              },
-            };
-            // Fire and forget - don't wait for cache
-            cacheSessionInKV(kv, splitToken, cacheData, obs).catch(() => {});
-          }
+          // NOT cached here. BetterAuth's `secondaryStorage` owns session
+          // entries in AUTH_SESSION_KV and writes them from inside the auth
+          // worker's own request, where the put is awaited. The write-back
+          // that used to sit here was fire-and-forget without `waitUntil`, so
+          // workerd cancelled it with the request context — and when it did
+          // land it overwrote BetterAuth's own entry with a NARROWER 8-field
+          // user projection, which BetterAuth then read back. A cache miss
+          // here simply costs the DB query it just made (Codex-kgrdp.7).
         }
       }
 

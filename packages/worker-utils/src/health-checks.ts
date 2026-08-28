@@ -34,7 +34,7 @@ export interface HealthCheckResult {
  *   serviceName: 'content-api',
  *   healthCheck: {
  *     checkDatabase: standardDatabaseCheck,
- *     checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
+ *     checkKV: createKvCheck(['CACHE_KV', 'AUTH_SESSION_KV']),
  *   },
  * });
  * ```

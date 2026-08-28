@@ -139,14 +139,13 @@ app.post(
       // Invalidate session KV cache so next request picks up new role from DB.
       // Must await (not waitUntil) — the redirect that follows needs the cache
       // cleared before the browser's next request arrives.
-      // Delete both key formats: session-auth middleware uses "session:{token}",
-      // BetterAuth secondaryStorage uses the raw token.
+      // One key: the bare token. BetterAuth's secondaryStorage is the sole
+      // owner of session entries in this namespace (Codex-kgrdp.7), so the
+      // second `session:{token}` delete this used to issue was a guaranteed
+      // no-op that still spent a KV write out of the account-wide budget.
       const kv = ctx.env.AUTH_SESSION_KV;
       if (kv && ctx.session?.token) {
-        await Promise.all([
-          kv.delete(`session:${ctx.session.token}`),
-          kv.delete(ctx.session.token),
-        ]).catch((err: unknown) => {
+        await kv.delete(ctx.session.token).catch((err: unknown) => {
           ctx.obs?.error('Failed to invalidate session KV after role upgrade', {
             error: err instanceof Error ? err.message : String(err),
             userId: ctx.user.id,
@@ -180,15 +179,12 @@ app.delete(
       // Invalidate the current session's KV entry so the very next request
       // fails auth. Await (not waitUntil) — the client clears its cookie and
       // redirects immediately after, and must not race a still-cached session.
-      // Delete both key formats (session-auth "session:{token}" + BetterAuth
-      // raw token), matching upgrade-to-creator. The DB-fallback deletedAt
-      // gate in @codex/security covers this user's other-device sessions.
+      // One key: the bare token, BetterAuth's own (Codex-kgrdp.7) — matching
+      // upgrade-to-creator. The DB-fallback deletedAt gate in @codex/security
+      // covers this user's other-device sessions.
       const kv = ctx.env.AUTH_SESSION_KV;
       if (kv && ctx.session?.token) {
-        await Promise.all([
-          kv.delete(`session:${ctx.session.token}`),
-          kv.delete(ctx.session.token),
-        ]).catch((err: unknown) => {
+        await kv.delete(ctx.session.token).catch((err: unknown) => {
           ctx.obs?.error(
             'Failed to invalidate session KV after account deletion',
             {

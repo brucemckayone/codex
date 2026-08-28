@@ -10,6 +10,7 @@
 // keep their import path. `WaitUntilFn` is canonically declared in this package.
 export type { InvalidationLogger, Logger } from '@codex/observability';
 export {
+  BASE_VERSION,
   buildCacheKey,
   buildVersionedCacheKey,
   buildVersionKey,

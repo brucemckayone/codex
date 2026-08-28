@@ -26,6 +26,16 @@ import { createAuthRateLimiter } from './middleware';
 import type { AuthBindings, AuthEnv } from './types';
 
 /**
+ * Export the rate-limit Durable Object class for the RATE_LIMIT_DO binding.
+ *
+ * A DO binding whose class is not a named export of the entrypoint fails at
+ * deploy — same requirement as media-api's OrphanedFileCleanupDO
+ * (workers/media-api/src/index.ts:48). The class itself lives in
+ * `@codex/security` because the middleware that addresses it does.
+ */
+export { RateLimitDO } from '@codex/security';
+
+/**
  * Create worker with standard middleware
  *
  * Configuration:
@@ -40,7 +50,8 @@ const app = createWorker({
   enableSecurityHeaders: false,
   healthCheck: {
     checkDatabase: standardDatabaseCheck,
-    checkKV: createKvCheck(['AUTH_SESSION_KV', 'RATE_LIMIT_KV']),
+    // RATE_LIMIT_KV is gone: the auth limiter now counts in RATE_LIMIT_DO.
+    checkKV: createKvCheck(['AUTH_SESSION_KV']),
   },
 });
 

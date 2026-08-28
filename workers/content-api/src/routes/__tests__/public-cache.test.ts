@@ -15,7 +15,12 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { CacheType, VersionedCache } from '@codex/cache';
+import {
+  BASE_VERSION,
+  buildVersionedCacheKey,
+  CacheType,
+  VersionedCache,
+} from '@codex/cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPublicContentCacheType,
@@ -232,17 +237,33 @@ describe('getCachedPublicContent', () => {
       fetcher
     );
 
-    // The version key MUST be derived from COLLECTION_ORG_CONTENT(orgId).
-    // A regression that reverts to passing the filter-combo as `id` would
-    // produce `cache:version:org-1:newest:20:1:all` and fail this test.
-    const versionKey = `cache:version:${CacheType.COLLECTION_ORG_CONTENT(orgId)}`;
-    expect(mockKV._data.has(versionKey)).toBe(true);
+    // The data slot MUST be namespaced by COLLECTION_ORG_CONTENT(orgId) in the
+    // `id` position, with the filter combo in the `type` position. A regression
+    // that swaps them produces `cache:org:org-1:content:content:public:...:v0`
+    // and fails this exact-string comparison.
+    const dataKey = buildVersionedCacheKey(
+      'cache',
+      // `orgId` is deliberately absent: it lives in the `id` half of the key,
+      // never in the `type` half — which is the separation under test.
+      buildPublicContentCacheType({
+        sort: 'newest',
+        limit: 20,
+        page: 1,
+        contentType: 'all',
+      }),
+      CacheType.COLLECTION_ORG_CONTENT(orgId),
+      BASE_VERSION
+    );
+    expect([...mockKV._data.keys()]).toEqual([dataKey]);
 
-    // No other version keys should exist for this org's reads.
+    // A READ mints NO version key (Codex-kgrdp.5). `id` here is derived from a
+    // caller-supplied orgId on a public no-auth route, so a version write on
+    // the read path spent one of the account-wide 1,000 KV writes/day per
+    // novel id. A missing version key now resolves to BASE_VERSION instead.
     const versionKeys = [...mockKV._data.keys()].filter((k) =>
       k.startsWith('cache:version:')
     );
-    expect(versionKeys).toEqual([versionKey]);
+    expect(versionKeys).toEqual([]);
   });
 
   it('returns cached result on repeat call with same filter combo', async () => {
@@ -290,13 +311,20 @@ describe('getCachedPublicContent', () => {
       fC
     );
 
-    const versionKeys = [...mockKV._data.keys()].filter((k) =>
-      k.startsWith('cache:version:')
-    );
-    // Every filter combo reads the SAME version key for org-1.
-    expect(versionKeys).toEqual([
-      `cache:version:${CacheType.COLLECTION_ORG_CONTENT('org-1')}`,
-    ]);
+    // Every filter combo is namespaced under the SAME id, so the single
+    // publish-side bump of that id reaches all of them (proved end-to-end by
+    // the CHAIN LOCK case below). Reads mint no version key at all
+    // (Codex-kgrdp.5), so the shared namespace is asserted on the data keys:
+    // each is `cache:<combo>:<id>:v<BASE_VERSION>` with one id across all three.
+    const suffix = `:${CacheType.COLLECTION_ORG_CONTENT('org-1')}:v${BASE_VERSION}`;
+    const dataKeys = [...mockKV._data.keys()];
+    expect(dataKeys).toHaveLength(3);
+    for (const key of dataKeys) {
+      expect(key.endsWith(suffix)).toBe(true);
+    }
+    expect(new Set(dataKeys).size).toBe(3);
+
+    expect(dataKeys.filter((k) => k.startsWith('cache:version:'))).toEqual([]);
   });
 
   it('CHAIN LOCK: invalidate(COLLECTION_ORG_CONTENT(orgId)) stales every cached filter combo', async () => {

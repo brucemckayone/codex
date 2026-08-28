@@ -20,7 +20,12 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { CacheType, VersionedCache } from '@codex/cache';
+import {
+  BASE_VERSION,
+  buildVersionedCacheKey,
+  CacheType,
+  VersionedCache,
+} from '@codex/cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPublishedJourneysCacheType,
@@ -183,15 +188,24 @@ describe('portal discovery cache-aside', () => {
       fetcher
     );
 
-    const versionKey = `cache:version:${CacheType.COLLECTION_ORG_JOURNEYS(orgId)}`;
-    expect(mockKV._data.has(versionKey)).toBe(true);
+    // The data slot MUST carry COLLECTION_ORG_JOURNEYS(orgId) in the `id`
+    // position and the variant in the `type` position. A regression passing
+    // the variant as `id` swaps the two halves of this exact string.
+    const dataKey = buildVersionedCacheKey(
+      'cache',
+      buildPublishedJourneysCacheType({ featured: true, limit: 4 }),
+      CacheType.COLLECTION_ORG_JOURNEYS(orgId),
+      BASE_VERSION
+    );
+    expect([...mockKV._data.keys()]).toEqual([dataKey]);
 
-    // A regression passing the variant as `id` would create
-    // `cache:version:journeys:published:featured:4` instead.
+    // A READ mints NO version key (Codex-kgrdp.5) — `id` is derived from a
+    // caller-supplied orgId on a public route, so a version write here spent
+    // one account-wide KV write per novel id. Absent resolves to BASE_VERSION.
     const versionKeys = [...mockKV._data.keys()].filter((k) =>
       k.startsWith('cache:version:')
     );
-    expect(versionKeys).toEqual([versionKey]);
+    expect(versionKeys).toEqual([]);
   });
 
   it('serves a repeat read of the same variant from cache', async () => {
@@ -226,13 +240,19 @@ describe('portal discovery cache-aside', () => {
     expect(featured).toHaveBeenCalledTimes(1);
     expect(rail).toHaveBeenCalledTimes(1);
 
-    // ...but they share one version key, so one bump reaches both.
-    const versionKeys = [...mockKV._data.keys()].filter((k) =>
-      k.startsWith('cache:version:')
-    );
-    expect(versionKeys).toEqual([
-      `cache:version:${CacheType.COLLECTION_ORG_JOURNEYS('org-1')}`,
-    ]);
+    // ...but both slots are namespaced under ONE id, so a single bump of that
+    // id reaches both (proved end-to-end by the CHAIN LOCK case below). Reads
+    // mint no version key (Codex-kgrdp.5), so the shared namespace is asserted
+    // on the data keys: `cache:<variant>:<id>:v<BASE_VERSION>`.
+    const suffix = `:${CacheType.COLLECTION_ORG_JOURNEYS('org-1')}:v${BASE_VERSION}`;
+    const dataKeys = [...mockKV._data.keys()];
+    expect(dataKeys).toHaveLength(2);
+    for (const key of dataKeys) {
+      expect(key.endsWith(suffix)).toBe(true);
+    }
+    expect(new Set(dataKeys).size).toBe(2);
+
+    expect(dataKeys.filter((k) => k.startsWith('cache:version:'))).toEqual([]);
   });
 
   it('CHAIN LOCK: invalidate(COLLECTION_ORG_JOURNEYS) stales every variant AND the courses rail', async () => {

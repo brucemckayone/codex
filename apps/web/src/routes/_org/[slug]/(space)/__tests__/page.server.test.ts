@@ -195,3 +195,89 @@ describe('org landing +page.server.ts — load shape', () => {
     );
   });
 });
+
+/**
+ * Codex-kgrdp.20 part 3. The slug-keyed reads (`getPublicStats`,
+ * `getPublicCreators`) used to be fired ABOVE `await parent()` to overlap with
+ * it. On a wildcard subdomain route that meant every probe of a slug that does
+ * not exist issued two subrequests and two Neon queries before anything had
+ * checked the org existed — and, because neither promise was `.catch()`-guarded
+ * at the point of creation, `parent()`'s 404 left two live rejections behind.
+ */
+describe('org landing +page.server.ts — unknown slug costs nothing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getPublicContentMock.mockResolvedValue({
+      items: [],
+      pagination: { total: 0 },
+    });
+    getPublicCategoriesMock.mockResolvedValue([]);
+    getContinueWatchingMock.mockResolvedValue([]);
+    getPublicCreatorsMock.mockResolvedValue({
+      items: [],
+      pagination: { total: 0 },
+    });
+    getPublicStatsMock.mockResolvedValue({ content: { total: 0 } });
+    listTiersMock.mockResolvedValue([]);
+    listPublishedJourneysMock.mockResolvedValue([]);
+  });
+
+  it('issues NO remote calls when parent() rejects with the layout 404', async () => {
+    const input = baseInput();
+    const notFound = Object.assign(new Error('Not found'), { status: 404 });
+    (input as { parent: () => Promise<unknown> }).parent = async () => {
+      throw notFound;
+    };
+
+    const { load } = await import('../+page.server');
+    await expect(load(input)).rejects.toBe(notFound);
+
+    // Every fan-out sits below the await, so a miss reaches none of them.
+    expect(getPublicStatsMock).not.toHaveBeenCalled();
+    expect(getPublicCreatorsMock).not.toHaveBeenCalled();
+    expect(getPublicContentMock).not.toHaveBeenCalled();
+    expect(listPublishedJourneysMock).not.toHaveBeenCalled();
+    expect(listTiersMock).not.toHaveBeenCalled();
+    expect(getPublicCategoriesMock).not.toHaveBeenCalled();
+    expect(getContinueWatchingMock).not.toHaveBeenCalled();
+    expect(input.setHeaders).not.toHaveBeenCalled();
+  });
+
+  it('does not regress first paint: stats + creators still overlap the catalogue fetch', async () => {
+    const callOrder: string[] = [];
+    getPublicStatsMock.mockImplementation(async () => {
+      callOrder.push('stats');
+      return { content: { total: 0 } };
+    });
+    getPublicCreatorsMock.mockImplementation(async () => {
+      callOrder.push('creators');
+      return { items: [], pagination: { total: 0 } };
+    });
+    // Resolves on a later microtask, so anything issued concurrently with the
+    // catalogue fetch has already been recorded by the time it settles.
+    getPublicContentMock.mockImplementation(async () => {
+      await Promise.resolve();
+      callOrder.push('catalogue');
+      return { items: [], pagination: { total: 0 } };
+    });
+
+    await loadData();
+
+    expect(callOrder.indexOf('stats')).toBeLessThan(
+      callOrder.indexOf('catalogue')
+    );
+    expect(callOrder.indexOf('creators')).toBeLessThan(
+      callOrder.indexOf('catalogue')
+    );
+  });
+
+  it('degrades stats to null and creators to an empty rail on rejection', async () => {
+    getPublicStatsMock.mockRejectedValueOnce(new Error('stats 500'));
+    getPublicCreatorsMock.mockRejectedValueOnce(new Error('creators 500'));
+
+    const result = await loadData();
+
+    expect(result.stats).toBeNull();
+    await expect(result.creators).resolves.toEqual({ items: [], total: 0 });
+  });
+});

@@ -1,17 +1,16 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "admin-api",
-  // Public exposure: OFF by default (Codex-kgrdp.12).
-  // With this unset, Cloudflare defaults BOTH the workers.dev route and the
-  // preview URL to ENABLED for any deploy that has no `routes` — which is how
-  // 8 orphaned *-dev workers ended up answering the public internet and
-  // absorbing a credential scanner (~6,275 requests in 24 minutes on
-  // auth-worker-dev, 2026-08-26). KV quota is billed per ACCOUNT, so that
-  // traffic burned production's daily write allowance.
-  // Envs that declare `routes` already infer false; being explicit here means
-  // a future env that forgets its routes fails closed instead of open.
-  // MUST live in config: disabling it only in the dashboard is silently
-  // re-enabled by the next `wrangler deploy`.
+  // Public exposure: OFF by default (Codex-kgrdp.12). With this unset,
+  // Cloudflare defaults BOTH the workers.dev route and the preview URL to
+  // ENABLED for any deploy that has no `routes` — which is how 8 orphaned *-dev
+  // workers ended up answering the public internet and absorbing a credential
+  // scanner (~6,275 requests in 24 minutes on auth-worker-dev, 2026-08-26). KV
+  // quota is billed per ACCOUNT, so that traffic burned production's daily
+  // write allowance. Envs that declare `routes` already infer false; being
+  // explicit here means a future env that forgets its routes fails closed
+  // instead of open. MUST live in config: disabling it only in the dashboard is
+  // silently re-enabled by the next `wrangler deploy`.
   "workers_dev": false,
   "main": "dist/index.js",
   "compatibility_date": "2025-01-01",
@@ -22,19 +21,53 @@
     "enabled": true
   },
 
-  // KV Namespaces
-  "kv_namespaces": [
+  // Rate limiting — native Workers Rate Limiting binding (Codex-kgrdp.17).
+  //
+  // `simple.limit` / `simple.period` MUST match RATE_LIMIT_PRESETS.API in
+  // packages/constants/src/limits.ts. The binding, not that file, is what the
+  // runtime enforces, and nothing checks that the two agree at deploy time.
+  // `period` may only be 10 or 60.
+  //
+  // namespace_id is PER WORKER AND PER ENV, not per preset: bindings sharing an
+  // id share counters across the whole ACCOUNT. A preset-wide id would let one
+  // worker's traffic spend another's budget (and a browser action that fans out
+  // to several workers would 429 at a fraction of the nominal rate); an
+  // env-wide id would let E2E traffic in admin-api-test spend
+  // admin-api-production's. That account-wide coupling is what let a dev worker
+  // burn production's KV quota in the first place.
+  //
+  // Scheme: env digit (1 dev, 2 test, 3 production) + two-digit worker number
+  // from CLAUDE.md + preset digit (1 strict, 2 streaming, 3 api, 4 web).
+  // admin-api is worker 5, so its api preset is 1053 / 2053 / 3053.
+  "ratelimits": [
     {
-      "binding": "RATE_LIMIT_KV",
-      "id": "cea7153364974737b16870df08f31083"
-    },
+      "name": "RATE_LIMIT_API",
+      "namespace_id": "1053",
+      "simple": {
+        "limit": 100,
+        "period": 60
+      }
+    }
+  ],
+
+  // KV Namespaces
+  //
+  // No RATE_LIMIT_KV: counters moved to the binding above (Codex-kgrdp.17). Its
+  // dev id cea7153364974737b16870df08f31083 had also already been deleted from
+  // the account, so the binding could not resolve either.
+  "kv_namespaces": [
     {
       "binding": "AUTH_SESSION_KV",
       "id": "82d04a4236df4aac8e9d87793344f0ed"
     },
     {
+      // Was c5e85d4c8ecb46f9a3e5d4d96a14e9f1, a namespace that does not exist
+      // in the account (Codex-kgrdp.21): every `wrangler deploy` of the default
+      // env failed on it, and only production escaped because it overrides
+      // CACHE_KV per-env. 8bde7d718cff4bfa99e29cd8e0aa7353 is the real dev/test
+      // CACHE_KV — the id apps/web's test env was already using.
       "binding": "CACHE_KV",
-      "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+      "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
     }
   ],
 
@@ -61,10 +94,21 @@
 
   // Environment configurations
   "env": {
-    // Test environment (E2E tests)
-    // Note: DB_METHOD is set via .dev.vars.test (NEON_BRANCH in CI, LOCAL_PROXY locally)
+    // Test environment (E2E tests) Note: DB_METHOD is set via .dev.vars.test
+    // (NEON_BRANCH in CI, LOCAL_PROXY locally)
     "test": {
       "name": "admin-api-test",
+      // Bindings are not inherited into a named env — see the default env.
+      "ratelimits": [
+        {
+          "name": "RATE_LIMIT_API",
+          "namespace_id": "2053",
+          "simple": {
+            "limit": 100,
+            "period": 60
+          }
+        }
+      ],
       "vars": {
         "ENVIRONMENT": "test",
         "DB_METHOD": "LOCAL_PROXY",
@@ -73,16 +117,13 @@
       },
       "kv_namespaces": [
         {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
-        },
-        {
           "binding": "AUTH_SESSION_KV",
           "id": "82d04a4236df4aac8e9d87793344f0ed"
         },
         {
+          // See the default-env CACHE_KV note above.
           "binding": "CACHE_KV",
-          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
         }
       ],
       "r2_buckets": [
@@ -100,6 +141,17 @@
     // Production environment
     "production": {
       "name": "admin-api-production",
+      // Bindings are not inherited into a named env — see the default env.
+      "ratelimits": [
+        {
+          "name": "RATE_LIMIT_API",
+          "namespace_id": "3053",
+          "simple": {
+            "limit": 100,
+            "period": 60
+          }
+        }
+      ],
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -107,10 +159,6 @@
         "AUTH_WORKER_URL": "https://auth.revelations.studio"
       },
       "kv_namespaces": [
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "06b7205ce78042ca9cad7b7e582ddf21"
-        },
         {
           "binding": "AUTH_SESSION_KV",
           "id": "aab4025dcb5c44ad8d1156bcfda055d2"
@@ -154,5 +202,5 @@
   //
   // Required Variables:
   //   - DATABASE_URL: PostgreSQL connection string
-  //   - RATE_LIMIT_KV: KV namespace binding (configured above)
+  //   - RATE_LIMIT_API: rate limit binding (configured above)
 }

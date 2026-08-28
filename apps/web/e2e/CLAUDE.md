@@ -76,7 +76,7 @@ apps/web/e2e/helpers/
 |---|---|---|---|
 | `loginAsSeedViewer` (seed-auth.ts) | Test needs `viewer@test.com` with the seeded `studio-alpha` subscription | `/api/test/fast-signin` | Fast (1 HTTP) |
 | `loginAsSeededCreator` (subscription.ts) | Test needs `creator@test.com` (Studio Alpha owner) | Real `/api/auth/sign-in/email` via form | Slow + rate-limited |
-| `captureSeededCreatorCookies` (subscription.ts) | Same as above but for `beforeAll` — share cookies across tests | Sign-in with synthetic CF-Connecting-IP | Fast, bypasses rate limit |
+| `captureSeededCreatorCookies` (subscription.ts) | Same as above but for `beforeAll` — share cookies across tests | Run-scoped cache validated via `get-session`; live sign-in only on cache miss (Codex-ty7ly) | Fast; ≤1 rate-limited sign-in per run |
 | `registerSharedStudioUser` (studio.ts) | Test needs a fresh org with isolated state | `orgFixture.createOrgMember` (multi-step) | Slow, but isolated |
 | `createFreshOwnerWithBypass` (subscription.ts) | Same as above but rate-limit-immune | fast-register + synthetic-IP sign-in + direct DB org insert | Fastest fresh-org path |
 | `createOwnerAndCreator` (agreements.ts) | Two-actor negotiation tests | Two `createOrgMember` calls | Slowest, two users |
@@ -87,12 +87,12 @@ apps/web/e2e/helpers/
 
 ## Rate limits
 
-The auth worker enforces `RATE_LIMIT_PRESETS.auth` (5 req / 15 min per IP) on `/api/auth/sign-in/email`. On localhost the default IP fallback resolves to the string `"unknown"`, so **all parallel processes share one bucket** — easily exhausted by a single failed test run.
+The auth worker enforces `RATE_LIMIT_PRESETS.auth` (5 req / 15 min) on the four canonical BetterAuth POST surfaces. The counter is keyed on the **credential** (submitted email, normalised) with the trusted client address as a second signal (`workers/auth/src/middleware/rate-limiter.ts`). Credential-keying means a synthetic `CF-Connecting-IP` no longer protects repeated sign-ins as the SAME seeded user — every charge lands on that user's one bucket, and CI retries re-running `beforeAll` exhaust it (Codex-ty7ly).
 
 Three escape hatches:
 
 1. **`/api/test/fast-signin`** — bypasses the form flow entirely. No rate limit. Used by `loginAsSeedViewer`.
-2. **Synthetic `CF-Connecting-IP` header** — per `defaultKeyGenerator` in `packages/security/src/rate-limit.ts:135-143`, the header is honoured for bucket keying. Used by `captureSeededCreatorCookies` and `createFreshOwnerWithBypass`.
+2. **Run-scoped session cache** (`helpers/seeded-creator-session.ts`, primed by `e2e/global-setup.ts`) — signs in as the seeded creator at most once per run; every later `captureSeededCreatorCookies()` validates the cached cookies against the unlimited `get-session` endpoint and reuses them. The synthetic-IP header is still sent on the rare live sign-in (fresh IP bucket) but the credential bucket is what the cache protects.
 3. **Wait 15 minutes** — only useful in extreme cases; just use one of the above.
 
 ---

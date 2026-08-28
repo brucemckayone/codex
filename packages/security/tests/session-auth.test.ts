@@ -10,15 +10,15 @@ import {
   type CachedSessionData,
   optionalAuth,
   requireAuth,
-  type SessionData,
-  type UserData,
+  type SessionAuthRow,
+  type UserAuthRow,
 } from '../src/session-auth';
 
 // Define environment type for test Hono app with user and session
 type TestEnv = {
   Variables: {
-    user?: UserData;
-    session?: SessionData;
+    user?: UserAuthRow;
+    session?: SessionAuthRow;
   };
 };
 
@@ -111,16 +111,16 @@ describe('Session Authentication Middleware', () => {
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          user: UserData;
-          session: SessionData;
+          user: UserAuthRow;
+          session: SessionAuthRow;
           source: string;
         };
         expect(body.user).toEqual(mockUser);
         expect(body.session).toEqual(mockSession);
-        expect(mockKV.get).toHaveBeenCalledWith(
-          `session:${mockSessionToken}`,
-          'json'
-        );
+        // Codex-kgrdp.7: exactly ONE read, against BetterAuth's bare-token
+        // key. The old `session:${token}` probe ran first and always missed.
+        expect(mockKV.get).toHaveBeenCalledWith(mockSessionToken, 'json');
+        expect(mockKV.get).toHaveBeenCalledTimes(1);
         // Should not query database if cache hit
         expect(mockDb.query.sessions.findFirst).not.toHaveBeenCalled();
       });
@@ -144,15 +144,12 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        expect(mockKV.get).toHaveBeenCalledWith(
-          `session:${mockSessionToken}`,
-          'json'
-        );
+        expect(mockKV.get).toHaveBeenCalledWith(mockSessionToken, 'json');
       });
     });
 
     describe('Valid Session from Database', () => {
-      it('should query database on cache miss and cache result', async () => {
+      it('should query database on cache miss without writing the cache', async () => {
         // Mock cache miss
         mockKV.get.mockResolvedValue(null);
 
@@ -184,8 +181,8 @@ describe('Session Authentication Middleware', () => {
 
         expect(res.status).toBe(200);
         const body = (await res.json()) as {
-          user: UserData;
-          session: SessionData;
+          user: UserAuthRow;
+          session: SessionAuthRow;
           source: string;
         };
         expect(body.user).toBeDefined();
@@ -195,11 +192,10 @@ describe('Session Authentication Middleware', () => {
         // Verify database was queried
         expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
 
-        // Verify result was cached
-        expect(mockKV.put).toHaveBeenCalled();
-        const putCall = mockKV.put.mock.calls[0];
-        expect(putCall[0]).toBe(`session:${mockSessionToken}`);
-        expect(putCall[2]).toHaveProperty('expirationTtl');
+        // Codex-kgrdp.7: this middleware is a read-only consumer of
+        // AUTH_SESSION_KV. BetterAuth's secondaryStorage is the single writer,
+        // so a DB fallback must NOT write a second key format back.
+        expect(mockKV.put).not.toHaveBeenCalled();
       });
 
       it('should work without KV (database-only mode)', async () => {
@@ -304,10 +300,13 @@ describe('Session Authentication Middleware', () => {
         const body = (await res.json()) as { hasUser: boolean };
         expect(body.hasUser).toBe(false);
 
-        // Should delete expired session from cache
-        expect(mockKV.delete).toHaveBeenCalledWith(
-          `session:${mockSessionToken}`
-        );
+        // Falls through to the database, which rejects it too.
+        expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
+
+        // Codex-kgrdp.7: BetterAuth owns this namespace and gave the entry a
+        // TTL equal to the same expiry, so KV reaps it. A read-only consumer
+        // must not spend a KV write deleting someone else's key.
+        expect(mockKV.delete).not.toHaveBeenCalled();
       });
 
       it('should reject expired session from database', async () => {
@@ -367,10 +366,7 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        expect(mockKV.get).toHaveBeenCalledWith(
-          `session:${mockSessionToken}`,
-          'json'
-        );
+        expect(mockKV.get).toHaveBeenCalledWith(mockSessionToken, 'json');
       });
     });
 
@@ -455,26 +451,62 @@ describe('Session Authentication Middleware', () => {
         expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
       });
 
-      it('should handle KV write errors gracefully', async () => {
-        mockKV.get.mockResolvedValue(null);
-        mockKV.put.mockRejectedValue(new Error('KV write failed'));
-        mockDb.query.sessions.findFirst.mockResolvedValue({
-          ...mockSession,
-          expiresAt: new Date(mockSession.expiresAt),
-          createdAt: new Date(mockSession.createdAt),
-          updatedAt: new Date(mockSession.updatedAt),
-          user: {
-            ...mockUser,
-            createdAt: new Date(mockUser.createdAt),
-            updatedAt: new Date(mockUser.updatedAt),
+      it('should surface a KV read failure through the module logger when no request obs is set', async () => {
+        const consoleSpy = vi
+          .spyOn(console, 'error')
+          .mockImplementation(() => {});
+        mockKV.get.mockRejectedValue(new Error('KV unavailable'));
+        mockDb.query.sessions.findFirst.mockResolvedValue(null);
+
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
+        app.get('/test', (c) => c.json({ hasUser: !!c.get('user') }));
+
+        await app.request('/test', {
+          headers: {
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
+          },
+        });
+
+        // A degraded session cache must never fail silently, even on the
+        // paths that have no request-scoped ObservabilityClient.
+        const logOutput = consoleSpy.mock.calls.flat().join(' ');
+        expect(logOutput).toContain('Failed to read session from KV');
+        // SECURITY: the token must not appear in the log line.
+        expect(logOutput).not.toContain(mockSessionToken);
+
+        consoleSpy.mockRestore();
+      });
+    });
+
+    // Codex-kgrdp.7 — AUTH_SESSION_KV had two competing session-cache
+    // implementations writing different key formats. BetterAuth's
+    // secondaryStorage (bare token -> `{ session, user }`) is the single
+    // owner; this middleware is a read-only consumer. These tests pin that
+    // contract so a second writer cannot creep back in.
+    describe('Single session-cache owner (Codex-kgrdp.7)', () => {
+      const dbRow = () => ({
+        ...mockSession,
+        expiresAt: new Date(mockSession.expiresAt),
+        createdAt: new Date(mockSession.createdAt),
+        updatedAt: new Date(mockSession.updatedAt),
+        user: {
+          ...mockUser,
+          createdAt: new Date(mockUser.createdAt),
+          updatedAt: new Date(mockUser.updatedAt),
+        },
+      });
+
+      it('reads a BetterAuth-written entry and never probes a `session:` key', async () => {
+        // Storage seeded the way BetterAuth writes it: bare token key,
+        // JSON string body. No `session:`-prefixed entry exists.
+        mockKV = createMockKVNamespace({
+          initialData: {
+            [mockSessionToken]: JSON.stringify(mockCachedData),
           },
         });
 
         app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
-        app.get('/test', (c) => {
-          const user = c.get('user');
-          return c.json({ hasUser: !!user });
-        });
+        app.get('/test', (c) => c.json({ userId: c.get('user')?.id ?? null }));
 
         const res = await app.request('/test', {
           headers: {
@@ -482,10 +514,42 @@ describe('Session Authentication Middleware', () => {
           },
         });
 
-        // Should still authenticate from database (ignore cache write error)
-        expect(res.status).toBe(200);
-        const body = (await res.json()) as { hasUser: boolean };
-        expect(body.hasUser).toBe(true);
+        const body = (await res.json()) as { userId: string | null };
+        expect(body.userId).toBe('user_1');
+        expect(mockDb.query.sessions.findFirst).not.toHaveBeenCalled();
+
+        const readKeys = mockKV.get.mock.calls.map((call) => call[0]);
+        expect(readKeys).toEqual([mockSessionToken]);
+        expect(readKeys).not.toContain(`session:${mockSessionToken}`);
+      });
+
+      it('never writes or deletes in AUTH_SESSION_KV on any path', async () => {
+        // Cache hit
+        mockKV.get.mockResolvedValueOnce(mockCachedData);
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
+        app.get('/test', (c) => c.json({ hasUser: !!c.get('user') }));
+        const cookie = `${COOKIES.SESSION_NAME}=${mockSessionToken}`;
+        await app.request('/test', { headers: { cookie } });
+
+        // Cache miss -> database hit
+        mockKV.get.mockResolvedValueOnce(null);
+        mockDb.query.sessions.findFirst.mockResolvedValueOnce(dbRow());
+        await app.request('/test', { headers: { cookie } });
+
+        // Expired cache entry
+        mockKV.get.mockResolvedValueOnce({
+          ...mockCachedData,
+          session: {
+            ...mockSession,
+            expiresAt: new Date(Date.now() - 1000).toISOString(),
+          },
+        });
+        mockDb.query.sessions.findFirst.mockResolvedValueOnce(null);
+        await app.request('/test', { headers: { cookie } });
+
+        expect(mockKV.get).toHaveBeenCalledTimes(3);
+        expect(mockKV.put).not.toHaveBeenCalled();
+        expect(mockKV.delete).not.toHaveBeenCalled();
       });
     });
 
@@ -728,7 +792,7 @@ describe('Session Authentication Middleware', () => {
         },
       });
 
-      const body = (await res.json()) as { session: SessionData };
+      const body = (await res.json()) as { session: SessionAuthRow };
       expect(body.session).toHaveProperty('id');
       expect(body.session).toHaveProperty('userId');
       expect(body.session).toHaveProperty('token');
@@ -754,7 +818,7 @@ describe('Session Authentication Middleware', () => {
         },
       });
 
-      const body = (await res.json()) as { user: UserData };
+      const body = (await res.json()) as { user: UserAuthRow };
       expect(body.user).toHaveProperty('id');
       expect(body.user).toHaveProperty('email');
       expect(body.user).toHaveProperty('name');

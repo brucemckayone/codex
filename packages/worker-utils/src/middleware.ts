@@ -9,8 +9,6 @@ import { COOKIES } from '@codex/constants';
 import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
   type CSP_PRESETS,
-  RATE_LIMIT_PRESETS,
-  rateLimit,
   requireAuth,
   securityHeaders,
 } from '@codex/security';
@@ -299,15 +297,12 @@ export function createHealthCheckHandler(
 /**
  * Creates a reusable KV health check handler.
  *
- * @param bindings - An array of objects with the name and binding of the KV namespaces to check.
+ * @param bindingNames - The KV binding names on `HonoEnv` to check.
  * @returns An async function that performs the health check for the specified KV namespaces.
  *
  * @example
  * ```typescript
- * createKvCheck([
- *   { name: 'SESSIONS_KV', kv: c.env.SESSIONS_KV },
- *   { name: 'RATE_LIMIT_KV', kv: c.env.RATE_LIMIT_KV },
- * ])
+ * createKvCheck(['AUTH_SESSION_KV', 'CACHE_KV'])
  * ```
  */
 export function createKvCheck(bindingNames: KVBindingKey[]): (
@@ -635,23 +630,6 @@ export function createSecurityHeadersWrapper(options?: {
     return securityHeaders({
       environment,
       ...options,
-    })(c, next);
-  };
-}
-
-/**
- * Creates a standardized rate limiting middleware wrapper
- *
- * @param preset - Rate limit preset name
- * @returns Middleware handler
- */
-export function createRateLimitWrapper(
-  preset: keyof typeof RATE_LIMIT_PRESETS = 'api'
-) {
-  return (c: Context<HonoEnv>, next: Next) => {
-    return rateLimit({
-      kv: c.env?.RATE_LIMIT_KV,
-      ...RATE_LIMIT_PRESETS[preset],
     })(c, next);
   };
 }
