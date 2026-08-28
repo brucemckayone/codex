@@ -7,11 +7,16 @@
  * everything" module (all types + topic filter). `allContent` items now carry
  * `categorySlugs`, so the topic filter matches client-side with no extra fetch.
  *
- * Shell + Stream (apps/web CLAUDE.md): the catalogue + stats are awaited (first
- * paint + SEO); the secondary rails — topic categories, cross-device continue
- * watching, creators, subscription pricing — are streamed as bare promises,
- * each `.catch()`-guarded so a failure degrades to an empty section rather than
- * crashing the load.
+ * Shell + Stream (apps/web CLAUDE.md): the catalogue, stats and journeys are
+ * awaited (first paint + SEO); the secondary rails — topic categories,
+ * cross-device continue watching, creators, subscription pricing — are streamed
+ * as bare promises, each `.catch()`-guarded so a failure degrades to an empty
+ * section rather than crashing the load.
+ *
+ * ONE journeys read serves both journey surfaces (Codex-kgrdp.23): the awaited
+ * `listPublishedJourneys` call feeds the "Guided portals" rail AND the featured
+ * picks derived from it, where it used to be two calls to the same endpoint —
+ * an extra worker subrequest and an extra KV cache-slot read per render.
  *
  * Every fan-out sits BELOW `await parent()`, so an unknown org slug issues no
  * subrequests from this load at all — see the comment on that await.
@@ -47,6 +52,17 @@ const MAX_CATALOGUE_ITEMS = 50;
  * set rather than a second catalogue.
  */
 const MAX_FEATURED_PORTALS = 4;
+
+/**
+ * How many portals the "Guided portals" rail carries.
+ *
+ * This is ALSO the window the featured picks are selected from, because both
+ * surfaces are served by ONE read — see `journeysPromise` below. Safe as a
+ * shared bound: `listPublishedJourneys` orders `landingPages.featured DESC`
+ * first, so every featured portal (up to this limit) appears in the leading
+ * rows, and `MAX_FEATURED_PORTALS` is far below it.
+ */
+const MAX_JOURNEY_RAIL_ITEMS = 12;
 
 export const load: PageServerLoad = async ({
   params: routeParams,
@@ -92,28 +108,41 @@ export const load: PageServerLoad = async ({
     .catch(() => ({ items: [], total: 0 }));
 
   /*
-    Featured PORTALS — the journeys a creator has promoted
-    (`landing_pages.featured`), which join the content picks as slides in
-    "Editor's picks" below.
+    Published PORTALS — ONE read serving TWO surfaces: the "Guided portals" rail
+    and the featured picks (`landing_pages.featured`) that join the content
+    picks as slides in "Editor's picks".
 
-    AWAITED, unlike the `journeys` rail further down, and that difference is
-    deliberate. The picks carousel is built from awaited data; feeding it a
-    streamed source would grow the slide count after hydration, which shifts
-    layout, changes the dot count under the user, and re-runs the carousel's
-    IntersectionObserver effect. A carousel may not gain slides late.
+    This used to be TWO calls to this same endpoint — `{ featured: true,
+    limit: 4 }` awaited here, plus `{ limit: 12 }` streamed from the return —
+    and journeys.ts:438-443 documents the two cache slots they needed in order
+    not to collide. But the rail deliberately shows EVERY portal including the
+    promoted ones (see +page.svelte), and the service orders
+    `landingPages.featured DESC` first, so the rail's own list already CONTAINS
+    the picks in its leading rows. The second call fetched data the first had to
+    fetch anyway, costing a worker subrequest and a KV read pair per render
+    (Codex-kgrdp.23).
+
+    Collapsing them is not a streaming trade: the awaited critical path already
+    included one call to this endpoint, and it still includes exactly one — only
+    the limit grew from 4 to 12 rows of the same shape. The rail simply stops
+    being streamed and lands in the SSR HTML instead.
+
+    AWAITED, and that part is load-bearing. The picks carousel is built from
+    awaited data; feeding it a streamed source would grow the slide count after
+    hydration, which shifts layout, changes the dot count under the user, and
+    re-runs the carousel's IntersectionObserver effect. A carousel may not gain
+    slides late.
 
     Fired AFTER `parent()` so it can pass the org id `parent()` already resolved.
     It used to run in the pre-`parent()` parallel group precisely BECAUSE it
     re-derived the org from the request hostname — that made it independent, but
-    it also meant every call paid a redundant `getPublicInfo` hop, twice per
-    render counting the rail below. Passing `organizationId` puts these reads on
-    the same footing as the content/categories/stats reads (Codex-72k55), and
-    costs no wall-clock: it now runs concurrently with the catalogue fetch, which
-    is the longer of the two.
+    it also meant every call paid a redundant `getPublicInfo` hop. Passing
+    `organizationId` puts this read on the same footing as the
+    content/categories/stats reads (Codex-72k55), and costs no wall-clock: it
+    runs concurrently with the catalogue fetch, which is the longer of the two.
   */
-  const featuredJourneysPromise = listPublishedJourneys({
-    featured: true,
-    limit: MAX_FEATURED_PORTALS,
+  const journeysPromise = listPublishedJourneys({
+    limit: MAX_JOURNEY_RAIL_ITEMS,
     organizationId: org.id,
   }).catch(() => []);
 
@@ -130,7 +159,13 @@ export const load: PageServerLoad = async ({
   // existing promises rather than starting requests. Already `.catch()`-guarded
   // at creation, so neither can reject here.
   const statsResult = await statsPromise;
-  const featuredJourneys = await featuredJourneysPromise;
+
+  // ONE read, two surfaces. The picks are the leading `featured` rows of the
+  // rail's own list, so no second subrequest is needed (Codex-kgrdp.23).
+  const journeys = await journeysPromise;
+  const featuredJourneys = journeys
+    .filter((journey) => journey.featured)
+    .slice(0, MAX_FEATURED_PORTALS);
 
   // Set cache headers only after the critical awaits. If `parent()` throws
   // (e.g. an auth/branding load failure), the resulting error response
@@ -197,13 +232,13 @@ export const load: PageServerLoad = async ({
     // Streamed: cross-device resume rail (server-backed via video_playback).
     // Anonymous visitors and any transport error resolve to an empty rail.
     continueWatching: getContinueWatching(undefined).catch(() => []),
-    // Streamed: guided journeys for this org (featured-first, capped). Hidden
-    // when the org has none; any transport error degrades to an empty rail.
-    // Takes the resolved org id for the same reason as the featured read above.
-    journeys: listPublishedJourneys({
-      limit: 12,
-      organizationId: org.id,
-    }).catch(() => []),
+    // Awaited, not streamed — it is the SAME array the picks were derived from,
+    // so it is already resolved by the time the load returns. This rail used to
+    // be a second `listPublishedJourneys` call; it cost an extra worker
+    // subrequest and an extra KV cache-slot read per render for data the
+    // awaited call already had to fetch. Side benefit: the rail is now in the
+    // SSR HTML instead of arriving after hydration.
+    journeys,
     // Streamed: already shaped + `.catch()`-guarded where it was created.
     creators: creatorsPromise,
     subscriptionPricing: tiersPromise,
