@@ -118,7 +118,7 @@ The package uses a cost-optimized testing strategy:
 
 **CI Environment**:
 - GitHub Actions creates one Neon branch per test domain (not per file)
-- Domains: ci-unit-tests, ci-auth-tests, ci-content-api-tests, ci-identity-api-tests, ci-ecom-api-tests, ci-e2e-api-tests, ci-e2e-web-tests
+- Domains (each suffixed with `-<run_id>-<run_attempt>` in CI so concurrent runs never share a branch): ci-unit-tests, ci-auth-tests, ci-content-api-tests, ci-identity-api-tests, ci-ecom-api-tests, ci-e2e-api-tests, ci-e2e-web-tests
 - Tests within a domain share the branch for cost optimization
 - DATABASE_URL automatically provided by workflow
 - Branches cleaned up after workflow completes
