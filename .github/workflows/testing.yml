@@ -667,9 +667,21 @@ jobs:
   e2e-api-tests:
     name: E2E API Tests
     needs: [worker-tests]
-    # Run if all worker tests passed or were skipped (no failures)
+    # Run if all worker tests passed or were skipped (no failures), but NOT when
+    # the run itself is being cancelled.
+    #
+    # `always()` here was actively harmful. It opts a job into running DURING
+    # cancellation, and a cancelled `worker-tests` reports result 'cancelled',
+    # which satisfies `!= 'failure'`. So the deliberately-cancelled `push` twin
+    # of every pull_request run still launched this job, forked its own Neon
+    # branch and started a full E2E suite it could never finish — on EVERY push
+    # to a PR branch, not just when two runs happened to overlap. `!cancelled()`
+    # keeps the intended "run even if a dependency was skipped" behaviour while
+    # dropping the "run even though the run is being torn down" behaviour.
+    # (`cleanup-neon-branches` keeps `always()` on purpose — it MUST run during
+    # cancellation.)
     # Runs in parallel with e2e-tests (web)
-    if: always() && needs.worker-tests.result != 'failure'
+    if: ${{ !cancelled() && needs.worker-tests.result != 'failure' }}
     runs-on: ubuntu-latest
     environment: test
     outputs:
@@ -837,11 +849,14 @@ jobs:
     name: E2E Web Tests
     needs: [worker-tests, changes]
     # Only run E2E web tests if:
+    # 0. The run is not being cancelled — see the note on e2e-api-tests. With
+    #    `always()` the cancelled `push` twin of every pull_request run still
+    #    forked a Neon branch and started a full E2E suite it could not finish.
     # 1. Worker tests didn't fail
     # 2. AND there are web-related changes (web app, auth, or shared-types)
     # Runs in parallel with e2e-api-tests
     if: |
-      always() &&
+      !cancelled() &&
       needs.worker-tests.result != 'failure' &&
       (needs.changes.outputs.web == 'true' ||
        needs.changes.outputs.auth-worker == 'true' ||
