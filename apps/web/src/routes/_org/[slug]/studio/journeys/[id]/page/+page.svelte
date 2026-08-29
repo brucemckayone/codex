@@ -26,6 +26,7 @@
   import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import type { PageStatus } from '@codex/shared-types';
+  import { buildJourneyUrl } from '@codex/urls';
   import {
     JourneyBuilderCanvas,
     PageBrandPanel,
@@ -38,6 +39,7 @@
   } from '$lib/components/page-builder';
   import {
     getCourseCurriculum,
+    getCourseOffer,
     getJourneyForBuilder,
     resolveSellPreview,
     saveJourneyPage,
@@ -123,6 +125,58 @@
   // public load applies. A sell-media read that fails must cost the author their
   // media preview, never their canvas.
   const sellPreview = $derived(sellPreviewQuery?.current ?? null);
+
+  // The course's AUTHORITATIVE offer — which ways in exist and what each charges
+  // (SPEC §7). The canvas received NOTHING here either (Codex-4wun2), and it is
+  // the same shape of omission as the sell media one above: the canvas declares
+  // `offer`, forwards it into `builderSalesContext`, and was never handed one — so
+  // `context.offer` was always null, `deriveOfferPaths` always returned `[]`, and
+  // the author edited the invite section against its price-less branch while the
+  // published page priced itself from this exact read. The whole Pricing panel was
+  // invisible on the surface the inline-WYSIWYG decision was made for.
+  //
+  // AUTHORITATIVE, never the page's own `offer` bag: that bag is presentation, no
+  // authoritative read consults it, and pricing the canvas from it would teach the
+  // author a number the checkout will not charge (`InviteSection`'s pricing
+  // invariant). The cost of reading the real thing is that a pricing edit reaches
+  // the canvas only after Save — the Pricing panel is where an unsaved price is
+  // visible.
+  //
+  // Same precondition as the preview read: the query validates `courseId` as a
+  // UUID and a non-course journey has no `subjectId` to price.
+  const offerQuery = $derived(
+    isCourse && course.id ? getCourseOffer({ courseId: course.id }) : null
+  );
+
+  // `.current` is `undefined` in flight AND after a rejection (Codex-xo3bl), so
+  // `?? null` reproduces the public load's `.catch(() => null)`. Null is the
+  // documented price-less CTA — the honest degradation, never authored numbers.
+  const offer = $derived(offerQuery?.current ?? null);
+
+  // Where the canvas's CTAs point — built with `buildJourneyUrl` exactly as the
+  // public `JourneyRenderer` builds the same two URLs, so the canvas's links and
+  // the page's links are one construction.
+  //
+  // THIS IS THE SECOND HALF OF THE OFFER FIX, not a tidy-up. The canvas passed
+  // neither URL, and `builderSalesContext` defaults both to `''` — harmless only
+  // while there were no paths, because every CTA then fell to `hrefFor(null)` →
+  // `''` → `safeHref` → `'#'`. With real paths, `checkoutUrlForPath('', pathId)`
+  // returns `'?offer=<pathId>'`, which has no scheme, so `safeHref` passes it
+  // through and every priced card in the canvas becomes a live RELATIVE link that
+  // reloads THIS route (losing unsaved work behind the beforeNavigate confirm).
+  //
+  // `course.slug` is the LANDING PAGE's slug, and that is the correct segment:
+  // `/journeys/[journeySlug]` and its `/checkout` both resolve by page slug
+  // (`getCoursePage` selects `landing_pages` by `(orgId, slug)`), which is also
+  // what `handleViewLive` below opens. `|| null` so a not-yet-loaded slug falls
+  // back to the id rather than building `/journeys//checkout`.
+  const journeyTarget = $derived({ slug: course.slug || null, id: course.id });
+  const checkoutUrl = $derived(
+    buildJourneyUrl(page.url, journeyTarget, { surface: 'checkout' })
+  );
+  const dashboardUrl = $derived(
+    buildJourneyUrl(page.url, journeyTarget, { surface: 'dashboard' })
+  );
 
   // ── Workspace view state ──────────────────────────────────────────────────
   type BuilderMode = 'design' | 'look' | 'pricing' | 'media' | 'brand' | 'seo';
@@ -224,6 +278,17 @@
   const slug = $derived(pending?.slug ?? '');
 
   // Per-page brand overrides → tint the canvas via the org brand OKLCH layer.
+  //
+  // COLOUR INPUTS ONLY. This used to also re-declare
+  // `--brand-shader-preset` from `tokenOverrides`, and that declaration could
+  // never do anything: no component in either page-builder tree — public
+  // `render/` or the canvas — mounts a `ShaderHero` or reads that property, and
+  // `getShaderConfig` reads it off `.org-layout` (or an element handed to it
+  // explicitly), never off an arbitrary ancestor like `.jb__canvas`. The canvas's
+  // own per-section wrapper already emits the WHOLE `tokenOverrides` set through
+  // the canonical `brandOverridesToStyleAttr`, so the value was redundant as well
+  // as inert. The control that wrote it is going from `PageBrandPanel` in the same
+  // pass.
   const brandStyle = $derived.by<string | undefined>(() => {
     const o = pending?.brandOverrides;
     if (!o) return undefined;
@@ -232,8 +297,6 @@
     if (o.secondaryColor) parts.push(`--brand-secondary:${o.secondaryColor}`);
     if (o.accentColor) parts.push(`--brand-accent:${o.accentColor}`);
     if (o.backgroundColor) parts.push(`--brand-bg:${o.backgroundColor}`);
-    const shader = o.tokenOverrides?.['--brand-shader-preset'];
-    if (shader) parts.push(`--brand-shader-preset:${shader}`);
     return parts.length ? parts.join(';') : undefined;
   });
 
@@ -551,6 +614,9 @@
           {orgDomain}
           {stages}
           {course}
+          {offer}
+          {checkoutUrl}
+          {dashboardUrl}
           {sellPreview}
         />
       </section>

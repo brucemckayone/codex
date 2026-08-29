@@ -30,6 +30,7 @@ import { command, form, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import type {
+  CourseOffer,
   CurriculumContentOption,
   EditorCurriculum,
   EnrolledJourneyCard,
@@ -487,6 +488,53 @@ export const getCourseMonetisation = query(
     const ctx = await resolveStudioOrg();
     if (!ctx) return null;
     return readCourseMonetisation(ctx, courseId);
+  }
+);
+
+const courseOfferSchema = z.object({ courseId: z.string().uuid() });
+
+/**
+ * The course's AUTHORITATIVE offer, WHOLE — for the builder canvas to render
+ * from (Codex-4wun2).
+ *
+ * WHY A SECOND READ BESIDE `getCourseMonetisation`, which calls the same
+ * endpoint: that one projects the offer down to a {@link JourneyMonetisation} for
+ * the Pricing PANEL — no `purchase.priceCents`, no `paths` — because a picker
+ * needs the current selection and the selectable options, not the presentation.
+ * The canvas mounts the PUBLIC `invite` section, and that section prices itself
+ * from a whole {@link CourseOffer} (`deriveOfferPaths(context.offer, …)`), which
+ * returns `[]` for anything less. Projecting once for the panel and once for the
+ * canvas out of one read would couple two consumers with different shapes; two
+ * queries over one idempotent GET is the cheaper coupling.
+ *
+ * AUTHORITATIVE-ONLY, deliberately (SPEC §7). The canvas could have assembled a
+ * preview offer out of the builder's unsaved pricing draft — which would show
+ * unsaved edits — and that is exactly the fallback the pricing invariant forbids:
+ * `landing_pages.offer` is presentation, no authoritative read consults it, and a
+ * canvas priced from it teaches the author a number the checkout will not charge.
+ * The cost is that a pricing edit shows in the canvas only after Save; the panel
+ * itself is where an unsaved price is visible.
+ *
+ * `null` off a non-org host or on a failed read, mirroring the public sales
+ * load's own `.catch(() => null)`: a pricing hiccup must cost the author their
+ * prices, never their canvas. The sections' documented degradation for a null
+ * offer is a PRICE-LESS CTA, never authored numbers.
+ *
+ * NOT A NEW EXPOSURE. `GET /courses/:id/offer` is already public with optional
+ * auth (the anonymous sell page and the checkout both read it), so this adds no
+ * reachable data; `resolveStudioOrg` is here for consistency with the sibling
+ * studio reads and to return `null` off a non-org host. `entitled` on the
+ * returned bag reflects the CREATOR's session, and that is harmless because
+ * nothing rendering-side reads it: `builderSalesContext` forces `enrolled: false`
+ * and `entitled` appears nowhere in `offer-paths.ts`, so the paths and prices a
+ * creator sees are exactly the ones an anonymous visitor sees.
+ */
+export const getCourseOffer = query(
+  courseOfferSchema,
+  async ({ courseId }): Promise<CourseOffer | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.courses.offer(courseId).catch(() => null);
   }
 );
 

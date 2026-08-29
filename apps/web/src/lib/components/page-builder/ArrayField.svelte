@@ -34,10 +34,42 @@
 
   Nesting is one level by contract: an entry field may be a `list`, never another
   `repeater`. A doubly-nested array is an editor nobody can use, and no renderer
-  reads one.
+  reads one. The component renders ITSELF for a nested `list`, and the contract is
+  what bounds the recursion: a `list` declares no `itemFields`, so its rows are
+  single string inputs and there is no third level to reach.
+
+  ── AND THE ENTRY DISPATCH IS THE SAME RULE ────────────────────────────────
+  The row cells dispatched on `textarea` ALONE and fell through to that same
+  catch-all `<input type="text">` for every other kind — so the bug above was
+  reintroduced one nesting level down, on `invite.offers`, the editor for the copy
+  at the page's primary conversion moment. Each of the three kinds it swallowed
+  corrupts silently, and each was traced to its reader:
+
+    · `id`      declared `select` over three canonical path ids. As free text the
+                legal values were never shown, and `readDecorations` drops an
+                entry naming no real path — so a creator who typed the label they
+                could SEE ("One-off purchase") authored an entry that decorated
+                nothing.
+    · `bullets` declared `list`. As one text input it persisted a bare STRING into
+                a key read by `fieldStringArray`, which returns `[]` for a
+                non-array: every bullet typed was discarded.
+    · `best`    declared `toggle`. As a text input it wrote a STRING into a key
+                read by `fieldBool` (`=== true`), so no value a creator could type
+                ever flagged a way in as recommended.
+
+  So an entry field now gets the same real control its top-level twin gets, and
+  the branches mirror `SectionEditor`'s own arms so the two dispatches cannot
+  drift. A kind with no branch here still lands in the text input — which is
+  correct for `text` and wrong for anything else, so
+  `section-editor-controls.svelte.test.ts` asserts the ELEMENT KIND per declared
+  entry field rather than trusting this list.
 -->
 <script lang="ts">
   import { TrashIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon } from '$lib/components/ui/Icon';
+  // Self-import, which is how a Svelte 5 component recurses (`<svelte:self>` is
+  // the legacy form). Used for ONE case only — a `list` entry field — and the
+  // depth bound is the declaration contract, not a counter.
+  import ArrayField from './ArrayField.svelte';
   import type { SectionFieldDef } from './section-fields';
 
   interface Props {
@@ -79,8 +111,39 @@
     return typeof v === 'string' ? v : '';
   }
 
-  /** Replace one row's cell, preserving every other key on an object row. */
-  function writeCell(index: number, key: string | undefined, next: string): void {
+  /**
+   * Read one cell UNCOERCED — the stored value in whatever shape it holds.
+   *
+   * A nested `list` needs this rather than {@link cellOf}, which flattens every
+   * non-string to `''` and would hand the nested control an empty value over a
+   * stored array — the creator would then see a blank list above real content and
+   * "fill in the blank" straight over it. That is the same data-loss trap the
+   * header note is about, from the other side.
+   */
+  function rawCellOf(row: unknown, key: string): unknown {
+    if (row === null || typeof row !== 'object') return undefined;
+    return (row as Record<string, unknown>)[key];
+  }
+
+  /** Read one cell as a boolean — `=== true`, the shape `fieldBool` tests for. */
+  function boolCellOf(row: unknown, key: string): boolean {
+    return rawCellOf(row, key) === true;
+  }
+
+  /**
+   * Replace one row's cell, preserving every other key on an object row.
+   *
+   * `next` is the union of the three shapes a cell may legally hold, because that
+   * is the point of this control: a `toggle` cell must land as a real boolean and
+   * a nested `list` as a real array, or the reader discards it. It is not widened
+   * to `unknown` — the union is the contract, and the reader for each kind is
+   * named in the header.
+   */
+  function writeCell(
+    index: number,
+    key: string | undefined,
+    next: string | boolean | unknown[]
+  ): void {
     const copy = [...rows];
     if (key === undefined) {
       copy[index] = next;
@@ -125,26 +188,73 @@
       <div class="af__cells">
         {#if isObjectRows}
           {#each field.itemFields ?? [] as sub (sub.key)}
-            <label class="af__cell">
-              <span class="af__cell-label">{sub.label}</span>
-              {#if sub.control === 'textarea'}
-                <textarea
-                  class="af__input af__input--area"
-                  rows="2"
-                  placeholder={sub.placeholder}
-                  value={cellOf(row, sub.key)}
-                  oninput={(e) => writeCell(rowIndex, sub.key, e.currentTarget.value)}
-                ></textarea>
-              {:else}
-                <input
-                  class="af__input"
-                  type="text"
-                  placeholder={sub.placeholder}
-                  value={cellOf(row, sub.key)}
-                  oninput={(e) => writeCell(rowIndex, sub.key, e.currentTarget.value)}
+            {#if sub.control === 'list'}
+              <!-- A `<div>`, not a `<label>`: a nested list renders MANY inputs,
+                   and a label wrapping more than one control labels none of them.
+                   The group gets a plain heading and each row labels itself. -->
+              <div class="af__cell">
+                <span class="af__cell-label">{sub.label}</span>
+                <ArrayField
+                  field={sub}
+                  value={rawCellOf(row, sub.key)}
+                  onchange={(next) => writeCell(rowIndex, sub.key, next)}
                 />
-              {/if}
-            </label>
+                {#if sub.hint}
+                  <span class="af__cell-hint">{sub.hint}</span>
+                {/if}
+              </div>
+            {:else if sub.control === 'toggle'}
+              <label class="af__cell af__cell--inline">
+                <input
+                  class="af__check"
+                  type="checkbox"
+                  checked={boolCellOf(row, sub.key)}
+                  onchange={(e) => writeCell(rowIndex, sub.key, e.currentTarget.checked)}
+                />
+                <span class="af__cell-label">{sub.label}</span>
+                {#if sub.hint}
+                  <span class="af__cell-hint">{sub.hint}</span>
+                {/if}
+              </label>
+            {:else}
+              <label class="af__cell">
+                <span class="af__cell-label">{sub.label}</span>
+                {#if sub.control === 'textarea'}
+                  <textarea
+                    class="af__input af__input--area"
+                    rows="2"
+                    placeholder={sub.placeholder}
+                    value={cellOf(row, sub.key)}
+                    oninput={(e) => writeCell(rowIndex, sub.key, e.currentTarget.value)}
+                  ></textarea>
+                {:else if sub.control === 'select'}
+                  <select
+                    class="af__input"
+                    value={cellOf(row, sub.key)}
+                    onchange={(e) => writeCell(rowIndex, sub.key, e.currentTarget.value)}
+                  >
+                    <!-- An explicit unset choice, FIRST: without it a new row
+                         would read as the first legal value while storing none,
+                         and the entry decorates nothing. -->
+                    <option value="">Choose…</option>
+                    {#each sub.options ?? [] as opt (opt.value)}
+                      <option value={opt.value}>{opt.label}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input
+                    class="af__input"
+                    type="text"
+                    placeholder={sub.placeholder}
+                    value={cellOf(row, sub.key)}
+                    oninput={(e) => writeCell(rowIndex, sub.key, e.currentTarget.value)}
+                  />
+                {/if}
+                {#if sub.hint}
+                  <span class="af__cell-hint">{sub.hint}</span>
+                {/if}
+              </label>
+            {/if}
           {/each}
         {:else}
           <input
@@ -245,11 +355,41 @@
     gap: var(--space-0-5);
   }
 
+  /* A toggle reads as one line — the box beside its own label, not under it. */
+  .af__cell--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
   .af__cell-label {
     color: var(--color-text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
+  }
+
+  /* Matches the inspector's own hint register — say what the control does and
+     what happens when it is unset. An entry field's hint carried the constraint
+     ("Must name a path the course actually offers") and had nowhere to render. */
+  .af__cell-hint {
+    color: var(--color-text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+  }
+
+  .af__check {
+    flex: none;
+    width: var(--space-4);
+    height: var(--space-4);
+    accent-color: var(--color-interactive);
+    cursor: pointer;
+  }
+
+  .af__check:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
   }
 
   .af__input {

@@ -347,6 +347,98 @@ describe('HeroSection — the CTA', () => {
   });
 });
 
+/**
+ * THE HERO MUST NOT SELL WHAT THE CHECKOUT CANNOT DELIVER (WP-1).
+ *
+ * The CTA pointed at `/journeys/<slug>/checkout` whatever the offer said, and the
+ * checkout answers "<Course> isn't open for enrolment just now. Back to the
+ * journey →". Measured in the dev database: FIVE of the seven published journey
+ * pages have `price_cents IS NULL`, zero `course_subscription_plans` rows and
+ * zero `course_tier_access` rows — so on the majority of real pages the hero sold
+ * a full-viewport promise into a bounce.
+ *
+ * The tri-state is the whole subtlety, and each state gets its own case below:
+ * `false` (a resolved offer with no paths) suppresses; `true` shows; ABSENT shows,
+ * because absence means "unknown" and the offer read is `.catch()`-guarded.
+ */
+describe('HeroSection — no buy button where there is nothing to buy', () => {
+  const primary = () =>
+    document.body.querySelector('.cta[data-variant="primary"]');
+
+  it('suppresses the primary CTA when the offer RESOLVED with no path', () => {
+    render({
+      config: { headline: 'A headline' },
+      context: context({ purchasable: false }),
+    });
+
+    expect(primary()).toBeNull();
+    // A button, not a section: the hero's copy is SEO-critical and still renders.
+    expect(
+      document.body.querySelector('.hero__headline')?.textContent
+    ).toContain('A headline');
+  });
+
+  it('drops the whole actions row rather than leaving an empty flex box', () => {
+    // `.hero__actions` sits in a gapped column and carries its own staggered
+    // entrance animation, so an empty one is a visible hole where the CTA was.
+    render({
+      config: { headline: 'A headline' },
+      context: context({ purchasable: false }),
+    });
+
+    expect(document.body.querySelector('.hero__actions')).toBeNull();
+  });
+
+  it('KEEPS the CTA when `purchasable` is ABSENT — unknown is not a negative', () => {
+    // The context field is optional-additive and absence means "assume the sell
+    // state". A host that cannot know (a preview harness, a test fixture, an older
+    // caller) must not silently lose the page's conversion affordance — so the
+    // guard is `!== false`, never `!purchasable`.
+    render({ config: { headline: 'A headline' }, context: context() });
+
+    expect(primary()?.getAttribute('href')).toBe(CHECKOUT);
+  });
+
+  it('keeps the CTA when the offer HAS a path', () => {
+    render({
+      config: { headline: 'A headline' },
+      context: context({ purchasable: true }),
+    });
+
+    expect(primary()?.getAttribute('href')).toBe(CHECKOUT);
+  });
+
+  it('keeps an ENROLLED member’s CTA even with nothing to buy', () => {
+    // Their target is the dashboard, which does not depend on the offer at all.
+    render({
+      config: { headline: 'A headline' },
+      context: context({ purchasable: false, enrolled: true }),
+    });
+
+    expect(primary()?.getAttribute('href')).toBe(DASHBOARD);
+  });
+
+  it('keeps the NON-TRANSACTIONAL affordances a suppressed page still has', () => {
+    // The authored side-door is not a purchase, so a page with nothing to sell can
+    // still offer it — and the row survives to hold it.
+    render({
+      config: {
+        headline: 'A headline',
+        quiet: 'Read the letter',
+        secondaryHref: '/letter',
+      },
+      context: context({ purchasable: false }),
+    });
+
+    expect(document.body.querySelector('.hero__actions')).not.toBeNull();
+    expect(primary()).toBeNull();
+    const secondary = document.body.querySelector(
+      '.cta[data-variant="secondary"]'
+    );
+    expect(secondary?.getAttribute('href')).toBe('/letter');
+  });
+});
+
 describe('HeroSection — the streamed hero still', () => {
   it('shows the synthetic plate while the sell-preview is pending', () => {
     let resolve!: (value: SellPreview | null) => void;

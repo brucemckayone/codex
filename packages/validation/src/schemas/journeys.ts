@@ -283,6 +283,39 @@ export const pageSectionSchema = z.object({
 });
 
 /**
+ * Page-level SEO / share metadata (`PageBuilderState.seo`) — the SEO panel's
+ * write, and what the public sell page's `<svelte:head>` reads for its meta
+ * title + description.
+ *
+ * Bounds are the SEO-practical ones, not the column's: a title over ~60 chars and
+ * a description over ~160 are already truncated by search engines, so 160/320
+ * leaves generous room while still refusing a pasted essay. Both are
+ * `.optional()` and neither carries `.min(1)` — CLEARING a field is expressed as
+ * the EMPTY STRING, which must persist so the head's `||` fallbacks resume
+ * deriving from the page title / course lede. Rejecting `''` would leave a
+ * creator unable to undo their own override.
+ *
+ * `.trim()` (a transform that keeps the ZodString type) is safe here for the same
+ * reason it is on `title` below; `.transform()`/`.default()` are not, per the note
+ * on the body schema.
+ *
+ * `.strict()`, and it declares ALL THREE keys of `PageSeo` rather than only the
+ * two the panel edits today. The bag ROUND-TRIPS — the builder loads it whole
+ * from `getJourneyForBuilder` and sends it whole back — so a key this schema
+ * dropped would be silently lost on the next save, and a key it rejected would
+ * make an otherwise-valid page unsaveable. `shareImageId` therefore persists
+ * already; what is missing is a CONTROL for it, and the panel says so.
+ */
+export const pageSeoSchema = z
+  .object({
+    title: z.string().trim().max(160).optional(),
+    description: z.string().trim().max(320).optional(),
+    shareImageId: uuidSchema.nullable().optional(),
+  })
+  .strict();
+export type PageSeoBody = z.infer<typeof pageSeoSchema>;
+
+/**
  * Save-journey-page body — the editable page record (frozen `JourneyPageRecord`
  * minus the server-owned `organizationId`/`publishedAt`, which the service
  * derives). `sections` is validated structurally by {@link pageSectionSchema};
@@ -290,9 +323,18 @@ export const pageSectionSchema = z.object({
  * is assignable to the service input with no boundary cast.
  *
  * `.strict()` because this endpoint does NOT own the whole builder draft. The
- * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema`, and `seo` has
- * no persistence yet — under Zod's default strip both were accepted, discarded,
- * and reported as "Page saved". A key this endpoint cannot honour must 400.
+ * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema` — under Zod's
+ * default strip it was accepted, discarded, and reported as "Page saved". A key
+ * this endpoint cannot honour must 400.
+ *
+ * `seo` IS now declared (Codex-2j8nq): migration 0090 added the
+ * `landing_pages.seo` jsonb column and `saveJourneyPage` writes it, so this is a
+ * key the endpoint can honour. It was deliberately absent before — under
+ * `.strict()` a declared-but-unpersistable field is WORSE than a rejected one,
+ * because the save accepts it, discards it and reports success. That is why the
+ * SEO panel's two meta fields shipped DISABLED rather than as live inputs.
+ * `.optional()`, and the service treats absent as LEAVE ALONE (never as clear) —
+ * see {@link pageSeoSchema} on how clearing is expressed.
  *
  * `design` (the PAGE-level look) IS now declared — F-B2 added the
  * `landing_pages.design` column, the service write and the `SavePagePayload`
@@ -329,6 +371,7 @@ export const saveJourneyPageBodySchema = z
     brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
     sections: z.array(pageSectionSchema),
     design: sectionDesignSchema.optional(),
+    seo: pageSeoSchema.optional(),
   })
   .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;

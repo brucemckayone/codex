@@ -155,6 +155,38 @@ export interface JourneySalesContext {
    */
   offer: CourseOffer | null;
   /**
+   * Whether this course has AT LEAST ONE real way in — i.e. whether the checkout
+   * can actually sell it. Derived once by `JourneyRenderer` from
+   * `deriveOfferPaths(offer, course).length > 0`, so every section shares one
+   * answer instead of each re-deriving it (and only `invite` ever did).
+   *
+   * WHY IT EXISTS. Three "Begin" affordances — the hero CTA, the floating pill
+   * and the invite CTA — pointed at `/journeys/<slug>/checkout` regardless, and
+   * checkout answers "<Course> isn't open for enrolment just now. Back to the
+   * journey →". Measured in this dev database: FIVE of the seven published
+   * journey pages have `price_cents IS NULL`, zero `course_subscription_plans`
+   * rows and zero `course_tier_access` rows, so on the majority of real pages the
+   * whole funnel terminated in a bounce back to where the visitor started.
+   *
+   * A CONFIDENT NEGATIVE ONLY. `false` means "the offer resolved and it has no
+   * paths"; a FAILED offer read is `offer: null` and leaves this TRUE. That
+   * asymmetry is deliberate and mirrors the loop-safety invariant the sell load
+   * states for its own redirect ("NEVER REDIRECT ON UNCERTAINTY" — on doubt,
+   * render where you are): the offer read is `.catch(() => null)`-guarded
+   * precisely so a pricing hiccup cannot break an SEO-critical page, and removing
+   * the buy button on a transient hiccup would be a worse failure than the dead
+   * end this closes.
+   *
+   * OPTIONAL-ADDITIVE, and `undefined` means TRUE — the pre-purchase sell state,
+   * exactly as `enrolled` defaults to `false` and `offer` to `null`. A host that
+   * cannot know (a preview harness, a test fixture) must not silently lose the
+   * page's conversion affordance. Both real hosts set it explicitly:
+   * `JourneyRenderer` derives it, `builderSalesContext` pins it to `true`.
+   * Consumers MUST therefore test `context.purchasable !== false`, never
+   * `!context.purchasable`.
+   */
+  purchasable?: boolean;
+  /**
    * The streamed sell-preview. Sections consume it via `{#await}` with a
    * poster skeleton so a slow/failed media resolution degrades gracefully and
    * never blocks the section's text (SEO-critical) from rendering.

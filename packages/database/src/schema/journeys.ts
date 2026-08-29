@@ -2,6 +2,7 @@ import type {
   BrandTokenOverrides,
   PageOffer,
   PageSection,
+  PageSeo,
   SectionDesign,
 } from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
@@ -101,6 +102,18 @@ export const landingPages = pgTable(
     // state plus forward-compat for a row written by an older deployment —
     // `resolveDesign` is total, so a NULL still renders coherently.
     design: jsonb('design').$type<SectionDesign>(),
+
+    // The page's SEO / share metadata — meta title + description (and, later, a
+    // share-image ref). The builder's SEO panel writes it; the public sell
+    // page's `<svelte:head>` reads it from the AWAITED envelope, never from a
+    // streamed promise, because it is SEO-critical.
+    //
+    // NULLABLE with no backfill, mirroring `offer` (migration 0081): unset is a
+    // legitimate and common state — the head then derives its title from
+    // `title` and its description from the course lede, exactly as it did before
+    // this column existed. So there is no value to write onto existing rows, and
+    // an empty `{}` would be indistinguishable from "the creator cleared it".
+    seo: jsonb('seo').$type<PageSeo>(),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

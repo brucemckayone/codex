@@ -435,13 +435,19 @@ function updateBrandOverrides(
 }
 
 /**
- * Merge a partial SEO patch into `pending.seo` (SEO builder mode).
+ * Merge a partial SEO patch into `pending.seo` (the SEO panel's write).
  *
- * CURRENTLY NO CONSUMER — `landing_pages` has no `seo` column and the `.strict()`
- * save schema has no `seo` key, so `PageSeoPanel` disables those fields rather than
- * accept keystrokes the save would discard. Kept as the seam persistence will wire
- * back into (NOT dead code): re-enabling the panel needs a migration + save-schema
- * field + service write, at which point this is the store-side write again.
+ * PERSISTED as of Codex-2j8nq: migration 0090 added `landing_pages.seo` jsonb,
+ * `pageSeoSchema` declares the key on the `.strict()` save body, and
+ * `saveJourneyPage` writes it. Before that this had no consumer and
+ * `PageSeoPanel` disabled its two fields rather than accept keystrokes the save
+ * would discard under a "Page saved" toast.
+ *
+ * A MERGE, not a replace, so the panel can write `title` and `description`
+ * independently. Clearing a field is the EMPTY STRING (which persists), never
+ * deleting the key — the public head falls back with `||`, so an empty override
+ * resumes deriving from the page title / course lede, while an ABSENT `seo` is
+ * what the service reads as "leave the stored bag alone".
  */
 function updateSeo(patch: Partial<PageSeo>): void {
   if (!state.pending) return;

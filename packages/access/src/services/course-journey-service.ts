@@ -76,6 +76,7 @@ import type {
   JourneyTestimonialView,
   PageOffer,
   PageSection,
+  PageSeo,
   PageStatus,
   PlaylistEntry,
   PracticeCompletionRecord,
@@ -288,7 +289,11 @@ export class CourseJourneyService extends BaseService {
    */
   async getCoursePage(
     organizationId: string,
-    slug: string
+    slug: string,
+    // Env-owned, so the ROUTE supplies it and the service resolves — the same
+    // split `getCourseSellPreview` and `listPublishedCourses` already use. Omit
+    // it and the page simply reports no cover (and emits no `og:image`).
+    r2PublicUrlBase?: string
   ): Promise<JourneyCoursePage | null> {
     try {
       // 1. The published landing page by org-scoped slug (partial-unique index).
@@ -306,6 +311,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -335,6 +341,7 @@ export class CourseJourneyService extends BaseService {
           lede: courses.lede,
           status: courses.status,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
         })
         .from(courses)
         .where(
@@ -383,6 +390,13 @@ export class CourseJourneyService extends BaseService {
           ...(pageRow.design
             ? { design: pageRow.design as SectionDesign }
             : {}),
+          // The page's SEO bag, which the sell page's `<svelte:head>` reads for
+          // its meta title + description. Spread-when-present for the same
+          // reason as `design`: `seo` is optional on the record and NULL is the
+          // common case (the column is nullable with no backfill), so an
+          // explicit empty bundle would make "never authored" look like
+          // "authored then cleared" to the view's `||` fallbacks.
+          ...(pageRow.seo ? { seo: pageRow.seo as PageSeo } : {}),
         },
         course: {
           id: courseRow.id,
@@ -394,6 +408,16 @@ export class CourseJourneyService extends BaseService {
           priceCents: courseRow.priceCents,
           stageCount: stages.length,
           practiceCount,
+          // The sell page's SHARE IMAGE (`og:image`). It has to ride the AWAITED
+          // envelope: the hero's still is resolved by `getCourseSellPreview`,
+          // which the page STREAMS, and a `<svelte:head>` is flushed long before
+          // a streamed promise settles — so the cover is the only image the
+          // share card can ever have. `md` variant, exactly as the journey cards
+          // serve. Null with no cover OR no configured base (never a raw key).
+          coverImageUrl: resolveCourseCoverUrl(
+            courseRow.coverImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
@@ -419,7 +443,9 @@ export class CourseJourneyService extends BaseService {
    */
   async getCoursePagePreview(
     organizationId: string,
-    slug: string
+    slug: string,
+    /** Env-owned; supplied by the route (see {@link getCoursePage}). */
+    r2PublicUrlBase?: string
   ): Promise<JourneyCoursePage | null> {
     try {
       // The landing page by org-scoped slug — ANY status (draft included).
@@ -437,6 +463,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -461,6 +488,7 @@ export class CourseJourneyService extends BaseService {
           lede: courses.lede,
           status: courses.status,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
         })
         .from(courses)
         .where(
@@ -507,6 +535,13 @@ export class CourseJourneyService extends BaseService {
           ...(pageRow.design
             ? { design: pageRow.design as SectionDesign }
             : {}),
+          // The page's SEO bag, which the sell page's `<svelte:head>` reads for
+          // its meta title + description. Spread-when-present for the same
+          // reason as `design`: `seo` is optional on the record and NULL is the
+          // common case (the column is nullable with no backfill), so an
+          // explicit empty bundle would make "never authored" look like
+          // "authored then cleared" to the view's `||` fallbacks.
+          ...(pageRow.seo ? { seo: pageRow.seo as PageSeo } : {}),
         },
         course: {
           id: courseRow.id,
@@ -518,6 +553,16 @@ export class CourseJourneyService extends BaseService {
           priceCents: courseRow.priceCents,
           stageCount: stages.length,
           practiceCount,
+          // The sell page's SHARE IMAGE (`og:image`). It has to ride the AWAITED
+          // envelope: the hero's still is resolved by `getCourseSellPreview`,
+          // which the page STREAMS, and a `<svelte:head>` is flushed long before
+          // a streamed promise settles — so the cover is the only image the
+          // share card can ever have. `md` variant, exactly as the journey cards
+          // serve. Null with no cover OR no configured base (never a raw key).
+          coverImageUrl: resolveCourseCoverUrl(
+            courseRow.coverImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
@@ -1385,6 +1430,7 @@ export class CourseJourneyService extends BaseService {
           sections: landingPages.sections,
           offer: landingPages.offer,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -1419,6 +1465,10 @@ export class CourseJourneyService extends BaseService {
         // selected, which is honest — the page really is rendering at the axis
         // defaults.
         ...(row.design ? { design: row.design as SectionDesign } : {}),
+        // The page's SEO bag — what the builder's SEO panel opens with. Without
+        // this projection the two meta fields would come back EMPTY after every
+        // reload, which is the shape a creator reads as "it did not save".
+        ...(row.seo ? { seo: row.seo as PageSeo } : {}),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1608,6 +1658,19 @@ export class CourseJourneyService extends BaseService {
        * page to hold an explicit bundle.
        */
       design?: SectionDesign;
+      /**
+       * The page's SEO / share metadata (the SEO panel's write). OPTIONAL and
+       * treated as "leave alone" when absent, for the same reason as `design`: a
+       * client that predates the field — or a save issued before the draft
+       * finished loading — must not silently wipe a stored meta description.
+       *
+       * CLEARING IS EXPRESSED AS EMPTY STRINGS, not as an absent key: the panel
+       * sends `{ title: '', description: '' }`, which persists, and the public
+       * head's `||` fallbacks then derive from the page title / course lede
+       * again. So a creator CAN undo their override; only "the client said
+       * nothing about SEO" is treated as no instruction.
+       */
+      seo?: PageSeo;
     }
   ): Promise<void> {
     try {
@@ -1694,6 +1757,7 @@ export class CourseJourneyService extends BaseService {
             sections: record.sections,
             brandOverrides: record.brandOverrides,
             ...(record.design ? { design: record.design } : {}),
+            ...(record.seo ? { seo: record.seo } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
           })
           .where(

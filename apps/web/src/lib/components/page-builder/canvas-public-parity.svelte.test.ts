@@ -39,7 +39,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PageSection } from '@codex/shared-types';
+import type { CourseOffer, PageSection } from '@codex/shared-types';
 import { tick } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -346,5 +346,213 @@ describe('canvas ↔ public: the sell media (Codex-bvhcr)', () => {
 
     expect(await heroStillVia('canvas', heroWithPlate, context)).toBeNull();
     expect(await heroStillVia('public', heroWithPlate, context)).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The authoritative OFFER (Codex-4wun2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A real offer with all three §7 paths on. It enumerates to FOUR cards, not
+ * three: a course subscription contributes both intervals, because a plan that
+ * exists only for this course would otherwise leave the annual price the creator
+ * set unreachable (`enumerateOfferPaths`). Prices are GBP pence and chosen to be
+ * whole pounds so `formatCleanPrice` takes its compact branch and the expected
+ * strings are unambiguous.
+ */
+const fullOffer: CourseOffer = {
+  courseId: 'c1',
+  organizationId: 'o1',
+  paths: ['purchase', 'subscription', 'tier'],
+  purchase: { priceCents: 2700 },
+  subscription: { planId: 'plan1', priceMonthly: 1500, priceAnnual: 15000 },
+  tiers: [
+    {
+      tierId: 't1',
+      tierName: 'Inner Circle',
+      priceMonthly: 1200,
+      priceAnnual: 12000,
+    },
+  ],
+  entitled: false,
+};
+
+/**
+ * One `invite` on its default composition. `pool` (and `banner`/`card`/`tiers`
+ * with it) renders ONE CARD PER REAL PATH, which is what makes the count and the
+ * price strings observable; `sticky` renders only the recommended path and
+ * `table` transposes them, so a test built on either would under-count for the
+ * wrong reason.
+ */
+const inviteSection: PageSection = {
+  id: 's-invite',
+  type: 'invite',
+  enabled: true,
+  props: {},
+} as PageSection;
+
+/**
+ * Mount ONE of the two paths and read what the invite section PRICED — the card
+ * count and every amount, in DOM order. Same one-mount-at-a-time shape as
+ * `heroStillVia` above, for the same teardown reason.
+ */
+async function invitePricingVia(
+  path: 'canvas' | 'public',
+  section: PageSection,
+  context: JourneySalesContext
+): Promise<{ cards: number; amounts: string[] }> {
+  const component =
+    path === 'canvas'
+      ? mount(SectionFrame, {
+          target: document.body,
+          props: {
+            renderable: selectRenderableSections([section])[0],
+            context,
+            editable: true,
+          },
+        })
+      : mount(PublicSectionRenderer, {
+          target: document.body,
+          props: { sections: [section], context },
+        });
+  flushSync();
+  await settle();
+
+  const cards = document.body.querySelectorAll('.invite__offer').length;
+  const amounts = [
+    ...document.body.querySelectorAll('.invite__price-amount'),
+  ].map((el) => el.textContent?.trim() ?? '');
+
+  unmount(component);
+  document.body.innerHTML = '';
+  return { cards, amounts };
+}
+
+describe('canvas ↔ public: the authoritative offer (Codex-4wun2)', () => {
+  it('forwards the offer AND both CTA URLs from the canvas into the shared context', () => {
+    // SOURCE-level, for the same reason the `sellPreview` case above is: the
+    // canvas declared `offer`, forwarded it here, and was handed none — so
+    // `builderSalesContext` defaulted it to null and every invite section in the
+    // canvas drew its price-less branch while the published page priced itself.
+    // "No prices" is also the CORRECT output for a course with no purchasable
+    // path, so no assertion over the canvas alone could witness the difference.
+    //
+    // `checkoutUrl`/`dashboardUrl` are asserted in the same breath because they
+    // are the same defect one hop later: they default to `''`, which is invisible
+    // only while there are no paths to link. With paths,
+    // `checkoutUrlForPath('', pathId)` yields the scheme-less `?offer=<pathId>`,
+    // `safeHref` passes it through, and every priced card becomes a live relative
+    // link that reloads whatever route the canvas is mounted on.
+    const canvas = readFileSync(
+      join(HERE, 'JourneyBuilderCanvas.svelte'),
+      'utf8'
+    );
+    const opens = canvas.indexOf('builderSalesContext({');
+    expect(opens, 'canvas no longer builds a context here').toBeGreaterThan(-1);
+    const call = canvas.slice(opens, canvas.indexOf('})', opens));
+    expect(
+      call,
+      'builderSalesContext is called without offer — the canvas cannot price anything (Codex-4wun2)'
+    ).toContain('offer');
+    expect(
+      call,
+      'builderSalesContext is called without checkoutUrl — every canvas CTA becomes a relative link'
+    ).toContain('checkoutUrl');
+    expect(call).toContain('dashboardUrl');
+  });
+
+  it('prices the SAME cards on both paths from one offer', async () => {
+    const context = builderSalesContext({
+      course: { id: 'c1', slug: 'demo', title: 'Demo course' },
+      stages: [],
+      offer: fullOffer,
+      checkoutUrl: 'http://lvh.me:3000/journeys/demo/checkout',
+      dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
+    });
+
+    const canvasSide = await invitePricingVia('canvas', inviteSection, context);
+    const publicSide = await invitePricingVia('public', inviteSection, context);
+
+    // The absolute expectation, not just an equality: an equality alone would be
+    // satisfied by both paths rendering ZERO cards, which is exactly the state
+    // this bead found on the canvas.
+    expect(canvasSide.cards, 'the canvas priced no cards').toBe(4);
+    expect(canvasSide.amounts).toEqual(['£27', '£15', '£150', '£12']);
+
+    expect(publicSide.cards, 'the two paths disagree on the card count').toBe(
+      canvasSide.cards
+    );
+    expect(
+      publicSide.amounts,
+      'the two paths disagree on the prices they show'
+    ).toEqual(canvasSide.amounts);
+  });
+
+  it('agrees on NO prices when the offer read gave nothing', async () => {
+    // The other half of the equality, and the honest degradation `InviteSection`
+    // documents: a null offer must produce a price-less CTA on BOTH surfaces —
+    // never authored numbers, and never an invented card. A canvas that
+    // fabricated a price would satisfy the case above just as well.
+    const context = builderSalesContext({
+      course: { id: 'c1', slug: 'demo', title: 'Demo course' },
+      stages: [],
+      offer: null,
+      checkoutUrl: 'http://lvh.me:3000/journeys/demo/checkout',
+      dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
+    });
+
+    expect(await invitePricingVia('canvas', inviteSection, context)).toEqual({
+      cards: 0,
+      amounts: [],
+    });
+    expect(await invitePricingVia('public', inviteSection, context)).toEqual({
+      cards: 0,
+      amounts: [],
+    });
+  });
+
+  it('deep-links each priced card at the REAL checkout, not a relative fragment', async () => {
+    // The second hop, rendered rather than asserted in source. With
+    // `checkoutUrl: ''` every one of these hrefs is `?offer=<pathId>` — scheme-
+    // less, so `safeHref` returns it verbatim and the card navigates whatever
+    // route the canvas sits on (the builder), taking the author's unsaved work
+    // with it behind a confirm dialog.
+    const context = builderSalesContext({
+      course: { id: 'c1', slug: 'demo', title: 'Demo course' },
+      stages: [],
+      offer: fullOffer,
+      checkoutUrl: '/journeys/demo/checkout',
+      dashboardUrl: '/journeys/demo/dashboard',
+    });
+
+    const component = mount(SectionFrame, {
+      target: document.body,
+      props: {
+        renderable: selectRenderableSections([inviteSection])[0],
+        context,
+        editable: true,
+      },
+    });
+    flushSync();
+    await settle();
+
+    const hrefs = [...document.body.querySelectorAll('.invite__offer a')].map(
+      (el) => el.getAttribute('href') ?? ''
+    );
+
+    unmount(component);
+
+    expect(hrefs).toHaveLength(4);
+    // The tier id arrives percent-encoded (`tier%3At1`) because
+    // `checkoutUrlForPath` runs it through `encodeURIComponent` — the pay step
+    // reads it back through `URLSearchParams`, which decodes it. Pinned as-is
+    // rather than normalised, so a change to that encoding is visible here.
+    expect(hrefs).toEqual([
+      '/journeys/demo/checkout?offer=purchase',
+      '/journeys/demo/checkout?offer=subscription-monthly',
+      '/journeys/demo/checkout?offer=subscription-annual',
+      '/journeys/demo/checkout?offer=tier%3At1',
+    ]);
   });
 });

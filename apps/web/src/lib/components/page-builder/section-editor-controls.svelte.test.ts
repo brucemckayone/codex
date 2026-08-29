@@ -150,10 +150,21 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     // `SectionFieldControl` with no branch in the dispatch would inherit the
     // catch-all text input and start corrupting whatever shape it names — exactly
     // how the first four got here. This makes that addition fail loudly.
+    //
+    // IT DESCENDS INTO `itemFields` NOW, and that is the whole point of the
+    // amendment: collecting with `fields.map((f) => f.control)` saw TOP-LEVEL
+    // fields only, so the three kinds a repeater's ENTRY declares
+    // (`invite.offers[].id` select, `.bullets` list, `.best` toggle) were never
+    // in the declared set. They passed anyway, because all three ARE built at the
+    // top level — the set was satisfied by a different dispatch than the one
+    // rendering them.
     const allDeclared = [
       ...new Set(
         Object.values(SECTION_FIELDS).flatMap((fields) =>
-          fields.map((f) => f.control)
+          fields.flatMap((f) => [
+            f.control,
+            ...(f.itemFields ?? []).map((sub) => sub.control),
+          ])
         )
       ),
     ].sort();
@@ -161,6 +172,138 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     const unaccounted = allDeclared.filter((c) => !accountedFor.includes(c));
     expect(unaccounted).toEqual([]);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE SAME GUARD ONE NESTING LEVEL DOWN (`ArrayField`'s ENTRY dispatch).
+//
+// Descending into `itemFields` for the declared SET above is necessary and not
+// sufficient: `select`, `list` and `toggle` are all built at the top level, so
+// membership alone can never fail. The bug this section exists for is that
+// `ArrayField` dispatched a repeater's entry fields on `textarea` ALONE and fell
+// through to `<input type="text">` for everything else — `Codex-28ifd`'s exact
+// defect, reintroduced one level down, on `invite.offers`: the editor for the
+// copy at the page's primary conversion moment.
+//
+// Each of the three was traced to its READER, and each corrupts silently:
+//   · `id`      free text, so the three legal path ids were never shown, and
+//               `offer-paths.ts` drops an entry naming no real path.
+//   · `bullets` a STRING into a key read by `fieldStringArray`, which returns
+//               `[]` for a non-array — every bullet typed was discarded.
+//   · `best`    a STRING into a key read by `fieldBool` (`=== true`), so no
+//               value a creator could type ever flagged a way in as recommended.
+//
+// So the guard has to be BEHAVIOURAL, for the same reason the file's header
+// gives: the catch-all is valid TypeScript and valid Svelte, and the bug is
+// which BRANCH a declared kind lands in. It asserts the ELEMENT KIND each
+// declared entry field reaches the DOM as, for every repeater in the catalogue.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every `(sectionType, repeaterField)` pair the catalogue declares. */
+const REPEATERS = Object.entries(SECTION_FIELDS).flatMap(([type, fields]) =>
+  fields
+    .filter((f) => f.control === 'repeater' && (f.itemFields?.length ?? 0) > 0)
+    .map((field) => ({ type, field }))
+);
+
+/** One row, so the entry cells exist — an empty repeater renders no cells. */
+function sectionWithOneRow(type: string, key: string): PageSection {
+  return {
+    id: `s-${type}`,
+    type,
+    enabled: true,
+    props: { [key]: [{}] },
+  } as PageSection;
+}
+
+/** The `.af__cell` whose own label is `text`. */
+function cellByLabel(text: string): HTMLElement | null {
+  return (
+    [...document.body.querySelectorAll<HTMLElement>('.af__cell')].find(
+      (cell) =>
+        cell.querySelector('.af__cell-label')?.textContent?.trim() === text
+    ) ?? null
+  );
+}
+
+describe('ArrayField — a repeater ENTRY field renders the control it declares', () => {
+  it('declares at least one entry field of every array-shaped kind', () => {
+    // Guards the guard: if the catalogue stopped declaring a nested `select`,
+    // `list` or `toggle`, the assertions below would pass by vacuity rather than
+    // by correctness. Naming the kinds here makes that visible.
+    const nested = [
+      ...new Set(
+        REPEATERS.flatMap(({ field }) =>
+          (field.itemFields ?? []).map((sub) => sub.control)
+        )
+      ),
+    ].sort();
+    expect(nested).toContain('select');
+    expect(nested).toContain('list');
+    expect(nested).toContain('toggle');
+  });
+
+  for (const { type, field } of REPEATERS) {
+    for (const sub of field.itemFields ?? []) {
+      it(`${type}.${field.key}[].${sub.key} (${sub.control}) is not a text box by default`, () => {
+        const component = mount(SectionEditor, {
+          target: document.body,
+          props: { section: sectionWithOneRow(type, field.key) },
+        });
+        flushSync();
+
+        const cell = cellByLabel(sub.label);
+        expect(cell, `no cell labelled "${sub.label}"`).not.toBeNull();
+
+        switch (sub.control) {
+          case 'select': {
+            const select = cell?.querySelector('select');
+            expect(select, 'a select control').not.toBeNull();
+            // Every declared option is offered — a free-text box could never
+            // show them, which is how an entry naming no real path got authored.
+            const offered = [...(select?.options ?? [])].map((o) => o.value);
+            for (const opt of sub.options ?? []) {
+              expect(offered).toContain(opt.value);
+            }
+            break;
+          }
+          case 'toggle':
+            // A checkbox, because `fieldBool` tests `=== true`. A text input
+            // here can only ever write the STRING "true".
+            expect(
+              cell?.querySelector('input[type="checkbox"]'),
+              'a checkbox'
+            ).not.toBeNull();
+            break;
+          case 'list': {
+            // The nested array control, named by the sub-field's own itemLabel
+            // ("Add bullet"). A single text input here writes a bare string into
+            // a key `fieldStringArray` reads as `[]`.
+            const noun = sub.itemLabel ?? 'item';
+            const adds = [...(cell?.querySelectorAll('button') ?? [])]
+              .map((b) => b.textContent?.trim() ?? '')
+              .filter((t) => t.length > 0);
+            expect(
+              adds.some((t) => t.includes(noun)),
+              `an add-${noun} affordance`
+            ).toBe(true);
+            break;
+          }
+          case 'textarea':
+            expect(cell?.querySelector('textarea')).not.toBeNull();
+            break;
+          default:
+            expect(
+              cell?.querySelector('input[type="text"]'),
+              'a text input'
+            ).not.toBeNull();
+            break;
+        }
+
+        unmount(component);
+      });
+    }
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

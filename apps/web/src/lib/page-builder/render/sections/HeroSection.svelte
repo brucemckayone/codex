@@ -299,6 +299,41 @@
       : (p.ctaLabel ?? m.journey_hero_cta_default())
   );
 
+  /**
+   * NO BUY BUTTON WHERE THERE IS NOTHING TO BUY.
+   *
+   * The hero's CTA is the first and largest thing a visitor sees, and it pointed
+   * at `/journeys/<slug>/checkout` whatever the course's offer said — so on a
+   * course with no purchasable path it sold a full-viewport promise into
+   * "<Course> isn't open for enrolment just now. Back to the journey →". Measured
+   * in the dev database: five of the seven published journey pages are in exactly
+   * that state (`price_cents IS NULL`, no subscription plan, no tier grant).
+   *
+   * `!== false`, NOT `!context.purchasable` — see the field's contract in
+   * `../types.ts`: absent means "unknown", and unknown keeps the sell state, so a
+   * `.catch()`-ed offer read or a host that cannot know never blanks the CTA.
+   * An enrolled member always keeps it: their target is the dashboard, which does
+   * not depend on the offer at all.
+   */
+  const showPrimaryCta = $derived(
+    context.enrolled || context.purchasable !== false
+  );
+
+  /**
+   * Whether the actions row has anything left to hold. `.hero__actions` is a
+   * flex row inside a gapped column, so an empty one would still consume a gap
+   * and a staggered entrance animation — a visible hole where the CTA was.
+   *
+   * The secondary link and the watch affordance survive the suppression on
+   * purpose: neither is transactional, so a page with nothing to sell can still
+   * offer its film and its authored side-door.
+   */
+  const hasActions = $derived(
+    showPrimaryCta ||
+      Boolean(p.secondaryLabel && p.secondaryHref) ||
+      showWatch
+  );
+
   // Decorative motes — count only; per-mote geometry lives in CSS (nth-child).
   const MOTE_COUNT = 12;
   const motes = Array.from({ length: MOTE_COUNT });
@@ -410,22 +445,30 @@
 {/snippet}
 
 {#snippet actions()}
-  <div class="hero__actions">
-    <CtaLink href={ctaHref} variant="primary" size="lg">
-      {ctaLabel}
-    </CtaLink>
-    {#if p.secondaryLabel && p.secondaryHref}
-      <CtaLink href={p.secondaryHref} variant="secondary" size="lg">
-        {p.secondaryLabel}
-      </CtaLink>
-    {/if}
-    {#if showWatch}
-      <button class="hero__watch" type="button" onclick={() => (introOpen = true)}>
-        <PlayIcon size="1rem" />
-        <span>{watchLabel}</span>
-      </button>
-    {/if}
-  </div>
+  {#if hasActions}
+    <div class="hero__actions">
+      {#if showPrimaryCta}
+        <CtaLink href={ctaHref} variant="primary" size="lg">
+          {ctaLabel}
+        </CtaLink>
+      {/if}
+      {#if p.secondaryLabel && p.secondaryHref}
+        <CtaLink href={p.secondaryHref} variant="secondary" size="lg">
+          {p.secondaryLabel}
+        </CtaLink>
+      {/if}
+      {#if showWatch}
+        <button
+          class="hero__watch"
+          type="button"
+          onclick={() => (introOpen = true)}
+        >
+          <PlayIcon size="1rem" />
+          <span>{watchLabel}</span>
+        </button>
+      {/if}
+    </div>
+  {/if}
 {/snippet}
 
 {#snippet trustNode()}

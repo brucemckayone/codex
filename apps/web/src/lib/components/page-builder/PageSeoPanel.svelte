@@ -2,16 +2,43 @@
   @component PageSeoPanel
 
   The "SEO & web address" page-mode panel (Codex-2pryk.3.3 · WP-5). Edits the web
-  address (slug, real `PageBuilderState.slug`) — persisted by the page save and
-  live in the address read-out immediately.
+  address (slug) and the page's meta title + description — all three are real
+  `PageBuilderState` fields, persisted by the page save.
 
-  META TITLE / DESCRIPTION ARE NOT YET PERSISTED. `landing_pages` has no `seo`
-  column (the `PageSeo` doc comment claiming "Backs landing_pages.seo jsonb" is
-  aspirational), and the save schema is `.strict()`, so `seo` has nowhere to go.
-  The fields are therefore DISABLED rather than accepting keystrokes the save
-  would discard while the toast said "Page saved" — the same silent swallow the
-  pricing panel had before `updateJourneyOffer` landed. Enabling them needs a
-  migration + save-schema + service field (bead filed).
+  META TITLE / DESCRIPTION ARE NOW PERSISTED (Codex-2j8nq). They shipped DISABLED
+  because `landing_pages` had no `seo` column and the save body is `.strict()`, so
+  the keystrokes would have been discarded under a "Page saved" toast — the same
+  silent swallow the pricing panel had before `updateJourneyOffer` landed. The
+  whole chain now exists: migration 0090 adds `landing_pages.seo` jsonb,
+  `pageSeoSchema` declares the key on `saveJourneyPageBodySchema`,
+  `CourseJourneyService.saveJourneyPage` writes it, `getJourneyForBuilder`
+  projects it back, and the public sell page reads it in `<svelte:head>` from the
+  AWAITED envelope (never a streamed promise — it is SEO-critical).
+
+  CLEARING A FIELD IS THE EMPTY STRING, and that is load-bearing: the head falls
+  back with `||`, not `??`, so an empty override resumes deriving the title from
+  the page title and the description from the course lede. Absent (the client said
+  nothing about SEO) is what the service reads as "leave the stored bag alone".
+
+  WEB ADDRESS — WHY THE LOCAL DRAFT. The input's `value` used to be bound to the
+  SLUGIFIED store value and re-derived on every keystroke, so the field rewrote
+  what the creator was typing, under the caret. MEASURED at the pre-fix commit:
+  typing a space between "deep" and "work" replaced the field's own value with
+  "deep-work" and moved `selectionStart` from 5 to the end of the field (9) — so
+  editing anywhere but the end threw the caret away, one keystroke at a time. The
+  same binding also let the field DISPLAY characters that never entered the
+  stored slug (a trailing hyphen, punctuation), because `slugify` strips them and
+  an unchanged store value means no re-render.
+
+  (The bead's stronger claim — that `deep-work` was unauthorable at all — does
+  NOT reproduce: `page-seo-panel.svelte.test.ts` types it at the pre-fix commit
+  and the store does end up holding `deep-work`. The caret and the display lie
+  are the real defects, and they are what the test pins.)
+
+  The draft string is authoritative while the field is focused (the same pattern,
+  for the same reason, as `PagePricingPanel`'s price fields); `pending.slug` still
+  holds the canonical slugified value on EVERY keystroke, so a draft can never
+  make the save payload invalid.
 -->
 <script lang="ts">
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -32,6 +59,30 @@
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
   }
+
+  // Raw text while the field is focused; null when it is not. See the component
+  // header — without it a hyphen cannot be typed.
+  let slugDraft = $state<string | null>(null);
+
+  function typeSlug(raw: string): void {
+    slugDraft = raw;
+    pageBuilder.updateMeta('slug', slugify(raw));
+  }
+
+  /** Blur → drop the draft so the field shows the canonical stored slug. */
+  function commitSlug(): void {
+    slugDraft = null;
+  }
+
+  // Renaming a LIVE page breaks every link already shared to it — the one
+  // consequence on this panel a creator cannot discover by looking. Shown only
+  // once the address actually differs from what is published, so it reads as a
+  // consequence of THIS edit rather than as a permanent scold.
+  const renamingLivePage = $derived(
+    pending?.status === 'published' &&
+      Boolean(pageBuilder.saved?.slug) &&
+      pending.slug !== pageBuilder.saved?.slug
+  );
 </script>
 
 {#if pending}
@@ -46,25 +97,28 @@
       <input
         type="text"
         class="panel__input"
-        value={pending.slug}
-        oninput={(e) => pageBuilder.updateMeta('slug', slugify(e.currentTarget.value))}
+        value={slugDraft ?? pending.slug}
+        oninput={(e) => typeSlug(e.currentTarget.value)}
+        onblur={commitSlug}
       />
       <span class="panel__hint">{orgDomain} / journeys / <b>{pending.slug || 'draft'}</b></span>
     </label>
 
-    <p class="panel__note">
-      Meta title, description and share image land with page metadata. Until then the
-      page’s own title is used, so nothing here is silently dropped.
-    </p>
+    {#if renamingLivePage}
+      <p class="panel__warn" role="status">
+        This portal is live at <b>/journeys/{pageBuilder.saved?.slug}</b>. Saving the new
+        address will 404 every link already shared to the old one.
+      </p>
+    {/if}
 
     <label class="panel__field">
       <span class="panel__label">Meta title</span>
       <input
         type="text"
         class="panel__input"
-        disabled
         placeholder={pending.title}
         value={pending.seo?.title ?? ''}
+        oninput={(e) => pageBuilder.updateSeo({ title: e.currentTarget.value })}
       />
       <span class="panel__hint">Shown in search results &amp; the browser tab. Unset → the page title.</span>
     </label>
@@ -74,14 +128,18 @@
       <textarea
         class="panel__input panel__input--area"
         rows="3"
-        disabled
         value={pending.seo?.description ?? ''}
+        oninput={(e) =>
+          pageBuilder.updateSeo({ description: e.currentTarget.value })}
       ></textarea>
+      <span class="panel__hint">
+        The sentence search results and share cards show. Unset → the course’s lede.
+      </span>
     </label>
 
     <p class="panel__group">Share image</p>
     <div class="panel__media">
-      <span class="panel__media-thumb" aria-hidden="true">🖼</span>
+      <span class="panel__media-thumb" aria-hidden="true"></span>
       <span class="panel__media-copy">
         Social preview
         <small>1200×630 · media library soon</small>
@@ -147,21 +205,15 @@
     line-height: var(--leading-normal);
   }
 
-  .panel__input:disabled {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text-muted);
-    cursor: not-allowed;
-  }
-
-  .panel__note {
+  .panel__warn {
     margin: 0;
     padding: var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
     border-radius: var(--radius-md);
-    background-color: var(--color-surface-secondary);
+    background-color: var(--color-warning-50);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-warning-700);
   }
 
   .panel__input:focus-visible {

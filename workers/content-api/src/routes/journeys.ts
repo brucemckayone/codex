@@ -221,7 +221,14 @@ app.get(
     },
     handler: async (ctx): Promise<JourneyCoursePage | null> => {
       const { organizationId, slug } = ctx.input.query;
-      return ctx.services.courseJourney.getCoursePage(organizationId, slug);
+      // The URL base is env-owned, so the ROUTE supplies it and the service
+      // resolves `courses.coverImageKey` → the page's `og:image` (the sell
+      // page's only share image; the hero still is on the STREAMED read).
+      return ctx.services.courseJourney.getCoursePage(
+        organizationId,
+        slug,
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
@@ -606,7 +613,8 @@ app.get(
     handler: async (ctx): Promise<JourneyCoursePage | null> => {
       return ctx.services.courseJourney.getCoursePagePreview(
         ctx.organizationId,
-        ctx.input.query.slug
+        ctx.input.query.slug,
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })

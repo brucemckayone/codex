@@ -209,9 +209,15 @@ export interface PageBuilderState {
   subjectId: string | null;
   brandOverrides: BrandTokenOverrides | null;
   /**
-   * Page-level SEO / share metadata (optional; unset → derive from `title`).
-   * Additive WP-5 editor field — the SEO builder mode writes it; the public page
-   * head reads it. Backs `landing_pages.seo` jsonb.
+   * Page-level SEO / share metadata (optional; unset → derive from `title` and
+   * the course lede). The builder's SEO panel writes it, `saveJourneyPage`
+   * persists it, and the public sales page reads it in `<svelte:head>` from the
+   * AWAITED envelope — never from a streamed promise, because the head is
+   * flushed long before one settles. Backs the `landing_pages.seo` jsonb column
+   * added in migration 0090 (Codex-2j8nq).
+   *
+   * ABSENT means "the client said nothing about SEO" and the service leaves the
+   * stored bag alone; an EMPTY STRING is how a creator clears an override.
    */
   seo?: PageSeo;
   /**
@@ -731,6 +737,21 @@ export interface JourneyCourseView {
   priceCents: number | null;
   stageCount: number;
   practiceCount: number;
+  /**
+   * Public CDN URL for the course cover, or null when there is no cover (or no
+   * configured URL base). Never a raw R2 key.
+   *
+   * THIS IS THE SELL PAGE'S SHARE IMAGE. It is the only image the page can put
+   * in `<svelte:head>`: the hero's still arrives on the STREAMED `sellPreview`
+   * promise, which the head has structurally already flushed past, so before
+   * this field every share of a journey rendered as a bare text card. The `md`
+   * (400px) variant, the same one {@link JourneyCardView.coverImageUrl} serves,
+   * so one column has one resolved meaning everywhere.
+   *
+   * OPTIONAL-additive (like `CourseSellPreview.guidePortraitUrl`): an older
+   * worker deployment simply omits it and the head emits no `og:image`.
+   */
+  coverImageUrl?: string | null;
 }
 
 /** One testimonial rendered by the `proof` section. */

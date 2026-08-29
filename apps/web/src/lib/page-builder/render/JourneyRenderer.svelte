@@ -18,12 +18,19 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { buildJourneyUrl } from '@codex/urls';
+  import * as m from '$paraglide/messages';
+  import { deriveOfferPaths, findInviteSection } from '$lib/page-builder/offer-paths';
   import FloatingCta from './FloatingCta.svelte';
   import SectionRenderer from './SectionRenderer.svelte';
   import '../journey-palette.css';
   import { brandOverridesToStyleAttr } from './brand-overrides';
+  import { aliasKeys, asStringFrom } from './coerce';
   import type { JourneySalesContext, SellPreview } from './types';
-  import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
+  import type {
+    CourseOffer,
+    JourneyCoursePage,
+    SectionProps,
+  } from '$lib/page-builder';
 
   interface Props {
     coursePage: JourneyCoursePage;
@@ -55,16 +62,63 @@
     brandOverridesToStyleAttr(coursePage.page.brandOverrides)
   );
 
-  const journeyTarget = $derived({
-    slug: coursePage.course.slug,
-    id: coursePage.course.id,
-  });
+  /*
+    TWO TARGETS, TWO KEY-SPACES — and they are NOT interchangeable.
 
+    This used to build ONE `journeyTarget` from `coursePage.course.slug` and hand
+    it to both surfaces. But `/journeys/<slug>/checkout` resolves
+    `landing_pages.slug` (`getCoursePage` → `GET /api/journeys/pages/by-slug`,
+    whose own docstring says "here `slug` is the org-scoped LANDING-PAGE slug",
+    filtering `eq(landingPages.slug, slug)`), while `/journeys/<slug>/dashboard`
+    resolves `courses.slug` (`resolveCourseBySlug` → `api.access.courseBySlug`).
+
+    The service layer states the hazard outright: "The public journey URL resolves
+    `landing_pages.slug`, so a caller linking by `courses.slug` builds a DIFFERENT
+    url than the org-landing rail … Callers building a sales-page link MUST prefer
+    `pageSlug`/`pageId`" (`course-journey-service.ts`). The sell load beside this
+    file already honours it in the other direction, and says why the mirror is not
+    symmetric: "the key changes (page slug → course slug), so the mirrored
+    fallback would build a URL that resolves to nothing" (`+page.server.ts`).
+
+    The two slugs are independently authored. They agree on all seven seeded
+    pages today, so the bug is latent rather than live — but it becomes live the
+    moment a creator renames a course, or a second published page sells one course
+    (">1 published page selling one course" is, per the same service, "the create
+    path's convention, not a constraint"). When they drift, every primary CTA and
+    the floating pill 404 with "This portal could not be found."
+  */
   const checkoutUrl = $derived(
-    buildJourneyUrl(page.url, journeyTarget, { surface: 'checkout' })
+    buildJourneyUrl(
+      page.url,
+      { slug: coursePage.page.slug, id: coursePage.page.id },
+      { surface: 'checkout' }
+    )
   );
   const dashboardUrl = $derived(
-    buildJourneyUrl(page.url, journeyTarget, { surface: 'dashboard' })
+    buildJourneyUrl(
+      page.url,
+      { slug: coursePage.course.slug, id: coursePage.course.id },
+      { surface: 'dashboard' }
+    )
+  );
+
+  /**
+   * Whether the checkout can actually sell this course — see
+   * {@link JourneySalesContext.purchasable} for the full reasoning.
+   *
+   * `offer === null` is checked FIRST and answers TRUE: null is a FAILED (or
+   * absent) offer read, not an empty offer, and `deriveOfferPaths` returns `[]`
+   * for both. Collapsing them would strip the buy button off a perfectly
+   * purchasable page whenever the `.catch(() => null)`-guarded pricing read
+   * hiccuped — the opposite defect, on the same element.
+   *
+   * The authored `invite` decorations are deliberately NOT passed: a decoration
+   * may only rename a real path, never create one, so it cannot change the count.
+   */
+  const purchasable = $derived(
+    offer === null
+      ? true
+      : deriveOfferPaths(offer, coursePage.course).length > 0
   );
 
   const context: JourneySalesContext = $derived({
@@ -75,8 +129,47 @@
     dashboardUrl,
     enrolled,
     offer,
+    purchasable,
     sellPreview,
   });
+
+  /**
+   * The floating pill's label — THE CREATOR'S OWN WORDS, not hardcoded English.
+   *
+   * It read `enrolled ? 'Continue →' : 'Begin →'`: two literals on a page whose
+   * every section routes its chrome through `$paraglide/messages`, and which
+   * ignored the `invite.ctaLabel` / `hero.ctaLabel` the creator typed. Measured
+   * on studio-beta/bone-deep before this change: the invite CTA read the authored
+   * "Begin" while the pill three inches below it read "Begin →" — the same button,
+   * two labels, one of them untranslatable.
+   *
+   * The preference order is the pill's job, not a section's: the pill is the
+   * page's standing conversion affordance, so the INVITE's label (the page's
+   * actual offer) wins over the hero's opening label, and both are read through
+   * `aliasKeys` so the builder's stored `button` key is honoured — that alias is
+   * the `Codex-tqr51` fix, and skipping it is exactly how the hero used to
+   * publish hardcoded English over a stored label.
+   *
+   * Resolved HERE and passed as a prop rather than added to
+   * {@link JourneySalesContext}: no section reads it, and a field on the shared
+   * context that only its own assembler consumes is a contract widened for
+   * nothing.
+   */
+  const inviteProps: SectionProps = $derived(
+    findInviteSection(coursePage.page.sections)?.props ?? {}
+  );
+  const heroProps: SectionProps = $derived(
+    coursePage.page.sections.find(
+      (s) => s.type === 'hero' && s.enabled !== false
+    )?.props ?? {}
+  );
+  const pillLabel = $derived(
+    enrolled
+      ? m.journey_hero_cta_enrolled()
+      : (asStringFrom(inviteProps, aliasKeys('invite', 'ctaLabel')) ??
+        asStringFrom(heroProps, aliasKeys('hero', 'ctaLabel')) ??
+        m.journey_invite_cta_default())
+  );
 </script>
 
 <div
@@ -98,11 +191,20 @@
       {context}
       pageDesign={coursePage.page.design}
     />
-    <FloatingCta
-      href={enrolled ? dashboardUrl : checkoutUrl}
-      label={coursePage.course.title}
-      ctaText={enrolled ? 'Continue →' : 'Begin →'}
-    />
+    <!--
+      NO PILL WHERE THERE IS NOTHING TO BUY. An enrolled member always keeps it
+      (it points at their dashboard, which exists), and a visitor keeps it only
+      while the course has a real way in — otherwise the page's most persistent
+      affordance is a fixed pill that follows the reader down the whole page to
+      deliver them to "isn't open for enrolment just now".
+    -->
+    {#if enrolled || purchasable}
+      <FloatingCta
+        href={enrolled ? dashboardUrl : checkoutUrl}
+        label={coursePage.course.title}
+        ctaText={pillLabel}
+      />
+    {/if}
   </div>
 </div>
 

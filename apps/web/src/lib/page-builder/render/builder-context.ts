@@ -145,6 +145,21 @@ export function builderSalesContext(
     dashboardUrl: input.dashboardUrl ?? '',
     enrolled: false,
     offer: input.offer ?? null,
+    // ALWAYS TRUE, and pinned explicitly rather than left to the field's default.
+    //
+    // `purchasable: false` is what suppresses the public page's conversion
+    // affordances, and an author must never lose sight of the button they are
+    // designing around: the canvas exists to show the SELL state (the same reason
+    // `enrolled` is hard-`false` two lines up). The studio also commonly has no
+    // offer read at all, so deriving it here would blank the hero's CTA in the
+    // canvas for a course that sells perfectly well.
+    //
+    // The consequence is a KNOWN, deliberate canvas↔public divergence — the one
+    // case where the canvas shows an affordance the published page withholds —
+    // and it is the same trade the `enrolled` flag already makes. The honest
+    // surface for "this course has no way in yet" is the builder's Pricing panel,
+    // not a silently missing button on the canvas.
+    purchasable: true,
     sellPreview: Promise.resolve(input.sellPreview ?? null),
   };
 }

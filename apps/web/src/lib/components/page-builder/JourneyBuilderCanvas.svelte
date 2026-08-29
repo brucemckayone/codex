@@ -92,6 +92,23 @@
     /** The authoritative offer, when loaded. Null ⇒ sections draw a price-less CTA. */
     offer?: CourseOffer | null;
     /**
+     * The journey's PUBLIC checkout + member-dashboard URLs — where the sections'
+     * CTAs point (`buildJourneyUrl(..., { surface })`, the same two the public
+     * `JourneyRenderer` builds).
+     *
+     * THE DEFAULTS ARE A FALLBACK, NOT THE INTENDED STATE. These were absent
+     * entirely for as long as `offer` was (Codex-4wun2), and the omission was
+     * invisible for exactly one reason: with no offer every CTA fell to
+     * `hrefFor(null)` → `''` → `safeHref` → `'#'`, so the canvas rendered dead
+     * anchors and looked correct. The moment real paths exist that stops holding —
+     * `checkoutUrlForPath('', 'purchase')` is `'?offer=purchase'`, which carries no
+     * scheme, so `safeHref` passes it through verbatim and every priced card
+     * becomes a live RELATIVE link that reloads the builder route out from under
+     * the author's unsaved work.
+     */
+    checkoutUrl?: string;
+    dashboardUrl?: string;
+    /**
      * The course's RESOLVED sell media — the hero's still and clip, the intro and
      * reel manifests, the guide's portrait.
      *
@@ -116,6 +133,8 @@
     stages = [],
     course,
     offer = null,
+    checkoutUrl = '',
+    dashboardUrl = '',
     sellPreview = null,
   }: Props = $props();
 
@@ -143,12 +162,22 @@
    * visitor gets, which is the entire point of mounting the public components
    * here, and A75 sharpened the cost: the `media` mode control it added had its
    * whole effect hidden on the surface where you author it.
+   *
+   * `offer` had the SAME shape of omission one bead later (Codex-4wun2): declared
+   * here, forwarded here, and never handed in by the route — so `context.offer`
+   * was always null, `deriveOfferPaths` always returned `[]`, and the author edited
+   * the invite section against `InviteSection`'s price-less branch while the
+   * published page priced itself. The whole Pricing panel was invisible on the
+   * WYSIWYG surface. `checkoutUrl`/`dashboardUrl` travel with it because they are
+   * only harmless while there are no paths to link (see their prop docs).
    */
   const salesContext = $derived(
     builderSalesContext({
       course: course ?? { id: '', slug: slug, title: pageBuilder.pending?.title ?? '' },
       stages,
       offer,
+      checkoutUrl,
+      dashboardUrl,
       sellPreview,
     })
   );

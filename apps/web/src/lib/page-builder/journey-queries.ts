@@ -118,6 +118,21 @@ export interface JourneyCourseView {
   priceCents: number | null;
   stageCount: number;
   practiceCount: number;
+  /**
+   * Public CDN URL for the course cover, or null when there is no cover (or no
+   * configured URL base). Never a raw R2 key.
+   *
+   * THIS IS THE SELL PAGE'S SHARE IMAGE. It is the only image the page can put
+   * in `<svelte:head>`: the hero's still arrives on the STREAMED `sellPreview`
+   * promise, which the head has structurally already flushed past, so before
+   * this field every share of a journey rendered as a bare text card. The `md`
+   * (400px) variant, the same one {@link JourneyCardView.coverImageUrl} serves,
+   * so one column has one resolved meaning everywhere.
+   *
+   * OPTIONAL-additive (like `CourseSellPreview.guidePortraitUrl`): an older
+   * worker deployment simply omits it and the head emits no `og:image`.
+   */
+  coverImageUrl?: string | null;
 }
 
 export interface JourneyTestimonialView {

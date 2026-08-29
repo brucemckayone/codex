@@ -63,6 +63,21 @@ export interface SavePagePayload {
    * draft loaded before F-B2's read path existed cannot wipe a page's look.
    */
   design?: PageBuilderState['design'];
+  /**
+   * The page's SEO / share metadata.
+   *
+   * OPTIONAL and omitted rather than sent as `undefined` for the same reason
+   * `design` is: the service reads absence as "leave the stored bag alone".
+   * Clearing a field is the empty STRING, which IS sent — so a `.min(1)`
+   * anywhere on this bag would make a cleared meta description unsaveable.
+   *
+   * TYPECHECK CANNOT CATCH the omission of this field from the `savePage` call
+   * below, because an absent optional property is legal. That omission is
+   * precisely the silent swallow the panel's `disabled` attribute was
+   * defending against, so the guard here is `builder-save.test.ts`, not the
+   * compiler.
+   */
+  seo?: PageBuilderState['seo'];
 }
 
 /**
@@ -267,6 +282,10 @@ export async function saveBuilderDraft(
       // the stored look alone) from set, so an explicit `design: undefined` would
       // still be the wrong thing to express here.
       ...(payload.design ? { design: payload.design } : {}),
+      // Same spread-when-present contract as `design`, and for the same reason:
+      // absent means "leave the stored SEO bag alone", so a draft loaded before
+      // the `seo` column existed cannot wipe a page's metadata.
+      ...(payload.seo ? { seo: payload.seo } : {}),
     });
   } catch (err) {
     return {
