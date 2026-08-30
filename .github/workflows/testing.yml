@@ -114,6 +114,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cleanup-stale-branches]  # Removed static-analysis - runs in parallel now
     outputs:
+      # The COMMON tier. Any file under packages/ sets this, and it is the ONLY
+      # term in worker-tests' COMMON_CHANGED. See the comment on the filter
+      # itself for why it is a whole-directory glob and not a list of names.
+      shared-packages: ${{ steps.filter.outputs.shared-packages }}
       database: ${{ steps.filter.outputs.database }}
       validation: ${{ steps.filter.outputs.validation }}
       cloudflare-clients: ${{ steps.filter.outputs.cloudflare-clients }}
@@ -148,6 +152,52 @@ jobs:
         with:
           base: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch || 'main' }}
           filters: |
+            # ─────────────────────────────────────────────────────────────
+            # THE COMMON TIER — one glob, deliberately not a list of names.
+            #
+            # WHY THIS EXISTS. worker-tests' `should-run` step used to derive
+            # "runs every worker suite" from three NAMED filters
+            # (worker-utils || database || security). A package with no entry in
+            # this block therefore set every output false, `should_run` went
+            # false, and every test step in that matrix job was SKIPPED while
+            # the job still reported SUCCESS — the "green can mean NOT RUN"
+            # failure mode. `packages/constants/**` had no entry at all, which
+            # is how ~20 exact-byte Cache-Control assertions in content-api and
+            # organization-api came to depend on packages/constants/src/limits.ts
+            # with nothing in CI that would run them when it changed. The `test`
+            # job cannot cover the gap either: root `pnpm test` is
+            # `turbo run test --filter='./packages/*' --filter='./apps/*'`,
+            # which excludes ./workers/* entirely.
+            #
+            # WHY A GLOB AND NOT `constants:` PLUS THE OTHER MISSING NAMES.
+            # A name list is the shape that produced the defect: it is only
+            # correct while someone remembers to extend it, and it was wrong for
+            # constants, cache, urls, image-processing, platform-settings,
+            # transcoding, subscription, agreements, admin, organization and
+            # notifications simultaneously. Measured against the real graph
+            # (runtime `dependencies` only, transitive), EVERY one of the seven
+            # worker suites reaches EVERY packages/* package — there is no
+            # subset that is honestly "not common". So the aggregate is the
+            # whole directory: a new package is covered the day it is created,
+            # and this entry cannot go stale.
+            #
+            # THE COST, STATED. A markdown-only edit under packages/ now fans
+            # out to all seven worker suites. That is deliberate: the failure
+            # direction of a glob is wasted CI, and the failure direction of a
+            # name list is an untested merge. Peak Neon branch usage is
+            # unchanged — it is bounded by worker-tests' `max-parallel: 4`, not
+            # by how many matrix jobs are eligible — so the 9-ephemeral-branch
+            # budget documented on that job still holds.
+            #
+            # The per-package filters below are NOT redundant with this: they
+            # still drive the per-worker `WORKER_CHANGED` refinements and the
+            # web/e2e conditions, which can only ADD suites, never subtract.
+            # (worker-utils, database and security are now subsumed here for the
+            # common tier; their named outputs are kept because they cost
+            # nothing and a future condition may want the narrower signal.)
+            # ─────────────────────────────────────────────────────────────
+            shared-packages:
+              - 'packages/**'
             database:
               - 'packages/database/**'
             validation:
@@ -488,8 +538,15 @@ jobs:
       - name: Check if worker should run
         id: should-run
         run: |
-          # Common dependencies that trigger ALL worker tests
-          COMMON_CHANGED="${{ needs.changes.outputs.worker-utils == 'true' || needs.changes.outputs.database == 'true' || needs.changes.outputs.security == 'true' }}"
+          # Common dependencies that trigger ALL worker tests.
+          #
+          # ONE term on purpose. This was `worker-utils || database ||
+          # security`, a three-name list that silently returned false for a
+          # change touching only packages/constants/** (which had no filter at
+          # all) — so every step below was skipped and this job still reported
+          # SUCCESS. The aggregate now lives in the `changes` job as a single
+          # `packages/**` glob; the reasoning is on that filter.
+          COMMON_CHANGED="${{ needs.changes.outputs.shared-packages == 'true' }}"
 
           # Worker-specific conditions
           case "${{ matrix.worker }}" in

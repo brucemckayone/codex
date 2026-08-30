@@ -21,7 +21,13 @@
  * matches a known bucket name. If it does → S3 mode. Otherwise → CDN mode.
  *
  * THIS WORKER IS NEVER DEPLOYED. It has no `routes` in wrangler.jsonc.
+ * `workers_dev: false` is set explicitly and there are no `routes`, so no
+ * deploy of this worker can be reachable from the public internet. That is the
+ * fact that licenses the `asset` preset's 24h shared window below: the only
+ * cache in front of this worker is the developer's own browser.
  */
+
+import { CACHE_PRESETS } from '@codex/constants';
 
 interface Env {
   ASSETS_BUCKET: R2Bucket;
@@ -201,11 +207,20 @@ export default {
         intent ? { range: toR2Range(intent) } : undefined
       );
       if (object) {
+        // `asset`, the same preset the production R2 proxy
+        // (apps/web/src/lib/server/cdn-proxy.ts) declares, so the local and
+        // deployed proxies are ONE decision rather than two. The browser half
+        // (max-age=3600) is byte-identical to what this worker emitted before;
+        // the shared half (s-maxage=86400) is inert here because nothing shared
+        // sits in front of a never-deployed dev worker, and it is safe on its
+        // own terms anyway — the R2 key encodes the bytes, so a stored copy is
+        // never stale, only superseded by a different key. Reasoning lives on
+        // the preset in packages/constants/src/limits.ts, not here.
         return objectResponse(
           object,
           intent,
           request.method,
-          'public, max-age=3600'
+          CACHE_PRESETS.asset
         );
       }
     }

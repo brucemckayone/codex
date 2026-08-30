@@ -50,6 +50,37 @@ jobs:
       - name: Public-bundle editor import boundary check
         run: pnpm --filter web run check:brand-boundary
 
+      # Codex-ea1hd WP9: the data-access contract drift gate.
+      #
+      # Two grep-based rules over packages/*/src, workers/*/src and apps/*/src:
+      #   RULE 3  no hand-written Cache-Control outside CACHE_PRESETS
+      #           (@codex/constants). The leak class is `s-maxage` on a body
+      #           that can vary by viewer — shared caches key on URL and NEVER
+      #           on Cookie, which is how DYNAMIC_PUBLIC_REVALIDATE shipped.
+      #   RULE 4  no floating KV write. A Workers response cancels an in-flight
+      #           promise nothing is holding, so `kv.put(...).catch(() => {})`
+      #           silently never happens and has no failure signal.
+      # Checks 1 and 2 of that bead are enforced by the type system instead
+      # (procedure/types.ts CachePolicyRule + the private default), and check 5
+      # lands with WP6. The script's header comment is the full rationale.
+      #
+      # THE GATE HAS NO EXEMPTION LIST AND MUST NOT BE GIVEN ONE. If it fails,
+      # the fix is at the call site: declare a CACHE_PRESETS name, or add a new
+      # preset (with its reasoning) to packages/constants/src/limits.ts.
+      #
+      # Belongs in THIS job, not the test job: zero dependencies, no database,
+      # ~1s. Neither caller of this reusable workflow (testing.yml,
+      # main-gate.yml) applies a path filter to it, so the gate cannot be
+      # skipped by a diff that touches only the files it scans.
+      #
+      # Self-test first, so a regression that breaks the gate itself surfaces
+      # before we trust its verdict — same reasoning as the boundary gate above.
+      - name: Data-access contract gate self-test
+        run: node --test scripts/checks/check-data-access-contract.test.mjs
+
+      - name: Data-access contract gate (Cache-Control + KV writes)
+        run: node scripts/checks/check-data-access-contract.mjs
+
       - name: Generate Paraglide i18n files
         run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide
 

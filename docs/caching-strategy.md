@@ -17,40 +17,130 @@ serve one user's render to another user — so it has its own section below.
 
 ## HTTP / CDN Cache (Cache-Control)
 
-Set via `setHeaders(CACHE_HEADERS.*)` in `+page.server.ts` loads
-(`apps/web/src/lib/server/cache.ts`). Governs the **browser cache** and the
-**Cloudflare edge cache** for the rendered HTML document (and, on content-api,
-the public JSON). It does NOT touch `@codex/cache` (KV) or the client
-collections — those are the separate layers below.
+Governs the **browser cache** and the **Cloudflare edge cache** for the rendered
+HTML document and for public JSON. It does NOT touch `@codex/cache` (KV) or the
+client collections — those are the separate layers below.
 
-### Presets
+There is now ONE vocabulary for the whole platform, and both entry points name
+it rather than writing a header value:
+
+- **Workers** — `procedure({ policy: { cache: '<preset>' } })`. Declaring
+  nothing means `private`; the safe reading is the default.
+- **apps/web** — `setHeaders(CACHE_HEADERS.*)` in a `+page.server.ts` load
+  (`apps/web/src/lib/server/cache.ts`), which is a header-shaped VIEW of the
+  same presets and contains no `Cache-Control` value of its own.
+
+### The vocabulary
+
+The presets live in `CACHE_PRESETS` (`packages/constants/src/limits.ts`) and are
+named by **who may STORE the body** — never by how long the window is.
+
+**Do not trust the values below over the code.** They are a copy for
+orientation. `packages/constants/src/limits.ts` is the source of truth, and
+`node scripts/checks/check-data-access-contract.mjs` prints the CURRENT
+vocabulary in its failure message — parsed out of that file, so it cannot fall
+behind. If this table and that output ever disagree, the output is right.
+
+Viewer-invariant — every viewer receives the same bytes, so a shared cache may
+store AND reuse the body:
 
 | Preset | `Cache-Control` | Use for |
 |---|---|---|
-| `STATIC_PUBLIC` | `public, max-age=3600, s-maxage=3600, swr=86400` | Truly static, auth-agnostic responses (sitemaps) |
-| `DYNAMIC_PUBLIC` | `public, max-age=300, s-maxage=300, swr=3600` | Public, auth-agnostic API JSON |
-| `DYNAMIC_PUBLIC_REVALIDATE` | `public, max-age=0, s-maxage=300, swr=3600` | Deprecated — see the rule below |
-| `PRIVATE` | `private, no-cache` | **Anything whose SSR output varies by auth** |
+| `public` | `public, max-age=60, s-maxage=60` | Public JSON / HTML that ignores the session. 60s because a shared window is a window during which a publish is INVISIBLE, and the KV version-bump that makes a publish visible cannot reach a CDN. |
+| `static` | `public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400` | Documents read by CRAWLERS on their own cadence — the two `sitemap.xml` routes. The only preset permitted `stale-while-revalidate`, because a crawler indexing yesterday's sitemap is the normal case rather than a defect. |
+| `asset` | `public, max-age=3600, s-maxage=86400` | Content-addressed bytes streamed through the R2 proxies (`apps/web/src/lib/server/cdn-proxy.ts`, `workers/dev-cdn`). The 24× shared/browser asymmetry is an R2-egress decision: the KEY changes when the bytes change, so a stored copy is never stale, only superseded. |
+
+Viewer-variant — the body may differ per viewer, so **no shared cache may reuse
+a stored copy**:
+
+| Preset | `Cache-Control` | Use for |
+|---|---|---|
+| `per-viewer` | `public, max-age=0, no-cache` | A shared cache may STORE it but must revalidate with the origin before serving it to anyone (RFC 9111). An anonymous burst is absorbed as 304s; a signed-in viewer always gets their own body. |
+| `private` | `private, no-cache` | The viewer's own browser only. **The default when nothing is declared.** Anything whose SSR output varies by auth. |
+| `fresh` | `private, no-store` | Not merely per-viewer but per-REQUEST: bodies that embed a credential, such as the HLS playlists in `content-api`'s `content-access.ts`, where a copy on the browser's own disk outlives the presigned URL inside it. |
+
+The apps/web view, `CACHE_HEADERS` name → preset name: `STATIC_PUBLIC` →
+`static`, `DYNAMIC_PUBLIC` → `public`, `PER_VIEWER` → `per-viewer`, `PRIVATE` →
+`private`, `FRESH` → `fresh`. `asset` has no `CACHE_HEADERS` entry: its only
+apps/web consumer sets the header on a `Headers` instance rather than through
+`setHeaders()`. That pairing is asserted byte-for-byte by
+`apps/web/src/lib/server/cache.test.ts`.
+
+### Which preset may an endpoint declare? (enforced by the compiler)
+
+`policy.cache` is type-checked against `policy.auth` in
+`packages/worker-utils/src/procedure/types.ts` (`CachePolicyRule`), so an
+illegal pairing does not compile — it is not a review note:
+
+| `auth` | may declare |
+|---|---|
+| `'none'` | any preset |
+| `'optional'` | `per-viewer` \| `private` \| `fresh` — plus `public`, but ONLY alongside the literal `variesBySession: false` |
+| `'required'` \| `'worker'` \| `'platform_owner'` | `private` \| `fresh` |
+
+`variesBySession: false` is the author's explicit assertion that the response
+body does not branch on the session. It exists because `auth: 'optional'` covers
+two unlike things — routes that ignore the session entirely (the journeys portal
+reads) and routes that branch on it — and no type can tell them apart. A widened
+`boolean` (`variesBySession: someFlag`) deliberately fails the rule: an
+assertion the compiler cannot read is not an assertion. The carve-out admits
+`public` alone, not `static` or `asset`; a day-long `stale-while-revalidate`
+window on a route that even LOOKS at the session would be a far longer leak than
+the one that shipped here.
+
+Two more things are checked rather than documented:
+
+- **No hand-written `Cache-Control` anywhere outside `limits.ts`** —
+  `scripts/checks/check-data-access-contract.mjs`, a hard step in the
+  static-analysis CI job. It has no waiver list and must not be given one: if
+  nothing in the vocabulary fits a response, the vocabulary is incomplete and
+  the fix is to ADD a preset with its reasoning.
+- **A route that declares nothing gets `private`** — `resolveCacheControl()` in
+  `procedure/helpers.ts`, pinned by
+  `procedure/__tests__/procedure-cache-control.test.ts`.
 
 ### The golden rule (MANDATORY)
 
-**If a page's SSR output varies by auth state, it MUST be `PRIVATE`.**
+**If a page's SSR output varies by auth state, it MUST NOT carry an `s-maxage`.**
+In practice that means `private` (or `per-viewer` when an anonymous burst is
+worth absorbing as 304s).
+
+Stated as the invariant rather than as a list of numbers, because the numbers
+drift and the invariant does not: **never an `s-maxage` — or a
+`stale-while-revalidate` — on a response that can vary by viewer.** A shared
+cache keys on **URL, never on Cookie**, so a window it may reuse is a window in
+which one viewer's body is handed to the next.
 
 Every page under the `(platform)`, `_org/[slug]`, and `_creators` layouts is
 auth-varying, because those layouts inject the auth-aware `user` (the sidebar
 user section). A page need not branch on `locals.user` itself — inheriting the
 layout's `user` is enough.
 
-**Why `public` is unsafe here:** shared caches (Cloudflare edge, miniflare's CF
-emulation in CI, any intermediate proxy) key entries by **URL — NOT by Cookie**.
-A `public` response cached during an anonymous visit is then served to
-*authenticated* visitors of the same URL, who get the logged-out render — the
-"You need to sign in" bug for content owners. Verified in production 2026-07-16:
-an anonymous content page returned `cf-cache-status: HIT` with anon HTML, and
-Cloudflare had rewritten origin `max-age=0` → `max-age=14400` (its default
-Browser Cache TTL), defeating the browser-revalidate half of
-`DYNAMIC_PUBLIC_REVALIDATE`. That preset fixes only the private browser cache,
-never the shared edge — do not use it for auth-varying pages.
+**Why a shared window is unsafe here:** shared caches (Cloudflare edge,
+miniflare's CF emulation in CI, any intermediate proxy) key entries by **URL —
+NOT by Cookie**. A body a shared cache may reuse, cached during an anonymous
+visit, is then served to *authenticated* visitors of the same URL, who get the
+logged-out render — the "You need to sign in" bug for content owners. Verified
+in production 2026-07-16: an anonymous content page returned
+`cf-cache-status: HIT` with anon HTML, and Cloudflare had rewritten origin
+`max-age=0` → `max-age=14400` (its default Browser Cache TTL), defeating the
+browser-revalidate half of the header it was sent.
+
+**`DYNAMIC_PUBLIC_REVALIDATE` WAS DELETED, NOT DEPRECATED — and it is worth
+knowing why.** It was `public, max-age=0, s-maxage=300,
+stale-while-revalidate=3600`, and the shape LOOKS safe: `max-age=0` means the
+browser revalidates every navigation. But `max-age=0` fixes only the browser
+half. `s-maxage=300` still licenses the edge to store the render and hand it to
+the next viewer, because a shared cache keys on URL and never on Cookie. CI
+reproduced the leak deterministically on 2026-05-28 (miniflare's CF cache
+emulation honours `s-maxage` for HTML by URL key alone) and the preset was
+removed from the platform landing page — the comment at the top of
+`apps/web/src/routes/(platform)/+page.server.ts` is the full record. Nothing in
+the current vocabulary has this shape, and
+`scripts/checks/check-data-access-contract.mjs` reports any reintroduction of it
+as its most severe class (`SHARED WINDOW`). If you want "cacheable for anonymous
+visitors, revalidated per viewer", that is `per-viewer` — `no-cache` with no
+shared window at all.
 
 ### Shield the DB at the data layer, not the HTML layer
 
@@ -78,9 +168,10 @@ authenticated viewers.
 
 ### Poisoning guard
 
-The `public` presets must be set only AFTER every `await` that can throw — a
-thrown `error()` otherwise inherits the `public` header and the CDN caches the
-*error page* for every visitor. `PRIVATE` is safe to set anywhere.
+The viewer-invariant presets (`public`, `static`, `asset`) must be set only
+AFTER every `await` that can throw — a thrown `error()` otherwise inherits the
+header and the CDN caches the *error page* for every visitor. `private` and
+`fresh` are safe to set anywhere.
 
 ---
 
