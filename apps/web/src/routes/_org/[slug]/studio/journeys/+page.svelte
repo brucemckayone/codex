@@ -49,6 +49,25 @@
   const items = $derived(journeysQuery.current ?? []);
   const loading = $derived(journeysQuery.loading);
 
+  /**
+   * WHY the list read failed, if it did.
+   *
+   * Without this the failure rendered as the EMPTY STATE: `.current` is
+   * `undefined` after a rejection as well as in flight (Codex-xo3bl), so `items`
+   * fell to `[]`, `loading` went false, and the page told a creator with a shelf
+   * full of portals "No portals yet — Create a course landing page…" and invited
+   * them to make another. An empty list and an unanswered question are different
+   * facts, and only one of them has a Create button as its next step.
+   *
+   * `queryErrorMessage`, never `journeysQuery.error?.message` — an `HttpError`
+   * keeps its text at `.body.message`, so the property read is `undefined` for
+   * every failure and its branch never runs. Same accessor the feature toggle
+   * beside it already uses.
+   */
+  const loadError = $derived(
+    queryErrorMessage(journeysQuery.error, 'Could not load your portals.')
+  );
+
   /*
     HOMEPAGE PROMOTION — `landing_pages.featured`.
 
@@ -170,6 +189,24 @@
           <li class="journeys__skeleton" aria-hidden="true"></li>
         {/each}
       </ul>
+    {:else if loadError}
+      <!--
+        The error arm sits ABOVE the items/empty pair on purpose: an error must
+        never fall through to "No portals yet", which is a claim about the data.
+        `role="alert"` so it is announced, and a Retry rather than only an
+        apology — the commonest cause is transient.
+      -->
+      <div class="journeys__error" role="alert">
+        <p class="journeys__error-title">We could not load your portals</p>
+        <p class="journeys__error-body">{loadError}</p>
+        <button
+          type="button"
+          class="journeys__error-btn"
+          onclick={() => journeysQuery.refresh()}
+        >
+          Try again
+        </button>
+      </div>
     {:else if items.length > 0}
       <ol class="journeys__rows" role="list">
         {#each items as j (j.id)}
@@ -273,6 +310,51 @@
 </div>
 
 <style>
+  /*
+    The FAILED-READ block. Shares the empty state's centred column so the two read
+    as one family, and is token-only: this list sits inside the studio shell and
+    inherits the org brand.
+  */
+  .journeys__error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-8) var(--space-4);
+    text-align: center;
+  }
+
+  .journeys__error-title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    color: var(--color-text);
+  }
+
+  .journeys__error-body {
+    margin: 0;
+    max-width: 46ch;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+  }
+
+  .journeys__error-btn {
+    margin-top: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .journeys__error-btn:hover {
+    background-color: var(--color-surface-secondary);
+  }
+
   .journeys {
     display: flex;
     flex-direction: column;

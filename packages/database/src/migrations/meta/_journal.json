@@ -638,6 +638,13 @@
       "when": 1788041435039,
       "tag": "0090_landing_pages_seo_column",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1788043675779,
+      "tag": "0091_invite_price_and_offcatalogue_variants",
+      "breakpoints": true
     }
   ]
 }

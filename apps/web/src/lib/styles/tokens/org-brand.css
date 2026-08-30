@@ -33,7 +33,11 @@
   --color-focus-ring: oklch(from var(--brand-color, var(--color-primary-500)) calc(l + 0.15) calc(c * 0.5) h);
   --color-border-focus: var(--brand-color, var(--color-primary-500));
 
-  /* ─── TEXT ON BRAND ─────────────────────────────────────────────────── */
+  /* ─── TEXT ON BRAND ───────────────────────────────────────────────────
+     THIS IS THE FALLBACK. An OKLCH-lightness step picks the WRONG ink for
+     8.47% of sRGB brands (measured; every green/teal). The live rule is the
+     relative-luminance step in the @supports block at the foot of this file —
+     read that comment before changing anything here. */
   --color-text-on-brand: oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Ink for filled --color-interactive controls (ui/Button primary). Keyed to
@@ -324,7 +328,11 @@
      --brand-color-dark. For --color-text-on-brand that meant auto-contrasting
      the label against a colour no longer being painted: a #FB923C button
      wearing a label picked for #EA580C = 2.26:1, under the 4.5:1 AA floor.
-     The step function is unchanged — only its input is corrected. */
+     The step function is unchanged — only its input is corrected.
+
+     Also the FALLBACK, for the same reason as its light twin: the live rule is
+     the relative-luminance step in the @supports block at the foot of the file,
+     which keeps this corrected INPUT and replaces only the pivot QUANTITY. */
   --color-text-on-brand: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   /* Same correction, one token over: --color-interactive is re-declared above
      from the DARK brand, so re-deriving the ink here keeps the pair in step. */
@@ -459,4 +467,130 @@
      and prefers each key's `--brand-*-dark` value (falling back to light). This
      covers every shader-* key, not just preset/intensity. */
   --brand-shader-is-dark: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ON-BRAND INK — PICKED BY RELATIVE LUMINANCE, NOT BY OKLCH LIGHTNESS
+ * (Codex-kdsuo, and the mechanism the bead does not name)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * The step above picks the label with `clamp(0, (0.62 - l) * 1000, 1)` — on
+ * OKLCH LIGHTNESS. WCAG contrast is computed on RELATIVE LUMINANCE, and the two
+ * quantities disagree by enough to invert the decision: OKLCH lightness is
+ * perceptual and near hue-independent, while luminance weights green at 0.7152
+ * against blue at 0.0722. So a green or teal brand sitting at the SAME OKLCH
+ * lightness as a crimson one is far brighter in luminance terms and needs the
+ * opposite ink. The multiplier is not the defect — the pivot QUANTITY is.
+ *
+ * MEASURED IN CHROME, canvas `getImageData` readback with
+ * `globalCompositeOperation = 'copy'`, on a live journey page, at BOTH poles
+ * (`data-theme` AND the `.dark` class flipped), with `--brand-color` injected on
+ * a nested `[data-org-brand]` exactly as a per-page override does it:
+ *
+ *   brand      today          with this rule   note
+ *   #A62B0C    #fff  7.07     #fff  7.07       of-blood-and-bones — unchanged
+ *   #E11D48    #fff  4.70     #fff  4.70       studio-alpha — unchanged; this is
+ *                                              kdsuo's own +0.20 figure
+ *   #2563EB    #fff  5.17     #fff  5.17       studio-beta — unchanged
+ *   #059669    #fff  3.77 ✗   #000  5.57       emerald-600
+ *   #0D9488    #fff  3.74 ✗   #000  5.61       teal-600
+ *   #808080    #fff  3.95 ✗   #000  5.32       a plain mid grey
+ *   #01a221    #fff  3.39 ✗   #000  6.19       the worst OKLCH-pivot case
+ *   #ec0008    —              #000  4.57       the worst case of THIS rule
+ *
+ * So no brand any org actually uses moves, and every brand that fails today is
+ * repaired. Swept over all 16 777 216 sRGB colours: the OKLCH-lightness step
+ * puts the on-brand label below 4.5:1 for 1 420 883 of them (8.47% of every
+ * brand a creator could pick in the brand editor) and in EVERY one of those the
+ * other ink would have passed. That is the structural form of Codex-kdsuo:
+ * #E11D48 (4.70) and #e1233b (4.66) sit just inside the passing edge of that
+ * band, which is why the bead measured 0.16–0.20 of headroom and could not
+ * attribute it. It is a band, not a margin.
+ *
+ * WHY LUMINANCE IS NOT MERELY BETTER BUT PROVABLY SUFFICIENT. White and black
+ * contrast EQUALLY against a background whose relative luminance is
+ * sqrt(1.05 * 0.05) - 0.05 = 0.1791, where both measure 4.58:1. Choose the ink by
+ * which side of 0.1791 the fill sits on and the worst attainable outcome is that
+ * 4.58:1 — this derivation cannot produce an AA failure for ANY sRGB fill.
+ * Swept: 0 failures out of 16 777 216, floor 4.57:1.
+ *
+ * THE KNEE IS DROPPED, THE OFFSET IS NOT, AND THAT DISTINCTION IS THE WHOLE
+ * ACCURACY BUDGET. `pow((c + 0.055) / 1.055, 2.4)` is sRGB's transfer function
+ * exactly for c >= 0.04045 and over-estimates by at most 0.00083 below it, which
+ * moves the decision boundary by under 0.001 in luminance — hence the 4.57
+ * floor rather than 4.58. Do NOT "simplify" it to `pow(c / 255, 2.4)`: that
+ * drops the 1.055/0.055 offset as well, a ~0.024 error at mid lightness, and it
+ * re-introduces 468 738 AA failures (2.79%) with a worst case of 4.14:1 on a mid
+ * grey. Both forms were swept before this one was chosen.
+ *
+ * `r`, `g` and `b` are in scope ONLY inside the `rgb(from …)` function — the
+ * same constraint `page-builder/journey-palette.css` documents for `l` — so the
+ * expression cannot be hoisted into a helper property and is written once per
+ * channel. They are numbers in 0–255, hence the `/ 255`.
+ *
+ * WHY @supports RATHER THAN EDITING THE DECLARATIONS ABOVE. Relative colour
+ * needs Chrome 119+ / Firefox 128+ / Safari 16.4+ (this file's header) but
+ * `pow()` INSIDE a relative colour needs Chrome 125+. An unguarded override
+ * would not degrade to the previous declaration: a custom property accepts
+ * almost any token stream at parse time and only fails when SUBSTITUTED, at
+ * which point the consuming `color` declaration is invalid at computed-value
+ * time and falls back to `unset` — i.e. the label would lose its colour
+ * entirely rather than keep the OKLCH step. The guard makes the change
+ * monotonic: no engine ends up worse than it is today. The condition tests
+ * every feature the expression needs (relative rgb + calc + pow + a channel
+ * keyword inside pow); verified true in Chrome 152 and false-safe elsewhere.
+ * `contrast-color()` expresses this in one call and resolves correctly here, but
+ * Firefox has not shipped it and its result is UA-defined, so it cannot be
+ * modelled by a test. Revisit when Firefox ships it.
+ *
+ * LOCKSTEP OBLIGATIONS — both are handed off, neither is done here:
+ *   1. `lib/components/brand-studio/rail/contrast.ts` models this rule to warn
+ *      a creator in the brand editor, and its header quotes the OKLCH form.
+ *      It now describes only the fallback, so the rail understates the ink on a
+ *      green brand (it would report 3.77 where the product now paints 5.57).
+ *   2. `themes/light.css` / `themes/dark.css` carry the same-shape
+ *      `--color-on-interactive` for the PLATFORM path. Neither platform primary
+ *      is inside the failing band today (#c24129 → 5.14, #f47d67 → 7.96), so
+ *      that twin is latent rather than live — but it must move for the same
+ *      reason, and the two must not drift.
+ */
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  [data-org-brand] {
+    --color-text-on-brand: rgb(
+      from var(--brand-color, var(--color-primary-500))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+    --color-on-interactive: rgb(
+      from var(--color-interactive)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+  }
+
+  /* The dark twin keeps Codex-5wgwf's correction — the ink is derived from the
+     colour ACTUALLY BEING PAINTED, `--brand-color-dark` first — and replaces
+     only the pivot. `--color-on-interactive` must be restated even though its
+     text is identical to the light copy: a custom property substitutes its
+     `var()`s on the element where it is DECLARED, and `--color-interactive` is
+     re-declared from the dark brand in the rule above, so a single copy would
+     freeze the light reading. Same reason themes/light.css:43-46 gives. */
+  .dark [data-org-brand],
+  [data-theme='dark'] [data-org-brand],
+  [data-editing-theme='dark'][data-org-brand] {
+    --color-text-on-brand: rgb(
+      from var(--brand-color-dark, var(--brand-color, var(--color-primary-400)))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+    --color-on-interactive: rgb(
+      from var(--color-interactive)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+  }
 }

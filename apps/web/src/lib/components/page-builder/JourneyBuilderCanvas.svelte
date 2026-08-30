@@ -67,12 +67,21 @@
     TrashIcon,
   } from '$lib/components/ui/Icon';
   import AddSectionPicker from './AddSectionPicker.svelte';
+  import {
+    type JourneyPreviewDeviceId,
+    journeyPreviewDevice,
+    journeyPreviewScale,
+  } from './journey-preview-canvas';
 
   interface Props {
     /** Off in Preview mode — hides block chrome + disables contenteditable. */
     editable?: boolean;
-    /** Canvas device width. */
-    device?: 'desktop' | 'tablet' | 'mobile';
+    /**
+     * Canvas device preset. The canvas renders at that preset's REAL width and
+     * scales down to fit the column it has — see `journey-preview-canvas.ts`,
+     * which records why relabelling one fixed column was a fidelity defect.
+     */
+    device?: JourneyPreviewDeviceId;
     /** Sections rail collapsed — the bar's toggle flips it (route owns the state). */
     railCollapsed?: boolean;
     onToggleRail?: () => void;
@@ -205,6 +214,125 @@
 
   const indexOf = (id: string): number => sections.findIndex((s) => s.id === id);
 
+  /* ── THE DEVICE FRAME ─────────────────────────────────────────────────────
+     The canvas renders at the preset's real width and is scale-transformed to
+     fit the column. `transform: scale()` and not `zoom`: both keep container
+     queries honest (the element genuinely IS 1440px in its own coordinate
+     space), but a transform also makes any `position: fixed` descendant resolve
+     against the transformed ancestor, so the sales page's own floating CTA stays
+     INSIDE the canvas instead of escaping to the studio viewport. */
+  const frame = $derived(journeyPreviewDevice(device));
+
+  /** The stage's CONTENT width (padding excluded) — see the observer below. */
+  let stageWidth = $state(0);
+  /** The page's own UNSCALED height, so the outer box can reserve `h × k`. */
+  let pageHeight = $state(0);
+  let stageEl = $state<HTMLElement | null>(null);
+  let pageEl = $state<HTMLElement | null>(null);
+
+  const scale = $derived(journeyPreviewScale(stageWidth, frame.width));
+  /** Shown to the author: a silently-scaled canvas is its own kind of lie. */
+  const scalePercent = $derived(Math.round(scale * 100));
+
+  /**
+   * Track the column and the page with ONE `ResizeObserver`, not a window
+   * resize listener: collapsing the sections rail or switching mode tabs
+   * changes the column width without changing the window, and those are the
+   * two most common ways an author changes it.
+   *
+   * `contentRect` rather than `getBoundingClientRect`, for two different
+   * reasons on the two targets. On the stage it excludes the padding, which is
+   * the space the frame cannot use. On the page it is the PRE-TRANSFORM box —
+   * a bounding rect would report `h × k` and feeding that back in would shrink
+   * the frame on every pass.
+   *
+   * No feedback loop: the page's height depends on its own content and its
+   * width, never on the outer box's height, so setting `--jbc-h` cannot resize
+   * what produced it.
+   */
+  $effect(() => {
+    const stage = stageEl;
+    const page = pageEl;
+    if (!stage || !page) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === stage) stageWidth = entry.contentRect.width;
+        else if (entry.target === page) pageHeight = entry.contentRect.height;
+      }
+    });
+    observer.observe(stage);
+    observer.observe(page);
+    return () => observer.disconnect();
+  });
+
+  /**
+   * The frame's geometry, as custom properties.
+   *
+   * `--jbc-cs` (the counter-scale, 1/k) is computed HERE rather than as
+   * `calc(1 / var(--jbc-k))` so the CSS does not depend on division by a
+   * non-literal number, and it exists because the editing chrome must not
+   * shrink with the page: at desktop k ≈ 0.49, and a 14px trash icon drawn at
+   * 7px is not a control any more.
+   *
+   * `--jp-device-vh` re-points the sections' `svh` basis (`--jp-stage-vh` in
+   * `journey-design.css`). `svh` resolves against the BROWSER viewport even
+   * inside a fixed-width transformed box, so at device=mobile a hero sized
+   * `100svh` was 373px wide by the STUDIO WINDOW's height — measured 373 × 900,
+   * aspect 0.414, where a real 390 × 844 phone gives 0.462. Unset on desktop on
+   * purpose: there the studio window really is a desktop viewport, so the live
+   * `svh` is the honest number and a pinned one would misreport a tall monitor.
+   */
+  const frameStyle = $derived(
+    [
+      `--jbc-w: ${frame.width}px`,
+      `--jbc-h: ${pageHeight}px`,
+      `--jbc-k: ${scale}`,
+      `--jbc-cs: ${scale > 0 ? 1 / scale : 1}`,
+      frame.height === null
+        ? ''
+        : `--jp-device-vh: ${frame.height / 100}px`,
+    ]
+      .filter(Boolean)
+      .join('; ')
+  );
+
+  /* ── BLOCK ORDER, IN THE ORDERING THE AUTHOR CAN SEE ──────────────────────
+     The toolbar's move buttons used to index into the FULL section list while
+     the canvas renders only `renderables` (enabled, known type). With a hidden
+     section between two visible ones — one click of the rail's eye toggle — the
+     button was ENABLED, the store mutated, the page went dirty, and the visible
+     order did not change, because the section had swapped with something that
+     is not drawn. Twice in a row it looked like it worked every other click.
+     The rail's own arrows were always correct (`SectionList` iterates all
+     sections), so the two panes disagreed about the same control. */
+  const visibleIndexOf = (id: string): number =>
+    renderables.findIndex((entry) => entry.section.id === id);
+
+  /**
+   * Move a section past its neighbouring VISIBLE section — an absolute-index
+   * move rather than a ±1 swap, so a hidden section in between is stepped over
+   * rather than swapped with.
+   *
+   * `moveSectionTo` is a splice-move (remove, then insert at the target), which
+   * is the SAME semantic the rail's drag-reorder already gives an author, so the
+   * two panes agree. Its visible consequence: a hidden section between the two
+   * moved sections shifts by one slot rather than staying put. That is
+   * deliberate — it keeps one reorder primitive in the store instead of adding a
+   * swap that only the canvas would use, and a hidden section has no position an
+   * author can see. It is NOT dropped: `moveSectionTo` splices within the one
+   * list, and the test asserts all three sections survive the move.
+   */
+  function moveVisible(id: string, delta: -1 | 1): void {
+    const neighbour = renderables[visibleIndexOf(id) + delta];
+    if (!neighbour) return;
+    pageBuilder.moveSectionTo(id, indexOf(neighbour.section.id));
+  }
+
+  /** A section's human label — the accessible name every block action needs. */
+  const labelFor = (section: { name?: string | null; type: string }): string =>
+    section.name ?? section.type;
+
   // In-canvas "add after this block" floating picker.
   let addAfterId = $state<string | null>(null);
   let addPos = $state<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -231,6 +359,57 @@
   function stop(event: Event): void {
     event.stopPropagation();
   }
+
+  /**
+   * IN EDITABLE MODE THE PAGE'S OWN LINKS MUST NOT NAVIGATE.
+   *
+   * This is the cost of the fidelity win in `Codex-4wun2`: the canvas now
+   * receives the real `offer` and the real `checkoutUrl`, so every priced card,
+   * hero CTA and invite button is a LIVE link to the real checkout instead of
+   * the dead `'#'` they resolved to while `offer` was null. Right for fidelity,
+   * wrong for an editor — clicking a price card to edit its copy navigated the
+   * author out of the builder, taking unsaved work with it behind a confirm
+   * dialog. Selecting the block is what a click anywhere else in it already
+   * does, so that is what a click on a link does too.
+   *
+   * PREVIEW MODE IS LEFT ALONE (`editable === false`): there the author has
+   * explicitly asked to see the page behave, and the links are the page.
+   *
+   * Bound on the block wrapper rather than the page so the handler is on the
+   * element that owns the selection, and `closest('[data-sec]')` re-derives the
+   * id from the DOM rather than trusting the closure — a duplicated section
+   * re-uses this handler.
+   */
+  function onBlockClick(event: MouseEvent, id: string): void {
+    if (!editable) return;
+    const anchor = (event.target as Element | null)?.closest?.('a[href]');
+    if (anchor) event.preventDefault();
+    pageBuilder.selectSection(id);
+  }
+
+  /**
+   * The keyboard path to selecting a block. There was none: selection was
+   * `onmousedown` on a plain `<div>`, so the canvas — the primary editing
+   * surface — could only be driven with a mouse, and the block toolbar
+   * (move/duplicate/add/delete) was reachable only after selecting from the
+   * rail.
+   *
+   * Enter and Space only. Not the arrow keys: a block is a scroll container's
+   * child and arrows must keep scrolling the stage.
+   */
+  function onBlockKeydown(event: KeyboardEvent, id: string): void {
+    if (!editable) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    // A key press inside a contenteditable field or a toolbar button belongs to
+    // that control, not to block selection.
+    const target = event.target as Element | null;
+    if (target && target !== event.currentTarget) {
+      if (target.closest('[contenteditable="true"], button, a[href], input, textarea, select'))
+        return;
+    }
+    event.preventDefault();
+    pageBuilder.selectSection(id);
+  }
 </script>
 
 <div class="jbc" data-editable={editable ? '' : undefined}>
@@ -249,12 +428,18 @@
     {/if}
     <span class="jbc__live"><span class="jbc__live-dot" aria-hidden="true"></span> Live</span>
     <span class="jbc__url">{orgDomain || 'your-space'} / journeys / {slug || 'draft'}</span>
+    <!-- The scale, stated. An author who reads "Desktop · 1440px · 49%"
+         understands why the type looks small; one who reads "Desktop" concludes
+         the page is wrong. -->
+    <span class="jbc__scale">
+      {frame.label} · {frame.width}px{scale < 1 ? ` · ${scalePercent}%` : ''}
+    </span>
     {#if editable}
       <span class="jbc__hint">Click a block to edit · type directly into text</span>
     {/if}
   </div>
 
-  <div class="jbc__stage">
+  <div class="jbc__stage" bind:this={stageEl}>
     <!-- `journey-palette` supplies the colour ladder `.jp` styles read, from the
          same file the live sales page and checkout derive from, so the canvas and
          the real page cannot drift apart again (Codex-gfg50) — see the import
@@ -262,95 +447,150 @@
          takes the BASE class only — `--page` would re-point `--color-surface*` /
          `--color-border*`, which the in-canvas block affordances below read and
          need to keep studio-neutral against any page palette. -->
-    <div
-      class="jbc-page jp journey-palette"
-      class:jbc-page--editable={editable}
-      data-device={device}
-    >
-      {#each renderables as entry (entry.section.id)}
-        {@const section = entry.section}
-        {@const i = indexOf(section.id)}
-        {@const isSel = editable && selectedId === section.id}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="jbc-block"
-          class:jbc-block--selected={isSel}
-          data-sec={section.id}
-          onmousedown={editable ? () => pageBuilder.selectSection(section.id) : undefined}
-        >
-          {#if editable}
-            <span class="jbc-block__tag">{section.name ?? section.type}</span>
-            {#if isSel}
-              <div class="jbc-block__bar" role="toolbar" aria-label="Section actions">
-                <button
-                  type="button"
-                  class="jbc-block__btn"
-                  title="Move up"
-                  disabled={i <= 0}
-                  onmousedown={stop}
-                  onclick={() => pageBuilder.moveSection(section.id, -1)}
-                >
-                  <ChevronUpIcon size={15} />
-                </button>
-                <button
-                  type="button"
-                  class="jbc-block__btn"
-                  title="Move down"
-                  disabled={i >= sections.length - 1}
-                  onmousedown={stop}
-                  onclick={() => pageBuilder.moveSection(section.id, 1)}
-                >
-                  <ChevronDownIcon size={15} />
-                </button>
-                <button
-                  type="button"
-                  class="jbc-block__btn"
-                  title="Duplicate"
-                  onmousedown={stop}
-                  onclick={() => pageBuilder.duplicateSection(section.id)}
-                >
-                  <CopyIcon size={14} />
-                </button>
-                <button
-                  type="button"
-                  class="jbc-block__btn"
-                  title="Add a section after this"
-                  onmousedown={stop}
-                  onclick={(e) => openAdd(section.id, e.currentTarget)}
-                >
-                  <PlusIcon size={15} />
-                </button>
-                <button
-                  type="button"
-                  class="jbc-block__btn jbc-block__btn--danger"
-                  title="Delete"
-                  onmousedown={stop}
-                  onclick={() => pageBuilder.removeSection(section.id)}
-                >
-                  <TrashIcon size={14} />
-                </button>
-              </div>
+    <!-- The FIT box. `overflow: hidden` plus an explicit `w × k` / `h × k` size
+         so the scaled page occupies exactly the space it paints and no phantom
+         scrollbar appears; the border, radius and elevation moved here from the
+         page because they must be drawn at studio scale, not at 49% of it. -->
+    <div class="jbc-fit" style={frameStyle}>
+      <div
+        class="jbc-page jp journey-palette"
+        class:jbc-page--editable={editable}
+        data-device={device}
+        bind:this={pageEl}
+      >
+        {#each renderables as entry (entry.section.id)}
+          {@const section = entry.section}
+          {@const vi = visibleIndexOf(section.id)}
+          {@const name = labelFor(section)}
+          {@const isSel = editable && selectedId === section.id}
+          <!--
+            A NON-INTERACTIVE CONTAINER THAT IS NONETHELESS FOCUSABLE, which is
+            exactly the shape the two suppressed rules are heuristics against.
+            It is deliberate, and the alternative is worse: `role="button"` would
+            satisfy the lint and then SWALLOW the section's own contents, because
+            a button's children are presentational to several screen readers —
+            and this container holds the editable copy and the page's real CTAs.
+            So `group` keeps the contents readable, `tabindex` gives the keyboard
+            the path to selection that did not exist at all, and Enter/Space
+            activate it (`onBlockKeydown` bows out for a key press that belongs
+            to a field or a control inside the block).
+          -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div
+            class="jbc-block"
+            class:jbc-block--selected={isSel}
+            data-sec={section.id}
+            role="group"
+            aria-label={editable ? `${name} section` : undefined}
+            aria-current={isSel ? 'true' : undefined}
+            tabindex={editable ? 0 : undefined}
+            onmousedown={editable ? () => pageBuilder.selectSection(section.id) : undefined}
+            onclick={(event) => onBlockClick(event, section.id)}
+            onkeydown={(event) => onBlockKeydown(event, section.id)}
+          >
+            {#if editable}
+              <span class="jbc-block__tag">{name}</span>
+              {#if isSel}
+                <!-- EVERY ACTION IS NAMED. These five were named ONLY by
+                     `title`, which is the accessible-name fallback in HTML-AAM
+                     but never appears on touch and is not reachable by
+                     keyboard — and one of them is a destructive Delete sitting
+                     immediately beside Duplicate. The label names the TARGET as
+                     well as the verb, because a toolbar of five identical
+                     "Delete"s tells a screen-reader user nothing about which
+                     section they are about to remove.
+
+                     PHRASED EXACTLY AS THE RAIL PHRASES IT — `Move <name> up`,
+                     not `Move the <name> section up`. These are the same five
+                     verbs on the same sections as `SectionList`'s row controls
+                     (`SectionList.svelte:122`), and the two panes disagreeing
+                     about the name of one control is the defect this whole block
+                     exists to end. The article also read badly against real
+                     data: the seeded sections are named "The ache" and
+                     "The map", so the first phrasing announced "Move the The
+                     ache section up".
+
+                     Delete does not confirm, and deliberately so: it pushes an
+                     undo step (`removeSection` → `snapshot()`), and undo is on
+                     the top bar and ⌘Z. A confirm on an undoable action trains
+                     people to dismiss confirms. -->
+                <div class="jbc-block__bar" role="toolbar" aria-label="{name} actions">
+                  <button
+                    type="button"
+                    class="jbc-block__btn"
+                    title="Move up"
+                    aria-label="Move {name} up"
+                    disabled={vi <= 0}
+                    onmousedown={stop}
+                    onclick={() => moveVisible(section.id, -1)}
+                  >
+                    <ChevronUpIcon size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    class="jbc-block__btn"
+                    title="Move down"
+                    aria-label="Move {name} down"
+                    disabled={vi >= renderables.length - 1}
+                    onmousedown={stop}
+                    onclick={() => moveVisible(section.id, 1)}
+                  >
+                    <ChevronDownIcon size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    class="jbc-block__btn"
+                    title="Duplicate"
+                    aria-label="Duplicate {name}"
+                    onmousedown={stop}
+                    onclick={() => pageBuilder.duplicateSection(section.id)}
+                  >
+                    <CopyIcon size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    class="jbc-block__btn"
+                    title="Add a section after this"
+                    aria-label="Add a section after {name}"
+                    onmousedown={stop}
+                    onclick={(e) => openAdd(section.id, e.currentTarget)}
+                  >
+                    <PlusIcon size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    class="jbc-block__btn jbc-block__btn--danger"
+                    title="Delete"
+                    aria-label="Delete {name}"
+                    onmousedown={stop}
+                    onclick={() => pageBuilder.removeSection(section.id)}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </div>
+              {/if}
             {/if}
-          {/if}
 
-          <!-- `display: contents` — the wrapper exists ONLY to scope the brand
-               declaration; it generates no box, so it cannot change section
-               layout, while custom properties still inherit through it. -->
-          <div class="jbc-block__brand" style={brandStyle}>
-            <SectionFrame
-              renderable={entry}
-              context={salesContext}
-              {pageDesign}
-              {editable}
-              onEdit={(key, value) => onEditProp(section.id, key, value)}
-            />
+            <!-- `display: contents` — the wrapper exists ONLY to scope the brand
+                 declaration; it generates no box, so it cannot change section
+                 layout, while custom properties still inherit through it. -->
+            <div class="jbc-block__brand" style={brandStyle}>
+              <SectionFrame
+                renderable={entry}
+                context={salesContext}
+                {pageDesign}
+                {editable}
+                onEdit={(key, value) => onEditProp(section.id, key, value)}
+              />
+            </div>
           </div>
-        </div>
-      {/each}
+        {/each}
 
-      {#if renderables.length === 0}
-        <p class="jbc-empty">No visible sections. Enable one in the rail, or add a section.</p>
-      {/if}
+        {#if renderables.length === 0}
+          <p class="jbc-empty">No visible sections. Enable one in the rail, or add a section.</p>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -450,13 +690,20 @@
     color: var(--color-text-muted);
   }
 
+  .jbc__scale {
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-wide);
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+
   .jbc__hint {
     margin-left: auto;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
   }
 
-  /* ── stage + page ── */
+  /* ── stage + fit box + page ── */
   .jbc__stage {
     overflow: auto;
     display: grid;
@@ -470,27 +717,58 @@
     background-size: 22px 22px;
   }
 
-  .jbc-page {
-    width: 100%;
-    max-width: 1080px;
-    border-radius: var(--radius-xl);
+  /* The scaled page's footprint: exactly `w × k` by `h × k`, and `content-box`
+     so those two numbers ARE the box rather than the box minus its edges — with
+     the repo-wide `border-box` the page would be clipped by a hairline down its
+     right edge.
+
+     THE EDGE IS A RING, NOT A BORDER, and that is a measurement not a
+     preference. `k` is solved from the stage's CONTENT width, so `w × k` is
+     already the exact space available; a 1px border adds 2px of LAYOUT on top of
+     it. Measured at device=tablet: stage clientWidth 708, scrollWidth 710 — two
+     pixels of horizontal scroll on a pane that is meant to scroll only
+     vertically. A `box-shadow` ring is ink overflow, never scrollable overflow,
+     so it draws the same hairline and costs no layout. It follows
+     `border-radius` like a border does. */
+  .jbc-fit {
+    box-sizing: content-box;
+    width: calc(var(--jbc-w) * var(--jbc-k));
+    height: calc(var(--jbc-h) * var(--jbc-k));
     overflow: hidden;
-    border: var(--border-width) var(--border-style) var(--color-border);
-    box-shadow: var(--shadow-xl);
-    transition: max-width var(--duration-slow) var(--ease-default);
+    border-radius: var(--radius-xl);
+    box-shadow:
+      0 0 0 var(--border-width) var(--color-border),
+      var(--shadow-xl);
+    background-color: var(--color-background);
   }
 
-  .jbc-page[data-device='tablet'] {
-    max-width: var(--brand-studio-preview-tablet, 768px);
-  }
+  /* THE CONTAINER-QUERY ROOT'S ANCESTOR, at a real device width. `.jp-sec`
+     carries `container-type: inline-size`, so this width — not the studio
+     column's — is what all 19 `@container` rules in the journey CSS resolve
+     against, which is the whole point of the fit box above.
 
-  .jbc-page[data-device='mobile'] {
-    max-width: var(--brand-studio-preview-mobile, 380px);
+     No width TRANSITION on the device switch, deliberately: animating this
+     width would step every container query through every intermediate value,
+     re-resolving eight breakpoints per frame and flickering compositions.
+     The device toggle is a mode change, not a movement. */
+  .jbc-page {
+    width: var(--jbc-w);
+    transform: scale(var(--jbc-k));
+    transform-origin: top left;
   }
 
   /* ── block selection + chrome ── */
   .jbc-block {
     position: relative;
+  }
+
+  /* The keyboard path to selection — see `onBlockKeydown`. Focus is drawn with
+     the same ring the selected state uses, counter-scaled like the rest of the
+     chrome so it stays a hairline on screen rather than 0.49 of one. */
+  .jbc-page--editable .jbc-block:focus-visible {
+    outline: calc(var(--border-width-thick) * var(--jbc-cs, 1)) solid
+      var(--color-interactive);
+    outline-offset: calc(-2px * var(--jbc-cs, 1));
   }
 
   .jbc-page--editable .jbc-block {
@@ -508,20 +786,34 @@
     z-index: 40;
   }
 
+  /* ── THE CHROME IS COUNTER-SCALED ───────────────────────────────────────────
+     `--jbc-cs` is 1/k. Everything below is editing chrome, not page content:
+     at desktop the page is drawn at ~49%, and a 14px trash icon at 7px, a
+     hairline at 0.49px and 10px label text are not usable controls. Scaling the
+     chrome back up keeps it at studio size on screen while the PAGE stays at
+     device size in its own coordinate space — which is the fidelity the frame
+     exists for. Every use carries `, 1` so the rules are still correct if the
+     property is ever missing. */
   .jbc-page--editable .jbc-block:hover::after {
-    outline: var(--border-width) solid color-mix(in oklab, var(--color-interactive) 45%, transparent);
+    outline: calc(var(--border-width) * var(--jbc-cs, 1)) solid
+      color-mix(in oklab, var(--color-interactive) 45%, transparent);
   }
 
   .jbc-block--selected::after {
-    outline: var(--border-width-thick) solid var(--color-interactive);
-    outline-offset: -2px;
+    outline: calc(var(--border-width-thick) * var(--jbc-cs, 1)) solid
+      var(--color-interactive);
+    outline-offset: calc(-2px * var(--jbc-cs, 1));
   }
 
+  /* `translateY(-100%) scale()` about the BOTTOM-LEFT origin: the translate is
+     applied in the untransformed space, so the tag's bottom edge stays on the
+     block's top edge and it grows upward — the same placement it had at scale 1. */
   .jbc-block__tag {
     position: absolute;
     top: 0;
     left: 0;
-    transform: translateY(-100%);
+    transform-origin: left bottom;
+    transform: translateY(-100%) scale(var(--jbc-cs, 1));
     z-index: 41;
     padding: var(--space-0-5) var(--space-2);
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
@@ -543,8 +835,10 @@
 
   .jbc-block__bar {
     position: absolute;
-    top: var(--space-2);
-    right: var(--space-2);
+    top: calc(var(--space-2) * var(--jbc-cs, 1));
+    right: calc(var(--space-2) * var(--jbc-cs, 1));
+    transform-origin: top right;
+    transform: scale(var(--jbc-cs, 1));
     z-index: 43;
     display: flex;
     gap: var(--space-0-5);

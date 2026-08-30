@@ -106,6 +106,43 @@
   );
 
   --jp-ink: var(--jp-pole-a);
+
+  /* ── brand accents — INPUTS, not rungs (Codex-8jve9) ─────────────────────
+     Left on the brand's own colours: the accent and its on-accent label already
+     read correctly against both inks.
+
+     THESE LIVE IN THE ROOT-ONLY BLOCK, deliberately, and moving them back into
+     the shared `.jp-sec` block below would silently re-break the bug this
+     placement fixes. `--jp-ember` reads `--brand-color`, which the org layout
+     sets UNCONDITIONALLY (`_org/[slug]/+layout.svelte` `style:--brand-color`),
+     so the theme-aware tail of the chain was unreachable and a journey accent
+     stayed on the LIGHT brand for a dark-mode visitor — while the CTA beside it
+     (`--color-brand-primary` → `--color-text-on-brand`) switched to
+     `--brand-color-dark` like every other org surface. Two colours for one
+     brand, disagreeing by theme.
+
+     The dark pole is therefore declared below, and it can only reach these
+     properties if they are declared HERE: the dark rule's selector matches the
+     palette ROOT, while the shared block re-declares its properties on every
+     `.jp-sec` at (0,2,0) — a section would have re-derived `--jp-ember` from
+     `--brand-color` again and thrown the override away. Declared as inputs, a
+     `.jp-sec` inherits an already-resolved ember exactly as it already inherits
+     an already-resolved `--jp-pole-a`.
+
+     `--jp-on-ember` and `--jp-ember-text` STAY in the shared block: they are
+     rungs, and `--jp-ember-text` reads the section's own `--jp-heading`, so they
+     must re-derive per section.
+
+     MEASURED: on this database no org declares `dark_mode_overrides.primaryColor`,
+     so `--brand-color-dark` is absent everywhere and this changes NOTHING on any
+     of the three seeded orgs at either pole — verified by canvas readback. It is
+     a structural fix for a config the fixture does not exercise, not a
+     re-tuning. An org that DOES set a dark primary gets a dark accent that
+     agrees with its dark CTA. */
+  --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
+  --jp-blood: var(--brand-secondary, var(--jp-ember));
+  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
+  --jp-rose: var(--brand-accent, var(--jp-ember));
 }
 
 /* ═══ THE DERIVATION — every rung, RE-DERIVED PER SECTION ═══════════════════
@@ -205,12 +242,10 @@
   --jp-line-hover: color-mix(in oklab, var(--jp-ink) 56%, var(--jp-heading) 44%);
 
   /* ── brand accents ──────────────────────────────────────────────────────
-     Left on the brand's own colours: the accent and its on-accent label already
-     read correctly against both inks. */
-  --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
-  --jp-blood: var(--brand-secondary, var(--jp-ember));
-  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
-  --jp-rose: var(--brand-accent, var(--jp-ember));
+     `--jp-ember`, `--jp-blood`, `--jp-blood-deep` and `--jp-rose` are declared
+     in the ROOT-ONLY block above, not here — see the note there (Codex-8jve9).
+     A `.jp-sec` inherits them already resolved. The two rungs BELOW them stay
+     here because they must re-derive per section. */
   /* The upper bound is 1, not 0.98, and that single character is the whole of
      this fix. `--color-text-on-brand` uses `clamp(0, (0.62 - l) * 1000, 1)`;
      this token used to stop at 0.98, so on a mid-lightness fill it handed back
@@ -341,6 +376,28 @@
      pole B re-derives from the dark background here for free, and
      `surface: invert` keeps working in dark mode with no second branch. */
   --jp-pole-a: var(--brand-bg-dark, var(--brand-bg, var(--color-background)));
+
+  /* ── the dark ACCENT (Codex-8jve9) ───────────────────────────────────────
+     The same two-pole shape, one axis over. Each chain is the light chain with
+     the org's dark companion prepended, so an org that sets no dark colour
+     resolves byte-identically to the light pole and NOTHING moves — which is
+     why this is safe to land against a fixture where no org declares one.
+     Chain order copied from `tokens/org-brand.css`'s dark branch so a journey
+     accent resolves exactly like every other org accent.
+
+     `--jp-blood-deep` is absent on purpose, exactly as `--jp-pole-b` is: it is
+     declared at the root in terms of `--jp-blood`, and substitution happens per
+     element AFTER the cascade picks a winner, so it re-derives from whichever
+     blood won here for free.
+
+     No `[data-editing-theme='dark']` form, also on purpose: `--jp-pole-a` above
+     does not have one either, so the brand-editor dark-preview gap is
+     pre-existing and shared, and closing it for the accent alone would leave the
+     preview showing a dark accent on a light ground. That is one decision about
+     the whole palette, not a side effect of this fix. */
+  --jp-ember: var(--brand-color-dark, var(--brand-color, var(--color-brand-primary, var(--color-interactive))));
+  --jp-blood: var(--brand-secondary-dark, var(--brand-secondary, var(--jp-ember)));
+  --jp-rose: var(--brand-accent-dark, var(--brand-accent, var(--jp-ember)));
 }
 
 /* ── background / surface / border ──────────────────────────────────────────

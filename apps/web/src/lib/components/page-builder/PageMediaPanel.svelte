@@ -248,10 +248,20 @@
     color: var(--color-text);
   }
 
+  /* NO `--color-text-muted` in this panel, deliberately, and the guard in
+     `page-builder/journey-palette.test.ts` now enforces it (Codex-6nb7i).
+     Measured on the studio panel surface by canvas readback: muted at
+     `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and 13px is
+     not WCAG "large text". The muted strings here included the group headings
+     ("Cover", "Videos & portrait" — the same case SectionEditor already fixed)
+     and every slot hint, one of which is "JPG, PNG, WebP or GIF · up to {N}MB":
+     the string that stops a creator wasting an upload. Secondary reads
+     7.81 / 10.21, and tracks `--color-text` so it holds on any brand
+     background. */
   .panel__sub {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__group {
@@ -266,7 +276,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__field {
@@ -284,7 +294,7 @@
   .panel__hint {
     font-size: var(--text-xs);
     line-height: var(--leading-snug);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   /* ── Cover ─────────────────────────────────────────────────────────────
@@ -315,7 +325,7 @@
 
   .cover__empty {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .cover__actions {

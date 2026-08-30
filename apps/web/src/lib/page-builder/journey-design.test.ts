@@ -652,6 +652,51 @@ describe('journey-design.css — the accessibility floors that are structural', 
 // 2. --tap-target-min — a floor a brand setting can lower is not a floor
 // ═══════════════════════════════════════════════════════════════════════════
 
+describe('--jp-stage-vh — the re-pointable height basis (O7 · the svh half)', () => {
+  // WHY THIS SEAM EXISTS. `svh` resolves against the BROWSER viewport and cannot
+  // be told not to, and `cqh` — the obvious alternative — silently falls back to
+  // the small viewport under inline-size containment, which is exactly what
+  // `.jp-sec` declares (`InviteSection.svelte:775` records that reasoning and it
+  // is why `svh` was chosen). So inside the builder's fixed-width device frame a
+  // `100svh` hero was as tall as the STUDIO WINDOW: measured live at
+  // device=mobile, the hero was 390 x 900 (aspect 0.433) where a real 390 x 844
+  // phone gives 0.462. The canvas could not preview the aspect of any
+  // full-height section — four of the hero's six compositions plus the invite's
+  // stage card.
+  //
+  // This file owns the SEAM. The two consumers live in `render/sections/`, which
+  // another work package owns, so they are handed off — the guard here is that
+  // the seam itself keeps the shape that makes the override reachable.
+
+  it('declares the basis once, on the axis substrate root', () => {
+    const declarations = declarationsOf(DESIGN, '--jp-stage-vh');
+    expect(declarations).toHaveLength(1);
+    expect(ruleFor(':where(.jp-sec)')?.declarations['--jp-stage-vh']).toBe(
+      'var(--jp-device-vh, 1svh)'
+    );
+  });
+
+  it('puts the fallback INSIDE the var(), not beside it', () => {
+    // The resolution trap, and the reason a plain `--jp-stage-vh: 1svh;` line
+    // would be wrong rather than merely different: `--jp-device-vh` arrives by
+    // INHERITANCE from an ancestor of `.jp-sec` (the canvas's fit box sets it).
+    // A bare declaration on `.jp-sec` itself would shadow the ancestor's
+    // contribution on every section, and the override could never win — the
+    // canvas would set a property nothing reads, which is the silent shape this
+    // whole file exists to catch.
+    const value = declarationsOf(DESIGN, '--jp-stage-vh')[0];
+    expect(value).toMatch(/^var\(--jp-device-vh,\s*1svh\)$/);
+  });
+
+  it('never sets --jp-device-vh itself, so the PUBLIC page is byte-identical', () => {
+    // The seam is inert off the canvas: with nothing declaring the device
+    // height, `--jp-stage-vh` resolves to `1svh` and published output cannot
+    // change. If this stylesheet ever declared it, every visitor would get the
+    // canvas's pinned height.
+    expect(declarationsOf(DESIGN, '--jp-device-vh')).toEqual([]);
+  });
+});
+
 describe('--tap-target-min (contract A2)', () => {
   const FORMULA = 'max(2.75rem, var(--space-11))';
 

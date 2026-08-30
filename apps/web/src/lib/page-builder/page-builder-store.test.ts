@@ -438,3 +438,180 @@ describe('pageBuilder — undo / redo', () => {
     expect(pageBuilder.canUndo).toBe(false);
   });
 });
+
+/**
+ * PAGE-LEVEL edits — the title, the status select, the brand overrides, the SEO
+ * bag and the one-off price — and their relationship with the history.
+ *
+ * THE BUG THESE LOCK OUT is a silent destruction, not a missing feature. `undo()`
+ * replaces the WHOLE `pending` object with a snapshot, but only the section
+ * mutators used to take one. So a snapshot captured by a section edit carried the
+ * title, brand and price AS THEY WERE AT THAT MOMENT, and restoring it took back
+ * every page-level edit made since — with nothing on screen to say so, and no way
+ * to get them back (redo replays the same narrow step). The two failures were
+ * therefore: (1) those edits were not undoable at all, and (2) they were destroyed
+ * by an undo aimed at something else entirely.
+ *
+ * The rule the tests below pin: ONE undo takes back exactly ONE edit, whichever
+ * kind it was, and leaves every earlier edit standing.
+ */
+describe('pageBuilder — page-level edits are part of the history', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    pageBuilder.open(PAGE_ID, makeSaved());
+  });
+
+  it('an undo after a title edit takes back the TITLE, not the section edit before it', () => {
+    pageBuilder.toggleSection('sec-ache');
+    const toggled = pageBuilder.sections.find(
+      (s) => s.id === 'sec-ache'
+    )?.enabled;
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    expect(pageBuilder.canUndo).toBe(true);
+
+    pageBuilder.undo();
+
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+    // The earlier, UNRELATED edit survives — the whole point.
+    expect(pageBuilder.sections.find((s) => s.id === 'sec-ache')?.enabled).toBe(
+      toggled
+    );
+    // And the section edit is still one further step back.
+    expect(pageBuilder.canUndo).toBe(true);
+  });
+
+  it('an undo aimed at the last edit does not destroy the title or the price behind it', () => {
+    // The exact sequence from the report: edit a section, then rename the page and
+    // set a one-off price, then press Cmd+Z once to take back the last thing.
+    pageBuilder.toggleSection('sec-ache');
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    pageBuilder.updateOffer({ oneOffEnabled: true, oneOffPriceCents: 2700 });
+
+    pageBuilder.undo();
+
+    // One undo = one edit. The rename stands; only the price is taken back.
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.pending?.offer?.oneOffPriceCents).toBeUndefined();
+  });
+
+  it('an undo of a title edit leaves a price set BEFORE it untouched', () => {
+    pageBuilder.updateOffer({ oneOffPriceCents: 2700 });
+    pageBuilder.updateMeta('status', 'published');
+
+    pageBuilder.undo();
+
+    expect(pageBuilder.pending?.status).toBe('draft');
+    // £27 was entered before the status change and must survive its undo.
+    expect(pageBuilder.pending?.offer?.oneOffPriceCents).toBe(2700);
+  });
+
+  it('the SEO bag and the brand overrides are undoable too', () => {
+    pageBuilder.updateSeo({ title: 'Bone Deep · a descent' });
+    expect(pageBuilder.pending?.seo?.title).toBe('Bone Deep · a descent');
+    pageBuilder.undo();
+    expect(pageBuilder.pending?.seo?.title).toBeUndefined();
+
+    pageBuilder.updateBrandOverrides({ primaryColor: '#a62b0c' });
+    expect(pageBuilder.pending?.brandOverrides?.primaryColor).toBe('#a62b0c');
+    pageBuilder.undo();
+    expect(pageBuilder.pending?.brandOverrides).toBeNull();
+  });
+
+  it('a write that changes nothing takes no step and does not dirty the draft', () => {
+    // `handlePublish` re-writes the same status when it rolls back a failed
+    // publish, and a colour input echoes its own value while the picker is open.
+    pageBuilder.updateMeta('title', 'Stillness');
+    pageBuilder.updateOffer({});
+    pageBuilder.updateBrandOverrides({ primaryColor: undefined });
+
+    expect(pageBuilder.canUndo).toBe(false);
+    expect(pageBuilder.isDirty).toBe(false);
+  });
+});
+
+/**
+ * CLEARING a brand override.
+ *
+ * Found while removing the shader control: the merge wrote
+ * `{ primaryColor: undefined }` instead of deleting the key. That key survives
+ * `structuredClone` (so the save payload carried it) but not `JSON.stringify` (so
+ * the `isDirty` diff and the sessionStorage snapshot each saw a DIFFERENT draft
+ * from the one the save would send). The observable damage was an override turned
+ * on and off again leaving the draft permanently DIRTY against a `null` baseline —
+ * Save lit with nothing to persist, and a navigation prompting over an empty
+ * change, which is how a creator learns to click through the prompt that is
+ * supposed to protect their work.
+ *
+ * The fix is the representation {@link setSectionDesignAxis} already uses:
+ * absence, and `null` once the bag is empty.
+ */
+describe('pageBuilder — brand overrides round-trip', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+  });
+
+  it('clearing the last override drops the bag to null, not to a phantom key', () => {
+    pageBuilder.open(
+      PAGE_ID,
+      makeSaved({ brandOverrides: { primaryColor: '#123456' } })
+    );
+
+    pageBuilder.updateBrandOverrides({ primaryColor: undefined });
+
+    expect(pageBuilder.pending?.brandOverrides).toBeNull();
+    const payload = pageBuilder.getSavePayload();
+    // The save body is `.strict()`; a key holding `undefined` is not a value the
+    // endpoint should ever be asked to interpret.
+    expect(JSON.stringify(payload)).not.toContain('primaryColor');
+    expect(Object.keys(payload?.brandOverrides ?? {})).toEqual([]);
+  });
+
+  it('clearing one override of two keeps the others and deletes only that key', () => {
+    pageBuilder.open(
+      PAGE_ID,
+      makeSaved({
+        brandOverrides: { primaryColor: '#123456', secondaryColor: '#654321' },
+      })
+    );
+
+    pageBuilder.updateBrandOverrides({ primaryColor: undefined });
+
+    expect(pageBuilder.pending?.brandOverrides).toEqual({
+      secondaryColor: '#654321',
+    });
+    expect(
+      Object.keys(pageBuilder.pending?.brandOverrides ?? {})
+    ).not.toContain('primaryColor');
+  });
+
+  it('override ON then OFF leaves the draft CLEAN against a null baseline', () => {
+    pageBuilder.open(PAGE_ID, makeSaved({ brandOverrides: null }));
+
+    pageBuilder.updateBrandOverrides({ primaryColor: '#a62b0c' });
+    expect(pageBuilder.isDirty).toBe(true);
+
+    pageBuilder.updateBrandOverrides({ primaryColor: undefined });
+
+    // Net change: nothing. The unsaved-work prompt must not fire for this.
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(pageBuilder.pending?.brandOverrides).toBeNull();
+  });
+
+  it('survives the save round trip: what markSaved adopts is what JSON would carry', () => {
+    pageBuilder.open(
+      PAGE_ID,
+      makeSaved({ brandOverrides: { primaryColor: '#123456' } })
+    );
+
+    pageBuilder.updateBrandOverrides({ primaryColor: undefined });
+    const payload = pageBuilder.getSavePayload();
+    pageBuilder.markSaved();
+
+    // The three views of the draft agree: the payload sent, the promoted
+    // baseline, and the JSON the sessionStorage snapshot would restore.
+    expect(payload?.brandOverrides).toBeNull();
+    expect(pageBuilder.saved?.brandOverrides).toBeNull();
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(JSON.parse(JSON.stringify(payload)).brandOverrides).toBeNull();
+  });
+});

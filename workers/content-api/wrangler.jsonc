@@ -113,6 +113,10 @@
     "WEB_APP_URL": "http://lvh.me:3000",
     "API_URL": "http://localhost:8787",
     "MEDIA_API_URL": "http://localhost:4002",
+    // localhost:4100 is workers/dev-cdn, which serves BOTH buckets by trying
+    // [ASSETS_BUCKET, MEDIA_BUCKET] in turn and honours HTTP Range. That is why
+    // HLS previews always played locally while every one of them 404'd in
+    // production (Codex-1g5lh.13). No R2_PUBLIC_MEDIA_URL_BASE needed here.
     "R2_PUBLIC_URL_BASE": "http://localhost:4100"
   },
 
@@ -226,6 +230,20 @@
         // bucket → cdn-assets.revelations.studio). `cdn.revelations.studio` is
         // unprovisioned, so every thumbnail/logo/public image 404'd.
         "R2_PUBLIC_URL_BASE": "https://cdn-assets.revelations.studio"
+        // R2_PUBLIC_MEDIA_URL_BASE is deliberately NOT set (Codex-1g5lh.13).
+        //
+        // The 30s HLS preview is a MEDIA-bucket key, so this assets host could
+        // not serve it and every public preview 404'd on its manifest. The fix
+        // is at the SERVING layer: apps/web's cdn-proxy now falls through to a
+        // read-only media binding for `^[^/]+/hls/[^/]+/preview/` and nothing
+        // else, so cdn-assets answers for previews and this base stays correct
+        // for both fields. `resolveR2PublicBases` in src/routes/public.ts reads
+        // R2_PUBLIC_MEDIA_URL_BASE only as the escape hatch for the other
+        // shape — a preview-ONLY host or worker route — for if the owner
+        // declines that binding. Setting it to cdn-media.revelations.studio is
+        // NOT that escape hatch: that domain fronts the whole private bucket
+        // (publicAccess:false in r2-infrastructure.json), and making it public
+        // would expose every master playlist, variant and segment.
       },
       "kv_namespaces": [
         {

@@ -70,6 +70,9 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
+    // Required since the field stopped meaning "undefined is true". This section
+    // has no conversion affordance, so the value only has to be stated.
+    purchasable: true,
     sellPreview,
   };
 }
@@ -108,6 +111,12 @@ function render(props: {
   onEdit?: (key: string, value: string) => void;
   sellPreview?: Promise<SellPreview | null>;
   courseTitle?: string;
+  /**
+   * What the PAGE has decided this section may use for its heading. Absent is the
+   * real default for four of the five fallback-capable sections on any page — only
+   * one of them claims the course title (`claimTitleFallback`).
+   */
+  titleFallback?: string;
 }) {
   component = mount(ReelSection, {
     target: document.body,
@@ -118,6 +127,7 @@ function render(props: {
       design: props.design ?? CANDLELIT,
       editable: props.editable,
       onEdit: props.onEdit,
+      titleFallback: props.titleFallback,
     },
   });
   flushSync();
@@ -249,9 +259,24 @@ describe('ReelSection — no hardcoded editorial voice (Codex-i9pzs)', () => {
     );
   });
 
-  it('falls back to the creator`s own course title', () => {
-    render({ config: {}, courseTitle: 'Bone Deep' });
+  it('falls back to the course title WHEN THE PAGE HAS CLAIMED IT HERE', () => {
+    render({
+      config: {},
+      courseTitle: 'Bone Deep',
+      titleFallback: 'Bone Deep',
+    });
     expect(title()?.textContent?.trim()).toBe('Bone Deep');
+  });
+
+  /*
+   * THE AGGREGATE DEFECT, at this section's end of it. Five sections each fell back
+   * to `context.course.title` on their own, so a page with the hero filled and the
+   * section headings blank served `<h1>Bone Deep</h1>` and four `<h2>Bone Deep</h2>`.
+   */
+  it('does NOT print the course title when the page claimed it elsewhere', () => {
+    render({ config: {}, courseTitle: 'Bone Deep' });
+    expect(title()).toBeNull();
+    expect(document.body.textContent).not.toContain('Bone Deep');
   });
 
   it('self-hides the heading when there is no title either', () => {
@@ -289,14 +314,58 @@ describe('ReelSection — the streamed transport', () => {
     expect(play?.getAttribute('aria-label')).toContain('practice preview');
   });
 
-  it('degrades to a rest rail and no button when there is no preview', async () => {
+  /*
+   * THE ASSERTION THIS REPLACES IS THE DEFECT, RECORDED. It read
+   * `expect(document.body.querySelector('.reel__rest-rail')).not.toBeNull()` and
+   * it PASSED — the section's contract was that a course with no preview clip
+   * publishes a full letterbox frame containing a dimmed `PlayIcon` and a scrub
+   * rail, neither of which is a control or could become one. That is the hollow
+   * shell, asserted as intended behaviour.
+   */
+  it('renders NO frame and no dead transport when there is no preview', async () => {
     render({ sellPreview: Promise.resolve(null) });
     await tick();
     flushSync();
     expect(document.body.querySelector('button.reel__play')).toBeNull();
-    expect(document.body.querySelector('.reel__rest-rail')).not.toBeNull();
-    // The heading still stands — the section never depends on the stream.
+    expect(document.body.querySelector('.reel__play--empty')).toBeNull();
+    expect(document.body.querySelector('.reel__rest-rail')).toBeNull();
+    expect(document.body.querySelector('.reel__frame')).toBeNull();
+    expect(document.body.querySelector('.reel__stage')).toBeNull();
+    // The heading still stands — the copy never depends on the stream.
     expect(title()).not.toBeNull();
+  });
+
+  it('keeps the frame for an authored poster with no clip', async () => {
+    render({
+      config: { ...GOLDEN, posterUrl: 'https://cdn.example/still.webp' },
+      sellPreview: Promise.resolve(null),
+    });
+    await tick();
+    flushSync();
+    // A real still is content; what it must NOT carry is a play affordance.
+    expect(document.body.querySelector('.reel__frame')).not.toBeNull();
+    expect(document.body.querySelector('.reel__image')).not.toBeNull();
+    expect(document.body.querySelector('button.reel__play')).toBeNull();
+  });
+
+  it('renders NOTHING when the section has neither copy nor a clip', async () => {
+    render({ config: {}, sellPreview: Promise.resolve(null) });
+    await tick();
+    flushSync();
+    expect(root()).toBeNull();
+  });
+
+  it('self-hides `waveform` entirely when there is no clip to transport', async () => {
+    render({
+      config: {},
+      variant: 'waveform',
+      sellPreview: Promise.resolve(null),
+    });
+    await tick();
+    flushSync();
+    // Its whole subject is the transport, so an authored poster cannot save it.
+    expect(document.body.querySelector('.reel__audio')).toBeNull();
+    expect(root()).toBeNull();
   });
 });
 

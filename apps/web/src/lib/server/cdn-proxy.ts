@@ -19,6 +19,18 @@
  * `bucket.get(key)` binding would bypass signature verification and expose gated
  * content to anyone who guesses a key, so they are deliberately NOT handled here
  * and fall through to normal request handling.
+ *
+ * ONE NARROW EXCEPTION, added deliberately and gated hard (Codex-1g5lh.13):
+ * the 30-second HLS PREVIEW clip. It is public by product design — it is what
+ * an unauthenticated visitor watches to decide whether to buy — but RunPod
+ * writes it into the PRIVATE media bucket along with the paid stream, because
+ * it uploads the whole `hls_dir` in one call
+ * (infrastructure/runpod/handler/main.py:1282-1290). Nothing bound to this
+ * public host could serve it, so `ASSETS_BUCKET.get(previewKey)` returned null
+ * and every hover/autoplay preview on every org landing page and Explore rail
+ * 404'd on its manifest while its poster loaded fine — a play affordance that
+ * does nothing, with no CSP violation to explain it. See
+ * `isPublicMediaPreviewKey` below for the exact allowlist and what it excludes.
  */
 import type { RequestEvent } from '@sveltejs/kit';
 
@@ -35,9 +47,26 @@ const PUBLIC_CDN_BINDINGS = {
 type CdnBinding =
   (typeof PUBLIC_CDN_BINDINGS)[keyof typeof PUBLIC_CDN_BINDINGS];
 
+/**
+ * `platform.env` as this module reads it.
+ *
+ * `MEDIA_PREVIEW_BUCKET` is a READ-ONLY binding to the otherwise-private media
+ * bucket, present only in environments whose wildcard route shadows the assets
+ * host. It is declared here rather than in `app.d.ts` only because this branch
+ * does not own that file — the canonical declaration belongs alongside
+ * `ASSETS_BUCKET` / `PLATFORM_BUCKET` in `apps/web/src/app.d.ts`.
+ */
+type CdnEnv = NonNullable<NonNullable<RequestEvent['platform']>['env']> & {
+  MEDIA_PREVIEW_BUCKET?: R2Bucket;
+};
+
 const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  // `Range` is CORS-safelisted in current browsers, so a byte-range media
+  // request does not preflight — but naming it here keeps an older or stricter
+  // client's preflight from failing on the one asset class that needs Range.
+  'access-control-allow-headers': 'range, if-none-match, if-modified-since',
 };
 
 /**
@@ -54,13 +83,109 @@ function resolveCdnBinding(hostname: string): CdnBinding | null {
   return null;
 }
 
+/**
+ * The ONLY media-bucket keys this public host may serve: the 30-second preview
+ * clip's own directory, `{creatorId}/hls/{mediaId}/preview/…`
+ * (`getHlsPreviewKey`, packages/transcoding/src/paths.ts:150-152).
+ *
+ * WHY THE WHOLE DIRECTORY AND NOT JUST `preview.m3u8`: the preview is built
+ * with `-hls_flags single_file` (infrastructure/runpod/handler/main.py
+ * `_build_preview_cmd`), so the directory holds exactly two objects —
+ * `preview.m3u8` and the `stream.ts` its `EXT-X-BYTERANGE` entries point at.
+ * Serving the manifest without the segment gives a manifest that loads and a
+ * clip that still does not play.
+ *
+ * DELIBERATELY EXCLUDED — a reviewer must reject any widening of this test:
+ *   `{creatorId}/hls/{mediaId}/master.m3u8`       the gated master playlist
+ *   `{creatorId}/hls/{mediaId}/720p/index.m3u8`   every variant playlist
+ *   `{creatorId}/hls/{mediaId}/720p/segment_*.ts` every full-length segment
+ *   `{creatorId}/originals/{mediaId}/video.mp4`   the source upload
+ * Those are the presigned-URL-gated paid streams (`publicAccess: false` in
+ * .github/config/r2-infrastructure.json). A blanket "try the media bucket too"
+ * fallback — which is what workers/dev-cdn does, and why this defect never
+ * showed up locally — would turn this host into an unsigned reader for the
+ * entire paid catalogue.
+ *
+ * `..` is rejected explicitly. R2 keys are opaque strings and R2 does not
+ * normalise them, and `new URL()` already collapses dot segments in a
+ * pathname, so a traversal out of the prefix is not reachable today; the check
+ * is here so that stays true if a caller ever hands this a key it built itself.
+ */
+export function isPublicMediaPreviewKey(key: string): boolean {
+  if (key.split('/').includes('..')) return false;
+  return /^[^/]+\/hls\/[^/]+\/preview\//.test(key);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// HTTP Range support
+//
+// REQUIRED for the preview above, not a nicety: hls.js (and Safari's native
+// player) fetch ONE `stream.ts` with `Range: bytes=…` per `EXT-X-BYTERANGE`
+// entry. A server that ignores Range and answers 200 with the whole file hands
+// back bytes from offset 0 for every segment, so playback dies after the first
+// one. workers/dev-cdn learned this locally (Codex-bpjg5) and this proxy — which
+// shadows the R2 custom domain and therefore replaces R2's own Range handling —
+// never did. Real R2 honours Range, so honouring it here also makes the
+// shadowed host behave like the origin it stands in for.
+// ───────────────────────────────────────────────────────────────────────────
+
+type RangeIntent =
+  | { kind: 'range'; start: number; end: number | null }
+  | { kind: 'suffix'; suffix: number };
+
+/**
+ * Parse a single-range HTTP Range header (`bytes=start-end` / `bytes=start-` /
+ * `bytes=-suffix`). Anything else — a multi-range request, a non-`bytes` unit,
+ * garbage — yields null, and the caller then serves the full object with 200,
+ * which is the spec's sanctioned response to an unsatisfiable/ignored Range.
+ */
+function parseRangeHeader(header: string | null): RangeIntent | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const [, startStr, endStr] = match;
+  if (startStr === '' && endStr === '') return null;
+  if (startStr === '') {
+    const suffix = Number(endStr);
+    return suffix > 0 ? { kind: 'suffix', suffix } : null;
+  }
+  const start = Number(startStr);
+  const end = endStr === '' ? null : Number(endStr);
+  if (end !== null && end < start) return null;
+  return { kind: 'range', start, end };
+}
+
+/** Translate a parsed Range intent into R2's native range option. */
+function toR2Range(intent: RangeIntent): R2Range {
+  if (intent.kind === 'suffix') return { suffix: intent.suffix };
+  return intent.end === null
+    ? { offset: intent.start }
+    : { offset: intent.start, length: intent.end - intent.start + 1 };
+}
+
+/** Resolve the served [start,end] byte bounds, clamped to the object size. */
+function servedBounds(
+  intent: RangeIntent,
+  size: number
+): { start: number; end: number } {
+  if (intent.kind === 'suffix') {
+    return { start: Math.max(0, size - intent.suffix), end: size - 1 };
+  }
+  const end = intent.end === null ? size - 1 : Math.min(intent.end, size - 1);
+  return { start: intent.start, end };
+}
+
 /** Build response headers from an R2 object (metadata + CORS + cache). */
 function buildAssetHeaders(object: R2Object): Headers {
   const headers = new Headers(CORS_HEADERS);
   object.writeHttpMetadata(headers);
   headers.set('etag', object.httpEtag);
+  headers.set('accept-ranges', 'bytes');
   // Worker-served path bypasses the R2 custom-domain cache rule, so set a sane
   // public cache policy here (browser 1h, edge 1d). Public assets only.
+  // Matches the media bucket's own declared rule (edgeTtl 86400 / browserTtl
+  // 3600 in r2-infrastructure.json), so a preview served through here caches
+  // exactly as its bucket intends.
   if (!headers.has('cache-control')) {
     headers.set('cache-control', 'public, max-age=3600, s-maxage=86400');
   }
@@ -78,9 +203,11 @@ export async function tryServeCdnAsset(
   const binding = resolveCdnBinding(event.url.hostname);
   if (!binding) return null;
 
+  const env = event.platform?.env as CdnEnv | undefined;
+
   // Binding absent in this environment (e.g. dev, which has no shadowing
   // wildcard) → let the real R2 custom domain handle it.
-  const bucket = event.platform?.env?.[binding] as R2Bucket | undefined;
+  const bucket = env?.[binding] as R2Bucket | undefined;
   if (!bucket) return null;
 
   const { method } = event.request;
@@ -101,8 +228,18 @@ export async function tryServeCdnAsset(
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
   }
 
+  // Second-chance bucket, consulted ONLY after the public bucket misses and
+  // ONLY for the public-preview prefix. Resolved to `undefined` for every other
+  // key, so there is no code path on which a gated stream reaches the media
+  // binding — the gate is applied here, once, before any lookup.
+  const previewBucket = isPublicMediaPreviewKey(key)
+    ? env?.MEDIA_PREVIEW_BUCKET
+    : undefined;
+
   if (method === 'HEAD') {
-    const object = await bucket.head(key);
+    const object =
+      (await bucket.head(key)) ??
+      (previewBucket ? await previewBucket.head(key) : null);
     if (!object) {
       return new Response(null, { status: 404, headers: CORS_HEADERS });
     }
@@ -112,8 +249,15 @@ export async function tryServeCdnAsset(
   }
 
   // GET — forward conditional headers (If-None-Match / If-Modified-Since) to R2
-  // via `onlyIf` so a matching client cache yields a metadata-only 304.
-  const object = await bucket.get(key, { onlyIf: event.request.headers });
+  // via `onlyIf` so a matching client cache yields a metadata-only 304, and the
+  // parsed Range via `range` so byte-range media plays (see above).
+  const range = parseRangeHeader(event.request.headers.get('range'));
+  const options: R2GetOptions = { onlyIf: event.request.headers };
+  if (range) options.range = toR2Range(range);
+
+  const object =
+    (await bucket.get(key, options)) ??
+    (previewBucket ? await previewBucket.get(key, options) : null);
   if (!object) {
     return new Response('Not Found', { status: 404, headers: CORS_HEADERS });
   }
@@ -123,6 +267,15 @@ export async function tryServeCdnAsset(
   // Precondition failed (etag matched): R2 returns metadata only, no body.
   if (!('body' in object)) {
     return new Response(null, { status: 304, headers });
+  }
+
+  if (range) {
+    // `object.size` is the FULL object size even on a ranged get, so the served
+    // bounds come from the request intent clamped to it.
+    const { start, end } = servedBounds(range, object.size);
+    headers.set('content-range', `bytes ${start}-${end}/${object.size}`);
+    headers.set('content-length', String(end - start + 1));
+    return new Response(object.body, { status: 206, headers });
   }
 
   headers.set('content-length', String(object.size));

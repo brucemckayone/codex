@@ -209,3 +209,89 @@ describe('sell-media store · save', () => {
     expect(sellMedia.isDirty).toBe(true);
   });
 });
+
+/**
+ * A FAILED read — the state the builder had no treatment for anywhere.
+ *
+ * Both reads were `.catch(() => null)` with the reason discarded and only
+ * `loading` exposed, so a media library that failed to list was
+ * indistinguishable from an org with no ready media: six empty pickers, plus the
+ * same `media` control in every section inspector, all quietly claiming "you have
+ * nothing". And because `save()` is a TOTAL write, a creator who picked one clip
+ * after a failed read would have sent five explicit nulls and CLEARED the other
+ * five slots on the live sales page.
+ *
+ * So: the reason is kept, and a store with no baseline refuses to write.
+ */
+describe('sell-media store · read failure', () => {
+  it('a clean load reports no error', async () => {
+    getJourneySellMedia.mockResolvedValue(PERSISTED);
+
+    await sellMedia.open(PAGE_ID);
+
+    expect(sellMedia.loadError).toBeNull();
+    expect(sellMedia.loaded).toBe(true);
+  });
+
+  it('keeps the LIBRARY failure reason instead of rendering it as "no media"', async () => {
+    getJourneySellMedia.mockResolvedValue(PERSISTED);
+    listMedia.mockRejectedValue({
+      status: 500,
+      body: { message: 'Media service unavailable' },
+    });
+
+    await sellMedia.open(PAGE_ID);
+
+    expect(sellMedia.options).toEqual([]);
+    // An empty list with a reason beside it is a different fact from an empty
+    // list without one, and only the store can tell them apart.
+    expect(sellMedia.loadError).toBe('Media service unavailable');
+    // Fail-soft holds: the attached media still hydrated.
+    expect(sellMedia.slot('heroMediaId')).toBe(PERSISTED.heroMediaId);
+  });
+
+  it('a failed ATTACHED-media read leaves no baseline, so a pick cannot wipe the rest', async () => {
+    getJourneySellMedia.mockRejectedValue(
+      new Error('Journey media unavailable')
+    );
+
+    await sellMedia.open(PAGE_ID);
+    expect(sellMedia.loadError).toBe('Journey media unavailable');
+    expect(sellMedia.loaded).toBe(false);
+
+    sellMedia.setSlot('heroMediaId', PERSISTED.heroMediaId);
+    // Not dirty ⇒ Save does not offer to persist a placeholder, and the leg in
+    // `saveBuilderDraft` is skipped.
+    expect(sellMedia.isDirty).toBe(false);
+
+    await sellMedia.save();
+    // THE ASSERTION THAT MATTERS: the destructive total write never happened.
+    expect(updateJourneySellMedia).not.toHaveBeenCalled();
+  });
+
+  it('a journey with no subject course does not read media at all, and is not an error', async () => {
+    // The slots live on the COURSE; the service answers NotFoundError for a page
+    // with none. Asking anyway put a guaranteed 404 in every plain landing page's
+    // log — and, once the reason is kept, an error in its author's face.
+    await sellMedia.open(PAGE_ID, { hasCourse: false });
+
+    expect(getJourneySellMedia).not.toHaveBeenCalled();
+    expect(sellMedia.loadError).toBeNull();
+    expect(sellMedia.loaded).toBe(false);
+    // The library still loads: those options are org-wide, not course-scoped.
+    expect(listMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('close() forgets a previous failure', async () => {
+    getJourneySellMedia.mockRejectedValue(
+      new Error('Journey media unavailable')
+    );
+    await sellMedia.open(PAGE_ID);
+    expect(sellMedia.loadError).not.toBeNull();
+
+    sellMedia.close();
+
+    expect(sellMedia.loadError).toBeNull();
+    expect(sellMedia.loaded).toBe(false);
+  });
+});

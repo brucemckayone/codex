@@ -429,11 +429,15 @@ async function reconcilePage(
  * page nobody wrote.
  */
 function buildSections(spec: PortalSpec) {
-  const priceLine =
-    spec.priceCents === null
-      ? 'Included with membership'
-      : `£${(spec.priceCents / 100).toFixed(2)} once · yours to keep`;
-
+  // NO `price` PROP. The invite section renders every price and path from the
+  // AUTHORITATIVE offer (`deriveOfferPaths(context.offer, ...)`), never from an
+  // authored string, and `price` is declared ZERO times in SECTION_FIELDS — so a
+  // seeded `price` was unreachable from the editor, invisible on the page, and
+  // permanent, because the store's save spreads props key-by-key and never drops
+  // an undeclared one. It also MISLED the creator: the builder canvas used to
+  // preview that string while the page published the real Stripe offer
+  // (Codex-bb445). Seeding it re-created the defect on every run, which is why
+  // this generator had to change alongside the data migration.
   return [
     {
       id: crypto.randomUUID(),
@@ -467,7 +471,14 @@ function buildSections(spec: PortalSpec) {
         sub: spec.lede,
       },
       enabled: true,
-      variant: 'default',
+      // `column`, NOT `default`. `default` is not an ache composition id at all —
+      // it fell through `legacySectionVariant()` to `def.defaultVariant`, which
+      // IS `column`, so it rendered correctly only because a fallback caught it.
+      // Writing the resolved id makes the intent explicit and stops a change to
+      // `defaultVariant` silently re-composing every seeded page. Same class as
+      // the hero and invite lines above (migrations 0087 / 0089), and the stored
+      // rows are corrected by the migration that accompanies this change.
+      variant: 'column',
     },
     {
       id: crypto.randomUUID(),
@@ -480,7 +491,10 @@ function buildSections(spec: PortalSpec) {
         note: 'The first ground is already open.',
       },
       enabled: true,
-      variant: 'descent',
+      // `spine`, NOT `descent` — same story as the ache line above. `descent` is
+      // the section's PROSE name, not a composition id; it resolved to `spine`
+      // only via `defaultVariant`.
+      variant: 'spine',
     },
     {
       id: crypto.randomUUID(),
@@ -491,7 +505,6 @@ function buildSections(spec: PortalSpec) {
         heading: spec.title,
         accent: 'is waiting.',
         sub: 'One key opens everything that grows from here.',
-        price: priceLine,
         risk: 'Cancel anytime',
         button: 'Begin',
       },

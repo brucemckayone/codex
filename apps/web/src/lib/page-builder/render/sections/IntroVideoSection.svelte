@@ -87,7 +87,11 @@
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
-  import type { IntroVideoSectionProps, JourneySalesContext } from '../types';
+  import type {
+    IntroVideoSectionProps,
+    JourneySalesContext,
+    SellPreview,
+  } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
 
@@ -122,10 +126,25 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so a page with the hero filled and the
+     * section headings blank served the same sentence as its `<h1>` and four of
+     * its `<h2>`s.
+     */
+    titleFallback?: string;
   }
 
-  const { config, context, variant, design, editable = false, onEdit }: Props =
-    $props();
+  const {
+    config,
+    context,
+    variant,
+    design,
+    editable = false,
+    onEdit,
+    titleFallback,
+  }: Props = $props();
 
   const p: IntroVideoCopy = $derived({
     // Bridged through the alias table (`coerce.ts` declares
@@ -162,8 +181,14 @@
    * heading, and self-hides when there is nothing to say. Deliberately NOT an
    * i18n key: a key holding one brand's editorial voice has not fixed this, it
    * has moved it.
+   *
+   * `titleFallback`, NOT `context.course.title`. The course title is still the
+   * fallback — but the page decides WHICH section gets to use it, because five
+   * sections making that call independently is what printed it five times. When
+   * this section is not the claimant the heading resolves undefined and the `<h2>`
+   * self-hides, which it already guarded for.
    */
-  const heading = $derived(p.heading ?? context.course?.title);
+  const heading = $derived(p.heading ?? titleFallback);
 
   let open = $state(false);
 
@@ -220,6 +245,29 @@
    */
   const showMedia = $derived(design?.media === 'none' ? 'no' : 'yes');
 
+  /**
+   * WHETHER THIS SECTION HAS ANYTHING TO SAY, independently of whether it has
+   * anything to play. Nine of the eleven sections already self-hide on empty data
+   * (`TurnSection` renders only if `statement || lede`); this one did not, and it
+   * is one of the two whose subject is media it may not have.
+   */
+  const hasCopy = $derived(Boolean(p.eyebrow || heading || p.sub));
+
+  /**
+   * WHETHER THERE IS ANYTHING TO PUT IN THE FRAME — a real clip, or an authored
+   * poster still.
+   *
+   * Before this the frame rendered unconditionally: the 16:9 `.iv__media` box with
+   * its atmosphere layers, its scrim and (on `theatre`) four viewfinder brackets,
+   * and with no intro clip its only content was `<div class="iv__empty">` — a
+   * decorative empty letterbox under the course's own title. `posterUrl` is
+   * authored and usually absent, so there was not even a still behind it. A
+   * journey page carrying this section for a course with no `introVideoMediaId`
+   * published what reads as a broken player.
+   */
+  const hasStage = (preview: SellPreview | null | undefined) =>
+    Boolean(preview?.intro) || Boolean(p.posterUrl);
+
   /** Advisory duration → a compact `M:SS` badge. Never fabricates a value. */
   function formatDuration(seconds: number | null | undefined): string | null {
     if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) {
@@ -230,6 +278,33 @@
     const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
+
+  /**
+   * THE PLAY BUTTON'S NAME, DERIVED FROM THE BADGE IT SITS BESIDE (`Codex-3tmt1`).
+   *
+   * The badge and the aria-label read the same field through DIFFERENT precedence
+   * rules, ten lines apart: the badge honoured the AUTHORED `duration` string, the
+   * label ignored it and always emitted raw seconds. The shipped test fixtures
+   * demonstrate it — `duration: '1:00'` with `durationSeconds: 90` rendered a
+   * "1:00" badge on a button announcing "Play the 90-second intro film". Both
+   * halves now come from ONE resolved `durationLabel`, so they cannot disagree.
+   *
+   * AND THE FABRICATED NUMBER IS GONE. The label was `Math.round(intro.durationSeconds ?? 90)`:
+   * an unprobed clip (`durationSeconds: null`) made the button announce a
+   * "90-second" film while the badge correctly rendered nothing, because
+   * `formatDuration` returns null for non-finite input. No duration ⇒ a
+   * duration-free name, never an invented one.
+   *
+   * The upstream number is separately wrong and is NOT fixed here: `toClip`
+   * reports `mediaItems.durationSeconds` — the SOURCE asset's runtime — on a clip
+   * built from `hlsPreviewKey`, which is a fixed 30-second preview, so a
+   * 30-minute intro yields `durationSeconds: 1800`. That is
+   * `packages/access/src/services/course-journey-service.ts`, outside this tree.
+   */
+  const playAria = (durationLabel: string | null): string =>
+    durationLabel
+      ? m.journey_intro_play_aria_labelled({ duration: durationLabel })
+      : m.journey_intro_play();
 
   /**
    * The props key an inline edit must write BACK to: the one the displayed value
@@ -325,7 +400,16 @@
   {/if}
 {/snippet}
 
-{#snippet stage()}
+<!--
+  THE FRAME, AND IT NO LONGER RENDERS WITHOUT SOMETHING IN IT.
+
+  `preview` + `pending` arrive as arguments rather than being awaited in here: the
+  CALLER decides whether the frame exists at all, which is the only place that
+  decision can be made (a snippet cannot un-render its own wrapper). `pending` is
+  its own argument rather than `preview === null`, because "not resolved yet" and
+  "resolved to nothing" now have OPPOSITE renderings — a skeleton and no frame.
+-->
+{#snippet stage(preview: SellPreview | null, pending: boolean)}
   <div class="iv__stage">
     <div class="iv__media">
       <!--
@@ -372,78 +456,128 @@
       -->
       <span class="iv__scrim" aria-hidden="true"></span>
 
-      {#await context.sellPreview}
+      {#if pending}
         <SectionSkeleton shape="media" label={m.journey_intro_skeleton_label()} />
-      {:then preview}
-        {#if preview?.intro}
-          {@const intro = preview.intro}
-          {@const durationLabel = p.duration ?? formatDuration(intro.durationSeconds)}
-          <div class="iv__controls">
-            <span class="iv__pulse" aria-hidden="true"></span>
-            <span class="iv__pulse iv__pulse--2" aria-hidden="true"></span>
-            <button
-              type="button"
-              class="iv__play"
-              data-iv-plate={plate}
-              onclick={() => (open = true)}
-              aria-label={m.journey_intro_play_aria({
-                seconds: Math.round(intro.durationSeconds ?? 90),
-              })}
-            >
-              <span class="iv__play-icon" aria-hidden="true">
-                <PlayIcon />
-              </span>
-            </button>
-          </div>
+      {:else if preview?.intro}
+        {@const intro = preview.intro}
+        {@const durationLabel = p.duration ?? formatDuration(intro.durationSeconds)}
+        <div class="iv__controls">
+          <span class="iv__pulse" aria-hidden="true"></span>
+          <span class="iv__pulse iv__pulse--2" aria-hidden="true"></span>
+          <button
+            type="button"
+            class="iv__play"
+            data-iv-plate={plate}
+            onclick={() => (open = true)}
+            aria-label={playAria(durationLabel)}
+          >
+            <span class="iv__play-icon" aria-hidden="true">
+              <PlayIcon />
+            </span>
+          </button>
+        </div>
 
-          {#if overlay === 'over'}
-            {@render meta(durationLabel)}
-          {/if}
-
-          <IntroVideoModal
-            {open}
-            src={intro.playlistUrl}
-            title={heading}
-            onclose={() => (open = false)}
-          />
-        {:else}
-          <div class="iv__empty" aria-hidden="true"></div>
+        {#if overlay === 'over'}
+          {@render meta(durationLabel)}
         {/if}
-      {/await}
+
+        <IntroVideoModal
+          {open}
+          src={intro.playlistUrl}
+          title={heading}
+          onclose={() => (open = false)}
+        />
+      {/if}
+      <!--
+        NO `iv__empty` BRANCH. A resolved preview with no intro clip used to draw a
+        full-height decorative void here; the frame itself is now conditional on
+        the caller, so this state cannot be reached with an empty box.
+      -->
     </div>
 
     <!--
-      Beneath the frame. Re-awaits the same promise rather than lifting the
-      `{#await}`: the promise is already resolved by then so there is no second
-      request, and keeping the meta inside the media box for `over` is what makes
-      the scrim protect it.
+      Beneath the frame. Reads the SAME resolved preview the frame did, so the two
+      placements cannot disagree; keeping the meta inside the media box for `over`
+      is what makes the scrim protect it.
     -->
-    {#if overlay === 'below'}
-      {#await context.sellPreview then preview}
-        {@render meta(p.duration ?? formatDuration(preview?.intro?.durationSeconds))}
-      {/await}
+    {#if overlay === 'below' && !pending}
+      {@render meta(p.duration ?? formatDuration(preview?.intro?.durationSeconds))}
     {/if}
   </div>
 {/snippet}
 
-<div class="iv" data-iv-composition={composition} data-iv-overlay={overlay}>
-  <div class="iv__inner" use:reveal={{ disabled: editable }}>
-    {#if composition === 'split'}
-      <div class="iv__split">
+<!--
+  THE MEDIA HALF'S GATE, in one place for all three compositions.
+
+  `media: none` is honoured first (`showMedia`) — the axis, then the fact. While
+  the promise is PENDING the frame renders with its skeleton, which is an honest
+  loading affordance with a `role="status"` label; the moment it resolves with
+  neither a clip nor an authored poster the frame is gone rather than empty.
+-->
+{#snippet mediaStage()}
+  {#if showMedia === 'yes'}
+    {#await context.sellPreview}
+      {@render stage(null, true)}
+    {:then preview}
+      {#if hasStage(preview)}
+        {@render stage(preview, false)}
+      {/if}
+    {:catch}
+      <!-- A failed media read is not a reason to draw an empty player. An
+           authored poster is still real content, so it survives. -->
+      {#if p.posterUrl}
+        {@render stage(null, false)}
+      {/if}
+    {/await}
+  {/if}
+{/snippet}
+
+{#snippet shell()}
+  <div class="iv" data-iv-composition={composition} data-iv-overlay={overlay}>
+    <div class="iv__inner" use:reveal={{ disabled: editable }}>
+      {#if composition === 'split'}
+        <div class="iv__split">
+          {@render lead()}
+          {@render mediaStage()}
+        </div>
+      {:else if composition === 'card'}
+        <div class="iv__card">
+          {@render lead()}
+          {@render mediaStage()}
+        </div>
+      {:else}
         {@render lead()}
-        {#if showMedia === 'yes'}{@render stage()}{/if}
-      </div>
-    {:else if composition === 'card'}
-      <div class="iv__card">
-        {@render lead()}
-        {#if showMedia === 'yes'}{@render stage()}{/if}
-      </div>
-    {:else}
-      {@render lead()}
-      {#if showMedia === 'yes'}{@render stage()}{/if}
-    {/if}
+        {@render mediaStage()}
+      {/if}
+    </div>
   </div>
-</div>
+{/snippet}
+
+<!--
+  SELF-HIDE, THE WAY NINE OF THE ELEVEN SECTIONS ALREADY DO (`AcheSection`,
+  `TurnSection`, `FeelSection`, `ProofSection`, `GuideSection`, `FaqSection`,
+  `MapSection` all render only when they have something to show). This section and
+  `reel` were the two that did not, and they are the two whose subject is media
+  they may not have.
+
+  THE COPY BRANCH IS NOT INSIDE THE `{#await}`, DELIBERATELY. The heading and sub
+  are SEO-critical and this component's contract is that they paint immediately;
+  putting them inside an await branch would also destroy and re-create them when
+  the promise resolves, which re-runs `use:reveal` and makes the copy flash out and
+  back in. So when there IS copy the shell renders synchronously and only the media
+  waits. The await wrapper is reached only when there is NO copy — where there is
+  nothing to flicker and nothing to index, and the section's whole existence
+  depends on whether a clip turned up.
+-->
+{#if hasCopy}
+  {@render shell()}
+{:else if showMedia === 'yes'}
+  {#await context.sellPreview then preview}
+    {#if hasStage(preview)}
+      {@render shell()}
+    {/if}
+  {/await}
+{/if}
 
 <style>
   /* ═══════════════════════════════════════════════════════════════════════
@@ -880,21 +1014,17 @@
     background: var(--jp-accent-mark);
   }
 
-  .iv__empty {
-    width: 100%;
-    height: 100%;
-  }
+  /* `.iv__empty` and the `.section-skeleton` size cap that used to sit here are
+     both GONE.
 
-  /* `SectionSkeleton` hardcodes `aspect-ratio: 16 / 9` for its media shape
-     (audit §C.4), which is wider than the box at `media: mask` (4/5) and taller
-     than it at `media: bleed` (21/9). It is a grid child under `place-items:
-     center`, so it is not stretched — but it can still overflow its own frame
-     during the pending state. Capped here rather than by changing the shared
-     primitive, which serves other sections and is not this worktree's file. */
-  .iv__media :global(.section-skeleton) {
-    max-width: 100%;
-    max-height: 100%;
-  }
+     The cap existed only to work around `SectionSkeleton`'s hardcoded
+     `aspect-ratio: 16 / 9`, which disagreed with the box at every value of the
+     `media` axis but two — its own comment said so and said it could not fix the
+     shared primitive from this worktree. `SectionSkeleton` now resolves
+     `var(--jp-media-aspect)`, which it INHERITS from the `.jp-sec` wrapper, so the
+     shimmer is the same shape as the box it stands in and there is nothing left to
+     clamp (`Codex-ae2ea`). `.iv__empty` was the decorative void this section drew
+     when the preview resolved with no clip; the frame is now conditional instead. */
 
   /* ── COMPOSITIONS ──────────────────────────────────────────────────────
      Arrangement only. Ported from the since-deleted `render-edit/journey-sections/_video.css`

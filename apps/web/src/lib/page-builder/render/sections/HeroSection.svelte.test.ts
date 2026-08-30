@@ -71,6 +71,7 @@ function context(
     dashboardUrl: DASHBOARD,
     enrolled: false,
     offer: null,
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };

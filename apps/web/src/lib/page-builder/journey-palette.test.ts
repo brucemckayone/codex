@@ -428,7 +428,23 @@ describe('the ladder re-derives PER SECTION, not once per page', () => {
     // `--jp-ink` and the two poles must NOT be re-declared on `.jp-sec`: the
     // `surface` axis's whole mechanism is a section declaring its own `--jp-ink`
     // at (0,1,0), and a palette rule at (0,2,0) would silently beat it.
-    for (const input of ['--jp-pole-a', '--jp-pole-b', '--jp-ink']) {
+    //
+    // The four brand ACCENTS are inputs for the mirror-image reason (Codex-8jve9):
+    // they are re-pointed by the DARK POLE, whose selector matches the palette
+    // ROOT only. Re-declared on `.jp-sec` at (0,2,0) they re-derive from
+    // `--brand-color` on every section and throw the dark override away — which
+    // is exactly what the old file did, and is reproducible by re-injecting that
+    // one rule (the root then reads the dark accent while its own sections read
+    // the light one).
+    for (const input of [
+      '--jp-pole-a',
+      '--jp-pole-b',
+      '--jp-ink',
+      '--jp-ember',
+      '--jp-blood',
+      '--jp-blood-deep',
+      '--jp-rose',
+    ]) {
       expect(selectorDeclaring(input), input).not.toContain('.jp-sec');
     }
   });

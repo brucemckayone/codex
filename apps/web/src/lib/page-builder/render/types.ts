@@ -177,15 +177,24 @@ export interface JourneySalesContext {
    * the buy button on a transient hiccup would be a worse failure than the dead
    * end this closes.
    *
-   * OPTIONAL-ADDITIVE, and `undefined` means TRUE — the pre-purchase sell state,
-   * exactly as `enrolled` defaults to `false` and `offer` to `null`. A host that
-   * cannot know (a preview harness, a test fixture) must not silently lose the
-   * page's conversion affordance. Both real hosts set it explicitly:
-   * `JourneyRenderer` derives it, `builderSalesContext` pins it to `true`.
-   * Consumers MUST therefore test `context.purchasable !== false`, never
-   * `!context.purchasable`.
+   * REQUIRED, and it was not always. It shipped as `purchasable?: boolean` with
+   * "`undefined` means TRUE" — so that a preview harness or a test fixture could
+   * not silently lose the page's conversion affordance. The cost of that kindness
+   * is that the CORRECT read is `context.purchasable !== false` and the obvious
+   * one, `!context.purchasable`, is wrong in the one direction that matters: it
+   * strips the buy button off every host that has not opted in. Nothing in the
+   * type system said so; only this comment did.
+   *
+   * Making it required moves that from a comment to a compile error. Every host
+   * now states its answer — `JourneyRenderer` derives it, `builderSalesContext`
+   * pins `true` for the canvas (and says why), and each test fixture declares the
+   * state it is testing. `!context.purchasable` and `purchasable !== false` are
+   * then the same predicate, so a new section cannot get it subtly wrong.
+   *
+   * Consumers should still prefer `context.purchasable !== false`: it keeps
+   * reading correctly if a future host ever widens this again.
    */
-  purchasable?: boolean;
+  purchasable: boolean;
   /**
    * The streamed sell-preview. Sections consume it via `{#await}` with a
    * poster skeleton so a slow/failed media resolution degrades gracefully and
@@ -297,12 +306,24 @@ export interface FeelSectionProps {
   body?: string;
   inclusions?: FeelInclusion[];
   /**
-   * The "free-taste" preview player. `previewTitle` is the switch — absent ⇒ the
-   * player self-hides. `previewDuration` is in seconds and drives the playhead.
+   * The "free-taste" preview player. TWO conditions now gate it, and both are
+   * required: `previewTitle` is the AUTHOR's switch, and
+   * `context.sellPreview.reel` is the FACT — a real 30s public HLS manifest. With
+   * a title and no clip the player does not render, because there is nothing to
+   * play (`Codex-scab9`).
    *
-   * The transport is currently a VISUAL taste (an animated equaliser + playhead),
-   * not real playback: it is not yet wired to `context.sellPreview.reel`'s HLS
-   * manifest. These props describe the authored copy either way.
+   * It used to be a MOCK: `playing` was a boolean, `elapsed` was advanced by a rAF
+   * accumulator, and there was no media element anywhere in the section. A visitor
+   * pressed play on the most conversion-critical page in the product, watched a
+   * clock run and a waveform move, and heard nothing — and under
+   * `prefers-reduced-motion` the rAF loop bailed, so the button reported
+   * `aria-pressed="true"` while the clock never moved at all.
+   *
+   * `previewDuration` is in seconds and is now only a PRE-METADATA fallback for
+   * the clock: the element's own `loadedmetadata` duration is the truth and wins
+   * as soon as it lands. It no longer defaults to 480 — an invented 8-minute
+   * runtime on a 30-second clip. The synthetic waveform survives as DECORATION
+   * over real playback, which is all it ever was.
    */
   previewTitle?: string;
   previewSub?: string;

@@ -22,6 +22,9 @@
     TrashIcon,
   } from '$lib/components/ui/Icon';
   import AddSectionPicker from './AddSectionPicker.svelte';
+  import { SECTION_GRIP_ICON, sectionIcon } from './section-icons';
+
+  const GripIcon = SECTION_GRIP_ICON;
 
   const sections = $derived(pageBuilder.sections);
   let picking = $state(false);
@@ -32,10 +35,6 @@
 
   function labelFor(type: string): string {
     return findSectionDefinition(type)?.label ?? type;
-  }
-
-  function glyphFor(type: string): string {
-    return findSectionDefinition(type)?.icon ?? '◌';
   }
 
   function onAdd(type: string): void {
@@ -95,6 +94,10 @@
     <ol class="section-list__rows" role="list">
       {#each sections as section, i (section.id)}
         {@const selected = pageBuilder.selectedSectionId === section.id}
+        <!-- A design-system icon, not the catalogue's glyph string — the same 17
+             real SVG icons this rail already draws. `IconBase` marks it
+             aria-hidden, so the row is announced as "Hero", not "◇ Hero". -->
+        {@const Icon = sectionIcon(section.type)}
         <li
           class="section-list__row"
           class:section-list__row--selected={selected}
@@ -111,7 +114,7 @@
             title="Drag to reorder"
             aria-hidden="true"
             ondragstart={(e) => onDragStart(e, section.id)}
-          >⠿</span>
+          ><GripIcon size={14} /></span>
           <div class="section-list__reorder">
             <button
               type="button"
@@ -140,7 +143,7 @@
             aria-pressed={selected}
             onclick={() => pageBuilder.selectSection(section.id)}
           >
-            <span class="section-list__glyph" aria-hidden="true">{glyphFor(section.type)}</span>
+            <span class="section-list__glyph"><Icon size={15} /></span>
             <span class="section-list__label">{labelFor(section.type)}</span>
           </button>
 
@@ -274,7 +277,6 @@
     width: var(--space-4);
     flex-shrink: 0;
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
     line-height: 1;
     cursor: grab;
   }
@@ -321,7 +323,6 @@
     height: var(--space-6);
     flex-shrink: 0;
     color: var(--color-text-secondary);
-    font-size: var(--text-sm);
   }
 
   .section-list__label {

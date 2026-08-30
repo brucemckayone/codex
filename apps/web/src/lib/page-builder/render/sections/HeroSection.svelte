@@ -103,6 +103,20 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, when the PAGE has let this section claim it as its heading
+     * fallback (`SectionComponentProps.titleFallback`). See `headline` below for why
+     * the hero — alone among the five fallback-capable sections — also keeps an
+     * unconditional last resort.
+     */
+    titleFallback?: string;
+    /**
+     * `1` for the page's first hero, `2` for any later duplicate
+     * (`SectionComponentProps.headingLevel`). A page may hold more than one hero
+     * (`duplicateSection()`), and two `<h1>`s is a correctness defect rather than a
+     * taste one.
+     */
+    headingLevel?: 1 | 2;
   }
 
   const {
@@ -112,6 +126,8 @@
     design,
     editable = false,
     onEdit,
+    titleFallback,
+    headingLevel = 1,
   }: Props = $props();
 
   const p: HeroCopy = $derived({
@@ -130,7 +146,26 @@
   });
 
   const eyebrow = $derived(p.eyebrow ?? context.course.kicker ?? undefined);
-  const headline = $derived(p.headline ?? context.course.title);
+  /**
+   * THE ONE UNCONDITIONAL COURSE-TITLE FALLBACK LEFT ON THE PAGE, and it is here
+   * on purpose.
+   *
+   * Five sections each fell back to `context.course.title` independently, so an
+   * under-authored page served `<h1>Bone Deep</h1>` followed by four
+   * `<h2>Bone Deep</h2>`. Four of the five now read a `titleFallback` the page
+   * hands to exactly one of them and SELF-HIDE their heading otherwise. The hero
+   * cannot: its `<h1>` is the only one on the page, it is not optional, and
+   * `words` below splits the headline — an absent one is not renderable at all.
+   *
+   * What stops it duplicating is at the other end: `claimTitleFallback` gives a
+   * heading-less hero the claim WHEREVER it sits on the page, so whenever this
+   * fallback fires no other section is printing the title. `titleFallback` is read
+   * first anyway, so the two agree by construction rather than by coincidence, and
+   * a host that passes nothing still gets a headline rather than a blank stage.
+   */
+  const headline = $derived(
+    p.headline ?? titleFallback ?? context.course.title
+  );
   const subheadline = $derived(p.subheadline ?? context.course.lede ?? undefined);
 
   // ── COMPOSITION ──────────────────────────────────────────────────────────
@@ -404,7 +439,31 @@
       {:else if mode === 'loop' && canPlay(preview)}
         <HeroLoopVideo src={clip.playlistUrl} posterUrl={still} />
       {:else if still}
-        <img class="hero__img" src={still} alt="" decoding="async" />
+        <!--
+          THE LCP ELEMENT on `full-bleed`, `split-media` and `poster`.
+          `fetchpriority="high"` is the half of the fix that lives in this file: the
+          still otherwise competes with the 12 decorative motes, the Google Fonts
+          stylesheet and every below-the-fold asset for bandwidth.
+
+          The OTHER half is not fixable here — the URL arrives on the STREAMED
+          `sellPreview` promise, so its discovery is gated on a second worker
+          round-trip that only begins after the shell flushes, and `<svelte:head>`
+          cannot preload a URL it does not have yet. That needs `heroImageUrl` on
+          the AWAITED `JourneyCourseView` (the org-landing page preloads its own
+          hero exactly that way), which crosses into `journey-queries.ts`,
+          `@codex/shared-types`, `CourseJourneyService` and the public route's head
+          — all outside this tree. Handed off, not silently skipped.
+
+          `aspect-ratio: var(--jp-media-aspect)` on `.hero__media` already reserves
+          the box, so this is an LCP problem and never was a CLS one.
+        -->
+        <img
+          class="hero__img"
+          src={still}
+          alt=""
+          decoding="async"
+          fetchpriority="high"
+        />
       {:else}
         <span class="hero__plate" aria-hidden="true"></span>
       {/if}
@@ -427,8 +486,26 @@
   </div>
 {/snippet}
 
+<!--
+  ONE `<h1>` PER PAGE, EVEN WHEN A PAGE HOLDS TWO HEROES.
+
+  `duplicateSection()` clones a section with the same type, and the seeded golden
+  page proved that is not theoretical — it served two `id="ache"` (`Codex-yxkj7`).
+  Two heroes therefore served two `<h1>`s, and `hero` is the only one of the eleven
+  sections that emits one. `headingLevel` arrives as `2` for any section that is not
+  the first of its type, so a duplicate demotes to `<h2>`. The class list and the
+  kinetic word split are untouched — this is the OUTLINE only, not the type scale,
+  which is the `type` axis's job.
+
+  A DEMOTION, NOT A DROP: an author who duplicated a hero must still be able to see
+  and delete it. The publish-time answer to "you have two heroes" is
+  `validatePageShape`'s `multiple-hero` error.
+-->
 {#snippet headlineNode()}
-  <h1 class="jp-sec__heading hero__headline">
+  <svelte:element
+    this={headingLevel === 2 ? 'h2' : 'h1'}
+    class="jp-sec__heading hero__headline"
+  >
     <!-- The kinetic word split is skipped when editable: a contenteditable node
          cannot be a bag of spans without the caret fighting the re-render. -->
     {#if editable}
@@ -441,7 +518,7 @@
         class="hero__accent"
         {...editAttrs('accent')}>{p.accent}</span
       >{/if}
-  </h1>
+  </svelte:element>
 {/snippet}
 
 {#snippet actions()}

@@ -63,6 +63,9 @@ function context(
     enrolled: false,
     // No offer read in this harness — this section shows no prices anyway.
     offer: null,
+    // Required since the field stopped meaning "undefined is true". This section
+    // has no conversion affordance, so the value only has to be stated.
+    purchasable: true,
     sellPreview,
   };
 }
@@ -97,6 +100,12 @@ function render(props: {
   onEdit?: (key: string, value: string) => void;
   sellPreview?: Promise<SellPreview | null>;
   courseTitle?: string;
+  /**
+   * What the PAGE has decided this section may use for its heading. Absent is the
+   * real default for four of the five fallback-capable sections on any given page
+   * — only one of them claims the course title (`claimTitleFallback`).
+   */
+  titleFallback?: string;
 }) {
   component = mount(IntroVideoSection, {
     target: document.body,
@@ -107,6 +116,7 @@ function render(props: {
       design: props.design ?? CANDLELIT,
       editable: props.editable,
       onEdit: props.onEdit,
+      titleFallback: props.titleFallback,
     },
   });
   flushSync();
@@ -157,7 +167,16 @@ describe('IntroVideoSection — streamed preview (the shell+stream contract)', (
     expect(play?.getAttribute('aria-label')).toContain('intro film');
   });
 
-  it('degrades to no skeleton and no play when the preview resolves null', async () => {
+  /*
+   * THE ASSERTION THIS REPLACES IS THE DEFECT, RECORDED. It read
+   * `expect(document.body.querySelector('.iv__empty')).not.toBeNull()` and it
+   * PASSED — the section's contract was that a course with no intro clip publishes
+   * a full 16:9 letterbox whose only content is a decorative empty div, under the
+   * course's own title, with the atmosphere layers and (on `theatre`) four
+   * viewfinder brackets around it. That is the hollow shell, asserted as intended
+   * behaviour. The copy still renders; the frame does not.
+   */
+  it('renders NO media frame at all when the preview resolves with no clip', async () => {
     render({
       config: { heading: HEADING },
       sellPreview: Promise.resolve(null),
@@ -168,7 +187,47 @@ describe('IntroVideoSection — streamed preview (the shell+stream contract)', (
     expect(heading()?.textContent?.trim()).toBe(HEADING);
     expect(document.body.querySelector('.section-skeleton')).toBeNull();
     expect(document.body.querySelector('.iv__play')).toBeNull();
-    expect(document.body.querySelector('.iv__empty')).not.toBeNull();
+    expect(document.body.querySelector('.iv__empty')).toBeNull();
+    expect(document.body.querySelector('.iv__media')).toBeNull();
+    expect(document.body.querySelector('.iv__stage')).toBeNull();
+  });
+
+  it('renders the frame for an authored poster even with no clip', async () => {
+    render({
+      config: { heading: HEADING, posterUrl: 'https://cdn.example/still.webp' },
+      sellPreview: Promise.resolve(null),
+    });
+    await tick();
+    flushSync();
+
+    // A real still is content, so the frame earns its place — but there is still
+    // no play affordance, because there is nothing to play.
+    expect(document.body.querySelector('.iv__media')).not.toBeNull();
+    expect(document.body.querySelector('.iv__image')).not.toBeNull();
+    expect(document.body.querySelector('.iv__play')).toBeNull();
+  });
+
+  it('renders NOTHING when the section has neither copy nor a clip', async () => {
+    render({ config: {}, sellPreview: Promise.resolve(null) });
+    await tick();
+    flushSync();
+
+    // The `<section class="jp-sec">` wrapper belongs to `SectionFrame`; what this
+    // component owns is `.iv`, and nine of the eleven sections already withhold
+    // their own root on empty data.
+    expect(root()).toBeNull();
+  });
+
+  it('keeps a copy-only section when the preview resolves with no clip', async () => {
+    render({
+      config: { heading: HEADING },
+      sellPreview: Promise.resolve(null),
+    });
+    await tick();
+    flushSync();
+
+    expect(root()).not.toBeNull();
+    expect(heading()?.textContent?.trim()).toBe(HEADING);
   });
 });
 
@@ -221,9 +280,26 @@ describe('IntroVideoSection — no hardcoded editorial voice (Codex-i9pzs)', () 
     expect(document.body.textContent).not.toContain('Ninety seconds inside');
   });
 
-  it('falls back to the creator`s own course title', () => {
-    render({ config: {}, courseTitle: 'Bone Deep' });
+  it('falls back to the course title WHEN THE PAGE HAS CLAIMED IT HERE', () => {
+    render({
+      config: {},
+      courseTitle: 'Bone Deep',
+      titleFallback: 'Bone Deep',
+    });
     expect(heading()?.textContent?.trim()).toBe('Bone Deep');
+  });
+
+  /*
+   * THE AGGREGATE DEFECT, at this section's end of it. Five sections each fell
+   * back to `context.course.title` on their own, so a page with the hero filled
+   * and the section headings blank served `<h1>Bone Deep</h1>` followed by four
+   * `<h2>Bone Deep</h2>`. The fallback is now claimed once per page; a section
+   * that did not claim it has no heading rather than a duplicate one.
+   */
+  it('does NOT print the course title when the page claimed it elsewhere', () => {
+    render({ config: {}, courseTitle: 'Bone Deep' });
+    expect(heading()).toBeNull();
+    expect(document.body.textContent).not.toContain('Bone Deep');
   });
 
   it('self-hides the heading when there is no title either', () => {
@@ -370,5 +446,55 @@ describe('IntroVideoSection — the editable seam', () => {
     el.textContent = 'Edited';
     el.dispatchEvent(new Event('input', { bubbles: true }));
     expect(onEdit).toHaveBeenCalledWith('eyebrow', 'Edited');
+  });
+});
+
+describe('IntroVideoSection — the play button cannot contradict its own badge (Codex-3tmt1)', () => {
+  /*
+   * THE SHIPPED FIXTURES ALREADY DEMONSTRATED THE DIVERGENCE, which is why this
+   * block asserts a RELATION rather than a literal: `GOLDEN` carries
+   * `duration: '1:00'` and `PREVIEW.intro.durationSeconds` is 90, so the badge
+   * rendered "1:00" in the very same DOM where the button announced "Play the
+   * 90-second intro film". The only aria assertion in the file before this one was
+   * `toContain('intro film')`, which is vacuous with respect to the number.
+   */
+  it('names the same duration the badge shows', async () => {
+    render({ config: GOLDEN, sellPreview: Promise.resolve(PREVIEW) });
+    await tick();
+    flushSync();
+
+    const badge = document.body
+      .querySelector('.iv__duration')
+      ?.textContent?.trim();
+    const label = document.body
+      .querySelector('.iv__play')
+      ?.getAttribute('aria-label');
+
+    expect(badge).toBe('1:00');
+    expect(label).toContain('1:00');
+    // And it must not smuggle the raw clip seconds in beside it.
+    expect(label).not.toContain('90');
+  });
+
+  it('names no duration at all when the clip reports none', async () => {
+    render({
+      config: { heading: 'H' },
+      sellPreview: Promise.resolve({
+        intro: { playlistUrl: '/cdn/x/preview.m3u8', durationSeconds: null },
+        reel: null,
+      }),
+    });
+    await tick();
+    flushSync();
+
+    // `formatDuration` returns null for non-finite input, so the badge correctly
+    // renders nothing — while the label used to say "90-second" from a `?? 90`
+    // fallback that no data anywhere supported.
+    expect(document.body.querySelector('.iv__duration')).toBeNull();
+    const label = document.body
+      .querySelector('.iv__play')
+      ?.getAttribute('aria-label');
+    expect(label).toBeTruthy();
+    expect(label).not.toMatch(/\d/);
   });
 });

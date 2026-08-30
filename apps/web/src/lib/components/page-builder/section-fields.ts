@@ -208,9 +208,33 @@ function videoFields(
       control: 'text',
       hint: 'Small caption shown over the frame. Optional.',
     },
-    { key: 'duration', label: 'Duration', control: 'text' },
+    DURATION_FIELD,
   ];
 }
+
+/**
+ * The advisory runtime badge (introVideo/reel/guide) — Codex-eawdg.
+ *
+ * IT STAYS A `text` CONTROL, and that is a decision, not an omission. All three
+ * renderers read it with `asString`, the catalogue seeds it as `'1:00'` / `'0:30'`
+ * / `'2:00'`, and published pages store strings — so `control: 'number'` would be
+ * a data migration dressed as a field change, and it could not express `1:02:30`
+ * either. (`feel.previewDuration` is genuinely a number and is genuinely declared
+ * `number`; the two are not the same field.)
+ *
+ * What was wrong is that a bare "Duration" label invited PROSE, and the value
+ * lands in a fixed-width `M:SS` badge (`.iv__duration` / `.reel__dur` /
+ * `.guide__dur`). A placeholder and a hint stop the control asking for a sentence.
+ * The badge's own overflow behaviour belongs to the three components and is
+ * handed off — this half is the write boundary only.
+ */
+const DURATION_FIELD: SectionFieldDef = {
+  key: 'duration',
+  label: 'Duration',
+  control: 'text',
+  placeholder: '4:30',
+  hint: 'A runtime, like 4:30. Leave blank to use the clip’s real length.',
+};
 
 /**
  * Field sets per course-section type, grounded in the prototype's inspector
@@ -236,11 +260,31 @@ export const SECTION_FIELDS: Readonly<
       hint: 'A short line under the sub-line. Optional.',
     },
     { key: 'button', label: 'Primary button', control: 'text' },
+    // BOTH HALVES OF THE SECONDARY CTA, and the pair is the point. `quiet` shipped
+    // alone: `HeroSection` gates the second button on `p.secondaryLabel &&
+    // p.secondaryHref`, and nothing declared the href, so a creator could type
+    // "Read the syllabus" into "Quiet link", save, publish — and no second button
+    // ever appeared, on any of the six hero compositions, with nothing on screen
+    // to explain why. The label is useless without a destination; each hint says
+    // so rather than leaving the creator to discover it.
+    //
+    // The href is creator-authored and reaches an `href` attribute, so it MUST be
+    // scheme-guarded. It already is: the render site passes it to `CtaLink`, which
+    // applies `safeHref()` to every href it takes (CtaLink.svelte — review M1,
+    // Codex-isr02). No renderer change is needed to declare this field, and none
+    // may bypass `CtaLink` for it.
     {
       key: 'quiet',
       label: 'Quiet link',
       control: 'text',
-      hint: 'A secondary link beside the button. Optional.',
+      hint: 'A secondary link beside the button. Needs a destination below to appear.',
+    },
+    {
+      key: 'secondaryHref',
+      label: 'Quiet link destination',
+      control: 'text',
+      placeholder: 'https://…',
+      hint: 'Where the quiet link goes. Without it the link is not shown. A page path (/about) or a full URL.',
     },
     {
       key: 'trust',
@@ -318,7 +362,33 @@ export const SECTION_FIELDS: Readonly<
       hint: 'The right panel of the Before / after layout — where they could be.',
     },
   ],
-  reel: videoFields('previewVideoMediaId'),
+  // `captions` is REEL-ONLY, and it must stay outside `videoFields()` even though
+  // every other field here comes from it: that factory also builds `introVideo`,
+  // which reads no `captions`, so declaring it there would turn the forward
+  // round-trip guard red for a key `IntroVideoSection` never reads.
+  //
+  // `ReelSection` reads `asStringArray(config, 'captions')` and falls back to a
+  // singular `caption`, cross-fades the list, and renders `.reel__caption` from it.
+  // Nothing wrote either key, so `captions` was `[]` on every page ever served and
+  // the caption whisper never appeared once.
+  //
+  // A30 / Codex-wtfs1 CHECKED, and the trap does NOT apply: the FAQ case is
+  // dangerous because `items[]` would SHADOW the stored `q1/a1` copy. Here the
+  // fallback vocabulary was never authorable either — `caption` is not a field and
+  // `defaultProps.reel` seeds no caption key — so a `list` bound to `captions`
+  // cannot shadow content a creator authored.
+  reel: [
+    ...videoFields('previewVideoMediaId'),
+    {
+      key: 'captions',
+      label: 'Whispered captions',
+      control: 'list',
+      itemLabel: 'caption',
+      maxItems: 4,
+      placeholder: 'A short line…',
+      hint: 'Shown small over the frame; more than one cross-fades slowly. Optional.',
+    },
+  ],
   map: [
     { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
     { key: 'heading', label: 'Heading', control: 'textarea' },
@@ -389,6 +459,19 @@ export const SECTION_FIELDS: Readonly<
   ],
   guide: [
     { key: 'role', label: 'Role / eyebrow', control: 'text' },
+    // `name` was READ IN FIVE PLACES with no field: the `guide__name` line, the
+    // Letter layout's sign-off (the element that makes it a letter), the portrait
+    // monogram, the portrait `alt` and the clip play control's `aria-label`. So the
+    // sign-off was permanently absent and the monogram always fell back to the
+    // heading's first initial. Placed after `role` so the rail reads role → name →
+    // heading. NOT seeded in the catalogue's `defaultProps`: a fabricated guide
+    // name is worse than an absent one, and it would compound Codex-maf0y.
+    {
+      key: 'name',
+      label: 'Guide name',
+      control: 'text',
+      hint: 'Signed at the foot of the Letter layout, and read out as the portrait’s alt text.',
+    },
     { key: 'heading', label: 'Heading', control: 'textarea' },
     { key: 'body', label: 'Bio', control: 'textarea' },
     {
@@ -424,7 +507,7 @@ export const SECTION_FIELDS: Readonly<
       control: 'text',
       hint: 'Small caption shown over the frame. Optional.',
     },
-    { key: 'duration', label: 'Duration', control: 'text' },
+    DURATION_FIELD,
     {
       key: 'facts',
       label: 'Credentials',
@@ -447,6 +530,12 @@ export const SECTION_FIELDS: Readonly<
   // reported as its own task. `g1…` extends the EXISTING vocabulary instead, so
   // the Grouped layout is authorable with no shape change and no loss.
   faq: [
+    // FAQ was the ONLY one of the eleven sections whose eyebrow was unauthorable —
+    // hero, map, proof and invite all declare theirs — so the page's section
+    // rhythm broke at the FAQ and no creator could fix it. `FaqSection` reads and
+    // renders it (and wires an in-canvas edit target for it), and its own CSS
+    // comment recorded that nothing could author one.
+    { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
     { key: 'heading', label: 'Heading', control: 'text' },
     { key: 'q1', label: 'Question 1', control: 'text' },
     { key: 'a1', label: 'Answer 1', control: 'textarea' },
@@ -506,11 +595,23 @@ export const SECTION_FIELDS: Readonly<
       maxItems: 6,
       hint: 'Rewrites the copy on a real way in. Prices always come from the course, never from here.',
       itemFields: [
+        // THE OPTION LIST IS INCOMPLETE, and the hint says so rather than letting
+        // a creator discover it by losing work. `deriveOfferPaths` emits a FOURTH
+        // id shape — `tier:<tierId>`, one per membership tier — and
+        // `readDecorations` matches decorations to paths strictly by id. So on a
+        // course sold only through tiers there is no id an author can pick that
+        // reaches a card, and an entry keyed to one of the three below decorates
+        // nothing: no error, no warning, the control simply does nothing.
+        //
+        // Fixing it properly means deriving the options from the page's real offer
+        // (the tiers are already in `monetisation-store`) and reporting an unmatched
+        // decoration in the rail. Both sit outside this file and are handed off;
+        // until then this hint is the honest half.
         {
           key: 'id',
           label: 'Which way in',
           control: 'select',
-          hint: 'Must name a path the course actually offers, or the entry is ignored.',
+          hint: 'Must name a path the course actually offers, or the entry is ignored. Membership tiers cannot be named here yet — their card copy is fixed.',
           options: [
             { value: 'purchase', label: 'One-off purchase' },
             { value: 'subscription-monthly', label: 'Subscription · monthly' },

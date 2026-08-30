@@ -294,10 +294,25 @@
     color: var(--color-text);
   }
 
+  /* NO `--color-text-muted` in this panel, deliberately, and the guard in
+     `page-builder/journey-palette.test.ts` now enforces it (Codex-6nb7i).
+     Measured on the studio panel surface by canvas readback: muted at
+     `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and 13px is
+     not WCAG "large text". This is a COMMERCE panel — the strings that were
+     muted included a real field label ("Monthly"/"Annual"), a tier's price, the
+     tier picker's only state read-out ("{n} of {m} include this journey") and
+     the callout that explains what Save does to a price. None of those is
+     decoration. `.way__sw::after` moved too: it is the toggle's only off-state
+     indicator, so WCAG 1.4.11's 3:1 non-text floor applies to it.
+     NOTE the ratio is a function of the ORG's brand background, not a constant:
+     under `[data-org-brand]`, `--color-text-muted` derives from `--brand-bg`
+     (tokens/org-brand.css) while `--color-text-secondary` mixes back from
+     `--color-text` — which is what makes the swap safe on every brand rather
+     than lucky on one. */
   .panel__sub {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__group {
@@ -306,7 +321,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__callout {
@@ -317,7 +332,7 @@
     background-color: var(--color-surface-secondary);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__callout b {
@@ -390,7 +405,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background-color: var(--color-text-muted);
+    background-color: var(--color-text-secondary);
     transition: transform var(--duration-fast) var(--ease-default), background-color var(--duration-fast) var(--ease-default);
   }
 
@@ -417,7 +432,7 @@
   }
 
   .way__copy small {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-size: var(--text-xs);
   }
 
@@ -434,7 +449,7 @@
     margin: 0;
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .way__note a {
@@ -455,7 +470,7 @@
 
   .field__label {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .field__input {
@@ -563,7 +578,7 @@
 
   .tier__price {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     white-space: nowrap;
   }
 </style>

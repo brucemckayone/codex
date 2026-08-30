@@ -1497,6 +1497,8 @@
   "journey_feel_preview_label": "Free taste — {title} preview",
   "journey_feel_preview_play": "Play preview",
   "journey_feel_preview_pause": "Pause preview",
+  "journey_feel_preview_mute": "Mute preview",
+  "journey_feel_preview_unmute": "Unmute preview",
   "journey_invite_badge_recommended": "Recommended",
   "journey_invite_compare_caption": "The ways in, compared",
   "journey_invite_row_price": "Price",
@@ -1505,7 +1507,8 @@
   "journey_guide_portrait_alt": "Portrait of {name}",
   "journey_guide_play_clip": "Play the clip from {name}",
   "journey_guide_play_clip_generic": "Play the guide clip",
-  "journey_intro_play_aria": "Play the {seconds}-second intro film",
+  "journey_intro_play": "Play the intro film",
+  "journey_intro_play_aria_labelled": "Play the intro film, {duration}",
   "journey_intro_skeleton_label": "Loading the intro film",
   "journey_reel_play_aria": "Play the practice preview"
 }

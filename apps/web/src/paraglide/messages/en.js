@@ -11999,6 +11999,22 @@ export const journey_feel_preview_pause = () => `Pause preview`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const journey_feel_preview_mute = () => `Mute preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_feel_preview_unmute = () => `Unmute preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const journey_invite_badge_recommended = () => `Recommended`
 
 
@@ -12059,11 +12075,19 @@ export const journey_guide_play_clip_generic = () => `Play the guide clip`
 
 
 /**
- * @param {{ seconds: NonNullable<unknown> }} params
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const journey_intro_play_aria = (params) => `Play the ${params.seconds}-second intro film`
+export const journey_intro_play = () => `Play the intro film`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const journey_intro_play_aria_labelled = (params) => `Play the intro film, ${params.duration}`
 
 
 /**

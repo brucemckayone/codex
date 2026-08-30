@@ -45,10 +45,8 @@
     saveJourneyPage,
     updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
-  import {
-    remoteErrorMessage,
-    saveBuilderDraft,
-  } from '$lib/page-builder/builder-save';
+  import { saveBuilderDraft } from '$lib/page-builder/builder-save';
+  import { queryErrorMessage } from '$lib/remote/query-result';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
@@ -125,6 +123,36 @@
   // public load applies. A sell-media read that fails must cost the author their
   // media preview, never their canvas.
   const sellPreview = $derived(sellPreviewQuery?.current ?? null);
+
+  /**
+   * WHY the draft read failed, if it did — and the reason the builder used to hang
+   * on "Loading page…" for ever (Codex-b0fm6).
+   *
+   * The whole workspace is gated on `pageBuilder.isOpen && pending`, and the store
+   * only opens from the `$effect` above, whose first line returns on a falsy
+   * `draft`. So a REJECTED read and a NULL resolve both left the spinner as the
+   * terminal state: no error, no retry, and no way back, because the builder's own
+   * chrome lives inside that `{#if}`. Two ordinary paths reach it — a non-UUID
+   * `[id]` segment (the query's schema rejects it) and a valid uuid that is not a
+   * landing page, which is exactly what opening the builder with a COURSE id
+   * produces, since `getJourneyForBuilder` is org-scoped and answers `null` for a
+   * foreign or missing page (IDOR-safe by design).
+   *
+   * THROUGH `queryErrorMessage`, NEVER `draftQuery.error?.message`: SvelteKit
+   * rejects with `HttpError`, which carries its text at `.body.message` and has no
+   * top-level `message`, so the property read is `undefined` for every failure
+   * there is and its branch is dead code (Codex-xo3bl).
+   */
+  const draftError = $derived(queryErrorMessage(draftQuery?.error));
+
+  /**
+   * A resolved-but-absent draft: the read succeeded and there is no such page in
+   * this org. Distinct from in-flight, which is why `loading` is part of the test
+   * — `.current` is `undefined` while a query is running too.
+   */
+  const draftMissing = $derived(
+    !!draftQuery && !draftQuery.loading && draftQuery.current === null
+  );
 
   // The course's AUTHORITATIVE offer — which ways in exist and what each charges
   // (SPEC §7). The canvas received NOTHING here either (Codex-4wun2), and it is
@@ -251,7 +279,11 @@
     // load from their own endpoint alongside the draft (Codex-eqh0z). Fire-and-
     // forget: `open()` already fails soft per-read, and a media-library hiccup
     // must not stop the creator editing copy.
-    void sellMedia.open(pageId);
+    // `hasCourse` so a page with no subject course does not fire a read the
+    // service answers with NotFoundError — the slots live on the COURSE.
+    void sellMedia.open(pageId, {
+      hasCourse: draft.subjectType === 'course' && !!draft.subjectId,
+    });
     // The subscription plan + tier-access set live on the SUBJECT COURSE too, and
     // their baseline is read back from the tables that actually gate access
     // (Codex-2pryk.2.4.2) — never from the page's `offer` bag. A page with no
@@ -343,6 +375,22 @@
           save: () => monetisation.save(),
           presentation: () => monetisation.presentationOffer,
         },
+        // Sell media is a FOURTH resource (it writes `courses.*MediaId`, not the
+        // page row) and only sends when a slot actually changed.
+        //
+        // INSIDE the orchestrator, not after it. This leg used to run below, in
+        // this function, UNDER the `staleWarning` early return — so a rejected
+        // post-save `invalidate` (which happens for reasons that have nothing to
+        // do with this save: any load it re-runs throwing is enough) skipped the
+        // media write entirely, warned the creator about page staleness instead,
+        // and still returned `true`. `handlePublish` then said "Page published"
+        // over media that had never been sent, and `markSaved()` had already run,
+        // so the un-sent media was silently discardable on the next navigation.
+        // A leg the caller runs afterwards is a leg the caller can skip.
+        sellMedia: {
+          isDirty: sellMedia.isDirty,
+          save: () => sellMedia.save(),
+        },
         // Fold the persisted bag back into the draft so the saved baseline carries
         // the derived fields; without it every save would re-send the offer write.
         syncOffer: (offer) => pageBuilder.updateOffer(offer),
@@ -358,33 +406,11 @@
         return false;
       }
       if (result.staleWarning) {
+        // Every write landed — including the media leg, which now runs inside
+        // `saveBuilderDraft` — so this is a WARNING about the studio's cached
+        // reads, and the save is reported as the success it was.
         toast.warning(result.staleWarning);
         return true;
-      }
-
-      // Sell media is a THIRD resource (it writes `courses.*MediaId`, not the page
-      // row) and only sends when a slot actually changed. Same partial-success
-      // discipline as pricing: on refusal, say what DID save and report NOT saved
-      // so `handlePublish`/`handleViewLive` do not proceed on a half-written page.
-      // A foreign media id lands here as a 403 carrying the service's own message.
-      //
-      // `markSaved()` and the `cache:versions` invalidation already happened inside
-      // `saveBuilderDraft`, so they are deliberately NOT repeated here. That does
-      // not lose the retry: `sellMedia` owns its own `isDirty`, independent of the
-      // page-builder draft state, so a failed media write stays dirty and re-sends
-      // on the next save.
-      if (sellMedia.isDirty) {
-        try {
-          await sellMedia.save();
-        } catch (err) {
-          const why = remoteErrorMessage(err);
-          toast.error(
-            why
-              ? `Page saved, but the media was not: ${why}`
-              : 'Page saved, but the media could not be saved.'
-          );
-          return false;
-        }
       }
 
       toast.success('Page saved');
@@ -408,7 +434,13 @@
    * own dashboard and never see the page they just edited.
    */
   async function handleViewLive(): Promise<void> {
-    if (pageBuilder.isDirty && !(await handleSave())) return;
+    // The WIDE flag, not `pageBuilder.isDirty`. Media and pricing live in their
+    // own stores, so with only a clip or a tier changed the narrow flag was false,
+    // the save was SKIPPED, and this opened the published page showing the OLD
+    // media beside a canvas showing the new — reintroducing the exact
+    // builder-vs-live discrepancy this function's docstring exists to prevent,
+    // through the flag rather than through a failed save.
+    if (isDirty && !(await handleSave())) return;
     if (!slug) {
       toast.error('Give the page a slug and save it before viewing live');
       return;
@@ -431,11 +463,89 @@
     toast.success('Page published');
   }
 
-  beforeNavigate(({ cancel }) => {
-    if (pageBuilder.isDirty && !confirm('You have unsaved page changes. Discard?')) {
-      cancel();
+  /**
+   * The unsaved-work guard, and the one control that stops the canvas's live CTAs
+   * navigating the editor away.
+   *
+   * (1) IT READS THE WIDE FLAG. It used to test `pageBuilder.isDirty`, which
+   * covers the page draft ONLY — so picking an intro clip in the Media tab or
+   * changing a tier in the Pricing tab and then clicking "Curriculum" left the
+   * route with nothing to prompt about: `onDestroy` ran `sellMedia.close()` /
+   * `monetisation.close()` and the selection was gone, while the Save button had
+   * been lit the whole time. The comment on `isDirty` above already named this
+   * ("otherwise picking a clip or a tier and navigating away would lose it with
+   * no warning"); the guard simply did not use it. The copy is "unsaved changes"
+   * rather than "unsaved page changes" because it now covers all three.
+   *
+   * (2) `type === 'leave'` (a tab close or a reload) gets `cancel()` with NO
+   * `confirm()`: browsers suppress a dialog during unload, so `confirm()` returns
+   * false immediately and the only thing that stops the unload is `cancel()`,
+   * which raises the browser's own "Leave site?" prompt. Calling both means the
+   * creator can be asked twice — once by a dialog they never see.
+   *
+   * (3) THE CANVAS'S CTAs ARE NOW LIVE LINKS. They point at the real checkout
+   * (that is the fix for a canvas whose every CTA resolved to '#'), and inside an
+   * EDITOR a click on one should select the block, not leave the page. The canvas
+   * intercepts the click; this is the backstop for the paths it cannot — a
+   * keyboard activation, a programmatic `goto`, a composition that forgets to
+   * call `preventDefault`. It cancels UNCONDITIONALLY, dirty or clean: a clean
+   * draft got no prompt at all, so the author simply lost their place. "View
+   * live ↗" is the way out to the real page, and it opens a new tab.
+   */
+  /**
+   * Write the status select's choice, confirming the one value that takes a page
+   * off the public site. Re-reads the draft on cancel so the control cannot show
+   * a status the page does not have.
+   */
+  function setStatus(select: HTMLSelectElement): void {
+    const next = select.value as PageStatus;
+    if (
+      next === 'archived' &&
+      !confirm(
+        'Archive this portal? It stops appearing on your site once you save.'
+      )
+    ) {
+      select.value = pageBuilder.pending?.status ?? 'draft';
+      return;
     }
+    pageBuilder.updateMeta('status', next);
+  }
+
+  beforeNavigate((navigation) => {
+    if (isPublicJourneySurface(navigation.to?.url)) {
+      navigation.cancel();
+      toast.info(
+        'The sales page’s buttons are inert while you edit. Use View live to open the real page.'
+      );
+      return;
+    }
+    if (!isDirty) return;
+    if (navigation.type === 'leave') {
+      navigation.cancel();
+      return;
+    }
+    if (!confirm('You have unsaved changes. Discard?')) navigation.cancel();
   });
+
+  /**
+   * Is this navigation target one of the journey's own PUBLIC surfaces — the sell
+   * page, its checkout or its member dashboard?
+   *
+   * Matched on the pathname of the two URLs the canvas is handed, plus the sell
+   * page itself, so it can only ever match a link the canvas drew. Nothing in the
+   * builder chrome points at these: the top bar links to /studio/journeys and the
+   * two course artifacts, and "View live" uses `window.open`, which never reaches
+   * `beforeNavigate`.
+   */
+  function isPublicJourneySurface(target: URL | null | undefined): boolean {
+    if (!target || !slug) return false;
+    const here = target.pathname.replace(/\/$/, '');
+    return (
+      here === `/journeys/${slug}` ||
+      here === new URL(checkoutUrl, page.url).pathname.replace(/\/$/, '') ||
+      here === new URL(dashboardUrl, page.url).pathname.replace(/\/$/, '')
+    );
+  }
 </script>
 
 <svelte:head>
@@ -473,10 +583,19 @@
           aria-label="Page title"
         />
       </span>
+      <!--
+        ARCHIVED IS DESTRUCTIVE and sits in the same undifferentiated row as the
+        title input, two elements from the history buttons — so it is confirmed
+        before it is written. It IS undoable now (page meta takes history steps),
+        but an archive is also a PUBLIC change the moment the page is saved, and
+        undo cannot reach a saved page. On cancel the select is snapped back to
+        the draft's real status, because a `<select>` keeps the user's choice on
+        screen otherwise and would then disagree with the draft.
+      -->
       <select
         class="jb__status"
         value={pending.status}
-        onchange={(e) => pageBuilder.updateMeta('status', e.currentTarget.value as PageStatus)}
+        onchange={(e) => setStatus(e.currentTarget)}
         aria-label="Page status"
       >
         {#each STATUSES as s (s.id)}
@@ -630,6 +749,39 @@
           {/if}
         </aside>
       {/if}
+    </div>
+  </div>
+{:else if draftError}
+  <!--
+    A FAILED read. Named, escapable, and retryable — the three things the bare
+    spinner was not. `role="alert"` because the surface has no other content to
+    read, so the failure must be announced rather than only painted.
+  -->
+  <div class="jb-empty" role="alert">
+    <p class="jb-empty__title">This page would not open</p>
+    <p class="jb-empty__body">{draftError}</p>
+    <div class="jb-empty__acts">
+      <button type="button" class="jb-empty__btn" onclick={() => draftQuery?.refresh()}>
+        Try again
+      </button>
+      <a class="jb-empty__link" href="/studio/journeys">All portals</a>
+    </div>
+  </div>
+{:else if draftMissing}
+  <!--
+    NOT FOUND, and the copy names the id class explicitly because the commonest
+    way to land here is a correct-looking URL with the wrong uuid in it: this route
+    takes the PORTAL page id, not the course id, and the two are interchangeable to
+    the eye.
+  -->
+  <div class="jb-empty">
+    <p class="jb-empty__title">No portal page with that id</p>
+    <p class="jb-empty__body">
+      This URL takes the PORTAL page id, not the course id. Open the portal from
+      All portals and use “Edit page”.
+    </p>
+    <div class="jb-empty__acts">
+      <a class="jb-empty__link" href="/studio/journeys">All portals</a>
     </div>
   </div>
 {:else}
@@ -1028,6 +1180,63 @@
     height: 100dvh;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
+  }
+
+  /*
+    The two FAILURE states, sharing `.jb-loading`'s full-height centring so the
+    builder's three tails read as one surface. Tokens only — the builder is a
+    full-bleed studio surface and inherits the org brand, so a literal colour here
+    would pin one org's palette into shared chrome.
+  */
+  .jb-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: 100dvh;
+    padding: var(--space-6);
+    text-align: center;
+  }
+
+  .jb-empty__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    color: var(--color-text);
+  }
+
+  .jb-empty__body {
+    margin: 0;
+    max-width: 46ch;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+  }
+
+  .jb-empty__acts {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+  }
+
+  .jb-empty__btn,
+  .jb-empty__link {
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    text-decoration: none;
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .jb-empty__btn:hover,
+  .jb-empty__link:hover {
+    background-color: var(--color-surface-secondary);
   }
 
   @media (--below-lg) {

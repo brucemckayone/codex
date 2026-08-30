@@ -18,6 +18,7 @@
  * Data comes exclusively through the `./journey-data` INTEGRATION SEAM (mocked
  * for AGGRESSIVE-MODE today; rewired to the real remote functions post-WP-2).
  */
+import { extractPlainText } from '@codex/validation';
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
 import { createServerApi } from '$lib/server/api';
@@ -83,13 +84,50 @@ export const load: PageServerLoad = async (event) => {
   // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
   // the public/join CTA rather than throwing.
   //
-  // AWAIT the offer alongside it (Codex-2pryk.2.4.3): the `invite` section's
-  // prices and the paths it offers are now read from the authoritative
-  // `getCourseOffer` rather than from the authored `priceLabel` a creator typed
-  // into the builder. It runs in PARALLEL with the enrolment check, so this adds
-  // no wall-clock to the critical path. `.catch(() => null)` because a pricing
-  // hiccup must not 500 an SEO-critical sales page — the section degrades to a
-  // price-less CTA and never falls back to authored numbers.
+  // AWAIT the offer alongside it (Codex-2pryk.2.4.3): every price and every path
+  // on this page is read from the authoritative `getCourseOffer` rather than from
+  // the authored `priceLabel` a creator typed into the builder.
+  // `.catch(() => null)` because a pricing hiccup must not 500 an SEO-critical
+  // sales page — the sections degrade to a price-less CTA and never fall back to
+  // authored numbers.
+  //
+  // ── THIS COMMENT USED TO CLAIM THE AWAIT WAS FREE. IT IS NOT. ──────────────
+  // It read "it runs in PARALLEL with the enrolment check, so this adds no
+  // wall-clock to the critical path". True for a signed-in visitor, FALSE for an
+  // anonymous one — the case the paragraph above calls the SEO-critical common
+  // case. With no session the enrolment leg is already-resolved
+  // `Promise.resolve(false)`, so there is nothing to overlap and the offer's full
+  // round-trip is the load's THIRD serial hop (`parent()` → `getCoursePage`,
+  // itself two worker calls → `courses.offer`), landing entirely on TTFB. The
+  // response is `private, no-cache` (see the cache decision below), so there is
+  // no shared cache to absorb it and every crawl pays it again.
+  //
+  // MEASURED — dev stack, studio-alpha/bone-deep, signed out, curl
+  // `time_starttransfer`, A/B interleaved over two rounds, min of n=8 (the
+  // statistic least polluted by a busy dev box):
+  //     offer awaited                          2.144s · 2.710s
+  //     offer replaced by Promise.resolve      1.094s · 1.189s
+  // and `GET /courses/:id/offer` alone is p50 0.97s (n=15). So the hop is real,
+  // and here it is about a second.
+  //
+  // IT STAYS AWAITED ANYWAY, because what reads it changed after that claim was
+  // written. The offer is no longer consumed only by the below-the-fold `invite`
+  // section: `JourneyRenderer` derives `purchasable` from it
+  // (`render/JourneyRenderer.svelte:118`), and that flag decides whether the
+  // ABOVE-THE-FOLD hero CTA exists at all (`render/sections/HeroSection.svelte`)
+  // and whether the floating pill renders. `+page.svelte` also prices the page's
+  // JSON-LD and `product:price:*` from it, and a head is flushed long before a
+  // streamed promise settles. Streaming would ship first paint — and the SSR HTML
+  // a crawler reads — with the page's primary conversion affordance missing and
+  // its machine-readable price absent. That trades a second of TTFB for a wrong
+  // page, so this is now a DELIBERATE first-paint dependency, not an oversight.
+  //
+  // THE REAL FIX, which does not belong in this file: the offer is auth-agnostic
+  // apart from its `entitled` flag, changes only through the three studio
+  // monetisation writes, and is keyed by a stable course id — the exact shape
+  // `@codex/cache` `VersionedCache` exists for. Cache it in the worker under a
+  // version key, or fold it into the `access.coursePage` read so it costs no
+  // extra hop, and the second goes away without moving it off the critical path.
   const [enrolled, offer] = await Promise.all([
     user
       ? resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
@@ -221,10 +259,48 @@ export const load: PageServerLoad = async (event) => {
     }
   }
 
+  // ── The head tags the ROOT LAYOUT renders on this page's behalf (O32) ───────
+  // `routes/+layout.svelte` used to emit `<meta name="description">` and
+  // `og:type` unconditionally, and `<svelte:head>` dedupes only `<title>` — so a
+  // page that set its own got TWO tags rather than an override. Measured on a
+  // journey page before this change, in document order:
+  //     meta[property="og:type"]  ["website", "product"]
+  //     meta[name="description"]  ["Discover transformative content from
+  //                                 independent creators", "<the course lede>"]
+  // A parser takes the FIRST value of a repeated Open Graph property, so the
+  // page's own `og:type="product"` was dead on arrival, and every journey page's
+  // search snippet was shadowed by the generic platform tagline.
+  //
+  // The root now renders exactly one of each FROM THIS BAG (falling back to the
+  // platform defaults when a load publishes none), which is why these two values
+  // are computed here and NOT in `+page.svelte`'s `<svelte:head>`: two emitters
+  // is the bug, so there is deliberately only one.
+  //
+  // `||`, never `??`: a creator who BLANKS the SEO panel's description leaves an
+  // empty string behind, and an empty `<meta content="">` is worse than the
+  // derived lede. Same reason `extractPlainText` is chained with `||` — a lede
+  // that is structurally valid TipTap JSON with no text nodes extracts to '',
+  // which the old `course.lede ? extractPlainText(...) : fallback` shape would
+  // have published as an empty description.
+  const pageMeta = {
+    description:
+      coursePage.page.seo?.description ||
+      extractPlainText(coursePage.course.lede) ||
+      `${coursePage.course.title} — a guided course.`,
+    // `product`, not `website`: this page sells one thing, and the
+    // `product:price:*` meta `+page.svelte` emits only makes sense under that
+    // vertical. Matches the `ContentDetailView` precedent of overriding the root's
+    // vertical per surface — except that it now actually overrides it.
+    ogType: 'product' as const,
+  };
+
   return {
     coursePage,
     orgSlug: params.slug,
     enrolled,
+    // Rendered by the ROOT layout, once, so the page overrides rather than
+    // duplicates. See the derivation above.
+    pageMeta,
     // The authoritative offer the `invite` section prices itself from. Null when
     // the read failed — sections show no price rather than a wrong one.
     offer,

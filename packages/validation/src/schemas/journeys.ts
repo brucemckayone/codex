@@ -279,7 +279,29 @@ export const pageSectionSchema = z.object({
   variant: z.string().max(60).optional(),
   name: z.string().max(200).optional(),
   design: sectionDesignSchema.optional(),
-  props: z.record(z.string(), z.unknown()).default({}),
+  // BOUNDED, not merely typed (Codex-us9ay residual 1). `props` is a passthrough
+  // record by design — its per-type shape belongs to the renderer + editor, and
+  // `render/coerce.ts` treats every field as untrusted at the read boundary — but
+  // "no shape" was being read as "no size", so a management-role client could
+  // write an arbitrarily large document into `landing_pages.sections`.
+  //
+  // A SERIALISED-BYTE cap rather than a key count: the cost is the jsonb we store
+  // and re-serialise on every builder load, and a key count bounds neither one
+  // long string nor a deep nested array. 16KB is ~70x the largest section this
+  // platform has ever stored (measured: 228 bytes across all 28 stored sections),
+  // so it cannot reject a real page while still refusing a pasted document.
+  //
+  // The `.default({})` stays OUTERMOST-in-effect: `.refine` appends a check rather
+  // than wrapping, so the INPUT type is still widened (the key is optional for the
+  // caller) while the OUTPUT stays required — which is what keeps the inferred body
+  // assignable to the service's `sections: PageSection[]` with no boundary cast.
+  props: z
+    .record(z.string(), z.unknown())
+    .default({})
+    .refine(
+      (props) => JSON.stringify(props).length <= 16_384,
+      'Section props are too large (16KB limit)'
+    ),
 });
 
 /**
@@ -369,7 +391,12 @@ export const saveJourneyPageBodySchema = z
     subjectType: z.string().max(30).nullable(),
     subjectId: uuidSchema.nullable(),
     brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
-    sections: z.array(pageSectionSchema),
+    // CAPPED (Codex-us9ay residual 1). An unbounded array on a jsonb column is an
+    // unbounded write; the idiom is already in this file at
+    // `saveCurriculumStageSchema` (`.max(100)`). 60 is ~5x the eleven-entry
+    // catalogue, so a real page — the largest stored today has FOUR sections —
+    // cannot hit it, while 500 duplicated sections now 400 instead of persisting.
+    sections: z.array(pageSectionSchema).max(60),
     design: sectionDesignSchema.optional(),
     seo: pageSeoSchema.optional(),
   })

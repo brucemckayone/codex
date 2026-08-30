@@ -93,6 +93,13 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so an under-authored page printed the
+     * same sentence as its `<h1>` four more times.
+     */
+    titleFallback?: string;
   }
 
   const {
@@ -102,6 +109,7 @@
     design,
     editable = false,
     onEdit,
+    titleFallback,
   }: Props = $props();
 
   /**
@@ -141,12 +149,30 @@
    * the hardcoded `"Everything you'll walk."` — one org's editorial voice
    * compiled into every org's sell page.
    *
-   * The heading is NOT allowed to self-hide, which is the other ranked fix: the
-   * page's outline is `h1` (hero) → `h2` (this section) → `h3` (stage), so
-   * dropping the `h2` would leave the stage names as an orphaned level under the
-   * hero's `h1`. The course's own title is the creator's words either way.
+   * THE ORIGINAL RULE HERE — "the heading is NOT allowed to self-hide", because
+   * the outline is `h1` (hero) → `h2` (this section) → `h3` (stage) and dropping
+   * the `h2` orphans the stage names — IS PRESERVED VERBATIM ABOVE THIS LINE AND
+   * IS NOW OVERRULED, deliberately, with the reasoning stated rather than the
+   * comment deleted:
+   *
+   *  · The heading it was defending was `context.course.title`, and FOUR other
+   *    sections resolved the same fallback independently. The document that
+   *    protected the outline was `<h1>Bone Deep</h1>` + `<h2>Bone Deep</h2>` ×4 —
+   *    a keyword-stuffed outline with no informational hierarchy, which is a worse
+   *    outline defect than the one it avoided.
+   *  · A skipped heading LEVEL (h1 → h3 inside this section) is valid HTML and an
+   *    advisory `heading-order` finding. A heading that repeats the page title four
+   *    times is neither valid information architecture nor advisory.
+   *  · `claimTitleFallback` gives a heading-less `hero` the claim wherever it sits,
+   *    so on the ordinary page shape the hero owns the title and this section is
+   *    quiet; this section only claims when the hero is authored — i.e. when the
+   *    page is one where a course-titled `h2` reads as a real section heading.
+   *
+   * So the `<h2>` now self-hides when this section did not claim the title, and a
+   * creator who wants a heading here types one (`map.title`, aliased from the
+   * builder's stored `heading`).
    */
-  const title = $derived(p.title ?? context.course.title);
+  const title = $derived(p.title ?? titleFallback);
 
   // ── COMPOSITION ──────────────────────────────────────────────────────────
   // `resolveVariant` has already mapped every retired id forward, so an unknown
@@ -176,41 +202,38 @@
   );
 
   /**
-   * GENERIC CHROME AWAITING i18n KEYS — reported, not added (contract A7/A20:
-   * the orchestrator owns `messages/en.json`; two worktrees regenerating
-   * paraglide strips keys and produces runtime 500s).
+   * THE GENERIC CHROME, NOW THROUGH THE i18n LAYER.
    *
-   * Every string here is a neutral noun or a column label, not editorial voice,
-   * so it is the class the bridge table calls "legitimate UI labels" — the same
-   * class as `journey_map_practice_label`, which already exists and IS consumed
-   * below. They are collected in ONE place rather than scattered through the
-   * markup so swapping them for `m.*()` calls is a single edit.
+   * This block used to hold ten raw English literals with a comment explaining
+   * that the keys had been REQUESTED but not added, because the orchestrator owns
+   * `messages/en.json` (contract A7/A20). The keys were in fact added — all ten of
+   * them are in `apps/web/messages/en.json` and compiled — so the deferral had
+   * quietly become the shipped state: this was the last section still publishing
+   * raw strings to the public page while `InviteSection`, `FeelSection`,
+   * `HeroSection`, `IntroVideoSection` and `ReelSection` all routed their chrome
+   * through `m.*()`.
    *
-   * Requested keys, name → English:
-   *   journey_map_stat_stages        "stages"     journey_map_stat_stages_one    "stage"
-   *   journey_map_stat_practices     "practices"  journey_map_stat_practices_one "practice"
-   *   journey_map_col_stage          "Stage"
-   *   journey_map_col_includes       "Includes"
-   *   journey_map_col_practices      "Practices"
-   *   journey_map_locked_hint        "included with membership"
-   *   journey_map_audio_label        "Audio"
-   *   journey_map_written_label      "Reflection"
+   * STILL COLLECTED IN ONE OBJECT rather than called at each use site, and that is
+   * not laziness: `countLabel` below takes the singular and plural forms as
+   * ARGUMENTS, so they have to be values. paraglide-js 1.11.8 has NO plural
+   * support, so a call-site ternary over two keys is the mechanism — never ICU
+   * `{count, plural, …}`, which compiles to a literal here.
    *
-   * paraglide-js 1.11.8 has NO plural support, hence the separate `_one` keys
-   * plus the call-site ternary in `countLabel` below rather than ICU.
+   * The values are read EAGERLY inside a `$derived` so a locale change
+   * re-resolves them, which a module-level constant would not.
    */
-  const CHROME = {
-    stages: 'stages',
-    stagesOne: 'stage',
-    practices: 'practices',
-    practicesOne: 'practice',
-    colStage: 'Stage',
-    colIncludes: 'Includes',
-    colPractices: 'Practices',
-    locked: 'included with membership',
-    audio: 'Audio',
-    written: 'Reflection',
-  };
+  const CHROME = $derived({
+    stages: m.journey_map_stat_stages(),
+    stagesOne: m.journey_map_stat_stages_one(),
+    practices: m.journey_map_stat_practices(),
+    practicesOne: m.journey_map_stat_practices_one(),
+    colStage: m.journey_map_col_stage(),
+    colIncludes: m.journey_map_col_includes(),
+    colPractices: m.journey_map_col_practices(),
+    locked: m.journey_map_locked_hint(),
+    audio: m.journey_map_audio_label(),
+    written: m.journey_map_written_label(),
+  });
 
   function countLabel(n: number, one: string, many: string): string {
     return n === 1 ? one : many;
@@ -449,13 +472,15 @@
             {p.eyebrow}
           </p>
         {/if}
-        <h2
-          class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
-          data-jp-step="2"
-          {...editAttrs('heading')}
-        >
-          {title}
-        </h2>
+        {#if title}
+          <h2
+            class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
+            data-jp-step="2"
+            {...editAttrs('heading')}
+          >
+            {title}
+          </h2>
+        {/if}
         {#if p.sub}
           <p
             class="jp-sec__measure jp-reveal descent__sub"

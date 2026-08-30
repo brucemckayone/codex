@@ -84,8 +84,9 @@
       // The `*.revelations.studio/*` route below shadows the cdn-assets /
       // cdn-platform R2 custom domains (worker routes win over R2 custom
       // domains), so the worker serves these PUBLIC buckets itself. The gated
-      // media/resources buckets are intentionally NOT bound — they require
-      // presigned-URL access and must not be served via a raw binding.
+      // RESOURCES bucket is intentionally NOT bound — it requires presigned-URL
+      // access and must not be served via a raw binding. The MEDIA bucket now
+      // has one narrow, gated exception; see MEDIA_PREVIEW_BUCKET below.
       "r2_buckets": [
         {
           "binding": "ASSETS_BUCKET",
@@ -94,6 +95,35 @@
         {
           "binding": "PLATFORM_BUCKET",
           "bucket_name": "codex-platform-production"
+        },
+        // ────────────────────────────────────────────────────────────────────
+        // NEEDS THE OWNER'S EXPLICIT SIGN-OFF BEFORE DEPLOY (Codex-1g5lh.13).
+        // This binding gives codex-web-production a READ handle on the private
+        // media bucket, and that is a deliberate widening of a security
+        // boundary — do not deploy it on an agent's judgement alone.
+        //
+        // WHY IT IS NEEDED: the 30-second HLS PREVIEW clip is public by
+        // product design (it is what an unauthenticated visitor watches before
+        // buying) but RunPod writes it into the media bucket along with the
+        // paid stream, because it uploads the whole hls_dir in one call
+        // (infrastructure/runpod/handler/main.py:1282-1290). Nothing bound to
+        // cdn-assets could serve it, so every hover/autoplay preview on every
+        // org landing page and Explore rail 404'd on its manifest while its
+        // poster loaded fine. It "worked locally" only because workers/dev-cdn
+        // tries [ASSETS_BUCKET, MEDIA_BUCKET] in turn.
+        //
+        // WHAT LIMITS THE EXPOSURE: apps/web/src/lib/server/cdn-proxy.ts reads
+        // this binding from exactly ONE place, only after ASSETS_BUCKET misses,
+        // and only for keys matching `^[^/]+/hls/[^/]+/preview/` — the preview
+        // clip's own directory. master.m3u8, every variant playlist and every
+        // variant segment still 404. Negative controls in both directions live
+        // in cdn-proxy.test.ts; a patch that widens that regex must be
+        // rejected. The binding name is deliberately NOT `MEDIA_BUCKET`, so no
+        // future code picks it up expecting a general media handle.
+        // ────────────────────────────────────────────────────────────────────
+        {
+          "binding": "MEDIA_PREVIEW_BUCKET",
+          "bucket_name": "codex-media-production"
         }
       ],
       "routes": [

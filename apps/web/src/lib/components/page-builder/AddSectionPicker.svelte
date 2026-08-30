@@ -15,6 +15,7 @@
     type SectionDefinition,
   } from '$lib/page-builder';
   import { SearchIcon } from '$lib/components/ui/Icon';
+  import { sectionIcon } from './section-icons';
 
   interface Props {
     /** Add a section of this type to the page. */
@@ -55,9 +56,12 @@
   {#if matches.length > 0}
     <ul class="add-picker__list" role="list">
       {#each matches as def (def.type)}
+        <!-- A design-system icon, not the catalogue's glyph string. `IconBase`
+             marks it aria-hidden, so the row is named by its label alone. -->
+        {@const Icon = sectionIcon(def.type)}
         <li>
           <button type="button" class="add-picker__item" onclick={() => onadd(def.type)}>
-            <span class="add-picker__glyph" aria-hidden="true">{def.icon}</span>
+            <span class="add-picker__glyph"><Icon size={16} /></span>
             <span class="add-picker__text">
               <span class="add-picker__label">{def.label}</span>
               <span class="add-picker__summary">{def.summary}</span>
@@ -153,7 +157,6 @@
     height: var(--space-6);
     flex-shrink: 0;
     color: var(--color-text-secondary);
-    font-size: var(--text-sm);
   }
 
   .add-picker__text {

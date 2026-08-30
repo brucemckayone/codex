@@ -484,6 +484,135 @@ describe('saveBuilderDraft · monetisation leg', () => {
 });
 
 /**
+ * The SELL-MEDIA leg.
+ *
+ * THE BUG THESE LOCK OUT, and it is the worst shape in the builder: the media
+ * write used to run in `+page.svelte` AFTER `saveBuilderDraft` returned, BELOW the
+ * component's `if (result.staleWarning) { toast.warning(...); return true; }`. So
+ * whenever the post-save `invalidate('cache:versions')` rejected — which happens
+ * whenever ANY load it re-runs throws, i.e. for reasons having nothing to do with
+ * this save — the media write was never attempted, the creator was warned about
+ * page STALENESS (not media), and `handleSave` returned TRUE. `handlePublish` then
+ * announced "Page published" for a page whose media had never been sent, and
+ * because `markSaved()` had already run inside the orchestrator the page draft was
+ * clean, so the un-sent media was silently discardable on the next navigation.
+ *
+ * A leg the caller runs afterwards is a leg the caller can skip. These tests are
+ * therefore about ORDER as much as about outcome.
+ */
+describe('saveBuilderDraft · sell-media leg', () => {
+  function makeSellMedia(overrides: Record<string, unknown> = {}) {
+    return {
+      isDirty: true,
+      save: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+      ...overrides,
+    };
+  }
+
+  it('runs the media write even when the post-save refresh REJECTS', async () => {
+    // The falsification case. With the leg in the component this passed the
+    // `staleWarning` early return and never fired.
+    const sellMedia = makeSellMedia();
+    const deps = makeDeps({
+      sellMedia,
+      refresh: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error('invalidate failed')),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(sellMedia.save).toHaveBeenCalledTimes(1);
+    // Still a SAVE with a staleness warning — the writes landed.
+    expect(result.outcome).toBe('saved');
+    expect(result).toMatchObject({ staleWarning: 'invalidate failed' });
+    expect(deps.markSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs AFTER the offer leg and BEFORE markSaved, so a refusal stays retryable', async () => {
+    const order: string[] = [];
+    const sellMedia = makeSellMedia({
+      save: vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
+        order.push('media');
+      }),
+    });
+    const deps = makeDeps({
+      sellMedia,
+      payload: makePayload({ offer: { oneOffEnabled: true } }),
+      saveOffer: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockImplementation(async () => {
+          order.push('offer');
+        }),
+      markSaved: vi.fn<() => void>().mockImplementation(() => {
+        order.push('markSaved');
+      }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(order).toEqual(['offer', 'media', 'markSaved']);
+  });
+
+  it('a refused media write is a FAILURE naming the media, and does not mark the draft saved', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(remoteError('That media is not yours')),
+    });
+    const deps = makeDeps({ sellMedia });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'media',
+      message: 'Page saved, but the media was not: That media is not yours',
+    });
+    // The copy DID land, so the message says so — but the draft stays dirty and
+    // publish/view-live must not proceed.
+    expect(deps.savePage).toHaveBeenCalledTimes(1);
+    expect(deps.markSaved).not.toHaveBeenCalled();
+  });
+
+  it('names the leg when the refusal carries no message', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi.fn<() => Promise<unknown>>().mockRejectedValue({ status: 500 }),
+    });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    expect(result).toMatchObject({
+      stage: 'media',
+      message: 'Page saved, but the media could not be saved.',
+    });
+  });
+
+  it('skips the write when no slot changed', async () => {
+    const sellMedia = makeSellMedia({ isDirty: false });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    expect(sellMedia.save).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('saved');
+  });
+
+  it('a media-only failure blocks publish', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(remoteError('That media is not yours')),
+    });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    // Same gate as the pricing-only failure below: media is part of the page
+    // going live, so "Page published" would be a claim about content nobody sent.
+    expect(result.outcome).toBe('failed');
+  });
+});
+
+/**
  * The two callers the bead names. Both are one line in the component; these
  * simulate that line against the real result contract so a regression to
  * "proceed regardless" fails here.

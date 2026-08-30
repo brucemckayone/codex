@@ -4,10 +4,11 @@
  * Extracted out of `studio/journeys/[id]/page/+page.svelte` so the gating logic
  * is unit-testable in isolation (same reason `preview-wiring.ts` was extracted).
  *
- * WHY IT EXISTS: the save drives THREE endpoints — page copy via
+ * WHY IT EXISTS: the save drives FOUR endpoints — page copy via
  * `saveJourneyPage`, the course's subscription plan + tier access via
- * `updateCourseMonetisation` (Codex-2pryk.2.4.2), and the page's offer row via
- * `updateJourneyOffer` (which owns the authoritative `courses.price_cents`).
+ * `updateCourseMonetisation` (Codex-2pryk.2.4.2), the page's offer row via
+ * `updateJourneyOffer` (which owns the authoritative `courses.price_cents`), and
+ * the course's sell media via `updateJourneySellMedia`.
  * The component used to `try/catch` both inline and
  * `toast.error(...)` on failure, then RETURN NORMALLY — so `handlePublish`'s
  * `await handleSave(); toast.success('Page published')` fired on a save that had
@@ -83,11 +84,16 @@ export interface SavePagePayload {
 /**
  * Which leg failed. `page` = nothing persisted at all. `monetisation` = the copy
  * landed but the subscription plan / tier access was refused. `offer` = both
- * landed but the page's own offer row was refused. The three messages must
+ * landed but the page's own offer row was refused. `media` = copy and pricing
+ * landed but the course's sell media was refused. The four messages must
  * differ — a bare "failed to save" would be false for the copy, and "saved"
  * would be false for pricing.
  */
-export type BuilderSaveFailureStage = 'page' | 'monetisation' | 'offer';
+export type BuilderSaveFailureStage =
+  | 'page'
+  | 'monetisation'
+  | 'offer'
+  | 'media';
 
 /**
  * The page's jsonb `offer` mirror as DERIVED from the authoritative monetisation
@@ -121,6 +127,28 @@ export interface MonetisationLeg {
    * values are left alone rather than overwritten with a derived "all off".
    */
   presentation(): DerivedOfferPresentation | null;
+}
+
+/**
+ * The SELL-MEDIA leg: the six media slots that live on the COURSE
+ * (`courses.*MediaId` + the guide bag), not on the page row.
+ *
+ * WHY IT IS A LEG HERE AND NOT A SECOND STEP IN THE COMPONENT. It used to run in
+ * `+page.svelte` AFTER this function returned, which put it behind the caller's
+ * own `staleWarning` early return: when `refresh()` (an `invalidate`, which
+ * re-runs every dependent load and therefore rejects whenever ANY of them throws)
+ * failed, the component toasted the staleness warning, returned `true`, and NEVER
+ * ATTEMPTED THE MEDIA WRITE. `handlePublish` then said "Page published" over a
+ * page whose media had never been sent — the exact class of false success this
+ * whole module exists to make impossible. Inside the sequence it cannot be
+ * skipped, and it lands BEFORE `markSaved()`, so a refusal leaves the draft dirty
+ * and retryable like every other leg.
+ */
+export interface SellMediaLeg {
+  /** Skip the write when no slot changed. */
+  isDirty: boolean;
+  /** Persist the slots. Rejects on refusal; must not swallow. */
+  save(): Promise<unknown>;
 }
 
 export type BuilderSaveResult =
@@ -160,6 +188,11 @@ export interface BuilderSaveDeps {
    * subject course, so there is nothing to monetise.
    */
   monetisation?: MonetisationLeg;
+  /**
+   * The course's sell-media leg. Optional for the same reason `monetisation` is:
+   * a plain landing page has no subject course, so it has no media slots.
+   */
+  sellMedia?: SellMediaLeg;
   /**
    * Write the offer bag that was actually persisted back into the draft, so the
    * saved baseline includes the DERIVED presentation fields.
@@ -254,12 +287,18 @@ function offerChanged(
 }
 
 /**
- * Persist the builder draft: page copy, then pricing when it changed. Never
- * throws — every outcome is reported through {@link BuilderSaveResult} so the
- * caller cannot accidentally treat a failure as a success.
+ * Persist the builder draft: page copy, then pricing when it changed, then the
+ * sell media when a slot changed. Never throws — every outcome is reported
+ * through {@link BuilderSaveResult} so the caller cannot accidentally treat a
+ * failure as a success.
  *
  * `markSaved()` runs ONLY once every write has landed, so a failed leg leaves
- * the draft dirty and retryable (a retry re-sends both legs).
+ * the draft dirty and retryable (a retry re-sends every leg).
+ *
+ * EVERY WRITE BELONGS INSIDE THIS SEQUENCE. A leg the caller runs after this
+ * function returns is a leg the caller can skip — which is precisely what
+ * happened to the media write behind the `staleWarning` early return (see
+ * {@link SellMediaLeg}).
  */
 export async function saveBuilderDraft(
   deps: BuilderSaveDeps
@@ -339,6 +378,31 @@ export async function saveBuilderDraft(
         message: why
           ? `Page saved, but the pricing was not: ${why}`
           : 'Page saved, but the pricing could not be saved.',
+      };
+    }
+  }
+
+  // The sell media is the FOURTH resource (it writes `courses.*MediaId`, not the
+  // page row) and only sends when a slot actually changed. Same partial-success
+  // discipline as pricing: on refusal, say what DID save and report the failure,
+  // so `handlePublish`/`handleViewLive` do not proceed on a half-written page. A
+  // foreign media id lands here as a 403 carrying the service's own message.
+  //
+  // LAST, and before `markSaved()`: the media write is the only leg whose refusal
+  // the creator can fix without touching the copy, so it is the cheapest one to
+  // leave for last — and a refusal must still leave the draft dirty, because the
+  // slots live in a separate store whose own `isDirty` is what re-sends them.
+  if (deps.sellMedia?.isDirty) {
+    try {
+      await deps.sellMedia.save();
+    } catch (err) {
+      const why = remoteErrorMessage(err);
+      return {
+        outcome: 'failed',
+        stage: 'media',
+        message: why
+          ? `Page saved, but the media was not: ${why}`
+          : 'Page saved, but the media could not be saved.',
       };
     }
   }

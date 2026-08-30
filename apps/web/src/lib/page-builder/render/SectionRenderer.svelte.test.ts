@@ -51,6 +51,7 @@ const context: JourneySalesContext = {
   // No offer read in this harness — sections must degrade to a price-less CTA
   // rather than falling back to authored numbers (Codex-2pryk.2.4.3).
   offer: null,
+  purchasable: true,
   sellPreview: Promise.resolve(null),
 };
 

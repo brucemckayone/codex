@@ -17,6 +17,7 @@ import {
   SECTION_DESIGN_DEFAULTS,
   SECTION_DESIGN_VALUES,
   sectionMatchesQuery,
+  seededSections,
   variantsForType,
 } from './section-catalog';
 
@@ -50,6 +51,33 @@ describe('SECTION_CATALOG', () => {
       expect(def.summary.length).toBeGreaterThan(0);
       expect(def.icon.length).toBeGreaterThan(0);
       expect(def.keywords.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('no `icon` glyph can render as colour emoji, and none is a Braille codepoint', () => {
+    // `icon` is now only the ADVISORY FALLBACK (the rail and the picker draw a
+    // design-system icon keyed on `type` — see
+    // `$lib/components/page-builder/section-icons.ts`). While the string exists,
+    // `SectionEditor`'s inspector header still shows it, so it must not carry an
+    // emoji presentation.
+    //
+    // `guide` was `'☺'` U+263A. Checked against Node's Unicode property escapes,
+    // it is the ONLY one of the eleven Unicode classes as emoji-capable — ✦ U+2726
+    // and ❝ U+275D are not in the emoji data at all, so neither can take an emoji
+    // form and neither was ever the defect. One value, not eight.
+    //
+    // The Braille half is separate and was not in the bead: `⠿` U+283F (Braille
+    // Pattern Dots-123456) was the rail's drag grip. It is not in this list, but
+    // the same class of value must not arrive here either.
+    for (const def of SECTION_CATALOG) {
+      expect(
+        /\p{Extended_Pictographic}|\p{Emoji_Presentation}/u.test(def.icon),
+        `${def.type}.icon '${def.icon}' can render as colour emoji`
+      ).toBe(false);
+      expect(
+        /[\u2800-\u28ff]/u.test(def.icon),
+        `${def.type}.icon '${def.icon}' is a Braille codepoint`
+      ).toBe(false);
     }
   });
 });
@@ -558,7 +586,101 @@ describe('the variant ids real pages actually store', () => {
     expect(resolveVariant({ type: 'invite', variant: 'card' })).toBe('card');
   });
 
-  it('an id that never existed still falls to the type default (studio-alpha stores "default")', () => {
+  it('an id that never existed still falls to the type default', () => {
+    // `ache: 'default'` and `map: 'descent'` WERE stored by the portals seed
+    // generator; migration 0091 normalised all 7 seeded pages to legal catalogue
+    // ids (ache=column, hero=stage, map=spine, invite=pool) and the generator was
+    // fixed, so no live row holds either value today.
+    //
+    // The fallback still has to hold, and this assertion still has to stand: a
+    // restore of a soft-deleted page, a payload from an older client, or a
+    // hand-edited row can put an unrecognised id back, and the alternative to
+    // falling through is a page that renders nothing.
     expect(resolveVariant({ type: 'ache', variant: 'default' })).toBe('column');
+    expect(resolveVariant({ type: 'map', variant: 'descent' })).toBe('spine');
+  });
+});
+
+// ── Unauthored (seed) copy detection — Codex-maf0y ───────────────────────────
+//
+// `addSection(type)` seeds every new section from the catalogue's `defaultProps`
+// and Save persists it, with no check anywhere between there and a PUBLISHED
+// public sales page. A creator who adds a Proof section, never opens it, and
+// publishes ships three invented testimonials and "2,400 and counting" — a
+// specific factual claim about their business that they never made.
+//
+// The seed copy stays (an empty block is near-invisible in the inline canvas, so
+// a creator cannot see or click the section they just added). The check moves to
+// publish time, as a non-blocking warning, and `seededSections` is its pure half.
+
+describe('seededSections', () => {
+  it('reports every seeded key of a freshly-added section', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    expect(seededSections([faq])).toEqual([
+      {
+        id: 'sec-faq',
+        type: 'faq',
+        label: 'FAQ',
+        // In `defaultProps` declaration order, so a message reads the way the
+        // rail does.
+        keys: ['heading', 'q1', 'a1', 'q2', 'a2', 'q3', 'a3'],
+      },
+    ]);
+  });
+
+  it('drops a key the creator has actually edited', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    faq.props.q1 = 'Do I need any experience?';
+    const [found] = seededSections([faq]);
+    expect(found.keys).not.toContain('q1');
+    // …and reports the rest, so one edited field does not clear the warning.
+    expect(found.keys).toContain('a1');
+  });
+
+  it('ignores a key whose SEED IS EMPTY — an empty field is not a placeholder', () => {
+    // This is why the check is not `props === defaultProps`. `hero.accent`,
+    // `hero.quiet` and `hero.trust` seed `''`; a section left at `''` has had
+    // nothing put in its mouth.
+    const hero = createSection('hero', () => 'sec-hero');
+    const [found] = seededSections([hero]);
+    expect(found.keys).not.toContain('accent');
+    expect(found.keys).not.toContain('quiet');
+    expect(found.keys).not.toContain('trust');
+    expect(found.keys).toContain('headline');
+  });
+
+  it('reports nothing for a fully-authored section', () => {
+    const ache = createSection('ache', () => 'sec-ache');
+    for (const key of Object.keys(ache.props)) {
+      ache.props[key] = `authored ${key}`;
+    }
+    expect(seededSections([ache])).toEqual([]);
+  });
+
+  it('reports nothing for an unknown/widened type — there is no seed to have leaked', () => {
+    expect(
+      seededSections([
+        { id: 'x', type: 'retreat-schedule', props: { heading: 'anything' } },
+      ])
+    ).toEqual([]);
+  });
+
+  it('names EVERY section of a default page, so the publish warning is honest', () => {
+    // The whole default template is placeholder copy on the day it is created.
+    const sections = createDefaultSections(() => crypto.randomUUID());
+    const found = seededSections(sections);
+    expect(found.map((f) => f.type)).toEqual(EXPECTED_ORDER);
+    expect(found.every((f) => f.keys.length > 0)).toBe(true);
+    // The labels are what a creator is shown; they must be the catalogue's.
+    expect(found.map((f) => f.label)).toEqual(
+      SECTION_CATALOG.map((d) => d.label)
+    );
+  });
+
+  it('is a warning input, not a gate — it never mutates the sections it reads', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    const before = JSON.stringify(faq);
+    seededSections([faq]);
+    expect(JSON.stringify(faq)).toBe(before);
   });
 });

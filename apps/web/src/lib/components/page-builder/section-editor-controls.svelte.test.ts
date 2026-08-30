@@ -86,9 +86,17 @@ describe('SectionEditor — only authorable control kinds reach the DOM', () => 
     );
     // The six A72 names, plus any new one someone adds — the point is that the
     // set is non-empty and that its membership is visible here.
+    //
+    // `reel.captions` is the seventh, added when Codex-5pl7b made the caption
+    // cycle authorable at all: it had NO field of any kind, so the element was
+    // permanently empty on every page. It joins this list because the list is
+    // "every declared field whose control kind SectionEditor cannot build yet",
+    // and a repeater of bare strings is one of those — the entry proves the
+    // field now exists rather than that it renders.
     expect(declared).toEqual([
       'ache.points',
       'turn.points',
+      'reel.captions',
       'feel.inclusions',
       'feel.previewDuration',
       'guide.facts',

@@ -65,7 +65,23 @@ export interface SectionDefinition {
   readonly label: string;
   /** One-line description shown in the add-section picker. */
   readonly summary: string;
-  /** Advisory glyph for the rail header (WP-5 rebinds to a DS icon). */
+  /**
+   * ADVISORY FALLBACK GLYPH — no longer what the studio draws (Codex-1khpv).
+   *
+   * The rail and the add-section picker now render a design-system icon from
+   * `$lib/components/page-builder/section-icons.ts`, keyed on `type`. The map
+   * lives THERE and not here for the reason this file's header gives: this module
+   * is the CE-4-scanned PUBLIC_LIB_ROOT and the public journey renderer imports it
+   * for `resolveVariant`/`resolveDesign`, so typing this field as a `Component`
+   * would ship eleven Svelte components into every visitor's chunk to draw
+   * studio-only UI. `$lib/config/rail-icons.ts` splits the nav rail the same way.
+   *
+   * The string survives because `SectionEditor`'s inspector header still reads it.
+   * While it does, it MUST NOT carry an emoji presentation: `guide` was `'☺'`
+   * U+263A, the one value of the eleven Unicode classes as emoji-capable, so on
+   * Apple platforms it rendered as a colour smiley among monochrome strokes. A
+   * test in `section-catalog.test.ts` pins that.
+   */
   readonly icon: string;
   /** Extra search terms beyond the label (synonyms). */
   readonly keywords: readonly string[];
@@ -563,7 +579,9 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
     type: 'guide',
     label: 'Your guide',
     summary: 'The guide bio, portrait and guide video.',
-    icon: '☺',
+    // Was '☺' U+263A — the one catalogue glyph Unicode classes as emoji-capable,
+    // so Apple platforms drew it in colour. U+25C9 carries no emoji presentation.
+    icon: '◉',
     keywords: ['guide', 'teacher', 'about', 'bio', 'host', 'facilitator'],
     variants: [
       {
@@ -1170,4 +1188,77 @@ export function createDefaultSections(
   makeId: () => string = () => crypto.randomUUID()
 ): PageSection[] {
   return SECTION_CATALOG.map((def) => createSection(def.type, makeId));
+}
+
+// ── Unauthored (seed) copy detection ─────────────────────────────────────────
+
+/** One section still holding catalogue seed copy, and which keys. */
+export interface SeededSection {
+  readonly id: string;
+  readonly type: string;
+  /** The catalogue label, for a message a creator can act on ("Proof, FAQ"). */
+  readonly label: string;
+  /** The prop keys whose value is still the catalogue's, in declaration order. */
+  readonly keys: readonly string[];
+}
+
+/**
+ * The sections of a draft that still hold the CATALOGUE'S OWN COPY, verbatim
+ * (Codex-maf0y).
+ *
+ * THE LEAK. `addSection(type)` seeds every new section from
+ * `def.defaultProps` — "A headline that names the promise", "A common question?",
+ * "First L.", "2,400 and counting" — and Save persists it. Nothing anywhere
+ * compares a section's props back against that seed, so a creator who adds a
+ * Proof section, never opens it, and publishes ships three invented testimonials
+ * and an invented "2,400 and counting" to a public sales page. That last one is
+ * not merely unpolished: it is a specific factual claim about the creator's
+ * business that the creator never made.
+ *
+ * WHY THIS AND NOT EMPTY DEFAULTS. Seeding nothing was considered and rejected in
+ * the bead: an empty block is near-invisible in the inline canvas, so a creator
+ * cannot see the section they just added, let alone click into it. The seed copy
+ * is good AUTHORING SCAFFOLDING and a bad PUBLISH payload — so the seed stays and
+ * the check moves to publish time.
+ *
+ * PURE, AND ADVISORY. It returns data; it decides nothing. The publish path turns
+ * this into ONE confirm naming the sections and proceeds on accept — a
+ * non-blocking warning, never a block, because "this copy is identical to the
+ * catalogue's" is a strong hint and not a certainty (a creator may legitimately
+ * want "Who holds this" as their guide heading).
+ *
+ * WHAT COUNTS, precisely:
+ *  - only keys the type's `defaultProps` actually seeds — an authored key the
+ *    catalogue knows nothing about is never suspect;
+ *  - only NON-EMPTY STRING seeds. `hero.accent`, `hero.quiet`, `hero.trust` and
+ *    `guide.quote` seed `''`; a section left at `''` has had nothing put in its
+ *    mouth, so it is not a placeholder leak. This is why the check is not simply
+ *    "props equals defaultProps".
+ *  - a strict `===` against the seed. One character of editing clears the key.
+ *
+ * An unknown/widened section type reports nothing: there is no catalogue seed to
+ * have leaked.
+ */
+export function seededSections(
+  sections: readonly Pick<PageSection, 'id' | 'type' | 'props'>[]
+): readonly SeededSection[] {
+  const found: SeededSection[] = [];
+  for (const section of sections) {
+    const def = findSectionDefinition(section.type);
+    if (!def) continue;
+    const keys = Object.keys(def.defaultProps).filter((key) => {
+      const seed = def.defaultProps[key];
+      if (typeof seed !== 'string' || seed.trim() === '') return false;
+      return section.props?.[key] === seed;
+    });
+    if (keys.length > 0) {
+      found.push({
+        id: section.id,
+        type: section.type,
+        label: def.label,
+        keys,
+      });
+    }
+  }
+  return found;
 }

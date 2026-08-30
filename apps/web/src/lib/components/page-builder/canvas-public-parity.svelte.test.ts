@@ -36,7 +36,7 @@
  * `$lib/components/page-builder`.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CourseOffer, PageSection } from '@codex/shared-types';
@@ -60,6 +60,10 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import {
+  JOURNEY_PREVIEW_DEVICES,
+  journeyPreviewDevice,
+} from './journey-preview-canvas';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** `$lib/page-builder`, from here. */
@@ -84,6 +88,7 @@ const context: JourneySalesContext = {
   dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
   enrolled: false,
   offer: null,
+  purchasable: true,
   sellPreview: Promise.resolve(null),
 };
 
@@ -554,5 +559,134 @@ describe('canvas ↔ public: the authoritative offer (Codex-4wun2)', () => {
       '/journeys/demo/checkout?offer=subscription-annual',
       '/journeys/demo/checkout?offer=tier%3At1',
     ]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE SAME INLINE SIZE (Codex-sf7t6's trap 2 · O7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every `@container` breakpoint in the journey CSS, in CSS pixels.
+ *
+ * WHY THIS IS THE MISSING HALF OF PARITY. The original audit compared a canvas
+ * column of 834px against a public viewport of 770px and called the 8% gap
+ * inconclusive. At a real desktop viewport the gap was not 8%: measured at 1440,
+ * the published page's `.jp-sec` was 1376px and the canvas's was 674px, because
+ * the canvas was `width: 100%; max-width: 1080px` inside a 708px studio column
+ * and the device toggle merely RELABELLED it. `.jp-sec` carries
+ * `container-type: inline-size`, so 8 of the 19 rules below resolved to the
+ * opposite branch — `hero.split-media` and `hero.banner` were authored stacked
+ * and published side-by-side. Two of the six hero compositions in the
+ * inspector's LAYOUT · OPTIONS grid.
+ *
+ * So a parity test that does not pin the WIDTHS is measuring two different
+ * pages. jsdom cannot resolve a container query, but it can read the two numbers
+ * that decide which branch resolves — the breakpoint set, and the width the
+ * canvas renders at — and assert that no breakpoint separates them.
+ *
+ * Read from source rather than hardcoded: WP-E owns these files and a new
+ * breakpoint above the desktop preset must fail HERE rather than silently
+ * reintroduce the divergence.
+ */
+function journeyContainerBreakpoints(): { file: string; px: number }[] {
+  const dirs = [
+    join(PUBLIC_LIB, 'render/sections'),
+    join(PUBLIC_LIB, 'render'),
+  ];
+  const found: { file: string; px: number }[] = [];
+  const seen = new Set<string>();
+  const files = [join(PUBLIC_LIB, 'journey-design.css')];
+  for (const dir of dirs) {
+    for (const name of readdirSync(dir)) {
+      if (name.endsWith('.svelte')) files.push(join(dir, name));
+    }
+  }
+  for (const file of files) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(file, 'utf8');
+    const rule =
+      /@container\s*\(\s*(?:min|max)-width:\s*([\d.]+)(rem|px)\s*\)/g;
+    for (const match of source.matchAll(rule)) {
+      // 16px per rem: the journey surface is measured at the browser default and
+      // the app never re-roots `font-size` (the O7 measurement confirmed
+      // `getComputedStyle(document.documentElement).fontSize === '16px'`).
+      const px = Number(match[1]) * (match[2] === 'rem' ? 16 : 1);
+      found.push({ file: file.slice(file.lastIndexOf('/') + 1), px });
+    }
+  }
+  return found;
+}
+
+describe('canvas ↔ public: the same inline size (Codex-sf7t6 · O7)', () => {
+  const breakpoints = journeyContainerBreakpoints();
+
+  it('finds the breakpoint set at all — the vacuity guard', () => {
+    // Every assertion below is a comparison against this set. An empty or
+    // half-parsed set would make all of them pass while saying nothing, which is
+    // the failure mode that let a relabelled column survive four review rounds.
+    // 19 rules when measured (Hero 3 · Reel 3 · Turn/Map/Guide/Feel/Faq 2 each ·
+    // Proof/Invite/IntroVideo/Ache 1 each); asserted as a floor, not an equality,
+    // so adding a section does not fail this for no reason.
+    expect(
+      breakpoints.length,
+      'no @container rules parsed — the assertions below are vacuous'
+    ).toBeGreaterThanOrEqual(15);
+    for (const bp of breakpoints) {
+      expect(Number.isFinite(bp.px) && bp.px > 0, `${bp.file}`).toBe(true);
+    }
+  });
+
+  it('renders Desktop above EVERY breakpoint, as a real desktop visitor does', () => {
+    // The one that matters. 864px (54rem) is the largest rule in the set; a
+    // canvas narrower than that resolves at least one query the visitor's 1440px
+    // viewport resolves the other way — which is exactly what 674px did to eight
+    // of them.
+    const desktop = journeyPreviewDevice('desktop');
+    const widest = Math.max(...breakpoints.map((bp) => bp.px));
+    expect(
+      desktop.width,
+      `Desktop renders at ${desktop.width}px, below the widest @container rule (${widest}px) — the canvas and the page resolve different branches`
+    ).toBeGreaterThan(widest);
+  });
+
+  it('puts no device preset EXACTLY on a breakpoint', () => {
+    // The old presets were 768 and 375. 768px is `48rem` — the most-consulted
+    // breakpoint in the section CSS (four rules, including both hero ones) — so
+    // the Tablet preview sat precisely on the boundary it was meant to preview,
+    // where a sub-pixel layout difference flips the composition. 834 (iPad Air)
+    // and 390 (iPhone) are real device widths and neither is a breakpoint.
+    const on = JOURNEY_PREVIEW_DEVICES.filter((device) =>
+      breakpoints.some((bp) => bp.px === device.width)
+    ).map((device) => `${device.id}@${device.width}px`);
+    expect(on, 'a device preset sits on a container breakpoint').toEqual([]);
+  });
+
+  it('caps the canvas page at NOTHING — the width IS the device width', () => {
+    // Source-level, because jsdom applies no stylesheet from a Svelte component.
+    // The defect was a `max-width` on the page, so its absence is the fix, and a
+    // reintroduced cap is the regression.
+    const canvas = readFileSync(
+      join(HERE, 'JourneyBuilderCanvas.svelte'),
+      'utf8'
+    );
+    const page = canvas.slice(
+      canvas.indexOf('\n  .jbc-page {'),
+      canvas.indexOf('\n  /* ── block selection')
+    );
+    expect(page, 'the .jbc-page rule moved — re-anchor this test').toContain(
+      'width: var(--jbc-w)'
+    );
+    expect(page, 'the canvas page is capped again').not.toMatch(/max-width/);
+    expect(
+      canvas,
+      'the brand-studio preview tokens are back — those are COLUMN widths, not device widths'
+    ).not.toContain('--brand-studio-preview-');
+    // And the device width is what reaches the CSS custom property the rule
+    // reads. Assembled rather than written inline so it is not itself mistaken
+    // for a template placeholder — the canvas emits this literally, inside a
+    // Svelte template string.
+    expect(canvas).toContain(['--jbc-w: $', '{frame.width}px'].join(''));
   });
 });

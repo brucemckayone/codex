@@ -88,6 +88,7 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/the-long-descent/dashboard',
     enrolled: false,
     offer: fourPathOffer(),
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };

@@ -37,7 +37,10 @@
      host that mounts a frame gets the rules that read its attributes — including
      the studio canvas, which mounts frames without this renderer. */
   import SectionFrame from './SectionFrame.svelte';
-  import { selectRenderableSections } from './section-registry';
+  import {
+    claimTitleFallback,
+    selectRenderableSections,
+  } from './section-registry';
   import type { JourneySalesContext } from './types';
   import type { PageSection, SectionDesign } from '$lib/page-builder';
 
@@ -64,6 +67,18 @@
   const { sections, context, pageDesign, editable = false, onEdit }: Props = $props();
 
   const renderable = $derived(selectRenderableSections(sections));
+
+  /**
+   * WHICH section may borrow the course title for its heading — see
+   * `SectionComponentProps.titleFallback` for the defect this closes (five
+   * sections each falling back to `course.title` independently, so an
+   * under-authored page printed the same sentence as its `<h1>` five times).
+   *
+   * Resolved HERE because it is an ARRAY-LEVEL property, which is what this
+   * component owns: no section can know what its neighbours authored. It is the
+   * same division of labour as the anchor ids.
+   */
+  const titleClaim = $derived(claimTitleFallback(renderable));
 </script>
 
 {#each renderable as entry (entry.section.id)}
@@ -72,6 +87,9 @@
     {context}
     {pageDesign}
     {editable}
+    titleFallback={entry.section.id === titleClaim
+      ? context.course.title
+      : undefined}
     onEdit={onEdit ? (key, value) => onEdit(entry.section.id, key, value) : undefined}
   />
 {/each}

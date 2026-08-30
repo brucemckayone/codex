@@ -119,14 +119,26 @@
     font-weight: var(--font-medium);
   }
 
+  /* `--color-text-secondary`, and NO font-size of its own (Codex-6nb7i).
+     This hint is the only text distinguishing two options that share a
+     thumbnail, so it carries meaning and cannot be the weakest ink on the
+     panel: measured by canvas readback on the studio panel,
+     `--color-text-muted` is 2.52:1 light / 3.19:1 dark against a 4.5 floor,
+     where secondary is 7.81 / 10.21. The `font-size: 0.66rem` it used to carry
+     was both a raw-literal token violation and ~10.6px — SMALLER than
+     `--text-xs`, and no weight makes that WCAG large text. Inheriting
+     `.vp-opt`'s `--text-xs` is the fix; the hierarchy is carried by
+     `.vp-opt__label`'s weight, not by shrinking the hint below the scale. */
   .vp-opt__hint {
-    color: var(--color-text-muted);
-    font-size: 0.66rem;
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
+  /* The SELECTED option's hint — the one string a creator re-reads to confirm
+     the choice they just made — so it least of all may be muted. The
+     interactive tint stays: it is what marks the selection. */
   .vp-opt--on .vp-opt__hint {
-    color: color-mix(in oklab, var(--color-interactive) 55%, var(--color-text-muted));
+    color: color-mix(in oklab, var(--color-interactive) 55%, var(--color-text-secondary));
   }
 
   /* schematic thumbnail */
@@ -149,11 +161,16 @@
     background-color: color-mix(in oklab, var(--color-interactive) 6%, var(--color-surface-secondary));
   }
 
+  /* The schematic ink is NOT decoration — it is the only thing that shows what
+     each composition does, so WCAG 1.4.11's 3:1 non-text floor applies to it.
+     Base moved off `--color-text-muted` for the same reason as the hint above;
+     the 55% mixes below stay, because the step from line to box/dot is what
+     makes the wireframe legible as a wireframe. */
   .vp-line {
     height: 3px;
     border-radius: 2px;
     margin-inline: auto;
-    background-color: var(--color-text-muted);
+    background-color: var(--color-text-secondary);
   }
 
   .vp-line--start {
@@ -162,14 +179,14 @@
 
   .vp-box {
     border-radius: 3px;
-    background-color: color-mix(in oklab, var(--color-text-muted) 55%, transparent);
+    background-color: color-mix(in oklab, var(--color-text-secondary) 55%, transparent);
   }
 
   .vp-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background-color: color-mix(in oklab, var(--color-text-muted) 55%, transparent);
+    background-color: color-mix(in oklab, var(--color-text-secondary) 55%, transparent);
   }
 
   .vp-row {
@@ -185,7 +202,7 @@
   }
 
   .vp-opt--on .vp-line {
-    background-color: color-mix(in oklab, var(--color-interactive) 72%, var(--color-text-muted));
+    background-color: color-mix(in oklab, var(--color-interactive) 72%, var(--color-text-secondary));
   }
 
   .vp-opt--on .vp-box,

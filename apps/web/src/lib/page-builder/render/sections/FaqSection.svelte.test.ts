@@ -60,6 +60,7 @@ function context(): JourneySalesContext {
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
   };
 }
