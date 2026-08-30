@@ -27,6 +27,23 @@
  *      while one write was in flight, which reads as the page having frozen.
  *   5. "Are you sure?" REPLACING THE COPY. The register these panels set is: say
  *      what it does, say what happens, name what survives (O22).
+ *
+ * WP-Q added three more of the same kind:
+ *
+ *   6. THE COVER TILE COLLAPSING TO AN EMPTY BOX. 4 of the 7 seeded portals have
+ *      no cover, so the FALLBACK is the common case, not the edge one — and an
+ *      `{#if coverImageUrl}` with no `{:else}` looks fine in a screenshot of the
+ *      org that does have covers.
+ *   7. DELETE ACTING ON A PUBLISHED PORTAL. Deleting a live page leaves
+ *      `courses.status` published with no sales page behind it — the course stays
+ *      in /explore and in enrolled libraries while `/journeys/:slug` 404s, which
+ *      is the exact divergence `cascadeCourseFromPage` exists to prevent. The
+ *      list must route that press to the unpublish-first dialog, never to the
+ *      delete.
+ *   8. THE DIALOG'S `variant` GOING BACK TO A CONSTANT. It was hardcoded
+ *      `destructive` when every act was one. Duplicate CREATES something; a red
+ *      confirm button on it misdescribes the act, and a hardcoded attribute is
+ *      invisible in a diff of the copy.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -56,11 +73,31 @@ function codeOnly(): string {
   );
 }
 
-/** The row's lifecycle group — so an assertion cannot drift onto the nav group. */
+/**
+ * The row's lifecycle group — so an assertion cannot drift onto a sibling group.
+ * It now ends at `journey-row__manage` (WP-Q inserted that group between
+ * lifecycle and nav); the group's own tests below cover Duplicate/Delete.
+ */
 function lifecycleGroup(): string {
   const open = ROUTE.indexOf('<div class="journey-row__lifecycle">');
-  const close = ROUTE.indexOf('<div class="journey-row__nav">', open);
+  const close = ROUTE.indexOf('<div class="journey-row__manage">', open);
   if (open < 0 || close < 0) throw new Error('lifecycle group not found');
+  return ROUTE.slice(open, close);
+}
+
+/** The row's EXISTENCE group — Duplicate + Delete. */
+function manageGroup(): string {
+  const open = ROUTE.indexOf('<div class="journey-row__manage">');
+  const close = ROUTE.indexOf('<div class="journey-row__nav">', open);
+  if (open < 0 || close < 0) throw new Error('manage group not found');
+  return ROUTE.slice(open, close);
+}
+
+/** The cover tile's markup. */
+function coverBlock(): string {
+  const open = ROUTE.indexOf('<div class="journey-row__cover"');
+  const close = ROUTE.indexOf('<div class="journey-row__main">', open);
+  if (open < 0 || close < 0) throw new Error('cover block not found');
   return ROUTE.slice(open, close);
 }
 
@@ -78,6 +115,15 @@ function requestStatusBody(): string {
     /function requestStatus\([^)]*\):\s*void\s*\{([\s\S]*?)\n {2}\}/
   );
   if (!match) throw new Error('requestStatus not found');
+  return match[1];
+}
+
+/** The `requestDelete` function body — the published-page gate. */
+function requestDeleteBody(): string {
+  const match = ROUTE.match(
+    /function requestDelete\(j: \{[\s\S]*?\}\): void \{([\s\S]*?)\n {2}\}/
+  );
+  if (!match) throw new Error('requestDelete not found');
   return match[1];
 }
 
@@ -194,6 +240,123 @@ describe('portals list — lifecycle row actions', () => {
     expect(ROUTE).toContain(
       '<p class="journeys__action-error" role="alert">{statusError}</p>'
     );
+  });
+
+  it('offers Duplicate and Delete in a group of their own, gated per ROW', () => {
+    const group = manageGroup();
+    expect(group).toContain("? 'Duplicating…'");
+    expect(group).toContain("      : 'Duplicate'");
+    expect(group).toContain("? 'Deleting…'");
+    expect(group).toContain("      : 'Delete'");
+
+    // An id-bearing record, not a boolean — one write must not freeze the list.
+    expect(ROUTE).toContain(
+      "let managePending = $state<{\n    pageId: string;\n    kind: 'duplicate' | 'delete';\n  } | null>(null)"
+    );
+    const disabled = group.match(/disabled=\{[^}]*\}/g) ?? [];
+    expect(disabled.length).toBe(2);
+    for (const attr of disabled) {
+      expect(attr).toBe('disabled={managePending?.pageId === j.id}');
+    }
+
+    // These MUTATE, so they are buttons. A link would be followable, prefetchable
+    // and middle-clickable.
+    expect(group).not.toMatch(/<a[\s>]/);
+  });
+
+  it('renders Delete on a PUBLISHED row and routes it to the unpublish-first dialog', () => {
+    // Rendered unconditionally on purpose: hiding it leaves a creator hunting for
+    // a control that exists on other rows, and a `disabled` button explains
+    // itself only to a pointer. The BRANCH is what makes it safe.
+    const group = manageGroup();
+    expect(group).not.toContain('{#if j.status');
+
+    const body = requestDeleteBody();
+    // Matched to the closing brace of the ternary arm, not by substring: a mutant
+    // that inverts the test still CONTAINS the shorter string.
+    expect(body).toMatch(
+      /action: j\.status === 'published' \? 'unpublish-first' : 'delete',/
+    );
+    // And the delete request must never reach `applyDelete` directly — the dialog
+    // is the only route to it.
+    expect(body).not.toContain('applyDelete');
+    expect(body).toContain('confirmOpen = true');
+  });
+
+  it('derives the dialog variant instead of hardcoding destructive', () => {
+    // Duplicate CREATES something. A red confirm button on it is a lie about the
+    // act, and the old hardcoded attribute would not show up in a copy diff.
+    expect(ROUTE).toContain("variant={confirmCopy?.variant ?? 'destructive'}");
+    expect(ROUTE).not.toContain('variant="destructive"');
+    const copy = confirmCopySource();
+    expect(copy).toContain("variant: 'primary' as const");
+    expect(copy).toContain("variant: 'destructive' as const");
+  });
+
+  it('names what a duplicate does NOT copy, and what a delete does not take', () => {
+    const copy = confirmCopySource();
+    // The whole reason duplicate asks at all: "duplicate portal" reads as
+    // "duplicate the journey", and the copy shares one course with the original.
+    expect(copy).toContain('It does NOT copy the course');
+    expect(copy).toMatch(/price is not copied/i);
+    // Delete: the constraint, then what survives, then that it is one-way.
+    expect(copy).toContain('A live portal cannot be deleted');
+    expect(copy).toMatch(/their purchase and their progress are kept/);
+    expect(copy).toMatch(/no Restore for a delete/);
+    // Same register as the rest — never the empty question.
+    expect(copy).not.toMatch(/are you sure/i);
+  });
+
+  it('does not tell a plain landing page about a course it has not got', () => {
+    // `subjectType` rides on the confirm target precisely so the copy can branch.
+    // Copy that asserts a curriculum a page does not have is the same defect as a
+    // missing warning, in the other direction.
+    const copy = confirmCopySource();
+    expect(copy).toContain("const isCourse = t.subjectType === 'course'");
+    // The course-specific sentences must sit on the `isCourse` side of a ternary,
+    // so each of the three branches offers both wordings.
+    const branches = copy.match(/description: isCourse\s*\n?\s*\?/g) ?? [];
+    expect(branches.length).toBe(3);
+  });
+
+  it('renders the cover tile with a typographic fallback, never an empty box', () => {
+    const block = coverBlock();
+    // 4 of the 7 seeded portals have no cover, so the fallback is the COMMON case.
+    expect(block).toContain('{#if j.coverImageUrl}');
+    expect(block).toContain('{:else}');
+    expect(block).toContain('{coverInitial(j.title)}');
+    // A real <img>, lazily loaded, with an empty alt — the title is right beside
+    // it and the tile is decoration.
+    expect(block).toContain('src={j.coverImageUrl}');
+    expect(block).toContain('alt=""');
+    expect(block).toContain('loading="lazy"');
+    expect(block).toContain('aria-hidden="true"');
+
+    // The plate is a background on the CONTAINER, so it paints in both states —
+    // a slow or 404'd CDN object degrades to the tile, not to a white gap.
+    const styles = ROUTE.slice(ROUTE.indexOf('<style>'));
+    expect(styles).toMatch(/\.journey-row__cover \{[\s\S]*?background-image:/);
+    // Token-derived brand colour, never a literal — the studio inherits the org
+    // brand and a fixed hue would pin one org's palette into shared chrome.
+    expect(styles).toContain('oklch(from var(--color-brand-primary)');
+    // Ink that reads on a dark plate in BOTH themes (measured 7.34–7.73:1 min
+    // across the three fixture orgs, identical light and dark).
+    expect(styles).toContain('color: var(--media-glyph)');
+  });
+
+  it('keeps ONE confirm mechanism and ONE error channel for the row writes', () => {
+    // A second dialog, or a toast used for a failure, is how two mechanisms drift
+    // apart. Exactly one `<ConfirmDialog`, and every failure lands in the same
+    // `role="alert"` paragraph class the lifecycle actions already use.
+    expect(ROUTE.match(/<ConfirmDialog/g)?.length).toBe(1);
+    expect(ROUTE).toContain('manageError = queryErrorMessage(');
+    expect(ROUTE).toContain(
+      '<p class="journeys__action-error" role="alert">{manageError}</p>'
+    );
+    // The toast is for the SUCCESS of a create — it names what was made, which
+    // the dialog cannot because it is gone by then.
+    expect(ROUTE).toContain('toast.success(');
+    expect(codeOnly()).not.toMatch(/toast\.error\(/);
   });
 
   it('stays a LIST of rows and token-only — no card grid, no hardcoded colours', () => {

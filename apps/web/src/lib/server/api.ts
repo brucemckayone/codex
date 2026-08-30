@@ -1278,7 +1278,12 @@ export function createServerApi(
       // and re-derive scope from the session; `organizationId` here is used ONLY
       // for org resolution, never as the authorization source.
 
-      /** Studio index — the org's journeys, newest-edited first (optional status). */
+      /**
+       * Studio index — the org's journeys, newest-edited first (optional status).
+       * Each row carries a resolved `coverImageUrl` (the `md` variant, the same
+       * one the public portal card serves) or null; the CDN base is env-owned and
+       * supplied by the worker route, never by this client.
+       */
       listJourneys: (organizationId: string, status?: string) =>
         request<JourneyListItem[]>(
           'access',
@@ -1380,6 +1385,18 @@ export function createServerApi(
           brandOverrides?: JourneyPageRecord['brandOverrides'];
           /** The page's LOOK — absent means "leave the stored bundle alone". */
           design?: JourneyPageRecord['design'];
+          /**
+           * The page's SEO / share metadata — absent means "leave the stored bag
+           * alone", never "clear it" (clearing is expressed as empty strings).
+           *
+           * Declared because the endpoint HONOURS it: `saveJourneyPageBodySchema`
+           * accepts `seo` and the service writes it. The whole record is
+           * serialised regardless, so the key already travelled — this makes the
+           * type say so, instead of leaving a caller that forwards a loaded
+           * record (`setJourneyStatus`) relying on TS not checking excess
+           * properties through a variable.
+           */
+          seo?: JourneyPageRecord['seo'];
         }
       ) =>
         request<null>(
@@ -1440,6 +1457,47 @@ export function createServerApi(
             pageId
           )}/featured?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PATCH', body: JSON.stringify({ featured }) }
+        ),
+
+      /**
+       * DUPLICATE the portal's SALES PAGE as a new draft — one `landing_pages`
+       * row, and NOT the course: the copy fronts the SAME subject course, so its
+       * curriculum, its stages and its enrolments are shared rather than cloned.
+       * `design` / `brandOverrides` / `seo` come across; `offer` does not, because
+       * money must be set deliberately on the copy.
+       *
+       * No body. The title (`"<title> (copy)"`) and a verified-free org-unique
+       * slug are DERIVED server-side — the slug-space spans `landing_pages` AND
+       * `courses`, and only the service can check both inside the insert's own
+       * transaction.
+       */
+      duplicateJourney: (organizationId: string, pageId: string) =>
+        request<{ id: string; slug: string; title: string }>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/duplicate?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'POST' }
+        ),
+
+      /**
+       * SOFT-DELETE the portal's landing page (`deleted_at`). The subject course,
+       * its curriculum, every purchase and every completion survive — this
+       * removes the sales page and the studio row, nothing else.
+       *
+       * 409 while the page is PUBLISHED, by design: `courses.status` is only ever
+       * written by the page save's cascade, so deleting a live page would leave
+       * the course listed on /explore and on the enrolled shelves with no sales
+       * page behind it. The caller must unpublish first — which the list's own
+       * Unpublish does, through that cascade.
+       */
+      deleteJourney: (organizationId: string, pageId: string) =>
+        request<null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'DELETE' }
         ),
 
       // ── Sell media + cover (Codex-eqh0z) ──────────────────────────────────

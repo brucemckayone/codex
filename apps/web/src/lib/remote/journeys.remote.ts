@@ -508,6 +508,98 @@ export const setJourneyStatus = command(
   }
 );
 
+/**
+ * DUPLICATE a portal from the studio list — the copy a creator makes when a page
+ * they have already shaped is the starting point for the next one (Codex-c3lky).
+ *
+ * IT DUPLICATES THE SALES PAGE, NOT THE COURSE, and the caller MUST say so.
+ * "Duplicate portal" reads as "duplicate the whole journey", and it is not: the
+ * copy carries the source's `subjectType`/`subjectId`, so a duplicated course
+ * portal is a SECOND sales page in front of the SAME course — one curriculum, one
+ * set of stages, one enrolment list, shown through two pages. That shape is
+ * already supported (`cascadeCourseFromPage` only takes a course down when no
+ * OTHER published page sells it; `listPublishedJourneys` dedupes by course), and
+ * the alternatives are worse: a fresh empty course would invent a second
+ * curriculum nobody asked for, and a subject-less copy would be UNVIEWABLE
+ * because the public sell read returns null for a page whose subject is not a
+ * course. So the honest fix is copy that names it, not a different write.
+ *
+ * `offer` is NOT copied — money is set deliberately, never inherited. Sections
+ * are re-keyed with fresh ids (the builder's selection and history model keys on
+ * section id). `status` is draft. All of that is the SERVICE's contract, not this
+ * command's: see `CourseJourneyService.duplicateJourneyPage`.
+ *
+ * The title and slug are derived SERVER-SIDE. The org slug-space spans
+ * `landing_pages` AND `courses`, so only the service can pick a free one inside
+ * the insert's own transaction — a slug chosen here would be a second, racier
+ * arbiter, and "-copy" cannot be assumed free.
+ *
+ * Returns the new page's id/slug/title so the list can name what it made and
+ * offer a link straight to its builder.
+ */
+export const duplicateJourney = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<{ id: string; slug: string; title: string }> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be duplicated within an organization');
+    }
+    try {
+      return await ctx.api.access.duplicateJourney(ctx.orgId, pageId);
+    } catch (err) {
+      // Forward 4xx text — "not found" for a page in another org, and the
+      // service's own 409 when 1000 slug candidates are exhausted, which is
+      // user-actionable ("try a different title"). 5xx propagates untouched
+      // because it may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * SOFT-DELETE a portal from the studio list — `landing_pages.deleted_at`, never a
+ * row removal (Codex-c3lky).
+ *
+ * A PUBLISHED PORTAL IS REFUSED with a 409 the list renders as a sentence, and
+ * that is the product decision rather than a gap. `courses.status` is written
+ * ONLY by the page save's `cascadeCourseFromPage`, so deleting a live page would
+ * leave its course published with nothing selling it — still on /explore, still
+ * resolvable by slug, still on the enrolled shelves — while `/journeys/:slug`
+ * 404'd. A blocked action that names the next step is a better product than a
+ * destructive one with a warning, and the next step exists: {@link
+ * setJourneyStatus}'s Unpublish runs through that same cascade.
+ *
+ * ONE column on ONE row. The subject course, its curriculum, every purchase and
+ * every recorded completion survive; the course is deliberately not cascaded
+ * because a course can be fronted by more than one page (see {@link
+ * duplicateJourney}) and retiring a body of work plus a payment history as a side
+ * effect of removing a sales page is not something a creator can undo from the
+ * studio.
+ */
+export const deleteJourney = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be deleted within an organization');
+    }
+    try {
+      await ctx.api.access.deleteJourney(ctx.orgId, pageId);
+    } catch (err) {
+      // The 409 ("Unpublish this portal before deleting it …") is the whole point
+      // of forwarding 4xx text: it is the one message the creator must read to
+      // know what to do next. 5xx propagates untouched — it may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Course MONETISATION — the authoritative subscription plan + tier-access write
 // (Codex-2pryk.2.4.2).

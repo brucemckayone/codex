@@ -1628,6 +1628,63 @@ export class CourseJourneyService extends BaseService {
   };
 
   /**
+   * Resolve a free ORG-UNIQUE slug from `base`, as `base`, `base-2`, `base-3`, …
+   *
+   * Checks BOTH tables that share the org slug-space — `landing_pages` AND
+   * `courses` — among non-deleted rows, because `cascadeCourseFromPage` writes a
+   * page's slug onto its subject course, so a page slug that collides with an
+   * unrelated course would surface as a raw `uq_courses_org_slug` violation on
+   * the first publish rather than as a 409 here.
+   *
+   * ONE helper rather than a loop per write path (review: `createJourney` and
+   * {@link duplicateJourneyPage} both need it): the "-2" convention, the
+   * two-table space and the exhaustion behaviour are a single contract, and two
+   * copies of it would drift the moment a third table joined the space.
+   *
+   * The SELECTs are not locks — the partial-unique indexes are the final arbiter
+   * if two creates race — and on exhaustion this throws rather than falling
+   * through to a colliding insert (review L3).
+   *
+   * MUST run inside the caller's transaction, so the slug it hands back is
+   * checked against the same snapshot the insert lands in.
+   */
+  private async resolveFreeOrgSlug(
+    tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
+    organizationId: string,
+    base: string
+  ): Promise<string> {
+    for (let n = 1; n < 1000; n++) {
+      const candidate = n === 1 ? base : `${base}-${n}`;
+      const [pageClash] = await tx
+        .select({ id: landingPages.id })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.slug, candidate),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+      const [courseClash] = await tx
+        .select({ id: courses.id })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.organizationId, organizationId),
+            eq(courses.slug, candidate),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      if (!pageClash && !courseClash) return candidate;
+    }
+    throw new ConflictError(
+      'Could not find an available slug for this title — try a different title'
+    );
+  }
+
+  /**
    * Create a new journey/page (as a draft) and return its page id + slug. For a
    * `course` page this is a TWO-ROW create — a `courses` row (the curriculum
    * subject) + a `landing_pages` row bound to it via `subjectType`/`subjectId` —
@@ -1651,46 +1708,7 @@ export class CourseJourneyService extends BaseService {
       const base = slugifyTitle(title);
 
       return await this.txDb.transaction(async (tx) => {
-        // Resolve a free org-unique slug, checking BOTH tables that share the
-        // org slug-space (landing_pages + courses) among non-deleted rows. The
-        // partial-unique index is the final arbiter if two creates race (this
-        // SELECT is not a lock); on exhaustion we throw rather than fall through
-        // to a colliding insert (review L3).
-        let slug: string | null = null;
-        for (let n = 1; n < 1000; n++) {
-          const candidate = n === 1 ? base : `${base}-${n}`;
-          const [pageClash] = await tx
-            .select({ id: landingPages.id })
-            .from(landingPages)
-            .where(
-              and(
-                eq(landingPages.organizationId, organizationId),
-                eq(landingPages.slug, candidate),
-                isNull(landingPages.deletedAt)
-              )
-            )
-            .limit(1);
-          const [courseClash] = await tx
-            .select({ id: courses.id })
-            .from(courses)
-            .where(
-              and(
-                eq(courses.organizationId, organizationId),
-                eq(courses.slug, candidate),
-                isNull(courses.deletedAt)
-              )
-            )
-            .limit(1);
-          if (!pageClash && !courseClash) {
-            slug = candidate;
-            break;
-          }
-        }
-        if (!slug) {
-          throw new ConflictError(
-            'Could not find an available slug for this title — try a different title'
-          );
-        }
+        const slug = await this.resolveFreeOrgSlug(tx, organizationId, base);
 
         let subjectId: string | null = null;
         if (pageType === 'course') {
@@ -2181,6 +2199,230 @@ export class CourseJourneyService extends BaseService {
       }
     } catch (error) {
       this.handleError(error, 'setJourneyFeatured');
+    }
+  }
+
+  /**
+   * DUPLICATE a portal — ONE new `landing_pages` row, as a draft (Codex-c3lky).
+   *
+   * WHAT IS COPIED, AND WHY EACH DECISION IS A CONTRACT RATHER THAN A PREFERENCE.
+   *
+   * IT COPIES THE SALES PAGE, NOT THE COURSE. No `courses` row is created and no
+   * curriculum is cloned: the copy carries the SOURCE's `subjectType`/`subjectId`,
+   * so a duplicated course portal is a SECOND sales page in front of the SAME
+   * course. That shape is already supported rather than invented here —
+   * {@link cascadeCourseFromPage} documents "a course MAY be fronted by more than
+   * one page (nothing enforces 1:1)" and only takes the course down when no OTHER
+   * published page still sells it, and `listPublishedJourneys` dedupes by course
+   * for exactly this case. The alternative (a fresh empty course) would silently
+   * create a second curriculum a creator never asked for, and a `landing`-type
+   * copy with no subject would be UNVIEWABLE — {@link getCoursePage} returns null
+   * for a page whose `subjectType !== 'course'`, so the copy would publish to a
+   * 404. The caller MUST say which one it duplicated: "duplicate portal" reads as
+   * "duplicate the whole journey" to a creator, and it is not.
+   *
+   * EVERY SECTION GETS A NEW `id`. The builder's selection and undo/redo model
+   * keys on section id (`page-builder-store` `setSectionDesignAxis`, the selection
+   * cursor, the history entries), so two pages sharing section ids would share
+   * selection state the moment both were open — and a stage-level design override
+   * would look like it had leaked between pages. `crypto.randomUUID()`, the same
+   * generator the builder's own `makeId` uses, so a copied section is
+   * indistinguishable from a hand-added one.
+   *
+   * `design`, `brandOverrides` and `seo` ARE copied — they are what a creator
+   * duplicates a page FOR. Each is spread only WHEN PRESENT, never as an explicit
+   * `undefined`/`{}`: a page written before those columns existed must stay null
+   * so the reader falls to the axis defaults rather than to an empty bundle
+   * (`resolveDesign` is total; an explicit empty bag is not the same as absent).
+   *
+   * `offer` IS NOT COPIED. Money must be set deliberately. A duplicate that
+   * silently carried a price is how a creator publishes a price they never chose
+   * — and `landing_pages.offer` is only the PRESENTATION half: the authoritative
+   * `courses.price_cents` lives on the shared course, so a copied bag would
+   * advertise a way in whose price the copy does not own. The copy therefore
+   * starts with no offer, exactly as a brand-new page does, and the pricing panel
+   * ({@link updateJourneyOffer}) is the only thing that can give it one.
+   *
+   * `status` is DRAFT and `publishedAt` is null — a copy must never go live by
+   * itself. `featured` is left at its column default (false) rather than copied:
+   * a homepage slide is a curation decision about one portal, and inheriting it
+   * would put two cards in the same rail.
+   *
+   * The SLUG is derived from the copy's title and VERIFIED FREE through
+   * {@link resolveFreeOrgSlug} — "-copy" is not assumed to be available, and the
+   * org slug-space spans `landing_pages` AND `courses`. All of it runs in ONE
+   * transaction so a half-duplicated page cannot exist.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)` — a foreign or
+   * missing id throws `NotFoundError`, never a silent cross-org read (mirrors
+   * {@link saveJourneyPage}'s guard). `creatorId` is the ACTING user, not the
+   * source's: this is a new row, made now, by them.
+   *
+   * @returns the new page's id + slug + title, so the caller can name it and link
+   *          straight to its builder.
+   */
+  async duplicateJourneyPage(
+    organizationId: string,
+    creatorId: string,
+    pageId: string
+  ): Promise<{ id: string; slug: string; title: string }> {
+    try {
+      return await this.txDb.transaction(async (tx) => {
+        const [source] = await tx
+          .select({
+            pageType: landingPages.pageType,
+            title: landingPages.title,
+            subjectType: landingPages.subjectType,
+            subjectId: landingPages.subjectId,
+            brandOverrides: landingPages.brandOverrides,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            seo: landingPages.seo,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .limit(1);
+
+        if (!source) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        // `varchar(500)`, and the save schema caps `title` at 500 too — so the
+        // suffix is applied and then bounded, rather than allowed to make a
+        // freshly-duplicated page unsaveable in the builder.
+        const title = `${source.title} (copy)`.slice(0, 500);
+        const slug = await this.resolveFreeOrgSlug(
+          tx,
+          organizationId,
+          slugifyTitle(title)
+        );
+
+        const sections = ((source.sections as PageSection[]) ?? []).map(
+          (section) => ({ ...section, id: crypto.randomUUID() })
+        );
+
+        const [page] = await tx
+          .insert(landingPages)
+          .values({
+            organizationId,
+            creatorId,
+            pageType: source.pageType,
+            slug,
+            title,
+            status: CONTENT_STATUS.DRAFT,
+            subjectType: source.subjectType,
+            subjectId: source.subjectId,
+            brandOverrides: source.brandOverrides,
+            sections,
+            ...(source.design ? { design: source.design } : {}),
+            ...(source.seo ? { seo: source.seo } : {}),
+          })
+          .returning({
+            id: landingPages.id,
+            slug: landingPages.slug,
+            title: landingPages.title,
+          });
+
+        if (!page) {
+          throw new Error(
+            'duplicateJourneyPage: landing page insert returned no row'
+          );
+        }
+
+        return { id: page.id, slug: page.slug, title: page.title };
+      });
+    } catch (error) {
+      this.handleError(error, 'duplicateJourneyPage');
+    }
+  }
+
+  /**
+   * SOFT-DELETE a portal's landing page — `deleted_at`, never a `DELETE`
+   * (Codex-c3lky). Every read in this service already filters
+   * `deletedAt IS NULL`, and both org-unique slug indexes are partial on the same
+   * predicate, so the slug returns to the org's slug-space the moment this runs.
+   *
+   * A PUBLISHED PAGE IS REFUSED, and that is the product decision rather than a
+   * missing feature. Deleting a live page would leave `courses.status` at
+   * 'published' with no sales page behind it — the course would stay listed on
+   * /explore, resolvable by {@link getCourseBySlug}, and present on the enrolled
+   * shelves and the course dashboard, while `/journeys/:slug` 404'd. That is
+   * exactly the divergence {@link cascadeCourseFromPage} exists to prevent, and
+   * the cascade is only reachable through {@link saveJourneyPage} — so the honest
+   * answer is a 409 naming the next step, not a second status writer here or a
+   * warning on a destructive act. "Unpublish, then delete" is a real path: the
+   * list's own Unpublish runs through that cascade.
+   *
+   * WHAT SURVIVES: the subject course, its curriculum, every purchase and every
+   * `practice_completions` row. This method touches ONE column on ONE row. The
+   * course is deliberately NOT cascaded — a course can be fronted by more than
+   * one page (see {@link duplicateJourneyPage}), and retiring a body of work plus
+   * a payment history as a side effect of removing a sales page is not something
+   * a creator can undo from the studio. The consequence is that a course-page
+   * delete leaves the course row holding its slug in the org slug-space; that is
+   * a known, recoverable wart (clear `deleted_at` to restore the page), and it is
+   * preferred to an irreversible one.
+   *
+   * ROW-LOCKED (`.for('update')`) rather than a read-then-write on the HTTP
+   * client: the status check and the write must see the same row, or a publish
+   * landing between them would let a live page be deleted — the single case this
+   * method exists to refuse.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)`. A foreign, missing
+   * or already-deleted id throws `NotFoundError` (mirrors
+   * {@link setJourneyFeatured}'s zero-row guard), so a repeat delete is a clean
+   * 404 rather than a silent success.
+   */
+  async deleteJourneyPage(
+    organizationId: string,
+    pageId: string
+  ): Promise<void> {
+    try {
+      await this.txDb.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: landingPages.id,
+            status: landingPages.status,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .for('update')
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          throw new ConflictError(
+            'Unpublish this portal before deleting it — while it is published its course stays live everywhere else'
+          );
+        }
+
+        await tx
+          .update(landingPages)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId)
+            )
+          );
+      });
+    } catch (error) {
+      this.handleError(error, 'deleteJourneyPage');
     }
   }
 

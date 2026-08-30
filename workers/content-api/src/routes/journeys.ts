@@ -533,7 +533,7 @@ app.get(
 /**
  * GET /api/journeys/studio/journeys?organizationId=&status=
  * The studio index — the org's journeys/pages, newest-edited first, optional
- * status filter, with `live` course rollups.
+ * status filter, with `live` course rollups and each row's resolved cover URL.
  * @returns {JourneyListItem[]}
  */
 app.get(
@@ -550,7 +550,13 @@ app.get(
     handler: async (ctx): Promise<JourneyListItem[]> => {
       return ctx.services.courseJourney.listJourneysForOrg(
         ctx.organizationId,
-        ctx.input.query.status
+        ctx.input.query.status,
+        // The CDN base is ENV-OWNED, so the route supplies it and the service
+        // resolves — the same split every sibling cover/media read uses. Omit it
+        // and every `coverImageUrl` comes back null and the studio rows render
+        // their typographic fallback tile, which is exactly what this list did
+        // before the field existed: the thumbnail is additive, never required.
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })
@@ -688,6 +694,101 @@ app.put(
         ctx.obs
       );
       return null;
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId?organizationId=
+ *
+ * SOFT-DELETE a portal's landing page (`deleted_at`) — the studio list's Delete.
+ * Nothing else is touched: the subject course, its curriculum, every purchase and
+ * every completion survive, and clearing `deleted_at` restores the page.
+ *
+ * REFUSED (409) WHILE THE PAGE IS PUBLISHED, deliberately. `courses.status` is
+ * written ONLY by `cascadeCourseFromPage`, reachable only through the page save,
+ * so deleting a live page would leave the course published with no sales page —
+ * still on /explore, still resolvable by slug, still on the enrolled shelves,
+ * while `/journeys/:slug` 404'd. The service refuses and names the next step;
+ * "unpublish, then delete" is a real path because the list's Unpublish goes
+ * through that cascade.
+ *
+ * No `bumpOrgJourneysVersion`: the delete is refused unless the page is already
+ * draft or archived, and every cached public read is filtered on
+ * `status = 'published'`, so the row this removes was not in any of them.
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.deleteJourneyPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/duplicate?organizationId=
+ *
+ * Duplicate the portal's SALES PAGE as a new draft — one `landing_pages` row.
+ * NOT the course: the copy carries the source's `subjectType`/`subjectId`, so a
+ * duplicated course portal is a second sales page in front of the SAME course
+ * (a shape `cascadeCourseFromPage` and `listPublishedJourneys` already handle).
+ * Every section gets a fresh id, `design`/`brandOverrides`/`seo` come across, and
+ * `offer` does NOT — money is set deliberately, never inherited by a copy.
+ *
+ * No body. The title and slug are DERIVED server-side (`"<title> (copy)"`, then a
+ * verified-free org-unique slug), because the org slug-space spans
+ * `landing_pages` AND `courses` and only the service can check both inside the
+ * insert's transaction. A client-supplied slug would be a second, racier arbiter.
+ *
+ * `rateLimit: 'api'` rather than `strict`: this is a cheap authoring gesture, and
+ * a creator laying out variants of a page makes several in one sitting. It
+ * creates a DRAFT, so nothing public changes and there is no cache to bump.
+ *
+ * `successStatus: 201` — a POST that CREATES a resource, per the envelope
+ * contract in CLAUDE.md. The sibling `POST /studio/journeys` predates that rule
+ * and still answers 200; it is left alone rather than changed underneath its
+ * callers, so the divergence is recorded here rather than propagated.
+ *
+ * The 4-segment path cannot collide with the 3-segment `:pageId` route.
+ * @returns {{ id: string; slug: string; title: string }} 201
+ */
+app.post(
+  '/studio/journeys/:pageId/duplicate',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 201,
+    handler: async (
+      ctx
+    ): Promise<{ id: string; slug: string; title: string }> => {
+      return ctx.services.courseJourney.duplicateJourneyPage(
+        ctx.organizationId,
+        ctx.user.id,
+        ctx.input.params.pageId
+      );
     },
   })
 );

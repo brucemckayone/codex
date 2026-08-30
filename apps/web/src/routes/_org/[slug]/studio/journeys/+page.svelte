@@ -17,7 +17,10 @@
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import ConfirmDialog from '$lib/components/ui/Feedback/ConfirmDialog.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
+    deleteJourney,
+    duplicateJourney,
     listJourneys,
     listJourneyRevenue,
     setJourneyFeatured,
@@ -169,14 +172,36 @@
     Publish and Restore do NOT ask: they are the forward directions, neither one
     withdraws anything, and each is undone by the control beside it.
   */
-  type LifecycleTarget = {
+  /**
+   * Which act the dialog is standing in front of.
+   *
+   * `unpublish-first` is NOT a fourth mutation — it is the DELETE request landing
+   * on a published portal, where the dialog explains the constraint and its
+   * confirm performs the unpublish that lifts it. A blocked action that names the
+   * next step and offers it is a better product than a destructive one with a
+   * warning, and the step is real: Unpublish runs through the course cascade, so
+   * afterwards the row is a draft and Delete is available.
+   */
+  type ConfirmAction = 'status' | 'duplicate' | 'delete' | 'unpublish-first';
+
+  type ConfirmTarget = {
     pageId: string;
     title: string;
     slug: string;
     from: PageStatus;
+    /** The destination status. Only read for `status` / `unpublish-first`. */
     to: PageStatus;
+    /**
+     * `'course'` for a portal that fronts a curriculum, null for a plain landing
+     * page. Carried because the delete copy's REASONS differ: a course page's
+     * course stays live everywhere else if the page is deleted from under it,
+     * and a landing page has no course to say that about. Copy that asserts a
+     * course a page does not have is the same defect as a missing warning.
+     */
+    subjectType: string | null;
+    action: ConfirmAction;
   };
-  let confirmTarget = $state<LifecycleTarget | null>(null);
+  let confirmTarget = $state<ConfirmTarget | null>(null);
   let confirmOpen = $state(false);
 
   /**
@@ -188,7 +213,13 @@
    * the assignment for no reason.
    */
   function requestStatus(
-    j: { id: string; title: string; slug: string; status: PageStatus },
+    j: {
+      id: string;
+      title: string;
+      slug: string;
+      status: PageStatus;
+      subjectType: string | null;
+    },
     to: PageStatus
   ): void {
     if (to === 'published' || j.status === 'archived') {
@@ -201,19 +232,192 @@
       slug: j.slug,
       from: j.status,
       to,
+      subjectType: j.subjectType,
+      action: 'status',
     };
     confirmOpen = true;
+  }
+
+  /*
+    DUPLICATE + DELETE — the two acts that change whether a portal EXISTS, as
+    opposed to what state it is in (Codex-c3lky). Both go through the same
+    per-ROW pending model and the same single `ConfirmDialog` the lifecycle
+    actions use; neither adds a second confirm mechanism.
+
+    ONE pending record for the pair rather than two booleans, matching
+    `statusPending` above: the kind rides beside the id so the button that was
+    pressed is the one that reports itself busy, and a write on one row never
+    disables another row's controls.
+  */
+  let managePending = $state<{
+    pageId: string;
+    kind: 'duplicate' | 'delete';
+  } | null>(null);
+  let manageError = $state<string | null>(null);
+
+  /**
+   * DUPLICATE always asks first, even though it destroys nothing.
+   *
+   * Not for safety — for DISAMBIGUATION. "Duplicate portal" reads as "duplicate
+   * the whole journey", and it is not: the copy fronts the SAME course, so the
+   * curriculum, the stages and the enrolments are shared rather than cloned, and
+   * the price is deliberately left unset. A creator who presses this expecting a
+   * second course would otherwise find out by editing the copy's curriculum and
+   * watching the original change with it.
+   */
+  function requestDuplicate(j: {
+    id: string;
+    title: string;
+    slug: string;
+    status: PageStatus;
+    subjectType: string | null;
+  }): void {
+    confirmTarget = {
+      pageId: j.id,
+      title: j.title,
+      slug: j.slug,
+      from: j.status,
+      to: j.status,
+      subjectType: j.subjectType,
+      action: 'duplicate',
+    };
+    confirmOpen = true;
+  }
+
+  /**
+   * DELETE on a PUBLISHED portal is refused rather than warned about, and the
+   * dialog says why and offers the unpublish that unblocks it.
+   *
+   * The control is still rendered on a published row on purpose: hiding it would
+   * leave a creator hunting for a Delete that exists on other rows, and a
+   * `disabled` button explains itself only to a pointer. The server refuses this
+   * too (409 from `deleteJourneyPage`) — this branch is the honest UI of a real
+   * constraint, not the constraint itself.
+   */
+  function requestDelete(j: {
+    id: string;
+    title: string;
+    slug: string;
+    status: PageStatus;
+    subjectType: string | null;
+  }): void {
+    confirmTarget = {
+      pageId: j.id,
+      title: j.title,
+      slug: j.slug,
+      from: j.status,
+      to: 'draft',
+      subjectType: j.subjectType,
+      action: j.status === 'published' ? 'unpublish-first' : 'delete',
+    };
+    confirmOpen = true;
+  }
+
+  async function applyDuplicate(pageId: string): Promise<void> {
+    managePending = { pageId, kind: 'duplicate' };
+    manageError = null;
+    try {
+      const copy = await duplicateJourney({ pageId });
+      // Re-read rather than push a row locally: the server derived both the title
+      // and a verified-free slug, and the list is ordered by `updated_at`, so the
+      // copy's position is the server's to decide.
+      await journeysQuery.refresh();
+      // The toast names WHAT was copied, because the confirm text is already gone
+      // by the time the creator sees the new row.
+      toast.success(
+        `“${copy.title}” created as a draft — the sales page only, sharing the original’s course.`
+      );
+    } catch (err) {
+      // `queryErrorMessage`, never `err.message` — a SvelteKit `HttpError` keeps
+      // its text at `body.message` and has NO top-level `message`, so the direct
+      // read is `undefined` for every failure (Codex-xo3bl).
+      manageError = queryErrorMessage(
+        err,
+        'Could not duplicate this portal. Please try again.'
+      );
+    } finally {
+      managePending = null;
+    }
+  }
+
+  async function applyDelete(pageId: string): Promise<void> {
+    managePending = { pageId, kind: 'delete' };
+    manageError = null;
+    try {
+      await deleteJourney({ pageId });
+      await journeysQuery.refresh();
+    } catch (err) {
+      // The 409 ("Unpublish this portal before deleting it …") arrives here if a
+      // publish landed between the render and the click, so this alert carries a
+      // real instruction rather than an apology — read through
+      // `queryErrorMessage` for the same reason as above.
+      manageError = queryErrorMessage(
+        err,
+        'Could not delete this portal. Please try again.'
+      );
+    } finally {
+      managePending = null;
+    }
   }
 
   const confirmCopy = $derived.by(() => {
     const t = confirmTarget;
     if (!t) return null;
+    /*
+      The three NON-STATUS branches come first, because `delete` and
+      `unpublish-first` both carry `to: 'draft'` and would otherwise be answered
+      by the unpublish copy below.
+
+      `variant` is derived rather than fixed on the dialog: duplicate CREATES
+      something and a red confirm button on it would be a lie about the act.
+    */
+    /*
+      A plain LANDING page has no course, so the copy branches rather than
+      asserting one. Reading `subjectType === 'course'` (a string comparison, not
+      a truthiness test) is the narrowing that works with strictNullChecks off,
+      and it is the SAME guard the row's Curriculum/Insights links use.
+    */
+    const isCourse = t.subjectType === 'course';
+    if (t.action === 'duplicate') {
+      return {
+        title: `Duplicate “${t.title}”?`,
+        description: isCourse
+          ? `This copies the SALES PAGE — its sections, its look, its brand overrides and its SEO — as a new draft called “${t.title} (copy)”. It does NOT copy the course: both pages will front the same curriculum, the same stages and the same enrolments, so a stage you add later shows on both. The price is not copied either — the copy starts with nothing on sale, so you set it deliberately before you publish it.`
+          : `This copies the page — its sections, its look, its brand overrides and its SEO — as a new draft called “${t.title} (copy)”. Nothing is copied that costs money: the copy starts with nothing on sale, so you set that deliberately before you publish it.`,
+        confirmText: isCourse ? 'Duplicate the sales page' : 'Duplicate the page',
+        cancelText: 'Cancel',
+        variant: 'primary' as const,
+      };
+    }
+    if (t.action === 'unpublish-first') {
+      return {
+        title: `Unpublish “${t.title}” before deleting it`,
+        description: isCourse
+          ? `A live portal cannot be deleted. Its course is published too, and only unpublishing the page takes the course down with it — delete the page while it is live and the course stays in Explore and in enrolled libraries with no sales page behind it. Unpublishing now removes /journeys/${t.slug} and takes it out of everyone’s library until you publish again; purchases and progress are kept. Delete becomes available straight after.`
+          : `A live page cannot be deleted — a delete must never be the thing that takes something offline. Unpublishing now stops /journeys/${t.slug} resolving and returns the page to Draft; nothing is deleted. Delete becomes available straight after.`,
+        confirmText: 'Unpublish',
+        cancelText: 'Keep it published',
+        variant: 'destructive' as const,
+      };
+    }
+    if (t.action === 'delete') {
+      return {
+        title: `Delete “${t.title}”?`,
+        description: isCourse
+          ? `This removes the sales page — its sections, its look and its SEO — and takes the portal off this list. It is offline already, so nobody loses access today: anyone who was enrolled lost it when the portal came down, and their purchase and their progress are kept, along with the course and its whole curriculum. There is no Restore for a delete, so archive it instead if you might want the page back.`
+          : `This removes the page — its sections, its look and its SEO — and takes it off this list. It is offline already, so no visitor loses anything today. There is no Restore for a delete, so archive it instead if you might want the page back.`,
+        confirmText: isCourse ? 'Delete the sales page' : 'Delete the page',
+        cancelText: 'Keep it',
+        variant: 'destructive' as const,
+      };
+    }
     if (t.to === 'draft') {
       return {
         title: `Unpublish “${t.title}”?`,
         description: `The sales page stops resolving at /journeys/${t.slug}, and the portal leaves the homepage rails and Explore. Anyone already enrolled loses it from their library until you publish again — their purchase and their progress are kept, and nothing is deleted.`,
         confirmText: 'Unpublish',
         cancelText: 'Keep it published',
+        variant: 'destructive' as const,
       };
     }
     if (t.from === 'published') {
@@ -222,6 +426,7 @@
         description: `Archiving takes the portal offline exactly as unpublishing does — /journeys/${t.slug} stops resolving, and anyone already enrolled loses it from their library — and shelves it out of the Draft and Published views. Purchases and progress are kept; Restore brings it back as a draft.`,
         confirmText: 'Archive',
         cancelText: 'Keep it published',
+        variant: 'destructive' as const,
       };
     }
     return {
@@ -229,6 +434,7 @@
       description: `This portal is a draft, so nothing changes for visitors. It moves out of the Draft view into Archived, where Restore brings it back as a draft. Nothing is deleted.`,
       confirmText: 'Archive',
       cancelText: 'Leave it in Draft',
+      variant: 'destructive' as const,
     };
   });
 
@@ -247,6 +453,25 @@
   });
   function money(cents: number | null): string | null {
     return cents == null ? null : gbp.format(cents / 100);
+  }
+
+  /**
+   * The cover tile's fallback character — the portal title's initial.
+   *
+   * The SAME derivation `JourneyEntryCard`'s flair dropcap uses on a row layout
+   * ("the title is per-item in both, so it leads on rows"), so a cover-less
+   * portal wears the same mark in the studio as on the public shelf. Purely
+   * decorative: the title is read out immediately beside it, which is why the
+   * whole tile is `aria-hidden`.
+   *
+   * `?? ''` because this runs on a client-side query result and apps/web has
+   * strictNullChecks off — an in-flight or malformed row must not typeset the
+   * string "undefined". An empty result renders NO letter rather than a
+   * substitute glyph: the plate is already a coherent tile on its own, and a
+   * stand-in mark would be the only non-typographic ornament in the studio.
+   */
+  function coverInitial(title: string): string {
+    return (title ?? '').trim().charAt(0).toUpperCase();
   }
 
   const relative = new Intl.DateTimeFormat('en-GB', {
@@ -319,6 +544,9 @@
     {#if statusError}
       <p class="journeys__action-error" role="alert">{statusError}</p>
     {/if}
+    {#if manageError}
+      <p class="journeys__action-error" role="alert">{manageError}</p>
+    {/if}
     {#if loading}
       <ul class="journeys__rows" role="list">
         {#each Array(3) as _, i (i)}
@@ -348,6 +576,40 @@
         {#each items as j (j.id)}
           {@const rev = money(revenue[j.id] ?? null)}
           <li class="journey-row">
+            <!--
+              THE COVER TILE — the prototype's 84px square
+              (`docs/design/course-journeys/prototype/studio-journeys.html` `.jcov`,
+              56px at its narrow breakpoint), sized here off `--space-20` /
+              `--space-14` so it tracks an org's density scale instead of pinning
+              two magic pixel counts.
+
+              `coverImageUrl` is the SAME `md` variant the public portal card
+              serves, so this doubles as a check on the image a visitor will see —
+              a studio-only crop would preview something the product never renders.
+
+              With NO cover it is not an empty box: the plate + the title's
+              initial are the typographic fallback `JourneyEntryCard` already
+              gives a cover-less portal, so the two surfaces agree about what
+              "no image yet" looks like. The plate paints in BOTH states — it sits
+              under the `<img>`, so a slow or broken CDN degrades to the tile
+              rather than to a white gap.
+
+              `aria-hidden`: the title is read out immediately beside it and the
+              initial is decoration, exactly as the public card's flair layer is.
+            -->
+            <div class="journey-row__cover" aria-hidden="true">
+              {#if j.coverImageUrl}
+                <img
+                  class="journey-row__cover-img"
+                  src={j.coverImageUrl}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
+              {:else}
+                <span class="journey-row__cover-initial">{coverInitial(j.title)}</span>
+              {/if}
+            </div>
             <div class="journey-row__main">
               <div class="journey-row__title-line">
                 <a class="journey-row__title" href="/studio/journeys/{j.id}/page">
@@ -452,6 +714,47 @@
                   </button>
                 {/if}
               </div>
+              <!--
+                EXISTENCE, not state. Duplicate and Delete change WHETHER the
+                portal is here; the group beside them changes what state it is in.
+                A third group rather than one long strip so the two kinds of act
+                are not adjacent by accident — pressing Delete when you meant
+                Archive is the mis-click this separation is for.
+
+                Both are buttons (they mutate), both gate on their OWN row, and
+                both open the single shared `ConfirmDialog`. Delete is rendered on
+                a PUBLISHED row too: its dialog explains why it is blocked and
+                offers the unpublish that unblocks it, which a hidden control
+                cannot do and a `disabled` one can only do to a pointer.
+              -->
+              <div class="journey-row__manage">
+                <button
+                  type="button"
+                  class="journey-row__action"
+                  disabled={managePending?.pageId === j.id}
+                  title="Copy this sales page as a new draft — the curriculum and the price are not copied"
+                  onclick={() => requestDuplicate(j)}
+                >
+                  {managePending?.pageId === j.id &&
+                  managePending.kind === 'duplicate'
+                    ? 'Duplicating…'
+                    : 'Duplicate'}
+                </button>
+                <button
+                  type="button"
+                  class="journey-row__action journey-row__action--danger"
+                  disabled={managePending?.pageId === j.id}
+                  title={j.status === 'published'
+                    ? 'Unpublish this portal first — a live sales page cannot be deleted'
+                    : 'Remove this sales page — the course, its curriculum and every purchase are kept'}
+                  onclick={() => requestDelete(j)}
+                >
+                  {managePending?.pageId === j.id &&
+                  managePending.kind === 'delete'
+                    ? 'Deleting…'
+                    : 'Delete'}
+                </button>
+              </div>
               <div class="journey-row__nav">
                 <!--
                   Homepage promotion. A toggle BUTTON with `aria-pressed` rather
@@ -535,9 +838,20 @@
   description={confirmCopy?.description ?? ''}
   confirmText={confirmCopy?.confirmText ?? 'Confirm'}
   cancelText={confirmCopy?.cancelText ?? 'Cancel'}
-  variant="destructive"
+  variant={confirmCopy?.variant ?? 'destructive'}
   onConfirm={() => {
-    if (confirmTarget) void applyStatus(confirmTarget.pageId, confirmTarget.to);
+    const t = confirmTarget;
+    if (!t) return;
+    /*
+      ONE dispatch, and `unpublish-first` deliberately performs the UNPUBLISH
+      rather than the delete the creator pressed. That is not a swapped act: the
+      dialog's title says "Unpublish … before deleting it" and its confirm button
+      says "Unpublish", so the button does what it is labelled. The row then
+      re-renders as a draft and Delete is available on the next press.
+    */
+    if (t.action === 'duplicate') void applyDuplicate(t.pageId);
+    else if (t.action === 'delete') void applyDelete(t.pageId);
+    else void applyStatus(t.pageId, t.to);
   }}
 />
 
@@ -743,6 +1057,24 @@
     buttons. Shrink only ever engages when a line cannot wrap its way out, which
     is exactly that case; at every wider width the row wraps first and the
     cluster keeps its natural width.
+
+    THE BASIS MOVED 22rem -> 30rem, and it is the same measurement redone after
+    the cover tile and the Duplicate/Delete group landed. Measured on
+    of-blood-and-bones at a 1440 viewport, studio column 1328px:
+
+      before this round   cluster 644px   ->  main 636px   (one line)
+      cover + manage      cluster 811px   ->  main 371px   (one line, crushed)
+      basis 30rem         cluster 811px   ->  main 1200px  (cluster wraps below)
+
+    371px is the same failure the paragraph above describes, one notch less
+    severe: the text column loses 42% of its width to chrome and a two-clause
+    tagline wraps to two lines beside a single row of buttons. 30rem is the
+    smallest basis whose sum (80 + 480 + 811 + 32 of gaps = 1403) exceeds 1328,
+    so at 1440 and below the cluster takes its own full-width line — which is
+    exactly what the prototype does (`.jacts { grid-column: 1 / -1 }`) — while an
+    ultra-wide column (1920 => 1808px) still seats both and gives the text ~869px.
+    Wrapping in flex is decided by BASE sizes, so this is the only lever that
+    chooses between "crush the words" and "give the buttons their own line".
   */
   .journey-row {
     display: flex;
@@ -762,7 +1094,7 @@
   }
 
   .journey-row__main {
-    flex: 1 1 22rem;
+    flex: 1 1 30rem;
     min-width: 0;
   }
 
@@ -833,6 +1165,7 @@
   }
 
   .journey-row__lifecycle,
+  .journey-row__manage,
   .journey-row__nav {
     display: flex;
     flex-wrap: wrap;
@@ -915,6 +1248,99 @@
   .journey-row__action:focus-visible {
     outline: none;
     box-shadow: var(--shadow-focus-ring);
+  }
+
+  /*
+    THE COVER TILE.
+
+    A fixed square that never shrinks (`flex: 0 0 auto`): it is the row's visual
+    index, and a thumbnail that squashes with the column is worse than none. The
+    size comes from the spacing scale (`--space-20` = 80px, `--space-14` = 56px at
+    density 1) rather than the prototype's literal 84/56, so an org's
+    `--brand-density-scale` moves it with everything else on the row.
+
+    THE PLATE IS THE SAME ONE THE PUBLIC CARD USES, deliberately reduced to two
+    stops for an 80px tile. `JourneyEntryCard.jec__cover-brand` records why the
+    lightness is PINNED (`oklch(from … 0.32 …)`) instead of derived from a theme
+    surface: `--media-glyph` — the ink the initial is set in — is a near-white in
+    BOTH themes, which only reads over a dark backdrop. A media plate is dark in
+    light mode for the same reason a photograph is. Chroma scales DOWN as the
+    plate deepens so the bottom lands as a brand shadow rather than a saturated
+    block.
+
+    It paints in BOTH states, not just the empty one: the `<img>` is absolutely
+    positioned over it, so a slow, missing or 404'd CDN object degrades to the
+    tile instead of to a white hole in the row.
+  */
+  .journey-row__cover {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    width: var(--space-20, 5rem);
+    height: var(--space-20, 5rem);
+    border-radius: var(--radius-md);
+    background-image: radial-gradient(
+        120% 120% at 30% 8%,
+        oklch(from var(--color-brand-primary) 0.44 calc(c * 0.72) h) 0%,
+        transparent 68%
+      ),
+      linear-gradient(
+        158deg,
+        oklch(from var(--color-brand-primary) 0.32 calc(c * 0.64) h) 0%,
+        oklch(from var(--color-brand-primary) 0.17 calc(c * 0.4) h) 100%
+      );
+  }
+
+  .journey-row__cover-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* The dropcap idiom `JourneyEntryCard` gives a cover-less portal, at tile
+     scale. `--font-semibold` and NOT `--font-bold`: under an org brand
+     `--font-bold` resolves to `var(--heading-weight, 700)` and computes to 400
+     for single-weight display faces, which would silently un-weight the letter. */
+  .journey-row__cover-initial {
+    font-family: var(--font-heading);
+    font-size: var(--text-2xl);
+    font-weight: var(--font-semibold);
+    line-height: 1;
+    color: var(--media-glyph);
+  }
+
+  @media (max-width: 900px) {
+    /* The prototype drops its square to 56px at its narrow breakpoint, and 900px
+       is where this row's own cluster starts wrapping inside the studio column
+       (see the wrapping note above). */
+    .journey-row__cover {
+      width: var(--space-14, 3.5rem);
+      height: var(--space-14, 3.5rem);
+    }
+
+    .journey-row__cover-initial {
+      font-size: var(--text-lg);
+    }
+  }
+
+  /*
+    DELETE reads as an ordinary text action until it is reached, then goes red.
+    A resting red chip on every row would be seven alarms on a list of seven
+    portals, and the act is guarded by a dialog rather than by colour.
+
+    Source order is load-bearing: this and `.journey-row__action:hover` are BOTH
+    (0,2,0), so it only wins by sitting after it. It deliberately leaves
+    `background-color` alone, so the shared hover surface still applies.
+  */
+  .journey-row__action--danger:hover,
+  .journey-row__action--danger:focus-visible {
+    color: var(--color-error-600);
+    border-color: var(--color-error-600);
   }
 
   .journeys__empty {

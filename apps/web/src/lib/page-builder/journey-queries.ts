@@ -194,6 +194,35 @@ export interface JourneyListItem {
    */
   featured: boolean;
   updatedAt: string;
+  /**
+   * Public CDN URL for the subject course's cover (`courses.coverImageKey` →
+   * `md.webp`), or null when there is no cover, no configured CDN base, or the
+   * page has no subject course. Never a raw R2 key.
+   *
+   * The SAME variant {@link JourneyCardView.coverImageUrl} serves, deliberately:
+   * the studio row's thumbnail is there so a creator can tell their portals apart
+   * AND check the image a visitor will see, so the two must resolve one column to
+   * one meaning. A studio-only variant would preview something the product never
+   * renders.
+   *
+   * OPTIONAL-additive (like {@link JourneySellMedia.heroImageUrl}): apps/web and
+   * the workers deploy separately, so a worker predating this field omits the key
+   * and the row renders its typographic fallback tile rather than a broken
+   * `<img>`. Readers therefore treat `undefined` as "no cover" (`?? null`).
+   *
+   * ── THIS TYPE HAS A TWIN, AND THE TWIN IS NOT CHECKED BY THE COMPILER ────────
+   * `@codex/shared-types` `JourneyListItem` is the shape the content-api actually
+   * serialises; this is the FE-frozen mirror the studio consumes, and nothing in
+   * the build makes them agree (a BE package cannot import an apps/web `$lib`
+   * type, which is why the pair exists — see the file header). A field added to
+   * one and forgotten on the other is silent: the worker sends it and the FE
+   * cannot see it, or the FE renders a key that never arrives.
+   *
+   * `studio/journeys/__tests__/journey-list-item-parity.test.ts` asserts
+   * bidirectional assignability between the two under `pnpm typecheck`, so a
+   * one-sided addition now fails the gate instead of shipping.
+   */
+  coverImageUrl?: string | null;
 }
 
 /**
