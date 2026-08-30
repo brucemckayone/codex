@@ -23,7 +23,11 @@ import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
-import { enforcePolicyInline, validateInput } from './helpers';
+import {
+  enforcePolicyInline,
+  resolveCacheControl,
+  validateInput,
+} from './helpers';
 import { PaginatedResult } from './paginated-result';
 
 import { createServiceRegistry } from './service-registry';
@@ -163,6 +167,23 @@ export function procedure<
       // ====================================================================
       // Step 6: Return Response with Automatic Envelope
       // ====================================================================
+      // The declared cache preset, emitted once, here — no route hand-writes a
+      // Cache-Control and no route can forget one. `resolveCacheControl`
+      // defaults an undeclared policy to `private`, and the auth-to-preset
+      // table is enforced in the type system (see `CachePolicyRule`), so an
+      // authenticated route cannot reach this line holding a shared-cache
+      // window.
+      //
+      // SUCCESS PATH ONLY, deliberately. Emitting the preset before the handler
+      // would put a route's 60s public window on its 429s and 403s too, and an
+      // edge-cached rate-limit response is a self-inflicted outage. Error
+      // responses therefore keep the header-less behaviour they have today.
+      //
+      // A router-level middleware that sets Cache-Control AFTER `await next()`
+      // still wins, which is how content-api's public + journeys routers keep
+      // their `public, max-age=60, s-maxage=60` until they adopt a preset.
+      c.header('Cache-Control', resolveCacheControl(policy));
+
       if (successStatus === 204) {
         return c.body(null, 204);
       }
