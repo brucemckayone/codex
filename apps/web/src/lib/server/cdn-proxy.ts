@@ -32,6 +32,7 @@
  * does nothing, with no CSP violation to explain it. See
  * `isPublicMediaPreviewKey` below for the exact allowlist and what it excludes.
  */
+import { CACHE_PRESETS } from '@codex/constants';
 import type { RequestEvent } from '@sveltejs/kit';
 
 /**
@@ -194,13 +195,18 @@ function buildAssetHeaders(object: R2Object): Headers {
   object.writeHttpMetadata(headers);
   headers.set('etag', object.httpEtag);
   headers.set('accept-ranges', 'bytes');
-  // Worker-served path bypasses the R2 custom-domain cache rule, so set a sane
+  // Worker-served path bypasses the R2 custom-domain cache rule, so set a
   // public cache policy here (browser 1h, edge 1d). Public assets only.
-  // Matches the media bucket's own declared rule (edgeTtl 86400 / browserTtl
-  // 3600 in r2-infrastructure.json), so a preview served through here caches
-  // exactly as its bucket intends.
+  //
+  // `CACHE_PRESETS.asset`, byte-identical to the value this line used to write
+  // out. It used to say the value was deliberately outside the vocabulary
+  // because it "has to keep matching r2-infrastructure.json rather than a
+  // preset" — that coupling now lives ON the preset, which records the
+  // buckets' own `edgeTtl: 86400` / `browserTtl: 3600` and the R2-egress
+  // reasoning behind the 24x asymmetry. One decision, one place, and dev-cdn
+  // reads the same one.
   if (!headers.has('cache-control')) {
-    headers.set('cache-control', 'public, max-age=3600, s-maxage=86400');
+    headers.set('cache-control', CACHE_PRESETS.asset);
   }
   return headers;
 }

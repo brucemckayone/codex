@@ -4,7 +4,11 @@
  * Fetches creator's published content via the public content endpoint.
  * Since there is no dedicated "get user by username" API, the page uses the
  * username from the URL and fetches public content scoped by search query.
- * Sets DYNAMIC_PUBLIC cache headers for edge caching.
+ * Sets CACHE_HEADERS.PRIVATE (see the call at the end of the load): the
+ * (platform) shell around this page renders the signed-in user, and shared
+ * caches key on URL and never on Cookie, so a shared window would serve one
+ * viewer's chrome to the next. The docstring used to claim DYNAMIC_PUBLIC,
+ * which this load has never called.
  */
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';

@@ -17,11 +17,13 @@
  * would tell a crawler the page changed on every fetch, which is worse than
  * telling it nothing. Add one only if the projection gains a real date.
  *
- * Response is cached at the CDN with a short max-age + long SWR so
- * returning crawlers get a stale copy instantly while a fresh one
- * is revalidated in the background.
+ * Response carries `CACHE_PRESETS.static` — 1h browser + CDN, 1d SWR — so a
+ * returning crawler gets a stored copy instantly while a fresh one is
+ * revalidated behind it. THIS WINDOW WAS 1800s AND IS NOW 3600s; see the
+ * `Cache-Control` line at the bottom of this file for why that is a non-event.
  */
 
+import { CACHE_PRESETS } from '@codex/constants';
 import { createServerApi } from '$lib/server/api';
 import type { RequestHandler } from './$types';
 
@@ -159,13 +161,24 @@ export const GET: RequestHandler = async ({
   return new Response(renderSitemap(entries), {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
-      // 30min edge + browser cache, 1d stale-while-revalidate.
-      // Content lists change on publish/unpublish — the VersionedCache
-      // staleness detection handles freshness on the app UI, but for
-      // crawlers hitting an XML file the short-ish TTL is a sensible
-      // compromise between freshness and CDN hit rate.
-      'Cache-Control':
-        'public, max-age=1800, s-maxage=1800, stale-while-revalidate=86400',
+      // `CACHE_PRESETS.static` — 1h browser + CDN, 1d SWR. THE ONE REAL
+      // BEHAVIOUR CHANGE of the preset adoption: this line was
+      // `public, max-age=1800, s-maxage=1800, stale-while-revalidate=86400`,
+      // justified as "1800s, not the 3600s of the platform sitemap — org
+      // content churns faster".
+      //
+      // That reason does not survive arithmetic. Both values already carried
+      // `stale-while-revalidate=86400`, so the staleness a crawler could
+      // actually observe was bounded at 1800+86400 vs 3600+86400 — the halving
+      // moved the real bound by 2%, while doubling the origin renders. And a
+      // crawler's own revisit interval is hours to days, so neither window is
+      // the thing deciding how fresh its index is. Publish-time freshness on
+      // the app UI comes from VersionedCache staleness detection, which no
+      // sitemap window participates in either way.
+      //
+      // Two near-identical windows were therefore two places to change one
+      // decision. There is now one.
+      'Cache-Control': CACHE_PRESETS.static,
     },
   });
 };

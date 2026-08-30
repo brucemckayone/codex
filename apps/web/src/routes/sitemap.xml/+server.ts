@@ -7,6 +7,7 @@
  * a single central sitemap would be noisy and wouldn't route crawlers
  * to each org's canonical subdomain origin.
  */
+import { CACHE_PRESETS } from '@codex/constants';
 import type { RequestHandler } from './$types';
 
 function escapeXml(value: string): string {
@@ -57,8 +58,15 @@ export const GET: RequestHandler = async ({ url }) => {
   return new Response(renderSitemap(entries), {
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
-      'Cache-Control':
-        'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
+      // `CACHE_PRESETS.static` — byte-identical to the value written here
+      // before, so no response changed. This line used to claim it sat
+      // "deliberately outside the shared CACHE_PRESETS vocabulary"; nothing
+      // enforced that, the drift gate disagreed, and the preset now carries the
+      // reasoning: only crawlers read this body, on their own multi-hour
+      // cadence, so a window that outlives KV invalidation is acceptable HERE
+      // and on no user-facing surface. Read `CACHE_PRESETS.static` in
+      // packages/constants/src/limits.ts before changing it.
+      'Cache-Control': CACHE_PRESETS.static,
     },
   });
 };

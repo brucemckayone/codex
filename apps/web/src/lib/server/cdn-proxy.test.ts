@@ -18,6 +18,7 @@
  *   - byte-range GETs answer 206, without which the single-file preview plays
  *     its first segment and stops.
  */
+import { CACHE_PRESETS } from '@codex/constants';
 import { describe, expect, it, vi } from 'vitest';
 import { isPublicMediaPreviewKey, tryServeCdnAsset } from './cdn-proxy';
 
@@ -153,7 +154,10 @@ describe('tryServeCdnAsset', () => {
     expect(res).not.toBeNull();
     expect(res?.status).toBe(200);
     expect(res?.headers.get('content-type')).toBe('image/webp');
-    expect(res?.headers.get('cache-control')).toContain('public');
+    // Byte-exact against the shared preset: `toContain('public')` alone could
+    // not tell a 60s window from a 24h one, and this response's whole point is
+    // the long shared window.
+    expect(res?.headers.get('cache-control')).toBe(CACHE_PRESETS.asset);
     expect(res?.headers.get('access-control-allow-origin')).toBe('*');
     expect(await res?.text()).toBe('IMG');
   });

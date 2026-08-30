@@ -13,6 +13,7 @@
  * dynamic content sitemap work — this test suite does NOT overlap.
  */
 
+import { CACHE_PRESETS } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import { GET } from '../+server';
 
@@ -41,15 +42,15 @@ describe('platform sitemap', () => {
       );
     });
 
-    it('sets Cache-Control to public + 1h max-age + 1d SWR', async () => {
+    it('sets Cache-Control to CACHE_PRESETS.static, byte for byte', async () => {
+      // Asserted against the preset rather than against re-typed directives:
+      // this route no longer decides its own window, and a test that spelled
+      // the numbers again would be a third copy of them. The window itself is
+      // argued for on `CACHE_PRESETS.static` in packages/constants.
       const response = await GET(
         makeEvent('https://revelations.studio/sitemap.xml')
       );
-      const cacheControl = response.headers.get('cache-control') ?? '';
-      expect(cacheControl).toContain('public');
-      expect(cacheControl).toContain('max-age=3600');
-      expect(cacheControl).toContain('s-maxage=3600');
-      expect(cacheControl).toContain('stale-while-revalidate=86400');
+      expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.static);
     });
   });
 

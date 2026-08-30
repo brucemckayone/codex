@@ -33,12 +33,22 @@ vi.mock('$lib/server/api', () => ({
   })),
 }));
 
-vi.mock('$lib/server/cache', () => ({
-  CACHE_HEADERS: {
-    PRIVATE: { 'cache-control': 'private' },
-    DYNAMIC_PUBLIC_REVALIDATE: { 'cache-control': 'public, max-age=0' },
-  },
-}));
+// Derived from the real shared presets rather than hand-typed. Every one of
+// these stubs used to carry a FAKE value ('public, max-age=60' when the real
+// preset said 300s), so neither removing a preset nor changing one could fail
+// this test. `@codex/constants` has zero imports, so pulling it into the mock
+// factory is safe here.
+// `DYNAMIC_PUBLIC_REVALIDATE` was retired for leaking one viewer's render to
+// the next through `s-maxage`; `PER_VIEWER` is its safe replacement.
+vi.mock('$lib/server/cache', async () => {
+  const { CACHE_PRESETS } = await import('@codex/constants');
+  return {
+    CACHE_HEADERS: {
+      PRIVATE: { 'Cache-Control': CACHE_PRESETS.private },
+      PER_VIEWER: { 'Cache-Control': CACHE_PRESETS['per-viewer'] },
+    },
+  };
+});
 
 describe('pricing page server load', () => {
   type LoadInput = Parameters<typeof import('../+page.server').load>[0];
