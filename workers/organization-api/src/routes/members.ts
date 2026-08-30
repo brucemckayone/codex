@@ -47,20 +47,42 @@ interface CacheCtx {
 /**
  * Invalidate the per-user membership cache after a mutation.
  *
- * Bumps the {@link VersionedCache} version key for `${orgId}:${userId}` so
- * the next `checkOrganizationMembership()` call falls through to Neon.
+ * DELETES THE KEY THE READER ACTUALLY READS. `checkOrganizationMembership()`
+ * (packages/worker-utils/src/procedure/org-helpers.ts) is a write-through
+ * cache with NO TTL and NO version check: it does a bare
+ * `kv.get(membershipCacheKey(orgId, userId), 'json')` and returns whatever it
+ * finds. The only thing that can dislodge a stale entry is deleting that exact
+ * key, which is what this does.
+ *
+ * WHY NOT `VersionedCache.invalidate()`. It was, between 2d1c065a and this
+ * commit, and the invalidation was dead for all three mutations.
+ * `VersionedCache.invalidate(id)` does one `kv.put(buildVersionKey(id), …)` —
+ * it writes `cache:version:membership:{orgId}:{userId}` and leaves
+ * `membership:{orgId}:{userId}` untouched. Nothing in the repo reads that
+ * version key (there is no membership `CacheType`; the reader is not
+ * version-aware), so the bump was a KV write nobody consumed — a quota cost
+ * plus a false signal that invalidation worked, while a removed member kept
+ * their access until the entry was overwritten by some other path. This
+ * restores c1c3d6c1's `kv.delete`.
+ *
+ * THE KEY IS BUILT BY THE READER'S OWN EXPORTED BUILDER. `membershipCacheKey`
+ * is imported from `@codex/worker-utils`, not re-typed here: two independent
+ * definitions of the same key format is the same defect in a slower form.
+ *
  * Fire-and-forget via `waitUntil` — cache invalidation never blocks the
- * mutation response and never throws (graceful degradation).
+ * mutation response and never throws (graceful degradation; a failed delete
+ * leaves a stale read, not a failed mutation).
  */
 function invalidateMembershipCache(
   ctx: CacheCtx,
   orgId: string,
   userId: string
 ) {
-  if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-  const cacheId = membershipCacheKey(orgId, userId);
-  ctx.executionCtx.waitUntil(cache.invalidate(cacheId).catch(() => {}));
+  const kv = ctx.env.CACHE_KV;
+  if (!kv) return;
+  ctx.executionCtx.waitUntil(
+    kv.delete(membershipCacheKey(orgId, userId)).catch(() => {})
+  );
 }
 
 /**
@@ -233,6 +255,13 @@ app.delete(
       );
       // Bust per-user membership cache — the removed user's next
       // `requireOrgMembership` check refetches and sees `null`, denying access.
+      // That sentence is only true because `invalidateMembershipCache` DELETES
+      // `membership:{orgId}:{userId}`; the reader has no TTL and no version
+      // check, so a bump-style invalidation leaves the removed member's cached
+      // `role` readable and this comment becomes a lie. Guarded by
+      // `src/routes/__tests__/members-cache-invalidation.test.ts`, which
+      // asserts the deleted key equals the key the reader's `kv.get` asked for
+      // — and that the next check really does return `null`.
       invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
