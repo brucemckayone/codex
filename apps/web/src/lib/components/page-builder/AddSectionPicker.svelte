@@ -95,7 +95,9 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
     background-color: var(--color-surface-secondary);
-    color: var(--color-text-muted);
+    /* Paints the search glyph, which is the only thing marking this box as a
+       search field — WCAG 1.4.11's 3:1 non-text floor, not decoration. */
+    color: var(--color-text-secondary);
   }
 
   .add-picker__input {
@@ -112,6 +114,11 @@
     outline: none;
   }
 
+  /* The ONE muted string this file keeps, and the guard in
+     `components/page-builder/panel-contrast.test.ts` allow-lists `::placeholder`
+     for exactly this reason: placeholder text must read as ABSENT so a creator
+     can tell an empty field from a filled one. Mirrors
+     `SectionEditor.svelte`'s note on the same exemption. */
   .add-picker__input::placeholder {
     color: var(--color-text-muted);
   }
@@ -173,16 +180,23 @@
     color: var(--color-text);
   }
 
+  /* The one-line description that distinguishes one catalogue entry from
+     another — "A montage of moments / practices from inside the journey." It is
+     what a creator reads to CHOOSE, so it cannot be the weakest ink on the
+     panel: muted measures 2.52:1 light / 3.19:1 dark at `--text-xs` against a
+     4.5 floor, secondary 7.81 / 10.21 (Codex-6nb7i). */
   .add-picker__summary {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
+  /* The no-results state. An empty-state message is the only text on screen
+     when it shows, so it is never decoration. */
   .add-picker__empty {
     margin: 0;
     padding: var(--space-2);
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 </style>

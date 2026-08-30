@@ -479,3 +479,96 @@ describe('JourneyRenderer — the pill yields to the invite section', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * THE EMPTY PUBLISHED PAGE — the renderer's half of `validatePageShape`.
+ *
+ * `createJourney` INSERTS `sections: []`, so a creator reaches this state by
+ * pressing publish before adding anything. The served document then carries a
+ * valid `<title>` and a `Course` JSON-LD asserting the course exists, over a body
+ * whose only content is this component's own floating pill — an indexable blank
+ * page with a buy button fixed to the bottom of it.
+ *
+ * The pill's whole justification, stated in `FloatingCta`'s own header, is being
+ * "a stand-in for a CTA the reader cannot currently see". On a page with no
+ * sections there is no CTA anywhere to stand in for, and nothing the reader has
+ * scrolled past — so it stops being a stand-in and becomes the page's only
+ * content: a fixed pill following the reader down a blank document to a checkout
+ * the page never described.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO. `multiple-hero` is also an `error` shape,
+ * and the renderer does NOT drop the duplicate hero — `SectionFrame` demotes its
+ * heading to `<h2>` instead, because an author who duplicated a section must
+ * still be able to see and delete it on the public page and in the canvas alike.
+ * Refusing a misshapen page is the builder's publish gate's job, not the public
+ * renderer's; the renderer's job is to serve an already-published one honestly.
+ */
+describe('JourneyRenderer — an empty page serves no chrome', () => {
+  it('withholds the floating pill when the page has no sections at all', () => {
+    render({
+      coursePage: coursePage({ sections: [] }),
+      offer: purchasableOffer(),
+    });
+
+    expect(document.body.querySelectorAll('.jp-sec')).toHaveLength(0);
+    expect(document.body.querySelector('.floatcta')).toBeNull();
+  });
+
+  it('withholds it when every section is DISABLED or an unknown type', () => {
+    // The same published document as `[]`, reached without deleting anything —
+    // so a creator cannot route around the rule by toggling sections off.
+    render({
+      coursePage: coursePage({
+        sections: [
+          { id: 's-hero', type: 'hero', enabled: false, props: {} },
+          {
+            id: 's-future',
+            type: 'retreat-only-future',
+            enabled: true,
+            props: {},
+          },
+        ],
+      }),
+      offer: purchasableOffer(),
+    });
+
+    expect(document.body.querySelectorAll('.jp-sec')).toHaveLength(0);
+    expect(document.body.querySelector('.floatcta')).toBeNull();
+  });
+
+  it('withholds it from an ENROLLED member too', () => {
+    // An enrolled member's pill points at a dashboard that really exists, which
+    // is why they normally keep it even with nothing to buy. On a blank page it
+    // is still the only thing in the body, and a member has a dashboard link in
+    // the org chrome regardless.
+    render({
+      coursePage: coursePage({ sections: [] }),
+      offer: purchasableOffer(),
+      enrolled: true,
+    });
+
+    expect(document.body.querySelector('.floatcta')).toBeNull();
+  });
+
+  it('KEEPS the pill as soon as ONE section renders', () => {
+    // The control, and the assertion that stops this becoming a pill that never
+    // appears: a single enabled, known section is a shaped page.
+    render({
+      coursePage: coursePage({
+        sections: [
+          { id: 's-hero', type: 'hero', enabled: false, props: {} },
+          {
+            id: 's-ache',
+            type: 'ache',
+            enabled: true,
+            props: { beats: ['x'] },
+          },
+        ],
+      }),
+      offer: purchasableOffer(),
+    });
+
+    expect(document.body.querySelectorAll('.jp-sec')).toHaveLength(1);
+    expect(document.body.querySelector('.floatcta')).not.toBeNull();
+  });
+});

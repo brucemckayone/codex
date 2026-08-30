@@ -140,7 +140,7 @@
           <button
             type="button"
             class="section-list__select"
-            class:section-list__select--disabled={!section.enabled}
+            class:section-list__select--hidden={!section.enabled}
             aria-pressed={selected}
             onclick={() => pageBuilder.selectSection(section.id)}
           >
@@ -277,7 +277,9 @@
     justify-content: center;
     width: var(--space-4);
     flex-shrink: 0;
-    color: var(--color-text-muted);
+    /* The drag affordance. It is the only thing that says a row can be
+       reordered, so WCAG 1.4.11's 3:1 non-text floor applies (Codex-6nb7i). */
+    color: var(--color-text-secondary);
     line-height: 1;
     cursor: grab;
   }
@@ -312,8 +314,16 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
-  .section-list__select--disabled {
-    color: var(--color-text-muted);
+  /* `--hidden`, NOT `--disabled`, and the rename is half the fix. The class is
+     `class:`-toggled on `!section.enabled` on a button that stays fully ENABLED
+     and clickable — selecting a hidden section is how a creator un-hides it. The
+     old name made the muted ink look like WCAG 1.4.3's inactive-control
+     exemption when nothing here is inactive, so a hidden section's own NAME sat
+     at 2.52:1 light / 3.19:1 dark while remaining interactive (Codex-6nb7i).
+     The hidden state is carried by the row's own eye icon and by opacity, not by
+     making the label hard to read. */
+  .section-list__select--hidden {
+    color: var(--color-text-secondary);
   }
 
   .section-list__glyph {
@@ -353,7 +363,11 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: none;
-    color: var(--color-text-muted);
+    /* These buttons have NO text — they are the 14-15px Chevron / Eye / EyeOff /
+       Trash glyphs, including the destructive Remove — so the glyph IS the
+       control and WCAG 1.4.11's 3:1 non-text floor applies. `:disabled` below
+       keeps its own dimming, which is the one state 1.4.3 exempts. */
+    color: var(--color-text-secondary);
     cursor: pointer;
     transition: var(--transition-colors);
   }
@@ -378,11 +392,13 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
+  /* "No sections yet. Add one to begin building the page." — the only text on
+     screen when it shows, and an instruction. Never decoration. */
   .section-list__empty {
     margin: 0;
     padding: var(--space-3);
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-normal);
   }
 </style>

@@ -13575,6 +13575,62 @@ export const studio_builder_toast_ctas_inert = () => `The sales page’s buttons
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_blocked_empty = () => `Nothing to publish yet — this page has no sections, so a visitor would arrive at an empty page. Add a section first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_blocked_two_heroes = () => `Two heroes — a page opens once, and two full-height stages before any content read as a mistake. Delete or turn off one of them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_blocked_no_cta = () => `Nowhere to press — with no hero and no invite, a visitor who wants in has no way to buy. Add one of them before publishing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_publish_blocked_generic = () => `This page’s shape is not publishable yet. Open the sections rail and check the page reads top to bottom.`
+
+
+/**
+ * @param {{ sections: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_confirm_seed_copy = (params) => `These sections still hold the example words they came with: ${params.sections}. They publish exactly as written. Publish anyway?`
+
+
+/**
+ * @param {{ section: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_confirm_seed_copy_one = (params) => `${params.section} still holds the example words it came with. They publish exactly as written. Publish anyway?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_loading = () => `Reading the media attached to this journey…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_title = () => `Page builder`
 
 

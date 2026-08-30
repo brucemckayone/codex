@@ -192,9 +192,25 @@ class SellMediaStore {
    * {@link save} is a TOTAL write — every slot is sent, so an unset slot CLEARS.
    * Without a baseline the pending record is all-empty PLACEHOLDER, so a creator
    * who picked one clip after a failed read would have sent five explicit nulls
-   * and wiped the journey's other five slots, live, in one press of Save. So an
-   * un-read store is never dirty and never writes: the pick is refused (visibly,
-   * via {@link loadError}) rather than persisted destructively.
+   * and wiped the journey's other five slots, live, in one press of Save.
+   *
+   * SO WHAT IS REFUSED IS THE WRITE, NOT THE PICK — stated precisely, because the
+   * previous wording here ("the pick is refused (visibly, via loadError)") was
+   * wrong in both halves and a reader acted on it. {@link setSlot} is unguarded:
+   * the pick lands in `#pending` exactly as it would after a good read. What an
+   * un-read store does is stay CLEAN ({@link isDirty} is hard-false without a
+   * baseline) so the save orchestrator never runs the media leg, and {@link save}
+   * checks `#loaded` again itself because that is the method that would do the
+   * damage. The pick is therefore accepted and then dropped on close.
+   *
+   * The "visibly" half is now true: {@link loadError} carries the reason and
+   * `PageMediaPanel` renders it above the slots, so a read failure is no longer
+   * indistinguishable from an empty library. It is NOT yet true that the picker
+   * refuses the pick — `MediaPicker` takes no `disabled` prop, so the panel cannot
+   * lock the six slots the way `PagePricingPanel` locks its tier set on
+   * `!monetisation.loaded`. Until it can, the honest reading of this state is
+   * "the reason is on screen and the pick will not persist", which is what the
+   * panel now says.
    */
   #loaded = $state(false);
 

@@ -82,10 +82,23 @@ export interface SectionComponentProps {
    * fallback (`Codex-i9pzs`) and all five landed on the same replacement — the
    * course's own title (`hero.headline`, `introVideo.heading`, `reel.heading`,
    * `map.title`, `invite.heading`). Each fix is locally right; the aggregate is
-   * not. On the DEFAULT state of a page — `section-catalog`'s `defaultProps` do
-   * not pre-fill any of those five — the served document reads
-   * `<h1>Bone Deep</h1> … <h2>Bone Deep</h2> ×4`: to a reader a rendering fault,
-   * to a crawler a keyword-stuffed outline with no hierarchy.
+   * not. On a page with more than one of those five left without a heading, the
+   * served document reads `<h1>Bone Deep</h1> … <h2>Bone Deep</h2> ×4`: to a
+   * reader a rendering fault, to a crawler a keyword-stuffed outline with no
+   * hierarchy.
+   *
+   * HOW REACHABLE THAT IS, corrected. This comment used to say the aggregate was
+   * "the DEFAULT state of a page" because "`section-catalog`'s `defaultProps` do
+   * not pre-fill any of those five". That is false, and checking it is trivial:
+   * every one of the five seeds its heading prop (`hero.headline`,
+   * `introVideo.heading`, `reel.heading`, `map.heading`, `invite.heading`), and
+   * `addSection` → `createSection` `structuredClone`s that bag onto each new
+   * section. All seven seeded pages store every heading they carry, so no live
+   * page duplicates the title today. The duplication needs a creator to CLEAR a
+   * heading, or a page whose sections were written by the seed script or a direct
+   * API call — one keystroke away, not the default. The mechanism is still the
+   * right one (the defect is invisible from inside any single section), but the
+   * next reader is owed the true reachability rather than a stronger one.
    *
    * So the fallback is now CLAIMED, once per page, by whichever renderable
    * section comes first without an authored heading ({@link claimTitleFallback}).
@@ -93,7 +106,10 @@ export interface SectionComponentProps {
    * The five sections MUST read this prop rather than `context.course.title`
    * directly — the context still carries the title, because sections legitimately
    * use it for alt text, modal titles and aria labels, so the discipline is at the
-   * heading read and nowhere else.
+   * heading read and nowhere else. All five now do; `invite` was converted last,
+   * and while it was outstanding the claim could be spent on `map` while a blank
+   * invite printed the title anyway, which made the mechanism unsound rather than
+   * merely incomplete.
    *
    * Resolved at the ARRAY level (`SectionRenderer`) rather than pushed onto
    * {@link JourneySalesContext}: one section cannot know what its neighbours
@@ -120,7 +136,11 @@ export interface SectionComponentProps {
    * duplicate section: an author who duplicated a hero can still see and delete it,
    * on the public page and in the canvas alike, and a renderer that silently
    * withholds a section the author added is a worse failure than an untidy outline.
-   * The publish-time answer is {@link validatePageShape}'s `multiple-hero`.
+   * The publish-time answer is {@link validatePageShape}'s `multiple-hero`, which
+   * the builder's publish action now blocks on — so this demotion is what keeps
+   * the outline valid on pages ALREADY published with two heroes, and on any page
+   * written straight through the API, which the gate does not cover
+   * ({@link PageShapeIssue.severity}).
    *
    * Absent ⇒ the component's own default (`1` for `hero`, `2` everywhere else).
    */
@@ -305,10 +325,39 @@ export interface PageShapeIssue {
     | 'hero-not-first'
     | 'no-cta';
   /**
-   * `error` shapes must not reach a PUBLISHED page — the builder's publish action
-   * blocks on them and the service rejects them. `warn` shapes are surfaced
-   * inline and publishable: they are taste, or a deliberate choice a creator is
+   * `error` shapes must not reach a PUBLISHED page; `warn` shapes are surfaced
+   * inline and publishable — they are taste, or a deliberate choice a creator is
    * allowed to make.
+   *
+   * WHAT ENFORCES THAT, HALF BY HALF — stated precisely because the earlier form
+   * of this comment asserted BOTH halves ("the builder's publish action blocks on
+   * them and the service rejects them") while NEITHER existed. A repo-wide grep
+   * for `validatePageShape` returned four hits and all four were prose in this
+   * file and `HeroSection`; grepping `packages/access`, `workers/content-api` and
+   * `packages/validation` for `multiple-hero` / `empty-page` returned nothing. A
+   * docstring asserting a check that is not there is worse than a missing check,
+   * because it tells the next reader the page is already defended.
+   *
+   * WIRED:
+   *  · THE BUILDER'S PUBLISH ACTION does block. `passesPublishGate()` in the
+   *    studio route filters this list to `severity === 'error'`, names each code
+   *    in its own message and refuses without writing anything. So `error` is a
+   *    real rule from the UI, and `warn` is deliberately not surfaced there — a
+   *    publish button is the wrong place to argue with a creator's taste.
+   *  · {@link JourneyRenderer} acts on `empty-page`, and on nothing else: it
+   *    withholds the floating pill, so an already-published blank page does not
+   *    serve a fixed buy button as the only thing in its body.
+   *
+   * NOT WIRED, and this is the half that remains:
+   *  · THE SERVICE DOES NOT REJECT. Nothing in `packages/*` or `workers/*` reads
+   *    this function, so a direct API write still publishes an empty or two-hero
+   *    page — the UI gate is the only gate. Anyone adding the server half should
+   *    call THIS function rather than restate its rules, or the two definitions of
+   *    "publishable" will drift.
+   *
+   * The split is the part other callers consume, so it is pinned by
+   * `section-registry.test.ts`: a later tidy-up cannot promote a `warn` and start
+   * blocking publishes that are fine, nor demote an `error` and reopen the hole.
    */
   severity: 'error' | 'warn';
 }
@@ -347,6 +396,13 @@ export interface PageShapeIssue {
  * `context.purchasable`: this is a check on the page's SHAPE, evaluated where
  * there is no viewer and no offer read. A course with nothing to sell yet is a
  * legitimate draft; a published page with nowhere to press is not.
+ *
+ * CALLERS, and this list is the honest one: the studio builder's
+ * `passesPublishGate()` (which blocks on the `error` severities),
+ * `JourneyRenderer` (the `empty-page` branch only) and
+ * `section-registry.test.ts`. NO service or worker calls it, so the publish gate
+ * is a UI gate — see {@link PageShapeIssue.severity} for what that means, and do
+ * not infer server-side enforcement from the fact that a validator exists.
  */
 export function validatePageShape(
   sections: readonly PageSection[]

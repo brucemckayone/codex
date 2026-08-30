@@ -51,12 +51,30 @@ export { default as JourneyRenderer } from './JourneyRenderer.svelte';
 export { default as SectionFrame } from './SectionFrame.svelte';
 export { default as SectionRenderer } from './SectionRenderer.svelte';
 export {
+  /**
+   * WHICH section may borrow the course title. Exported for the studio canvas,
+   * which owns its own section loop and must therefore resolve the claim the way
+   * `SectionRenderer` does and pass the result to each `SectionFrame` — otherwise
+   * its sections self-hide a heading the published page shows. It does not do that
+   * yet; see the handoff.
+   */
+  claimTitleFallback,
+  type PageShapeIssue,
   type RenderableSection,
   resolveSectionComponent,
   SECTION_COMPONENTS,
   type SectionComponent,
   type SectionComponentProps,
   selectRenderableSections,
+  /**
+   * A page's SECTION COMPOSITION, validated. Exported for the studio's publish
+   * action, which blocks on the `error` severities — it currently reaches this
+   * function by importing `render/section-registry` directly, because the export
+   * was not here when it was written, and should be pointed at this barrel. Read
+   * {@link PageShapeIssue.severity} first: it records which halves of the
+   * enforcement are wired and which are not.
+   */
+  validatePageShape,
 } from './section-registry';
 
 export type {

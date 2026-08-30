@@ -25,6 +25,25 @@
  * data arrives from client queries, and the thing that regresses is a prop
  * omission in markup. Source text is where a prop omission is observable.
  *
+ * WHY "EVERY DECLARED PROP" WAS STILL NOT ENOUGH, and this is the widening that
+ * matters. The declared-prop form is blind to a prop that was never DECLARED: the
+ * canvas typed `course` as `Pick<JourneyCourseView, 'id' | 'slug' | 'title'>` and
+ * declared no `testimonials` at all, so `kicker`, `lede` and every testimonial
+ * were invisible to a guard whose whole input is the declaration list. Three more
+ * fields sat unwired for two more beads under a green test.
+ *
+ * So the authority moved one step upstream, to what `builderSalesContext`
+ * ACCEPTS — `BuilderContextInput`, the adapter's own input type. That is the
+ * complete list of what the canvas can be given, it is maintained by whoever
+ * widens the adapter, and it cannot be satisfied by omission. Every accepted
+ * field must now be (1) declared as a prop, (2) forwarded into
+ * `builderSalesContext`, and (3) passed by the route — the three hops the
+ * omission has hidden in, once each.
+ *
+ * AND `course` IS TYPED OFF `BuilderContextInput['course']` rather than off a
+ * hand-written `Pick`, so the narrowing that hid `kicker`/`lede` is now a compile
+ * error rather than a test's problem. The assertion below only pins that link.
+ *
  * WHAT THIS GUARD CANNOT DO, stated so nobody trusts it further than it goes: a
  * name match cannot tell `offer={offer}` from a coincidental mention inside
  * another prop's value expression. It is calibrated for the failure that actually
@@ -48,6 +67,44 @@ const CANVAS = readFileSync(
   ),
   'utf8'
 );
+
+/** `src/lib/page-builder/render/builder-context.ts`, from here. */
+const ADAPTER = readFileSync(
+  join(
+    HERE,
+    '../../../../../../../..',
+    'lib/page-builder/render/builder-context.ts'
+  ),
+  'utf8'
+);
+
+/** Source with comments stripped — a doc comment must never satisfy a scan. */
+function code(source: string): string {
+  return source
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '');
+}
+
+/**
+ * A brace-matched slice starting at `marker`, so a slice can never silently grow
+ * to the end of the file when a helper moves (the shape that makes an assertion
+ * pass for the wrong reason).
+ */
+function braceBody(source: string, marker: string): string {
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`${marker} not found`);
+  const open = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(open, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces after ${marker}`);
+}
 
 /**
  * The `<JourneyBuilderCanvas … />` tag body, so a prop mentioned anywhere else in
@@ -95,6 +152,112 @@ function declaredProps(): string[] {
   }
   return names;
 }
+
+/**
+ * The field names `builderSalesContext` ACCEPTS, read off `BuilderContextInput`.
+ *
+ * This is the list the declared-prop scan could not see: a field the adapter
+ * accepts and the canvas never declared is invisible to any assertion whose input
+ * is the declaration list, which is exactly how `testimonials` (and, inside
+ * `course`, `kicker`/`lede`) stayed unwired.
+ *
+ * Members sit at TWO spaces inside an `export interface` at column 0, so a
+ * continuation line (four spaces, e.g. `course`'s intersection type) cannot be
+ * mistaken for a member. Comments go first, because a doc comment legitimately
+ * contains both braces and `word:` pairs.
+ */
+function acceptedInputs(): string[] {
+  const marker = 'export interface BuilderContextInput {';
+  const start = ADAPTER.indexOf(marker);
+  if (start === -1)
+    throw new Error('builder-context no longer exports `BuilderContextInput`');
+  const body = code(ADAPTER.slice(start + marker.length));
+  const end = body.indexOf('\n}');
+  if (end === -1) throw new Error('`BuilderContextInput` is unterminated');
+
+  const names: string[] = [];
+  for (const line of body.slice(0, end).split('\n')) {
+    const match = line.match(/^ {2}([A-Za-z_$][\w$]*)\??\s*:/);
+    if (match && !names.includes(match[1])) names.push(match[1]);
+  }
+  return names;
+}
+
+/** The `builderSalesContext({ … })` argument the canvas assembles. */
+function contextCall(): string {
+  return braceBody(code(CANVAS), 'builderSalesContext(');
+}
+
+describe('canvas ← adapter: every input builderSalesContext ACCEPTS is wired', () => {
+  /**
+   * THE PARSER'S OWN GUARD. A parser that returns `[]` makes all three
+   * assertions below unfailable — the vacuous shape that let a declared-and-
+   * unpassed prop live through two beads, and an UNDECLARED one through two more.
+   */
+  it('reads the adapter input list before asserting anything about it', () => {
+    const inputs = acceptedInputs();
+    expect(
+      inputs.length,
+      'parsed no fields out of `BuilderContextInput` — the guards below would pass vacuously'
+    ).toBeGreaterThanOrEqual(7);
+    expect(inputs).toContain('course');
+    expect(inputs).toContain('testimonials');
+    expect(inputs).toContain('sellPreview');
+    expect(inputs).toContain('offer');
+  });
+
+  it('declares a canvas prop for every accepted input', () => {
+    const declared = declaredProps();
+    const undeclared = acceptedInputs().filter(
+      (field) => !declared.includes(field)
+    );
+    expect(
+      undeclared,
+      '`builderSalesContext` accepts these and the canvas declares no prop for them, so the adapter silently fills its documented DEFAULT — the failure a declared-prop scan cannot see (Codex-bvhcr class)'
+    ).toEqual([]);
+  });
+
+  it('forwards every accepted input into builderSalesContext', () => {
+    const call = contextCall();
+    const dropped = acceptedInputs().filter(
+      (field) => !new RegExp(`\\b${field}\\b`).test(call)
+    );
+    expect(
+      dropped,
+      'the canvas takes these as props and does not hand them to the adapter, so the value stops one hop short of the sections'
+    ).toEqual([]);
+  });
+
+  it('the route passes every accepted input', () => {
+    const tag = canvasTag();
+    const missing = acceptedInputs().filter(
+      (field) => !new RegExp(`\\b${field}\\b`).test(tag)
+    );
+    expect(
+      missing,
+      'the adapter accepts these, the canvas declares them, and the route hands over none — the exact gap between a DEFAULT and a value'
+    ).toEqual([]);
+  });
+
+  it('types the course prop off the adapter, so it cannot narrow again', () => {
+    // The narrowing IS the defect: `Pick<JourneyCourseView, 'id'|'slug'|'title'>`
+    // made `kicker` and `lede` untypeable at the call site, so the route could
+    // not have passed them even if it had tried. Typed off the adapter's own
+    // input, a field the adapter accepts is a field the canvas can be handed.
+    expect(code(CANVAS)).toMatch(/course\?:\s*BuilderContextInput\['course'\]/);
+    expect(code(CANVAS)).not.toMatch(/course\?:\s*Pick</);
+  });
+
+  it('the route builds the course object with the fields the sections fall back to', () => {
+    // `HeroSection` draws its eyebrow from `context.course.kicker` and its
+    // subheadline from `.lede` whenever the props are unset — a documented
+    // fallback pages are expected to rely on — so a canvas with neither draws
+    // one line where the published page draws three.
+    const built = braceBody(code(ROUTE), 'const course = $derived(');
+    expect(built).toMatch(/\bkicker\b/);
+    expect(built).toMatch(/\blede\b/);
+  });
+});
 
 describe('builder route → canvas: every declared prop is passed', () => {
   /**

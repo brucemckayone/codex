@@ -41,15 +41,28 @@
   (Preview mode) the block chrome + contenteditable are off — a clean read-only page.
 -->
 <script lang="ts">
-  import type { CourseOffer, EditorStageView, JourneyCourseView } from '$lib/page-builder';
   import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import {
     brandOverridesToStyleAttr,
+    /**
+     * THE ADAPTER'S OWN INPUT TYPE, and every sales prop below is declared off
+     * it rather than off a hand-written shape.
+     *
+     * This is not tidiness. `course` used to be typed
+     * `Pick<JourneyCourseView, 'id' | 'slug' | 'title'>` — a narrower type than
+     * `builderSalesContext` accepts — so `kicker` and `lede` were not merely
+     * un-passed, they were UNTYPEABLE at the call site: the route could not have
+     * handed them over if it had tried, and the guard that asserts "every
+     * declared prop is passed" could not see a prop that was never declared.
+     * Typed off `BuilderContextInput`, what the adapter accepts is exactly what
+     * this component can be given, and a widened adapter cannot silently leave
+     * the canvas behind.
+     */
+    type BuilderContextInput,
     builderSalesContext,
     SectionFrame,
     selectRenderableSections,
-    type SellPreview,
   } from '$lib/page-builder/render';
   /* THE COLOUR LADDER. `SectionFrame` carries the axis substrate
      (`journey-design.css` + `journey-sections-shared.css`) but deliberately NOT
@@ -102,11 +115,23 @@
      * section actually reads, so the canvas and the live page number practices
      * the same way.
      */
-    stages?: readonly EditorStageView[];
-    /** The course being sold — id/slug/title at minimum. */
-    course?: Pick<JourneyCourseView, 'id' | 'slug' | 'title'>;
+    stages?: BuilderContextInput['stages'];
+    /**
+     * The course being sold. `id`/`slug`/`title` at minimum; the rest of
+     * {@link BuilderContextInput.course} is optional and the adapter documents
+     * what each absent field degrades to.
+     *
+     * WHY THE TYPE IS THE ADAPTER'S AND NOT A `Pick`: as a three-field pick, this
+     * prop made `kicker` and `lede` untypeable at the call site, so the canvas
+     * hero drew NEITHER while the published page drew both from the course row —
+     * `HeroSection` reads `p.eyebrow ?? context.course.kicker` and
+     * `p.subheadline ?? context.course.lede`, a fallback-to-data pattern pages
+     * are expected to rely on. A creator who cleared the hero eyebrow to inherit
+     * their kicker saw the canvas go blank and typed the kicker in by hand.
+     */
+    course?: BuilderContextInput['course'];
     /** The authoritative offer, when loaded. Null ⇒ sections draw a price-less CTA. */
-    offer?: CourseOffer | null;
+    offer?: BuilderContextInput['offer'];
     /**
      * The journey's PUBLIC checkout + member-dashboard URLs — where the sections'
      * CTAs point (`buildJourneyUrl(..., { surface })`, the same two the public
@@ -122,8 +147,20 @@
      * becomes a live RELATIVE link that reloads the builder route out from under
      * the author's unsaved work.
      */
-    checkoutUrl?: string;
-    dashboardUrl?: string;
+    checkoutUrl?: BuilderContextInput['checkoutUrl'];
+    dashboardUrl?: BuilderContextInput['dashboardUrl'];
+    /**
+     * The course's testimonials — what `ProofSection` renders.
+     *
+     * DECLARED LAST AND FOUND LAST, and the reason is worth keeping: this prop
+     * did not exist, so the canvas passed nothing, `builderSalesContext` filled
+     * its documented `[]`, and `ProofSection` drew its empty state while the
+     * published page rendered the real `course_testimonials` rows. That was
+     * invisible for as long as the table was empty for every course — a latent
+     * divergence waiting for the first creator to add a quote, and one no
+     * declared-prop guard could see, because nothing was declared.
+     */
+    testimonials?: BuilderContextInput['testimonials'];
     /**
      * The course's RESOLVED sell media — the hero's still and clip, the intro and
      * reel manifests, the guide's portrait.
@@ -136,7 +173,7 @@
      * the correct answer for a course that has picked no media and was the ONLY
      * answer before Codex-bvhcr.
      */
-    sellPreview?: SellPreview | null;
+    sellPreview?: BuilderContextInput['sellPreview'];
   }
 
   let {
@@ -151,6 +188,7 @@
     offer = null,
     checkoutUrl = '',
     dashboardUrl = '',
+    testimonials = [],
     sellPreview = null,
   }: Props = $props();
 
@@ -186,6 +224,15 @@
    * published page priced itself. The whole Pricing panel was invisible on the
    * WYSIWYG surface. `checkoutUrl`/`dashboardUrl` travel with it because they are
    * only harmless while there are no paths to link (see their prop docs).
+   *
+   * `testimonials`, and inside `course` the `kicker`/`lede` pair, were the LAST
+   * three of the same class, and they hid one level deeper: the two fields were
+   * absent from the `course` prop's TYPE and the collection had no prop at all, so
+   * nothing about them was observable at the call site or to the route→canvas
+   * guard. Every field `builderSalesContext` accepts is now a prop typed off
+   * `BuilderContextInput`, which is what makes the guard's list complete
+   * (`__tests__/builder-canvas-wiring.test.ts` walks that type, not this
+   * interface).
    */
   const salesContext = $derived(
     builderSalesContext({
@@ -194,6 +241,7 @@
       offer,
       checkoutUrl,
       dashboardUrl,
+      testimonials,
       sellPreview,
     })
   );

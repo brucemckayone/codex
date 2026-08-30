@@ -22,6 +22,7 @@
   import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
+  import { sectionIcon } from './section-icons';
   import {
     findSectionDefinition,
     resolveDesign,
@@ -48,6 +49,12 @@
 
   const { section }: Props = $props();
 
+  /**
+   * The section's icon as a COMPONENT, derived rather than inlined with
+   * `{@const}`: that form is only legal as the immediate child of a block, and
+   * the header it renders into is a plain element.
+   */
+  const SectionGlyph = $derived(sectionIcon(section.type));
   const definition = $derived(findSectionDefinition(section.type));
 
   /**
@@ -163,7 +170,16 @@
 <div class="section-editor">
   <header class="section-editor__head">
     <div class="section-editor__title">
-      <span class="section-editor__glyph" aria-hidden="true">{definition?.icon ?? '◌'}</span>
+      <!-- THE LAST TEXT-NODE ICON, now an SVG like every other one.
+           `definition.icon` is a catalogue STRING, and rendering it here put a
+           glyph inside the header's text: `◇`, `◍`, `⊞`, `✦`. `aria-hidden`
+           kept it out of the accessible name, so this was the milder half of
+           Codex-1khpv — the rail's rows had the same glyphs UNHIDDEN and were
+           announced as "⠿ ◇ Hero". The rail was converted; this was handed off
+           and then missed, which a completeness audit caught.
+           `sectionIcon` falls back for an unknown type, so the `?? '◌'` guard
+           this replaces is no longer needed. IconBase marks it decorative. -->
+      <span class="section-editor__glyph"><SectionGlyph /></span>
       <div>
         <p class="section-editor__label">{section.name ?? definition?.label ?? section.type}</p>
         {#if definition?.summary}

@@ -110,6 +110,19 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so an under-authored page printed the
+     * same sentence as its `<h1>` four more times.
+     *
+     * This section was the LAST of the five still reading the context directly,
+     * which made the mechanism unsound rather than merely incomplete: with the
+     * claim spent on (say) `map`, a blank invite printed the title as well — the
+     * exact duplication `claimTitleFallback` exists to prevent, on the conversion
+     * section.
+     */
+    titleFallback?: string;
   }
 
   const {
@@ -119,6 +132,7 @@
     design,
     editable = false,
     onEdit,
+    titleFallback,
   }: Props = $props();
 
   const eyebrow = $derived(asString(config, 'eyebrow'));
@@ -176,8 +190,24 @@
    * Latent rather than live today: all seven pages store a heading, so the old
    * fallback was reachable but unreached. It would have fired on the first page
    * a creator left the field empty on.
+   *
+   * THE FALLBACK IS NOW BORROWED, NOT ASSUMED. It reads `titleFallback` — the
+   * course title, handed to whichever single section the PAGE granted it
+   * (`claimTitleFallback`) — and never `context.course.title`. Four sections were
+   * converted when the claim landed and this one was missed, so the claim could go
+   * to `map` while a blank invite ALSO printed the title. The course title is
+   * still in the context and is still read below for accessible names; the
+   * discipline is at the heading read and nowhere else.
+   *
+   * Read through `aliasKeys` rather than a bare `'heading'` so this read and
+   * `hasAuthoredHeading`'s claim test consult ONE preference list. `invite`
+   * declares no heading alias today, so the two are identical — but a hand-copied
+   * key list is exactly how a claim comes to disagree with a render, and the
+   * disagreement degrades to a self-hidden heading rather than failing.
    */
-  const heading = $derived(asString(config, 'heading') ?? context.course.title);
+  const heading = $derived(
+    asStringFrom(config, aliasKeys('invite', 'heading')) ?? titleFallback
+  );
 
   /**
    * The real ways in, decorated by this section's authored copy. EMPTY when the
@@ -498,12 +528,27 @@
            defect, not this section's — `--jp-heading-size` (24/30/40/48) is
            monotonic — and it affects every consumer of `--jp-display`.
            Reported, not fixed here. -->
-      <h2 class="jp-sec__heading invite__heading">
-        <span {...editAttrs('heading')}>{heading}</span>{#if accent}&nbsp;<span
-            class="invite__accent"
-            {...editAttrs('accent')}>{accent}</span
-          >{/if}
-      </h2>
+      <!-- SELF-HIDING, because the fallback is claimed once per page and this
+           section may not be the claimant. An EMPTY `<h2>` would be worse than
+           none: this is the only `<h2>` in the tree carrying `--text-display`
+           (80px on the seeded pages), so a blank one is a screenful of nothing
+           between the eyebrow and the offer.
+
+           GUARDED ON `heading || accent`, not on `heading` alone. The accent is
+           the creator's own words — the italic second line closing the heading —
+           so an authored accent still gets a heading element to live in, and the
+           `&nbsp;` separator only appears when there is something on both sides of
+           it. Dropping authored copy because the field beside it is blank is the
+           class of loss most of this file's history is made of. -->
+      {#if heading || accent}
+        <h2 class="jp-sec__heading invite__heading">
+          {#if heading}<span {...editAttrs('heading')}>{heading}</span
+            >{/if}{#if heading && accent}&nbsp;{/if}{#if accent}<span
+              class="invite__accent"
+              {...editAttrs('accent')}>{accent}</span
+            >{/if}
+        </h2>
+      {/if}
       {#if sub}
         <p class="invite__sub" {...editAttrs('sub')}>{sub}</p>
       {/if}

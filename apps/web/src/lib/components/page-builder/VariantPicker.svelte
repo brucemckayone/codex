@@ -62,16 +62,31 @@
 
 <div class="vp">
   {#each variants as v (v.id)}
+    <!-- `unavailable` is a DECLARED-BUT-NOT-BUILT composition (Codex-wqxv4):
+         `reel: strip` was selectable here while `ReelSection` clamped it to
+         `theatre`, so choosing it took the selected state and published a
+         different layout.
+
+         `disabled` rather than hidden, because the composition is DESCOPED
+         rather than retired: a creator who can see the design deserves to see
+         why it is not on offer yet, and hiding it answers "why can't I do this?"
+         with nothing. The REASON replaces the hint as VISIBLE TEXT in the card
+         rather than sitting in a `title` — a tooltip never appears on touch, and
+         a disabled button is not focusable, so a `title` would be the one place
+         neither a touch nor a keyboard user could reach. As rendered text it is
+         available to every reader without focus. -->
+    {@const blocked = v.unavailable}
     <button
       type="button"
       class="vp-opt"
       class:vp-opt--on={selected === v.id}
       aria-pressed={selected === v.id}
+      disabled={!!blocked}
       onclick={() => onselect(v.id)}
     >
       {@render schematic(v.thumb)}
       <span class="vp-opt__label">{v.label}</span>
-      <span class="vp-opt__hint">{v.hint}</span>
+      <span class="vp-opt__hint">{blocked ?? v.hint}</span>
     </button>
   {/each}
 </div>
@@ -113,6 +128,32 @@
     border-color: var(--color-interactive);
     color: var(--color-text);
     background-color: color-mix(in oklab, var(--color-interactive) 10%, var(--color-surface));
+  }
+
+  /* A DESCOPED composition (Codex-wqxv4). Unavailability is carried by the
+     cursor, the dashed border and the reason text — NOT by dimming the ink. The
+     reason is the one string that explains why the option cannot be chosen, so
+     it stays on `--color-text-secondary` like every other hint in this panel
+     (Codex-6nb7i); `opacity` on the whole card would take the reason down with
+     it. The schematic drops back instead, because the thumbnail is the part that
+     should read as "not on offer". */
+  .vp-opt:disabled {
+    border-style: dashed;
+    cursor: not-allowed;
+  }
+
+  .vp-opt:disabled:hover {
+    color: var(--color-text-secondary);
+    border-color: var(--color-border);
+  }
+
+  .vp-opt:disabled .vp-thumb {
+    opacity: var(--opacity-40, 0.4);
+  }
+
+  .vp-opt:disabled .vp-opt__label {
+    text-decoration: line-through;
+    text-decoration-thickness: from-font;
   }
 
   .vp-opt__label {

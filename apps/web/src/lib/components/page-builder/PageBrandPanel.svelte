@@ -151,10 +151,26 @@
     color: var(--color-text);
   }
 
+  /* NO `--color-text-muted` in this panel, deliberately, and the guard in
+     `components/page-builder/panel-contrast.test.ts` now enforces it
+     (Codex-6nb7i). Measured on the studio panel surface by canvas readback:
+     muted at `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and
+     13px is not WCAG "large text". Secondary reads 7.81 / 10.21.
+     WHAT WAS MUTED HERE: the panel's own subtitle, the callout that explains the
+     inheritance model ("Every page inherits the org's brand tokens…") and the
+     "only this page" scope note on each override row — i.e. every string that
+     tells a creator what a brand override will actually do. `.row__sw::after`
+     moved too; it is the toggle's only off-state indicator, so WCAG 1.4.11's 3:1
+     non-text floor applies to it, not 1.4.3's.
+     NOTE the ratio is a function of the ORG's brand background, not a constant:
+     under `[data-org-brand]`, `--color-text-muted` derives from `--brand-bg`
+     (tokens/org-brand.css) while `--color-text-secondary` mixes back from
+     `--color-text` — which is what makes the swap safe on every brand rather
+     than lucky on one. */
   .panel__sub {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__field {
@@ -193,7 +209,7 @@
     background-color: var(--color-surface-secondary);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__callout b {
@@ -222,7 +238,7 @@
   }
 
   .row__copy small {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-size: var(--text-xs);
   }
 
@@ -246,7 +262,9 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background-color: var(--color-text-muted);
+    /* The knob is the ONLY off-state indicator on this switch, so the floor is
+       WCAG 1.4.11's 3:1 for non-text, not decoration. */
+    background-color: var(--color-text-secondary);
     transition: transform var(--duration-fast) var(--ease-default);
   }
 

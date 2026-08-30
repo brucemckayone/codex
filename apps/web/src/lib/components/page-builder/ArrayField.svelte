@@ -326,10 +326,26 @@
     gap: var(--space-2);
   }
 
+  /* NO `--color-text-muted` in this component, and the guard in
+     `components/page-builder/panel-contrast.test.ts` now enforces it
+     (Codex-6nb7i).
+
+     THIS FILE IS WHY THE GUARD EXISTS. It landed in 70b6ab3e, AFTER the
+     SectionEditor swap, and renders INSIDE the same inspector beside hints that
+     swap had deliberately moved to secondary — so the fix regressed within its
+     own component tree, and then went 1 -> 2 uses in a later round. Three
+     prose comments in three sibling files did not stop it; a test will.
+
+     Measured on the studio panel surface by canvas readback: muted at
+     `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and 13px is
+     not WCAG "large text". Secondary reads 7.81 / 10.21 and tracks
+     `--color-text`, so it holds on any brand background — under
+     `[data-org-brand]` muted derives from `--brand-bg` instead, which is what
+     makes its ratio a function of the org rather than a constant. */
   .af__empty,
   .af__cap {
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
@@ -382,7 +398,7 @@
      what happens when it is unset. An entry field's hint carried the constraint
      ("Must name a path the course actually offers") and had nowhere to render. */
   .af__cell-hint {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);

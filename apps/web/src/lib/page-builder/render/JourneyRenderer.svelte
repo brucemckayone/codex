@@ -25,6 +25,7 @@
   import '../journey-palette.css';
   import { brandOverridesToStyleAttr } from './brand-overrides';
   import { aliasKeys, asStringFrom } from './coerce';
+  import { validatePageShape } from './section-registry';
   import type { JourneySalesContext, SellPreview } from './types';
   import type {
     CourseOffer,
@@ -121,6 +122,36 @@
       : deriveOfferPaths(offer, coursePage.course).length > 0
   );
 
+  /**
+   * WHETHER THIS PAGE HAS A SHAPE AT ALL — `validatePageShape`'s `empty-page`.
+   *
+   * `createJourney` INSERTS `sections: []`, so publishing before adding anything
+   * is a state a creator reaches in two clicks. The served document then carries
+   * a valid `<title>` and a `Course` JSON-LD asserting the course exists, over a
+   * body whose only content is the floating pill below.
+   *
+   * Read through the validator rather than `sections.length === 0`, deliberately:
+   * a page whose every section is DISABLED or of an unknown type serves the same
+   * blank document, and the validator already applies this renderer's own
+   * enabled + known-type filter (`selectRenderableSections`). One definition of
+   * "empty", shared with the publish-time gate, so the two cannot disagree about
+   * which pages are blank.
+   *
+   * ONLY `empty-page` is acted on here, and the omission is the point.
+   * `multiple-hero` is an `error` shape too, and this renderer deliberately does
+   * NOT drop the duplicate hero — `SectionFrame` demotes its heading to `<h2>`
+   * instead, because an author who duplicated a section must still be able to see
+   * and delete it, on the public page and in the canvas alike (see
+   * `SectionComponentProps.headingLevel`). Refusing to serve a section the author
+   * added is a worse failure than an untidy outline, so blocking a misshapen page
+   * belongs to the builder's publish action, not to the public renderer.
+   */
+  const emptyShape = $derived(
+    validatePageShape(coursePage.page.sections).some(
+      (issue) => issue.code === 'empty-page'
+    )
+  );
+
   const context: JourneySalesContext = $derived({
     course: coursePage.course,
     stages: coursePage.stages,
@@ -192,13 +223,20 @@
       pageDesign={coursePage.page.design}
     />
     <!--
-      NO PILL WHERE THERE IS NOTHING TO BUY. An enrolled member always keeps it
-      (it points at their dashboard, which exists), and a visitor keeps it only
-      while the course has a real way in — otherwise the page's most persistent
+      NO PILL WHERE THERE IS NOTHING TO BUY. An enrolled member keeps it (it
+      points at their dashboard, which exists), and a visitor keeps it only while
+      the course has a real way in — otherwise the page's most persistent
       affordance is a fixed pill that follows the reader down the whole page to
       deliver them to "isn't open for enrolment just now".
+
+      AND NO PILL WHERE THERE IS NOTHING TO SCROLL PAST. `FloatingCta`'s own
+      justification is being "a stand-in for a CTA the reader cannot currently
+      see"; on an `empty-page` there is no CTA anywhere to stand in for and no
+      section the reader has scrolled past, so the stand-in becomes the body's
+      only content. That exception applies to an enrolled member too — see
+      `emptyShape`.
     -->
-    {#if enrolled || purchasable}
+    {#if !emptyShape && (enrolled || purchasable)}
       <FloatingCta
         href={enrolled ? dashboardUrl : checkoutUrl}
         label={coursePage.course.title}

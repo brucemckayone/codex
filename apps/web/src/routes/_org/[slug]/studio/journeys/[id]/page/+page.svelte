@@ -29,6 +29,7 @@
   import { buildJourneyUrl } from '@codex/urls';
   import * as m from '$paraglide/messages';
   import {
+    fieldsForSectionType,
     JourneyBuilderCanvas,
     PageBrandPanel,
     PageDesignPanel,
@@ -41,12 +42,29 @@
   import {
     getCourseCurriculum,
     getCourseOffer,
+    getCoursePagePreview,
     getJourneyForBuilder,
     resolveSellPreview,
     saveJourneyPage,
     updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
   import { saveBuilderDraft } from '$lib/page-builder/builder-save';
+  // The unauthored-copy check, for the publish confirm. Had no caller anywhere in
+  // the repo except its own unit test, while its docstring described this exact
+  // call site (Codex-maf0y).
+  import { seededSections } from '$lib/page-builder';
+  /*
+    The page-SHAPE check, for the publish block. Also caller-less until now: its
+    `PageShapeIssue` doc states "the builder's publish action blocks on them", and
+    the publish action had never heard of it — so an EMPTY page (what
+    `createJourney` inserts) and a TWO-HERO page (one press of Duplicate) both
+    published.
+
+    Through the `render` barrel, which is where the renderer's own half of this
+    enforcement imports it from too — one function, one import path, two halves
+    (the renderer refuses to paint an empty page; this refuses to publish one).
+  */
+  import { validatePageShape } from '$lib/page-builder/render';
   import { queryErrorMessage } from '$lib/remote/query-result';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -91,13 +109,79 @@
   // page numbering practices identically (Codex-eckbx W1–W3).
   const stages = $derived(curriculumQuery?.current?.stages ?? []);
 
-  // The course the sections render against. `id` is the subject of the page
-  // draft; title/slug come from the same draft read, so the canvas needs no
-  // extra request.
+  /**
+   * The COURSE ROW's own sell copy and its testimonials — the last two legs of
+   * `builderSalesContext` the canvas was never handed (Codex-bvhcr's class, after
+   * `sellPreview` and `offer`).
+   *
+   * WHY THIS READ AND NOT A WIDER PAGE PAYLOAD. `kicker`, `lede` and
+   * `course_testimonials` live on the COURSE, and nothing the studio already loads
+   * carries them: the builder draft is the `landing_pages` row, and
+   * `getCourseCurriculum` answers `{ courseId, stages }`. This is the same
+   * management-gated read the public sell load falls back to for an unpublished
+   * draft, and its docstring says it exists for the studio — so the canvas and the
+   * page take their course facts from ONE endpoint rather than two, which is the
+   * whole reason the canvas mounts the public components at all.
+   *
+   * ONLY `.course` AND `.testimonials` ARE READ. The payload also carries a `page`
+   * record and its `stages`; both are ignored here, because the draft STORE is the
+   * authority on the page and `curriculumQuery` on the curriculum. Reading the
+   * page from this instead would show the author the last-saved copy in place of
+   * what they are typing.
+   *
+   * KEYED ON THE SAVED SLUG, never `pending.slug`. The SEO panel edits the slug
+   * live; keying on the pending value would re-fire this read on every keystroke
+   * and answer `null` the moment the new slug differs from the persisted row.
+   */
+  const savedSlug = $derived(draftQuery?.current?.slug ?? '');
+  const coursePageQuery = $derived(
+    isCourse && savedSlug ? getCoursePagePreview({ slug: savedSlug }) : null
+  );
+
+  // `.current` is `undefined` in flight AND after a rejection (Codex-xo3bl), and
+  // this query fails SOFT to `null` server-side as well, so both shapes mean the
+  // same thing here: no course facts yet. The sections' own fallbacks cover it —
+  // an absent kicker draws no eyebrow, exactly as an unset one does.
+  const courseFacts = $derived(coursePageQuery?.current?.course ?? null);
+
+  /**
+   * Real testimonials for the canvas's `proof` section.
+   *
+   * `[]` is the honest empty — `ProofSection` renders its own empty state from it,
+   * the same one the published page shows for a course with no quotes. What it is
+   * NOT any more is a hardcoded `[]` standing in for "we never asked".
+   */
+  const testimonials = $derived(coursePageQuery?.current?.testimonials ?? []);
+
+  /**
+   * The course the sections render against — a DELIBERATELY MIXED object, and the
+   * mix is the point.
+   *
+   * `id` is the page draft's subject. `slug`/`title` are the DRAFT's, not the
+   * course row's, because `saveJourneyPage` keeps the subject course in lockstep
+   * with the page (`cascadeCourseFromPage`: "the course's `slug`/`title` follow the
+   * page's"), so the draft values are what the course WILL hold the moment this
+   * page is saved — and the top bar's title input therefore updates the canvas's
+   * heading fallbacks live, which is what a WYSIWYG surface owes its author.
+   *
+   * `kicker`/`lede` have no page-level twin at all: they are course columns with no
+   * control in this builder, so the only honest source is the course row. Absent
+   * them, `HeroSection`'s `p.eyebrow ?? context.course.kicker` and
+   * `p.subheadline ?? context.course.lede` drew NOTHING in the canvas and drew
+   * both lines on the published page — so a creator who cleared the hero eyebrow
+   * to inherit their kicker saw the canvas go blank and typed the kicker in by
+   * hand, storing a duplicate of a value the page would have inherited.
+   *
+   * `stageCount`/`practiceCount` are deliberately left to the adapter, which
+   * derives them from the curriculum read — the same numbers, from the read the
+   * builder already has, and they follow an unsaved curriculum edit.
+   */
   const course = $derived({
     id: draftQuery?.current?.subjectId ?? '',
     slug: draftQuery?.current?.slug ?? '',
     title: draftQuery?.current?.title ?? '',
+    kicker: courseFacts?.kicker ?? null,
+    lede: courseFacts?.lede ?? null,
   });
 
   // The course's resolved sell media — hero still + clip, intro and reel
@@ -456,11 +540,139 @@
   }
 
   /**
+   * The page's SHAPE problems that must not reach a published page, as copy.
+   *
+   * `validatePageShape` was written for this call site and had none: its
+   * `PageShapeIssue` doc states that "`error` shapes must not reach a PUBLISHED
+   * page — the builder's publish action blocks on them and the service rejects
+   * them", and the publish action had never heard of it. Two of those shapes are
+   * one gesture away — `sections: []` is what `createJourney` INSERTS, and a
+   * second hero is one press of Duplicate.
+   *
+   * ONLY THE `error` SEVERITIES BLOCK. `no-hero` and `hero-not-first` are `warn`
+   * by design — opening on an ache, or putting a turn above the hero, are real
+   * editorial choices — and a publish button is the wrong place to argue with a
+   * creator's taste: blocking on taste is how a gate gets worked around. Stated
+   * honestly, nothing surfaces the two warnings ANYWHERE yet; their inline home is
+   * the section rail or the canvas frame, and it is not this function.
+   *
+   * ONE MESSAGE PER CODE, because "this page cannot be published" gives a creator
+   * nothing to do next. An unknown future `error` code still BLOCKS, with the
+   * generic message: a widened enum cannot open a hole here by defaulting to
+   * silence, and the fallback is a reminder to add the specific copy.
+   */
+  function shapeBlockers(): string[] {
+    return validatePageShape(pageBuilder.sections)
+      .filter((issue) => issue.severity === 'error')
+      .map((issue) => {
+        if (issue.code === 'empty-page')
+          return m.studio_builder_publish_blocked_empty();
+        if (issue.code === 'multiple-hero')
+          return m.studio_builder_publish_blocked_two_heroes();
+        if (issue.code === 'no-cta')
+          return m.studio_builder_publish_blocked_no_cta();
+        return m.studio_builder_publish_blocked_generic();
+      });
+  }
+
+  /**
+   * Is this section prop a COPY field — words a visitor reads and the creator can
+   * edit — rather than an appearance choice?
+   *
+   * The discriminator is the inspector's own control type, because that is what
+   * decides whether the value is prose: `text`/`textarea` are the copy controls,
+   * while `select`/`toggle`/`number`/`media` are choices. Reading it from
+   * `section-fields.ts` rather than re-listing keys here means a field that
+   * changes control type cannot leave a stale list behind.
+   */
+  function isSeedCopyField(type: string, key: string): boolean {
+    const field = fieldsForSectionType(type).find((f) => f.key === key);
+    return field?.control === 'text' || field?.control === 'textarea';
+  }
+
+  /**
+   * THE PUBLISH GATE — the one function both ways of publishing go through.
+   *
+   * TWO CHECKS, TWO DIFFERENT STRENGTHS, in this order:
+   *
+   *  1. THE SHAPE BLOCKS. An empty page, two heroes, or a sales page with nowhere
+   *     to press are not choices, they are mistakes with no reading that helps a
+   *     visitor — so this refuses, names them, and nothing is written.
+   *  2. THE PLACEHOLDER COPY ASKS. `seededSections` reports the sections still
+   *     holding the catalogue's OWN words verbatim — "A common question?",
+   *     "First L.", "2,400 and counting". That last one is not merely unpolished:
+   *     it is a specific factual claim about the creator's business that the
+   *     creator never made. But "identical to the catalogue's" is a strong hint
+   *     and not a certainty (a creator may legitimately want "Who holds this" as
+   *     their guide heading), so it is ONE confirm naming the sections, and accept
+   *     proceeds. Never a block.
+   *
+   * SHAPE FIRST, because asking "publish anyway?" about placeholder copy on a page
+   * that cannot be published at all is a question with no useful answer.
+   *
+   * THE PENDING SECTIONS, not the saved baseline: publish saves the draft, so the
+   * copy about to go public is the pending copy.
+   *
+   * `confirm()` rather than a modal, matching the archive confirm below it — the
+   * builder has one destructive-confirmation idiom and this is it. A modal is the
+   * right eventual home for a message naming several sections; it is not worth a
+   * second idiom in the same top bar today.
+   */
+  function passesPublishGate(): boolean {
+    const blockers = shapeBlockers();
+    if (blockers.length > 0) {
+      toast.error(blockers.join(' '));
+      return false;
+    }
+
+    // COPY ONLY, and this filter is load-bearing — MEASURED against the live
+    // fixture, not assumed. `seededSections` reports every key whose seed is a
+    // non-empty STRING, and the catalogue seeds string ENUMS as well as copy:
+    // `hero.bg` seeds `'ember'`, which is the Background SELECT's default. So
+    // every one of the seven seeded pages here reported its hero as "still
+    // holding the example words it came with" on the strength of an atmosphere
+    // choice — a false positive on the loudest section of every page, in a
+    // confirm whose whole value is that a creator believes it.
+    //
+    // `text`/`textarea` are the two copy controls (`section-fields.ts`), so a
+    // seeded key is only WORDS if its field is one of them. A seeded key with no
+    // field at all is also skipped deliberately: it is unauthorable in this
+    // builder, so naming its section would send a creator looking for a control
+    // that does not exist.
+    const seeded = seededSections(pageBuilder.sections).filter((section) =>
+      section.keys.some((key) => isSeedCopyField(section.type, key))
+    );
+    if (seeded.length === 0) return true;
+
+    // DEDUPED and ORDERED as the page reads: two Proof sections both untouched
+    // must not name "Proof, Proof", and the order is the order a visitor meets
+    // them, so the creator can walk down the page fixing them.
+    const labels: string[] = [];
+    for (const section of seeded) {
+      if (!labels.includes(section.label)) labels.push(section.label);
+    }
+
+    // Paraglide 1.11.8 has NO plural support, so the singular is its own key and
+    // the call site chooses — never an ICU `{count, plural, …}`, which does not
+    // compile in this project.
+    return labels.length === 1
+      ? confirm(m.studio_builder_confirm_seed_copy_one({ section: labels[0] }))
+      : confirm(
+          m.studio_builder_confirm_seed_copy({ sections: labels.join(', ') })
+        );
+  }
+
+  /**
    * Publish = flip the status and save. The success toast fires ONLY when the
    * write landed; on failure the status is rolled back to what it was so the
    * builder does not sit there claiming "Published" over an unpublished page.
+   *
+   * GATED FIRST, and before the status is written: a refused publish must leave
+   * the draft exactly as it was, and writing-then-rolling-back would leave it
+   * dirty (and the history holding a step) for a publish that never happened.
    */
   async function handlePublish(): Promise<void> {
+    if (!passesPublishGate()) return;
     const previousStatus = pageBuilder.pending?.status;
     pageBuilder.updateMeta('status', 'published');
     if (!(await handleSave())) {
@@ -530,12 +742,27 @@
    * the same change.
    */
   /**
-   * Write the status select's choice, confirming the one value that takes a page
-   * off the public site. Re-reads the draft on cancel so the control cannot show
-   * a status the page does not have.
+   * Write the status select's choice, gating the two values that change what the
+   * public site holds. Re-reads the draft on refusal so the control cannot show a
+   * status the page does not have.
+   *
+   * THIS IS THE OTHER WAY TO PUBLISH, and a gate on the Publish button alone is a
+   * gate with a dropdown beside it: choosing "Published" here writes
+   * `status: 'published'` into the draft, and the next Save takes the page live
+   * and cascades the subject course to published with it. So the same
+   * {@link passesPublishGate} runs — the shape blockers and the placeholder-copy
+   * confirm — for the same reason and with the same strengths.
+   *
+   * Only `published` and `archived` are gated. Draft has nothing to check: it
+   * takes a page OFF the public site, which is the one direction that cannot ship
+   * unauthored copy or a broken shape to a visitor.
    */
   function setStatus(select: HTMLSelectElement): void {
     const next = select.value as PageStatus;
+    if (next === 'published' && !passesPublishGate()) {
+      select.value = pageBuilder.pending?.status ?? 'draft';
+      return;
+    }
     if (
       next === 'archived' &&
       !confirm(m.studio_builder_confirm_archive())
@@ -786,6 +1013,7 @@
           {offer}
           {checkoutUrl}
           {dashboardUrl}
+          {testimonials}
           {sellPreview}
         />
       </section>

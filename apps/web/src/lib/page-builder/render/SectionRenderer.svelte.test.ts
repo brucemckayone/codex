@@ -288,3 +288,143 @@ describe('SectionRenderer (mount)', () => {
     unmount(component);
   });
 });
+
+/**
+ * THE COURSE TITLE, PRINTED ONCE PER PAGE (`Codex-i9pzs`) — asserted on a whole
+ * mounted page, which is the only level that can see the defect.
+ *
+ * Five sections were each independently fixed away from a hardcoded editorial
+ * fallback and all five landed on the same replacement, the course's own title.
+ * Each fix is locally right; the aggregate served `<h1>Bone Deep</h1>` followed by
+ * up to four `<h2>Bone Deep</h2>` — to a reader a rendering fault, to a crawler a
+ * keyword-stuffed outline with no hierarchy.
+ *
+ * WHY HERE AND NOT IN A SECTION'S OWN TEST. Each of the five section tests
+ * asserts what that section does with the `titleFallback` PROP, which is the
+ * per-section half. Whether the PAGE hands the prop to exactly one section is an
+ * array-level property, and a section test cannot see it: it would pass with all
+ * five sections printing the title, because each one received a prop that told it
+ * to. This block mounts the array.
+ */
+describe('SectionRenderer — the course title is printed once (Codex-i9pzs)', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /**
+   * The tag of every heading whose whole text IS the course title.
+   *
+   * Whitespace-normalised because `HeroSection` renders its headline as one span
+   * per word, each with a trailing space for the kinetic split — so a raw
+   * `textContent` comparison would silently never match the `<h1>` and the test
+   * would be vacuous in the one direction that matters.
+   */
+  function titleHeadings(): string[] {
+    return [...document.body.querySelectorAll('h1, h2, h3')]
+      .filter(
+        (h) =>
+          (h.textContent ?? '').replace(/\s+/g, ' ').trim() ===
+          context.course.title
+      )
+      .map((h) => h.tagName.toLowerCase());
+  }
+
+  it('hands the claim to the first unauthored section and leaves the rest quiet', () => {
+    // The reachable duplication, and the shape the finding was filed against: the
+    // hero is authored, so the claim falls to `introVideo` (first-wins among the
+    // other four) — and `invite`, also blank, must NOT print the title too.
+    const component = mount(SectionRenderer, {
+      target: document.body,
+      props: {
+        sections: [
+          {
+            id: 's-hero',
+            type: 'hero',
+            enabled: true,
+            props: { headline: 'The body remembers' },
+          },
+          { id: 's-iv', type: 'introVideo', enabled: true, props: {} },
+          { id: 's-invite', type: 'invite', enabled: true, props: {} },
+        ],
+        context,
+      },
+    });
+    flushSync();
+
+    expect(titleHeadings()).toEqual(['h2']);
+    expect(
+      document.body.querySelector('[data-section-type="introVideo"] h2')
+    ).not.toBeNull();
+    expect(
+      document.body.querySelector('[data-section-type="invite"] h2')
+    ).toBeNull();
+    // The invite still RENDERS — this hides a heading, not a conversion section.
+    expect(
+      document.body.querySelector('[data-section-type="invite"]')
+    ).not.toBeNull();
+
+    unmount(component);
+  });
+
+  it('gives a heading-less HERO the claim wherever it sits, and nothing else prints it', () => {
+    // The hero's `<h1>` cannot self-hide (the headline is split into words, so an
+    // absent one is not renderable), which is why `claimTitleFallback` runs a
+    // hero pass before first-wins. With the claim on the hero, both blank
+    // sections below it stay quiet.
+    const component = mount(SectionRenderer, {
+      target: document.body,
+      props: {
+        sections: [
+          { id: 's-iv', type: 'introVideo', enabled: true, props: {} },
+          { id: 's-hero', type: 'hero', enabled: true, props: {} },
+          { id: 's-invite', type: 'invite', enabled: true, props: {} },
+        ],
+        context,
+      },
+    });
+    flushSync();
+
+    expect(titleHeadings()).toEqual(['h1']);
+    expect(
+      document.body.querySelector('[data-section-type="invite"] h2')
+    ).toBeNull();
+
+    unmount(component);
+  });
+
+  it('prints it nowhere when every fallback-capable section is authored', () => {
+    // The live state of all seven seeded pages — hero `headline`, map `heading`
+    // and invite `heading` are all stored — so the claim is `null` and the title
+    // appears in no heading at all.
+    const component = mount(SectionRenderer, {
+      target: document.body,
+      props: {
+        sections: [
+          {
+            id: 's-hero',
+            type: 'hero',
+            enabled: true,
+            props: { headline: 'The body remembers' },
+          },
+          {
+            id: 's-invite',
+            type: 'invite',
+            enabled: true,
+            props: { heading: 'The ground' },
+          },
+        ],
+        context,
+      },
+    });
+    flushSync();
+
+    expect(titleHeadings()).toEqual([]);
+    expect(
+      document.body
+        .querySelector('[data-section-type="invite"] h2')
+        ?.textContent?.trim()
+    ).toBe('The ground');
+
+    unmount(component);
+  });
+});

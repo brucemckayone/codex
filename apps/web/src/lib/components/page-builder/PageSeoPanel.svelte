@@ -170,10 +170,27 @@
     color: var(--color-text);
   }
 
+  /* NO `--color-text-muted` in this panel, deliberately, and the guard in
+     `components/page-builder/panel-contrast.test.ts` now enforces it
+     (Codex-6nb7i). Measured on the studio panel surface by canvas readback:
+     muted at `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and
+     13px is not WCAG "large text". Secondary reads 7.81 / 10.21.
+     WHAT WAS MUTED HERE, and this is the most SEO-critical panel in the builder:
+     the address preview and "Shown in search results & the browser tab. Unset ->
+     the page title." (`.panel__hint`), the "Share image" group heading
+     (`.panel__group`), the "1200x630 - media library soon" slot note
+     (`.panel__media-copy small`) and the panel subtitle. Every one of them tells
+     the creator what a field does or what happens if it is left unset — the exact
+     register O22 records as this builder's house standard — so none is decoration.
+     NOTE the ratio is a function of the ORG's brand background, not a constant:
+     under `[data-org-brand]`, `--color-text-muted` derives from `--brand-bg`
+     (tokens/org-brand.css) while `--color-text-secondary` mixes back from
+     `--color-text` — which is what makes the swap safe on every brand rather
+     than lucky on one. */
   .panel__sub {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__field {
@@ -224,7 +241,7 @@
 
   .panel__hint {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
@@ -238,7 +255,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__media {
@@ -267,7 +284,7 @@
   }
 
   .panel__media-copy small {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-size: var(--text-xs);
   }
 </style>

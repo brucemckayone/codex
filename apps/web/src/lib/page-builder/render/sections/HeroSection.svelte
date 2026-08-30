@@ -499,7 +499,10 @@
 
   A DEMOTION, NOT A DROP: an author who duplicated a hero must still be able to see
   and delete it. The publish-time answer to "you have two heroes" is
-  `validatePageShape`'s `multiple-hero` error.
+  `validatePageShape`'s `multiple-hero` error, which the builder's publish action
+  now blocks on. The demotion is still what keeps the outline valid on pages
+  ALREADY published with two heroes, and on any page written straight through the
+  API — nothing server-side reads that validator.
 -->
 {#snippet headlineNode()}
   <svelte:element

@@ -33,6 +33,9 @@
  * via `close()` first (mirrors `monetisation-store.test.ts`).
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JourneySellMedia } from './journey-queries';
 
@@ -486,5 +489,60 @@ describe('sell-media store · read failure', () => {
 
     expect(sellMedia.loadError).toBeNull();
     expect(sellMedia.loaded).toBe(false);
+  });
+});
+
+/**
+ * `loadError` HAS A CONSUMER — and until this guard it did not.
+ *
+ * The field, its getter and the two `.catch` legs that populate it were all
+ * present, tested (above) and reached by NOTHING: `PageMediaPanel.svelte` had no
+ * `loadError` reference at all, so a failed library read still rendered as six
+ * empty pickers — precisely the state the field was added to distinguish. The
+ * sibling had been wired the whole time (`monetisation.loadError` →
+ * `PagePricingPanel.svelte`), which is what makes this a wiring omission rather
+ * than an open design question.
+ *
+ * WHY THE ASSERTION LIVES HERE, in the store's own suite rather than beside the
+ * component: the file partition for this round did not give the panel's directory
+ * a test file, and the invariant belongs to the field anyway — "this state is
+ * recorded AND it is sayable" is one fact, and splitting it is how the recorded
+ * half came to exist alone. Move it beside the panel when that suite exists.
+ *
+ * Source text, not a mount: the panel renders six Melt comboboxes and three
+ * multipart `form()` bindings, none of which jsdom can stand up, and the thing
+ * that regresses is a deleted branch.
+ */
+describe('sell-media store · the read failure is RENDERED', () => {
+  const PANEL = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'components/page-builder/PageMediaPanel.svelte'
+    ),
+    'utf8'
+  );
+
+  it('the media panel branches on loadError', () => {
+    expect(PANEL).toMatch(/\{#if sellMedia\.loadError\}/);
+  });
+
+  it('announces it, and renders it ABOVE the slots it explains', () => {
+    // `role="alert"`, matching `PagePricingPanel`: the failure explains every
+    // frame and every picker below it, and a creator who has just watched their
+    // media "disappear" is the one person who must not have to find it.
+    const branch = PANEL.slice(PANEL.indexOf('{#if sellMedia.loadError}'));
+    expect(branch.slice(0, 400)).toContain('role="alert"');
+    expect(PANEL.indexOf('{#if sellMedia.loadError}')).toBeLessThan(
+      PANEL.indexOf('{#each SLOTS as entry')
+    );
+  });
+
+  it('prints the store’s own reason, never a generic failure line', () => {
+    // The reason is the whole value of the field: "Could not list your media
+    // library." and "Could not read the media attached to this journey." are
+    // different facts with different next actions.
+    const branch = PANEL.slice(PANEL.indexOf('{#if sellMedia.loadError}'));
+    expect(branch.slice(0, 400)).toContain('{sellMedia.loadError}');
   });
 });

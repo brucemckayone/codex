@@ -190,7 +190,62 @@
      near-step function about l=0.62 with a narrow transition band, rather than a
      gradual ramp that would spend most of its range illegible. Chroma is damped
      to a quarter so the text carries a hint of the brand's warmth without
-     reading as coloured text. */
+     reading as coloured text.
+
+     ── THIS DERIVATION HAS A PRECONDITION ON `--brand-bg`, AND IT IS NOT MET
+     ── FOR EVERY COLOUR A CREATOR CAN PICK. Recorded rather than fixed, with
+     ── the measurements that decided it (round 4, WT-C).
+
+     THE DEFECT. Inside the transition band the heading's lightness lands on the
+     ink's OWN, so the derivation actively produces an invisible page. Measured
+     with the model in `journey-design.test.ts` (the one validated against this
+     file's published browser numbers): `--brand-bg: #bd618f` renders every
+     heading at **1.27:1**, `#808080` at 3.52:1, `#9C6B4F` at 4.02:1. Swept
+     exhaustively over all 16 777 216 sRGB inks, 14.36% put the heading under
+     4.5:1, floor 1.00:1. `--jp-pole-b` (above) is the identical expression, so
+     `surface: invert` fails the same way, and the whole ladder hangs off
+     `--jp-heading`, so every rung collapses together.
+
+     WHY THE MULTIPLIER IS *NOT* THE FIX, which is the trap this note exists to
+     close. Raising `* 100` to `* 1000` narrows the band tenfold but MOVES it
+     rather than removing it, and inside the new band an ink that used to take
+     the near-black FLOOR now takes the near-white CEILING. Swept exhaustively:
+       * 100   floor 1.00:1   under 4.5: 2 409 483 (14.36%)
+       * 1000  floor 1.00:1   under 4.5: 2 484 004 (14.81%)   116 339 inks WORSE
+       * 1e6   floor 1.01:1   under 4.5: 2 492 478 (14.86%)   118 623 inks WORSE
+     Worst single regression at * 1000: `#05a22b` 6.16:1 → 1.01:1. So the obvious
+     "make it a truer step" change makes the token measurably worse on the space
+     a creator actually picks from. `journey-design.test.ts` pins all six of
+     those numbers so the change cannot be re-proposed as an improvement.
+
+     WHY THE PIVOT IS NOT THE FIX EITHER. The failure is that OKLCH `l` is a
+     PERCEPTUAL lightness while WCAG contrast is relative LUMINANCE, and for
+     saturated hues the two disagree by enough to invert the decision — the same
+     root cause `tokens/org-brand.css` fixed for `--color-text-on-brand` by
+     deciding on luminance under an `@supports` guard. That escape is NOT
+     available here: `r`/`g`/`b` are in scope only inside `rgb(from …)` and
+     `l`/`c`/`h` only inside `oklch(from …)`, so a luminance decision cannot also
+     carry the ink's hue and damped chroma, and dropping the hue term is the
+     design this file is for. `--jp-on-ember` DOES take that route below,
+     precisely because its chroma is already zeroed and there is nothing to lose.
+
+     AND EVEN A PERFECT HEADING WOULD NOT MAKE A MID INK USABLE. `--jp-faint` is
+     a 58% mix of heading into ink, so its ratio is bounded by the two ends'
+     separation, not by the step: it is under 4.5:1 for 54.72% of all sRGB inks
+     at EVERY multiplier tested (identical count in all three sweeps above). A
+     mid-luminance page background cannot carry this ladder however the step is
+     written.
+
+     SO THE FIX BELONGS WHERE THE VALUE IS CHOSEN, not here. The ladder is valid
+     for an ink whose relative luminance is away from WCAG's black/white
+     crossover (0.1791); nothing today constrains `branding_settings
+     .background_color_hex` or a page's `brandOverrides.backgroundColor`, so a
+     creator can pick a mid grey and publish an invisible page with no warning.
+     That guard is a brand-editor change (`components/brand-studio/rail/
+     contrast.ts` already models the sibling rule for the on-brand ink) and is
+     handed off, not done here. The three seeded orgs are nowhere near the band —
+     `#F3F0E7` is OKLCH L 0.955 and `#200000` is 0.153, measuring 18.38:1 and
+     17.53:1 — which is why four rounds of review never saw it. */
   --jp-heading: oklch(
     from var(--jp-ink) clamp(0.05, (0.62 - l) * 100, 0.96) calc(c * 0.25) h
   );
@@ -246,20 +301,35 @@
      in the ROOT-ONLY block above, not here — see the note there (Codex-8jve9).
      A `.jp-sec` inherits them already resolved. The two rungs BELOW them stay
      here because they must re-derive per section. */
-  /* The upper bound is 1, not 0.98, and that single character is the whole of
-     this fix. `--color-text-on-brand` uses `clamp(0, (0.62 - l) * 1000, 1)`;
+  /* THE FALLBACK DECLARATION. The `@supports` block at the foot of this file
+     supersedes it wherever `pow()` works inside a relative colour; this form is
+     what an older engine gets, and it is deliberately UNCHANGED — see WHY THE
+     MULTIPLIER STAYS AT * 100 there.
+
+     HISTORY, which is accurate and should not be re-litigated. The upper bound
+     is 1, not 0.98, and that one character was round 3's fix (commit 5614cbe0):
      this token used to stop at 0.98, so on a mid-lightness fill it handed back
      #f8f8f8 where the platform hands back #ffffff. On `studio-alpha`'s #E11D48
      (OKLCH L = 0.5858) that is 4.45:1 versus 4.70:1 — one side of the 4.5 floor
-     each. The bead and the `KNOWN_OPEN` note both recorded this token as already
-     mirroring `--color-text-on-brand`, which is why the fix was scoped as a
-     platform-wide design decision and deferred; measured (WT-7, round 3) they
-     were never the same expression. The PIVOT genuinely does not fix it — 0.60,
-     0.62 and 0.65 all measure identical because #E11D48 saturates every one of
-     them — so the earlier finding was right about the threshold and wrong about
-     the range. Note the floor stays 0.05 rather than the platform's 0: this is
-     now a mirror at the light end only, deliberately, because darkening the ink
-     on a light fill is a separate sweep. */
+     each — which is why the two `studio-alpha` entries left `KNOWN_OPEN` in
+     `journey-design.test.ts`. They genuinely stopped failing.
+
+     WHAT THAT FIX DID NOT SETTLE, and what the note used to read as though it
+     had: the CEILING was one of three numbers in this expression, and only the
+     ceiling and the pivot were ever examined. The PIVOT indeed does not help —
+     0.60, 0.62 and 0.65 measure identical because #E11D48 saturates every one of
+     them — but the MULTIPLIER was never looked at, and at `* 100` the ramp
+     between black and white is 0.01 wide in OKLCH L, so a brand landing inside
+     it gets a genuine MID GREY rather than either end. Swept exhaustively over
+     all 16 777 216 sRGB brands: 718 821 of them (4.285%) put this label under
+     4.5:1 on its own fill, floor **1.00:1** — an invisible label. `#059669`
+     (emerald-600) measures 2.41:1. So one brand's 4.43 was repaired while a
+     band of brands stayed at 1.00, and the file read as settled.
+
+     The lesson the `KNOWN_OPEN` note already carries is the right one and was
+     applied only half way: a token DOCUMENTED as a mirror of another is not a
+     mirror until both expressions have been read side by side. Read side by
+     side, THREE of the four numbers still differed. */
   --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0);
 
   /* ── the ember AS TEXT ───────────────────────────────────────────────────
@@ -455,4 +525,88 @@
   --color-border: var(--jp-line);
   --color-border-strong: var(--jp-line-strong);
   --color-border-hover: var(--jp-line-hover);
+}
+
+/* ── `--jp-on-ember`, DECIDED ON LUMINANCE — the mirror finished ─────────────
+   (Codex-kdsuo · Codex-g7ipk, round 4)
+
+   The accent plate's label — `--jp-accent-on-fill`, so InviteSection's
+   recommended-tier badge, IntroVideoSection's solid play button, GuideSection's
+   dot control and ProofSection's numeral — written on `--jp-ember`, i.e. on the
+   creator's own brand colour. Nothing else in the palette has a page-background
+   term in its ratio: this pair is the brand against itself, so it is the one rung
+   a creator can break on their own with no warning.
+
+   WHY THIS EXISTS RATHER THAN AN EDIT TO THE DECLARATION ABOVE. Identical
+   reasoning, and an identical `@supports` condition, to
+   `tokens/org-brand.css`'s `--color-text-on-brand` — read that file's note for
+   the full argument. In short: relative colour needs Chrome 119+, but `pow()`
+   INSIDE a relative colour needs Chrome 125+, and an unguarded override would
+   not degrade to the declaration above. A custom property accepts almost any
+   token stream at parse time and only fails when SUBSTITUTED, at which point the
+   consuming `color` declaration is invalid at computed-value time and falls back
+   to `unset` — the label would lose its colour entirely rather than keep the
+   OKLCH step. The guard makes the change MONOTONIC: no engine ends up worse than
+   it is today.
+
+   WHY LUMINANCE IS NOT MERELY BETTER BUT PROVABLY SUFFICIENT. White and black
+   contrast equally against a fill whose relative luminance is
+   sqrt(1.05 * 0.05) - 0.05 = 0.1791, where both measure 4.58:1. Pick the ink by
+   which side of 0.1791 the fill sits on and the worst attainable outcome IS that
+   4.58:1. Swept over all 16 777 216 sRGB brands:
+
+     oklch step, * 100 (above)   floor 1.00:1   under 4.5: 718 821 (4.285%)
+     LUMINANCE step (here)       floor 4.58:1   under 4.5: 0        (0.000%)
+
+   and against the * 100 form it regresses ZERO brands — it is a strict
+   improvement everywhere, not a trade. Every published figure is preserved:
+   of-blood-and-bones #A62B0C 7.07:1, studio-beta #2563EB 5.17:1, studio-alpha
+   #E11D48 4.70:1, #e1233b 4.66:1, golden #552e8e 9.69:1, platform #c24129
+   5.14:1, #f47d67 7.96 → 7.98:1. The brands that MOVE are the ones that were
+   failing: #059669 2.41 → 5.57:1, #0D9488 5.59 → 5.61:1.
+
+   WHY THE MULTIPLIER ABOVE STAYS AT * 100 rather than being raised to match.
+   Because measured, it would make things worse for a real slice of the gamut:
+   `* 1000` leaves the floor at 1.00:1, moves the under-4.5 count only from
+   718 821 to 694 679, and REGRESSES 70 907 brands — worst case `#149b0b`
+   5.70:1 → 1.00:1, because an ink that took the near-black floor now takes the
+   white ceiling on a light green fill. `* 1e6` is worse again (floor 1.03,
+   71 002 regressions). The band narrows and moves; it never leaves. So the
+   fallback is left exactly where it was and the FIX is the change of decision
+   quantity, not a steeper ramp. `journey-design.test.ts` pins all of these
+   numbers so the steeper ramp cannot be re-proposed as an improvement.
+
+   THE KNEE IS DROPPED, THE OFFSET IS NOT. `pow((c + 0.055) / 1.055, 2.4)` is
+   sRGB's transfer function exactly for c >= 0.04045 and over-estimates by at most
+   0.00083 below it, which moves the decision boundary by under 0.001 in
+   luminance. Do NOT "simplify" it to `pow(c / 255, 2.4)` — org-brand.css records
+   that dropping the offset re-introduces 468 738 failures.
+
+   Both ends are 0 and 1 here, not the 0.05 floor above: with chroma already
+   zeroed there is no hue to keep in gamut, and this is a TRUE mirror of the
+   platform token rather than the light-end-only one the note above describes.
+   The difference is unmeasurable anyway — OKLCH L 0.05 is luminance 0.000125.
+
+   `r`, `g` and `b` are in scope ONLY inside `rgb(from …)` — the same constraint
+   this file documents for `l` — so the expression cannot be hoisted into a helper
+   property and is written once per channel.
+
+   SELECTOR LIST AND ORDER, both load-bearing. It repeats the shared block's list
+   verbatim so the override reaches the palette ROOT *and* every `.jp-sec`: the
+   shared block re-declares this property on every section at (0,2,0), and a
+   rule matching only the root would be thrown away there. `@supports` adds no
+   specificity, so this wins purely by coming later in the file — keep it last.
+   The dark pole needs no twin: it re-points `--jp-ember` at the root only, and
+   substitution happens per element after the cascade picks a winner, so this
+   re-derives from whichever ember won for free. */
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  .journey-palette.journey-palette.journey-palette,
+  .journey-palette .jp-sec {
+    --jp-on-ember: rgb(
+      from var(--jp-ember)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+  }
 }

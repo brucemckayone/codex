@@ -787,27 +787,64 @@ const mix = (a: Oklab, b: Oklab, p: number): Oklab => [
 ];
 
 /**
- * `oklch(from <c> clamp(0.05, (<pivot> - l) * 100, <ceil>) calc(c * <k>) h)` —
+ * `oklch(from <c> clamp(0.05, (<pivot> - l) * <mult>, <ceil>) calc(c * <k>) h)` —
  * the auto-contrast step function `--jp-heading` and `--jp-pole-b` share.
+ *
+ * `mult` defaults to the 100 both declarations use, so every existing caller
+ * models the shipped CSS. It is a parameter only so the `--jp-heading` sweep
+ * below can MEASURE the multiplier a future reader will reach for — the change
+ * looks like a strict improvement and is not.
  */
 function autoContrast(
   base: Oklab,
   pivot: number,
   ceil: number,
-  chromaScale: number
+  chromaScale: number,
+  mult = 100
 ): Oklab {
   const [L, a, b] = base;
   const C = Math.hypot(a, b);
   const H = Math.atan2(b, a);
-  const L2 = Math.min(ceil, Math.max(0.05, (pivot - L) * 100));
+  const L2 = Math.min(ceil, Math.max(0.05, (pivot - L) * mult));
   const C2 = C * chromaScale;
   return [L2, C2 * Math.cos(H), C2 * Math.sin(H)];
 }
 
-/** `oklch(from <c> clamp(0.05, (0.6 - l) * 100, 0.98) 0 0)` — chroma zeroed. */
-function autoContrastGrey(base: Oklab, pivot: number, ceil: number): Oklab {
-  const L2 = Math.min(ceil, Math.max(0.05, (pivot - base[0]) * 100));
+/**
+ * `oklch(from <c> clamp(0.05, (<pivot> - l) * <mult>, <ceil>) 0 0)` — chroma
+ * zeroed. `mult` is a parameter because the whole `--jp-on-ember` finding turns
+ * on it: at 100 the ramp between black and white is 0.01 wide in OKLCH L and a
+ * fill landing inside it gets a genuine MID GREY. See
+ * `--jp-on-ember`'s tests below, which measure every multiplier.
+ */
+function autoContrastGrey(
+  base: Oklab,
+  pivot: number,
+  ceil: number,
+  mult = 100,
+  floor = 0.05
+): Oklab {
+  const L2 = Math.min(ceil, Math.max(floor, (pivot - base[0]) * mult));
   return [L2, 0, 0];
+}
+
+/**
+ * `rgb(from <c> calc(255 * clamp(0, (0.1791 - <luminance>) * 1e6, 1)) …)` — the
+ * @supports form of `--jp-on-ember`, and the same rule org-brand.css uses for
+ * `--color-text-on-brand`.
+ *
+ * White and black contrast EQUALLY against a fill whose relative luminance is
+ * sqrt(1.05 * 0.05) - 0.05 = 0.1791, both at 4.58:1. Deciding on which side of
+ * that the fill sits cannot produce an AA failure for any sRGB fill — which is
+ * exactly what an OKLCH-lightness pivot cannot promise, because `l` is
+ * perceptual and the ratio is computed on luminance.
+ *
+ * `* 1e6` saturates the clamp for every representable colour, so the result is
+ * pure black or pure white and this needs no ceiling parameter.
+ */
+const WCAG_INK_CROSSOVER = 0.1791;
+function autoContrastLuminance(base: Oklab): Oklab {
+  return relLum(oklabToLin(base)) < WCAG_INK_CROSSOVER ? [1, 0, 0] : [0, 0, 0];
 }
 
 const relLum = (lin: LinRgb): number =>
@@ -821,6 +858,40 @@ function ratio(fg: Oklab, bg: Oklab): number {
   const [hi, lo] = a > b ? [a, b] : [b, a];
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/**
+ * A GENERATED sweep of the colour space a creator actually picks from — the sRGB
+ * cube at a stride of 5, i.e. 52³ = 140 608 colours.
+ *
+ * WHY THIS EXISTS, and it is the whole reason two contrast defects survived four
+ * rounds of review: every ratio in this file was measured against a hand-written
+ * list of eight brand/pole rows. Their inputs are five ember hexes at OKLCH L
+ * 0.405, 0.555, 0.723, 0.586 and 0.546, and four backgrounds at L 0.947, 0.164,
+ * 0.968 and 0.223. The failing regions of both auto-contrast steps are narrow
+ * bands that NONE of those nine values enters, so the assertions were green over
+ * 100 combinations that never approached their floors. A generated sweep cannot
+ * be blind by construction.
+ *
+ * WHY sRGB AND NOT OKLCH. The brand editor takes a hex, so the pickable space is
+ * the 8-bit cube; an OKLCH grid at any practical step misses colours that land
+ * inside a narrow ramp and reports a floor that is too optimistic — measured, an
+ * OKLCH grid at L step 0.001 put `--jp-heading`'s floor at 3.06:1 where the
+ * exhaustive 8-bit answer is 1.00:1. Stride 5 rather than 1 keeps the suite fast;
+ * every headline number quoted in the comments below was re-derived at stride 1
+ * over all 16 777 216 colours and is labelled as such.
+ */
+const BRAND_GRID: Oklab[] = (() => {
+  const out: Oklab[] = [];
+  const lin = Array.from({ length: 256 }, (_, i) => srgbToLin(i / 255));
+  for (let r = 0; r < 256; r += 5) {
+    for (let g = 0; g < 256; g += 5) {
+      for (let b = 0; b < 256; b += 5) {
+        out.push(linToOklab([lin[r], lin[g], lin[b]]));
+      }
+    }
+  }
+  return out;
+})();
 
 /** The whole `--jp-*` ladder, derived from one ink exactly as the CSS does. */
 interface Ladder {
@@ -858,7 +929,12 @@ function ladderFrom(ink: Oklab, ember: Oklab): Ladder {
     lineHover: mix(ink, heading, 0.56),
     ember,
     emberText: mix(ember, heading, 0.55),
-    onEmber: autoContrastGrey(ember, 0.6, 1),
+    // The @supports form, because it is what every browser this product targets
+    // actually paints — and what every ratio in `04-contrast-baseline.md` was
+    // measured in. The OKLCH fallback is modelled explicitly, and compared
+    // against this one, in the `--jp-on-ember` describe below; modelling the
+    // fallback HERE would make the sweep measure a page no visitor sees.
+    onEmber: autoContrastLuminance(ember),
   };
 }
 
@@ -905,7 +981,9 @@ describe('the colour model matches the CSS it claims to model', () => {
     ],
     [
       '--jp-on-ember',
-      // Ceiling 1, not 0.98. See the note on `KNOWN_OPEN` below.
+      // The FALLBACK form. Ceiling 1, not 0.98 — round 3's fix. The live form is
+      // the @supports luminance override, asserted separately below because
+      // `declarationsOf` returns both and `toContain` would hide a swap.
       'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)',
     ],
   ];
@@ -1347,25 +1425,51 @@ function sweep(label: string, bg: string, emberHex: string): Failure[] {
  * background at all: `#E11D48` is OKLCH L = 0.5858, just under `--jp-on-ember`'s
  * 0.60 pivot, so the label resolved to near-white on a mid-lightness red.
  *
- * RESOLVED in round 3 by raising `--jp-on-ember`'s clamp CEILING
- * from 0.98 to 1 — see the comment on the token in `journey-palette.css`. The
- * original analysis was RIGHT that no PIVOT fixes it (0.60, 0.62 and 0.65 all
- * measure identical, because the fill's lightness saturates every threshold) and
- * wrong about what followed from that: the ceiling, not the pivot, was the
- * difference, and 0.98 versus 1 is 4.45:1 versus 4.70:1 — one side of the 4.5
- * floor each.
+ * Those TWO ENTRIES were genuinely resolved, in round 3 (commit 5614cbe0), by
+ * raising `--jp-on-ember`'s clamp CEILING from 0.98 to 1: 0.98 versus 1 is 4.45:1
+ * versus 4.70:1 on #E11D48, one side of the 4.5 floor each. That analysis was
+ * also RIGHT that no PIVOT fixes it — 0.60, 0.62 and 0.65 measure identical,
+ * because the fill's lightness saturates every threshold. So the emptying of this
+ * set was correct FOR STUDIO-ALPHA and should not be undone.
  *
- * It was also deferred on a premise that measurement did not support — that
- * `--jp-on-ember` mirrors `--color-text-on-brand`, so the same 4.43 hit every
- * primary Button on that org and any fix was therefore a platform-wide design
- * decision. Read side by side they were never the same expression: the platform
- * token is `clamp(0, (0.62 - l) * 1000, 1)`, with a different pivot, multiplier
- * AND ceiling. The blast radius was journey-only throughout. `platform-500
- * #c24129` (4.86) and `studio-beta #2563EB` (4.88) always passed, which is why a
- * single-brand check missed it entirely.
+ * ── BUT THE SET BEING EMPTY WAS READ AS THE TOKEN BEING SETTLED, AND IT WAS NOT
+ * (round 4, WT-C). Recorded here because an empty allow-list with a "RESOLVED"
+ * note beside it is the most convincing false green in this file.
  *
- * The lesson worth keeping: a token DOCUMENTED as a mirror of another is not a
- * mirror until both expressions have been read side by side.
+ * The expression carries FOUR numbers — floor, pivot, multiplier, ceiling — and
+ * only the ceiling and the pivot were ever examined. At `* 100` the ramp between
+ * black and white is 0.01 wide in OKLCH L, and a fill landing inside it gets a
+ * genuine MID GREY rather than either end. Swept over all 16 777 216 sRGB
+ * brands, 718 821 of them (4.285%) put this label under 4.5:1 on its own fill,
+ * floor **1.00:1** — an invisible label. `#059669` (emerald-600) measured
+ * 2.41:1. One brand's 4.43 was repaired while a band of brands stayed at 1.00,
+ * and both this note and the token's own comment read as finished.
+ *
+ * WHY THE SWEEP COULD NOT HAVE CAUGHT IT: the modelling was always correct — the
+ * gap was the INPUT SET. The eight rows below feed five ember hexes whose OKLCH L
+ * values are 0.405, 0.555, 0.723, 0.586 and 0.546. None is inside (0.59, 0.60),
+ * so the ramp was never exercised. The generated sweeps added below fix that.
+ *
+ * FIXED, at the level the defect actually sits: `--jp-on-ember` now decides on
+ * RELATIVE LUMINANCE under an `@supports` guard, exactly as
+ * `tokens/org-brand.css` does for `--color-text-on-brand` — 0 failures out of
+ * 16 777 216, floor 4.58:1, and zero regressions against the old form. The
+ * arithmetic, and the measurement showing that merely raising the multiplier
+ * would have made things WORSE for 70 907 brands, is in the
+ * `--jp-on-ember` describe below.
+ *
+ * The premise the deferral rested on was also wrong, and is the reason the whole
+ * bead family exists: `--jp-on-ember` was documented as a mirror of
+ * `--color-text-on-brand`, so a fix looked like a platform-wide design decision.
+ * Read side by side they were never the same expression — the platform token was
+ * `clamp(0, (0.62 - l) * 1000, 1)`, differing in pivot, multiplier AND floor. It
+ * is a true mirror now, and by construction rather than by claim: both files
+ * carry the same luminance rule under the same `@supports` condition, and
+ * `journey-palette.test.ts` asserts the condition strings are identical.
+ *
+ * The lesson worth keeping, now with its second half: a token DOCUMENTED as a
+ * mirror of another is not a mirror until both expressions have been read side by
+ * side — and reading two of four numbers is not reading the expression.
  */
 const KNOWN_OPEN = new Set<string>([]);
 
@@ -1589,5 +1693,396 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     // One entry, and it is the pre-existing HeroSection background-image list.
     // If you are adding to this, fix the declaration instead.
     expect(KNOWN_VIOLATIONS).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. THE PRIMARY CTA — the one element a visitor must read to pay (Codex-kdsuo)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The journey CTA does NOT consume the journey palette. `render/CtaLink.svelte`
+ * is the only styler of `.cta` in the whole page-builder tree — the sole other
+ * `.cta` selector is `InviteSection.svelte`'s `margin-top: auto` — and its
+ * primary variant spends two ORG-BRAND tokens:
+ *
+ *   background: var(--color-brand-primary);
+ *   color:      var(--color-text-on-brand);
+ *
+ * So the sweep above, which measures `--jp-on-ember` on `--jp-ember`, has never
+ * touched it, and neither has anything else in the repo. Codex-kdsuo measured
+ * 4.70:1 on `studio-alpha` at BOTH poles and asked for a pin; the pin was never
+ * added, and in the meantime the DERIVATION was rewritten (org-brand.css now
+ * decides the ink on relative luminance under an `@supports` guard). The element
+ * the bead warned could silently cross the floor is the one element in this
+ * effort whose colour rule changed with nothing watching it.
+ *
+ * The ratio has NO page-background term — the label is pure black or pure white
+ * on the brand fill — which is why the bead measured it width-invariant and,
+ * on an org with no dark brand override, pole-invariant too.
+ *
+ * THREE PARTS, and each fails for a different reason:
+ *   (1) the CONSUMER — a future change that re-routes the CTA onto
+ *       `--jp-accent-fill`/`--jp-accent-on-fill` would be covered by the sweep
+ *       above and must not slip through as a silent re-route;
+ *   (2) the DERIVATION — string-asserted, so the model below cannot drift off
+ *       the stylesheet;
+ *   (3) the RATIO — modelled, with the published figures pinned AND a generated
+ *       brand sweep, because a pin over the eight seeded brands would be green
+ *       and would assert nothing about the risk the bead names.
+ */
+describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
+  const CTA = read('render/CtaLink.svelte');
+
+  /** The declaration body of one selector's rule block in a Svelte `<style>`. */
+  const ruleBody = (css: string, selector: string): string => {
+    const at = css.indexOf(selector);
+    expect(at, `${selector} not found`).toBeGreaterThan(0);
+    const open = css.indexOf('{', at);
+    const close = css.indexOf('}', open);
+    return css.slice(open + 1, close);
+  };
+
+  it('still spends exactly --color-brand-primary and --color-text-on-brand', () => {
+    const body = ruleBody(CTA, ".cta[data-variant='primary'] {");
+    expect(squash(body)).toContain('background: var(--color-brand-primary);');
+    expect(squash(body)).toContain('color: var(--color-text-on-brand);');
+    // And the journey palette is NOT in play here, which is the fact that makes
+    // the sweep above blind to this pair. If a future change re-points the CTA
+    // at the accent ladder this goes red, and the sweep starts covering it.
+    expect(body).not.toContain('--jp-');
+  });
+
+  it('is the only styler of .cta in the section tree', () => {
+    // The pin above is worth nothing if a second rule can repaint the label.
+    // Today the only other `.cta` selector in the eleven sections is
+    // `InviteSection`'s `:global(.cta)`, which sets `margin-top: auto`. A section
+    // that starts painting the CTA's own colours must show up HERE, because the
+    // pin above would keep passing while the page changed.
+    const painters = SECTION_SOURCES.flatMap(({ file, css }) =>
+      [...css.matchAll(/([^{}]*\.cta\)?[^{}]*)\{([^{}]*)\}/g)]
+        .filter(([, , body]) => /(?:^|[;\s])(?:color|background)/.test(body))
+        .map(([, selector]) => `${file} — ${squash(selector)}`)
+    );
+    // Guards the guard: an empty source set would pass this trivially.
+    expect(SECTION_SOURCES).toHaveLength(11);
+    expect(painters).toEqual([]);
+  });
+
+  it('derives the ink on LUMINANCE, with the OKLCH step kept as the fallback', () => {
+    // Four declarations, in file order: the two OKLCH fallbacks (light, dark)
+    // then the two `@supports` luminance overrides. Asserted as a set rather
+    // than with `toContain`, so replacing one with the other cannot pass.
+    const decls = declarationsOf(ORG_BRAND, '--color-text-on-brand');
+    expect(decls).toHaveLength(4);
+
+    expect(decls[0]).toBe(
+      'oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0)'
+    );
+    expect(decls[1]).toBe(
+      'oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0)'
+    );
+
+    // Codex-5wgwf's correction, which must not be lost in either form: the dark
+    // ink is derived from the colour ACTUALLY BEING PAINTED (`--brand-color-dark`
+    // first), not from the light brand.
+    for (const dark of [decls[1], decls[3]]) {
+      expect(dark).toContain('--brand-color-dark');
+    }
+    for (const lum of [decls[2], decls[3]]) {
+      expect(lum).toContain('rgb(');
+      expect(lum).toContain(String(WCAG_INK_CROSSOVER));
+      expect(lum).toContain('* 1e6, 1)');
+      expect(lum).toContain('pow((r / 255 + 0.055) / 1.055, 2.4)');
+    }
+
+    // The same-shape sibling must not drift: an engine that can run one can run
+    // the other, and the two are the same expression over two fills.
+    expect(declarationsOf(ORG_BRAND, '--color-on-interactive')).toHaveLength(4);
+  });
+
+  /** The pair, exactly as painted: pure black or pure white on the brand fill. */
+  const ctaRatio = (brand: string): number => {
+    const fill = hex(brand);
+    return ratio(autoContrastLuminance(fill), fill);
+  };
+
+  it('locks the three measured browser figures (A67 method, both poles)', () => {
+    // Measured by canvas `getImageData` readback with the composite set to
+    // `copy` and the ancestor walked to alpha > 250, on all three seeded orgs at
+    // BOTH poles. Identical at both poles on every one of them: none of the
+    // three sets `dark_mode_overrides.primaryColor`, so `--brand-color-dark` is
+    // absent and dark falls back to the light brand.
+    expect(ctaRatio('#A62B0C')).toBeCloseTo(7.07, 1); // of-blood-and-bones
+    expect(ctaRatio('#2563EB')).toBeCloseTo(5.17, 1); // studio-beta
+    expect(ctaRatio('#E11D48')).toBeCloseTo(4.7, 1); // studio-alpha  +0.20
+    // The figure Codex-kdsuo itself recorded, on a brand this database does not
+    // have. Kept because the bead's argument is about the MARGIN, not the org:
+    // 0.16 is inside the noise of any brand edit.
+    expect(ctaRatio('#e1233b')).toBeCloseTo(4.66, 1);
+  });
+
+  it('cannot be pushed below AA by ANY brand a creator can pick', () => {
+    // THE PART THAT MAKES THIS TEST NON-VACUOUS. A pin over the eight seeded
+    // brands stays green and proves nothing: the OKLCH-lightness form ADMITTED
+    // hard AA failures on legal brands — swept over all 16 777 216 sRGB colours
+    // it put the label under 4.5:1 for 1 420 883 of them (8.47%), worst case
+    // #01a221 at 3.40:1, and in every one of those the OTHER ink would have
+    // passed. #E11D48 (4.70) and #e1233b (4.66) sit just inside the passing edge
+    // of that band, which is why the bead measured 0.16-0.20 of headroom and
+    // could not attribute it. It is a band, not a margin.
+    //
+    // The luminance form cannot produce a failure at all: black and white
+    // contrast equally at luminance 0.1791, both at 4.58:1, so that is the worst
+    // attainable outcome. Asserted over a generated sRGB grid rather than
+    // claimed.
+    let floor = Number.POSITIVE_INFINITY;
+    let failures = 0;
+    for (const brand of BRAND_GRID) {
+      const r = ratio(autoContrastLuminance(brand), brand);
+      if (r < floor) floor = r;
+      if (r < 4.5) failures += 1;
+    }
+    expect(BRAND_GRID.length).toBe(140608); // guards the guard
+    expect(failures).toBe(0);
+    expect(floor).toBeGreaterThan(4.5);
+    expect(floor).toBeCloseTo(4.58, 1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. THE TWO AUTO-CONTRAST RAMPS, SWEPT — `--jp-on-ember` and `--jp-heading`
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Both tokens pick an ink by stepping on OKLCH lightness. Both have a failing
+ * band. One is now fixed and one is recorded as a precondition, and the point of
+ * these tests is that the DIFFERENCE between those two outcomes is measured
+ * rather than asserted — including a pin on the change a future reader will
+ * reach for first, which measurement shows makes things worse.
+ */
+describe('--jp-on-ember, the accent plate label (Codex-kdsuo · Codex-g7ipk)', () => {
+  /** The FALLBACK declaration: `clamp(0.05, (0.6 - l) * <mult>, 1)`. */
+  const fallback = (fill: Oklab, mult: number): Oklab =>
+    autoContrastGrey(fill, 0.6, 1, mult);
+
+  const sweepRamp = (
+    ink: (fill: Oklab) => Oklab
+  ): { floor: number; failures: number } => {
+    let floor = Number.POSITIVE_INFINITY;
+    let failures = 0;
+    for (const fill of BRAND_GRID) {
+      const r = ratio(ink(fill), fill);
+      if (r < floor) floor = r;
+      if (r < 4.5) failures += 1;
+    }
+    return { floor, failures };
+  };
+
+  it('the LIVE (luminance) form cannot fail AA for any brand', () => {
+    // Exhaustive at stride 1: 0 failures out of 16 777 216, floor 4.582:1.
+    const { floor, failures } = sweepRamp(autoContrastLuminance);
+    expect(failures).toBe(0);
+    expect(floor).toBeCloseTo(4.58, 1);
+  });
+
+  it('the FALLBACK form still admits a 1.00:1 label — the defect, measured', () => {
+    // This is the red the emptied `KNOWN_OPEN` note above hid. Exhaustive at
+    // stride 1: 718 821 brands (4.285%) under 4.5:1, floor 1.00:1.
+    //
+    // It is left in place deliberately — see the token's comment. An unguarded
+    // override would not degrade to it: a custom property only fails when
+    // SUBSTITUTED, at which point the consuming `color` is invalid at
+    // computed-value time and the label loses its colour entirely. So the
+    // `@supports` guard is what makes the fix monotonic, and this assertion
+    // records what an engine older than Chrome 125 still gets.
+    const { floor, failures } = sweepRamp((f) => fallback(f, 100));
+    expect(failures).toBeGreaterThan(0);
+    expect(floor).toBeLessThan(1.01);
+  });
+
+  it('RAISING THE MULTIPLIER MAKES IT WORSE — do not "fix" it that way', () => {
+    // The obvious change, and the trap. `* 1000` narrows the mid-grey ramp
+    // tenfold but MOVES it rather than removing it: inside the new band a fill
+    // that took the near-black floor now takes the white ceiling.
+    //
+    // Exhaustive at stride 1:
+    //   * 100    floor 1.00:1   under 4.5: 718 821 (4.285%)
+    //   * 1000   floor 1.00:1   under 4.5: 694 679 (4.141%)   70 907 WORSE
+    //   * 1e6    floor 1.03:1   under 4.5: 696 762 (4.153%)   71 002 WORSE
+    // Worst single regression: #149b0b 5.70:1 -> 1.00:1.
+    const x100 = sweepRamp((f) => fallback(f, 100));
+    const x1000 = sweepRamp((f) => fallback(f, 1000));
+    expect(x1000.floor).toBeLessThan(1.01); // the band never leaves
+
+    let regressions = 0;
+    for (const fill of BRAND_GRID) {
+      if (
+        ratio(fallback(fill, 1000), fill) <
+        ratio(fallback(fill, 100), fill) - 0.01
+      ) {
+        regressions += 1;
+      }
+    }
+    expect(regressions).toBeGreaterThan(0);
+
+    // The named case, exactly.
+    const emerald = hex('#149b0b');
+    expect(ratio(fallback(emerald, 100), emerald)).toBeCloseTo(5.7, 1);
+    expect(ratio(fallback(emerald, 1000), emerald)).toBeCloseTo(1.0, 1);
+    // Whereas the luminance form regresses NOTHING against `* 100` — it is a
+    // strict improvement, which is what licenses landing it at all.
+    let luminanceRegressions = 0;
+    for (const fill of BRAND_GRID) {
+      if (
+        ratio(autoContrastLuminance(fill), fill) <
+        ratio(fallback(fill, 100), fill) - 0.01
+      ) {
+        luminanceRegressions += 1;
+      }
+    }
+    expect(luminanceRegressions).toBe(0);
+    expect(x100.failures).toBeGreaterThan(0);
+  });
+
+  it('preserves every published figure and repairs the failing brands', () => {
+    const on = (h: string) => {
+      const fill = hex(h);
+      return ratio(autoContrastLuminance(fill), fill);
+    };
+    // UNCHANGED — the seeded orgs, the golden ember and both platform primaries.
+    expect(on('#A62B0C')).toBeCloseTo(7.07, 1);
+    expect(on('#2563EB')).toBeCloseTo(5.17, 1);
+    expect(on('#E11D48')).toBeCloseTo(4.7, 1);
+    expect(on('#552e8e')).toBeCloseTo(9.69, 1);
+    expect(on('#c24129')).toBeCloseTo(5.14, 1);
+    // MOVED — and only upward, and only where it was failing.
+    const emerald = hex('#059669');
+    expect(ratio(fallback(emerald, 100), emerald)).toBeCloseTo(2.41, 1);
+    expect(on('#059669')).toBeCloseTo(5.57, 1);
+  });
+});
+
+/**
+ * `--jp-heading` — RECORDED, NOT FIXED, and the record is the deliverable.
+ *
+ * The derivation is unchanged and this suite says why in numbers, because the
+ * defect is real and the two obvious repairs both make it worse. See the long
+ * note on the token in `journey-palette.css`; these assertions are that note's
+ * evidence, so the note cannot rot into prose.
+ */
+describe('--jp-heading collapses on a mid-luminance ink (recorded)', () => {
+  const heading = (ink: Oklab, mult: number): Oklab =>
+    autoContrast(ink, 0.62, 0.96, 0.25, mult);
+  const faint = (ink: Oklab, mult: number): Oklab =>
+    mix(heading(ink, mult), ink, 0.58);
+
+  const sweepPair = (mult: number) => {
+    let headFloor = Number.POSITIVE_INFINITY;
+    let faintFloor = Number.POSITIVE_INFINITY;
+    let headFails = 0;
+    let faintFails = 0;
+    for (const ink of BRAND_GRID) {
+      const h = ratio(heading(ink, mult), ink);
+      const f = ratio(faint(ink, mult), ink);
+      if (h < headFloor) headFloor = h;
+      if (f < faintFloor) faintFloor = f;
+      if (h < 4.5) headFails += 1;
+      if (f < 4.5) faintFails += 1;
+    }
+    return { headFloor, faintFloor, headFails, faintFails };
+  };
+
+  it('THE DEFECT: a mid-lightness --brand-bg renders headings unreadable', () => {
+    // The spot values, which are what a reviewer can reproduce in a browser by
+    // setting `--brand-bg` on `.journey-palette` and reading `--color-heading`
+    // against `--color-background`.
+    const at = (h: string) => {
+      const ink = hex(h);
+      return ratio(heading(ink, 100), ink);
+    };
+    expect(at('#bd618f')).toBeCloseTo(1.27, 1); // a dusty pink — INVISIBLE
+    expect(at('#808080')).toBeCloseTo(3.52, 1); // a plain mid grey
+    expect(at('#9C6B4F')).toBeCloseTo(4.02, 1); // a mid tan
+
+    // Exhaustive at stride 1: 2 409 483 inks (14.36%) under 4.5:1, floor 1.00:1.
+    const { headFloor, headFails } = sweepPair(100);
+    expect(headFloor).toBeLessThan(1.01);
+    expect(headFails).toBeGreaterThan(0);
+  });
+
+  it('is invisible to the eight hardcoded rows, which is why it survived', () => {
+    // The four backgrounds the sweep above feeds are OKLCH L 0.947, 0.164, 0.968
+    // and 0.223; the failing band is 0.528-0.618. Every seeded org has enormous
+    // headroom, so no amount of re-measuring the fixture would find this.
+    for (const [bg, want] of [
+      ['#F3F0E7', 18.38], // of-blood-and-bones, this database's actual value
+      ['#F6EFE6', 18.36], // the value the docs quote
+      ['#200000', 17.53],
+      ['#fafafa', 20.07],
+      ['#171717', 15.96],
+    ] as [string, number][]) {
+      const ink = hex(bg);
+      expect(ratio(heading(ink, 100), ink), bg).toBeCloseTo(want, 1);
+    }
+  });
+
+  it('RAISING THE MULTIPLIER MAKES IT WORSE — the change not to make', () => {
+    // Exhaustive at stride 1, and this is the decisive measurement:
+    //   * 100   floor 1.00:1   under 4.5: 2 409 483 (14.36%)
+    //   * 1000  floor 1.00:1   under 4.5: 2 484 004 (14.81%)   116 339 WORSE
+    //   * 1e6   floor 1.01:1   under 4.5: 2 492 478 (14.86%)   118 623 WORSE
+    // The band narrows and MOVES; some ink always lands inside it (32 of the
+    // 16 777 216 even at 1e6), so the floor never leaves 1.00.
+    const x100 = sweepPair(100);
+    const x1000 = sweepPair(1000);
+    expect(x1000.headFails).toBeGreaterThanOrEqual(x100.headFails);
+    expect(x1000.headFloor).toBeLessThan(1.01);
+
+    // The named regression: a vivid green just under the pivot flips from the
+    // near-black FLOOR to the near-white CEILING.
+    const green = hex('#05a22b');
+    expect(ratio(heading(green, 100), green)).toBeCloseTo(6.16, 1);
+    expect(ratio(heading(green, 1000), green)).toBeCloseTo(1.01, 1);
+  });
+
+  it('and the PIVOT cannot be moved to luminance without losing the hue', () => {
+    // `--color-text-on-brand` escaped this by deciding on relative luminance,
+    // and `--jp-on-ember` follows it above. Neither carries a hue: `r`/`g`/`b`
+    // are in scope only inside `rgb(from …)` and `l`/`c`/`h` only inside
+    // `oklch(from …)`, so a luminance decision cannot also emit `calc(c * 0.25)
+    // h`. This assertion is the reason the token still steps on `l`.
+    expect(declarationsOf(PALETTE, '--jp-heading')[0]).toContain(
+      'calc(c * 0.25) h'
+    );
+    expect(declarationsOf(PALETTE, '--jp-heading')[0]).toContain('(0.62 - l)');
+    // Same expression, same reason, one axis over.
+    expect(declarationsOf(PALETTE, '--jp-pole-b')[0]).toContain(
+      'calc(c * 0.25) h'
+    );
+  });
+
+  it('and no multiplier can rescue --jp-faint, so the fix is an INPUT guard', () => {
+    // THE FACT THAT SETTLES IT. `--jp-faint` is a 58% mix of heading into ink,
+    // so its ratio is bounded by the two ends' separation rather than by the
+    // step — its failure count is IDENTICAL at every multiplier (exhaustive at
+    // stride 1: 9 181 154, i.e. 54.72%, in all three sweeps). A mid-luminance
+    // page background cannot carry this ladder however the step is written, so
+    // the guard belongs where `--brand-bg` is CHOSEN — the brand editor — and
+    // not in this file.
+    expect(sweepPair(100).faintFails).toBe(sweepPair(1000).faintFails);
+    expect(sweepPair(100).faintFails).toBe(sweepPair(1e6).faintFails);
+    expect(sweepPair(100).faintFails).toBeGreaterThan(
+      sweepPair(100).headFails * 3
+    );
+    // And the seeded orgs are comfortably outside it, which is the other half of
+    // why this is a precondition rather than a live bug.
+    for (const [bg, want] of [
+      ['#F6EFE6', 7.11],
+      ['#200000', 5.37],
+    ] as [string, number][]) {
+      const ink = hex(bg);
+      expect(ratio(faint(ink, 100), ink), bg).toBeCloseTo(want, 1);
+    }
   });
 });

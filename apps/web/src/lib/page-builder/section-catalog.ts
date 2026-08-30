@@ -61,6 +61,41 @@ export interface SectionVariant {
   readonly hint: string;
   /** Schematic-thumbnail key (a tiny abstract of the layout). */
   readonly thumb: string;
+  /**
+   * DECLARED BUT NOT BUILT — the reason, shown to the creator, and the picker
+   * renders the option disabled.
+   *
+   * WHY THIS FIELD EXISTS (Codex-wqxv4). `reel: strip` was declared here, hinted
+   * "A row of clip thumbnails; one plays inline", and DESCOPED in the renderer:
+   * `ReelSection.svelte`'s own `COMPOSITIONS` array excludes it and clamps to
+   * `theatre`. So the renderer knew and the picker did not — a creator could
+   * choose a composition, watch its layout card take the selected state, save,
+   * and get `theatre` on the published page. That is the failure mode
+   * `journey-design.test.ts` opens by naming ("a value selectable in the builder
+   * that matches no CSS rule renders with the axis default, and the creator sees
+   * a control that appears to do nothing"), and it is worse here, because the
+   * picker showed the choice as taken.
+   *
+   * NOT deleted, deliberately: the composition is DESCOPED, not retired, and the
+   * distinction is already load-bearing in this file. A retired id belongs in
+   * {@link LEGACY_SECTION_VARIANTS} and maps FORWARD onto a built composition; a
+   * descoped one has never been selectable and has nothing to map from. Deleting
+   * it would also lose the design and the reason it is blocked — the history
+   * `ReelSection`'s header deliberately preserves.
+   *
+   * The string is authored English, like `label`, `hint` and `summary` beside it,
+   * because this module is the CE-4-scanned PUBLIC_LIB_ROOT and stays free of the
+   * app's i18n runtime. Same i18n debt as its three neighbours, and no new one.
+   *
+   * `resolveVariant` deliberately does NOT skip an unavailable id: the renderers
+   * already clamp to their own `COMPOSITIONS`, so the resolved value and the
+   * painted layout stay whatever they were, and the picker is where the lie was.
+   * The conformance test in `section-catalog.test.ts` derives the expected set
+   * from the renderers, so a NEW unbuilt composition fails there rather than
+   * shipping as a dead control — and marking a BUILT composition unavailable
+   * fails too.
+   */
+  readonly unavailable?: string;
 }
 
 // ── Section definition ───────────────────────────────────────────────────────
@@ -392,6 +427,16 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
         label: 'Strip',
         hint: 'A row of clip thumbnails; one plays inline',
         thumb: 'grid',
+        // DESCOPED per contract A27, and `ReelSection.svelte`'s header carries
+        // the full reasoning: it needs 3-5 clips against a single
+        // `previewVideoMediaId`, an array-cardinality problem rather than a
+        // missing slot. Migration 0086 added `courses.hero_media_id` and
+        // `courses.signature_media_id`, both scalar `uuid`, so the clip count
+        // available here is still exactly one. A synthetic gradient plate
+        // standing in for the absent clips is specifically NOT the answer —
+        // A27 names that as the mistake `hero.split` already makes.
+        unavailable:
+          'Not built yet — needs three to five clips, and a journey supplies one',
       },
       {
         id: 'waveform',

@@ -189,6 +189,36 @@
     <p class="panel__sub">{m.studio_builder_panel_page_level()}</p>
   </header>
 
+  <!--
+    WHY THE READ FAILURE IS SAID OUT LOUD, and why it sits at the TOP of the panel
+    rather than beside the pickers.
+
+    `sellMedia.loadError` existed, was populated by both of `open()`'s reads and
+    was rendered NOWHERE: this panel had no reference to it at all, so a failed
+    media-library read was indistinguishable from "you have no ready media" — six
+    empty pickers, three frames reading "No cover", and no way for the creator to
+    tell a hiccup from an empty account. The sibling panel had been wired the whole
+    time (`monetisation.loadError` → `PagePricingPanel`), so this is the same
+    treatment, deliberately: same `role="alert"`, same warn surface, same
+    error-then-loading pair.
+
+    ABOVE EVERYTHING, because the failure explains everything below it. The three
+    upload frames read their resolved URLs from the SAME read as the six slots, so
+    a failed read makes "No cover" a claim the store cannot support either.
+
+    IT DOES NOT LOCK THE CONTROLS, unlike the pricing panel's `locked`, and that is
+    a gap rather than a choice: `MediaPicker` takes no `disabled` prop, so the
+    slots stay pickable while `sellMedia.loaded` is false — and such a pick lands
+    in the pending draft and is then dropped rather than persisted (see the store's
+    `#loaded`). The message is what tells the creator that; the lock needs a prop on
+    a component this panel does not own.
+  -->
+  {#if sellMedia.loadError}
+    <p class="panel__warn" role="alert">{sellMedia.loadError}</p>
+  {:else if sellMedia.loading}
+    <p class="panel__note" role="status">{m.studio_builder_media_loading()}</p>
+  {/if}
+
   <!-- ── Cover ─────────────────────────────────────────────────────────── -->
   <section class="panel__group">
     <h3 class="panel__group-title">{m.studio_builder_media_cover()}</h3>
@@ -583,6 +613,33 @@
   .panel__hint {
     font-size: var(--text-xs);
     line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+  }
+
+  /* The read-failure surface, token-for-token the one `PagePricingPanel` gives
+     `monetisation.loadError` — the two panels report the same class of failure
+     and a creator should not have to learn two treatments for it. The WARNING
+     ramp rather than the danger one: nothing is broken and nothing is lost, the
+     store simply could not ask. */
+  .panel__warn {
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-md);
+    background-color: var(--color-warning-50);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-warning-700);
+  }
+
+  /* The in-flight twin. `--color-text-secondary`, never muted: muted at
+     `--text-xs` measures 2.52:1 on this surface, under the floor (see the
+     `.panel__sub` note above), and this line is the one that explains an empty
+     picker. */
+  .panel__note {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
     color: var(--color-text-secondary);
   }
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultSections,
@@ -21,6 +24,9 @@ import {
   variantsForType,
 } from './section-catalog';
 import { SECTION_DESIGN_BY_TYPE } from './section-design-defaults';
+
+/** This file's own directory — the section renderers sit under `render/sections`. */
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
 
 const EXPECTED_ORDER = [
   'hero',
@@ -791,5 +797,141 @@ describe('seededSections', () => {
     const before = JSON.stringify(faq);
     seededSections([faq]);
     expect(JSON.stringify(faq)).toBe(before);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The catalogue against the RENDERERS — no offered composition may be unbuilt
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * THE DEFECT THIS CATCHES, and it was live (Codex-wqxv4). `reel: strip` was
+ * offered in the catalogue, hinted "A row of clip thumbnails; one plays inline",
+ * and absent from `ReelSection.svelte`'s own `COMPOSITIONS` array — which clamps
+ * anything it does not know to `theatre`. `ReelSection`'s header said so in
+ * capitals ("`strip` STAYS DESCOPED per contract A27") and the picker offered it
+ * anyway. So a creator could pick a composition, watch the layout card take the
+ * selected state, save, and get a different layout on the published page.
+ *
+ * The renderer clamp meant nothing CRASHED, which is precisely why it survived:
+ * there was no error to find, only a control that quietly did nothing.
+ *
+ * WHY THE EXPECTED SET IS DERIVED FROM THE RENDERERS rather than restated here:
+ * a hand-written list is the thing that went stale. Each section component owns
+ * exactly one `const COMPOSITIONS = [...]`, it is the array the component
+ * actually branches on, and it is the only honest source for "what can be
+ * painted". Parsing it is deliberate coupling.
+ *
+ * BOTH DIRECTIONS FAIL, and they are different bugs:
+ *   offered-but-unbuilt   a dead control — the defect above;
+ *   built-but-unoffered   a composition no creator can reach, i.e. dead CSS and
+ *                         a layout that only a hand-edited database row selects.
+ */
+describe('every offered composition is one a renderer can actually paint', () => {
+  const RENDER_DIR = join(HERE_DIR, 'render/sections');
+
+  /** `<Type>Section.svelte` for a catalogue type — the file naming convention. */
+  const componentFor = (type: string): string =>
+    `${type.charAt(0).toUpperCase()}${type.slice(1)}Section.svelte`;
+
+  /** The ids in a component's own `COMPOSITIONS` array. */
+  const builtCompositions = (type: string): string[] => {
+    const src = readFileSync(join(RENDER_DIR, componentFor(type)), 'utf8');
+    const decl = /const COMPOSITIONS(?::[^=]*)? = (\[[^\]]*\])/.exec(src);
+    expect(
+      decl,
+      `${componentFor(type)} declares no COMPOSITIONS`
+    ).not.toBeNull();
+    return [...(decl?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
+  };
+
+  it('finds a COMPOSITIONS array in all eleven section components', () => {
+    // Guards the guard: a renamed constant or a moved directory would make every
+    // assertion below vacuous, and the failure it protects against is silent.
+    expect(SECTION_CATALOG).toHaveLength(11);
+    for (const def of SECTION_CATALOG) {
+      expect(
+        builtCompositions(def.type).length,
+        `${def.type} built compositions`
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('offers exactly the compositions its renderer builds, plus marked ones', () => {
+    const mismatches: string[] = [];
+    for (const def of SECTION_CATALOG) {
+      const built = new Set(builtCompositions(def.type));
+      for (const variant of def.variants) {
+        const isBuilt = built.has(variant.id);
+        if (!isBuilt && !variant.unavailable) {
+          mismatches.push(
+            `${def.type}/${variant.id} is OFFERED but ${componentFor(def.type)} cannot paint it — ` +
+              'mark it `unavailable` with the reason, or build it'
+          );
+        }
+        if (isBuilt && variant.unavailable) {
+          mismatches.push(
+            `${def.type}/${variant.id} is marked unavailable but ${componentFor(def.type)} DOES paint it — ` +
+              'delete the marker'
+          );
+        }
+      }
+      for (const id of built) {
+        if (!def.variants.some((v) => v.id === id)) {
+          mismatches.push(
+            `${def.type}/${id} is BUILT but not offered — no creator can select it`
+          );
+        }
+      }
+    }
+    expect(
+      mismatches,
+      mismatches.length ? `\n  ${mismatches.join('\n  ')}` : ''
+    ).toEqual([]);
+  });
+
+  it('marks reel/strip unavailable rather than deleting it (A27)', () => {
+    // The composition is DESCOPED, not retired, and the difference matters: a
+    // retired id belongs in `LEGACY_SECTION_VARIANTS` and maps forward onto a
+    // built composition, while a descoped one has never been selectable and has
+    // nothing to map from. Keeping it holds the design and the reason it is
+    // blocked; `ReelSection`'s header holds the rest.
+    const strip = findSectionDefinition('reel')?.variants.find(
+      (v) => v.id === 'strip'
+    );
+    expect(strip, 'reel/strip must stay declared').toBeDefined();
+    expect(strip?.unavailable).toBeTruthy();
+    // The reason is shown to the creator in the picker, so it has to say
+    // something — not just be present.
+    expect(strip?.unavailable?.length ?? 0).toBeGreaterThan(20);
+    // And it must NOT be reachable through the retirement map, which would make
+    // a stored `strip` silently become a different composition.
+    expect(LEGACY_SECTION_VARIANTS.reel?.strip).toBeUndefined();
+  });
+
+  it('never marks a type default unavailable', () => {
+    // A fresh or duplicated section starts in `defaultVariant`, so an unavailable
+    // default would make every new section of that type start in a composition
+    // the creator cannot re-select once they leave it.
+    for (const def of SECTION_CATALOG) {
+      const fallback = def.variants.find((v) => v.id === def.defaultVariant);
+      expect(
+        fallback?.unavailable,
+        `${def.type} defaultVariant`
+      ).toBeUndefined();
+    }
+  });
+
+  it('leaves at least two selectable compositions on every type', () => {
+    // The editor shows the picker only when a type offers >= 2 variants, so a
+    // type whose second option is unavailable would render a picker with one
+    // usable card.
+    for (const def of SECTION_CATALOG) {
+      const usable = def.variants.filter((v) => !v.unavailable);
+      expect(
+        usable.length,
+        `${def.type} selectable compositions`
+      ).toBeGreaterThan(1);
+    }
   });
 });

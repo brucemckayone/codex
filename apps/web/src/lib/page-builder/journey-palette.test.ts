@@ -658,3 +658,104 @@ describe('JourneyRenderer (mount)', () => {
     unmount(component);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `--jp-on-ember` — the on-accent label, and the @supports mirror that pins it
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * STRUCTURE ONLY. The arithmetic — every published ratio, the exhaustive sRGB
+ * sweep and the before/after that proves the luminance form is a strict
+ * improvement — lives in `journey-design.test.ts`, which owns the colour model.
+ * What is asserted HERE is that the stylesheet still has the SHAPE that model
+ * assumes, because a model validated against a file it has stopped describing is
+ * the failure mode this whole test file exists to prevent.
+ */
+describe('--jp-on-ember decides on luminance, and the fallback survives', () => {
+  /** The `@supports` prelude, verbatim, and the block it guards. */
+  const SUPPORTS =
+    '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
+
+  it('declares BOTH forms — the oklch fallback and the luminance override', () => {
+    const decls = declarationsOf(PALETTE, '--jp-on-ember');
+    expect(decls).toHaveLength(2);
+
+    // 1. THE FALLBACK, unchanged. An older engine keeps the OKLCH step rather
+    //    than losing the colour entirely: a custom property accepts any token
+    //    stream at parse time and only fails when SUBSTITUTED, at which point the
+    //    consuming `color` is invalid at computed-value time and falls back to
+    //    `unset`. That is why this is an @supports override and not an edit.
+    expect(decls[0]).toBe(
+      'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)'
+    );
+
+    // 2. THE OVERRIDE, deciding on RELATIVE LUMINANCE at WCAG's black/white
+    //    crossover — the quantity the ratio is actually computed on.
+    expect(decls[1]).toContain('rgb(');
+    expect(decls[1]).toContain('from var(--jp-ember)');
+    expect(decls[1]).toContain('0.1791');
+    // The luminance weights, all three, in the sRGB-linear form. `2.4` with the
+    // `+ 0.055) / 1.055` offset: org-brand.css records that dropping the offset
+    // re-introduces 468 738 AA failures, so the offset is not optional.
+    for (const term of [
+      '0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4)',
+      '0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4)',
+      '0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4)',
+    ]) {
+      expect(decls[1]).toContain(term);
+    }
+    // `* 1e6` makes it a true step: black or white, never a mid grey. The 0.05
+    // floor of the fallback is deliberately NOT carried over — chroma is already
+    // zeroed here, so there is no hue to keep in gamut.
+    expect(decls[1]).toContain('* 1e6, 1)');
+    // Written once per channel because `r`/`g`/`b` are in scope only inside
+    // `rgb(from …)` and cannot be hoisted into a helper property.
+    expect(decls[1].match(/pow\(\(r \/ 255/g)).toHaveLength(3);
+  });
+
+  it('guards the override with the SAME @supports condition as org-brand.css', () => {
+    // The two must not drift: they are the same expression over two fills, and
+    // an engine that can run one can run the other. `pow()` inside a relative
+    // colour needs Chrome 125+, later than relative colour itself (119+), which
+    // is the whole reason for the guard.
+    const ORG_BRAND = readSrc('lib/styles/tokens/org-brand.css');
+    expect(PALETTE).toContain(SUPPORTS);
+    expect(ORG_BRAND).toContain(SUPPORTS);
+  });
+
+  it('applies the override to the palette ROOT *and* every .jp-sec, last in the file', () => {
+    // Both halves are load-bearing.
+    //
+    // SELECTOR: the shared block re-declares `--jp-on-ember` on every section at
+    // (0,2,0), so an override matching only the root is thrown away there — the
+    // page would get the luminance ink and every section the OKLCH one. This is
+    // the same trap the Codex-8jve9 note above documents for `--jp-ember`.
+    //
+    // ORDER: `@supports` adds no specificity, so the override wins purely by
+    // coming later. Moving this block up the file silently disables it.
+    const at = PALETTE_CODE.indexOf(SUPPORTS);
+    expect(at, '@supports block missing').toBeGreaterThan(0);
+    const block = PALETTE_CODE.slice(at);
+    expect(block).toContain('.journey-palette.journey-palette.journey-palette');
+    expect(block).toContain('.journey-palette .jp-sec');
+
+    // Nothing but this override may follow it, or "last in the file" stops being
+    // checkable by reading the tail.
+    expect(declarationsOf(block, '--jp-on-ember')).toHaveLength(1);
+    const sharedAt = PALETTE_CODE.search(/--jp-on-ember\s*:/);
+    expect(sharedAt).toBeGreaterThan(0);
+    expect(sharedAt).toBeLessThan(at);
+  });
+
+  it('needs no dark twin, because the dark pole re-points the INPUT', () => {
+    // `--jp-ember` is re-pointed by the dark rule at the palette ROOT only, and
+    // custom-property substitution happens per element AFTER the cascade picks a
+    // winner — so this re-derives from whichever ember won, at both poles, with
+    // one declaration. A dark twin here would be dead weight that could drift.
+    const at = PALETTE_CODE.indexOf(SUPPORTS);
+    const block = PALETTE_CODE.slice(at);
+    expect(block).not.toContain('[data-theme=');
+    expect(block).not.toContain('.dark ');
+    expect(declarationsOf(PALETTE, '--jp-ember')).toHaveLength(2);
+  });
+});
