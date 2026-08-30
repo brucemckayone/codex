@@ -65,18 +65,19 @@ vi.mock('@codex/database', async (importOriginal) => {
   };
 });
 
-// A DELEGATING spy: the real helper runs (real key, real value, real write
-// -through), and the recorded call lets the argument itself be asserted.
-vi.mock('@codex/worker-utils', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@codex/worker-utils')>();
-  return {
-    ...actual,
-    checkOrganizationMembership: vi.fn(actual.checkOrganizationMembership),
-  };
-});
-
-// Imported AFTER the mocks so the route resolves the spy, not the original.
-import { checkOrganizationMembership } from '@codex/worker-utils';
+// NO vi.mock ON @codex/worker-utils, DELIBERATELY. A delegating spy built with
+// `importOriginal` pulls the whole barrel back through the mocked specifier, and
+// under @cloudflare/vitest-pool-workers that deadlocks runtime init — the file
+// hangs before a single test runs, which reads as "slow suite" rather than as a
+// broken test.
+//
+// Nothing is lost. The spy existed for one assertion: that `cacheWrite` arrives
+// in argument 5. That mattered while the parameter was OPTIONAL, because a
+// missing argument was invisible. It is now REQUIRED, so every call site is
+// checked by tsc and the arity assertion has graduated to compile time. What
+// remains — that the write is issued, bounded, still in flight at response
+// time, and registered on THIS request's waitUntil — is observable from the KV
+// double and the waitUntil spy below, with the real helper running untouched.
 import membershipRoutes from '../membership';
 
 /** Mirrors `generateWorkerSignature` from @codex/security — see membership.test.ts. */
@@ -201,7 +202,14 @@ describe('membership lookup · the KV write-through survives the response', () =
       data: { role: 'owner', joinedAt: JOINED_AT },
     });
 
-    // The write was issued...
+    // The write was issued, carrying the 60s authorization bound.
+    //
+    // The TTL is asserted here as well as in worker-utils' own suite because
+    // this is the only end-to-end path that reaches KV through a real route,
+    // and the number is pinned as a literal on purpose: a security ceiling that
+    // can be raised without failing a test is not a ceiling. It is what caps a
+    // removed member's residual access if invalidation regresses — as it did in
+    // 2d1c065a, silently, for three months (Codex-rxjwp).
     expect(kv.put).toHaveBeenCalledTimes(1);
     expect(kv.put).toHaveBeenCalledWith(
       `membership:${ORG_ID}:${USER_ID}`,
@@ -209,7 +217,8 @@ describe('membership lookup · the KV write-through survives the response', () =
         role: 'owner',
         status: 'active',
         joinedAt: JOINED_AT,
-      })
+      }),
+      { expirationTtl: 60 }
     );
 
     // ...and was STILL IN FLIGHT when the response was returned. This is the
@@ -251,20 +260,5 @@ describe('membership lookup · the KV write-through survives the response', () =
 
     expect(missKv.put).toHaveBeenCalledTimes(1);
     expect(miss.registered).toHaveLength(hit.registered.length + 1);
-  });
-
-  it('passes a cacheWrite FUNCTION in argument 5, not nothing', async () => {
-    // Stated separately from the behaviour above because the failure modes
-    // differ: an arity change to the helper would leave the behavioural
-    // assertions passing while this one names the slot that moved.
-    const kv = makeKv();
-    const { drain } = await dispatch(kv.binding);
-    kv.release();
-    await drain();
-
-    const call = vi.mocked(checkOrganizationMembership).mock.calls[0];
-    expect(call).toBeDefined();
-    expect(call).toHaveLength(5);
-    expect(typeof call?.[4]).toBe('function');
   });
 });
