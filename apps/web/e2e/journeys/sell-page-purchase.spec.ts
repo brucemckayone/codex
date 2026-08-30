@@ -178,35 +178,40 @@ test.describe('journey sell page · a course with no way in', () => {
    * `context.enrolled || context.purchasable !== false`, which is exactly the
    * predicate `HeroSection.svelte` uses.
    *
-   * Un-`fixme` this test with that change; it must go green without weakening
-   * the assertion below.
+   * UN-FIXME'D 2026-08-30. That change landed in 760119a9 — `InviteSection.svelte`
+   * now guards its doorway on `context.enrolled || context.purchasable !== false`,
+   * the same predicate `HeroSection` uses. The assertion below is UNCHANGED from
+   * when it was written: it still demands ZERO checkout links anywhere on a page
+   * that cannot sell, so it is the original bar, not a lowered one.
+   *
+   * The title's old parenthetical ("the invite CTA is still a dead end") described
+   * the defect this test was pinning. It no longer is one, so the title now says
+   * what the test enforces instead of what used to be broken.
    */
-  test.fixme(
-    'offers no purchase affordance at all — the invite CTA is still a dead end',
-    async ({ page, baseURL }) => {
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
-      await expectSellPageRendered(page, NOT_PURCHASABLE);
-      await forceRevealsIn(page);
+  test('offers no purchase affordance at all — including the invite CTA', async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
+    await expectSellPageRendered(page, NOT_PURCHASABLE);
+    await forceRevealsIn(page);
 
-      const checkoutLinks = await page.evaluate(() =>
-        [...document.querySelectorAll('a[href*="/checkout"]')].map(
-          (element) => ({
-            href: element.getAttribute('href'),
-            section:
-              element
-                .closest('[data-section-type]')
-                ?.getAttribute('data-section-type') ?? 'page',
-            text: (element.textContent ?? '').trim(),
-          })
-        )
-      );
-      expect(
-        checkoutLinks,
-        'a course with no way in still offers a route to the checkout'
-      ).toEqual([]);
-    }
-  );
+    const checkoutLinks = await page.evaluate(() =>
+      [...document.querySelectorAll('a[href*="/checkout"]')].map((element) => ({
+        href: element.getAttribute('href'),
+        section:
+          element
+            .closest('[data-section-type]')
+            ?.getAttribute('data-section-type') ?? 'page',
+        text: (element.textContent ?? '').trim(),
+      }))
+    );
+    expect(
+      checkoutLinks,
+      'a course with no way in still offers a route to the checkout'
+    ).toEqual([]);
+  });
 
   /**
    * NEGATIVE CONTROL for the two `DEAD_END` assertions above.
