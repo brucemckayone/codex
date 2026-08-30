@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   createDefaultSections,
@@ -17,8 +20,13 @@ import {
   SECTION_DESIGN_DEFAULTS,
   SECTION_DESIGN_VALUES,
   sectionMatchesQuery,
+  seededSections,
   variantsForType,
 } from './section-catalog';
+import { SECTION_DESIGN_BY_TYPE } from './section-design-defaults';
+
+/** This file's own directory — the section renderers sit under `render/sections`. */
+const HERE_DIR = dirname(fileURLToPath(import.meta.url));
 
 const EXPECTED_ORDER = [
   'hero',
@@ -50,6 +58,33 @@ describe('SECTION_CATALOG', () => {
       expect(def.summary.length).toBeGreaterThan(0);
       expect(def.icon.length).toBeGreaterThan(0);
       expect(def.keywords.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('no `icon` glyph can render as colour emoji, and none is a Braille codepoint', () => {
+    // `icon` is now only the ADVISORY FALLBACK (the rail and the picker draw a
+    // design-system icon keyed on `type` — see
+    // `$lib/components/page-builder/section-icons.ts`). While the string exists,
+    // `SectionEditor`'s inspector header still shows it, so it must not carry an
+    // emoji presentation.
+    //
+    // `guide` was `'☺'` U+263A. Checked against Node's Unicode property escapes,
+    // it is the ONLY one of the eleven Unicode classes as emoji-capable — ✦ U+2726
+    // and ❝ U+275D are not in the emoji data at all, so neither can take an emoji
+    // form and neither was ever the defect. One value, not eight.
+    //
+    // The Braille half is separate and was not in the bead: `⠿` U+283F (Braille
+    // Pattern Dots-123456) was the rail's drag grip. It is not in this list, but
+    // the same class of value must not arrive here either.
+    for (const def of SECTION_CATALOG) {
+      expect(
+        /\p{Extended_Pictographic}|\p{Emoji_Presentation}/u.test(def.icon),
+        `${def.type}.icon '${def.icon}' can render as colour emoji`
+      ).toBe(false);
+      expect(
+        /[\u2800-\u28ff]/u.test(def.icon),
+        `${def.type}.icon '${def.icon}' is a Braille codepoint`
+      ).toBe(false);
     }
   });
 });
@@ -153,6 +188,87 @@ describe('variants', () => {
     const s = createSection('retreat-x', () => 'sec-z');
     expect(s.variant).toBeUndefined();
     expect(s.props).toEqual({});
+    // …and no rhythm, because the renderer skips the type entirely.
+    expect(s.design).toBeUndefined();
+  });
+
+  // ── The RHYTHM a new section arrives with ──────────────────────────────────
+  //
+  // Measured before this change: every section of every published page emitted
+  // BYTE-IDENTICAL axis values, and zero of the 28 stored sections carried a
+  // `design` key. The mechanism was complete — store writer, inspector control,
+  // schema and renderer all present since F-B2 — and nothing ever wrote the
+  // exception `setSectionDesignAxis`'s own comment asks for. So the fix is the
+  // DEFAULT, and this is where it enters the model.
+
+  it('createSection writes the type’s rhythm bag', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    expect(faq.design).toBeDefined();
+    // The axes where FAQ differs from the axis defaults, and only those.
+    expect(faq.design).toEqual({
+      density: 'compact',
+      align: 'start',
+      type: 'restrained',
+      accent: 'none',
+      motion: 'fade',
+    });
+  });
+
+  it('createSection writes NO key the section would inherit anyway', () => {
+    // The page look IS the hero's rhythm, so the hero is not an exception to it
+    // and must store nothing: absence is how "inherited" is represented, and the
+    // inspector paints its "Inherited" pill from exactly that absence.
+    const hero = createSection(
+      'hero',
+      () => 'sec-hero',
+      SECTION_DESIGN_BY_TYPE.hero
+    );
+    expect(hero.design).toBeUndefined();
+  });
+
+  it('createSection stores only the axes that differ from the page look', () => {
+    // The look every seeded page actually carries (measured live).
+    const pageLook = {
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+      edge: 'none',
+      align: 'center',
+      type: 'monumental',
+      accent: 'glow',
+      motion: 'drift',
+      media: 'bleed',
+    } as const;
+    const hero = createSection('hero', () => 'sec-hero', pageLook);
+    // Against that look the hero differs on two axes only — and those two are
+    // what stop it reading like the sections beneath it.
+    expect(hero.design).toEqual({ width: 'full', density: 'vast' });
+  });
+
+  it('createSection never writes `media` on a type that resolves none', () => {
+    // Only Hero / IntroVideo / Reel / Guide read the `--jp-media-*` family.
+    // `Codex-wqxv4`: a stored value that cannot change what renders is a
+    // decorative control, and this programme has paid for one already.
+    for (const type of [
+      'ache',
+      'turn',
+      'map',
+      'feel',
+      'proof',
+      'faq',
+      'invite',
+    ]) {
+      const section = createSection(type, () => `sec-${type}`);
+      expect(section.design, type).toBeDefined();
+      expect(section.design?.media, type).toBeUndefined();
+    }
+  });
+
+  it('createSection returns a bag no other section shares by reference', () => {
+    const a = createSection('faq', () => 'a');
+    const b = createSection('faq', () => 'b');
+    expect(a.design).not.toBe(b.design);
+    expect(a.design).not.toBe(SECTION_DESIGN_BY_TYPE.faq);
   });
 });
 
@@ -183,6 +299,33 @@ describe('createDefaultSections', () => {
   it('mints unique ids by default (crypto.randomUUID)', () => {
     const ids = createDefaultSections().map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('gives a brand-new page a RHYTHM, not one setting repeated eleven times', () => {
+    // This is the assertion form of the defect. Before the change every section
+    // of every published page emitted the same nine values; the page read flat
+    // because nothing varied. A default set must now vary.
+    const sections = createDefaultSections(() => crypto.randomUUID());
+    const densities = new Set(sections.map((s) => s.design?.density));
+    const surfaces = new Set(sections.map((s) => s.design?.surface));
+    expect(densities.size).toBeGreaterThanOrEqual(3);
+    expect(surfaces.size).toBeGreaterThanOrEqual(4);
+    // Every section carries a bag of its own — none is left to inherit the flat
+    // page look wholesale.
+    expect(sections.every((s) => s.design !== undefined)).toBe(true);
+  });
+
+  it('forwards the page look, so a default set stores exceptions only', () => {
+    const sections = createDefaultSections(
+      () => crypto.randomUUID(),
+      SECTION_DESIGN_BY_TYPE.hero
+    );
+    const hero = sections.find((s) => s.type === 'hero');
+    const faq = sections.find((s) => s.type === 'faq');
+    // The hero matches that look exactly, so it is not an exception to it…
+    expect(hero?.design).toBeUndefined();
+    // …and the FAQ still is.
+    expect(faq?.design?.density).toBe('compact');
   });
 });
 
@@ -558,7 +701,237 @@ describe('the variant ids real pages actually store', () => {
     expect(resolveVariant({ type: 'invite', variant: 'card' })).toBe('card');
   });
 
-  it('an id that never existed still falls to the type default (studio-alpha stores "default")', () => {
+  it('an id that never existed still falls to the type default', () => {
+    // `ache: 'default'` and `map: 'descent'` WERE stored by the portals seed
+    // generator; migration 0091 normalised all 7 seeded pages to legal catalogue
+    // ids (ache=column, hero=stage, map=spine, invite=pool) and the generator was
+    // fixed, so no live row holds either value today.
+    //
+    // The fallback still has to hold, and this assertion still has to stand: a
+    // restore of a soft-deleted page, a payload from an older client, or a
+    // hand-edited row can put an unrecognised id back, and the alternative to
+    // falling through is a page that renders nothing.
     expect(resolveVariant({ type: 'ache', variant: 'default' })).toBe('column');
+    expect(resolveVariant({ type: 'map', variant: 'descent' })).toBe('spine');
+  });
+});
+
+// ── Unauthored (seed) copy detection — Codex-maf0y ───────────────────────────
+//
+// `addSection(type)` seeds every new section from the catalogue's `defaultProps`
+// and Save persists it, with no check anywhere between there and a PUBLISHED
+// public sales page. A creator who adds a Proof section, never opens it, and
+// publishes ships three invented testimonials and "2,400 and counting" — a
+// specific factual claim about their business that they never made.
+//
+// The seed copy stays (an empty block is near-invisible in the inline canvas, so
+// a creator cannot see or click the section they just added). The check moves to
+// publish time, as a non-blocking warning, and `seededSections` is its pure half.
+
+describe('seededSections', () => {
+  it('reports every seeded key of a freshly-added section', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    expect(seededSections([faq])).toEqual([
+      {
+        id: 'sec-faq',
+        type: 'faq',
+        label: 'FAQ',
+        // In `defaultProps` declaration order, so a message reads the way the
+        // rail does.
+        keys: ['heading', 'q1', 'a1', 'q2', 'a2', 'q3', 'a3'],
+      },
+    ]);
+  });
+
+  it('drops a key the creator has actually edited', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    faq.props.q1 = 'Do I need any experience?';
+    const [found] = seededSections([faq]);
+    expect(found.keys).not.toContain('q1');
+    // …and reports the rest, so one edited field does not clear the warning.
+    expect(found.keys).toContain('a1');
+  });
+
+  it('ignores a key whose SEED IS EMPTY — an empty field is not a placeholder', () => {
+    // This is why the check is not `props === defaultProps`. `hero.accent`,
+    // `hero.quiet` and `hero.trust` seed `''`; a section left at `''` has had
+    // nothing put in its mouth.
+    const hero = createSection('hero', () => 'sec-hero');
+    const [found] = seededSections([hero]);
+    expect(found.keys).not.toContain('accent');
+    expect(found.keys).not.toContain('quiet');
+    expect(found.keys).not.toContain('trust');
+    expect(found.keys).toContain('headline');
+  });
+
+  it('reports nothing for a fully-authored section', () => {
+    const ache = createSection('ache', () => 'sec-ache');
+    for (const key of Object.keys(ache.props)) {
+      ache.props[key] = `authored ${key}`;
+    }
+    expect(seededSections([ache])).toEqual([]);
+  });
+
+  it('reports nothing for an unknown/widened type — there is no seed to have leaked', () => {
+    expect(
+      seededSections([
+        { id: 'x', type: 'retreat-schedule', props: { heading: 'anything' } },
+      ])
+    ).toEqual([]);
+  });
+
+  it('names EVERY section of a default page, so the publish warning is honest', () => {
+    // The whole default template is placeholder copy on the day it is created.
+    const sections = createDefaultSections(() => crypto.randomUUID());
+    const found = seededSections(sections);
+    expect(found.map((f) => f.type)).toEqual(EXPECTED_ORDER);
+    expect(found.every((f) => f.keys.length > 0)).toBe(true);
+    // The labels are what a creator is shown; they must be the catalogue's.
+    expect(found.map((f) => f.label)).toEqual(
+      SECTION_CATALOG.map((d) => d.label)
+    );
+  });
+
+  it('is a warning input, not a gate — it never mutates the sections it reads', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    const before = JSON.stringify(faq);
+    seededSections([faq]);
+    expect(JSON.stringify(faq)).toBe(before);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The catalogue against the RENDERERS — no offered composition may be unbuilt
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * THE DEFECT THIS CATCHES, and it was live (Codex-wqxv4). `reel: strip` was
+ * offered in the catalogue, hinted "A row of clip thumbnails; one plays inline",
+ * and absent from `ReelSection.svelte`'s own `COMPOSITIONS` array — which clamps
+ * anything it does not know to `theatre`. `ReelSection`'s header said so in
+ * capitals ("`strip` STAYS DESCOPED per contract A27") and the picker offered it
+ * anyway. So a creator could pick a composition, watch the layout card take the
+ * selected state, save, and get a different layout on the published page.
+ *
+ * The renderer clamp meant nothing CRASHED, which is precisely why it survived:
+ * there was no error to find, only a control that quietly did nothing.
+ *
+ * WHY THE EXPECTED SET IS DERIVED FROM THE RENDERERS rather than restated here:
+ * a hand-written list is the thing that went stale. Each section component owns
+ * exactly one `const COMPOSITIONS = [...]`, it is the array the component
+ * actually branches on, and it is the only honest source for "what can be
+ * painted". Parsing it is deliberate coupling.
+ *
+ * BOTH DIRECTIONS FAIL, and they are different bugs:
+ *   offered-but-unbuilt   a dead control — the defect above;
+ *   built-but-unoffered   a composition no creator can reach, i.e. dead CSS and
+ *                         a layout that only a hand-edited database row selects.
+ */
+describe('every offered composition is one a renderer can actually paint', () => {
+  const RENDER_DIR = join(HERE_DIR, 'render/sections');
+
+  /** `<Type>Section.svelte` for a catalogue type — the file naming convention. */
+  const componentFor = (type: string): string =>
+    `${type.charAt(0).toUpperCase()}${type.slice(1)}Section.svelte`;
+
+  /** The ids in a component's own `COMPOSITIONS` array. */
+  const builtCompositions = (type: string): string[] => {
+    const src = readFileSync(join(RENDER_DIR, componentFor(type)), 'utf8');
+    const decl = /const COMPOSITIONS(?::[^=]*)? = (\[[^\]]*\])/.exec(src);
+    expect(
+      decl,
+      `${componentFor(type)} declares no COMPOSITIONS`
+    ).not.toBeNull();
+    return [...(decl?.[1] ?? '').matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
+  };
+
+  it('finds a COMPOSITIONS array in all eleven section components', () => {
+    // Guards the guard: a renamed constant or a moved directory would make every
+    // assertion below vacuous, and the failure it protects against is silent.
+    expect(SECTION_CATALOG).toHaveLength(11);
+    for (const def of SECTION_CATALOG) {
+      expect(
+        builtCompositions(def.type).length,
+        `${def.type} built compositions`
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('offers exactly the compositions its renderer builds, plus marked ones', () => {
+    const mismatches: string[] = [];
+    for (const def of SECTION_CATALOG) {
+      const built = new Set(builtCompositions(def.type));
+      for (const variant of def.variants) {
+        const isBuilt = built.has(variant.id);
+        if (!isBuilt && !variant.unavailable) {
+          mismatches.push(
+            `${def.type}/${variant.id} is OFFERED but ${componentFor(def.type)} cannot paint it — ` +
+              'mark it `unavailable` with the reason, or build it'
+          );
+        }
+        if (isBuilt && variant.unavailable) {
+          mismatches.push(
+            `${def.type}/${variant.id} is marked unavailable but ${componentFor(def.type)} DOES paint it — ` +
+              'delete the marker'
+          );
+        }
+      }
+      for (const id of built) {
+        if (!def.variants.some((v) => v.id === id)) {
+          mismatches.push(
+            `${def.type}/${id} is BUILT but not offered — no creator can select it`
+          );
+        }
+      }
+    }
+    expect(
+      mismatches,
+      mismatches.length ? `\n  ${mismatches.join('\n  ')}` : ''
+    ).toEqual([]);
+  });
+
+  it('marks reel/strip unavailable rather than deleting it (A27)', () => {
+    // The composition is DESCOPED, not retired, and the difference matters: a
+    // retired id belongs in `LEGACY_SECTION_VARIANTS` and maps forward onto a
+    // built composition, while a descoped one has never been selectable and has
+    // nothing to map from. Keeping it holds the design and the reason it is
+    // blocked; `ReelSection`'s header holds the rest.
+    const strip = findSectionDefinition('reel')?.variants.find(
+      (v) => v.id === 'strip'
+    );
+    expect(strip, 'reel/strip must stay declared').toBeDefined();
+    expect(strip?.unavailable).toBeTruthy();
+    // The reason is shown to the creator in the picker, so it has to say
+    // something — not just be present.
+    expect(strip?.unavailable?.length ?? 0).toBeGreaterThan(20);
+    // And it must NOT be reachable through the retirement map, which would make
+    // a stored `strip` silently become a different composition.
+    expect(LEGACY_SECTION_VARIANTS.reel?.strip).toBeUndefined();
+  });
+
+  it('never marks a type default unavailable', () => {
+    // A fresh or duplicated section starts in `defaultVariant`, so an unavailable
+    // default would make every new section of that type start in a composition
+    // the creator cannot re-select once they leave it.
+    for (const def of SECTION_CATALOG) {
+      const fallback = def.variants.find((v) => v.id === def.defaultVariant);
+      expect(
+        fallback?.unavailable,
+        `${def.type} defaultVariant`
+      ).toBeUndefined();
+    }
+  });
+
+  it('leaves at least two selectable compositions on every type', () => {
+    // The editor shows the picker only when a type offers >= 2 variants, so a
+    // type whose second option is unavailable would render a picker with one
+    // usable card.
+    for (const def of SECTION_CATALOG) {
+      const usable = def.variants.filter((v) => !v.unavailable);
+      expect(
+        usable.length,
+        `${def.type} selectable compositions`
+      ).toBeGreaterThan(1);
+    }
   });
 });

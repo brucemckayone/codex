@@ -77,6 +77,7 @@
   import * as m from '$paraglide/messages';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
+  import { editFieldAttrs } from '../editable';
   import type { JourneySalesContext, MapSectionProps } from '../types';
   import type {
     JourneyContentType,
@@ -93,6 +94,13 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so an under-authored page printed the
+     * same sentence as its `<h1>` four more times.
+     */
+    titleFallback?: string;
   }
 
   const {
@@ -102,6 +110,7 @@
     design,
     editable = false,
     onEdit,
+    titleFallback,
   }: Props = $props();
 
   /**
@@ -141,12 +150,30 @@
    * the hardcoded `"Everything you'll walk."` — one org's editorial voice
    * compiled into every org's sell page.
    *
-   * The heading is NOT allowed to self-hide, which is the other ranked fix: the
-   * page's outline is `h1` (hero) → `h2` (this section) → `h3` (stage), so
-   * dropping the `h2` would leave the stage names as an orphaned level under the
-   * hero's `h1`. The course's own title is the creator's words either way.
+   * THE ORIGINAL RULE HERE — "the heading is NOT allowed to self-hide", because
+   * the outline is `h1` (hero) → `h2` (this section) → `h3` (stage) and dropping
+   * the `h2` orphans the stage names — IS PRESERVED VERBATIM ABOVE THIS LINE AND
+   * IS NOW OVERRULED, deliberately, with the reasoning stated rather than the
+   * comment deleted:
+   *
+   *  · The heading it was defending was `context.course.title`, and FOUR other
+   *    sections resolved the same fallback independently. The document that
+   *    protected the outline was `<h1>Bone Deep</h1>` + `<h2>Bone Deep</h2>` ×4 —
+   *    a keyword-stuffed outline with no informational hierarchy, which is a worse
+   *    outline defect than the one it avoided.
+   *  · A skipped heading LEVEL (h1 → h3 inside this section) is valid HTML and an
+   *    advisory `heading-order` finding. A heading that repeats the page title four
+   *    times is neither valid information architecture nor advisory.
+   *  · `claimTitleFallback` gives a heading-less `hero` the claim wherever it sits,
+   *    so on the ordinary page shape the hero owns the title and this section is
+   *    quiet; this section only claims when the hero is authored — i.e. when the
+   *    page is one where a course-titled `h2` reads as a real section heading.
+   *
+   * So the `<h2>` now self-hides when this section did not claim the title, and a
+   * creator who wants a heading here types one (`map.title`, aliased from the
+   * builder's stored `heading`).
    */
-  const title = $derived(p.title ?? context.course.title);
+  const title = $derived(p.title ?? titleFallback);
 
   // ── COMPOSITION ──────────────────────────────────────────────────────────
   // `resolveVariant` has already mapped every retired id forward, so an unknown
@@ -176,41 +203,64 @@
   );
 
   /**
-   * GENERIC CHROME AWAITING i18n KEYS — reported, not added (contract A7/A20:
-   * the orchestrator owns `messages/en.json`; two worktrees regenerating
-   * paraglide strips keys and produces runtime 500s).
+   * WHETHER THE `<header>` HAS ANYTHING TO HOLD — the guard each of the four
+   * contents of `.descent__head` already had and the element around them did not.
    *
-   * Every string here is a neutral noun or a column label, not editorial voice,
-   * so it is the class the bridge table calls "legitimate UI labels" — the same
-   * class as `journey_map_practice_label`, which already exists and IS consumed
-   * below. They are collected in ONE place rather than scattered through the
-   * markup so swapping them for `m.*()` calls is a single edit.
+   * Every child of that header is individually `{#if}`-guarded (eyebrow, the
+   * self-hiding `<h2>`, sub, and the stats row, which `table` and
+   * `numbered-prose` drop), so on those two compositions all four can be false at
+   * once and the header rendered as an EMPTY LANDMARK carrying
+   * `margin: 0 0 calc(var(--space-12) * var(--jp-rhythm))` — a `--space-12` band
+   * of nothing above the stages, under a `header` role announcing no content.
    *
-   * Requested keys, name → English:
-   *   journey_map_stat_stages        "stages"     journey_map_stat_stages_one    "stage"
-   *   journey_map_stat_practices     "practices"  journey_map_stat_practices_one "practice"
-   *   journey_map_col_stage          "Stage"
-   *   journey_map_col_includes       "Includes"
-   *   journey_map_col_practices      "Practices"
-   *   journey_map_locked_hint        "included with membership"
-   *   journey_map_audio_label        "Audio"
-   *   journey_map_written_label      "Reflection"
+   * REACHABLE, and the whole-catalogue sweep is what found it: `props: {}` with
+   * no claimed title fallback on `map: table` or `map: numbered-prose`. The other
+   * four compositions are immune only because `showStats` is true for them — i.e.
+   * the header was empty on exactly the two compositions defined as having no
+   * chrome, which is the pair a creator picks when they want the stages and
+   * nothing else.
    *
-   * paraglide-js 1.11.8 has NO plural support, hence the separate `_one` keys
-   * plus the call-site ternary in `countLabel` below rather than ICU.
+   * Derived from the same four expressions the children read rather than from
+   * `config`: a guard that re-derives its own answer is how a heading self-hides
+   * while the frame around it still renders (this section's own `title` history),
+   * and `title` in particular depends on `titleFallback`, which only the page can
+   * decide.
    */
-  const CHROME = {
-    stages: 'stages',
-    stagesOne: 'stage',
-    practices: 'practices',
-    practicesOne: 'practice',
-    colStage: 'Stage',
-    colIncludes: 'Includes',
-    colPractices: 'Practices',
-    locked: 'included with membership',
-    audio: 'Audio',
-    written: 'Reflection',
-  };
+  const hasHead = $derived(!!(p.eyebrow || title || p.sub) || showStats);
+
+  /**
+   * THE GENERIC CHROME, NOW THROUGH THE i18n LAYER.
+   *
+   * This block used to hold ten raw English literals with a comment explaining
+   * that the keys had been REQUESTED but not added, because the orchestrator owns
+   * `messages/en.json` (contract A7/A20). The keys were in fact added — all ten of
+   * them are in `apps/web/messages/en.json` and compiled — so the deferral had
+   * quietly become the shipped state: this was the last section still publishing
+   * raw strings to the public page while `InviteSection`, `FeelSection`,
+   * `HeroSection`, `IntroVideoSection` and `ReelSection` all routed their chrome
+   * through `m.*()`.
+   *
+   * STILL COLLECTED IN ONE OBJECT rather than called at each use site, and that is
+   * not laziness: `countLabel` below takes the singular and plural forms as
+   * ARGUMENTS, so they have to be values. paraglide-js 1.11.8 has NO plural
+   * support, so a call-site ternary over two keys is the mechanism — never ICU
+   * `{count, plural, …}`, which compiles to a literal here.
+   *
+   * The values are read EAGERLY inside a `$derived` so a locale change
+   * re-resolves them, which a module-level constant would not.
+   */
+  const CHROME = $derived({
+    stages: m.journey_map_stat_stages(),
+    stagesOne: m.journey_map_stat_stages_one(),
+    practices: m.journey_map_stat_practices(),
+    practicesOne: m.journey_map_stat_practices_one(),
+    colStage: m.journey_map_col_stage(),
+    colIncludes: m.journey_map_col_includes(),
+    colPractices: m.journey_map_col_practices(),
+    locked: m.journey_map_locked_hint(),
+    audio: m.journey_map_audio_label(),
+    written: m.journey_map_written_label(),
+  });
 
   function countLabel(n: number, one: string, many: string): string {
     return n === 1 ? one : many;
@@ -289,30 +339,22 @@
   }
 
   /**
-   * The inline-edit seam for the studio canvas (`editable` + `onEdit` on the
-   * shared props contract), as a spreadable attribute bag. Empty when `editable`
-   * is false, so the PUBLIC markup is byte-identical to having no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * The keys are the BUILDER's names (`heading`, `note`), not the renderer's
-   * (`title`, `foot`) — an edit must write back to the key `section-fields.ts`
-   * declares, which is the same direction the alias table reads.
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`, the canvas's primitive:
-   * that component renders an EMPTY element and lets a Svelte ACTION write
-   * `textContent`, and actions do not run during SSR. On the public page it would
-   * serve `<h2></h2>` and paint the heading in only after hydration. The canvas
-   * never noticed because the studio is `ssr = false`.
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('map', key, editable, onEdit);
 
   // ── Progressive enhancement state ──
   let mounted = $state(false);
@@ -439,53 +481,61 @@
     data-map={composition}
   >
     <div class="descent__inner">
-      <header class="descent__head" use:reveal={{ disabled: editable }}>
-        {#if p.eyebrow}
-          <p
-            class="jp-sec__eyebrow jp-reveal descent__eyebrow"
-            data-jp-step="1"
-            {...editAttrs('eyebrow')}
-          >
-            {p.eyebrow}
-          </p>
-        {/if}
-        <h2
-          class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
-          data-jp-step="2"
-          {...editAttrs('heading')}
-        >
-          {title}
-        </h2>
-        {#if p.sub}
-          <p
-            class="jp-sec__measure jp-reveal descent__sub"
-            data-jp-step="3"
-            {...editAttrs('sub')}
-          >
-            {p.sub}
-          </p>
-        {/if}
-        {#if showStats}
-          <p class="jp-reveal descent__stats" data-jp-step="4">
-            <span class="descent__stat">
-              <b>{context.course.stageCount}</b>
-              {countLabel(
-                context.course.stageCount,
-                CHROME.stagesOne,
-                CHROME.stages
-              )}
-            </span>
-            <span class="descent__stat">
-              <b>{context.course.practiceCount}</b>
-              {countLabel(
-                context.course.practiceCount,
-                CHROME.practicesOne,
-                CHROME.practices
-              )}
-            </span>
-          </p>
-        {/if}
-      </header>
+      <!-- NO EMPTY LANDMARK, AND NO PHANTOM BAND — see `hasHead`. Every child
+           below self-hides, so on `table` / `numbered-prose` (the two that drop
+           the stats row) an unauthored section rendered this `<header>` with
+           nothing in it and `--space-12` of margin under it. -->
+      {#if hasHead}
+        <header class="descent__head" use:reveal={{ disabled: editable }}>
+          {#if p.eyebrow}
+            <p
+              class="jp-sec__eyebrow jp-reveal descent__eyebrow"
+              data-jp-step="1"
+              {...editAttrs('eyebrow')}
+            >
+              {p.eyebrow}
+            </p>
+          {/if}
+          {#if title}
+            <h2
+              class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
+              data-jp-step="2"
+              {...editAttrs('heading')}
+            >
+              {title}
+            </h2>
+          {/if}
+          {#if p.sub}
+            <p
+              class="jp-sec__measure jp-reveal descent__sub"
+              data-jp-step="3"
+              {...editAttrs('sub')}
+            >
+              {p.sub}
+            </p>
+          {/if}
+          {#if showStats}
+            <p class="jp-reveal descent__stats" data-jp-step="4">
+              <span class="descent__stat">
+                <b>{context.course.stageCount}</b>
+                {countLabel(
+                  context.course.stageCount,
+                  CHROME.stagesOne,
+                  CHROME.stages
+                )}
+              </span>
+              <span class="descent__stat">
+                <b>{context.course.practiceCount}</b>
+                {countLabel(
+                  context.course.practiceCount,
+                  CHROME.practicesOne,
+                  CHROME.practices
+                )}
+              </span>
+            </p>
+          {/if}
+        </header>
+      {/if}
 
       {#if composition === 'spine'}
         <div class="descent__body" bind:this={bodyEl}>
@@ -1084,7 +1134,49 @@
 
   .descent__card {
     flex: 1 1 11rem;
-    min-width: 0;
+    /*
+      THE FLOOR THAT MAKES THE ROW WRAP INSTEAD OF CRUSHING A CARD — the fix for a
+      live overflow at a 390px viewport.
+
+      WHERE THE SQUEEZE COMES FROM, and it is NOT the line above. The narrow
+      block near the foot of this stylesheet, `@container (max-width: 45rem)`,
+      deliberately overrides the basis to `flex: 1 1 8.25rem` (132px) so a narrow
+      container still gets a TWO-UP practice pool. At a 390px viewport the
+      practices row measures 279px, so two 132px cards plus the 12px gap (276px)
+      fit on one line — and each card's content box is 132 − 40 padding − 2 border
+      = 90px.
+
+      `.descent__card-top` is a flex row holding the uppercase type label
+      ("REFLECTION" at `--text-xs` / `--tracking-wider`, beside a 14px glyph) and
+      the lock, and its min-content is 131px. MEASURED LIVE on
+      of-blood-and-bones/bone-deep, 390 viewport, light, reveals forced in:
+      `.descent__card` scrollWidth 151 / clientWidth 130 and `.descent__card-top`
+      scrollWidth 131 / clientWidth 90 — the label spilling 41px past its box
+      under `overflow: visible`, painting over the card's own edge.
+      `document.documentElement.scrollWidth` stayed equal to `clientWidth`
+      throughout, which is why a horizontal-overflow check at three widths never
+      saw it.
+
+      `@container (max-width: 24rem)` below already forces `flex-basis: 100%`, so
+      the mitigation EXISTS — it just starts one breakpoint too late: 384px, and
+      390px is the width of every iPhone from the 12 to the 15. It missed by six
+      pixels. Raising it would be a third hand-maintained number in a chain whose
+      real constraint moves with the `type` and `density` axes.
+
+      So state the constraint instead. `min-width: min(100%, 11rem)` says a card is
+      never narrower than its BASE basis unless the row itself is narrower — so the
+      flex row wraps to one-up exactly when two-up would crush a card, at every
+      axis bag and every width, with no breakpoint to keep in step. The two-up
+      design SURVIVES wherever it fits: a 45rem container gives a ~609px row and
+      two 298px cards. The `100%` term is what stops a card overflowing a container
+      narrower than the floor.
+
+      FALSIFIED IN ISOLATION, narrow basis held at `8.25rem` in both arms and only
+      this declaration varied: `.descent__card-top` 121/92 (29px spill, both cards
+      on one line) → 92/92 (0px, one card per line). The live 41px and the
+      harness's 29px differ only by the page's real font stack and tracking.
+    */
+    min-width: min(100%, 11rem);
     padding: calc(var(--space-4) * var(--jp-rhythm));
   }
 
@@ -1485,6 +1577,14 @@
     .descent__practices {
       margin-top: calc(var(--space-4) * var(--jp-rhythm));
     }
+    /*
+      THE NARROW TWO-UP BASIS, KEPT — and it is no longer the whole story.
+      Unclamped it produced two 132px cards in a 279px row at a 390px viewport,
+      a 90px content box, and a 131px label spilling past the card edge. The
+      constraint now lives on `.descent__card`'s `min-width` floor rather than in
+      a breakpoint here, so this basis only decides how cards SHARE a line they
+      already fit on. Read that floor's comment before changing either number.
+    */
     .descent__card {
       flex: 1 1 8.25rem;
     }

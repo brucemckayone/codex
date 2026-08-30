@@ -652,6 +652,51 @@ describe('journey-design.css — the accessibility floors that are structural', 
 // 2. --tap-target-min — a floor a brand setting can lower is not a floor
 // ═══════════════════════════════════════════════════════════════════════════
 
+describe('--jp-stage-vh — the re-pointable height basis (O7 · the svh half)', () => {
+  // WHY THIS SEAM EXISTS. `svh` resolves against the BROWSER viewport and cannot
+  // be told not to, and `cqh` — the obvious alternative — silently falls back to
+  // the small viewport under inline-size containment, which is exactly what
+  // `.jp-sec` declares (`InviteSection.svelte:775` records that reasoning and it
+  // is why `svh` was chosen). So inside the builder's fixed-width device frame a
+  // `100svh` hero was as tall as the STUDIO WINDOW: measured live at
+  // device=mobile, the hero was 390 x 900 (aspect 0.433) where a real 390 x 844
+  // phone gives 0.462. The canvas could not preview the aspect of any
+  // full-height section — four of the hero's six compositions plus the invite's
+  // stage card.
+  //
+  // This file owns the SEAM. The two consumers live in `render/sections/`, which
+  // another work package owns, so they are handed off — the guard here is that
+  // the seam itself keeps the shape that makes the override reachable.
+
+  it('declares the basis once, on the axis substrate root', () => {
+    const declarations = declarationsOf(DESIGN, '--jp-stage-vh');
+    expect(declarations).toHaveLength(1);
+    expect(ruleFor(':where(.jp-sec)')?.declarations['--jp-stage-vh']).toBe(
+      'var(--jp-device-vh, 1svh)'
+    );
+  });
+
+  it('puts the fallback INSIDE the var(), not beside it', () => {
+    // The resolution trap, and the reason a plain `--jp-stage-vh: 1svh;` line
+    // would be wrong rather than merely different: `--jp-device-vh` arrives by
+    // INHERITANCE from an ancestor of `.jp-sec` (the canvas's fit box sets it).
+    // A bare declaration on `.jp-sec` itself would shadow the ancestor's
+    // contribution on every section, and the override could never win — the
+    // canvas would set a property nothing reads, which is the silent shape this
+    // whole file exists to catch.
+    const value = declarationsOf(DESIGN, '--jp-stage-vh')[0];
+    expect(value).toMatch(/^var\(--jp-device-vh,\s*1svh\)$/);
+  });
+
+  it('never sets --jp-device-vh itself, so the PUBLIC page is byte-identical', () => {
+    // The seam is inert off the canvas: with nothing declaring the device
+    // height, `--jp-stage-vh` resolves to `1svh` and published output cannot
+    // change. If this stylesheet ever declared it, every visitor would get the
+    // canvas's pinned height.
+    expect(declarationsOf(DESIGN, '--jp-device-vh')).toEqual([]);
+  });
+});
+
 describe('--tap-target-min (contract A2)', () => {
   const FORMULA = 'max(2.75rem, var(--space-11))';
 
@@ -742,27 +787,64 @@ const mix = (a: Oklab, b: Oklab, p: number): Oklab => [
 ];
 
 /**
- * `oklch(from <c> clamp(0.05, (<pivot> - l) * 100, <ceil>) calc(c * <k>) h)` —
+ * `oklch(from <c> clamp(0.05, (<pivot> - l) * <mult>, <ceil>) calc(c * <k>) h)` —
  * the auto-contrast step function `--jp-heading` and `--jp-pole-b` share.
+ *
+ * `mult` defaults to the 100 both declarations use, so every existing caller
+ * models the shipped CSS. It is a parameter only so the `--jp-heading` sweep
+ * below can MEASURE the multiplier a future reader will reach for — the change
+ * looks like a strict improvement and is not.
  */
 function autoContrast(
   base: Oklab,
   pivot: number,
   ceil: number,
-  chromaScale: number
+  chromaScale: number,
+  mult = 100
 ): Oklab {
   const [L, a, b] = base;
   const C = Math.hypot(a, b);
   const H = Math.atan2(b, a);
-  const L2 = Math.min(ceil, Math.max(0.05, (pivot - L) * 100));
+  const L2 = Math.min(ceil, Math.max(0.05, (pivot - L) * mult));
   const C2 = C * chromaScale;
   return [L2, C2 * Math.cos(H), C2 * Math.sin(H)];
 }
 
-/** `oklch(from <c> clamp(0.05, (0.6 - l) * 100, 0.98) 0 0)` — chroma zeroed. */
-function autoContrastGrey(base: Oklab, pivot: number, ceil: number): Oklab {
-  const L2 = Math.min(ceil, Math.max(0.05, (pivot - base[0]) * 100));
+/**
+ * `oklch(from <c> clamp(0.05, (<pivot> - l) * <mult>, <ceil>) 0 0)` — chroma
+ * zeroed. `mult` is a parameter because the whole `--jp-on-ember` finding turns
+ * on it: at 100 the ramp between black and white is 0.01 wide in OKLCH L and a
+ * fill landing inside it gets a genuine MID GREY. See
+ * `--jp-on-ember`'s tests below, which measure every multiplier.
+ */
+function autoContrastGrey(
+  base: Oklab,
+  pivot: number,
+  ceil: number,
+  mult = 100,
+  floor = 0.05
+): Oklab {
+  const L2 = Math.min(ceil, Math.max(floor, (pivot - base[0]) * mult));
   return [L2, 0, 0];
+}
+
+/**
+ * `rgb(from <c> calc(255 * clamp(0, (0.1791 - <luminance>) * 1e6, 1)) …)` — the
+ * @supports form of `--jp-on-ember`, and the same rule org-brand.css uses for
+ * `--color-text-on-brand`.
+ *
+ * White and black contrast EQUALLY against a fill whose relative luminance is
+ * sqrt(1.05 * 0.05) - 0.05 = 0.1791, both at 4.58:1. Deciding on which side of
+ * that the fill sits cannot produce an AA failure for any sRGB fill — which is
+ * exactly what an OKLCH-lightness pivot cannot promise, because `l` is
+ * perceptual and the ratio is computed on luminance.
+ *
+ * `* 1e6` saturates the clamp for every representable colour, so the result is
+ * pure black or pure white and this needs no ceiling parameter.
+ */
+const WCAG_INK_CROSSOVER = 0.1791;
+function autoContrastLuminance(base: Oklab): Oklab {
+  return relLum(oklabToLin(base)) < WCAG_INK_CROSSOVER ? [1, 0, 0] : [0, 0, 0];
 }
 
 const relLum = (lin: LinRgb): number =>
@@ -776,6 +858,40 @@ function ratio(fg: Oklab, bg: Oklab): number {
   const [hi, lo] = a > b ? [a, b] : [b, a];
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/**
+ * A GENERATED sweep of the colour space a creator actually picks from — the sRGB
+ * cube at a stride of 5, i.e. 52³ = 140 608 colours.
+ *
+ * WHY THIS EXISTS, and it is the whole reason two contrast defects survived four
+ * rounds of review: every ratio in this file was measured against a hand-written
+ * list of eight brand/pole rows. Their inputs are five ember hexes at OKLCH L
+ * 0.405, 0.555, 0.723, 0.586 and 0.546, and four backgrounds at L 0.947, 0.164,
+ * 0.968 and 0.223. The failing regions of both auto-contrast steps are narrow
+ * bands that NONE of those nine values enters, so the assertions were green over
+ * 100 combinations that never approached their floors. A generated sweep cannot
+ * be blind by construction.
+ *
+ * WHY sRGB AND NOT OKLCH. The brand editor takes a hex, so the pickable space is
+ * the 8-bit cube; an OKLCH grid at any practical step misses colours that land
+ * inside a narrow ramp and reports a floor that is too optimistic — measured, an
+ * OKLCH grid at L step 0.001 put `--jp-heading`'s floor at 3.06:1 where the
+ * exhaustive 8-bit answer is 1.00:1. Stride 5 rather than 1 keeps the suite fast;
+ * every headline number quoted in the comments below was re-derived at stride 1
+ * over all 16 777 216 colours and is labelled as such.
+ */
+const BRAND_GRID: Oklab[] = (() => {
+  const out: Oklab[] = [];
+  const lin = Array.from({ length: 256 }, (_, i) => srgbToLin(i / 255));
+  for (let r = 0; r < 256; r += 5) {
+    for (let g = 0; g < 256; g += 5) {
+      for (let b = 0; b < 256; b += 5) {
+        out.push(linToOklab([lin[r], lin[g], lin[b]]));
+      }
+    }
+  }
+  return out;
+})();
 
 /** The whole `--jp-*` ladder, derived from one ink exactly as the CSS does. */
 interface Ladder {
@@ -813,7 +929,12 @@ function ladderFrom(ink: Oklab, ember: Oklab): Ladder {
     lineHover: mix(ink, heading, 0.56),
     ember,
     emberText: mix(ember, heading, 0.55),
-    onEmber: autoContrastGrey(ember, 0.6, 1),
+    // The @supports form, because it is what every browser this product targets
+    // actually paints — and what every ratio in `04-contrast-baseline.md` was
+    // measured in. The OKLCH fallback is modelled explicitly, and compared
+    // against this one, in the `--jp-on-ember` describe below; modelling the
+    // fallback HERE would make the sweep measure a page no visitor sees.
+    onEmber: autoContrastLuminance(ember),
   };
 }
 
@@ -860,7 +981,9 @@ describe('the colour model matches the CSS it claims to model', () => {
     ],
     [
       '--jp-on-ember',
-      // Ceiling 1, not 0.98. See the note on `KNOWN_OPEN` below.
+      // The FALLBACK form. Ceiling 1, not 0.98 — round 3's fix. The live form is
+      // the @supports luminance override, asserted separately below because
+      // `declarationsOf` returns both and `toContain` would hide a swap.
       'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)',
     ],
   ];
@@ -1302,25 +1425,51 @@ function sweep(label: string, bg: string, emberHex: string): Failure[] {
  * background at all: `#E11D48` is OKLCH L = 0.5858, just under `--jp-on-ember`'s
  * 0.60 pivot, so the label resolved to near-white on a mid-lightness red.
  *
- * RESOLVED in round 3 by raising `--jp-on-ember`'s clamp CEILING
- * from 0.98 to 1 — see the comment on the token in `journey-palette.css`. The
- * original analysis was RIGHT that no PIVOT fixes it (0.60, 0.62 and 0.65 all
- * measure identical, because the fill's lightness saturates every threshold) and
- * wrong about what followed from that: the ceiling, not the pivot, was the
- * difference, and 0.98 versus 1 is 4.45:1 versus 4.70:1 — one side of the 4.5
- * floor each.
+ * Those TWO ENTRIES were genuinely resolved, in round 3 (commit 5614cbe0), by
+ * raising `--jp-on-ember`'s clamp CEILING from 0.98 to 1: 0.98 versus 1 is 4.45:1
+ * versus 4.70:1 on #E11D48, one side of the 4.5 floor each. That analysis was
+ * also RIGHT that no PIVOT fixes it — 0.60, 0.62 and 0.65 measure identical,
+ * because the fill's lightness saturates every threshold. So the emptying of this
+ * set was correct FOR STUDIO-ALPHA and should not be undone.
  *
- * It was also deferred on a premise that measurement did not support — that
- * `--jp-on-ember` mirrors `--color-text-on-brand`, so the same 4.43 hit every
- * primary Button on that org and any fix was therefore a platform-wide design
- * decision. Read side by side they were never the same expression: the platform
- * token is `clamp(0, (0.62 - l) * 1000, 1)`, with a different pivot, multiplier
- * AND ceiling. The blast radius was journey-only throughout. `platform-500
- * #c24129` (4.86) and `studio-beta #2563EB` (4.88) always passed, which is why a
- * single-brand check missed it entirely.
+ * ── BUT THE SET BEING EMPTY WAS READ AS THE TOKEN BEING SETTLED, AND IT WAS NOT
+ * (round 4, WT-C). Recorded here because an empty allow-list with a "RESOLVED"
+ * note beside it is the most convincing false green in this file.
  *
- * The lesson worth keeping: a token DOCUMENTED as a mirror of another is not a
- * mirror until both expressions have been read side by side.
+ * The expression carries FOUR numbers — floor, pivot, multiplier, ceiling — and
+ * only the ceiling and the pivot were ever examined. At `* 100` the ramp between
+ * black and white is 0.01 wide in OKLCH L, and a fill landing inside it gets a
+ * genuine MID GREY rather than either end. Swept over all 16 777 216 sRGB
+ * brands, 718 821 of them (4.285%) put this label under 4.5:1 on its own fill,
+ * floor **1.00:1** — an invisible label. `#059669` (emerald-600) measured
+ * 2.41:1. One brand's 4.43 was repaired while a band of brands stayed at 1.00,
+ * and both this note and the token's own comment read as finished.
+ *
+ * WHY THE SWEEP COULD NOT HAVE CAUGHT IT: the modelling was always correct — the
+ * gap was the INPUT SET. The eight rows below feed five ember hexes whose OKLCH L
+ * values are 0.405, 0.555, 0.723, 0.586 and 0.546. None is inside (0.59, 0.60),
+ * so the ramp was never exercised. The generated sweeps added below fix that.
+ *
+ * FIXED, at the level the defect actually sits: `--jp-on-ember` now decides on
+ * RELATIVE LUMINANCE under an `@supports` guard, exactly as
+ * `tokens/org-brand.css` does for `--color-text-on-brand` — 0 failures out of
+ * 16 777 216, floor 4.58:1, and zero regressions against the old form. The
+ * arithmetic, and the measurement showing that merely raising the multiplier
+ * would have made things WORSE for 70 907 brands, is in the
+ * `--jp-on-ember` describe below.
+ *
+ * The premise the deferral rested on was also wrong, and is the reason the whole
+ * bead family exists: `--jp-on-ember` was documented as a mirror of
+ * `--color-text-on-brand`, so a fix looked like a platform-wide design decision.
+ * Read side by side they were never the same expression — the platform token was
+ * `clamp(0, (0.62 - l) * 1000, 1)`, differing in pivot, multiplier AND floor. It
+ * is a true mirror now, and by construction rather than by claim: both files
+ * carry the same luminance rule under the same `@supports` condition, and
+ * `journey-palette.test.ts` asserts the condition strings are identical.
+ *
+ * The lesson worth keeping, now with its second half: a token DOCUMENTED as a
+ * mirror of another is not a mirror until both expressions have been read side by
+ * side — and reading two of four numbers is not reading the expression.
  */
 const KNOWN_OPEN = new Set<string>([]);
 
@@ -1544,5 +1693,663 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     // One entry, and it is the pre-existing HeroSection background-image list.
     // If you are adding to this, fix the declaration instead.
     expect(KNOWN_VIOLATIONS).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. THE PRIMARY CTA — the one element a visitor must read to pay (Codex-kdsuo)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The journey CTA does NOT consume the journey palette. `render/CtaLink.svelte`
+ * is the only styler of `.cta` in the whole page-builder tree — the sole other
+ * `.cta` selector is `InviteSection.svelte`'s `margin-top: auto` — and its
+ * primary variant spends two ORG-BRAND tokens:
+ *
+ *   background: var(--color-brand-primary);
+ *   color:      var(--color-text-on-brand);
+ *
+ * So the sweep above, which measures `--jp-on-ember` on `--jp-ember`, has never
+ * touched it, and neither has anything else in the repo. Codex-kdsuo measured
+ * 4.70:1 on `studio-alpha` at BOTH poles and asked for a pin; the pin was never
+ * added, and in the meantime the DERIVATION was rewritten (org-brand.css now
+ * decides the ink on relative luminance under an `@supports` guard). The element
+ * the bead warned could silently cross the floor is the one element in this
+ * effort whose colour rule changed with nothing watching it.
+ *
+ * The ratio has NO page-background term — the label is pure black or pure white
+ * on the brand fill — which is why the bead measured it width-invariant and,
+ * on an org with no dark brand override, pole-invariant too.
+ *
+ * THREE PARTS, and each fails for a different reason:
+ *   (1) the CONSUMER — a future change that re-routes the CTA onto
+ *       `--jp-accent-fill`/`--jp-accent-on-fill` would be covered by the sweep
+ *       above and must not slip through as a silent re-route;
+ *   (2) the DERIVATION — string-asserted, so the model below cannot drift off
+ *       the stylesheet;
+ *   (3) the RATIO — modelled, with the published figures pinned AND a generated
+ *       brand sweep, because a pin over the eight seeded brands would be green
+ *       and would assert nothing about the risk the bead names.
+ */
+describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
+  const CTA = read('render/CtaLink.svelte');
+
+  /** The declaration body of one selector's rule block in a Svelte `<style>`. */
+  const ruleBody = (css: string, selector: string): string => {
+    const at = css.indexOf(selector);
+    expect(at, `${selector} not found`).toBeGreaterThan(0);
+    const open = css.indexOf('{', at);
+    const close = css.indexOf('}', open);
+    return css.slice(open + 1, close);
+  };
+
+  it('still spends exactly --color-brand-primary and --color-text-on-brand', () => {
+    const body = ruleBody(CTA, ".cta[data-variant='primary'] {");
+    expect(squash(body)).toContain('background: var(--color-brand-primary);');
+    expect(squash(body)).toContain('color: var(--color-text-on-brand);');
+    // And the journey palette is NOT in play here, which is the fact that makes
+    // the sweep above blind to this pair. If a future change re-points the CTA
+    // at the accent ladder this goes red, and the sweep starts covering it.
+    expect(body).not.toContain('--jp-');
+  });
+
+  it('is the only styler of .cta in the section tree', () => {
+    // The pin above is worth nothing if a second rule can repaint the label.
+    // Today the only other `.cta` selector in the eleven sections is
+    // `InviteSection`'s `:global(.cta)`, which sets `margin-top: auto`. A section
+    // that starts painting the CTA's own colours must show up HERE, because the
+    // pin above would keep passing while the page changed.
+    const painters = SECTION_SOURCES.flatMap(({ file, css }) =>
+      [...css.matchAll(/([^{}]*\.cta\)?[^{}]*)\{([^{}]*)\}/g)]
+        .filter(([, , body]) => /(?:^|[;\s])(?:color|background)/.test(body))
+        .map(([, selector]) => `${file} — ${squash(selector)}`)
+    );
+    // Guards the guard: an empty source set would pass this trivially.
+    expect(SECTION_SOURCES).toHaveLength(11);
+    expect(painters).toEqual([]);
+  });
+
+  it('derives the ink on LUMINANCE, with the OKLCH step kept as the fallback', () => {
+    // Four declarations, in file order: the two OKLCH fallbacks (light, dark)
+    // then the two `@supports` luminance overrides. Asserted as a set rather
+    // than with `toContain`, so replacing one with the other cannot pass.
+    const decls = declarationsOf(ORG_BRAND, '--color-text-on-brand');
+    expect(decls).toHaveLength(4);
+
+    expect(decls[0]).toBe(
+      'oklch(from var(--brand-color, var(--color-primary-500)) clamp(0, (0.62 - l) * 1000, 1) 0 0)'
+    );
+    expect(decls[1]).toBe(
+      'oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0)'
+    );
+
+    // Codex-5wgwf's correction, which must not be lost in either form: the dark
+    // ink is derived from the colour ACTUALLY BEING PAINTED (`--brand-color-dark`
+    // first), not from the light brand.
+    for (const dark of [decls[1], decls[3]]) {
+      expect(dark).toContain('--brand-color-dark');
+    }
+    for (const lum of [decls[2], decls[3]]) {
+      expect(lum).toContain('rgb(');
+      expect(lum).toContain(String(WCAG_INK_CROSSOVER));
+      expect(lum).toContain('* 1e6, 1)');
+      expect(lum).toContain('pow((r / 255 + 0.055) / 1.055, 2.4)');
+    }
+
+    // The same-shape sibling must not drift: an engine that can run one can run
+    // the other, and the two are the same expression over two fills.
+    expect(declarationsOf(ORG_BRAND, '--color-on-interactive')).toHaveLength(4);
+  });
+
+  /** The pair, exactly as painted: pure black or pure white on the brand fill. */
+  const ctaRatio = (brand: string): number => {
+    const fill = hex(brand);
+    return ratio(autoContrastLuminance(fill), fill);
+  };
+
+  it('locks the three measured browser figures (A67 method, both poles)', () => {
+    // Measured by canvas `getImageData` readback with the composite set to
+    // `copy` and the ancestor walked to alpha > 250, on all three seeded orgs at
+    // BOTH poles. Identical at both poles on every one of them: none of the
+    // three sets `dark_mode_overrides.primaryColor`, so `--brand-color-dark` is
+    // absent and dark falls back to the light brand.
+    expect(ctaRatio('#A62B0C')).toBeCloseTo(7.07, 1); // of-blood-and-bones
+    expect(ctaRatio('#2563EB')).toBeCloseTo(5.17, 1); // studio-beta
+    expect(ctaRatio('#E11D48')).toBeCloseTo(4.7, 1); // studio-alpha  +0.20
+    // The figure Codex-kdsuo itself recorded, on a brand this database does not
+    // have. Kept because the bead's argument is about the MARGIN, not the org:
+    // 0.16 is inside the noise of any brand edit.
+    expect(ctaRatio('#e1233b')).toBeCloseTo(4.66, 1);
+  });
+
+  it('cannot be pushed below AA by ANY brand a creator can pick', () => {
+    // THE PART THAT MAKES THIS TEST NON-VACUOUS. A pin over the eight seeded
+    // brands stays green and proves nothing: the OKLCH-lightness form ADMITTED
+    // hard AA failures on legal brands — swept over all 16 777 216 sRGB colours
+    // it put the label under 4.5:1 for 1 420 883 of them (8.47%), worst case
+    // #01a221 at 3.40:1, and in every one of those the OTHER ink would have
+    // passed. #E11D48 (4.70) and #e1233b (4.66) sit just inside the passing edge
+    // of that band, which is why the bead measured 0.16-0.20 of headroom and
+    // could not attribute it. It is a band, not a margin.
+    //
+    // The luminance form cannot produce a failure at all: black and white
+    // contrast equally at luminance 0.1791, both at 4.58:1, so that is the worst
+    // attainable outcome. Asserted over a generated sRGB grid rather than
+    // claimed.
+    let floor = Number.POSITIVE_INFINITY;
+    let failures = 0;
+    for (const brand of BRAND_GRID) {
+      const r = ratio(autoContrastLuminance(brand), brand);
+      if (r < floor) floor = r;
+      if (r < 4.5) failures += 1;
+    }
+    expect(BRAND_GRID.length).toBe(140608); // guards the guard
+    expect(failures).toBe(0);
+    expect(floor).toBeGreaterThan(4.5);
+    expect(floor).toBeCloseTo(4.58, 1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. THE TWO AUTO-CONTRAST RAMPS, SWEPT — `--jp-on-ember` and `--jp-heading`
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Both tokens pick an ink by stepping on OKLCH lightness. Both have a failing
+ * band. One is now fixed and one is recorded as a precondition, and the point of
+ * these tests is that the DIFFERENCE between those two outcomes is measured
+ * rather than asserted — including a pin on the change a future reader will
+ * reach for first, which measurement shows makes things worse.
+ */
+describe('--jp-on-ember, the accent plate label (Codex-kdsuo · Codex-g7ipk)', () => {
+  /** The FALLBACK declaration: `clamp(0.05, (0.6 - l) * <mult>, 1)`. */
+  const fallback = (fill: Oklab, mult: number): Oklab =>
+    autoContrastGrey(fill, 0.6, 1, mult);
+
+  const sweepRamp = (
+    ink: (fill: Oklab) => Oklab
+  ): { floor: number; failures: number } => {
+    let floor = Number.POSITIVE_INFINITY;
+    let failures = 0;
+    for (const fill of BRAND_GRID) {
+      const r = ratio(ink(fill), fill);
+      if (r < floor) floor = r;
+      if (r < 4.5) failures += 1;
+    }
+    return { floor, failures };
+  };
+
+  it('the LIVE (luminance) form cannot fail AA for any brand', () => {
+    // Exhaustive at stride 1: 0 failures out of 16 777 216, floor 4.582:1.
+    const { floor, failures } = sweepRamp(autoContrastLuminance);
+    expect(failures).toBe(0);
+    expect(floor).toBeCloseTo(4.58, 1);
+  });
+
+  it('the FALLBACK form still admits a 1.00:1 label — the defect, measured', () => {
+    // This is the red the emptied `KNOWN_OPEN` note above hid. Exhaustive at
+    // stride 1: 718 821 brands (4.285%) under 4.5:1, floor 1.00:1.
+    //
+    // It is left in place deliberately — see the token's comment. An unguarded
+    // override would not degrade to it: a custom property only fails when
+    // SUBSTITUTED, at which point the consuming `color` is invalid at
+    // computed-value time and the label loses its colour entirely. So the
+    // `@supports` guard is what makes the fix monotonic, and this assertion
+    // records what an engine older than Chrome 125 still gets.
+    const { floor, failures } = sweepRamp((f) => fallback(f, 100));
+    expect(failures).toBeGreaterThan(0);
+    expect(floor).toBeLessThan(1.01);
+  });
+
+  it('RAISING THE MULTIPLIER MAKES IT WORSE — do not "fix" it that way', () => {
+    // The obvious change, and the trap. `* 1000` narrows the mid-grey ramp
+    // tenfold but MOVES it rather than removing it: inside the new band a fill
+    // that took the near-black floor now takes the white ceiling.
+    //
+    // Exhaustive at stride 1:
+    //   * 100    floor 1.00:1   under 4.5: 718 821 (4.285%)
+    //   * 1000   floor 1.00:1   under 4.5: 694 679 (4.141%)   70 907 WORSE
+    //   * 1e6    floor 1.03:1   under 4.5: 696 762 (4.153%)   71 002 WORSE
+    // Worst single regression: #149b0b 5.70:1 -> 1.00:1.
+    const x100 = sweepRamp((f) => fallback(f, 100));
+    const x1000 = sweepRamp((f) => fallback(f, 1000));
+    expect(x1000.floor).toBeLessThan(1.01); // the band never leaves
+
+    let regressions = 0;
+    for (const fill of BRAND_GRID) {
+      if (
+        ratio(fallback(fill, 1000), fill) <
+        ratio(fallback(fill, 100), fill) - 0.01
+      ) {
+        regressions += 1;
+      }
+    }
+    expect(regressions).toBeGreaterThan(0);
+
+    // The named case, exactly.
+    const emerald = hex('#149b0b');
+    expect(ratio(fallback(emerald, 100), emerald)).toBeCloseTo(5.7, 1);
+    expect(ratio(fallback(emerald, 1000), emerald)).toBeCloseTo(1.0, 1);
+    // Whereas the luminance form regresses NOTHING against `* 100` — it is a
+    // strict improvement, which is what licenses landing it at all.
+    let luminanceRegressions = 0;
+    for (const fill of BRAND_GRID) {
+      if (
+        ratio(autoContrastLuminance(fill), fill) <
+        ratio(fallback(fill, 100), fill) - 0.01
+      ) {
+        luminanceRegressions += 1;
+      }
+    }
+    expect(luminanceRegressions).toBe(0);
+    expect(x100.failures).toBeGreaterThan(0);
+  });
+
+  it('preserves every published figure and repairs the failing brands', () => {
+    const on = (h: string) => {
+      const fill = hex(h);
+      return ratio(autoContrastLuminance(fill), fill);
+    };
+    // UNCHANGED — the seeded orgs, the golden ember and both platform primaries.
+    expect(on('#A62B0C')).toBeCloseTo(7.07, 1);
+    expect(on('#2563EB')).toBeCloseTo(5.17, 1);
+    expect(on('#E11D48')).toBeCloseTo(4.7, 1);
+    expect(on('#552e8e')).toBeCloseTo(9.69, 1);
+    expect(on('#c24129')).toBeCloseTo(5.14, 1);
+    // MOVED — and only upward, and only where it was failing.
+    const emerald = hex('#059669');
+    expect(ratio(fallback(emerald, 100), emerald)).toBeCloseTo(2.41, 1);
+    expect(on('#059669')).toBeCloseTo(5.57, 1);
+  });
+});
+
+/**
+ * `--jp-heading` — RECORDED, NOT FIXED, and the record is the deliverable.
+ *
+ * The derivation is unchanged and this suite says why in numbers, because the
+ * defect is real and the two obvious repairs both make it worse. See the long
+ * note on the token in `journey-palette.css`; these assertions are that note's
+ * evidence, so the note cannot rot into prose.
+ */
+describe('--jp-heading collapses on a mid-luminance ink (recorded)', () => {
+  const heading = (ink: Oklab, mult: number): Oklab =>
+    autoContrast(ink, 0.62, 0.96, 0.25, mult);
+  const faint = (ink: Oklab, mult: number): Oklab =>
+    mix(heading(ink, mult), ink, 0.58);
+
+  const sweepPair = (mult: number) => {
+    let headFloor = Number.POSITIVE_INFINITY;
+    let faintFloor = Number.POSITIVE_INFINITY;
+    let headFails = 0;
+    let faintFails = 0;
+    for (const ink of BRAND_GRID) {
+      const h = ratio(heading(ink, mult), ink);
+      const f = ratio(faint(ink, mult), ink);
+      if (h < headFloor) headFloor = h;
+      if (f < faintFloor) faintFloor = f;
+      if (h < 4.5) headFails += 1;
+      if (f < 4.5) faintFails += 1;
+    }
+    return { headFloor, faintFloor, headFails, faintFails };
+  };
+
+  it('THE DEFECT: a mid-lightness --brand-bg renders headings unreadable', () => {
+    // The spot values, which are what a reviewer can reproduce in a browser by
+    // setting `--brand-bg` on `.journey-palette` and reading `--color-heading`
+    // against `--color-background`.
+    const at = (h: string) => {
+      const ink = hex(h);
+      return ratio(heading(ink, 100), ink);
+    };
+    expect(at('#bd618f')).toBeCloseTo(1.27, 1); // a dusty pink — INVISIBLE
+    expect(at('#808080')).toBeCloseTo(3.52, 1); // a plain mid grey
+    expect(at('#9C6B4F')).toBeCloseTo(4.02, 1); // a mid tan
+
+    // Exhaustive at stride 1: 2 409 483 inks (14.36%) under 4.5:1, floor 1.00:1.
+    const { headFloor, headFails } = sweepPair(100);
+    expect(headFloor).toBeLessThan(1.01);
+    expect(headFails).toBeGreaterThan(0);
+  });
+
+  it('is invisible to the eight hardcoded rows, which is why it survived', () => {
+    // The four backgrounds the sweep above feeds are OKLCH L 0.947, 0.164, 0.968
+    // and 0.223; the failing band is 0.528-0.618. Every seeded org has enormous
+    // headroom, so no amount of re-measuring the fixture would find this.
+    for (const [bg, want] of [
+      ['#F3F0E7', 18.38], // of-blood-and-bones, this database's actual value
+      ['#F6EFE6', 18.36], // the value the docs quote
+      ['#200000', 17.53],
+      ['#fafafa', 20.07],
+      ['#171717', 15.96],
+    ] as [string, number][]) {
+      const ink = hex(bg);
+      expect(ratio(heading(ink, 100), ink), bg).toBeCloseTo(want, 1);
+    }
+  });
+
+  it('RAISING THE MULTIPLIER MAKES IT WORSE — the change not to make', () => {
+    // Exhaustive at stride 1, and this is the decisive measurement:
+    //   * 100   floor 1.00:1   under 4.5: 2 409 483 (14.36%)
+    //   * 1000  floor 1.00:1   under 4.5: 2 484 004 (14.81%)   116 339 WORSE
+    //   * 1e6   floor 1.01:1   under 4.5: 2 492 478 (14.86%)   118 623 WORSE
+    // The band narrows and MOVES; some ink always lands inside it (32 of the
+    // 16 777 216 even at 1e6), so the floor never leaves 1.00.
+    const x100 = sweepPair(100);
+    const x1000 = sweepPair(1000);
+    expect(x1000.headFails).toBeGreaterThanOrEqual(x100.headFails);
+    expect(x1000.headFloor).toBeLessThan(1.01);
+
+    // The named regression: a vivid green just under the pivot flips from the
+    // near-black FLOOR to the near-white CEILING.
+    const green = hex('#05a22b');
+    expect(ratio(heading(green, 100), green)).toBeCloseTo(6.16, 1);
+    expect(ratio(heading(green, 1000), green)).toBeCloseTo(1.01, 1);
+  });
+
+  it('and the PIVOT cannot be moved to luminance without losing the hue', () => {
+    // `--color-text-on-brand` escaped this by deciding on relative luminance,
+    // and `--jp-on-ember` follows it above. Neither carries a hue: `r`/`g`/`b`
+    // are in scope only inside `rgb(from …)` and `l`/`c`/`h` only inside
+    // `oklch(from …)`, so a luminance decision cannot also emit `calc(c * 0.25)
+    // h`. This assertion is the reason the token still steps on `l`.
+    expect(declarationsOf(PALETTE, '--jp-heading')[0]).toContain(
+      'calc(c * 0.25) h'
+    );
+    expect(declarationsOf(PALETTE, '--jp-heading')[0]).toContain('(0.62 - l)');
+    // Same expression, same reason, one axis over.
+    expect(declarationsOf(PALETTE, '--jp-pole-b')[0]).toContain(
+      'calc(c * 0.25) h'
+    );
+  });
+
+  it('and no multiplier can rescue --jp-faint, so the fix is an INPUT guard', () => {
+    // THE FACT THAT SETTLES IT. `--jp-faint` is a 58% mix of heading into ink,
+    // so its ratio is bounded by the two ends' separation rather than by the
+    // step — its failure count is IDENTICAL at every multiplier (exhaustive at
+    // stride 1: 9 181 154, i.e. 54.72%, in all three sweeps). A mid-luminance
+    // page background cannot carry this ladder however the step is written, so
+    // the guard belongs where `--brand-bg` is CHOSEN — the brand editor — and
+    // not in this file.
+    expect(sweepPair(100).faintFails).toBe(sweepPair(1000).faintFails);
+    expect(sweepPair(100).faintFails).toBe(sweepPair(1e6).faintFails);
+    expect(sweepPair(100).faintFails).toBeGreaterThan(
+      sweepPair(100).headFails * 3
+    );
+    // And the seeded orgs are comfortably outside it, which is the other half of
+    // why this is a precondition rather than a live bug.
+    for (const [bg, want] of [
+      ['#F6EFE6', 7.11],
+      ['#200000', 5.37],
+    ] as [string, number][]) {
+      const ink = hex(bg);
+      expect(ratio(faint(ink, 100), ink), bg).toBeCloseTo(want, 1);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. THE PRACTICE-CARD FLOOR — the one mechanism in this branch that neither
+//    jsdom nor a horizontal-overflow check can see
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * WHY A CSS-MECHANISM CHECK, AND WHY HERE.
+ *
+ * `MapSection`'s practice pool overflowed at a 390px viewport: the uppercase
+ * type label inside `.descent__card-top` painted 41px past the card's own edge,
+ * over the border. Nothing else in this branch's gate could see it.
+ *
+ *   * jsdom has no layout and no container queries, so the section's own
+ *     component test renders both cards at width 0 and asserts nothing about
+ *     either. The `@container (max-width: 45rem)` rule that CAUSES the squeeze
+ *     is not even evaluated.
+ *   * `document.documentElement.scrollWidth` stayed equal to `clientWidth` at
+ *     all three measured widths, because the spill is INSIDE a section that
+ *     does not itself overflow the page. A page-level horizontal-overflow probe
+ *     — the usual guard for this bug class — is blind to it by construction.
+ *   * A visual snapshot would have caught it, but the repo's journey snapshots
+ *     capture blank sections (the reveal never fires in a headless full-page
+ *     shot), so they did not.
+ *
+ * That leaves the declarations themselves, which is what this file already does
+ * for colour: parse the CSS, model the mechanism it declares, and license the
+ * model by reproducing numbers measured in a real browser. The model below
+ * reproduces FOUR live measurements to the pixel across both arms, which is why
+ * the assertions that follow it mean something.
+ *
+ * This is the only per-section Svelte `<style>` block this file reads. The
+ * stylesheet-integrity sweep at the top deliberately excludes them (the Svelte
+ * compiler fails the build on a malformed comment), and that exclusion still
+ * holds — nothing here re-litigates it.
+ */
+const MAP_SVELTE = read('render/sections/MapSection.svelte');
+const MAP_STYLE = MAP_SVELTE.slice(
+  MAP_SVELTE.indexOf('<style>') + '<style>'.length,
+  MAP_SVELTE.lastIndexOf('</style>')
+);
+const MAP_RULES = parseRules(MAP_STYLE);
+
+/** The at-rule preludes the practice pool's width chain passes through. */
+const NARROW_AT = '@container (max-width: 45rem)';
+const ONE_UP_AT = '@container (max-width: 24rem)';
+
+/** Rules whose selector LIST contains `sel` exactly — grouped rules included. */
+const mapRulesFor = (sel: string, at = ''): Rule[] =>
+  MAP_RULES.filter(
+    (r) => r.at === at && r.selector.split(',').some((s) => s.trim() === sel)
+  );
+
+/** The winning declaration of `prop` on `sel` within `at` — later wins. */
+const mapDecl = (sel: string, prop: string, at = ''): string | undefined => {
+  const hits = mapRulesFor(sel, at)
+    .map((r) => r.declarations[prop])
+    .filter((v): v is string => v !== undefined);
+  return hits.at(-1);
+};
+
+/** The first `<n>rem` length in a value, in rem. */
+const remIn = (value: string | undefined): number => {
+  const m = value === undefined ? null : /(-?[\d.]+)rem/.exec(value);
+  return m ? Number(m[1]) : Number.NaN;
+};
+
+// ── the layout model ───────────────────────────────────────────────────────
+//
+// Two equal flex items in a wrapping row. Everything below is arithmetic the
+// CSS states outright: there is no line-breaking heuristic here, because with
+// two items of equal basis a wrap happens exactly when the pair plus the gap
+// cannot fit, and `min-width` is the only thing that stops the shrink.
+
+const REM = 16; // `rootFont` measured 16px on every seeded org
+const SPACE_UNIT = 4; // `--space-unit` = 0.25rem * `--brand-density-scale: 1`
+const BORDER = 1; // `--border-width`, the floor `max()` in the card rule
+
+interface Arm {
+  /** `.descent__practices` content-box width. */
+  rowWidth: number;
+  /** `--jp-rhythm`, the section's own multiplier on gap AND padding. */
+  rhythm: number;
+  /** `flex-basis`, in rem — 11 at base, 8.25 under the 45rem container. */
+  basisRem: number;
+  /** `min-width`'s rem term, or `null` for the arm that has no `min-width`. */
+  floorRem: number | null;
+}
+
+interface Arranged {
+  twoUp: boolean;
+  /** `.descent__card`'s `clientWidth` — border excluded, padding included. */
+  cardClientWidth: number;
+  /** `.descent__card-top`'s box: the card's content width. */
+  labelBox: number;
+}
+
+function arrange({ rowWidth, rhythm, basisRem, floorRem }: Arm): Arranged {
+  const gap = 3 * SPACE_UNIT * rhythm; // `--space-3` * `--jp-rhythm`
+  const pad = 4 * SPACE_UNIT * rhythm; // `--space-4` * `--jp-rhythm`
+  const basis = basisRem * REM;
+  // `min(100%, 11rem)`: the `100%` term resolves against the flex container's
+  // own content box, so a row NARROWER than the floor yields the row. That term
+  // is what stops a single card overflowing a container tighter than 11rem.
+  const floor = floorRem === null ? 0 : Math.min(rowWidth, floorRem * REM);
+  const perItem = Math.max(basis, floor);
+  const twoUp = 2 * perItem + gap <= rowWidth;
+  const outer = twoUp ? (rowWidth - gap) / 2 : rowWidth;
+  return {
+    twoUp,
+    cardClientWidth: outer - 2 * BORDER,
+    labelBox: outer - 2 * BORDER - 2 * pad,
+  };
+}
+
+/**
+ * THE LABEL'S MIN-CONTENT, and it is measured rather than derived.
+ *
+ * `.descent__card-top` is a flex row: a 14px glyph, 6px gap, the practice type
+ * at `--text-xs` upper-cased at `--tracking-wider`, then an 8px gap and a 14px
+ * lock. Its `scrollWidth` read 131px on of-blood-and-bones/bone-deep at a 390
+ * viewport with "REFLECTION" as the longest type in the pool. Content-dependent
+ * by nature — a longer type string raises it — so it is a recorded floor to
+ * clear, not a formula. The `min-width` fix is deliberately indifferent to it:
+ * it states the card's own minimum instead of tracking the label's.
+ */
+const LABEL_MIN_CONTENT = 131;
+
+/** `--jp-rhythm`'s declared values, read from the axis stylesheet. */
+const RHYTHMS = [
+  ...new Set(declarationsOf(DESIGN, '--jp-rhythm').map(Number)),
+].sort((a, b) => a - b);
+
+/** The section's rhythm on the page every number below was measured on. */
+const MEASURED_RHYTHM = 1.25;
+/** `.descent__practices` clientWidth at a 390px viewport, measured. */
+const MEASURED_ROW = 279;
+
+describe('the practice-card floor — .descent__card min-width (F4)', () => {
+  it('the model reproduces the live browser, in BOTH arms', () => {
+    // MEASURED on of-blood-and-bones/bone-deep AND studio-alpha/bone-deep, 390
+    // viewport, reveals forced in, via getComputedStyle + clientWidth readback:
+    //   --jp-rhythm 1.25 · gap 15px · padding 20px · border 1px
+    //   flex-basis 132px (the 45rem container override, section CQ width 390)
+    //   .descent__practices clientWidth 279
+    //
+    // BEFORE (no min-width): .descent__card scrollWidth 151 / clientWidth 130,
+    //   .descent__card-top 131 / 90 — a 41px spill, both cards on one line.
+    // AFTER  (min-width live): .descent__card 279 wide / clientWidth 277,
+    //   .descent__card-top 237 / 237 — zero spill, card tops 1664 and 1768,
+    //   i.e. one card per line.
+    const before = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 8.25,
+      floorRem: null,
+    });
+    expect(before.twoUp).toBe(true);
+    expect(before.cardClientWidth).toBe(130); // live: 130
+    expect(before.labelBox).toBe(90); // live: 90
+
+    const after = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 11,
+      floorRem: 11,
+    });
+    expect(after.twoUp).toBe(false);
+    expect(after.cardClientWidth).toBe(277); // live: 277
+    expect(after.labelBox).toBe(237); // live: 237
+  });
+
+  it('THE DEFECT — without the floor the label does not fit its own card', () => {
+    // The control arm, and the reason this test is not vacuous: delete the
+    // `min-width` declaration and this is what the page goes back to. The
+    // margin was ONE PIXEL of slack in the wrong direction — 2 x 132 + 15 = 279
+    // against a 279px row — which is why it survived review.
+    const control = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 8.25,
+      floorRem: null,
+    });
+    expect(control.labelBox).toBeLessThan(LABEL_MIN_CONTENT);
+    expect(LABEL_MIN_CONTENT - control.labelBox).toBe(41); // the live spill
+  });
+
+  it('the floor clears the label at every rhythm and every narrow width', () => {
+    // The claim the fix makes, and the reason it is a constraint rather than a
+    // fourth breakpoint: `min-width` holds at every axis bag and every width,
+    // with no number to keep in step. Swept over `--jp-rhythm`'s four declared
+    // values x every row width from a 320px viewport up.
+    expect(RHYTHMS).toEqual([0.75, 1, 1.25, 1.6]);
+    const failures: string[] = [];
+    for (const rhythm of RHYTHMS) {
+      for (let rowWidth = 209; rowWidth <= 320; rowWidth += 1) {
+        const got = arrange({ rowWidth, rhythm, basisRem: 8.25, floorRem: 11 });
+        if (got.labelBox < LABEL_MIN_CONTENT)
+          failures.push(`${rowWidth}px @ rhythm ${rhythm}: ${got.labelBox}`);
+      }
+    }
+    expect(failures).toEqual([]);
+
+    // THE LIMIT, STATED. The floor cannot help below the width at which the row
+    // itself is too narrow for the label plus its padding: at the widest rhythm
+    // a single full-row card needs rowWidth >= 131 + 51.2 + 2 = 184.2px. A 320px
+    // viewport gives a 209px row (the 390 viewport's 279 less the same chrome),
+    // so the nearest real device clears it by ~25px. Below ~185px of row no
+    // `min-width` can fix this and the label itself would have to wrap.
+    const atLimit = arrange({
+      rowWidth: 184,
+      rhythm: 1.6,
+      basisRem: 8.25,
+      floorRem: 11,
+    });
+    expect(atLimit.labelBox).toBeLessThan(LABEL_MIN_CONTENT);
+  });
+
+  it('and does NOT collapse the two-up design where two cards fit', () => {
+    // The regression the fix could plausibly have caused: forcing one-up
+    // everywhere. At the 45rem container boundary the row measures ~609px, so
+    // the pair still shares a line with room to spare.
+    const wide = arrange({
+      rowWidth: 609,
+      rhythm: 1,
+      basisRem: 11,
+      floorRem: 11,
+    });
+    expect(wide.twoUp).toBe(true);
+    expect(Math.round(wide.cardClientWidth)).toBe(297);
+    expect(wide.labelBox).toBeGreaterThan(LABEL_MIN_CONTENT);
+  });
+
+  it('the declarations the model reads are the ones in the stylesheet', () => {
+    // The string half. If any of these five moves, the numbers above stop
+    // describing the file and this fails rather than going quietly stale.
+    expect(mapDecl('.descent__card', 'min-width')).toBe('min(100%, 11rem)');
+    expect(mapDecl('.descent__card', 'flex')).toBe('1 1 11rem');
+    expect(mapDecl('.descent__card', 'padding')).toBe(
+      'calc(var(--space-4) * var(--jp-rhythm))'
+    );
+    expect(mapDecl('.descent__practices', 'gap')).toBe(
+      'calc(var(--space-3) * var(--jp-rhythm))'
+    );
+    // The narrow-container basis is the CONTROL the A/B held constant: both arms
+    // ran at 8.25rem and varied only `min-width`. Change it and re-measure.
+    expect(remIn(mapDecl('.descent__card', 'flex', NARROW_AT))).toBe(8.25);
+
+    // The 24rem rule still exists, and is still NOT what saves a 390 viewport:
+    // 24rem is 384px, and 390px is the width of every iPhone from the 12 to the
+    // 15. It missed by six pixels, which is the whole reason for the floor.
+    expect(mapDecl('.descent__card', 'flex-basis', ONE_UP_AT)).toBe('100%');
+    expect(24 * REM).toBeLessThan(390);
+
+    // Nothing else re-declares either property on this element — no later rule
+    // (`.descent--enhanced`, reduced motion) can unset the floor.
+    const touching = MAP_RULES.filter(
+      (r) =>
+        /\.descent__card(?![-\w])/.test(r.selector) &&
+        ('min-width' in r.declarations || 'flex' in r.declarations)
+    );
+    expect(touching.map((r) => `${r.at}|${r.selector}`).sort()).toEqual([
+      '@container (max-width: 45rem)|.descent__card',
+      '|.descent__card', // `at` is '' at top level
+    ]);
   });
 });

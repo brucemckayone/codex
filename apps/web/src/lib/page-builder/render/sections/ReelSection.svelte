@@ -76,7 +76,13 @@
   import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
   import { aliasKeys, asString, asStringArray, asStringFrom } from '../coerce';
-  import type { ReelSectionProps, JourneySalesContext } from '../types';
+  import { editFieldAttrs } from '../editable';
+  import type { Snippet } from 'svelte';
+  import type {
+    ReelSectionProps,
+    JourneySalesContext,
+    SellPreview,
+  } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
 
@@ -104,10 +110,24 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so an under-authored page printed the
+     * same sentence as its `<h1>` four more times.
+     */
+    titleFallback?: string;
   }
 
-  const { config, context, variant, design, editable = false, onEdit }: Props =
-    $props();
+  const {
+    config,
+    context,
+    variant,
+    design,
+    editable = false,
+    onEdit,
+    titleFallback,
+  }: Props = $props();
 
   const p: ReelCopy = $derived({
     /**
@@ -139,8 +159,13 @@
    * org's page then published. It falls back to the creator's OWN words instead,
    * and self-hides when there is nothing to say. Deliberately NOT an i18n key: a
    * key holding one brand's editorial voice has not fixed this, it has moved it.
+   *
+   * `titleFallback`, NOT `context.course.title`: the PAGE decides which single
+   * section may borrow the title, because five sections deciding independently is
+   * what printed it five times. Not the claimant ⇒ no heading, which the `{#if}`
+   * around the `<h2>` already handled.
    */
-  const heading = $derived(p.heading ?? context.course?.title);
+  const heading = $derived(p.heading ?? titleFallback);
 
   /**
    * The rec tag, by contrast, IS generic chrome, so it takes the key that already
@@ -208,6 +233,38 @@
     audioFirst === 'no' && design?.media === 'bleed' ? 'over' : 'below'
   );
 
+  /**
+   * WHETHER THIS SECTION HAS ANYTHING TO SAY, independently of whether it has
+   * anything to play. Nine of the eleven sections already self-hide on empty data
+   * (`TurnSection` renders only if `statement || lede`); this one and `introVideo`
+   * did not, and they are the two whose subject is media they may not have.
+   */
+  const hasCopy = $derived(Boolean(p.eyebrow || heading || p.sub));
+
+  /**
+   * WHETHER THE LETTERBOX HAS ANYTHING IN IT — a real clip, or an authored poster
+   * still.
+   *
+   * Before this the frame rendered unconditionally, and the no-clip branch of
+   * `transport` drew `<span class="reel__play reel__play--empty">` with a real
+   * `PlayIcon` inside it plus a `.reel__rest-rail` — a play glyph and a scrub rail
+   * that are not controls and never will be, in a full letterbox frame. `posterUrl`
+   * is authored and usually absent, so on a course with no `previewVideoMediaId`
+   * there was not even a still behind them: the section published what reads as a
+   * broken player.
+   */
+  const hasStage = (preview: SellPreview | null | undefined) =>
+    Boolean(preview?.reel?.playlistUrl) || Boolean(p.posterUrl);
+
+  /**
+   * `waveform`'s SEPARATE test, because its whole subject is the transport. It has
+   * no poster and no letterbox by definition (research §3: "the equaliser and
+   * playhead ARE the section"), so an authored poster cannot save it — with no
+   * clip there is nothing for the composition to be about.
+   */
+  const hasTransport = (preview: SellPreview | null | undefined) =>
+    Boolean(preview?.reel?.playlistUrl);
+
   /** `media: none` emits `--jp-media-display: none` — honoured in markup. */
   const showMedia = $derived(design?.media === 'none' ? 'no' : 'yes');
 
@@ -250,23 +307,22 @@
   };
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all. DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it fills
-   * `textContent` from a Svelte action and actions do not run during SSR, so the
-   * public page would serve an empty heading and paint it in after hydration
-   * (pilot lesson 9). Here the text is a real child node.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
+   *
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('reel', key, editable, onEdit);
 
   onMount(() => {
     mounted = true;
@@ -442,15 +498,15 @@
         title={heading}
         onclose={() => (open = false)}
       />
-    {:else}
-      <!-- No preview configured: keep the still legible, offer no play. -->
-      <span class="reel__play reel__play--empty" aria-hidden="true">
-        <span class="reel__play-icon"><PlayIcon /></span>
-      </span>
-      <div class="reel__track" aria-hidden="true">
-        <div class="reel__rest-rail"></div>
-      </div>
     {/if}
+    <!--
+      NO `reel__play--empty` / `reel__rest-rail` BRANCH. It drew a `PlayIcon` and a
+      scrub rail for a course with no preview clip — a play affordance and a
+      transport that are not controls, cannot become controls, and are the exact
+      shape of a broken player. With no clip and no authored poster the FRAME does
+      not render at all now (`hasStage`), and with a poster but no clip the still
+      speaks for itself with no dead chrome on it.
+    -->
   </div>
 {/snippet}
 
@@ -542,6 +598,37 @@
 {/snippet}
 
 <!--
+  THE MEDIA GATE, in one place for all four compositions.
+
+  A snippet that takes a snippet, so the "is there anything to show" question is
+  answered ONCE rather than at each of the three `stageFigure()` call sites (which
+  is how the two would eventually disagree). While the promise is PENDING the frame
+  renders with its own pending chrome — an honest loading state — and the moment it
+  resolves with nothing to show, nothing renders.
+
+  `present` is passed in because `waveform` and the letterbox compositions ask
+  DIFFERENT questions: a poster rescues a letterbox, and cannot rescue a transport.
+-->
+{#snippet whenMedia(
+  present: (preview: SellPreview | null | undefined) => boolean,
+  node: Snippet
+)}
+  {#await context.sellPreview}
+    {@render node()}
+  {:then preview}
+    {#if present(preview)}
+      {@render node()}
+    {/if}
+  {:catch}
+    <!-- A failed media read is not a reason to draw an empty player; an authored
+         poster is still real content, so `hasStage` keeps the frame for it. -->
+    {#if present(null)}
+      {@render node()}
+    {/if}
+  {/await}
+{/snippet}
+
+<!--
   The letterbox and everything on it. ONE definition serving `theatre`, `plain`
   and `split`, with `overlay` deciding whether the meta and lower block sit
   inside the frame or beneath it — so the two placements can never drift apart.
@@ -571,36 +658,65 @@
   {@render lower()}
 {/snippet}
 
-<div
-  class="reel"
-  data-reel-composition={composition}
-  data-reel-overlay={overlay}
-  data-reel-align={design?.align ?? 'center'}
->
-  <div class="reel__inner" use:reveal={{ disabled: editable }}>
-    {#if composition === 'split'}
-      <div class="reel__split">
-        {@render header()}
-        {#if showMedia === 'yes'}{@render stageFigure()}{/if}
-      </div>
-    {:else if audioFirst === 'yes'}
-      {@render header()}
-      <!--
-        `waveform` — the equaliser and playhead ARE the section. No poster, no
-        letterbox: an audio preview should look like audio rather than like a
-        video with the picture missing (research §3). Rendered regardless of
-        `media`, because this composition's subject is the transport, not a box
-        the `media` axis shapes.
-      -->
-      <div class="reel__audio">
-        {@render metaAndLower()}
-      </div>
-    {:else}
-      {@render header()}
-      {#if showMedia === 'yes'}{@render stageFigure()}{/if}
-    {/if}
+{#snippet audioBlock()}
+  <!--
+    `waveform` — the equaliser and playhead ARE the section. No poster, no
+    letterbox: an audio preview should look like audio rather than like a video
+    with the picture missing (research §3). Rendered regardless of `media`, because
+    this composition's subject is the transport, not a box the `media` axis shapes
+    — but NOT regardless of whether a clip exists, which is `hasTransport`.
+  -->
+  <div class="reel__audio">
+    {@render metaAndLower()}
   </div>
-</div>
+{/snippet}
+
+{#snippet shell()}
+  <div
+    class="reel"
+    data-reel-composition={composition}
+    data-reel-overlay={overlay}
+    data-reel-align={design?.align ?? 'center'}
+  >
+    <div class="reel__inner" use:reveal={{ disabled: editable }}>
+      {#if composition === 'split'}
+        <div class="reel__split">
+          {@render header()}
+          {#if showMedia === 'yes'}{@render whenMedia(hasStage, stageFigure)}{/if}
+        </div>
+      {:else if audioFirst === 'yes'}
+        {@render header()}
+        {@render whenMedia(hasTransport, audioBlock)}
+      {:else}
+        {@render header()}
+        {#if showMedia === 'yes'}{@render whenMedia(hasStage, stageFigure)}{/if}
+      {/if}
+    </div>
+  </div>
+{/snippet}
+
+<!--
+  SELF-HIDE, THE WAY NINE OF THE ELEVEN SECTIONS ALREADY DO.
+
+  THE COPY BRANCH IS NOT INSIDE THE `{#await}`, DELIBERATELY: the header is
+  SEO-critical and paints immediately, and putting it inside an await branch would
+  destroy and re-create it when the promise resolved, re-running `use:reveal` and
+  making the copy flash out and back in. The await wrapper is reached only when
+  there is NO copy — where there is nothing to flicker and nothing to index, and
+  the section's whole existence depends on whether a clip turned up.
+
+  `audioFirst` uses the transport test even here: a `waveform` with no copy and no
+  clip has no subject at all.
+-->
+{#if hasCopy}
+  {@render shell()}
+{:else}
+  {#await context.sellPreview then preview}
+    {#if audioFirst === 'yes' ? hasTransport(preview) : showMedia === 'yes' && hasStage(preview)}
+      {@render shell()}
+    {/if}
+  {/await}
+{/if}
 
 <style>
   /* ═══════════════════════════════════════════════════════════════════════
@@ -1173,8 +1289,11 @@
     outline-offset: var(--focus-offset);
   }
 
-  .reel__play--pending,
-  .reel__play--empty {
+  /* `--empty` is gone with its markup: a dimmed, cursor-default play glyph is
+     still a play glyph, and a course with no preview clip now renders no frame
+     rather than a decorative one. `--pending` stays — it stands for a real clip
+     that has not resolved yet. */
+  .reel__play--pending {
     cursor: default;
     opacity: 0.65;
   }
@@ -1263,14 +1382,6 @@
     width: var(--border-width-thick);
     background: var(--color-heading);
     opacity: 0;
-  }
-
-  .reel__rest-rail {
-    position: absolute;
-    inset: 45% 0 auto 0;
-    height: var(--border-width-thick);
-    border-radius: var(--radius-full);
-    background: color-mix(in oklab, var(--color-heading) 22%, transparent);
   }
 
   /* streamed-play skeleton */

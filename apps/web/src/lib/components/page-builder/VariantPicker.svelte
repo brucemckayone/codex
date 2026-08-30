@@ -62,16 +62,31 @@
 
 <div class="vp">
   {#each variants as v (v.id)}
+    <!-- `unavailable` is a DECLARED-BUT-NOT-BUILT composition (Codex-wqxv4):
+         `reel: strip` was selectable here while `ReelSection` clamped it to
+         `theatre`, so choosing it took the selected state and published a
+         different layout.
+
+         `disabled` rather than hidden, because the composition is DESCOPED
+         rather than retired: a creator who can see the design deserves to see
+         why it is not on offer yet, and hiding it answers "why can't I do this?"
+         with nothing. The REASON replaces the hint as VISIBLE TEXT in the card
+         rather than sitting in a `title` — a tooltip never appears on touch, and
+         a disabled button is not focusable, so a `title` would be the one place
+         neither a touch nor a keyboard user could reach. As rendered text it is
+         available to every reader without focus. -->
+    {@const blocked = v.unavailable}
     <button
       type="button"
       class="vp-opt"
       class:vp-opt--on={selected === v.id}
       aria-pressed={selected === v.id}
+      disabled={!!blocked}
       onclick={() => onselect(v.id)}
     >
       {@render schematic(v.thumb)}
       <span class="vp-opt__label">{v.label}</span>
-      <span class="vp-opt__hint">{v.hint}</span>
+      <span class="vp-opt__hint">{blocked ?? v.hint}</span>
     </button>
   {/each}
 </div>
@@ -115,18 +130,56 @@
     background-color: color-mix(in oklab, var(--color-interactive) 10%, var(--color-surface));
   }
 
+  /* A DESCOPED composition (Codex-wqxv4). Unavailability is carried by the
+     cursor, the dashed border and the reason text — NOT by dimming the ink. The
+     reason is the one string that explains why the option cannot be chosen, so
+     it stays on `--color-text-secondary` like every other hint in this panel
+     (Codex-6nb7i); `opacity` on the whole card would take the reason down with
+     it. The schematic drops back instead, because the thumbnail is the part that
+     should read as "not on offer". */
+  .vp-opt:disabled {
+    border-style: dashed;
+    cursor: not-allowed;
+  }
+
+  .vp-opt:disabled:hover {
+    color: var(--color-text-secondary);
+    border-color: var(--color-border);
+  }
+
+  .vp-opt:disabled .vp-thumb {
+    opacity: var(--opacity-40, 0.4);
+  }
+
+  .vp-opt:disabled .vp-opt__label {
+    text-decoration: line-through;
+    text-decoration-thickness: from-font;
+  }
+
   .vp-opt__label {
     font-weight: var(--font-medium);
   }
 
+  /* `--color-text-secondary`, and NO font-size of its own (Codex-6nb7i).
+     This hint is the only text distinguishing two options that share a
+     thumbnail, so it carries meaning and cannot be the weakest ink on the
+     panel: measured by canvas readback on the studio panel,
+     `--color-text-muted` is 2.52:1 light / 3.19:1 dark against a 4.5 floor,
+     where secondary is 7.81 / 10.21. The `font-size: 0.66rem` it used to carry
+     was both a raw-literal token violation and ~10.6px — SMALLER than
+     `--text-xs`, and no weight makes that WCAG large text. Inheriting
+     `.vp-opt`'s `--text-xs` is the fix; the hierarchy is carried by
+     `.vp-opt__label`'s weight, not by shrinking the hint below the scale. */
   .vp-opt__hint {
-    color: var(--color-text-muted);
-    font-size: 0.66rem;
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
+  /* The SELECTED option's hint — the one string a creator re-reads to confirm
+     the choice they just made — so it least of all may be muted. The
+     interactive tint stays: it is what marks the selection. */
   .vp-opt--on .vp-opt__hint {
-    color: color-mix(in oklab, var(--color-interactive) 55%, var(--color-text-muted));
+    color: color-mix(in oklab, var(--color-interactive) 55%, var(--color-text-secondary));
   }
 
   /* schematic thumbnail */
@@ -149,11 +202,16 @@
     background-color: color-mix(in oklab, var(--color-interactive) 6%, var(--color-surface-secondary));
   }
 
+  /* The schematic ink is NOT decoration — it is the only thing that shows what
+     each composition does, so WCAG 1.4.11's 3:1 non-text floor applies to it.
+     Base moved off `--color-text-muted` for the same reason as the hint above;
+     the 55% mixes below stay, because the step from line to box/dot is what
+     makes the wireframe legible as a wireframe. */
   .vp-line {
     height: 3px;
     border-radius: 2px;
     margin-inline: auto;
-    background-color: var(--color-text-muted);
+    background-color: var(--color-text-secondary);
   }
 
   .vp-line--start {
@@ -162,14 +220,14 @@
 
   .vp-box {
     border-radius: 3px;
-    background-color: color-mix(in oklab, var(--color-text-muted) 55%, transparent);
+    background-color: color-mix(in oklab, var(--color-text-secondary) 55%, transparent);
   }
 
   .vp-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background-color: color-mix(in oklab, var(--color-text-muted) 55%, transparent);
+    background-color: color-mix(in oklab, var(--color-text-secondary) 55%, transparent);
   }
 
   .vp-row {
@@ -185,7 +243,7 @@
   }
 
   .vp-opt--on .vp-line {
-    background-color: color-mix(in oklab, var(--color-interactive) 72%, var(--color-text-muted));
+    background-color: color-mix(in oklab, var(--color-interactive) 72%, var(--color-text-secondary));
   }
 
   .vp-opt--on .vp-box,

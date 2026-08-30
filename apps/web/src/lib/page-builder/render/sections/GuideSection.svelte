@@ -71,6 +71,7 @@
   import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
   import { safeHref } from '../safe-href';
+  import { editFieldAttrs } from '../editable';
   import type { GuideSectionProps, JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -300,26 +301,22 @@
   };
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte` (pilot lesson 9): it
-   * renders an EMPTY element and fills `textContent` from a Svelte action, and
-   * actions do not run during SSR — so the public page would serve `<h2></h2>`
-   * and paint the text in only after hydration. The canvas never noticed because
-   * the studio is `ssr = false`.
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('guide', key, editable, onEdit);
 </script>
 
 <!--

@@ -16,6 +16,7 @@ import {
   getUserAvatarKey,
   getWaveformKey,
   isValidR2Key,
+  PATH_CONFIG,
   parseR2Key,
 } from '../paths';
 
@@ -198,5 +199,69 @@ describe('Path Helpers', () => {
     it('isValidR2Key should reject backslash paths', () => {
       expect(isValidR2Key('user\\..\\admin')).toBe(false);
     });
+  });
+});
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE PUBLIC-EXPOSURE PIN
+ *
+ * `apps/web/src/lib/server/cdn-proxy.ts` binds the OTHERWISE-PRIVATE production
+ * media bucket and serves an object from it — publicly, with no signature —
+ * whenever a key matches this shape:
+ *
+ *     /^[^/]+\/hls\/[^/]+\/preview\//
+ *
+ * That gate is the ONLY thing separating the free-taste clip from every paid
+ * rendition and every creator's original upload in the same bucket. It is
+ * fail-closed by construction (the binding is only obtained when the gate
+ * passes) and it is tested there against traversal, case-flips and
+ * prefix-adjacent names.
+ *
+ * BUT THE GATE HARDCODES A LAYOUT THIS FILE OWNS, and nothing else connects the
+ * two. `apps/web` does not depend on `@codex/transcoding`, so it cannot import
+ * `PATH_CONFIG` — the regex is a restatement. That is the hazard this block
+ * exists for: if the preview layout below ever moves, the gate silently stops
+ * matching (previews 404, a visible failure) — but worse, if anything sensitive
+ * is ever written UNDER a `…/hls/…/preview/` prefix, it becomes publicly
+ * readable, and that change would look entirely innocent in its own PR.
+ *
+ * So: do not "fix" a failure here by widening the regex in cdn-proxy.ts.
+ * Decide, deliberately, what is public.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+describe('HLS preview layout — pinned against the public CDN gate', () => {
+  /** Restated from `isPublicMediaPreviewKey` in apps/web/src/lib/server/cdn-proxy.ts. */
+  const PUBLIC_CDN_GATE = /^[^/]+\/hls\/[^/]+\/preview\//;
+
+  it('produces a preview key the public gate matches', () => {
+    const key = getHlsPreviewKey('creator-1', 'media-1');
+    expect(key).toMatch(PUBLIC_CDN_GATE);
+  });
+
+  it('keeps every OTHER rendition outside the gate', () => {
+    // The paid renditions and the master playlist share this bucket. If any of
+    // them starts matching, it becomes world-readable.
+    const mustNotBePublic = [
+      getHlsMasterKey('creator-1', 'media-1'),
+      getHlsVariantKey('creator-1', 'media-1', '1080p'),
+      getHlsVariantSegmentKey(
+        'creator-1',
+        'media-1',
+        '1080p',
+        'segment_000.ts'
+      ),
+    ];
+    for (const key of mustNotBePublic) {
+      expect(key, `${key} would be served publicly`).not.toMatch(
+        PUBLIC_CDN_GATE
+      );
+    }
+  });
+
+  it('pins the subfolder name the gate hardcodes', () => {
+    // A rename here is a public-surface change, not a refactor.
+    expect(PATH_CONFIG.HLS_PREVIEW_SUBFOLDER).toBe('preview');
+    expect(PATH_CONFIG.HLS_FOLDER).toBe('hls');
   });
 });

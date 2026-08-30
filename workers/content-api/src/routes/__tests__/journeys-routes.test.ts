@@ -766,7 +766,11 @@ describe('GET /api/journeys/pages/by-slug — public sales page (optional auth)'
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: COURSE_PAGE });
-    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(ORG_ID, SLUG);
+    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(
+      ORG_ID,
+      SLUG,
+      R2_PUBLIC_URL_BASE
+    );
   });
 
   it('anonymous (no session) → 200 — the sell shell is fully public', async () => {
@@ -778,7 +782,11 @@ describe('GET /api/journeys/pages/by-slug — public sales page (optional auth)'
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: COURSE_PAGE });
-    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(ORG_ID, SLUG);
+    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(
+      ORG_ID,
+      SLUG,
+      R2_PUBLIC_URL_BASE
+    );
   });
 
   it('no published page → 200 { data: null }', async () => {

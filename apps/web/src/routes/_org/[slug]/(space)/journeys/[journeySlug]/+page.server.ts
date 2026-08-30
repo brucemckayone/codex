@@ -18,6 +18,7 @@
  * Data comes exclusively through the `./journey-data` INTEGRATION SEAM (mocked
  * for AGGRESSIVE-MODE today; rewired to the real remote functions post-WP-2).
  */
+import { extractPlainText } from '@codex/validation';
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
 import { createServerApi } from '$lib/server/api';
@@ -72,6 +73,38 @@ export const load: PageServerLoad = async (event) => {
     throw error(404, 'This portal could not be found.');
   }
 
+  // ── START THE HERO'S MEDIA READ NOW, NOT AT THE END OF THE LOAD ─────────────
+  // Still STREAMED (it is returned unawaited below, and the intro/reel/hero
+  // sections `{#await}` it behind poster skeletons) — only its START moved. It
+  // used to be constructed inline in the `return`, i.e. AFTER the awaited
+  // `Promise.all([enrolled, offer])`, so the request that discovers the hero
+  // still's URL did not leave the box until the load's whole critical chain had
+  // finished. And the hero still is the page's LCP element on the `full-bleed`,
+  // `split-media` and `poster` compositions, so it was structurally the LAST
+  // thing the browser could learn about.
+  //
+  // MEASURED — dev stack, of-blood-and-bones/ancestral-threads, signed out,
+  // curl, n=6. The gap between `time_starttransfer` and `time_total` is exactly
+  // this promise's tail, because it is the only streamed value on the page:
+  //     before   min tail 0.249s · median 0.522s   (on a 2.3–3.3s TTFB)
+  //     after    see the report — it now overlaps the awaited pair instead
+  // TTFB itself is unchanged either way: nothing new is awaited.
+  //
+  // `.catch()` IS ATTACHED HERE, at construction, not at the return: a rejection
+  // between the two would otherwise be an unhandled rejection with no handler
+  // yet attached, and the whole point of moving construction earlier is that
+  // there is now `await`ed work in between.
+  //
+  // THE ONE COST, stated rather than hidden: the entitled→dashboard redirect
+  // below is thrown after this fires, so an entitled viewer pays one wasted
+  // worker read before being bounced. That is the rare path (it happens once,
+  // then they are on the dashboard); the anonymous visitor is the common one and
+  // the SEO-critical one, and this is the trade in their favour.
+  const sellPreview = resolveSellPreview({
+    pageId: coursePage.page.id,
+    courseId: coursePage.course.id,
+  }).catch(() => null);
+
   // AWAIT the entitlement flag: it now DECIDES THE REDIRECT below (Codex-aectb)
   // — an entitled viewer is sent to their dashboard rather than sold the course
   // again — and, on the preview bypass where no redirect fires, still flips the
@@ -83,13 +116,50 @@ export const load: PageServerLoad = async (event) => {
   // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
   // the public/join CTA rather than throwing.
   //
-  // AWAIT the offer alongside it (Codex-2pryk.2.4.3): the `invite` section's
-  // prices and the paths it offers are now read from the authoritative
-  // `getCourseOffer` rather than from the authored `priceLabel` a creator typed
-  // into the builder. It runs in PARALLEL with the enrolment check, so this adds
-  // no wall-clock to the critical path. `.catch(() => null)` because a pricing
-  // hiccup must not 500 an SEO-critical sales page — the section degrades to a
-  // price-less CTA and never falls back to authored numbers.
+  // AWAIT the offer alongside it (Codex-2pryk.2.4.3): every price and every path
+  // on this page is read from the authoritative `getCourseOffer` rather than from
+  // the authored `priceLabel` a creator typed into the builder.
+  // `.catch(() => null)` because a pricing hiccup must not 500 an SEO-critical
+  // sales page — the sections degrade to a price-less CTA and never fall back to
+  // authored numbers.
+  //
+  // ── THIS COMMENT USED TO CLAIM THE AWAIT WAS FREE. IT IS NOT. ──────────────
+  // It read "it runs in PARALLEL with the enrolment check, so this adds no
+  // wall-clock to the critical path". True for a signed-in visitor, FALSE for an
+  // anonymous one — the case the paragraph above calls the SEO-critical common
+  // case. With no session the enrolment leg is already-resolved
+  // `Promise.resolve(false)`, so there is nothing to overlap and the offer's full
+  // round-trip is the load's THIRD serial hop (`parent()` → `getCoursePage`,
+  // itself two worker calls → `courses.offer`), landing entirely on TTFB. The
+  // response is `private, no-cache` (see the cache decision below), so there is
+  // no shared cache to absorb it and every crawl pays it again.
+  //
+  // MEASURED — dev stack, studio-alpha/bone-deep, signed out, curl
+  // `time_starttransfer`, A/B interleaved over two rounds, min of n=8 (the
+  // statistic least polluted by a busy dev box):
+  //     offer awaited                          2.144s · 2.710s
+  //     offer replaced by Promise.resolve      1.094s · 1.189s
+  // and `GET /courses/:id/offer` alone is p50 0.97s (n=15). So the hop is real,
+  // and here it is about a second.
+  //
+  // IT STAYS AWAITED ANYWAY, because what reads it changed after that claim was
+  // written. The offer is no longer consumed only by the below-the-fold `invite`
+  // section: `JourneyRenderer` derives `purchasable` from it
+  // (`render/JourneyRenderer.svelte:118`), and that flag decides whether the
+  // ABOVE-THE-FOLD hero CTA exists at all (`render/sections/HeroSection.svelte`)
+  // and whether the floating pill renders. `+page.svelte` also prices the page's
+  // JSON-LD and `product:price:*` from it, and a head is flushed long before a
+  // streamed promise settles. Streaming would ship first paint — and the SSR HTML
+  // a crawler reads — with the page's primary conversion affordance missing and
+  // its machine-readable price absent. That trades a second of TTFB for a wrong
+  // page, so this is now a DELIBERATE first-paint dependency, not an oversight.
+  //
+  // THE REAL FIX, which does not belong in this file: the offer is auth-agnostic
+  // apart from its `entitled` flag, changes only through the three studio
+  // monetisation writes, and is keyed by a stable course id — the exact shape
+  // `@codex/cache` `VersionedCache` exists for. Cache it in the worker under a
+  // version key, or fold it into the `access.coursePage` read so it costs no
+  // extra hop, and the second goes away without moving it off the critical path.
   const [enrolled, offer] = await Promise.all([
     user
       ? resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
@@ -172,6 +242,19 @@ export const load: PageServerLoad = async (event) => {
   // visitors, so this redirect is a UX convenience and not a security boundary.
   // The most a hand-typed `?preview=anything` earns is the marketing page the
   // same person could already read while signed out.
+  //
+  // AND `?preview` NOW MEANS MORE THAN THIS BYPASS — BUT DELIBERATELY NOT HERE.
+  // Bypassing the redirect only got the creator onto the sell page; the CTA still
+  // resolved against THEIR entitlement, so all three CTAs read "Go to your
+  // dashboard" and a creator could never preview their own buy button (O17).
+  // `+page.svelte` now forces the anonymous CTA resolution under this same
+  // predicate — and it lives THERE, in the render, on purpose. `enrolled` below
+  // is the true entitlement and must stay so: it is the only predicate this page
+  // and the dashboard both gate on, which is what makes the pair provably
+  // loop-free (see the paragraph above). A "render as a visitor" flag in this
+  // file would sit one tidy-up away from becoming an input to `evaluateCourseGate`
+  // and reintroducing the sell→dashboard→sell bounce. Downstream of the decision
+  // it cannot.
   if (!(url.searchParams.has('preview') || draftPreview)) {
     const gate = evaluateCourseGate({
       // A slug with no page/course already threw 404 above.
@@ -221,18 +304,54 @@ export const load: PageServerLoad = async (event) => {
     }
   }
 
+  // ── The head tags the ROOT LAYOUT renders on this page's behalf (O32) ───────
+  // `routes/+layout.svelte` used to emit `<meta name="description">` and
+  // `og:type` unconditionally, and `<svelte:head>` dedupes only `<title>` — so a
+  // page that set its own got TWO tags rather than an override. Measured on a
+  // journey page before this change, in document order:
+  //     meta[property="og:type"]  ["website", "product"]
+  //     meta[name="description"]  ["Discover transformative content from
+  //                                 independent creators", "<the course lede>"]
+  // A parser takes the FIRST value of a repeated Open Graph property, so the
+  // page's own `og:type="product"` was dead on arrival, and every journey page's
+  // search snippet was shadowed by the generic platform tagline.
+  //
+  // The root now renders exactly one of each FROM THIS BAG (falling back to the
+  // platform defaults when a load publishes none), which is why these two values
+  // are computed here and NOT in `+page.svelte`'s `<svelte:head>`: two emitters
+  // is the bug, so there is deliberately only one.
+  //
+  // `||`, never `??`: a creator who BLANKS the SEO panel's description leaves an
+  // empty string behind, and an empty `<meta content="">` is worse than the
+  // derived lede. Same reason `extractPlainText` is chained with `||` — a lede
+  // that is structurally valid TipTap JSON with no text nodes extracts to '',
+  // which the old `course.lede ? extractPlainText(...) : fallback` shape would
+  // have published as an empty description.
+  const pageMeta = {
+    description:
+      coursePage.page.seo?.description ||
+      extractPlainText(coursePage.course.lede) ||
+      `${coursePage.course.title} — a guided course.`,
+    // `product`, not `website`: this page sells one thing, and the
+    // `product:price:*` meta `+page.svelte` emits only makes sense under that
+    // vertical. Matches the `ContentDetailView` precedent of overriding the root's
+    // vertical per surface — except that it now actually overrides it.
+    ogType: 'product' as const,
+  };
+
   return {
     coursePage,
     orgSlug: params.slug,
     enrolled,
+    // Rendered by the ROOT layout, once, so the page overrides rather than
+    // duplicates. See the derivation above.
+    pageMeta,
     // The authoritative offer the `invite` section prices itself from. Null when
     // the read failed — sections show no price rather than a wrong one.
     offer,
     draftPreview,
-    // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
-    sellPreview: resolveSellPreview({
-      pageId: coursePage.page.id,
-      courseId: coursePage.course.id,
-    }).catch(() => null),
+    // STREAM: public sell previews (no auth), already `.catch()`-guarded. Started
+    // near the top of this load rather than here — see the comment there.
+    sellPreview,
   };
 };

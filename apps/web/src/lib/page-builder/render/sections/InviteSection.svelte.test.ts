@@ -67,6 +67,23 @@ function fourPathOffer(): CourseOffer {
   };
 }
 
+/**
+ * A RESOLVED offer with no paths — distinct from `offer: null`, which means the
+ * READ failed. Five of the seven seeded courses are in this state
+ * (`price_cents IS NULL`, no subscription plan, no tier grant).
+ */
+function emptyOffer(): CourseOffer {
+  return {
+    courseId: 'c1',
+    organizationId: 'o1',
+    paths: [],
+    purchase: null,
+    subscription: null,
+    tiers: [],
+    entitled: false,
+  };
+}
+
 function context(
   overrides: Partial<JourneySalesContext> = {}
 ): JourneySalesContext {
@@ -88,6 +105,7 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/the-long-descent/dashboard',
     enrolled: false,
     offer: fourPathOffer(),
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };
@@ -108,6 +126,24 @@ function render(enrolled: boolean): void {
     props: {
       config: COPY,
       context: context({ enrolled }),
+      variant: 'tiers',
+      design: CANDLELIT,
+    },
+  });
+  flushSync();
+}
+
+/**
+ * Render with an arbitrary context, so a case can vary `purchasable` and `offer`
+ * independently of enrolment. `render(enrolled)` above stays as-is because five
+ * existing cases read it.
+ */
+function renderWith(overrides: Partial<JourneySalesContext>): void {
+  component = mount(InviteSection, {
+    target: document.body,
+    props: {
+      config: COPY,
+      context: context(overrides),
       variant: 'tiers',
       design: CANDLELIT,
     },
@@ -184,5 +220,323 @@ describe('InviteSection — the enrolled viewer', () => {
     const text = document.body.textContent ?? '';
     expect(text).toContain('The ground');
     expect(text).toContain('is waiting.');
+  });
+});
+
+describe('InviteSection — a course with nothing to sell', () => {
+  it('offers NO transactional affordance when the offer RESOLVED with no path', () => {
+    // The third of three dead-end "Begin" affordances. The hero CTA and the
+    // floating pill were withheld in an earlier change; this branch still sent a
+    // visitor to a checkout that answers "isn't open for enrolment just now"
+    // after re-pitching the course — a closed loop back to where they started.
+    // Five of the seven seeded courses are in exactly this state.
+    renderWith({ enrolled: false, purchasable: false, offer: null });
+    expect(ctaHrefs().filter((h) => h.includes('/checkout'))).toEqual([]);
+  });
+
+  it('KEEPS the affordance when the offer read merely FAILED — purchasable is a CONFIDENT negative', () => {
+    // `offer: null` alone means the `.catch(() => null)`-guarded read failed, and
+    // a failed read produces an empty `paths` array just as a genuinely unsellable
+    // course does. Testing `!context.purchasable` instead of `=== false` would
+    // strip the buy button off a perfectly purchasable page on any transient
+    // pricing hiccup — the opposite defect, on the same element. This case is the
+    // guard against that, and it is why the two cases must both exist.
+    renderWith({ enrolled: false, purchasable: true, offer: null });
+    expect(
+      ctaHrefs().filter((h) => h.includes('/checkout')).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('KEEPS an enrolled member their dashboard doorway even with no purchasable path', () => {
+    // An enrolled viewer has nothing to buy but everything to return to, so the
+    // suppression must not reach them. Their CTA is not transactional.
+    renderWith({ enrolled: true, purchasable: false, offer: null });
+    const hrefs = ctaHrefs();
+    expect(
+      hrefs.filter((h) => h.includes('/dashboard')).length
+    ).toBeGreaterThan(0);
+    expect(hrefs.filter((h) => h.includes('/checkout'))).toEqual([]);
+  });
+
+  it('still renders the authored copy — the section has something to SAY, not to sell', () => {
+    renderWith({ enrolled: false, purchasable: false, offer: null });
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('The ground');
+    expect(text).toContain('is waiting.');
+  });
+});
+
+/**
+ * THE COURSE-TITLE FALLBACK, AND WHY THIS SECTION WAS THE ONE LEFT OUT.
+ *
+ * Five sections can fall back to the course title for their heading, and the page
+ * hands that permission to exactly ONE of them (`claimTitleFallback`). Four were
+ * converted to read a `titleFallback` prop; this one still read
+ * `context.course.title` UNCONDITIONALLY, so `claimTitleFallback` could give the
+ * claim to (say) `map` while a blank invite printed the title as well — the exact
+ * duplication the mechanism exists to prevent, on the conversion section.
+ *
+ * LATENT ON TODAY'S DATA, and worth stating plainly: all seven seeded pages store
+ * an invite `heading`, and the catalogue's `defaultProps` seed one for every new
+ * section, so the duplicate only appears once a creator CLEARS a heading (or on a
+ * page whose sections were written by the seed script or a direct API call). The
+ * array-level proof lives in `render/SectionRenderer.svelte.test.ts`.
+ */
+describe('InviteSection — the course title is borrowed, not assumed', () => {
+  /**
+   * Mount with arbitrary copy and an arbitrary page-level claim.
+   *
+   * `courseTitle` and `titleFallback` are deliberately DIFFERENT strings in the
+   * cases below. In production they are the same value, but a fixture where they
+   * agree cannot tell "reads the prop" from "reads the context" — which is
+   * precisely the bug being fixed, so the test has to be able to see the
+   * difference.
+   */
+  function renderCopy(props: {
+    config?: SectionProps;
+    titleFallback?: string;
+    courseTitle?: string;
+    editable?: boolean;
+  }): void {
+    const base = context();
+    component = mount(InviteSection, {
+      target: document.body,
+      props: {
+        config: props.config ?? {},
+        context: {
+          ...base,
+          course: {
+            ...base.course,
+            title: props.courseTitle ?? base.course.title,
+          },
+        },
+        variant: 'pool',
+        design: CANDLELIT,
+        editable: props.editable ?? false,
+        titleFallback: props.titleFallback,
+      },
+    });
+    flushSync();
+  }
+
+  const headingEl = () => document.body.querySelector('h2.invite__heading');
+
+  /** Every heading this section renders, whitespace-normalised. */
+  const sectionHeadings = (): string[] =>
+    [...document.body.querySelectorAll('h2, h3')].map((h) =>
+      (h.textContent ?? '').replace(/\s+/g, ' ').trim()
+    );
+
+  it('prints the authored heading, claim or no claim', () => {
+    // The control case: an authored heading never consults the fallback, so this
+    // must pass identically before and after the conversion.
+    renderCopy({ config: { heading: 'The ground' }, courseTitle: 'Bone Deep' });
+    expect(headingEl()?.textContent?.trim()).toBe('The ground');
+  });
+
+  it('falls back to the course title WHEN THE PAGE HAS CLAIMED IT HERE', () => {
+    renderCopy({
+      config: {},
+      courseTitle: 'The course in the context',
+      titleFallback: 'The title the page granted',
+    });
+    expect(headingEl()?.textContent?.trim()).toBe('The title the page granted');
+  });
+
+  it('does NOT print the course title as a heading when the page claimed it elsewhere', () => {
+    // The defect. Before the conversion this rendered `<h2>Bone Deep</h2>`
+    // regardless of which section the page had actually given the claim to.
+    //
+    // SCOPED TO HEADINGS ON PURPOSE. The course title legitimately appears
+    // elsewhere in this section — each offer CTA's accessible name is built from
+    // it ("Own Bone Deep") to keep four similarly-named links distinguishable
+    // (WCAG 2.4.4) — so a body-wide `not.toContain` would be asserting the
+    // opposite of another fix in this same file. The discipline is at the heading
+    // read and nowhere else.
+    renderCopy({ config: {}, courseTitle: 'Bone Deep' });
+    expect(sectionHeadings()).not.toContain('Bone Deep');
+  });
+
+  it('renders no heading element at all rather than an empty one', () => {
+    // An empty `<h2>` is worse than no `<h2>`: this heading ships
+    // `--text-display` (80px on the seeded pages), so a blank one is a screenful
+    // of nothing between the eyebrow and the offer.
+    renderCopy({ config: {}, courseTitle: 'Bone Deep' });
+    expect(headingEl()).toBeNull();
+  });
+
+  it('still prints an authored ACCENT when the heading is unclaimed and blank', () => {
+    // The accent is the creator's own words — the italic second line closing the
+    // heading, `OWED_READS.invite`. Dropping it because the heading beside it has
+    // no claim would be a copy loss, which is the class of bug this file's own
+    // history is mostly made of.
+    renderCopy({
+      config: { accent: 'is waiting.' },
+      courseTitle: 'Bone Deep',
+    });
+    const h2 = headingEl();
+    expect(h2).not.toBeNull();
+    // UNTRIMMED on purpose: `String.trim()` strips U+00A0, so a `.trim()` here
+    // would not notice the `&nbsp;` separator being emitted with nothing on its
+    // left — a visible indent on an 80px heading, and invisible to the test.
+    expect(h2?.textContent).toBe('is waiting.');
+    expect(sectionHeadings()).not.toContain('Bone Deep');
+  });
+
+  it('keeps the canvas edit seam on an authored heading', () => {
+    // The `{#if}` guard sits OUTSIDE the contenteditable span, so a heading the
+    // creator has typed is still clickable in the studio canvas. Asserted because
+    // wrapping a contenteditable in a condition is the obvious way to break inline
+    // editing, and the studio is `ssr = false` so nothing else would catch it.
+    renderCopy({ config: { heading: 'The ground' }, editable: true });
+    const field = document.body.querySelector(
+      'h2.invite__heading [data-field="heading"]'
+    );
+    expect(field).not.toBeNull();
+    expect(field?.getAttribute('contenteditable')).toBe('true');
+  });
+
+  it('has no inline heading field when the heading is blank AND unclaimed — the inspector owns that case', () => {
+    // The known consequence of the guard, recorded rather than discovered later:
+    // with nothing to print there is no node to make editable, so an empty
+    // heading is authored from the inspector's own content field (which exists —
+    // the Design panel carries every section's copy fields) rather than inline.
+    // This is the same behaviour the other four converted sections already have.
+    renderCopy({ config: {}, editable: true });
+    expect(document.body.querySelector('[data-field="heading"]')).toBeNull();
+  });
+
+  it('keeps the heading and the accent in one h2, in that order, when both exist', () => {
+    renderCopy({
+      config: { heading: 'The ground', accent: 'is waiting.' },
+      courseTitle: 'Bone Deep',
+    });
+    // One heading element, not two — the accent is part of the sentence, and the
+    // ` ` between them is the only separator (the markup is deliberately
+    // whitespace-tight so no second space creeps in).
+    expect(document.body.querySelectorAll('h2.invite__heading')).toHaveLength(
+      1
+    );
+    expect(headingEl()?.textContent?.replace(/ /g, ' ').trim()).toBe(
+      'The ground is waiting.'
+    );
+  });
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE TOP-LEVEL COLLAPSE (WP-2's section sweep).
+
+     Withholding the transactional affordance from a non-purchasable course was
+     correct, and it left the FRAME standing: `.invite` + its four-layer
+     `.invite__atmos` + an empty `.invite__head`, with zero characters of text.
+     `invite` was the only one of the eleven sections with no top-level guard, and
+     it is the LAST section of the default page template — so an empty glowing
+     band was the note a visitor left the page on.
+
+     Reachability, stated honestly: the seven seeded pages all author `heading` and
+     `accent`, so this was never live. It is one cleared field away on the five
+     whose course has `price_cents IS NULL`.
+     ═══════════════════════════════════════════════════════════════════════ */
+  describe('degrades to nothing rather than to a frame', () => {
+    /** Nothing to say and nothing to sell — a confident negative on both. */
+    function renderBare(overrides: Partial<JourneySalesContext> = {}): void {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: {},
+          context: context({
+            offer: emptyOffer(),
+            purchasable: false,
+            ...overrides,
+          }),
+          variant: 'tiers',
+          design: CANDLELIT,
+        },
+      });
+      flushSync();
+    }
+
+    it('renders NO element at all with no copy, no paths and purchasable false', () => {
+      for (const variant of [
+        'pool',
+        'banner',
+        'card',
+        'tiers',
+        'table',
+        'sticky',
+      ]) {
+        component = mount(InviteSection, {
+          target: document.body,
+          props: {
+            config: {},
+            context: context({ offer: emptyOffer(), purchasable: false }),
+            variant,
+            design: CANDLELIT,
+          },
+        });
+        flushSync();
+        expect(document.body.querySelector('.invite'), variant).toBeNull();
+        expect(
+          document.body.querySelector('.invite__atmos'),
+          variant
+        ).toBeNull();
+        teardown();
+      }
+    });
+
+    it('still renders for authored copy alone, with no offer', () => {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: { sub: 'A closing line the creator typed.' },
+          context: context({ offer: emptyOffer(), purchasable: false }),
+          variant: 'pool',
+          design: CANDLELIT,
+        },
+      });
+      flushSync();
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(document.body.textContent).toContain('A closing line');
+      // …and still no purchase affordance, which is the earlier fix holding.
+      expect(ctaHrefs()).toEqual([]);
+    });
+
+    it('still renders for a borrowed course title (the claimed fallback)', () => {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: {},
+          context: context({ offer: emptyOffer(), purchasable: false }),
+          variant: 'pool',
+          design: CANDLELIT,
+          titleFallback: 'The Long Descent',
+        },
+      });
+      flushSync();
+      expect(document.body.querySelector('h2')?.textContent?.trim()).toBe(
+        'The Long Descent'
+      );
+    });
+
+    /*
+      THE CONFIDENT-NEGATIVE HALF, and it is the reason the guard reads
+      `purchasable !== false`. A FAILED offer read leaves `purchasable` true AND
+      empties `paths`; collapsing on truthiness would delete the whole section on
+      a transient pricing hiccup — the same defect as stripping the buy button,
+      one level up.
+    */
+    it('does NOT collapse when the offer read merely FAILED', () => {
+      renderBare({ offer: null, purchasable: true });
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(ctaHrefs()).toEqual([
+        'http://lvh.me:3000/journeys/the-long-descent/checkout',
+      ]);
+    });
+
+    it('does NOT collapse for an enrolled member with nothing authored', () => {
+      renderBare({ enrolled: true });
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(ctaHrefs()).toEqual([
+        'http://lvh.me:3000/journeys/the-long-descent/dashboard',
+      ]);
+    });
   });
 });

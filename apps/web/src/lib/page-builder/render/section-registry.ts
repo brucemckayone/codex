@@ -18,6 +18,7 @@ import type {
   ResolvedSectionDesign,
   SectionProps,
 } from '$lib/page-builder';
+import { aliasKeys } from './coerce';
 import AcheSection from './sections/AcheSection.svelte';
 import FaqSection from './sections/FaqSection.svelte';
 import FeelSection from './sections/FeelSection.svelte';
@@ -34,7 +35,7 @@ import type { JourneySalesContext } from './types';
 /**
  * The uniform prop contract every section component renders against.
  *
- * The four additive props below are ALL OPTIONAL, deliberately: this interface is
+ * The six additive props below are ALL OPTIONAL, deliberately: this interface is
  * the single props contract for all 11 sections, so making any of them required
  * would break every component in one commit and force the whole programme through
  * one worktree. Optional means the foundation lands the seam, and each component
@@ -74,6 +75,76 @@ export interface SectionComponentProps {
    * renderer never passes it.
    */
   onEdit?: (key: string, value: string) => void;
+  /**
+   * THE COURSE TITLE, BUT ONLY FOR THE ONE SECTION ALLOWED TO BORROW IT.
+   *
+   * Five sections were each independently fixed away from a hardcoded editorial
+   * fallback (`Codex-i9pzs`) and all five landed on the same replacement — the
+   * course's own title (`hero.headline`, `introVideo.heading`, `reel.heading`,
+   * `map.title`, `invite.heading`). Each fix is locally right; the aggregate is
+   * not. On a page with more than one of those five left without a heading, the
+   * served document reads `<h1>Bone Deep</h1> … <h2>Bone Deep</h2> ×4`: to a
+   * reader a rendering fault, to a crawler a keyword-stuffed outline with no
+   * hierarchy.
+   *
+   * HOW REACHABLE THAT IS, corrected. This comment used to say the aggregate was
+   * "the DEFAULT state of a page" because "`section-catalog`'s `defaultProps` do
+   * not pre-fill any of those five". That is false, and checking it is trivial:
+   * every one of the five seeds its heading prop (`hero.headline`,
+   * `introVideo.heading`, `reel.heading`, `map.heading`, `invite.heading`), and
+   * `addSection` → `createSection` `structuredClone`s that bag onto each new
+   * section. All seven seeded pages store every heading they carry, so no live
+   * page duplicates the title today. The duplication needs a creator to CLEAR a
+   * heading, or a page whose sections were written by the seed script or a direct
+   * API call — one keystroke away, not the default. The mechanism is still the
+   * right one (the defect is invisible from inside any single section), but the
+   * next reader is owed the true reachability rather than a stronger one.
+   *
+   * So the fallback is now CLAIMED, once per page, by whichever renderable
+   * section comes first without an authored heading ({@link claimTitleFallback}).
+   * Every other section resolves `undefined` and self-hides its heading element.
+   * The five sections MUST read this prop rather than `context.course.title`
+   * directly — the context still carries the title, because sections legitimately
+   * use it for alt text, modal titles and aria labels, so the discipline is at the
+   * heading read and nowhere else. All five now do; `invite` was converted last,
+   * and while it was outstanding the claim could be spent on `map` while a blank
+   * invite printed the title anyway, which made the mechanism unsound rather than
+   * merely incomplete.
+   *
+   * Resolved at the ARRAY level (`SectionRenderer`) rather than pushed onto
+   * {@link JourneySalesContext}: one section cannot know what its neighbours
+   * authored, and a context field that only the assembler can populate would make
+   * every host that builds a context responsible for a rule it cannot see.
+   *
+   * `undefined` ⇒ this section may not use the course title. A host that mounts
+   * `SectionFrame` itself and passes nothing therefore gets self-hiding headings
+   * rather than a wrong one, which is the safe direction.
+   */
+  titleFallback?: string;
+  /**
+   * The heading level this section's OWN top-level heading must use.
+   *
+   * `hero` is the only section that emits an `<h1>` (every other of the eleven
+   * emits `<h2>` — verified across all of them), and a page may hold more than one
+   * hero: `duplicateSection()` clones a section with the same type, and the seeded
+   * golden page proved that is not theoretical (it shipped two `id="ache"`,
+   * `Codex-yxkj7`). Two heroes therefore served two `<h1>`s.
+   *
+   * `SectionFrame` passes `2` for any section that is NOT the first of its type on
+   * the page, so a duplicated hero demotes its headline to `<h2>` and the document
+   * keeps one top-level heading. Deliberately a DEMOTION rather than dropping the
+   * duplicate section: an author who duplicated a hero can still see and delete it,
+   * on the public page and in the canvas alike, and a renderer that silently
+   * withholds a section the author added is a worse failure than an untidy outline.
+   * The publish-time answer is {@link validatePageShape}'s `multiple-hero`, which
+   * the builder's publish action now blocks on — so this demotion is what keeps
+   * the outline valid on pages ALREADY published with two heroes, and on any page
+   * written straight through the API, which the gate does not cover
+   * ({@link PageShapeIssue.severity}).
+   *
+   * Absent ⇒ the component's own default (`1` for `hero`, `2` everywhere else).
+   */
+  headingLevel?: 1 | 2;
 }
 
 /** A renderable section component. */
@@ -181,4 +252,179 @@ export function selectRenderableSections(
     });
   }
   return out;
+}
+
+/**
+ * The prop each fallback-capable section resolves its own top heading from. Only
+ * these five can borrow the course title, so only these five can CLAIM it.
+ *
+ * Read through `aliasKeys` at the call site rather than listing the aliases here:
+ * `map.title` also accepts the builder's stored `heading` key, and a second copy
+ * of that preference list is exactly how a claim could disagree with the render
+ * (`map` would self-hide a heading it was in fact authored).
+ */
+const TITLE_FALLBACK_PROP: Readonly<Record<string, string>> = {
+  hero: 'headline',
+  introVideo: 'heading',
+  reel: 'heading',
+  map: 'title',
+  invite: 'heading',
+};
+
+/** Whether this section's own heading prop is authored (aliases included). */
+function hasAuthoredHeading(section: PageSection): boolean {
+  const prop = TITLE_FALLBACK_PROP[section.type];
+  if (prop === undefined) return true;
+  return aliasKeys(section.type, prop).some((key) => {
+    const value = section.props?.[key];
+    return typeof value === 'string' && value.trim() !== '';
+  });
+}
+
+/**
+ * Which section — if any — may fall back to the course title for its heading.
+ * Returns its `section.id`, or `null` when every fallback-capable section on the
+ * page is authored (or the page has none).
+ *
+ * TWO PASSES, AND THE ORDER IS LOAD-BEARING.
+ *
+ *  1. A HEADING-LESS `hero` WINS WHEREVER IT SITS. Its `<h1>` is the only one on
+ *     the page and it cannot self-hide — a hero with no headline is a
+ *     full-viewport blank stage, and `HeroSection` splits the headline into words,
+ *     so an absent one is not even renderable. Handing the claim to an earlier
+ *     `map` would leave the hero with nothing to print. `HeroSection` therefore
+ *     keeps an unconditional last-resort fallback of its own, and this pass is
+ *     what stops that fallback ever DUPLICATING another section's heading.
+ *  2. Otherwise FIRST-WINS among the remaining four. Not "hero-wins" as a general
+ *     rule: a page with no `hero` at all would then have no heading anywhere
+ *     carrying the course's name, and `validatePageShape` only WARNS on `no-hero`
+ *     because opening on an `ache` is a real editorial choice.
+ *
+ * Pure, and takes the already-filtered renderables so a DISABLED or unknown-type
+ * section can never claim a fallback nobody will see.
+ */
+export function claimTitleFallback(
+  renderables: readonly RenderableSection[]
+): string | null {
+  const hero = renderables.find(
+    ({ section }) => section.type === 'hero' && !hasAuthoredHeading(section)
+  );
+  if (hero !== undefined) return hero.section.id;
+
+  const first = renderables.find(({ section }) => !hasAuthoredHeading(section));
+  return first?.section.id ?? null;
+}
+
+/** One thing wrong with a page's section composition. */
+export interface PageShapeIssue {
+  /** Stable machine code — the UI maps it to copy, tests assert on it. */
+  code:
+    | 'empty-page'
+    | 'no-hero'
+    | 'multiple-hero'
+    | 'hero-not-first'
+    | 'no-cta';
+  /**
+   * `error` shapes must not reach a PUBLISHED page; `warn` shapes are surfaced
+   * inline and publishable — they are taste, or a deliberate choice a creator is
+   * allowed to make.
+   *
+   * WHAT ENFORCES THAT, HALF BY HALF — stated precisely because the earlier form
+   * of this comment asserted BOTH halves ("the builder's publish action blocks on
+   * them and the service rejects them") while NEITHER existed. A repo-wide grep
+   * for `validatePageShape` returned four hits and all four were prose in this
+   * file and `HeroSection`; grepping `packages/access`, `workers/content-api` and
+   * `packages/validation` for `multiple-hero` / `empty-page` returned nothing. A
+   * docstring asserting a check that is not there is worse than a missing check,
+   * because it tells the next reader the page is already defended.
+   *
+   * WIRED:
+   *  · THE BUILDER'S PUBLISH ACTION does block. `passesPublishGate()` in the
+   *    studio route filters this list to `severity === 'error'`, names each code
+   *    in its own message and refuses without writing anything. So `error` is a
+   *    real rule from the UI, and `warn` is deliberately not surfaced there — a
+   *    publish button is the wrong place to argue with a creator's taste.
+   *  · {@link JourneyRenderer} acts on `empty-page`, and on nothing else: it
+   *    withholds the floating pill, so an already-published blank page does not
+   *    serve a fixed buy button as the only thing in its body.
+   *
+   * NOT WIRED, and this is the half that remains:
+   *  · THE SERVICE DOES NOT REJECT. Nothing in `packages/*` or `workers/*` reads
+   *    this function, so a direct API write still publishes an empty or two-hero
+   *    page — the UI gate is the only gate. Anyone adding the server half should
+   *    call THIS function rather than restate its rules, or the two definitions of
+   *    "publishable" will drift.
+   *
+   * The split is the part other callers consume, so it is pinned by
+   * `section-registry.test.ts`: a later tidy-up cannot promote a `warn` and start
+   * blocking publishes that are fine, nor demote an `error` and reopen the hole.
+   */
+  severity: 'error' | 'warn';
+}
+
+/**
+ * Validate a page's SECTION COMPOSITION — the one property of a journey page that
+ * nothing checked anywhere.
+ *
+ * `selectRenderableSections` filters on `enabled` + known-type and preserves
+ * array order verbatim; its tests assert order preservation and nothing about
+ * validity. So the builder could publish, and did not stop, any of:
+ *
+ *   · `sections: []` — which is what `createJourney` INSERTS. Publishing without
+ *     adding a section serves a document with a valid `<title>`, a `Course`
+ *     JSON-LD asserting the course exists, and a body holding nothing but a
+ *     hidden `inert` floating pill. An indexable blank page.
+ *   · two `hero` sections — reachable via `duplicateSection()` — i.e. two
+ *     full-viewport stages at `min-height: min(100svh, 80svh × rhythm)` before any
+ *     content, and (until `headingLevel`) two `<h1>`s.
+ *   · a page with no `hero`, so no `<h1>` at all under a run of `<h2>`s.
+ *   · a sales page with no conversion affordance anywhere.
+ *
+ * PURE + ORDER-AWARE, taking the STORED sections rather than the renderables:
+ * a section the author has toggled off is not part of the published shape, so the
+ * same `enabled` + known-type filter is applied here — an unknown future type
+ * cannot be judged and is skipped, exactly as the renderer skips it.
+ *
+ * Severities are calibrated to what a creator is ALLOWED to want. Opening on an
+ * `ache` rather than a hero is a real editorial choice (`no-hero`, `warn`), and so
+ * is putting a `turn` above the hero (`hero-not-first`, `warn`). Two heroes and an
+ * empty page are not choices, they are mistakes with no reading that helps a
+ * visitor; a page that cannot be bought from is the one that costs the creator
+ * money.
+ *
+ * `no-cta` deliberately tests for a `hero` OR an `invite` and NOT for
+ * `context.purchasable`: this is a check on the page's SHAPE, evaluated where
+ * there is no viewer and no offer read. A course with nothing to sell yet is a
+ * legitimate draft; a published page with nowhere to press is not.
+ *
+ * CALLERS, and this list is the honest one: the studio builder's
+ * `passesPublishGate()` (which blocks on the `error` severities),
+ * `JourneyRenderer` (the `empty-page` branch only) and
+ * `section-registry.test.ts`. NO service or worker calls it, so the publish gate
+ * is a UI gate — see {@link PageShapeIssue.severity} for what that means, and do
+ * not infer server-side enforcement from the fact that a validator exists.
+ */
+export function validatePageShape(
+  sections: readonly PageSection[]
+): PageShapeIssue[] {
+  const live = sections.filter(
+    (section) =>
+      section.enabled && resolveSectionComponent(section.type) !== null
+  );
+
+  if (live.length === 0) return [{ code: 'empty-page', severity: 'error' }];
+
+  const issues: PageShapeIssue[] = [];
+  const heroCount = live.filter((section) => section.type === 'hero').length;
+
+  if (heroCount === 0) issues.push({ code: 'no-hero', severity: 'warn' });
+  if (heroCount > 1) issues.push({ code: 'multiple-hero', severity: 'error' });
+  if (heroCount > 0 && live[0].type !== 'hero') {
+    issues.push({ code: 'hero-not-first', severity: 'warn' });
+  }
+  if (heroCount === 0 && !live.some((section) => section.type === 'invite')) {
+    issues.push({ code: 'no-cta', severity: 'error' });
+  }
+
+  return issues;
 }

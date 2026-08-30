@@ -99,6 +99,7 @@
   import CtaLink from '../CtaLink.svelte';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
+  import { editFieldAttrs } from '../editable';
   import type { JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -110,6 +111,19 @@
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, and ONLY when this section is the one the page has let
+     * claim it (`SectionComponentProps.titleFallback`). Five sections fell back to
+     * `context.course.title` independently, so an under-authored page printed the
+     * same sentence as its `<h1>` four more times.
+     *
+     * This section was the LAST of the five still reading the context directly,
+     * which made the mechanism unsound rather than merely incomplete: with the
+     * claim spent on (say) `map`, a blank invite printed the title as well — the
+     * exact duplication `claimTitleFallback` exists to prevent, on the conversion
+     * section.
+     */
+    titleFallback?: string;
   }
 
   const {
@@ -119,6 +133,7 @@
     design,
     editable = false,
     onEdit,
+    titleFallback,
   }: Props = $props();
 
   const eyebrow = $derived(asString(config, 'eyebrow'));
@@ -176,8 +191,24 @@
    * Latent rather than live today: all seven pages store a heading, so the old
    * fallback was reachable but unreached. It would have fired on the first page
    * a creator left the field empty on.
+   *
+   * THE FALLBACK IS NOW BORROWED, NOT ASSUMED. It reads `titleFallback` — the
+   * course title, handed to whichever single section the PAGE granted it
+   * (`claimTitleFallback`) — and never `context.course.title`. Four sections were
+   * converted when the claim landed and this one was missed, so the claim could go
+   * to `map` while a blank invite ALSO printed the title. The course title is
+   * still in the context and is still read below for accessible names; the
+   * discipline is at the heading read and nowhere else.
+   *
+   * Read through `aliasKeys` rather than a bare `'heading'` so this read and
+   * `hasAuthoredHeading`'s claim test consult ONE preference list. `invite`
+   * declares no heading alias today, so the two are identical — but a hand-copied
+   * key list is exactly how a claim comes to disagree with a render, and the
+   * disagreement degrades to a self-hidden heading rather than failing.
    */
-  const heading = $derived(asString(config, 'heading') ?? context.course.title);
+  const heading = $derived(
+    asStringFrom(config, aliasKeys('invite', 'heading')) ?? titleFallback
+  );
 
   /**
    * The real ways in, decorated by this section's authored copy. EMPTY when the
@@ -187,6 +218,42 @@
    * so they render the price-less branch today.
    */
   const paths = $derived(deriveOfferPaths(context.offer, context.course, config));
+
+  /**
+   * THE TOP-LEVEL COLLAPSE — the guard the other ten sections already had, and
+   * the last hole the dead-end-checkout fix left behind.
+   *
+   * Nine of the eleven sections self-hide on empty data (`AcheSection`'s
+   * `hasContent` is the pattern; `introVideo` and `reel` gained theirs when the
+   * hollow media shell was removed). `invite` did not, so whenever it had neither
+   * copy nor an offer it still rendered its root `<div>`, its four-layer
+   * atmosphere and an EMPTY `<header>` — a glowing band with nothing in it, and
+   * it is the LAST section of the default page template, so it is the note a
+   * visitor leaves on.
+   *
+   * WHY THAT STATE EXISTS AT ALL, and why closing it belongs here: withholding
+   * the transactional affordance from a non-purchasable course (the branch far
+   * below) was correct — the checkout it pointed at answers "isn't open for
+   * enrolment just now" — but it left the frame standing. A section with nothing
+   * to say and nothing to sell must not be a frame.
+   *
+   * `purchasable !== false`, never `!purchasable`, for the reason the CTA branch
+   * states at length: `purchasable` is a CONFIDENT NEGATIVE, and a FAILED offer
+   * read leaves it `true` while also emptying `paths`. Testing truthiness would
+   * collapse the entire section on a transient pricing hiccup — the same defect
+   * as stripping the buy button, one level up.
+   *
+   * MEASURED BEFORE THE GUARD, all six compositions, `props: {}` + `paths: []` +
+   * `purchasable: false` + no claimed title fallback: `.invite` +
+   * `.invite__atmos` + `.invite__inner` + an empty `.invite__head`, and ZERO
+   * characters of text. Not live on the seven seeded pages — every one authors
+   * `heading` and `accent` — but one cleared field away on the five whose course
+   * has `price_cents IS NULL`.
+   */
+  const hasCopy = $derived(!!(eyebrow || heading || accent || sub));
+  const hasDoorway = $derived(
+    context.enrolled || paths.length > 0 || context.purchasable !== false
+  );
 
   /**
    * CTA branches on enrolment: an enrolled member is sent to their dashboard;
@@ -373,27 +440,22 @@
   });
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: that component renders an
-   * EMPTY element and fills `textContent` from a Svelte action, and actions do
-   * not run during SSR — so the public page would serve an empty heading and
-   * paint the text in only after hydration. The canvas never noticed because the
-   * studio is `ssr = false`. Here the text is a real child node, so it is in the
-   * served HTML and `contenteditable` is layered on top (pilot lesson 9).
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('invite', key, editable, onEdit);
 </script>
 
 {#snippet badge()}
@@ -421,323 +483,385 @@
   {/if}
 {/snippet}
 
-<div
-  class="invite"
-  class:invite--enhanced={enhanced}
-  data-invite={composition}
-  data-detail={detail}
-  data-plated={plated}
-  data-motion={motion}
->
-  <!-- THE ATMOSPHERE, gated ONCE on the shared parent (pilot lesson 3, a
-       correction to research §2.3's per-layer gate). The bloom's opacity is
-       ANIMATED, and a keyframe beats a `calc()` on the same element; on the
-       parent the two compose multiplicatively, so the bloom keeps breathing
-       under `surface: media` and resolves to zero opacity everywhere else. The
-       markup stays mounted either way, which is cheaper and lower-risk than
-       conditionally rendering it.
+{#if hasCopy || hasDoorway}
+  <!-- NOTHING WHEN THERE IS NOTHING — see `hasCopy` / `hasDoorway` above. The
+       atmosphere, the inner column and the `<header>` all live inside this
+       guard, because it was the FRAME that was the defect: an empty
+       `.invite__head` inside a lit `.invite__atmos` is a band of nothing at the
+       foot of the page, and the ten sibling sections already collapse instead. -->
+  <div
+    class="invite"
+    class:invite--enhanced={enhanced}
+    data-invite={composition}
+    data-detail={detail}
+    data-plated={plated}
+    data-motion={motion}
+  >
+    <!-- THE ATMOSPHERE, gated ONCE on the shared parent (pilot lesson 3, a
+         correction to research §2.3's per-layer gate). The bloom's opacity is
+         ANIMATED, and a keyframe beats a `calc()` on the same element; on the
+         parent the two compose multiplicatively, so the bloom keeps breathing
+         under `surface: media` and resolves to zero opacity everywhere else. The
+         markup stays mounted either way, which is cheaper and lower-risk than
+         conditionally rendering it.
 
-       `--invite-atmos` is the composition's own multiplier on top: `card` is
-       defined as the quiet composition with no atmosphere at all
-       (`_invite.css` :44-46), so it multiplies the whole layer to zero without
-       needing a second gate in markup. -->
-  <div class="invite__atmos" aria-hidden="true">
-    <span class="invite__bloom"></span>
-    <span class="invite__vignette"></span>
-    <span class="invite__descent"><span class="invite__seed"></span></span>
-  </div>
+         `--invite-atmos` is the composition's own multiplier on top: `card` is
+         defined as the quiet composition with no atmosphere at all
+         (`_invite.css` :44-46), so it multiplies the whole layer to zero without
+         needing a second gate in markup. -->
+    <div class="invite__atmos" aria-hidden="true">
+      <span class="invite__bloom"></span>
+      <span class="invite__vignette"></span>
+      <span class="invite__descent"><span class="invite__seed"></span></span>
+    </div>
 
-  <!-- ONE observer for the whole section, on the container.
+    <!-- ONE observer for the whole section, on the container.
 
-       The shared atom in `journey-sections-shared.css` is
-       `.reveal--armed .jp-reveal` — a DESCENDANT selector — and the `reveal`
-       action adds `.reveal--armed` / `.is-in` to the node it is used on. So the
-       action goes on the container and the staggered beats are its children;
-       putting both on the same element matches nothing. One IntersectionObserver
-       per section is also the cheaper shape.
+         The shared atom in `journey-sections-shared.css` is
+         `.reveal--armed .jp-reveal` — a DESCENDANT selector — and the `reveal`
+         action adds `.reveal--armed` / `.is-in` to the node it is used on. So the
+         action goes on the container and the staggered beats are its children;
+         putting both on the same element matches nothing. One IntersectionObserver
+         per section is also the cheaper shape.
 
-       Scroll-triggered reveal is correct HERE, unlike the hero (pilot lesson 6):
-       the invite is the page's close, below the fold on every real page. On a
-       short page where `banner` or `sticky` opens above the fold, the observer
-       fires on its first callback because the node is already intersecting, so
-       nothing waits for a scroll that never comes. -->
-  <div class="invite__inner" use:reveal={{ disabled: editable }}>
-    <header class="invite__head jp-reveal">
-      {#if eyebrow}
-        <p class="jp-sec__eyebrow invite__eyebrow" {...editAttrs('eyebrow')}>
-          {eyebrow}
-        </p>
+         Scroll-triggered reveal is correct HERE, unlike the hero (pilot lesson 6):
+         the invite is the page's close, below the fold on every real page. On a
+         short page where `banner` or `sticky` opens above the fold, the observer
+         fires on its first callback because the node is already intersecting, so
+         nothing waits for a scroll that never comes. -->
+    <div class="invite__inner" use:reveal={{ disabled: editable }}>
+      <!-- NO EMPTY LANDMARK, AND NO PHANTOM COLUMN. `hasCopy || hasDoorway`
+           above stops the whole section being a lit band of nothing, but the two
+           are ORed, so the frame legitimately renders on `hasDoorway` ALONE —
+           an unauthored invite on a purchasable course is a real state (nothing
+           to say, something to sell). In exactly that state every child of this
+           `<header>` self-hid and the header itself did not: `.invite__inner` is
+           `display: flex` with `gap: var(--invite-block-gap)`, so the empty
+           header still spent one whole block gap above the offer, and on `banner`
+           — where `.invite__inner` is `grid-template-columns: 1fr auto` — it took
+           the entire copy column and pushed the action into the narrow track.
+           `hasCopy` is reused rather than restated: it already names the four
+           fields this header holds. -->
+      {#if hasCopy}
+        <header class="invite__head jp-reveal">
+          {#if eyebrow}
+            <p class="jp-sec__eyebrow invite__eyebrow" {...editAttrs('eyebrow')}>
+              {eyebrow}
+            </p>
+          {/if}
+          <!-- `.jp-sec__heading` WITHOUT `--sub`, and this is the one deliberate
+               departure from contract A36 in this file. A36's rule — "a section
+               `<h2>` reads `--jp-heading-size`, NEVER `--jp-display`" — exists to
+               stop a 48px heading being grown to 80px on every published page. This
+               heading is ALREADY 80px: it is the only `<h2>` in the tree that ships
+               `--text-display`, because the invite is the page's second display
+               moment (the hero opens, the invite closes). Reading
+               `--jp-heading-size` here would SHRINK it 80 → 48px on seven pages,
+               breaking the same A3/D8 invariant A36 protects, from the other side.
+
+               Measured both ways, at a real viewport (the `--text-*` steps carry
+               `vw`, so a container-only probe reads the wrong number):
+
+                 type          this h2 (--jp-display)    A36's letter (--jp-heading-size)
+                 restrained    24.6 / 28.5 / 30 px       20.4 / 23.4 / 24 px
+                 balanced      37.2 / 46.1 / 48 px       24.6 / 28.5 / 30 px
+                 expressive    28.0 / 35.2 / 44 px       31.0 / 38.4 / 40 px
+                 monumental    44.0 / 50.6 / 80 px       37.2 / 46.1 / 48 px
+                                            (375 / 768 / 1440 viewport)
+
+               `monumental` is Candlelit and is what all seven pages carry, and its
+               column is IDENTICAL to the base commit's fixed `var(--text-display)`
+               at all three widths — 44 / 50.56 / 80px before and after. Zero delta.
+
+               NOTE THE LADDER IS NOT MONOTONIC: `expressive` renders SMALLER than
+               `balanced` at every width, because `--text-5xl` maxes at 2.75rem while
+               `--text-4xl` maxes at 3rem. That is a `tokens/typography` ladder
+               defect, not this section's — `--jp-heading-size` (24/30/40/48) is
+               monotonic — and it affects every consumer of `--jp-display`.
+               Reported, not fixed here. -->
+          <!-- SELF-HIDING, because the fallback is claimed once per page and this
+               section may not be the claimant. An EMPTY `<h2>` would be worse than
+               none: this is the only `<h2>` in the tree carrying `--text-display`
+               (80px on the seeded pages), so a blank one is a screenful of nothing
+               between the eyebrow and the offer.
+
+               GUARDED ON `heading || accent`, not on `heading` alone. The accent is
+               the creator's own words — the italic second line closing the heading —
+               so an authored accent still gets a heading element to live in, and the
+               `&nbsp;` separator only appears when there is something on both sides of
+               it. Dropping authored copy because the field beside it is blank is the
+               class of loss most of this file's history is made of. -->
+          {#if heading || accent}
+            <h2 class="jp-sec__heading invite__heading">
+              {#if heading}<span {...editAttrs('heading')}>{heading}</span
+                >{/if}{#if heading && accent}&nbsp;{/if}{#if accent}<span
+                  class="invite__accent"
+                  {...editAttrs('accent')}>{accent}</span
+                >{/if}
+            </h2>
+          {/if}
+          {#if sub}
+            <p class="invite__sub" {...editAttrs('sub')}>{sub}</p>
+          {/if}
+        </header>
       {/if}
-      <!-- `.jp-sec__heading` WITHOUT `--sub`, and this is the one deliberate
-           departure from contract A36 in this file. A36's rule — "a section
-           `<h2>` reads `--jp-heading-size`, NEVER `--jp-display`" — exists to
-           stop a 48px heading being grown to 80px on every published page. This
-           heading is ALREADY 80px: it is the only `<h2>` in the tree that ships
-           `--text-display`, because the invite is the page's second display
-           moment (the hero opens, the invite closes). Reading
-           `--jp-heading-size` here would SHRINK it 80 → 48px on seven pages,
-           breaking the same A3/D8 invariant A36 protects, from the other side.
 
-           Measured both ways, at a real viewport (the `--text-*` steps carry
-           `vw`, so a container-only probe reads the wrong number):
+      {#if context.enrolled || paths.length === 0}
+        <!-- THE PRICE-LESS THRESHOLD — a warm doorway seated on its own ember
+             pool so beginning feels contained, safe, inevitable.
 
-             type          this h2 (--jp-display)    A36's letter (--jp-heading-size)
-             restrained    24.6 / 28.5 / 30 px       20.4 / 23.4 / 24 px
-             balanced      37.2 / 46.1 / 48 px       24.6 / 28.5 / 30 px
-             expressive    28.0 / 35.2 / 44 px       31.0 / 38.4 / 40 px
-             monumental    44.0 / 50.6 / 80 px       37.2 / 46.1 / 48 px
-                                        (375 / 768 / 1440 viewport)
+             NO PRICE HERE BY DESIGN. This branch is reached when the offer read
+             was unavailable or the course has no purchasable path, and in both
+             cases the checkout is the only surface that can state the terms. It is
+             the live state on four of the seven pages, and it is the state every
+             composition below falls back to — `sticky` renders its bar with this
+             CTA and no amount, `tiers` and `table` render nothing at all rather
+             than an empty grid.
 
-           `monumental` is Candlelit and is what all seven pages carry, and its
-           column is IDENTICAL to the base commit's fixed `var(--text-display)`
-           at all three widths — 44 / 50.56 / 80px before and after. Zero delta.
+             AN ENROLLED VIEWER TAKES THIS BRANCH TOO, and that is the fix for the
+             state below: the compositions rendered every priced path to a member
+             who had already bought, re-pointing each card's CTA to the same
+             dashboard. Four cards quoting £24.99 / £27 / £270 / £15 to someone
+             holding all of it, behind four links with one destination — and the
+             file already said why that was wrong ("An enrolled viewer has nothing
+             to buy") while rendering the buying UI anyway. It also compounded the
+             WCAG 2.4.4 duplicate-link-name problem the composition CTAs work
+             around: for an enrolled viewer the four names were not merely similar,
+             they were the same link four times.
+             `hrefFor(null)` already resolves to `dashboardUrl` and `ctaLabel`
+             already reads the enrolled string, so the enrolled state needs no new
+             markup — only this branch. -->
+        <!-- THE LAST DEAD END, closed. A viewer who is not enrolled AND whose
+             course has no purchasable path gets NO transactional affordance here.
+             This branch used to render `hrefFor(null)` → `checkoutUrl` for them,
+             and that checkout answers "<Course> isn't open for enrolment just
+             now" after re-pitching the course in full — a closed loop back to the
+             page they came from. It was the third of three such affordances; the
+             hero CTA and the floating pill were withheld earlier, and this one
+             could not be fixed in the same change because the file was owned by a
+             different writer.
 
-           NOTE THE LADDER IS NOT MONOTONIC: `expressive` renders SMALLER than
-           `balanced` at every width, because `--text-5xl` maxes at 2.75rem while
-           `--text-4xl` maxes at 3rem. That is a `tokens/typography` ladder
-           defect, not this section's — `--jp-heading-size` (24/30/40/48) is
-           monotonic — and it affects every consumer of `--jp-display`.
-           Reported, not fixed here. -->
-      <h2 class="jp-sec__heading invite__heading">
-        <span {...editAttrs('heading')}>{heading}</span>{#if accent}&nbsp;<span
-            class="invite__accent"
-            {...editAttrs('accent')}>{accent}</span
-          >{/if}
-      </h2>
-      {#if sub}
-        <p class="invite__sub" {...editAttrs('sub')}>{sub}</p>
-      {/if}
-    </header>
+             THE TEST IS `=== false`, NOT `!context.purchasable`, and the
+             distinction is the whole point: `purchasable` is a CONFIDENT NEGATIVE.
+             A FAILED offer read leaves it true (the read is `.catch(() => null)`-
+             guarded on an SEO-critical page), and a failed read also produces an
+             empty `paths` array — so testing truthiness would strip the buy button
+             off a perfectly purchasable page on any transient pricing hiccup. That
+             is the opposite defect, on the same element.
 
-    {#if context.enrolled || paths.length === 0}
-      <!-- THE PRICE-LESS THRESHOLD — a warm doorway seated on its own ember
-           pool so beginning feels contained, safe, inevitable.
-
-           NO PRICE HERE BY DESIGN. This branch is reached when the offer read
-           was unavailable or the course has no purchasable path, and in both
-           cases the checkout is the only surface that can state the terms. It is
-           the live state on four of the seven pages, and it is the state every
-           composition below falls back to — `sticky` renders its bar with this
-           CTA and no amount, `tiers` and `table` render nothing at all rather
-           than an empty grid.
-
-           AN ENROLLED VIEWER TAKES THIS BRANCH TOO, and that is the fix for the
-           state below: the compositions rendered every priced path to a member
-           who had already bought, re-pointing each card's CTA to the same
-           dashboard. Four cards quoting £24.99 / £27 / £270 / £15 to someone
-           holding all of it, behind four links with one destination — and the
-           file already said why that was wrong ("An enrolled viewer has nothing
-           to buy") while rendering the buying UI anyway. It also compounded the
-           WCAG 2.4.4 duplicate-link-name problem the composition CTAs work
-           around: for an enrolled viewer the four names were not merely similar,
-           they were the same link four times.
-           `hrefFor(null)` already resolves to `dashboardUrl` and `ctaLabel`
-           already reads the enrolled string, so the enrolled state needs no new
-           markup — only this branch. -->
-      <div class="invite__single jp-reveal" data-jp-step="2">
-        <div class="invite__pool" aria-hidden="true"></div>
-        <CtaLink href={hrefFor(null)} variant="primary" size="lg">
-          {ctaLabel}
-        </CtaLink>
-        <!-- The risk note ("Start free · cancel anytime") is purchase copy. It
-             says nothing true to a member who has already joined. -->
-        {#if priceNote && !context.enrolled}
-          <p class="invite__note" {...editAttrs('risk')}>{priceNote}</p>
-        {/if}
-      </div>
-    {:else if composition === 'table'}
-      <!-- COMPOSITION · table — a comparison matrix across the available paths.
-
-           TRANSPOSED: the paths are COLUMNS and the attributes are ROWS. A
-           feature matrix with one row per feature would need a union of feature
-           labels across paths, and `bullets` is per-path free text — there is no
-           such union in the read model, so the ✓/✗ grid the name suggests would
-           be a control that renders nothing. WT-4 shipped `map.table` with three
-           columns rather than the research's four for exactly this reason
-           (contract A50). Every row below is a real field on `OfferPath`.
-
-           `<th scope>` on both axes, and a visually-hidden `<caption>`, because
-           a comparison table read cell-by-cell without headers is unusable.
-
-           THE SCROLLER IS FOCUSABLE, and that is a measured requirement rather
-           than belt-and-braces. Measured at a 375px section: the matrix's
-           min-content is 733px against a 330px content box, so the region really
-           does scroll and two of the four paths really are off-screen. A
-           container that scrolls but cannot be focused is not keyboard-operable
-           (WCAG 2.1.1) — Chrome gives no keyboard scrolling to a non-focusable
-           overflow box. `role="region"` is what lets `tabindex` sit on a
-           non-interactive element without tripping Svelte's
-           `a11y_no_noninteractive_tabindex`, and it is named by the table's own
-           caption via `aria-labelledby` so the string is announced once rather
-           than duplicated into an `aria-label`. It is also the ONE focusable
-           element in this section that is not a `CtaLink`, so it carries the R14
-           ring itself — see the rule beside `.invite__scroller`.
-
-           AUTOFIXER FINDING, REJECTED WITH REASONS AND RE-CHECKED:
-           `svelte-autofixer` flags `tabindex="0"` here as
-           `a11y_no_noninteractive_tabindex`, because `region` is a landmark and
-           landmarks are non-interactive. The rule is right in general — a stray
-           tabindex on a `<div>` is a real defect — and wrong for a SCROLL
-           CONTAINER, which is the documented exception: WCAG 2.1.1 and the ARIA
-           practices' scrollable-region guidance both require a region that
-           scrolls to be keyboard-operable, and a browser gives no keyboard
-           scrolling to a non-focusable overflow box. This region DOES scroll —
-           733px of min-content in a 330px box, measured. So the warning is
-           suppressed at the narrowest possible scope, one element, rather than
-           the behaviour being removed. -->
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <div
-        class="invite__scroller"
-        role="region"
-        tabindex="0"
-        aria-labelledby={captionId}
-      >
-        <table class="invite__table">
-          <caption id={captionId} class="sr-only">{CHROME.compareCaption}</caption>
-          <thead>
-            <tr>
-              <td></td>
-              {#each paths as path (path.id)}
-                <th scope="col" data-best={path.best ? 'true' : undefined}>
-                  {#if path.best}{@render badge()}{/if}
-                  <span class="invite__offer-name">{path.name}</span>
-                </th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">{CHROME.rowPrice}</th>
-              {#each paths as path (path.id)}
-                <td data-best={path.best ? 'true' : undefined}>
-                  {@render priceBlock(path)}
-                </td>
-              {/each}
-            </tr>
-            {#if paths.some((p) => p.who)}
-              <tr>
-                <th scope="row">{CHROME.rowWho}</th>
-                {#each paths as path (path.id)}
-                  <td data-best={path.best ? 'true' : undefined}>
-                    {path.who ?? ''}
-                  </td>
-                {/each}
-              </tr>
-            {/if}
-            {#if paths.some((p) => p.bullets.length > 0)}
-              <tr>
-                <th scope="row">{CHROME.rowIncludes}</th>
-                {#each paths as path (path.id)}
-                  <td data-best={path.best ? 'true' : undefined}>
-                    {@render bullets(path)}
-                  </td>
-                {/each}
-              </tr>
-            {/if}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td></td>
-              {#each paths as path (path.id)}
-                <td data-best={path.best ? 'true' : undefined}>
-                  <CtaLink
-                    href={hrefFor(path.id)}
-                    variant={path.best ? 'primary' : 'secondary'}
-                    size="md"
-                    aria-label={ctaName(path)}
-                  >
-                    {ctaLabel}
-                  </CtaLink>
-                </td>
-              {/each}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      {#if priceNote}
-        <p class="invite__note jp-reveal" data-jp-step="3" {...editAttrs('risk')}>
-          {priceNote}
-        </p>
-      {/if}
-    {:else if composition === 'sticky'}
-      <!-- COMPOSITION · sticky — a short in-flow section plus a bar that pins.
-
-           THE STATIC BAR IS THE BASELINE (contract A40). It is a normal block in
-           the flow here; the pinning lives entirely inside
-           `@media (prefers-reduced-motion: no-preference)` further down, gated
-           on `data-motion`. Nothing to undo, so nothing to forget.
-
-           The bar carries the RECOMMENDED path — one amount and one CTA, because
-           a pinned bar with four choices is a menu, not a bar. The full grid is
-           not repeated: `tiers` is the composition for comparing. -->
-      {@const best = paths.find((p) => p.best) ?? paths[0]}
-      <div class="invite__bar jp-reveal" data-jp-step="2">
-        <span class="invite__bar-id">
-          <span class="invite__offer-name">{best.name}</span>
-          {@render priceBlock(best)}
-        </span>
-        <CtaLink
-          href={hrefFor(best.id)}
-          variant="primary"
-          size="md"
-          aria-label={ctaName(best)}
-        >
-          {ctaLabel}
-        </CtaLink>
-      </div>
-      {#if priceNote}
-        <p class="invite__note jp-reveal" data-jp-step="3" {...editAttrs('risk')}>
-          {priceNote}
-        </p>
-      {/if}
-    {:else}
-      <!-- COMPOSITIONS · pool / banner / card / tiers — one card per real path.
-
-           `auto-fit` + a FLEXIBLE max, never a fixed one. The old ladder was
-           `1fr` → `repeat(3, minmax(0, 1fr))` at a viewport breakpoint: a baked
-           -in column count that put the golden page's FOUR paths into 3 + 1
-           orphan. `minmax(min(100%, 16rem), 1fr)` makes the count fall out of
-           the container's own width, which is what container-query scoping is
-           for. The max is `1fr` and not a rem value because a fixed max makes
-           the repetition count resolve to 1 — measured, three cards stacked in
-           one column at every width (contract A48). -->
-      <ul class="invite__offers">
-        {#each paths as path, i (path.id)}
-          {@const href = hrefFor(path.id)}
-          <li
-            class="invite__offer jp-reveal"
-            data-jp-step={step(i)}
-            data-best={path.best ? 'true' : undefined}
-          >
-            {#if path.best}{@render badge()}{/if}
-            <h3 class="invite__offer-name">{path.name}</h3>
-            {@render priceBlock(path)}
-            {#if detail === 'full' && path.who}
-              <p class="invite__offer-who">{path.who}</p>
-            {/if}
-            {#if path.blurb}
-              <p class="invite__offer-blurb">{path.blurb}</p>
-            {/if}
-            {#if detail === 'full'}{@render bullets(path)}{/if}
-            <CtaLink
-              {href}
-              variant={path.best ? 'primary' : 'secondary'}
-              size="md"
-              aria-label={ctaName(path)}
-            >
+             AN ENROLLED VIEWER IS UNAFFECTED: `hrefFor(null)` resolves to
+             `dashboardUrl` for them and `ctaLabel` already reads the enrolled
+             string, so their doorway is not transactional and stays exactly as it
+             was. The eyebrow, heading and sub above still render — they are the
+             creator's editorial copy, and a section with something to say is not
+             the same as a section with something to sell. -->
+        {#if context.enrolled || context.purchasable !== false}
+          <div class="invite__single jp-reveal" data-jp-step="2">
+            <div class="invite__pool" aria-hidden="true"></div>
+            <CtaLink href={hrefFor(null)} variant="primary" size="lg">
               {ctaLabel}
             </CtaLink>
-          </li>
-        {/each}
-      </ul>
-      {#if priceNote}
-        <p class="invite__note jp-reveal" data-jp-step="5" {...editAttrs('risk')}>
-          {priceNote}
-        </p>
+            <!-- The risk note ("Start free · cancel anytime") is purchase copy. It
+                 says nothing true to a member who has already joined. -->
+            {#if priceNote && !context.enrolled}
+              <p class="invite__note" {...editAttrs('risk')}>{priceNote}</p>
+            {/if}
+          </div>
+        {/if}
+      {:else if composition === 'table'}
+        <!-- COMPOSITION · table — a comparison matrix across the available paths.
+
+             TRANSPOSED: the paths are COLUMNS and the attributes are ROWS. A
+             feature matrix with one row per feature would need a union of feature
+             labels across paths, and `bullets` is per-path free text — there is no
+             such union in the read model, so the ✓/✗ grid the name suggests would
+             be a control that renders nothing. WT-4 shipped `map.table` with three
+             columns rather than the research's four for exactly this reason
+             (contract A50). Every row below is a real field on `OfferPath`.
+
+             `<th scope>` on both axes, and a visually-hidden `<caption>`, because
+             a comparison table read cell-by-cell without headers is unusable.
+
+             THE SCROLLER IS FOCUSABLE, and that is a measured requirement rather
+             than belt-and-braces. Measured at a 375px section: the matrix's
+             min-content is 733px against a 330px content box, so the region really
+             does scroll and two of the four paths really are off-screen. A
+             container that scrolls but cannot be focused is not keyboard-operable
+             (WCAG 2.1.1) — Chrome gives no keyboard scrolling to a non-focusable
+             overflow box. `role="region"` is what lets `tabindex` sit on a
+             non-interactive element without tripping Svelte's
+             `a11y_no_noninteractive_tabindex`, and it is named by the table's own
+             caption via `aria-labelledby` so the string is announced once rather
+             than duplicated into an `aria-label`. It is also the ONE focusable
+             element in this section that is not a `CtaLink`, so it carries the R14
+             ring itself — see the rule beside `.invite__scroller`.
+
+             AUTOFIXER FINDING, REJECTED WITH REASONS AND RE-CHECKED:
+             `svelte-autofixer` flags `tabindex="0"` here as
+             `a11y_no_noninteractive_tabindex`, because `region` is a landmark and
+             landmarks are non-interactive. The rule is right in general — a stray
+             tabindex on a `<div>` is a real defect — and wrong for a SCROLL
+             CONTAINER, which is the documented exception: WCAG 2.1.1 and the ARIA
+             practices' scrollable-region guidance both require a region that
+             scrolls to be keyboard-operable, and a browser gives no keyboard
+             scrolling to a non-focusable overflow box. This region DOES scroll —
+             733px of min-content in a 330px box, measured. So the warning is
+             suppressed at the narrowest possible scope, one element, rather than
+             the behaviour being removed. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div
+          class="invite__scroller"
+          role="region"
+          tabindex="0"
+          aria-labelledby={captionId}
+        >
+          <table class="invite__table">
+            <caption id={captionId} class="sr-only">{CHROME.compareCaption}</caption>
+            <thead>
+              <tr>
+                <td></td>
+                {#each paths as path (path.id)}
+                  <th scope="col" data-best={path.best ? 'true' : undefined}>
+                    {#if path.best}{@render badge()}{/if}
+                    <span class="invite__offer-name">{path.name}</span>
+                  </th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">{CHROME.rowPrice}</th>
+                {#each paths as path (path.id)}
+                  <td data-best={path.best ? 'true' : undefined}>
+                    {@render priceBlock(path)}
+                  </td>
+                {/each}
+              </tr>
+              {#if paths.some((p) => p.who)}
+                <tr>
+                  <th scope="row">{CHROME.rowWho}</th>
+                  {#each paths as path (path.id)}
+                    <td data-best={path.best ? 'true' : undefined}>
+                      {path.who ?? ''}
+                    </td>
+                  {/each}
+                </tr>
+              {/if}
+              {#if paths.some((p) => p.bullets.length > 0)}
+                <tr>
+                  <th scope="row">{CHROME.rowIncludes}</th>
+                  {#each paths as path (path.id)}
+                    <td data-best={path.best ? 'true' : undefined}>
+                      {@render bullets(path)}
+                    </td>
+                  {/each}
+                </tr>
+              {/if}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td></td>
+                {#each paths as path (path.id)}
+                  <td data-best={path.best ? 'true' : undefined}>
+                    <CtaLink
+                      href={hrefFor(path.id)}
+                      variant={path.best ? 'primary' : 'secondary'}
+                      size="md"
+                      aria-label={ctaName(path)}
+                    >
+                      {ctaLabel}
+                    </CtaLink>
+                  </td>
+                {/each}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        {#if priceNote}
+          <p class="invite__note jp-reveal" data-jp-step="3" {...editAttrs('risk')}>
+            {priceNote}
+          </p>
+        {/if}
+      {:else if composition === 'sticky'}
+        <!-- COMPOSITION · sticky — a short in-flow section plus a bar that pins.
+
+             THE STATIC BAR IS THE BASELINE (contract A40). It is a normal block in
+             the flow here; the pinning lives entirely inside
+             `@media (prefers-reduced-motion: no-preference)` further down, gated
+             on `data-motion`. Nothing to undo, so nothing to forget.
+
+             The bar carries the RECOMMENDED path — one amount and one CTA, because
+             a pinned bar with four choices is a menu, not a bar. The full grid is
+             not repeated: `tiers` is the composition for comparing. -->
+        {@const best = paths.find((p) => p.best) ?? paths[0]}
+        <div class="invite__bar jp-reveal" data-jp-step="2">
+          <span class="invite__bar-id">
+            <span class="invite__offer-name">{best.name}</span>
+            {@render priceBlock(best)}
+          </span>
+          <CtaLink
+            href={hrefFor(best.id)}
+            variant="primary"
+            size="md"
+            aria-label={ctaName(best)}
+          >
+            {ctaLabel}
+          </CtaLink>
+        </div>
+        {#if priceNote}
+          <p class="invite__note jp-reveal" data-jp-step="3" {...editAttrs('risk')}>
+            {priceNote}
+          </p>
+        {/if}
+      {:else}
+        <!-- COMPOSITIONS · pool / banner / card / tiers — one card per real path.
+
+             `auto-fit` + a FLEXIBLE max, never a fixed one. The old ladder was
+             `1fr` → `repeat(3, minmax(0, 1fr))` at a viewport breakpoint: a baked
+             -in column count that put the golden page's FOUR paths into 3 + 1
+             orphan. `minmax(min(100%, 16rem), 1fr)` makes the count fall out of
+             the container's own width, which is what container-query scoping is
+             for. The max is `1fr` and not a rem value because a fixed max makes
+             the repetition count resolve to 1 — measured, three cards stacked in
+             one column at every width (contract A48). -->
+        <ul class="invite__offers">
+          {#each paths as path, i (path.id)}
+            {@const href = hrefFor(path.id)}
+            <li
+              class="invite__offer jp-reveal"
+              data-jp-step={step(i)}
+              data-best={path.best ? 'true' : undefined}
+            >
+              {#if path.best}{@render badge()}{/if}
+              <h3 class="invite__offer-name">{path.name}</h3>
+              {@render priceBlock(path)}
+              {#if detail === 'full' && path.who}
+                <p class="invite__offer-who">{path.who}</p>
+              {/if}
+              {#if path.blurb}
+                <p class="invite__offer-blurb">{path.blurb}</p>
+              {/if}
+              {#if detail === 'full'}{@render bullets(path)}{/if}
+              <CtaLink
+                {href}
+                variant={path.best ? 'primary' : 'secondary'}
+                size="md"
+                aria-label={ctaName(path)}
+              >
+                {ctaLabel}
+              </CtaLink>
+            </li>
+          {/each}
+        </ul>
+        {#if priceNote}
+          <p class="invite__note jp-reveal" data-jp-step="5" {...editAttrs('risk')}>
+            {priceNote}
+          </p>
+        {/if}
       {/if}
-    {/if}
+    </div>
   </div>
-</div>
+{/if}
 
 <style>
   /* ═══════════════════════════════════════════════════════════════════════

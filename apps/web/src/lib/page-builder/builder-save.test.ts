@@ -16,6 +16,7 @@
 import type { PageBuilderState } from '@codex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type BuilderRefreshScope,
   type BuilderSaveResult,
   type DerivedOfferPresentation,
   remoteErrorMessage,
@@ -480,6 +481,362 @@ describe('saveBuilderDraft · monetisation leg', () => {
 
     expect(deps.saveOffer).not.toHaveBeenCalled();
     expect(result).toMatchObject({ offerSaved: false });
+  });
+});
+
+/**
+ * The SELL-MEDIA leg.
+ *
+ * THE BUG THESE LOCK OUT, and it is the worst shape in the builder: the media
+ * write used to run in `+page.svelte` AFTER `saveBuilderDraft` returned, BELOW the
+ * component's `if (result.staleWarning) { toast.warning(...); return true; }`. So
+ * whenever the post-save `invalidate('cache:versions')` rejected — which happens
+ * whenever ANY load it re-runs throws, i.e. for reasons having nothing to do with
+ * this save — the media write was never attempted, the creator was warned about
+ * page STALENESS (not media), and `handleSave` returned TRUE. `handlePublish` then
+ * announced "Page published" for a page whose media had never been sent, and
+ * because `markSaved()` had already run inside the orchestrator the page draft was
+ * clean, so the un-sent media was silently discardable on the next navigation.
+ *
+ * A leg the caller runs afterwards is a leg the caller can skip. These tests are
+ * therefore about ORDER as much as about outcome.
+ */
+describe('saveBuilderDraft · sell-media leg', () => {
+  function makeSellMedia(overrides: Record<string, unknown> = {}) {
+    return {
+      isDirty: true,
+      save: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+      ...overrides,
+    };
+  }
+
+  it('runs the media write even when the post-save refresh REJECTS', async () => {
+    // The falsification case. With the leg in the component this passed the
+    // `staleWarning` early return and never fired.
+    const sellMedia = makeSellMedia();
+    const deps = makeDeps({
+      sellMedia,
+      refresh: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error('invalidate failed')),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(sellMedia.save).toHaveBeenCalledTimes(1);
+    // Still a SAVE with a staleness warning — the writes landed.
+    expect(result.outcome).toBe('saved');
+    expect(result).toMatchObject({ staleWarning: 'invalidate failed' });
+    expect(deps.markSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs AFTER the offer leg and BEFORE markSaved, so a refusal stays retryable', async () => {
+    const order: string[] = [];
+    const sellMedia = makeSellMedia({
+      save: vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
+        order.push('media');
+      }),
+    });
+    const deps = makeDeps({
+      sellMedia,
+      payload: makePayload({ offer: { oneOffEnabled: true } }),
+      saveOffer: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockImplementation(async () => {
+          order.push('offer');
+        }),
+      markSaved: vi.fn<() => void>().mockImplementation(() => {
+        order.push('markSaved');
+      }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(order).toEqual(['offer', 'media', 'markSaved']);
+  });
+
+  it('a refused media write is a FAILURE naming the media, and does not mark the draft saved', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(remoteError('That media is not yours')),
+    });
+    const deps = makeDeps({ sellMedia });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'media',
+      message: 'Page saved, but the media was not: That media is not yours',
+    });
+    // The copy DID land, so the message says so — but the draft stays dirty and
+    // publish/view-live must not proceed.
+    expect(deps.savePage).toHaveBeenCalledTimes(1);
+    expect(deps.markSaved).not.toHaveBeenCalled();
+  });
+
+  it('names the leg when the refusal carries no message', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi.fn<() => Promise<unknown>>().mockRejectedValue({ status: 500 }),
+    });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    expect(result).toMatchObject({
+      stage: 'media',
+      message: 'Page saved, but the media could not be saved.',
+    });
+  });
+
+  it('skips the write when no slot changed', async () => {
+    const sellMedia = makeSellMedia({ isDirty: false });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    expect(sellMedia.save).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('saved');
+  });
+
+  it('a media-only failure blocks publish', async () => {
+    const sellMedia = makeSellMedia({
+      save: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(remoteError('That media is not yours')),
+    });
+
+    const result = await saveBuilderDraft(makeDeps({ sellMedia }));
+
+    // Same gate as the pricing-only failure below: media is part of the page
+    // going live, so "Page published" would be a claim about content nobody sent.
+    expect(result.outcome).toBe('failed');
+  });
+});
+
+/**
+ * THE POST-SAVE RE-READ.
+ *
+ * The bug: `refresh` is `invalidate('cache:versions')`, and `invalidate(resource)`
+ * re-runs `load` functions ONLY. SvelteKit re-runs remote `query()` functions
+ * from an invalidation pass exclusively behind its internal `force_invalidation`
+ * flag, which only `invalidateAll()` / `refreshAll()` set. So Save toasted
+ * success while the canvas went on rendering the PRE-SAVE price and the PRE-SAVE
+ * media until a hard reload — and both of those reads are authoritative ones the
+ * canvas is fed deliberately INSTEAD of the draft's own bag, so the staleness
+ * shows up as a plausible older number rather than as an obvious blank.
+ *
+ * WHY THESE TESTS DRIVE A VALUE AND NOT A SPY. Asserting `refreshQueries` was
+ * called would pass over a refresher that refreshes nothing — which is exactly
+ * the failure mode being fixed, since `invalidate()` WAS being called all along.
+ * So each test below wires a fake query whose `.current` moves only when its own
+ * `refresh()` runs, mutates the server-side value inside the write leg (as the
+ * real endpoints do), and asserts THE OBSERVED VALUE CHANGED across the save.
+ */
+describe('saveBuilderDraft · the post-save re-read', () => {
+  /**
+   * A remote query, modelled on the only two properties this code uses:
+   * `.current` is a SNAPSHOT (it does not track the server), and `refresh()` is
+   * the sole thing that re-reads. That is the whole mechanism of the bug.
+   */
+  function fakeQuery<T>(read: () => T) {
+    let current = read();
+    return {
+      get current() {
+        return current;
+      },
+      refresh: vi.fn<() => Promise<void>>().mockImplementation(async () => {
+        current = read();
+      }),
+    };
+  }
+
+  /** The builder's two authoritative reads, over a mutable "server". */
+  function makeStudioReads() {
+    const server = { priceCents: 1000, heroImageUrl: 'hero-old.webp' };
+    const offerQuery = fakeQuery(() => ({
+      purchase: { priceCents: server.priceCents },
+    }));
+    const sellPreviewQuery = fakeQuery(() => ({
+      heroImageUrl: server.heroImageUrl,
+    }));
+    return {
+      server,
+      offerQuery,
+      sellPreviewQuery,
+      /** Exactly the wiring `+page.svelte` hands the orchestrator. */
+      refreshQueries: (scope: BuilderRefreshScope) =>
+        Promise.all([
+          scope.offer ? offerQuery.refresh() : undefined,
+          scope.media ? sellPreviewQuery.refresh() : undefined,
+        ]),
+    };
+  }
+
+  it('the canvas price MOVES across a save that changed the price', async () => {
+    // THE FALSIFICATION. Without `refreshQueries` wired into the orchestrator this
+    // reads 1000 — the pre-save number, beside a "Page saved" toast.
+    const reads = makeStudioReads();
+    const deps = makeDeps({
+      payload: makePayload({
+        offer: { oneOffEnabled: true, oneOffPriceCents: 2500 },
+      }),
+      refreshQueries: reads.refreshQueries,
+      saveOffer: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockImplementation(async () => {
+          reads.server.priceCents = 2500;
+        }),
+    });
+
+    expect(reads.offerQuery.current.purchase.priceCents).toBe(1000);
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toMatchObject({ outcome: 'saved', offerSaved: true });
+    expect(reads.offerQuery.current.purchase.priceCents).toBe(2500);
+  });
+
+  it('the canvas MEDIA moves across a save that changed a slot', async () => {
+    const reads = makeStudioReads();
+    const deps = makeDeps({
+      refreshQueries: reads.refreshQueries,
+      sellMedia: {
+        isDirty: true,
+        save: vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
+          reads.server.heroImageUrl = 'hero-new.webp';
+        }),
+      },
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result.outcome).toBe('saved');
+    expect(reads.sellPreviewQuery.current.heroImageUrl).toBe('hero-new.webp');
+  });
+
+  it('a PLAN change moves the pricing read too, not just a one-off price change', async () => {
+    // `CourseOffer.subscription` / `.tiers` mirror what the monetisation leg
+    // writes, so a subscription-only save leaves the canvas as stale as a
+    // price-only one did.
+    const reads = makeStudioReads();
+    const deps = makeDeps({
+      monetisation: {
+        isDirty: true,
+        save: vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
+          reads.server.priceCents = 4200;
+        }),
+        presentation: vi
+          .fn<() => DerivedOfferPresentation | null>()
+          .mockReturnValue(null),
+      },
+      refreshQueries: reads.refreshQueries,
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toMatchObject({
+      monetisationSaved: true,
+      offerSaved: false,
+    });
+    expect(reads.offerQuery.current.purchase.priceCents).toBe(4200);
+  });
+
+  it('re-reads ONLY what moved: a media-only save does not spend the pricing read', async () => {
+    // The reason this is a scope and not an `invalidateAll()`: the creator waits on
+    // these round trips, and four of the builder's five queries answer nothing this
+    // save wrote.
+    const reads = makeStudioReads();
+    const deps = makeDeps({
+      refreshQueries: reads.refreshQueries,
+      sellMedia: {
+        isDirty: true,
+        save: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+      },
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(reads.sellPreviewQuery.refresh).toHaveBeenCalledTimes(1);
+    expect(reads.offerQuery.refresh).not.toHaveBeenCalled();
+  });
+
+  it('does not re-read at all when a copy-only save moved neither', async () => {
+    const refreshQueries = vi
+      .fn<(scope: BuilderRefreshScope) => Promise<unknown>>()
+      .mockResolvedValue(undefined);
+
+    const result = await saveBuilderDraft(makeDeps({ refreshQueries }));
+
+    expect(result.outcome).toBe('saved');
+    expect(refreshQueries).not.toHaveBeenCalled();
+  });
+
+  it('re-reads the queries even when the load invalidation REJECTS', async () => {
+    // Same shape as the media leg's own falsification case: a read placed behind
+    // something that can bail is a read that gets skipped. A rejected `invalidate`
+    // has nothing to do with this save and must not be what leaves the canvas
+    // showing the old price.
+    const reads = makeStudioReads();
+    const deps = makeDeps({
+      payload: makePayload({
+        offer: { oneOffEnabled: true, oneOffPriceCents: 2500 },
+      }),
+      refreshQueries: reads.refreshQueries,
+      saveOffer: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockImplementation(async () => {
+          reads.server.priceCents = 2500;
+        }),
+      refresh: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error('invalidate failed')),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(reads.offerQuery.current.purchase.priceCents).toBe(2500);
+    expect(result).toMatchObject({
+      outcome: 'saved',
+      staleWarning: 'invalidate failed',
+    });
+  });
+
+  it('still invalidates the loads when the query re-read rejects', async () => {
+    const deps = makeDeps({
+      payload: makePayload({
+        offer: { oneOffEnabled: true, oneOffPriceCents: 2500 },
+      }),
+      refreshQueries: vi
+        .fn<(scope: BuilderRefreshScope) => Promise<unknown>>()
+        .mockRejectedValue(new Error('the offer read failed')),
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(deps.refresh).toHaveBeenCalledTimes(1);
+    // A committed write with a lagging read is a WARNING, never a failure.
+    expect(result).toMatchObject({
+      outcome: 'saved',
+      offerSaved: true,
+      staleWarning: 'the offer read failed',
+    });
+  });
+
+  it('never re-reads after a FAILED leg — there is nothing new to read', async () => {
+    const refreshQueries = vi
+      .fn<(scope: BuilderRefreshScope) => Promise<unknown>>()
+      .mockResolvedValue(undefined);
+    const deps = makeDeps({
+      refreshQueries,
+      savePage: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockRejectedValue(remoteError('slug taken')),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(refreshQueries).not.toHaveBeenCalled();
+    expect(deps.refresh).not.toHaveBeenCalled();
   });
 });
 

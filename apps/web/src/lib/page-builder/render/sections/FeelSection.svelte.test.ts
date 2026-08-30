@@ -18,17 +18,93 @@
  *  - THE WAVEFORM IS NO LONGER A FAKE CONTROL. It used to carry
  *    `role="presentation"`, `aria-hidden="true"` AND an `onclick` seek handler.
  *  - REAL TEXT CHILDREN under `editable` (pilot lesson 9 — the SEO contract).
+ *  - AND THE TRANSPORT IS NOT A MOCK (`Codex-scab9`). The five assertions in the
+ *    player block were written against the mock and PASSED against it: a play
+ *    button existed with no clip, a clock counted towards `8:00`, and
+ *    `aria-pressed` followed a local boolean. They are rewritten here to assert
+ *    the opposite in each case, so the mock cannot come back without going red.
+ *
+ * WHAT jsdom CANNOT DO, stated so nothing here overclaims: `HTMLMediaElement`
+ * neither decodes nor fires its own media events, so `play()`/`pause()` are spies
+ * and `play`/`pause`/`timeupdate`/`loadedmetadata` are DISPATCHED by the test. That
+ * is exactly the seam under test — the component must take its state from the
+ * ELEMENT's events rather than from its own boolean, and a dispatched event is the
+ * only way to prove which of the two it does.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
 import {
   flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import type { JourneySalesContext, SellPreview } from '../types';
+import type { JourneySalesContext, PreviewMedia, SellPreview } from '../types';
 import FeelSection from './FeelSection.svelte';
+
+/**
+ * The manifests handed to `createHlsPlayer`, in order. The factory is the SHARED
+ * one (`$lib/components/VideoPlayer/hls`) that `IntroVideoModal` — which
+ * `ReelSection` mounts — and `AudioPlayer` already use; this section deliberately
+ * does not have a player of its own, so the mock is the proof of the reuse.
+ */
+const hlsSources: string[] = [];
+const cleanupSpy = vi.fn();
+const playSpy = vi.fn();
+const pauseSpy = vi.fn();
+
+vi.mock('$lib/components/VideoPlayer/hls', () => ({
+  createHlsPlayer: vi.fn(async ({ src }: { src: string }) => {
+    hlsSources.push(src);
+    return { hls: null, cleanup: cleanupSpy };
+  }),
+}));
+
+/** A resolved 30s public preview — what `sellPreview.reel` actually looks like. */
+const REEL_CLIP: PreviewMedia = {
+  playlistUrl: 'https://cdn.example.test/creator/hls/m1/preview/preview.m3u8',
+  durationSeconds: 30,
+};
+const WITH_CLIP: SellPreview = { intro: null, reel: REEL_CLIP };
+const NO_CLIP: SellPreview = { intro: null, reel: null };
+
+/** Force the reduced-motion branch, with a listener surface `onMount` can use. */
+function stubReducedMotion(reduce: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    (query: string) =>
+      ({
+        matches: reduce && query.includes('prefers-reduced-motion'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList
+  );
+}
+
+const media = () =>
+  document.body.querySelector('video.feel-taste__media') as HTMLVideoElement;
+
+/** Fire a media event the element itself would fire in a real browser. */
+function fireMedia(name: string, patch?: Record<string, number>) {
+  const el = media();
+  if (patch) {
+    for (const [key, value] of Object.entries(patch)) {
+      Object.defineProperty(el, key, {
+        value,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
+  el.dispatchEvent(new Event(name));
+  flushSync();
+}
 
 const CANDLELIT: ResolvedSectionDesign = {
   width: 'text',
@@ -42,7 +118,9 @@ const CANDLELIT: ResolvedSectionDesign = {
   media: 'bleed',
 };
 
-function context(): JourneySalesContext {
+function context(
+  sellPreview: Promise<SellPreview | null> = Promise.resolve(null)
+): JourneySalesContext {
   return {
     course: {
       id: 'c1',
@@ -61,7 +139,8 @@ function context(): JourneySalesContext {
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
-    sellPreview: Promise.resolve<SellPreview | null>(null),
+    purchasable: true,
+    sellPreview,
   };
 }
 
@@ -80,11 +159,16 @@ const WITH_INCLUSIONS: SectionProps = {
   ],
 };
 
+/**
+ * The author's switch, with NO `previewDuration`. That absence is the point: it is
+ * the default state of the field (contract A29 — the `number` control has no
+ * editor UI), and it is the state that used to publish a clock counting towards
+ * `8:00`.
+ */
 const WITH_PLAYER: SectionProps = {
   ...FLAT,
   previewTitle: 'Naming what is here',
   previewSub: 'Practice one',
-  previewDuration: 540,
 };
 
 let component: ReturnType<typeof mount> | undefined;
@@ -95,12 +179,13 @@ function render(props: {
   design?: ResolvedSectionDesign;
   editable?: boolean;
   onEdit?: (key: string, value: string) => void;
+  sellPreview?: Promise<SellPreview | null>;
 }) {
   component = mount(FeelSection, {
     target: document.body,
     props: {
       config: props.config ?? FLAT,
-      context: context(),
+      context: context(props.sellPreview),
       variant: props.variant,
       design: props.design ?? CANDLELIT,
       editable: props.editable,
@@ -109,6 +194,15 @@ function render(props: {
   });
   flushSync();
   return document.body;
+}
+
+/** Mount with a resolved clip and settle the `{#await}` before asserting. */
+async function renderWithClip(
+  props: Parameters<typeof render>[0] = {}
+): Promise<void> {
+  render({ ...props, sellPreview: Promise.resolve(WITH_CLIP) });
+  await tick();
+  flushSync();
 }
 
 const root = () => document.body.querySelector('.feel');
@@ -125,6 +219,21 @@ function reset() {
   component = undefined;
   document.body.innerHTML = '';
 }
+
+beforeEach(() => {
+  hlsSources.length = 0;
+  cleanupSpy.mockClear();
+  playSpy.mockClear();
+  pauseSpy.mockClear();
+  stubReducedMotion(false);
+  // jsdom's HTMLMediaElement throws "Not implemented" on play/pause/load.
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(async () => {
+    playSpy();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {
+    pauseSpy();
+  });
+});
 
 afterEach(reset);
 
@@ -253,52 +362,303 @@ describe('FeelSection — the builder bridge (Codex-tqr51)', () => {
   });
 });
 
-describe('FeelSection — the free-taste player', () => {
-  it('self-hides without previewTitle, which is its switch', () => {
-    render({ config: FLAT });
+describe('FeelSection — the free taste needs BOTH the switch and the clip', () => {
+  it('renders no player without previewTitle, which is the author`s switch', async () => {
+    await renderWithClip({ config: FLAT });
     expect(document.body.querySelector('.feel-taste')).toBeNull();
   });
 
-  it('renders with a labelled play control when previewTitle is set', () => {
-    render({ config: WITH_PLAYER });
-    const button = document.body.querySelector('button.feel-play');
-    expect(button).not.toBeNull();
-    expect(button?.getAttribute('aria-label')).toBe('Play preview');
-    expect(button?.getAttribute('aria-pressed')).toBe('false');
+  it('renders no player with the switch on and NO clip', async () => {
+    // THIS IS THE MOCK'S OWN TEST, INVERTED. It used to assert a labelled play
+    // button here, against `sellPreview` resolving to null — a control with
+    // nothing behind it, which is precisely the defect (`Codex-scab9`).
+    render({ config: WITH_PLAYER, sellPreview: Promise.resolve(NO_CLIP) });
+    await tick();
+    flushSync();
+    expect(document.body.querySelector('.feel-taste')).toBeNull();
+    expect(document.body.querySelector('button.feel-play')).toBeNull();
+    // The COPY is untouched — the clip gates the transport, never the words.
+    expect(heading()?.textContent?.trim()).toBe('How it feels.');
   });
 
-  it('draws every bar server-side, deterministically', () => {
-    render({ config: WITH_PLAYER });
+  it('renders no player when the preview read itself failed', async () => {
+    render({ config: WITH_PLAYER, sellPreview: Promise.resolve(null) });
+    await tick();
+    flushSync();
+    expect(document.body.querySelector('.feel-taste')).toBeNull();
+    expect(heading()).not.toBeNull();
+  });
+
+  it('hides the whole section when the player is its only subject and there is no clip', async () => {
+    render({
+      config: { previewTitle: 'Naming what is here' },
+      sellPreview: Promise.resolve(NO_CLIP),
+    });
+    await tick();
+    flushSync();
+    // Before: `hasContent` counted `previewTitle`, so this published a bordered
+    // card with an aura and a fake transport for a course with no clip at all.
+    expect(root()).toBeNull();
+  });
+
+  it('keeps the section when the player is its only subject and a clip resolves', async () => {
+    await renderWithClip({ config: { previewTitle: 'Naming what is here' } });
+    expect(root()).not.toBeNull();
+    expect(document.body.querySelector('.feel-taste')).not.toBeNull();
+  });
+});
+
+describe('FeelSection — the free taste plays the real clip (Codex-scab9)', () => {
+  it('mounts a real media element and a labelled transport', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    expect(media()).not.toBeNull();
+    // Nothing is fetched before the visitor asks.
+    expect(media().getAttribute('preload')).toBe('none');
+    expect(hlsSources).toEqual([]);
+
+    const play = document.body.querySelector('button.feel-play');
+    expect(play?.getAttribute('aria-label')).toBe('Play preview');
+    expect(play?.getAttribute('aria-pressed')).toBe('false');
+
+    const mute = document.body.querySelector('button.feel-mute');
+    expect(mute?.getAttribute('aria-label')).toBe('Mute preview');
+    expect(mute?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps the hidden clip out of the accessibility tree and the tab order', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    expect(media().getAttribute('aria-hidden')).toBe('true');
+    expect(media().getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('hands the reel`s playlistUrl to the SHARED hls factory on click', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    (
+      document.body.querySelector('button.feel-play') as HTMLButtonElement
+    ).click();
+    await vi.waitFor(() => expect(hlsSources).toHaveLength(1));
+    expect(hlsSources[0]).toBe(REEL_CLIP.playlistUrl);
+    // WAIT for `play()` rather than assuming it is synchronous with the source
+    // landing: the handle attaches the manifest and only then plays, so asserting
+    // straight after `hlsSources` fills is a race. The sibling case below already
+    // awaits `playSpy` the same way. This waits on the real signal — it does not
+    // weaken the assertion.
+    await vi.waitFor(() => expect(playSpy).toHaveBeenCalled());
+  });
+
+  it('does not rebuild the player on a second play of the same clip', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    const play = document.body.querySelector(
+      'button.feel-play'
+    ) as HTMLButtonElement;
+    play.click();
+    await vi.waitFor(() => expect(hlsSources).toHaveLength(1));
+    fireMedia('play');
+    play.click();
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+    fireMedia('pause');
+    play.click();
+    await vi.waitFor(() => expect(playSpy).toHaveBeenCalledTimes(2));
+    expect(hlsSources).toHaveLength(1);
+  });
+
+  it('takes its pressed state from the ELEMENT, not from a local boolean', async () => {
+    // The mock flipped `playing` inside `togglePlay`, so `aria-pressed` went true
+    // whether or not anything played — and under reduced motion nothing ever did.
+    await renderWithClip({ config: WITH_PLAYER });
+    const play = () => document.body.querySelector('button.feel-play');
+    expect(play()?.getAttribute('aria-pressed')).toBe('false');
+    fireMedia('play');
+    expect(play()?.getAttribute('aria-pressed')).toBe('true');
+    expect(play()?.getAttribute('aria-label')).toBe('Pause preview');
+    fireMedia('pause');
+    expect(play()?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('drives the clock and the waveform fill from timeupdate', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    expect(document.body.querySelector('.feel-cur')?.textContent?.trim()).toBe(
+      '0:00'
+    );
+    expect(document.body.querySelectorAll('.feel-wave i.is-on')).toHaveLength(
+      0
+    );
+
+    fireMedia('timeupdate', { currentTime: 15 });
+
+    expect(document.body.querySelector('.feel-cur')?.textContent?.trim()).toBe(
+      '0:15'
+    );
+    // Half of a 30s clip ⇒ half the 56 bars lit. Nothing here advances on a timer.
+    expect(document.body.querySelectorAll('.feel-wave i.is-on')).toHaveLength(
+      28
+    );
+  });
+
+  it('lets the element`s own duration outrank every advisory figure', async () => {
+    await renderWithClip({ config: { ...WITH_PLAYER, previewDuration: 540 } });
+    fireMedia('loadedmetadata', { duration: 27 });
+    expect(
+      document.body.querySelector('.feel-taste__time')?.textContent
+    ).toContain('0:27');
+  });
+
+  it('resets to the start when the clip ends', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    fireMedia('play');
+    fireMedia('timeupdate', { currentTime: 20 });
+    fireMedia('ended');
+    expect(
+      document.body
+        .querySelector('button.feel-play')
+        ?.getAttribute('aria-pressed')
+    ).toBe('false');
+    expect(document.body.querySelector('.feel-cur')?.textContent?.trim()).toBe(
+      '0:00'
+    );
+  });
+
+  it('mutes and unmutes the real element', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
+    const mute = document.body.querySelector(
+      'button.feel-mute'
+    ) as HTMLButtonElement;
+    mute.click();
+    flushSync();
+    expect(mute.getAttribute('aria-pressed')).toBe('true');
+    expect(mute.getAttribute('aria-label')).toBe('Unmute preview');
+    expect(media().muted).toBe(true);
+    mute.click();
+    flushSync();
+    expect(media().muted).toBe(false);
+  });
+});
+
+describe('FeelSection — the clock counts towards a real number', () => {
+  it('takes the total from the clip rather than an invented 8:00', async () => {
+    // The mock hard-defaulted `previewDuration` to 480 whenever the field was
+    // unset, which is its default state — so "0:00 / 8:00" was what every page
+    // published, over a thirty-second clip.
+    await renderWithClip({ config: WITH_PLAYER });
+    const time = document.body.querySelector('.feel-taste__time')?.textContent;
+    expect(time).toContain('0:30');
+    expect(time).not.toContain('8:00');
+  });
+
+  it('caps the clip`s advisory duration at the 30s the preview actually is', async () => {
+    // `packages/access` `toClip()` reports the SOURCE asset's runtime on a fixed
+    // 30s preview rendition, so a 30-minute intro arrives as 1800.
+    render({
+      config: WITH_PLAYER,
+      sellPreview: Promise.resolve({
+        intro: null,
+        reel: { ...REEL_CLIP, durationSeconds: 1800 },
+      }),
+    });
+    await tick();
+    flushSync();
+    const time = document.body.querySelector('.feel-taste__time')?.textContent;
+    expect(time).toContain('0:30');
+    expect(time).not.toContain('30:00');
+  });
+
+  it('prefers an authored previewDuration over the clip`s advisory figure', async () => {
+    await renderWithClip({ config: { ...WITH_PLAYER, previewDuration: 12 } });
+    expect(
+      document.body.querySelector('.feel-taste__time')?.textContent
+    ).toContain('0:12');
+  });
+
+  it('ignores a non-numeric previewDuration rather than trusting it', async () => {
+    // The `number` control has no editor UI (contract A29) and the text
+    // fallthrough writes a string. It now falls to the CLIP, not to 480.
+    await renderWithClip({
+      config: { ...WITH_PLAYER, previewDuration: '999' },
+    });
+    const time = document.body.querySelector('.feel-taste__time')?.textContent;
+    expect(time).toContain('0:30');
+    expect(time).not.toContain('16:39');
+  });
+
+  it('prints no total at all when nothing knows one', async () => {
+    render({
+      config: WITH_PLAYER,
+      sellPreview: Promise.resolve({
+        intro: null,
+        reel: { playlistUrl: REEL_CLIP.playlistUrl, durationSeconds: null },
+      }),
+    });
+    await tick();
+    flushSync();
+    const time = document.body.querySelector('.feel-taste__time');
+    expect(time?.textContent?.trim()).toBe('0:00');
+    expect(time?.querySelector('.feel-sep')).toBeNull();
+  });
+});
+
+describe('FeelSection — the waveform, and what it is honest about', () => {
+  it('draws every bar server-side, deterministically', async () => {
+    await renderWithClip({ config: WITH_PLAYER });
     expect(document.body.querySelectorAll('.feel-wave i')).toHaveLength(56);
   });
 
-  it('the waveform is decoration, with no click handler pretending otherwise', () => {
+  it('is decoration, with no click handler pretending otherwise', async () => {
     // It used to be an aria-hidden, role="presentation" <div> carrying onclick —
-    // a seek control with no keyboard path and no name. There is nothing to seek:
-    // the transport is a visual taste with no audio (`Codex-scab9`).
-    render({ config: WITH_PLAYER });
+    // a seek control with no keyboard path and no name. It stays decoration now
+    // that playback is real: a synthetic envelope is not this clip's amplitude.
+    await renderWithClip({ config: WITH_PLAYER });
     const wave = document.body.querySelector('.feel-wave') as HTMLElement;
     expect(wave.getAttribute('aria-hidden')).toBe('true');
     expect(wave.getAttribute('role')).toBeNull();
     expect(wave.onclick).toBeNull();
   });
 
-  it('uses an icon component rather than an inline svg path', () => {
+  it('uses icon components rather than inline svg paths', async () => {
     // Contract A8: no inline `<svg>` in a section; icons come from
     // `Icon/*Icon.svelte` via `IconBase`, which sets `aria-hidden` itself.
-    render({ config: WITH_PLAYER });
-    const glyph = document.body.querySelector('.feel-play__glyph');
-    expect(glyph).not.toBeNull();
-    expect(glyph?.getAttribute('aria-hidden')).toBe('true');
+    await renderWithClip({ config: WITH_PLAYER });
+    for (const cls of ['.feel-play__glyph', '.feel-mute__glyph']) {
+      const glyph = document.body.querySelector(cls);
+      expect(glyph, cls).not.toBeNull();
+      expect(glyph?.getAttribute('aria-hidden'), cls).toBe('true');
+    }
   });
+});
 
-  it('ignores a non-numeric previewDuration rather than trusting it', () => {
-    // The `number` control has no editor UI (contract A29) and the text
-    // fallthrough writes a string, which must fall back to the 480s default.
-    render({ config: { ...FLAT, previewTitle: 'x', previewDuration: '999' } });
+describe('FeelSection — reduced motion no longer kills the control', () => {
+  it('still plays, and the clock still moves', async () => {
+    // THE SECOND HALF OF `Codex-scab9`. The rAF ticker bailed on `!enhanced`, and
+    // `enhanced` is false under `prefers-reduced-motion: reduce` — so the click
+    // flipped the button to "Pause"/`aria-pressed=true` and the clock never moved
+    // at all. `enhanced` now gates ANIMATION only, never state.
+    stubReducedMotion(true);
+    await renderWithClip({ config: WITH_PLAYER });
+
+    const play = document.body.querySelector(
+      'button.feel-play'
+    ) as HTMLButtonElement;
+    expect(play).not.toBeNull();
+    play.click();
+    await vi.waitFor(() => expect(hlsSources).toHaveLength(1));
+    // WAIT for `play()` rather than assuming it is synchronous with the source
+    // landing: the handle attaches the manifest and only then plays, so asserting
+    // straight after `hlsSources` fills is a race. The sibling case below already
+    // awaits `playSpy` the same way. This waits on the real signal — it does not
+    // weaken the assertion.
+    await vi.waitFor(() => expect(playSpy).toHaveBeenCalled());
+
+    fireMedia('play');
+    expect(play.getAttribute('aria-pressed')).toBe('true');
+    fireMedia('timeupdate', { currentTime: 9 });
+    expect(document.body.querySelector('.feel-cur')?.textContent?.trim()).toBe(
+      '0:09'
+    );
+    // The equaliser animation IS suppressed — that part was always correct.
     expect(
-      document.body.querySelector('.feel-taste__time')?.textContent
-    ).toContain('8:00');
+      document.body
+        .querySelector('.feel-wave')
+        ?.classList.contains('is-playing')
+    ).toBe(false);
   });
 });
 

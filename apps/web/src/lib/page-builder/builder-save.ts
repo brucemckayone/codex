@@ -4,10 +4,11 @@
  * Extracted out of `studio/journeys/[id]/page/+page.svelte` so the gating logic
  * is unit-testable in isolation (same reason `preview-wiring.ts` was extracted).
  *
- * WHY IT EXISTS: the save drives THREE endpoints — page copy via
+ * WHY IT EXISTS: the save drives FOUR endpoints — page copy via
  * `saveJourneyPage`, the course's subscription plan + tier access via
- * `updateCourseMonetisation` (Codex-2pryk.2.4.2), and the page's offer row via
- * `updateJourneyOffer` (which owns the authoritative `courses.price_cents`).
+ * `updateCourseMonetisation` (Codex-2pryk.2.4.2), the page's offer row via
+ * `updateJourneyOffer` (which owns the authoritative `courses.price_cents`), and
+ * the course's sell media via `updateJourneySellMedia`.
  * The component used to `try/catch` both inline and
  * `toast.error(...)` on failure, then RETURN NORMALLY — so `handlePublish`'s
  * `await handleSave(); toast.success('Page published')` fired on a save that had
@@ -63,16 +64,36 @@ export interface SavePagePayload {
    * draft loaded before F-B2's read path existed cannot wipe a page's look.
    */
   design?: PageBuilderState['design'];
+  /**
+   * The page's SEO / share metadata.
+   *
+   * OPTIONAL and omitted rather than sent as `undefined` for the same reason
+   * `design` is: the service reads absence as "leave the stored bag alone".
+   * Clearing a field is the empty STRING, which IS sent — so a `.min(1)`
+   * anywhere on this bag would make a cleared meta description unsaveable.
+   *
+   * TYPECHECK CANNOT CATCH the omission of this field from the `savePage` call
+   * below, because an absent optional property is legal. That omission is
+   * precisely the silent swallow the panel's `disabled` attribute was
+   * defending against, so the guard here is `builder-save.test.ts`, not the
+   * compiler.
+   */
+  seo?: PageBuilderState['seo'];
 }
 
 /**
  * Which leg failed. `page` = nothing persisted at all. `monetisation` = the copy
  * landed but the subscription plan / tier access was refused. `offer` = both
- * landed but the page's own offer row was refused. The three messages must
+ * landed but the page's own offer row was refused. `media` = copy and pricing
+ * landed but the course's sell media was refused. The four messages must
  * differ — a bare "failed to save" would be false for the copy, and "saved"
  * would be false for pricing.
  */
-export type BuilderSaveFailureStage = 'page' | 'monetisation' | 'offer';
+export type BuilderSaveFailureStage =
+  | 'page'
+  | 'monetisation'
+  | 'offer'
+  | 'media';
 
 /**
  * The page's jsonb `offer` mirror as DERIVED from the authoritative monetisation
@@ -106,6 +127,54 @@ export interface MonetisationLeg {
    * values are left alone rather than overwritten with a derived "all off".
    */
   presentation(): DerivedOfferPresentation | null;
+}
+
+/**
+ * The SELL-MEDIA leg: the six media slots that live on the COURSE
+ * (`courses.*MediaId` + the guide bag), not on the page row.
+ *
+ * WHY IT IS A LEG HERE AND NOT A SECOND STEP IN THE COMPONENT. It used to run in
+ * `+page.svelte` AFTER this function returned, which put it behind the caller's
+ * own `staleWarning` early return: when `refresh()` (an `invalidate`, which
+ * re-runs every dependent load and therefore rejects whenever ANY of them throws)
+ * failed, the component toasted the staleness warning, returned `true`, and NEVER
+ * ATTEMPTED THE MEDIA WRITE. `handlePublish` then said "Page published" over a
+ * page whose media had never been sent — the exact class of false success this
+ * whole module exists to make impossible. Inside the sequence it cannot be
+ * skipped, and it lands BEFORE `markSaved()`, so a refusal leaves the draft dirty
+ * and retryable like every other leg.
+ */
+export interface SellMediaLeg {
+  /** Skip the write when no slot changed. */
+  isDirty: boolean;
+  /** Persist the slots. Rejects on refusal; must not swallow. */
+  save(): Promise<unknown>;
+}
+
+/**
+ * WHICH authoritative reads this save moved — the argument to
+ * {@link BuilderSaveDeps.refreshQueries}.
+ *
+ * Two flags, not five, and not one: the builder holds five client queries, and
+ * only these two answer anything this save writes. `getJourneyForBuilder` is the
+ * draft that `markSaved()` just promoted (the server now holds exactly what the
+ * store holds, so a re-read cannot say anything new), while
+ * `getCourseCurriculum` and `getCoursePagePreview` answer course facts no leg
+ * here touches. Refreshing those would spend round trips to learn nothing.
+ */
+export interface BuilderRefreshScope {
+  /**
+   * The authoritative pricing read (`getCourseOffer`) — true when the offer leg
+   * and/or the monetisation leg ran. BOTH move it: `CourseOffer.purchase` mirrors
+   * the `courses.price_cents` the offer leg writes, and `.subscription` / `.tiers`
+   * / `.paths` mirror the plan and tier-access set the monetisation leg writes.
+   */
+  offer: boolean;
+  /**
+   * The sell-media read (`resolveSellPreview`) — true when the media leg ran. It
+   * carries no pricing, so a pricing-only save must not spend it.
+   */
+  media: boolean;
 }
 
 export type BuilderSaveResult =
@@ -146,6 +215,35 @@ export interface BuilderSaveDeps {
    */
   monetisation?: MonetisationLeg;
   /**
+   * The course's sell-media leg. Optional for the same reason `monetisation` is:
+   * a plain landing page has no subject course, so it has no media slots.
+   */
+  sellMedia?: SellMediaLeg;
+  /**
+   * Re-read the studio's OWN client queries for the resources this save wrote.
+   *
+   * WHY THIS EXISTS SEPARATELY FROM {@link BuilderSaveDeps.refresh}. `refresh` is
+   * an `invalidate(resource)`, and that re-runs `load` functions ONLY: SvelteKit
+   * re-runs remote `query()` functions from a `_invalidate()` pass exclusively
+   * when its internal `force_invalidation` flag is set, and the only two things
+   * that set it are `invalidateAll()` and `refreshAll()` — never
+   * `invalidate('cache:versions')` (`@sveltejs/kit` `client.js`: the
+   * `if (force_invalidation) { query_map.forEach(...refresh()) }` block).
+   *
+   * So without this the builder's own canvas kept showing PRE-SAVE pricing and
+   * PRE-SAVE media until a hard reload, while its toast said the page was saved —
+   * the canvas contradicting the page it would publish, which is the same class of
+   * lie as reporting success over a write that never landed. The two reads that
+   * go stale are the authoritative ones the canvas is deliberately fed instead of
+   * the draft's own presentation bag, so their staleness is invisible: they render
+   * a plausible older number rather than nothing.
+   *
+   * NOT `invalidateAll()`, which would also re-run every `load` on the route for
+   * data this save did not touch. The scope says which reads actually moved, and
+   * this is called ONLY when at least one of them did.
+   */
+  refreshQueries?(scope: BuilderRefreshScope): Promise<unknown>;
+  /**
    * Write the offer bag that was actually persisted back into the draft, so the
    * saved baseline includes the DERIVED presentation fields.
    *
@@ -156,7 +254,14 @@ export interface BuilderSaveDeps {
   syncOffer?(offer: PersistedPageOffer): void;
   /** Promote pending → saved. Runs only once EVERY leg has landed. */
   markSaved(): void;
-  /** Post-save cache invalidation. A rejection degrades to `staleWarning`. */
+  /**
+   * Post-save cache invalidation for the `load` functions that `depends()` on the
+   * cache-version key. A rejection degrades to `staleWarning`.
+   *
+   * LOADS ONLY. It does not re-read the route's remote queries — see
+   * {@link BuilderSaveDeps.refreshQueries}, which exists precisely because this
+   * one silently does not.
+   */
   refresh?(): Promise<unknown>;
 }
 
@@ -239,12 +344,18 @@ function offerChanged(
 }
 
 /**
- * Persist the builder draft: page copy, then pricing when it changed. Never
- * throws — every outcome is reported through {@link BuilderSaveResult} so the
- * caller cannot accidentally treat a failure as a success.
+ * Persist the builder draft: page copy, then pricing when it changed, then the
+ * sell media when a slot changed. Never throws — every outcome is reported
+ * through {@link BuilderSaveResult} so the caller cannot accidentally treat a
+ * failure as a success.
  *
  * `markSaved()` runs ONLY once every write has landed, so a failed leg leaves
- * the draft dirty and retryable (a retry re-sends both legs).
+ * the draft dirty and retryable (a retry re-sends every leg).
+ *
+ * EVERY WRITE BELONGS INSIDE THIS SEQUENCE. A leg the caller runs after this
+ * function returns is a leg the caller can skip — which is precisely what
+ * happened to the media write behind the `staleWarning` early return (see
+ * {@link SellMediaLeg}).
  */
 export async function saveBuilderDraft(
   deps: BuilderSaveDeps
@@ -267,6 +378,10 @@ export async function saveBuilderDraft(
       // the stored look alone) from set, so an explicit `design: undefined` would
       // still be the wrong thing to express here.
       ...(payload.design ? { design: payload.design } : {}),
+      // Same spread-when-present contract as `design`, and for the same reason:
+      // absent means "leave the stored SEO bag alone", so a draft loaded before
+      // the `seo` column existed cannot wipe a page's metadata.
+      ...(payload.seo ? { seo: payload.seo } : {}),
     });
   } catch (err) {
     return {
@@ -324,25 +439,87 @@ export async function saveBuilderDraft(
     }
   }
 
+  // The sell media is the FOURTH resource (it writes `courses.*MediaId`, not the
+  // page row) and only sends when a slot actually changed. Same partial-success
+  // discipline as pricing: on refusal, say what DID save and report the failure,
+  // so `handlePublish`/`handleViewLive` do not proceed on a half-written page. A
+  // foreign media id lands here as a 403 carrying the service's own message.
+  //
+  // LAST, and before `markSaved()`: the media write is the only leg whose refusal
+  // the creator can fix without touching the copy, so it is the cheapest one to
+  // leave for last — and a refusal must still leave the draft dirty, because the
+  // slots live in a separate store whose own `isDirty` is what re-sends them.
+  let mediaSaved = false;
+  if (deps.sellMedia?.isDirty) {
+    try {
+      await deps.sellMedia.save();
+      mediaSaved = true;
+    } catch (err) {
+      const why = remoteErrorMessage(err);
+      return {
+        outcome: 'failed',
+        stage: 'media',
+        message: why
+          ? `Page saved, but the media was not: ${why}`
+          : 'Page saved, but the media could not be saved.',
+      };
+    }
+  }
+
   // Fold the persisted bag (derivation included) back into the draft BEFORE
   // promoting it, so the new baseline is what the server actually holds.
   deps.syncOffer?.(nextOffer);
   deps.markSaved();
 
-  if (deps.refresh) {
-    try {
-      await deps.refresh();
-    } catch (err) {
-      return {
-        outcome: 'saved',
-        offerSaved,
-        monetisationSaved,
-        staleWarning:
-          remoteErrorMessage(err) ??
-          'Saved, but the live page may still show the previous version.',
-      };
-    }
+  const staleWarning = await refreshReads(deps, {
+    offer: offerSaved || monetisationSaved,
+    media: mediaSaved,
+  });
+  if (staleWarning) {
+    return { outcome: 'saved', offerSaved, monetisationSaved, staleWarning };
   }
 
   return { outcome: 'saved', offerSaved, monetisationSaved };
+}
+
+/**
+ * Re-read everything the save invalidated: the studio's own client queries for
+ * the resources that moved, and the `load` functions that `depends()` on the
+ * cache-version key.
+ *
+ * BOTH ALWAYS RUN, even when the first rejects, and that is the same lesson the
+ * media leg taught: a read placed after something that can bail is a read that
+ * gets skipped. A rejected `invalidate` (any `load` it re-runs throwing is
+ * enough, for reasons having nothing to do with this save) must not be what
+ * leaves the canvas showing last week's price.
+ *
+ * @returns the warning to surface, or `undefined` when every read landed. Never
+ *   a failure: the writes are already committed by the time this runs, so the
+ *   worst truthful thing to say is that the studio's reads may lag.
+ */
+async function refreshReads(
+  deps: BuilderSaveDeps,
+  scope: BuilderRefreshScope
+): Promise<string | undefined> {
+  const reads: Promise<unknown>[] = [];
+  // Only when something actually moved — an all-false scope has nothing to
+  // re-read, and calling with one would make "was a refresh needed?" unanswerable
+  // from the call itself.
+  if (deps.refreshQueries && (scope.offer || scope.media)) {
+    reads.push(Promise.resolve().then(() => deps.refreshQueries?.(scope)));
+  }
+  if (deps.refresh) {
+    reads.push(Promise.resolve().then(() => deps.refresh?.()));
+  }
+
+  const settled = await Promise.allSettled(reads);
+  for (const outcome of settled) {
+    if (outcome.status === 'rejected') {
+      return (
+        remoteErrorMessage(outcome.reason) ??
+        'Saved, but the live page may still show the previous version.'
+      );
+    }
+  }
+  return undefined;
 }

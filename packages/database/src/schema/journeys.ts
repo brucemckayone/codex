@@ -2,6 +2,7 @@ import type {
   BrandTokenOverrides,
   PageOffer,
   PageSection,
+  PageSeo,
   SectionDesign,
 } from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
@@ -102,6 +103,18 @@ export const landingPages = pgTable(
     // `resolveDesign` is total, so a NULL still renders coherently.
     design: jsonb('design').$type<SectionDesign>(),
 
+    // The page's SEO / share metadata — meta title + description (and, later, a
+    // share-image ref). The builder's SEO panel writes it; the public sell
+    // page's `<svelte:head>` reads it from the AWAITED envelope, never from a
+    // streamed promise, because it is SEO-critical.
+    //
+    // NULLABLE with no backfill, mirroring `offer` (migration 0081): unset is a
+    // legitimate and common state — the head then derives its title from
+    // `title` and its description from the course lede, exactly as it did before
+    // this column existed. So there is no value to write onto existing rows, and
+    // an empty `{}` would be indistinguishable from "the creator cleared it".
+    seo: jsonb('seo').$type<PageSeo>(),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -164,6 +177,54 @@ export const courses = pgTable(
     // the key, cards serve `md`). Deterministic per course id ⇒ a re-upload
     // overwrites in place, so replacing a cover never orphans an object.
     coverImageKey: varchar('cover_image_key', { length: 500 }),
+
+    // Still-image HERO — an UPLOADED image, the same shape as `coverImageKey`
+    // above and for the same reason (Codex-490z7, contract amendment A32).
+    //
+    // NOT a `media_items` ref: that table is CHECK-constrained to
+    // ('video','audio'), which is the entire reason this gap existed. `heroMediaId`
+    // below can only ever name a VIDEO, so the "hero image" a creator picked there
+    // was really that video's auto-generated poster frame — a creator who owned a
+    // photograph and no film had no way to put it in the loudest section of their
+    // own sales page.
+    //
+    // A32's fallback chain, resolved by `getCourseSellPreview`:
+    //   heroImageKey (this) ?? heroMediaId's poster frame ?? the synthetic plate.
+    // Uploaded outranks derived — an explicit choice beats a by-product.
+    //
+    // `ImageProcessingService.processCourseHero` writes {sm,md,lg}.webp under this
+    // base key and the hero serves `lg` (it paints full-bleed, where the cover's
+    // `md` serves a card). Deterministic per course id ⇒ a re-upload overwrites in
+    // place, so replacing a hero never orphans an object.
+    heroImageKey: varchar('hero_image_key', { length: 500 }),
+
+    // Still-image SIGNATURE — the guide's sign-off mark, an UPLOADED image
+    // (Codex-wqxv4's remaining named-slot half). Third instance of the same
+    // shape as `coverImageKey` / `heroImageKey`, and the shape exists because of
+    // the same constraint: `media_items` is CHECK-constrained to
+    // ('video','audio'), so `signatureMediaId` below can only ever name a VIDEO
+    // and the "signature" it resolves is that video's poster frame.
+    //
+    // A signature is a scan of ink. Nobody films one. So of the three columns
+    // that CANNOT be a media ref, this was the one where the media ref was not
+    // merely a compromise but useless: `guide.letter` describes signing off with
+    // the guide's own mark, and until this column there was no way to put a mark
+    // there at all. That is why A27 shipped `signatureMediaId` and the letter
+    // still rendered only typeset text.
+    //
+    // The same ORDERED chain as the hero, resolved by `getCourseSellPreview`:
+    //   signatureImageKey (this) ?? signatureMediaId's poster frame ?? nothing
+    //     (the letter signs off with the typeset name alone).
+    // Uploaded outranks derived, for the reason A32 gives: an explicit choice
+    // beats a by-product.
+    //
+    // `ImageProcessingService.processCourseSignature` writes {sm,md,lg}.webp
+    // under this base key and the letter serves `md` — a signature is a small
+    // inline mark (~180px in `GuideSection`), so `lg` would be 800px of payload
+    // for a 180px slot while `sm` (200px) leaves nothing for a 2x display.
+    // Deterministic per course id ⇒ a re-upload overwrites in place, so
+    // replacing a signature never orphans an object.
+    signatureImageKey: varchar('signature_image_key', { length: 500 }),
 
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(

@@ -79,6 +79,7 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };
@@ -416,5 +417,117 @@ describe('ProofSection — the edit seam', () => {
     ).toBe('true');
     // …but a course row has no `q<n>` to write back to.
     expect(quotes()[0].getAttribute('contenteditable')).toBeNull();
+  });
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE TWO CONTROLS THAT WERE NOT CONTROLS (WP-2's section sweep).
+
+     Both are properties of a composition rather than of the copy, and both were
+     invisible to every assertion in this file before it swept the compositions:
+     one is a scroll container nothing can reach by keyboard, the other a pause
+     mechanism whose selector can never match.
+     ═══════════════════════════════════════════════════════════════════════ */
+  describe('keyboard reach into the mobile snap-row (WCAG 2.1.1)', () => {
+    /*
+      `@container (max-width: 48rem)` rewrites `grid` and `wall` into
+      `display: flex; overflow-x: auto` with `flex: 0 0 84%` per quote and
+      `scrollbar-width: none`. Nothing inside a quote is focusable, so the box
+      scrolls and no keyboard can scroll it. jsdom implements no container
+      queries, so the ATTRIBUTE is what is asserted here — the CSS that consumes
+      it, and the 674px measurement that found it, are recorded in the component.
+    */
+    it('makes the row focusable for the two compositions that become a scroller', () => {
+      for (const variant of ['grid', 'wall']) {
+        render({ variant });
+        expect(
+          document.body.querySelector('.proof__grid')?.getAttribute('tabindex'),
+          variant
+        ).toBe('0');
+        reset();
+      }
+    });
+
+    it('adds no tab stop to a composition that never scrolls', () => {
+      for (const variant of ['stack', 'spotlight', 'pull']) {
+        render({ variant });
+        expect(
+          document.body.querySelector('.proof__grid')?.getAttribute('tabindex'),
+          variant
+        ).toBeNull();
+        reset();
+      }
+    });
+
+    it('adds no tab stop to a single quote, which cannot overflow', () => {
+      render({
+        variant: 'grid',
+        config: { heading: 'One', q1: 'Only', n1: 'Ada' },
+      });
+      expect(quotes()).toHaveLength(1);
+      expect(
+        document.body.querySelector('.proof__grid')?.getAttribute('tabindex')
+      ).toBeNull();
+    });
+  });
+
+  describe('the marquee can be stopped (WCAG 2.2.2)', () => {
+    /*
+      The ticker is `animation: … linear infinite`, 15.6s–42s a cycle, and it
+      starts on its own. Its only declared stop was
+      `.proof__marquee:hover, .proof__marquee:focus-within` — and `:focus-within`
+      CANNOT MATCH, because the strip holds no focusable node (`<figure>` /
+      `<blockquote>` / `<figcaption>`, and the clone track is `aria-hidden`). So
+      the real coverage was pointer-only: no keyboard user and no touch user had
+      any mechanism at all.
+    */
+    it('has no focusable node inside the strip — which is why the button exists', () => {
+      render({ variant: 'marquee' });
+      const strip = document.body.querySelector('.proof__marquee');
+      expect(strip).not.toBeNull();
+      expect(
+        strip?.querySelectorAll('a,button,input,select,textarea,[tabindex]')
+      ).toHaveLength(0);
+    });
+
+    it('offers a named pause control that toggles the paused state', () => {
+      render({ variant: 'marquee' });
+      const button =
+        document.body.querySelector<HTMLButtonElement>('.proof__pause');
+      expect(button).not.toBeNull();
+      // The house keys, shared with `components/pricing/ContentMarquee.svelte`.
+      expect(button?.getAttribute('aria-label')).toBe('Pause the moving row');
+      expect(
+        document.body
+          .querySelector('.proof__marquee')
+          ?.getAttribute('data-paused')
+      ).toBeNull();
+
+      button?.click();
+      flushSync();
+      expect(
+        document.body
+          .querySelector('.proof__marquee')
+          ?.getAttribute('data-paused')
+      ).toBe('true');
+      expect(
+        document.body.querySelector('.proof__pause')?.getAttribute('aria-label')
+      ).toBe('Resume the moving row');
+    });
+
+    it('sits OUTSIDE the masked strip, so the edge fade cannot fade the control', () => {
+      render({ variant: 'marquee' });
+      const button = document.body.querySelector('.proof__pause');
+      expect(button?.closest('.proof__marquee')).toBeNull();
+      expect(button?.closest('.proof__ticker')).not.toBeNull();
+    });
+
+    it('offers nothing to pause when the motion axis is off', () => {
+      render({ variant: 'marquee', design: { ...CANDLELIT, motion: 'none' } });
+      expect(document.body.querySelector('.proof__pause')).toBeNull();
+    });
+
+    it('offers nothing to pause on a composition with no ticker', () => {
+      render({ variant: 'grid' });
+      expect(document.body.querySelector('.proof__pause')).toBeNull();
+    });
   });
 });

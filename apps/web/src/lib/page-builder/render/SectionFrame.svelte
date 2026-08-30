@@ -72,13 +72,43 @@
     editable?: boolean;
     /** Commit an inline copy edit. Only meaningful when `editable`. */
     onEdit?: (key: string, value: string) => void;
+    /**
+     * The course title, passed ONLY to the one section on the page allowed to use
+     * it as its heading fallback (`SectionComponentProps.titleFallback`). Resolved
+     * at the array level by `SectionRenderer` / `claimTitleFallback`, because no
+     * section can know what its neighbours authored.
+     *
+     * A host that owns its own loop — the studio canvas does — must resolve it the
+     * same way and pass it here, or its sections self-hide a heading the published
+     * page shows. Absent is the SAFE direction (a missing heading, never a wrong
+     * one), which is why it is optional.
+     */
+    titleFallback?: string;
   }
 
-  const { renderable, context, pageDesign, editable = false, onEdit }: Props = $props();
+  const {
+    renderable,
+    context,
+    pageDesign,
+    editable = false,
+    onEdit,
+    titleFallback,
+  }: Props = $props();
 
   const section = $derived(renderable.section);
   const variant = $derived(resolveVariant(section));
   const design = $derived(resolveDesign(section, { design: pageDesign }));
+
+  /**
+   * SECOND AND LATER SECTIONS OF A TYPE DEMOTE THEIR HEADING (see
+   * `SectionComponentProps.headingLevel`). Derived from the anchor id rather than
+   * from a new count: `claimAnchorId` already gives the FIRST section of a type
+   * the bare type name and every later duplicate an ordinal suffix, so the two
+   * rules cannot disagree about which hero is the first one.
+   */
+  const headingLevel: 1 | 2 = $derived(
+    renderable.anchorId === section.type ? 1 : 2
+  );
 </script>
 
 <!--
@@ -117,6 +147,8 @@
     {design}
     {editable}
     {onEdit}
+    {titleFallback}
+    {headingLevel}
   />
 </section>
 

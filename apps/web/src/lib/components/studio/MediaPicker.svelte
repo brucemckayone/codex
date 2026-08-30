@@ -50,6 +50,41 @@
     onchange?: (mediaItemId: string | null) => void;
     name?: string;
     showLibraryLink?: boolean;
+    /**
+     * Accessible name for the picker's trigger.
+     *
+     * Melt's combobox puts `aria-labelledby` on the trigger pointing at its own
+     * `label` element — and this component destructures `label` from
+     * `createCombobox` and NEVER RENDERS IT, so that reference DANGLES. A dangling
+     * `aria-labelledby` computes to an empty name, so the accessible name fell
+     * through to the placeholder and every picker announced identically as
+     * "Select media…". The journey builder's guide inspector stacks THREE of them
+     * (portrait, video, signature), so all three were the same control to a screen
+     * reader.
+     *
+     * Passing this sets `aria-label` AND clears the dangling `aria-labelledby`, so
+     * the name is stated outright rather than depending on the accessible-name
+     * algorithm falling through a broken reference.
+     */
+    ariaLabel?: string;
+    /**
+     * Disable the trigger.
+     *
+     * NO CALLER PASSES THIS YET, deliberately, and that is worth knowing before you
+     * reach for it. The motivating case — a picker whose library has not loaded
+     * accepts a pick the sell-media store then drops, because `save()` no-ops on
+     * `!loaded` — is real, but wiring it to `!loaded` proved to be the wrong fix
+     * twice over: it is a UI-layer patch on a store-layer defect, and `!loaded` is
+     * ALSO true after a failed read, so every media field would go permanently dead
+     * instead of transiently. It also broke a negative control asserting that only
+     * the ONE axis-gated field is ever disabled, which is a guard worth more than
+     * the convenience.
+     *
+     * The capability stays because a disabled trigger is a legitimate thing for a
+     * caller to want. The load-window gap needs a guard in `setSlot` and its own
+     * test.
+     */
+    disabled?: boolean;
   }
 
   const {
@@ -58,6 +93,8 @@
     onchange,
     name = 'mediaItemId',
     showLibraryLink = false,
+    ariaLabel,
+    disabled = false,
   }: Props = $props();
 
   // ── Melt UI Combobox ────────────────────────────────────────────────
@@ -144,6 +181,9 @@
         use:input
         type="button"
         class="trigger-preview"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : $input['aria-labelledby']}
+        {disabled}
       >
         <span class="trigger-icon" aria-hidden="true">
           {#if selectedItem.mediaType === 'video'}
@@ -185,6 +225,9 @@
       use:input
       class="picker-trigger picker-input"
       placeholder={m.media_picker_placeholder()}
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabel ? undefined : $input['aria-labelledby']}
+      {disabled}
     />
   {/if}
 

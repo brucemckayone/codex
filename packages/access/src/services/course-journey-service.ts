@@ -76,6 +76,7 @@ import type {
   JourneyTestimonialView,
   PageOffer,
   PageSection,
+  PageSeo,
   PageStatus,
   PlaylistEntry,
   PracticeCompletionRecord,
@@ -122,6 +123,56 @@ function resolveCourseCoverUrl(
 ): string | null {
   return coverImageKey && r2PublicUrlBase
     ? `${r2PublicUrlBase}/${coverImageKey}/md.webp`
+    : null;
+}
+
+/**
+ * Resolve a stored `courses.heroImageKey` to its public CDN URL (Codex-490z7,
+ * contract amendment A32).
+ *
+ * Same raw-key → CDN-URL convention as {@link resolveCourseCoverUrl}, with ONE
+ * difference: the hero serves the **lg** variant, not `md`. A cover fills a card;
+ * a hero paints edge to edge, and handing a 400px image to a full-bleed section
+ * is visibly soft. `ImageProcessingService.processCourseHero` writes {sm,md,lg}
+ * under the base key and returns the `lg` URL for exactly this reason.
+ *
+ * Returns null when there is no uploaded hero OR no configured base, so a client
+ * never receives a raw R2 key and never a half-formed URL. A null hero is a
+ * legitimate state — A32's chain then falls through to `heroMediaId`'s poster
+ * frame and finally to the section's synthetic plate.
+ */
+function resolveCourseHeroUrl(
+  heroImageKey: string | null | undefined,
+  r2PublicUrlBase: string | undefined
+): string | null {
+  return heroImageKey && r2PublicUrlBase
+    ? `${r2PublicUrlBase}/${heroImageKey}/lg.webp`
+    : null;
+}
+
+/**
+ * Resolve a stored `courses.signatureImageKey` to its public CDN URL
+ * (Codex-wqxv4's named-slot half).
+ *
+ * Same raw-key → CDN-URL convention as {@link resolveCourseCoverUrl} and
+ * {@link resolveCourseHeroUrl}. The variant is **md**: `GuideSection` sizes the
+ * mark by HEIGHT off the heading scale with `width: auto`, which puts a wide
+ * signature around 200–400 CSS px, so `sm` is soft on retina and `lg` is 800px
+ * for a mark never painted that wide. `ImageProcessingService.
+ * processCourseSignature` writes {sm,md,lg} under the base key and returns `md`
+ * for exactly this reason.
+ *
+ * Returns null when there is no uploaded signature OR no configured base, so a
+ * client never receives a raw R2 key and never a half-formed URL. Null is a
+ * legitimate state — the chain then falls to `signatureMediaId`'s poster frame,
+ * and then to the letter signing off with its typeset name alone.
+ */
+function resolveCourseSignatureUrl(
+  signatureImageKey: string | null | undefined,
+  r2PublicUrlBase: string | undefined
+): string | null {
+  return signatureImageKey && r2PublicUrlBase
+    ? `${r2PublicUrlBase}/${signatureImageKey}/md.webp`
     : null;
 }
 
@@ -288,7 +339,11 @@ export class CourseJourneyService extends BaseService {
    */
   async getCoursePage(
     organizationId: string,
-    slug: string
+    slug: string,
+    // Env-owned, so the ROUTE supplies it and the service resolves — the same
+    // split `getCourseSellPreview` and `listPublishedCourses` already use. Omit
+    // it and the page simply reports no cover (and emits no `og:image`).
+    r2PublicUrlBase?: string
   ): Promise<JourneyCoursePage | null> {
     try {
       // 1. The published landing page by org-scoped slug (partial-unique index).
@@ -306,6 +361,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -335,6 +391,7 @@ export class CourseJourneyService extends BaseService {
           lede: courses.lede,
           status: courses.status,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
         })
         .from(courses)
         .where(
@@ -383,6 +440,13 @@ export class CourseJourneyService extends BaseService {
           ...(pageRow.design
             ? { design: pageRow.design as SectionDesign }
             : {}),
+          // The page's SEO bag, which the sell page's `<svelte:head>` reads for
+          // its meta title + description. Spread-when-present for the same
+          // reason as `design`: `seo` is optional on the record and NULL is the
+          // common case (the column is nullable with no backfill), so an
+          // explicit empty bundle would make "never authored" look like
+          // "authored then cleared" to the view's `||` fallbacks.
+          ...(pageRow.seo ? { seo: pageRow.seo as PageSeo } : {}),
         },
         course: {
           id: courseRow.id,
@@ -394,6 +458,16 @@ export class CourseJourneyService extends BaseService {
           priceCents: courseRow.priceCents,
           stageCount: stages.length,
           practiceCount,
+          // The sell page's SHARE IMAGE (`og:image`). It has to ride the AWAITED
+          // envelope: the hero's still is resolved by `getCourseSellPreview`,
+          // which the page STREAMS, and a `<svelte:head>` is flushed long before
+          // a streamed promise settles — so the cover is the only image the
+          // share card can ever have. `md` variant, exactly as the journey cards
+          // serve. Null with no cover OR no configured base (never a raw key).
+          coverImageUrl: resolveCourseCoverUrl(
+            courseRow.coverImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
@@ -419,7 +493,9 @@ export class CourseJourneyService extends BaseService {
    */
   async getCoursePagePreview(
     organizationId: string,
-    slug: string
+    slug: string,
+    /** Env-owned; supplied by the route (see {@link getCoursePage}). */
+    r2PublicUrlBase?: string
   ): Promise<JourneyCoursePage | null> {
     try {
       // The landing page by org-scoped slug — ANY status (draft included).
@@ -437,6 +513,7 @@ export class CourseJourneyService extends BaseService {
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -461,6 +538,7 @@ export class CourseJourneyService extends BaseService {
           lede: courses.lede,
           status: courses.status,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
         })
         .from(courses)
         .where(
@@ -507,6 +585,13 @@ export class CourseJourneyService extends BaseService {
           ...(pageRow.design
             ? { design: pageRow.design as SectionDesign }
             : {}),
+          // The page's SEO bag, which the sell page's `<svelte:head>` reads for
+          // its meta title + description. Spread-when-present for the same
+          // reason as `design`: `seo` is optional on the record and NULL is the
+          // common case (the column is nullable with no backfill), so an
+          // explicit empty bundle would make "never authored" look like
+          // "authored then cleared" to the view's `||` fallbacks.
+          ...(pageRow.seo ? { seo: pageRow.seo as PageSeo } : {}),
         },
         course: {
           id: courseRow.id,
@@ -518,6 +603,16 @@ export class CourseJourneyService extends BaseService {
           priceCents: courseRow.priceCents,
           stageCount: stages.length,
           practiceCount,
+          // The sell page's SHARE IMAGE (`og:image`). It has to ride the AWAITED
+          // envelope: the hero's still is resolved by `getCourseSellPreview`,
+          // which the page STREAMS, and a `<svelte:head>` is flushed long before
+          // a streamed promise settles — so the cover is the only image the
+          // share card can ever have. `md` variant, exactly as the journey cards
+          // serve. Null with no cover OR no configured base (never a raw key).
+          coverImageUrl: resolveCourseCoverUrl(
+            courseRow.coverImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
@@ -554,6 +649,14 @@ export class CourseJourneyService extends BaseService {
           // portrait below), so they select and write like the three videos.
           heroMediaId: courses.heroMediaId,
           signatureMediaId: courses.signatureMediaId,
+          // A32 (Codex-490z7): the UPLOADED hero still. An R2 key, not a media
+          // ref — see the column comment for why `media_items` cannot hold one.
+          heroImageKey: courses.heroImageKey,
+          // The UPLOADED signature mark (Codex-wqxv4's named-slot half). An R2
+          // key for the same reason, and here the reason bites hardest: nobody
+          // films a signature, so the media ref could only ever hold a frame of a
+          // film OF one.
+          signatureImageKey: courses.signatureImageKey,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
           guide: courses.guide,
@@ -637,18 +740,53 @@ export class CourseJourneyService extends BaseService {
         // them, so the guide section could never show a portrait or a clip.
         guidePortraitUrl: toStill(guidePortraitMediaId),
         guideClip: toClip(courseRow.guideVideoMediaId),
-        // Contract amendment A27 (Codex-wqxv4): the hero image and the guide's
-        // signature. Both go through `toStill` for the reason its own comment
+        // Contract amendment A27 (Codex-wqxv4) + A32 (Codex-490z7): the hero
+        // image, resolved down A32's FALLBACK CHAIN, uploaded first:
+        //
+        //   heroImageKey (an uploaded JPEG/PNG/WebP)
+        //     ?? heroMediaId's poster frame (a video's `thumbnailKey`)
+        //       ?? the section's synthetic plate (absence, resolved in the render)
+        //
+        // ORDERED, not merely additive, and the order is the whole point. An
+        // uploaded image is an explicit creator choice; a poster frame is a
+        // by-product of transcoding. When both exist the choice must win, or a
+        // creator who uploads a hero over a course that already has a hero video
+        // sees nothing change and has no way to tell why.
+        //
+        // `toStill` stays for the second link for the reason its own comment
         // gives — `media_items` is video/audio-only, so the still a creator picks
-        // is the item's `thumbnailKey`. `hero.full-bleed` / `hero.poster` /
-        // `guide.letter` are named after media that, until now, no column held.
-        heroImageUrl: toStill(courseRow.heroMediaId),
+        // THERE is the item's `thumbnailKey`. That is exactly the limitation A32
+        // exists to lift, not to replace: `hero.full-bleed` / `hero.poster` still
+        // work for a video-only journey.
+        //
+        // The seam above this is unchanged: a section consumes `heroImageUrl`
+        // without knowing which link produced it.
+        heroImageUrl:
+          resolveCourseHeroUrl(courseRow.heroImageKey, r2PublicUrlBase) ??
+          toStill(courseRow.heroMediaId),
         // The SAME item, resolved both ways: `toStill` for the modes that only
         // draw it, `toClip` for the modes that play it. Before this the manifest
         // was thrown away here, so a creator's hero video could only ever appear
         // as its own poster frame (Codex-uj4jc).
         heroClip: toClip(courseRow.heroMediaId),
-        signatureUrl: toStill(courseRow.signatureMediaId),
+        // The guide's signature, down the SAME ordered chain as the hero above
+        // and for a sharper version of the same reason (Codex-wqxv4's named-slot
+        // half):
+        //
+        //   signatureImageKey (an uploaded PNG/JPEG/WebP) ?? signatureMediaId's
+        //   poster frame ?? nothing (the letter signs with its typeset name)
+        //
+        // A27 gave `guide.letter` a signature SLOT and no way to fill it with a
+        // signature: `media_items` is video/audio-only, so `toStill` could only
+        // ever return a frame of a FILM of a mark. Uploaded therefore does not
+        // merely outrank derived here — it is the only link that can hold the
+        // thing the composition is named after. The media ref stays as the second
+        // link so a journey that already picked one keeps rendering it.
+        signatureUrl:
+          resolveCourseSignatureUrl(
+            courseRow.signatureImageKey,
+            r2PublicUrlBase
+          ) ?? toStill(courseRow.signatureMediaId),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
@@ -1299,10 +1437,27 @@ export class CourseJourneyService extends BaseService {
    * CURRENT state — {@link setJourneyFeatured} is the write, this is the read that
    * makes it visible. Carried for EVERY status, since the flag is orthogonal to
    * publish state (a featured draft is stored intent with no public effect).
+   *
+   * `coverImageUrl` is resolved from the SUBJECT COURSE's `coverImageKey` (null
+   * for a plain landing page, which owns no course and therefore no cover), at the
+   * SAME `md` variant the public portal card serves. The studio row's thumbnail is
+   * there to let a creator tell their portals apart at a glance AND check the image
+   * a visitor will see, so it must not preview a variant or a crop the product
+   * never renders — the rule `CategoryList`'s cover tile states for topics.
    */
   async listJourneysForOrg(
     organizationId: string,
-    status?: PageStatus
+    status?: PageStatus,
+    /**
+     * Env-owned CDN base, supplied by the ROUTE — the same split
+     * {@link getJourneySellMedia} and {@link getCourseSellPreview} use, so no
+     * service method ever invents a URL base.
+     *
+     * Omitted ⇒ every `coverImageUrl` resolves to null and the studio rows render
+     * their typographic fallback tile. That is the pre-existing behaviour, so an
+     * older caller is unaffected rather than broken.
+     */
+    r2PublicUrlBase?: string
   ): Promise<JourneyListItem[]> {
     try {
       const pageRows = await this.db
@@ -1352,6 +1507,14 @@ export class CourseJourneyService extends BaseService {
           revenueCents: null,
           featured: p.featured,
           updatedAt: p.updatedAt.toISOString(),
+          // Null for a plain landing page (no subject course ⇒ no cover column)
+          // and for a course with no uploaded cover — both are the studio row's
+          // typographic-fallback state, which is exactly what the public card
+          // does with the same absence.
+          coverImageUrl: resolveCourseCoverUrl(
+            roll?.coverImageKey,
+            r2PublicUrlBase
+          ),
         };
       });
     } catch (error) {
@@ -1385,6 +1548,7 @@ export class CourseJourneyService extends BaseService {
           sections: landingPages.sections,
           offer: landingPages.offer,
           design: landingPages.design,
+          seo: landingPages.seo,
         })
         .from(landingPages)
         .where(
@@ -1419,6 +1583,10 @@ export class CourseJourneyService extends BaseService {
         // selected, which is honest — the page really is rendering at the axis
         // defaults.
         ...(row.design ? { design: row.design as SectionDesign } : {}),
+        // The page's SEO bag — what the builder's SEO panel opens with. Without
+        // this projection the two meta fields would come back EMPTY after every
+        // reload, which is the shape a creator reads as "it did not save".
+        ...(row.seo ? { seo: row.seo as PageSeo } : {}),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1460,6 +1628,63 @@ export class CourseJourneyService extends BaseService {
   };
 
   /**
+   * Resolve a free ORG-UNIQUE slug from `base`, as `base`, `base-2`, `base-3`, …
+   *
+   * Checks BOTH tables that share the org slug-space — `landing_pages` AND
+   * `courses` — among non-deleted rows, because `cascadeCourseFromPage` writes a
+   * page's slug onto its subject course, so a page slug that collides with an
+   * unrelated course would surface as a raw `uq_courses_org_slug` violation on
+   * the first publish rather than as a 409 here.
+   *
+   * ONE helper rather than a loop per write path (review: `createJourney` and
+   * {@link duplicateJourneyPage} both need it): the "-2" convention, the
+   * two-table space and the exhaustion behaviour are a single contract, and two
+   * copies of it would drift the moment a third table joined the space.
+   *
+   * The SELECTs are not locks — the partial-unique indexes are the final arbiter
+   * if two creates race — and on exhaustion this throws rather than falling
+   * through to a colliding insert (review L3).
+   *
+   * MUST run inside the caller's transaction, so the slug it hands back is
+   * checked against the same snapshot the insert lands in.
+   */
+  private async resolveFreeOrgSlug(
+    tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
+    organizationId: string,
+    base: string
+  ): Promise<string> {
+    for (let n = 1; n < 1000; n++) {
+      const candidate = n === 1 ? base : `${base}-${n}`;
+      const [pageClash] = await tx
+        .select({ id: landingPages.id })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.slug, candidate),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+      const [courseClash] = await tx
+        .select({ id: courses.id })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.organizationId, organizationId),
+            eq(courses.slug, candidate),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      if (!pageClash && !courseClash) return candidate;
+    }
+    throw new ConflictError(
+      'Could not find an available slug for this title — try a different title'
+    );
+  }
+
+  /**
    * Create a new journey/page (as a draft) and return its page id + slug. For a
    * `course` page this is a TWO-ROW create — a `courses` row (the curriculum
    * subject) + a `landing_pages` row bound to it via `subjectType`/`subjectId` —
@@ -1483,46 +1708,7 @@ export class CourseJourneyService extends BaseService {
       const base = slugifyTitle(title);
 
       return await this.txDb.transaction(async (tx) => {
-        // Resolve a free org-unique slug, checking BOTH tables that share the
-        // org slug-space (landing_pages + courses) among non-deleted rows. The
-        // partial-unique index is the final arbiter if two creates race (this
-        // SELECT is not a lock); on exhaustion we throw rather than fall through
-        // to a colliding insert (review L3).
-        let slug: string | null = null;
-        for (let n = 1; n < 1000; n++) {
-          const candidate = n === 1 ? base : `${base}-${n}`;
-          const [pageClash] = await tx
-            .select({ id: landingPages.id })
-            .from(landingPages)
-            .where(
-              and(
-                eq(landingPages.organizationId, organizationId),
-                eq(landingPages.slug, candidate),
-                isNull(landingPages.deletedAt)
-              )
-            )
-            .limit(1);
-          const [courseClash] = await tx
-            .select({ id: courses.id })
-            .from(courses)
-            .where(
-              and(
-                eq(courses.organizationId, organizationId),
-                eq(courses.slug, candidate),
-                isNull(courses.deletedAt)
-              )
-            )
-            .limit(1);
-          if (!pageClash && !courseClash) {
-            slug = candidate;
-            break;
-          }
-        }
-        if (!slug) {
-          throw new ConflictError(
-            'Could not find an available slug for this title — try a different title'
-          );
-        }
+        const slug = await this.resolveFreeOrgSlug(tx, organizationId, base);
 
         let subjectId: string | null = null;
         if (pageType === 'course') {
@@ -1608,6 +1794,19 @@ export class CourseJourneyService extends BaseService {
        * page to hold an explicit bundle.
        */
       design?: SectionDesign;
+      /**
+       * The page's SEO / share metadata (the SEO panel's write). OPTIONAL and
+       * treated as "leave alone" when absent, for the same reason as `design`: a
+       * client that predates the field — or a save issued before the draft
+       * finished loading — must not silently wipe a stored meta description.
+       *
+       * CLEARING IS EXPRESSED AS EMPTY STRINGS, not as an absent key: the panel
+       * sends `{ title: '', description: '' }`, which persists, and the public
+       * head's `||` fallbacks then derive from the page title / course lede
+       * again. So a creator CAN undo their override; only "the client said
+       * nothing about SEO" is treated as no instruction.
+       */
+      seo?: PageSeo;
     }
   ): Promise<void> {
     try {
@@ -1694,6 +1893,7 @@ export class CourseJourneyService extends BaseService {
             sections: record.sections,
             brandOverrides: record.brandOverrides,
             ...(record.design ? { design: record.design } : {}),
+            ...(record.seo ? { seo: record.seo } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
           })
           .where(
@@ -2002,6 +2202,230 @@ export class CourseJourneyService extends BaseService {
     }
   }
 
+  /**
+   * DUPLICATE a portal — ONE new `landing_pages` row, as a draft (Codex-c3lky).
+   *
+   * WHAT IS COPIED, AND WHY EACH DECISION IS A CONTRACT RATHER THAN A PREFERENCE.
+   *
+   * IT COPIES THE SALES PAGE, NOT THE COURSE. No `courses` row is created and no
+   * curriculum is cloned: the copy carries the SOURCE's `subjectType`/`subjectId`,
+   * so a duplicated course portal is a SECOND sales page in front of the SAME
+   * course. That shape is already supported rather than invented here —
+   * {@link cascadeCourseFromPage} documents "a course MAY be fronted by more than
+   * one page (nothing enforces 1:1)" and only takes the course down when no OTHER
+   * published page still sells it, and `listPublishedJourneys` dedupes by course
+   * for exactly this case. The alternative (a fresh empty course) would silently
+   * create a second curriculum a creator never asked for, and a `landing`-type
+   * copy with no subject would be UNVIEWABLE — {@link getCoursePage} returns null
+   * for a page whose `subjectType !== 'course'`, so the copy would publish to a
+   * 404. The caller MUST say which one it duplicated: "duplicate portal" reads as
+   * "duplicate the whole journey" to a creator, and it is not.
+   *
+   * EVERY SECTION GETS A NEW `id`. The builder's selection and undo/redo model
+   * keys on section id (`page-builder-store` `setSectionDesignAxis`, the selection
+   * cursor, the history entries), so two pages sharing section ids would share
+   * selection state the moment both were open — and a stage-level design override
+   * would look like it had leaked between pages. `crypto.randomUUID()`, the same
+   * generator the builder's own `makeId` uses, so a copied section is
+   * indistinguishable from a hand-added one.
+   *
+   * `design`, `brandOverrides` and `seo` ARE copied — they are what a creator
+   * duplicates a page FOR. Each is spread only WHEN PRESENT, never as an explicit
+   * `undefined`/`{}`: a page written before those columns existed must stay null
+   * so the reader falls to the axis defaults rather than to an empty bundle
+   * (`resolveDesign` is total; an explicit empty bag is not the same as absent).
+   *
+   * `offer` IS NOT COPIED. Money must be set deliberately. A duplicate that
+   * silently carried a price is how a creator publishes a price they never chose
+   * — and `landing_pages.offer` is only the PRESENTATION half: the authoritative
+   * `courses.price_cents` lives on the shared course, so a copied bag would
+   * advertise a way in whose price the copy does not own. The copy therefore
+   * starts with no offer, exactly as a brand-new page does, and the pricing panel
+   * ({@link updateJourneyOffer}) is the only thing that can give it one.
+   *
+   * `status` is DRAFT and `publishedAt` is null — a copy must never go live by
+   * itself. `featured` is left at its column default (false) rather than copied:
+   * a homepage slide is a curation decision about one portal, and inheriting it
+   * would put two cards in the same rail.
+   *
+   * The SLUG is derived from the copy's title and VERIFIED FREE through
+   * {@link resolveFreeOrgSlug} — "-copy" is not assumed to be available, and the
+   * org slug-space spans `landing_pages` AND `courses`. All of it runs in ONE
+   * transaction so a half-duplicated page cannot exist.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)` — a foreign or
+   * missing id throws `NotFoundError`, never a silent cross-org read (mirrors
+   * {@link saveJourneyPage}'s guard). `creatorId` is the ACTING user, not the
+   * source's: this is a new row, made now, by them.
+   *
+   * @returns the new page's id + slug + title, so the caller can name it and link
+   *          straight to its builder.
+   */
+  async duplicateJourneyPage(
+    organizationId: string,
+    creatorId: string,
+    pageId: string
+  ): Promise<{ id: string; slug: string; title: string }> {
+    try {
+      return await this.txDb.transaction(async (tx) => {
+        const [source] = await tx
+          .select({
+            pageType: landingPages.pageType,
+            title: landingPages.title,
+            subjectType: landingPages.subjectType,
+            subjectId: landingPages.subjectId,
+            brandOverrides: landingPages.brandOverrides,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            seo: landingPages.seo,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .limit(1);
+
+        if (!source) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        // `varchar(500)`, and the save schema caps `title` at 500 too — so the
+        // suffix is applied and then bounded, rather than allowed to make a
+        // freshly-duplicated page unsaveable in the builder.
+        const title = `${source.title} (copy)`.slice(0, 500);
+        const slug = await this.resolveFreeOrgSlug(
+          tx,
+          organizationId,
+          slugifyTitle(title)
+        );
+
+        const sections = ((source.sections as PageSection[]) ?? []).map(
+          (section) => ({ ...section, id: crypto.randomUUID() })
+        );
+
+        const [page] = await tx
+          .insert(landingPages)
+          .values({
+            organizationId,
+            creatorId,
+            pageType: source.pageType,
+            slug,
+            title,
+            status: CONTENT_STATUS.DRAFT,
+            subjectType: source.subjectType,
+            subjectId: source.subjectId,
+            brandOverrides: source.brandOverrides,
+            sections,
+            ...(source.design ? { design: source.design } : {}),
+            ...(source.seo ? { seo: source.seo } : {}),
+          })
+          .returning({
+            id: landingPages.id,
+            slug: landingPages.slug,
+            title: landingPages.title,
+          });
+
+        if (!page) {
+          throw new Error(
+            'duplicateJourneyPage: landing page insert returned no row'
+          );
+        }
+
+        return { id: page.id, slug: page.slug, title: page.title };
+      });
+    } catch (error) {
+      this.handleError(error, 'duplicateJourneyPage');
+    }
+  }
+
+  /**
+   * SOFT-DELETE a portal's landing page — `deleted_at`, never a `DELETE`
+   * (Codex-c3lky). Every read in this service already filters
+   * `deletedAt IS NULL`, and both org-unique slug indexes are partial on the same
+   * predicate, so the slug returns to the org's slug-space the moment this runs.
+   *
+   * A PUBLISHED PAGE IS REFUSED, and that is the product decision rather than a
+   * missing feature. Deleting a live page would leave `courses.status` at
+   * 'published' with no sales page behind it — the course would stay listed on
+   * /explore, resolvable by {@link getCourseBySlug}, and present on the enrolled
+   * shelves and the course dashboard, while `/journeys/:slug` 404'd. That is
+   * exactly the divergence {@link cascadeCourseFromPage} exists to prevent, and
+   * the cascade is only reachable through {@link saveJourneyPage} — so the honest
+   * answer is a 409 naming the next step, not a second status writer here or a
+   * warning on a destructive act. "Unpublish, then delete" is a real path: the
+   * list's own Unpublish runs through that cascade.
+   *
+   * WHAT SURVIVES: the subject course, its curriculum, every purchase and every
+   * `practice_completions` row. This method touches ONE column on ONE row. The
+   * course is deliberately NOT cascaded — a course can be fronted by more than
+   * one page (see {@link duplicateJourneyPage}), and retiring a body of work plus
+   * a payment history as a side effect of removing a sales page is not something
+   * a creator can undo from the studio. The consequence is that a course-page
+   * delete leaves the course row holding its slug in the org slug-space; that is
+   * a known, recoverable wart (clear `deleted_at` to restore the page), and it is
+   * preferred to an irreversible one.
+   *
+   * ROW-LOCKED (`.for('update')`) rather than a read-then-write on the HTTP
+   * client: the status check and the write must see the same row, or a publish
+   * landing between them would let a live page be deleted — the single case this
+   * method exists to refuse.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)`. A foreign, missing
+   * or already-deleted id throws `NotFoundError` (mirrors
+   * {@link setJourneyFeatured}'s zero-row guard), so a repeat delete is a clean
+   * 404 rather than a silent success.
+   */
+  async deleteJourneyPage(
+    organizationId: string,
+    pageId: string
+  ): Promise<void> {
+    try {
+      await this.txDb.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: landingPages.id,
+            status: landingPages.status,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .for('update')
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        if (existing.status === CONTENT_STATUS.PUBLISHED) {
+          throw new ConflictError(
+            'Unpublish this portal before deleting it — while it is published its course stays live everywhere else'
+          );
+        }
+
+        await tx
+          .update(landingPages)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId)
+            )
+          );
+      });
+    } catch (error) {
+      this.handleError(error, 'deleteJourneyPage');
+    }
+  }
+
   // ── Sell media + cover (Codex-eqh0z — the media WRITE path) ────────────────
   //
   // Before this, `courses.introVideoMediaId` / `previewVideoMediaId` /
@@ -2011,8 +2435,18 @@ export class CourseJourneyService extends BaseService {
   // content. These three methods are that missing write path.
 
   /**
-   * Read the journey's SELL MEDIA — the four `media_items` refs the sales page's
-   * `introVideo` / `reel` / `guide` sections resolve, plus the still cover URL.
+   * Read the journey's SELL MEDIA — the six `media_items` refs the sales page's
+   * `hero` / `introVideo` / `reel` / `guide` sections resolve, plus the THREE
+   * UPLOADED still URLs (the card cover, the hero image since A32, and the guide's
+   * signature since Codex-wqxv4's named-slot half).
+   *
+   * `heroImageUrl` and `signatureImageUrl` here are the UPLOADS only —
+   * deliberately NOT their public fallback chains. The panel needs to know whether
+   * an upload EXISTS, because that is what its Replace / Remove affordances act
+   * on; resolving the chain here would make a video's poster frame
+   * indistinguishable from an uploaded file and offer the creator a "Remove" that
+   * removes nothing. The public read ({@link getCourseSellPreview}) owns both
+   * chains.
    *
    * Org-scoped through {@link resolveCourseIdForPage} (a foreign, missing, or
    * non-course page 404s), then re-scoped on the course row itself as
@@ -2038,6 +2472,8 @@ export class CourseJourneyService extends BaseService {
           signatureMediaId: courses.signatureMediaId,
           guide: courses.guide,
           coverImageKey: courses.coverImageKey,
+          heroImageKey: courses.heroImageKey,
+          signatureImageKey: courses.signatureImageKey,
         })
         .from(courses)
         .where(
@@ -2065,6 +2501,11 @@ export class CourseJourneyService extends BaseService {
           row.coverImageKey,
           r2PublicUrlBase
         ),
+        heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
+        signatureImageUrl: resolveCourseSignatureUrl(
+          row.signatureImageKey,
+          r2PublicUrlBase
+        ),
       };
     } catch (error) {
       this.handleError(error, 'getJourneySellMedia');
@@ -2084,6 +2525,16 @@ export class CourseJourneyService extends BaseService {
    * throws `ForbiddenError` and NOTHING is written — `media_items` carries no
    * `organization_id`, so creator-membership is the org boundary, and the FK
    * alone would happily accept another org's media.
+   *
+   * TYPE — the same pre-transaction pass also refuses a non-video item in a
+   * STILL slot (see {@link assertMediaItemsInOrg}'s `stillSlots` argument). Three
+   * of the six slots draw a frame rather than play a stream, and an AUDIO item has
+   * `thumbnailKey = null` BY CONSTRUCTION, so accepting one wrote a value that
+   * `toStill` could only ever resolve to null: the write returned 200, the panel
+   * marked itself clean, and the hero kept drawing its synthetic plate with
+   * nothing anywhere saying why. The UI filters its pickers too, but the UI is
+   * not the boundary — a section inspector, a replayed request or a future picker
+   * would each have to re-derive the rule.
    *
    * `guide.portraitMediaId` lives inside the `guide` jsonb, so it is merged into
    * the existing bag rather than replacing it — writing a bare
@@ -2105,7 +2556,25 @@ export class CourseJourneyService extends BaseService {
       heroMediaId: string | null;
       /** A27 (Codex-wqxv4) — the guide's signature mark. */
       signatureMediaId: string | null;
-    }
+    },
+    /**
+     * Env-owned CDN base, supplied by the route exactly as
+     * {@link getJourneySellMedia} takes it.
+     *
+     * It is here so the echoed shape can resolve the two UPLOADED still URLs
+     * ITSELF. This method used to return `coverImageUrl: null` unconditionally —
+     * "rather than inventing a base URL", which was the right instinct with no
+     * base in scope — and the ROUTE compensated by issuing a second, full
+     * `getJourneySellMedia` read purely to recover that one field. So the bug was
+     * never user-visible; the cost was a compensation the next still had to
+     * remember. A32's hero image is that next still, and it would have needed the
+     * same patch in the same place. Taking the base makes the echo true at the
+     * source and lets the route drop the extra round-trip.
+     *
+     * Omitted ⇒ both URLs resolve to null, which is the old behaviour, so an
+     * older caller is unaffected.
+     */
+    r2PublicUrlBase?: string
   ): Promise<JourneySellMedia> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -2115,14 +2584,27 @@ export class CourseJourneyService extends BaseService {
 
       // Validate the ids BEFORE opening the transaction — a rejected write must
       // leave no trace, and a ForbiddenError here is cheaper than a rollback.
-      await this.assertMediaItemsInOrg(organizationId, [
-        input.introVideoMediaId,
-        input.previewVideoMediaId,
-        input.guideVideoMediaId,
-        input.guidePortraitMediaId,
-        input.heroMediaId,
-        input.signatureMediaId,
-      ]);
+      //
+      // `stillSlots` names the three slots that DRAW a frame rather than play a
+      // stream. The three clip slots are deliberately absent from it: `reel`'s
+      // `waveform` composition is audio-first, so tightening those would break a
+      // shipped composition.
+      await this.assertMediaItemsInOrg(
+        organizationId,
+        [
+          input.introVideoMediaId,
+          input.previewVideoMediaId,
+          input.guideVideoMediaId,
+          input.guidePortraitMediaId,
+          input.heroMediaId,
+          input.signatureMediaId,
+        ],
+        [
+          { label: 'Hero image', mediaId: input.heroMediaId },
+          { label: 'Guide portrait', mediaId: input.guidePortraitMediaId },
+          { label: 'Guide signature', mediaId: input.signatureMediaId },
+        ]
+      );
 
       return await this.txDb.transaction(async (tx) => {
         const [existing] = await tx
@@ -2179,6 +2661,8 @@ export class CourseJourneyService extends BaseService {
             signatureMediaId: courses.signatureMediaId,
             guide: courses.guide,
             coverImageKey: courses.coverImageKey,
+            heroImageKey: courses.heroImageKey,
+            signatureImageKey: courses.signatureImageKey,
           });
 
         // Zero rows ⇒ the course was soft-deleted between the resolve and the
@@ -2197,9 +2681,25 @@ export class CourseJourneyService extends BaseService {
           guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
           heroMediaId: row.heroMediaId,
           signatureMediaId: row.signatureMediaId,
-          // The cover is written by its own multipart endpoint; echo the stored
-          // key unresolved-to-null here rather than inventing a base URL.
-          coverImageUrl: null,
+          // The cover and the hero image are written by their own multipart
+          // endpoints, but their STORED keys come back on this same `.returning()`
+          // row — so resolving them here costs nothing and makes the echo true.
+          //
+          // This used to be a hard `coverImageUrl: null` ("rather than inventing a
+          // base URL"), and the route compensated with a whole second
+          // `getJourneySellMedia` read to recover the one field. That worked, but
+          // it put the correction one layer away from the cause, where the NEXT
+          // still to be added has to notice and repeat it. See the
+          // `r2PublicUrlBase` parameter doc.
+          coverImageUrl: resolveCourseCoverUrl(
+            row.coverImageKey,
+            r2PublicUrlBase
+          ),
+          heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
+          signatureImageUrl: resolveCourseSignatureUrl(
+            row.signatureImageKey,
+            r2PublicUrlBase
+          ),
         };
       });
     } catch (error) {
@@ -2254,6 +2754,121 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * Persist (or clear) the subject course's HERO IMAGE R2 key, org-scoped
+   * (Codex-490z7, contract amendment A32).
+   *
+   * The DB half of the hero-image upload, and a deliberate sibling of
+   * {@link setCourseCoverImageKey}: `ImageProcessingService.processCourseHero`
+   * owns the R2 variants and returns the base key, this owns the scoped write.
+   * Same split, same reason — no scope logic in the image layer.
+   *
+   * Pass `null` to clear. The R2 objects are left in place: keys are
+   * deterministic per course, so a later re-upload overwrites them rather than
+   * accumulating orphans, and no client is ever handed a raw key so the
+   * unreferenced variants are unreachable in the meantime.
+   *
+   * Clearing does NOT leave the hero empty — it drops the page back to A32's next
+   * link, `heroMediaId`'s poster frame, and then to the synthetic plate. That is
+   * why this is a separate column from `heroMediaId` rather than a replacement
+   * for it.
+   *
+   * @returns the persisted key (null when cleared).
+   */
+  async setCourseHeroImageKey(
+    organizationId: string,
+    pageId: string,
+    heroImageKey: string | null
+  ): Promise<{ courseId: string; heroImageKey: string | null }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const updated = await this.db
+        .update(courses)
+        .set({ heroImageKey })
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does), exactly as
+        // `setCourseCoverImageKey` documents.
+        .returning();
+
+      const [row] = updated;
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, heroImageKey: row.heroImageKey };
+    } catch (error) {
+      this.handleError(error, 'setCourseHeroImageKey');
+    }
+  }
+
+  /**
+   * Persist (or clear) the subject course's SIGNATURE IMAGE R2 key, org-scoped
+   * (Codex-wqxv4's named-slot half).
+   *
+   * The DB half of the signature upload, and the third sibling of
+   * {@link setCourseCoverImageKey} / {@link setCourseHeroImageKey}:
+   * `ImageProcessingService.processCourseSignature` owns the R2 variants and
+   * returns the base key, this owns the scoped write. Same split, same reason —
+   * no scope logic in the image layer.
+   *
+   * Pass `null` to clear. The R2 objects are left in place: keys are
+   * deterministic per course, so a later re-upload overwrites them rather than
+   * accumulating orphans, and no client is ever handed a raw key so the
+   * unreferenced variants are unreachable in the meantime.
+   *
+   * Clearing does NOT necessarily leave the letter unsigned — it drops to the
+   * next link, `signatureMediaId`'s poster frame, and only then to the typeset
+   * name alone. That is why this is a separate column rather than a replacement
+   * for the media ref.
+   *
+   * @returns the persisted key (null when cleared).
+   */
+  async setCourseSignatureImageKey(
+    organizationId: string,
+    pageId: string,
+    signatureImageKey: string | null
+  ): Promise<{ courseId: string; signatureImageKey: string | null }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const updated = await this.db
+        .update(courses)
+        .set({ signatureImageKey })
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does), exactly as
+        // `setCourseCoverImageKey` documents.
+        .returning();
+
+      const [row] = updated;
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, signatureImageKey: row.signatureImageKey };
+    } catch (error) {
+      this.handleError(error, 'setCourseSignatureImageKey');
+    }
+  }
+
+  /**
    * Guard: every non-null media id exists, is non-deleted, and belongs to a
    * creator with an ACTIVE membership in `organizationId`. Throws
    * `ForbiddenError` naming the offending id otherwise.
@@ -2267,16 +2882,32 @@ export class CourseJourneyService extends BaseService {
    *
    * Nulls are skipped (clearing a slot needs no ownership) and duplicates are
    * de-duplicated, so one id used in two slots costs one row.
+   *
+   * SECOND JOB — `stillSlots` (P3, Codex-490z7's sibling defect). The same rows
+   * already carry `mediaType`, so the slots that draw a FRAME rather than play a
+   * stream are type-checked here rather than in a second query. An AUDIO item has
+   * `thumbnailKey = null` by construction (`@codex/transcoding` `paths.ts` returns
+   * null for any non-video, and the ready-row CHECK asks only for a `waveformKey`),
+   * so `getCourseSellPreview`'s `toStill` can only ever resolve one to null: the
+   * write succeeded, the panel went clean, and the hero silently kept its
+   * synthetic plate. Refusing it here is the only place that cannot be bypassed —
+   * the panel, the section inspector and any future picker all funnel through this
+   * one write.
+   *
+   * `ValidationError`, not `ForbiddenError`: the item IS the caller's, it is
+   * simply the wrong KIND for that slot, and the message has to say which slot or
+   * a creator with six pickers cannot act on it.
    */
   private async assertMediaItemsInOrg(
     organizationId: string,
-    mediaIds: readonly (string | null)[]
+    mediaIds: readonly (string | null)[],
+    stillSlots: readonly { label: string; mediaId: string | null }[] = []
   ): Promise<void> {
     const wanted = [...new Set(mediaIds.filter((id): id is string => !!id))];
     if (wanted.length === 0) return;
 
     const rows = await this.db
-      .selectDistinct({ id: mediaItems.id })
+      .selectDistinct({ id: mediaItems.id, mediaType: mediaItems.mediaType })
       .from(mediaItems)
       .innerJoin(
         organizationMemberships,
@@ -2297,6 +2928,20 @@ export class CourseJourneyService extends BaseService {
       throw new ForbiddenError('Media item does not belong to this space', {
         mediaItemId: rejected,
       });
+    }
+
+    // Ownership first, THEN type: a foreign id must not be told what kind of
+    // item it is, and the ownership error is the more specific fact.
+    const typeById = new Map(rows.map((r) => [r.id, r.mediaType]));
+    for (const slot of stillSlots) {
+      if (!slot.mediaId) continue;
+      const mediaType = typeById.get(slot.mediaId);
+      if (mediaType && mediaType !== 'video') {
+        throw new ValidationError(
+          `${slot.label} needs a video — a ${mediaType} item has no frame to show.`,
+          { mediaItemId: slot.mediaId, mediaType }
+        );
+      }
     }
   }
 
@@ -2695,6 +3340,13 @@ export class CourseJourneyService extends BaseService {
       string,
       {
         tagline: string | null;
+        /**
+         * The RAW `courses.coverImageKey`, not a URL. The CDN base is env-owned
+         * and arrives at the public boundary ({@link listJourneysForOrg}), so
+         * this private rollup stays base-free and the ONE resolver
+         * (`resolveCourseCoverUrl`) keeps deciding which variant a cover means.
+         */
+        coverImageKey: string | null;
         stageCount: number;
         practiceCount: number;
         enrolledCount: number;
@@ -2705,6 +3357,7 @@ export class CourseJourneyService extends BaseService {
       string,
       {
         tagline: string | null;
+        coverImageKey: string | null;
         stageCount: number;
         practiceCount: number;
         enrolledCount: number;
@@ -2712,9 +3365,16 @@ export class CourseJourneyService extends BaseService {
     >();
     if (courseIds.length === 0) return map;
 
-    // Course lede (tagline) — org-scoped, non-deleted. Seeds the map.
+    // Course lede (tagline) + cover key — org-scoped, non-deleted. Seeds the map.
+    // The cover rides THIS query rather than a new one: it is a column on the row
+    // the tagline already comes from, so the studio index's thumbnail costs no
+    // extra round-trip.
     const courseRows = await this.db
-      .select({ id: courses.id, lede: courses.lede })
+      .select({
+        id: courses.id,
+        lede: courses.lede,
+        coverImageKey: courses.coverImageKey,
+      })
       .from(courses)
       .where(
         and(
@@ -2726,6 +3386,7 @@ export class CourseJourneyService extends BaseService {
     for (const c of courseRows) {
       map.set(c.id, {
         tagline: c.lede ?? null,
+        coverImageKey: c.coverImageKey ?? null,
         stageCount: 0,
         practiceCount: 0,
         enrolledCount: 0,

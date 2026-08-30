@@ -34,6 +34,7 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import type { JourneyCoursePage } from './journey-queries';
+import JourneyRenderer from './render/JourneyRenderer.svelte';
 
 vi.mock('$app/state', () => ({
   page: { url: new URL('http://of-blood-and-bones.lvh.me:3000/journeys/demo') },
@@ -428,7 +429,23 @@ describe('the ladder re-derives PER SECTION, not once per page', () => {
     // `--jp-ink` and the two poles must NOT be re-declared on `.jp-sec`: the
     // `surface` axis's whole mechanism is a section declaring its own `--jp-ink`
     // at (0,1,0), and a palette rule at (0,2,0) would silently beat it.
-    for (const input of ['--jp-pole-a', '--jp-pole-b', '--jp-ink']) {
+    //
+    // The four brand ACCENTS are inputs for the mirror-image reason (Codex-8jve9):
+    // they are re-pointed by the DARK POLE, whose selector matches the palette
+    // ROOT only. Re-declared on `.jp-sec` at (0,2,0) they re-derive from
+    // `--brand-color` on every section and throw the dark override away — which
+    // is exactly what the old file did, and is reproducible by re-injecting that
+    // one rule (the root then reads the dark accent while its own sections read
+    // the light one).
+    for (const input of [
+      '--jp-pole-a',
+      '--jp-pole-b',
+      '--jp-ink',
+      '--jp-ember',
+      '--jp-blood',
+      '--jp-blood-deep',
+      '--jp-rose',
+    ]) {
       expect(selectorDeclaring(input), input).not.toContain('.jp-sec');
     }
   });
@@ -547,31 +564,37 @@ const coursePage = (
 });
 
 /**
- * TIMEOUT RAISED TO 45s — not a slow assertion, a one-time mount cost.
+ * THE MOUNT IMPORT IS STATIC (line 37), AND THAT IS THE WHOLE MITIGATION
+ * (Codex-prblb). Do not turn it back into `await import()` inside `render`.
  *
- * Whichever test in this block mounts FIRST absorbs the entire cost of Vite
- * transforming + jsdom instantiating the `JourneyRenderer` component graph; its
- * siblings then run in single-digit milliseconds. Measured here, same machine,
- * same file, back-to-back runs — the first mount was 13190ms on a cold Vite
- * cache, 7067ms warmer and 6641ms warmest, tracking `transform` (19.82s → 13.33s
- * → 8.34s) rather than anything in the test. It has been measured at 33138ms on a
- * loaded box, against a 15000ms global budget (`vite.config.ts` `testTimeout`).
+ * This block used to carry `{ timeout: 45000 }` against a 15000ms global budget
+ * (`vite.config.ts` `testTimeout`), justified by measurements of the first mount:
+ * 13190ms on a cold Vite cache, 6641ms warmest, 33138ms on a loaded box. Those
+ * numbers were real, but the diagnosis was one level off. The cost is Vite
+ * TRANSFORMING the `JourneyRenderer` graph — `render/section-registry.ts`
+ * statically imports all eleven section components — and a dynamic
+ * `await import()` inside the test body charged that transform to the TEST's
+ * timer. Nothing about the mount itself is slow.
  *
- * So this is not flake: it is reliably too slow and has only ever passed because
- * the machine happened to be quiet. 45s clears the worst observed run with
- * headroom. Scoped to this `describe` rather than to one `it`, because the cost
- * lands on whichever mount runs first and test order is not guaranteed — pinning
- * a single test would just move the failure to its sibling.
+ * Re-measured on a loaded box (8 cores, load average 13–46), same file,
+ * back-to-back:
+ *   dynamic import inside `render`   first mount 12065 / 13556 / 4890 ms
+ *   static import at module scope    first mount    28 /    35 ms
+ * The transform cost does not vanish, it moves to `collect` (1.4→6.5s), which no
+ * per-test timeout governs — which is exactly where the four other files that
+ * pull the same eleven-component graph have always paid it
+ * (render/SectionRenderer.svelte.test.ts, render/brand-overrides.test.ts,
+ * components/page-builder/canvas-public-parity.svelte.test.ts and
+ * preset-emission.svelte.test.ts all import it statically and all pass at 15000ms).
+ * So the override was covering a self-inflicted charge, not a slow assertion.
  *
- * NOT a weakened test: every assertion below is unchanged. The underlying
- * pathology — a component mount costing seconds in jsdom — is tracked separately;
- * this only stops it failing the suite on a busy machine.
- *
- * `describe(name, options, fn)` is the supported shape for a suite-level timeout
- * in Vitest 4 (`SuiteCollectorCallable`); passing options as the THIRD argument
- * is not — that overload takes a bare number.
+ * NOT a weakened test: every assertion below is unchanged, and the graph is still
+ * fully transformed and mounted. The PRODUCTION cost of those eleven static
+ * imports is separately measured and still open as Codex-ug311 — 171,088 B raw
+ * (77,990 JS + 93,098 CSS) shipped eagerly to the public sell page — and this
+ * change neither fixes nor hides it.
  */
-describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
+describe('JourneyRenderer (mount)', () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });
@@ -582,10 +605,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
       (el.getAttribute('class') ?? '').split(/\s+/).includes(cls)
     );
 
-  const render = async (page: JourneyCoursePage) => {
-    const { default: JourneyRenderer } = await import(
-      './render/JourneyRenderer.svelte'
-    );
+  const render = (page: JourneyCoursePage) => {
     const component = mount(JourneyRenderer, {
       target: document.body,
       props: { coursePage: page, sellPreview: Promise.resolve(null) },
@@ -595,7 +615,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   };
 
   it('puts the ladder on the wrapper and the re-points on a DESCENDANT', async () => {
-    const component = await render(coursePage());
+    const component = render(coursePage());
 
     const base = withClass('journey-palette');
     const page = withClass('journey-palette--page');
@@ -611,7 +631,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   });
 
   it('never carries both palette classes on one element', async () => {
-    const component = await render(coursePage());
+    const component = render(coursePage());
 
     const both = [...document.body.querySelectorAll('[class]')].filter((el) => {
       const tokens = (el.getAttribute('class') ?? '').split(/\s+/);
@@ -628,7 +648,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   it('still injects per-page brand overrides onto the wrapper', async () => {
     // The overrides were always computed and injected correctly — the bug was
     // that `.journey-page` overwrote them one level down. Assert they survive.
-    const component = await render(coursePage({ backgroundColor: '#F3F0E7' }));
+    const component = render(coursePage({ backgroundColor: '#F3F0E7' }));
 
     const [base] = withClass('journey-palette');
     expect(base.getAttribute('style')).toContain('--brand-bg');
@@ -636,5 +656,106 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
     expect(base.hasAttribute('data-org-brand')).toBe(true);
 
     unmount(component);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `--jp-on-ember` — the on-accent label, and the @supports mirror that pins it
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * STRUCTURE ONLY. The arithmetic — every published ratio, the exhaustive sRGB
+ * sweep and the before/after that proves the luminance form is a strict
+ * improvement — lives in `journey-design.test.ts`, which owns the colour model.
+ * What is asserted HERE is that the stylesheet still has the SHAPE that model
+ * assumes, because a model validated against a file it has stopped describing is
+ * the failure mode this whole test file exists to prevent.
+ */
+describe('--jp-on-ember decides on luminance, and the fallback survives', () => {
+  /** The `@supports` prelude, verbatim, and the block it guards. */
+  const SUPPORTS =
+    '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))';
+
+  it('declares BOTH forms — the oklch fallback and the luminance override', () => {
+    const decls = declarationsOf(PALETTE, '--jp-on-ember');
+    expect(decls).toHaveLength(2);
+
+    // 1. THE FALLBACK, unchanged. An older engine keeps the OKLCH step rather
+    //    than losing the colour entirely: a custom property accepts any token
+    //    stream at parse time and only fails when SUBSTITUTED, at which point the
+    //    consuming `color` is invalid at computed-value time and falls back to
+    //    `unset`. That is why this is an @supports override and not an edit.
+    expect(decls[0]).toBe(
+      'oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 1) 0 0)'
+    );
+
+    // 2. THE OVERRIDE, deciding on RELATIVE LUMINANCE at WCAG's black/white
+    //    crossover — the quantity the ratio is actually computed on.
+    expect(decls[1]).toContain('rgb(');
+    expect(decls[1]).toContain('from var(--jp-ember)');
+    expect(decls[1]).toContain('0.1791');
+    // The luminance weights, all three, in the sRGB-linear form. `2.4` with the
+    // `+ 0.055) / 1.055` offset: org-brand.css records that dropping the offset
+    // re-introduces 468 738 AA failures, so the offset is not optional.
+    for (const term of [
+      '0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4)',
+      '0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4)',
+      '0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4)',
+    ]) {
+      expect(decls[1]).toContain(term);
+    }
+    // `* 1e6` makes it a true step: black or white, never a mid grey. The 0.05
+    // floor of the fallback is deliberately NOT carried over — chroma is already
+    // zeroed here, so there is no hue to keep in gamut.
+    expect(decls[1]).toContain('* 1e6, 1)');
+    // Written once per channel because `r`/`g`/`b` are in scope only inside
+    // `rgb(from …)` and cannot be hoisted into a helper property.
+    expect(decls[1].match(/pow\(\(r \/ 255/g)).toHaveLength(3);
+  });
+
+  it('guards the override with the SAME @supports condition as org-brand.css', () => {
+    // The two must not drift: they are the same expression over two fills, and
+    // an engine that can run one can run the other. `pow()` inside a relative
+    // colour needs Chrome 125+, later than relative colour itself (119+), which
+    // is the whole reason for the guard.
+    const ORG_BRAND = readSrc('lib/styles/tokens/org-brand.css');
+    expect(PALETTE).toContain(SUPPORTS);
+    expect(ORG_BRAND).toContain(SUPPORTS);
+  });
+
+  it('applies the override to the palette ROOT *and* every .jp-sec, last in the file', () => {
+    // Both halves are load-bearing.
+    //
+    // SELECTOR: the shared block re-declares `--jp-on-ember` on every section at
+    // (0,2,0), so an override matching only the root is thrown away there — the
+    // page would get the luminance ink and every section the OKLCH one. This is
+    // the same trap the Codex-8jve9 note above documents for `--jp-ember`.
+    //
+    // ORDER: `@supports` adds no specificity, so the override wins purely by
+    // coming later. Moving this block up the file silently disables it.
+    const at = PALETTE_CODE.indexOf(SUPPORTS);
+    expect(at, '@supports block missing').toBeGreaterThan(0);
+    const block = PALETTE_CODE.slice(at);
+    expect(block).toContain('.journey-palette.journey-palette.journey-palette');
+    expect(block).toContain('.journey-palette .jp-sec');
+
+    // Nothing but this override may follow it, or "last in the file" stops being
+    // checkable by reading the tail.
+    expect(declarationsOf(block, '--jp-on-ember')).toHaveLength(1);
+    const sharedAt = PALETTE_CODE.search(/--jp-on-ember\s*:/);
+    expect(sharedAt).toBeGreaterThan(0);
+    expect(sharedAt).toBeLessThan(at);
+  });
+
+  it('needs no dark twin, because the dark pole re-points the INPUT', () => {
+    // `--jp-ember` is re-pointed by the dark rule at the palette ROOT only, and
+    // custom-property substitution happens per element AFTER the cascade picks a
+    // winner — so this re-derives from whichever ember won, at both poles, with
+    // one declaration. A dark twin here would be dead weight that could drift.
+    const at = PALETTE_CODE.indexOf(SUPPORTS);
+    const block = PALETTE_CODE.slice(at);
+    expect(block).not.toContain('[data-theme=');
+    expect(block).not.toContain('.dark ');
+    expect(declarationsOf(PALETTE, '--jp-ember')).toHaveLength(2);
   });
 });

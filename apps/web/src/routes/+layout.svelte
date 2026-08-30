@@ -9,6 +9,7 @@
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import { afterNavigate, invalidate, onNavigate } from '$app/navigation';
+  import { page } from '$app/state';
   import { NavigationProgress, SkipLink, Toaster } from '$lib/components/ui';
   import {
     decideAuthRevalidation,
@@ -23,6 +24,58 @@
   const AUTH_RECHECK_COOLDOWN_MS = 60_000;
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
+
+  // ── Head tags this layout OWNS, rendered from page data (O32) ───────────────
+  /**
+   * `<meta name="description">` and `og:type` were emitted below as fixed
+   * literals, on every page. `<svelte:head>` dedupes only `<title>`, so a page
+   * that set its own did not override this one — it APPENDED, and the layout's
+   * tag came first. Measured on a journey sell page, in document order:
+   *
+   *     meta[property="og:type"]  ["website", "product"]
+   *     meta[name="description"]  ["Discover transformative content from
+   *                                 independent creators", "<the course lede>"]
+   *
+   * A parser takes the FIRST value of a repeated Open Graph property, so the
+   * page's `og:type="product"` was dead on arrival, and the search snippet of
+   * every page with real copy was shadowed by the platform tagline.
+   *
+   * The fix is for this layout to keep emitting exactly ONE of each and take the
+   * value from the page: a load publishes `pageMeta`, and the literals below are
+   * only the fallback for a route that publishes none. So a page overrides
+   * instead of duplicating — and a page that says nothing is unchanged.
+   *
+   * MIGRATION STATE, stated plainly rather than implied: only the journey sell
+   * page publishes `pageMeta` today. Every other surface still emits its own
+   * `<meta name="description">` inline and therefore still duplicates, exactly as
+   * it did before this change. That is deliberate — those files belong to other
+   * work — and it is the safe direction: no page can end up with NO description,
+   * because the fallback here is unconditional. Migrating one is two moves:
+   * return `pageMeta` from its load, delete the inline tag from its markup.
+   * Remaining: ContentDetailView, the org landing/explore/creators/pricing pages,
+   * the four `(platform)` pages and `_creators/[username]`.
+   */
+  interface PageMeta {
+    /** The page's own meta description. Empty/absent → the platform default. */
+    description?: string;
+    /** The page's Open Graph vertical (`product`, `article`, `video.other`, …). */
+    ogType?: string;
+  }
+
+  const PLATFORM_DESCRIPTION =
+    'Discover transformative content from independent creators';
+
+  // `App.PageData` declares only `user` (`src/app.d.ts`), and widening it is not
+  // this file's to do, so the convention is read through a narrow local cast —
+  // a named shape, never `any`. `page.data` is the MERGED data of every load for
+  // the current route, so a page-level load's `pageMeta` is visible here.
+  const pageMeta = $derived(
+    (page.data as { pageMeta?: PageMeta } | undefined)?.pageMeta
+  );
+  const metaDescription = $derived(
+    pageMeta?.description || PLATFORM_DESCRIPTION
+  );
+  const ogType = $derived(pageMeta?.ogType || 'website');
 
   // ── Identity-change guard (Codex-1g5lh.17) ────────────────────────────
   // Persisted client state (`codex-following`, `codex-library`,
@@ -150,9 +203,14 @@
 </script>
 
 <svelte:head>
-  <meta name="description" content="Discover transformative content from independent creators" />
+  <!--
+    ONE of each, from the page's own data — see `pageMeta` above for the
+    duplication this replaces. `og:site_name` stays a literal: it names the
+    platform, not the page, so no page has cause to override it.
+  -->
+  <meta name="description" content={metaDescription} />
   <meta property="og:site_name" content="Revelations" />
-  <meta property="og:type" content="website" />
+  <meta property="og:type" content={ogType} />
   <link rel="manifest" href="/manifest.json" />
 </svelte:head>
 

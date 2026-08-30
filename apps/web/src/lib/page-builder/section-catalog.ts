@@ -40,6 +40,11 @@ import type {
   SectionDesign,
   SectionProps,
 } from '@codex/shared-types';
+// The per-type RHYTHM table. The dependency is ONE-DIRECTIONAL: that file imports
+// only types, never this module, so `createSection` can reach it with no cycle and
+// the house rhythm stays a diff in ONE table rather than logic threaded through
+// this catalogue.
+import { sectionDesignForType } from './section-design-defaults';
 
 // ── Variant definition ───────────────────────────────────────────────────────
 
@@ -56,6 +61,41 @@ export interface SectionVariant {
   readonly hint: string;
   /** Schematic-thumbnail key (a tiny abstract of the layout). */
   readonly thumb: string;
+  /**
+   * DECLARED BUT NOT BUILT — the reason, shown to the creator, and the picker
+   * renders the option disabled.
+   *
+   * WHY THIS FIELD EXISTS (Codex-wqxv4). `reel: strip` was declared here, hinted
+   * "A row of clip thumbnails; one plays inline", and DESCOPED in the renderer:
+   * `ReelSection.svelte`'s own `COMPOSITIONS` array excludes it and clamps to
+   * `theatre`. So the renderer knew and the picker did not — a creator could
+   * choose a composition, watch its layout card take the selected state, save,
+   * and get `theatre` on the published page. That is the failure mode
+   * `journey-design.test.ts` opens by naming ("a value selectable in the builder
+   * that matches no CSS rule renders with the axis default, and the creator sees
+   * a control that appears to do nothing"), and it is worse here, because the
+   * picker showed the choice as taken.
+   *
+   * NOT deleted, deliberately: the composition is DESCOPED, not retired, and the
+   * distinction is already load-bearing in this file. A retired id belongs in
+   * {@link LEGACY_SECTION_VARIANTS} and maps FORWARD onto a built composition; a
+   * descoped one has never been selectable and has nothing to map from. Deleting
+   * it would also lose the design and the reason it is blocked — the history
+   * `ReelSection`'s header deliberately preserves.
+   *
+   * The string is authored English, like `label`, `hint` and `summary` beside it,
+   * because this module is the CE-4-scanned PUBLIC_LIB_ROOT and stays free of the
+   * app's i18n runtime. Same i18n debt as its three neighbours, and no new one.
+   *
+   * `resolveVariant` deliberately does NOT skip an unavailable id: the renderers
+   * already clamp to their own `COMPOSITIONS`, so the resolved value and the
+   * painted layout stay whatever they were, and the picker is where the lie was.
+   * The conformance test in `section-catalog.test.ts` derives the expected set
+   * from the renderers, so a NEW unbuilt composition fails there rather than
+   * shipping as a dead control — and marking a BUILT composition unavailable
+   * fails too.
+   */
+  readonly unavailable?: string;
 }
 
 // ── Section definition ───────────────────────────────────────────────────────
@@ -65,7 +105,23 @@ export interface SectionDefinition {
   readonly label: string;
   /** One-line description shown in the add-section picker. */
   readonly summary: string;
-  /** Advisory glyph for the rail header (WP-5 rebinds to a DS icon). */
+  /**
+   * ADVISORY FALLBACK GLYPH — no longer what the studio draws (Codex-1khpv).
+   *
+   * The rail and the add-section picker now render a design-system icon from
+   * `$lib/components/page-builder/section-icons.ts`, keyed on `type`. The map
+   * lives THERE and not here for the reason this file's header gives: this module
+   * is the CE-4-scanned PUBLIC_LIB_ROOT and the public journey renderer imports it
+   * for `resolveVariant`/`resolveDesign`, so typing this field as a `Component`
+   * would ship eleven Svelte components into every visitor's chunk to draw
+   * studio-only UI. `$lib/config/rail-icons.ts` splits the nav rail the same way.
+   *
+   * The string survives because `SectionEditor`'s inspector header still reads it.
+   * While it does, it MUST NOT carry an emoji presentation: `guide` was `'☺'`
+   * U+263A, the one value of the eleven Unicode classes as emoji-capable, so on
+   * Apple platforms it rendered as a colour smiley among monochrome strokes. A
+   * test in `section-catalog.test.ts` pins that.
+   */
   readonly icon: string;
   /** Extra search terms beyond the label (synonyms). */
   readonly keywords: readonly string[];
@@ -371,6 +427,50 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
         label: 'Strip',
         hint: 'A row of clip thumbnails; one plays inline',
         thumb: 'grid',
+        // DESCOPED per contract A27, and `ReelSection.svelte`'s header carries
+        // the original reasoning: it needs 3-5 clips against a single
+        // `previewVideoMediaId`, an array-cardinality problem rather than a
+        // missing slot. Migration 0086 added `courses.hero_media_id` and
+        // `courses.signature_media_id`, both scalar `uuid`, so the clip count
+        // available here is still exactly one. A synthetic gradient plate
+        // standing in for the absent clips is specifically NOT the answer —
+        // A27 names that as the mistake `hero.split` already makes.
+        //
+        // THE BLOCKER IS NOT A COLUMN, AND IT IS NOT CARDINALITY — TRACED, and
+        // recorded here because "an array-cardinality problem" has twice been
+        // read as "this needs a schema decision: a join table, or a jsonb
+        // column". It needs NEITHER, and that is worth knowing before anyone
+        // scopes a migration for it.
+        //
+        // `props` is ALREADY the jsonb column, and it already round-trips an
+        // array with the type intact (`pageSectionSchema.props` is a passthrough
+        // record under a 16KB byte cap). So STORING `clips: string[]` is free.
+        // What cannot be done is RESOLVING one. A media id becomes a playable
+        // URL in exactly one place — `CourseJourneyService.getCourseSellPreview`
+        // — which SELECTs six FIXED scalar `courses` columns and projects seven
+        // NAMED slots (`intro`, `reel`, `heroClip`, …). Its two inputs are a
+        // `media_items.hlsPreviewKey` row and `R2_PUBLIC_URL_BASE`, worker env
+        // handed in by the route; neither is reachable from a section's props,
+        // and the route is keyed on `:courseId` alone. Every playable media in
+        // all eleven sections therefore arrives as `sellPreview.<named slot>`,
+        // never out of `props` — which is what `section-fields.ts`'s `mediaSlot`
+        // comment means by "a picker that wrote into `props` could never affect
+        // what renders", the decorative-control defect Codex-eqh0z fixed.
+        //
+        // So the work is a PROJECTION, not a migration: `CourseSellPreview` and
+        // its `render/types.ts` mirror need a shape that can carry N clips
+        // resolved from the page's own sections, and `getCourseSellPreview` needs
+        // the page (it is given only a course id today). Three packages, no DDL.
+        //
+        // AND WHOEVER BUILDS IT MUST CARRY THE ORG SCOPE ACROSS. Media ids are
+        // scoped by `assertMediaItemsInOrg`, whose own comment claims it "cannot
+        // be bypassed — the panel, the section inspector and any future picker
+        // all funnel through this one write". Props do NOT funnel through it:
+        // `saveJourneyPage` writes `sections` straight through and never calls
+        // it. Ids held in `props` are an unscoped media reference, so the
+        // resolver — not the editor — has to re-check ownership.
+        unavailable:
+          'Not built yet — needs three to five clips, and a journey supplies one',
       },
       {
         id: 'waveform',
@@ -563,7 +663,9 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
     type: 'guide',
     label: 'Your guide',
     summary: 'The guide bio, portrait and guide video.',
-    icon: '☺',
+    // Was '☺' U+263A — the one catalogue glyph Unicode classes as emoji-capable,
+    // so Apple platforms drew it in colour. U+25C9 carries no emoji presentation.
+    icon: '◉',
     keywords: ['guide', 'teacher', 'about', 'bio', 'host', 'facilitator'],
     variants: [
       {
@@ -1141,13 +1243,28 @@ export function firstSectionMatch(query: string): SectionDefinition | null {
  * variant + a clone of its default copy so the section renders populated the
  * moment it is added (the prototype's `DEFAULTS` behaviour). An unknown type
  * yields an empty, variant-less section (the renderer skips it).
+ *
+ * AND WITH A RHYTHM. A new section also arrives carrying the house per-type axis
+ * bag from {@link SECTION_DESIGN_BY_TYPE} — every axis where that type's rhythm
+ * differs from what the section would otherwise inherit, and nothing else. That
+ * is the whole of the fix for a page whose every section emitted byte-identical
+ * axis values; see `section-design-defaults.ts` for the measurement and the
+ * reasoning. It is a DEFAULT the creator can clear per axis in the inspector,
+ * never a lock — and no stored page is touched, because this runs at creation.
+ *
+ * `pageDesign` is the page's own look (`pending.design`), and passing it is what
+ * keeps the stored bag HONEST: an axis whose rhythm value equals the inherited
+ * value is dropped, so the inspector's "Inherited" pill still tells the truth.
+ * Omit it only where there is no page context (an unknown type, or a caller
+ * building a section outside a draft).
  */
 export function createSection(
   type: string,
-  makeId: () => string = () => crypto.randomUUID()
+  makeId: () => string = () => crypto.randomUUID(),
+  pageDesign?: SectionDesign | null
 ): PageSection {
   const def = findSectionDefinition(type);
-  return {
+  const section: PageSection = {
     id: makeId(),
     type,
     enabled: true,
@@ -1155,6 +1272,18 @@ export function createSection(
     name: def?.label,
     props: def ? structuredClone(def.defaultProps) : {},
   };
+  // The baseline is the RESOLVED look — page bag, then any retired-variant axes,
+  // then the axis defaults — computed by the one resolver the renderer uses, so
+  // "redundant" here means exactly what "Inherited" means in the inspector.
+  const inherited = resolveDesign(
+    { type, variant: section.variant },
+    { design: pageDesign ?? undefined }
+  );
+  const design = sectionDesignForType(type, inherited);
+  // Assigned only when non-empty: absence is how "inherited" is represented, and
+  // a `design: {}` would round-trip through the save as a key that says nothing.
+  if (design) section.design = design;
+  return section;
 }
 
 /**
@@ -1165,9 +1294,90 @@ export function createSection(
  *
  * `makeId` is injectable so tests get deterministic ids; it defaults to
  * `crypto.randomUUID` (available in the SvelteKit + Node runtimes).
+ *
+ * `pageDesign` is forwarded to {@link createSection}, so a default set arrives
+ * with the house rhythm already on it — which is the amendment-A21 requirement
+ * that page creation write an EXPLICIT design rather than relying on implicit
+ * axis defaults, satisfied per section instead of once per page.
  */
 export function createDefaultSections(
-  makeId: () => string = () => crypto.randomUUID()
+  makeId: () => string = () => crypto.randomUUID(),
+  pageDesign?: SectionDesign | null
 ): PageSection[] {
-  return SECTION_CATALOG.map((def) => createSection(def.type, makeId));
+  return SECTION_CATALOG.map((def) =>
+    createSection(def.type, makeId, pageDesign)
+  );
+}
+
+// ── Unauthored (seed) copy detection ─────────────────────────────────────────
+
+/** One section still holding catalogue seed copy, and which keys. */
+export interface SeededSection {
+  readonly id: string;
+  readonly type: string;
+  /** The catalogue label, for a message a creator can act on ("Proof, FAQ"). */
+  readonly label: string;
+  /** The prop keys whose value is still the catalogue's, in declaration order. */
+  readonly keys: readonly string[];
+}
+
+/**
+ * The sections of a draft that still hold the CATALOGUE'S OWN COPY, verbatim
+ * (Codex-maf0y).
+ *
+ * THE LEAK. `addSection(type)` seeds every new section from
+ * `def.defaultProps` — "A headline that names the promise", "A common question?",
+ * "First L.", "2,400 and counting" — and Save persists it. Nothing anywhere
+ * compares a section's props back against that seed, so a creator who adds a
+ * Proof section, never opens it, and publishes ships three invented testimonials
+ * and an invented "2,400 and counting" to a public sales page. That last one is
+ * not merely unpolished: it is a specific factual claim about the creator's
+ * business that the creator never made.
+ *
+ * WHY THIS AND NOT EMPTY DEFAULTS. Seeding nothing was considered and rejected in
+ * the bead: an empty block is near-invisible in the inline canvas, so a creator
+ * cannot see the section they just added, let alone click into it. The seed copy
+ * is good AUTHORING SCAFFOLDING and a bad PUBLISH payload — so the seed stays and
+ * the check moves to publish time.
+ *
+ * PURE, AND ADVISORY. It returns data; it decides nothing. The publish path turns
+ * this into ONE confirm naming the sections and proceeds on accept — a
+ * non-blocking warning, never a block, because "this copy is identical to the
+ * catalogue's" is a strong hint and not a certainty (a creator may legitimately
+ * want "Who holds this" as their guide heading).
+ *
+ * WHAT COUNTS, precisely:
+ *  - only keys the type's `defaultProps` actually seeds — an authored key the
+ *    catalogue knows nothing about is never suspect;
+ *  - only NON-EMPTY STRING seeds. `hero.accent`, `hero.quiet`, `hero.trust` and
+ *    `guide.quote` seed `''`; a section left at `''` has had nothing put in its
+ *    mouth, so it is not a placeholder leak. This is why the check is not simply
+ *    "props equals defaultProps".
+ *  - a strict `===` against the seed. One character of editing clears the key.
+ *
+ * An unknown/widened section type reports nothing: there is no catalogue seed to
+ * have leaked.
+ */
+export function seededSections(
+  sections: readonly Pick<PageSection, 'id' | 'type' | 'props'>[]
+): readonly SeededSection[] {
+  const found: SeededSection[] = [];
+  for (const section of sections) {
+    const def = findSectionDefinition(section.type);
+    if (!def) continue;
+    const keys = Object.keys(def.defaultProps).filter((key) => {
+      const seed = def.defaultProps[key];
+      if (typeof seed !== 'string' || seed.trim() === '') return false;
+      return section.props?.[key] === seed;
+    });
+    if (keys.length > 0) {
+      found.push({
+        id: section.id,
+        type: section.type,
+        label: def.label,
+        keys,
+      });
+    }
+  }
+  return found;
 }
