@@ -50,6 +50,7 @@
   import CtaLink from '../CtaLink.svelte';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
+  import { editFieldAttrs } from '../editable';
   import type {
     HeroSectionProps,
     JourneySalesContext,
@@ -374,28 +375,22 @@
   const motes = Array.from({ length: MOTE_COUNT });
 
   /**
-   * The inline-edit seam for the studio canvas (`editable` + `onEdit` on the shared
-   * props contract), as a spreadable attribute bag. Empty when `editable` is false,
-   * so the PUBLIC markup is byte-identical to having no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`, which was the canvas's
-   * primitive: that component renders an EMPTY element and lets a Svelte ACTION
-   * write `textContent`. Actions do not run during SSR, so on the public page it
-   * would serve `<h1></h1>` and fill the headline in only after hydration — an SEO
-   * hole in the most SEO-critical section on the page. The canvas never saw it
-   * because the studio is `ssr = false`. Here the text is a real child node, so it
-   * is in the served HTML, and `contenteditable` is layered on top for the canvas.
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('hero', key, editable, onEdit);
 
   let mounted = $state(false);
   let reduced = $state(false);

@@ -41,6 +41,22 @@ export {
   fieldString,
   SECTION_PROP_ALIASES,
 } from './coerce';
+/**
+ * THE STUDIO CANVAS'S INLINE-EDIT SEAM, built once for all eleven sections (F38).
+ *
+ * `editFieldLabel` / `editFieldName` are exported for a round-trip guard: the
+ * accessible names restate the editor's own field labels, and this module cannot
+ * import `components/page-builder/section-fields.ts` to derive them — that is the
+ * banned direction under the CE-4 boundary. The EDITOR side may import this tree,
+ * so a test in `components/page-builder/section-fields.test.ts` can pin the two
+ * vocabularies together. See the handoff.
+ */
+export {
+  type EditFieldCommit,
+  editFieldAttrs,
+  editFieldLabel,
+  editFieldName,
+} from './editable';
 export { default as JourneyRenderer } from './JourneyRenderer.svelte';
 /**
  * ONE section's wrapper + component invocation. Exported for the studio canvas,

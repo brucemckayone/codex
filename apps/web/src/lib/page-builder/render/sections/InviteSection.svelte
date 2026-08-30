@@ -99,6 +99,7 @@
   import CtaLink from '../CtaLink.svelte';
   import { aliasKeys, asString, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
+  import { editFieldAttrs } from '../editable';
   import type { JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -403,27 +404,22 @@
   });
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: that component renders an
-   * EMPTY element and fills `textContent` from a Svelte action, and actions do
-   * not run during SSR — so the public page would serve an empty heading and
-   * paint the text in only after hydration. The canvas never noticed because the
-   * studio is `ssr = false`. Here the text is a real child node, so it is in the
-   * served HTML and `contenteditable` is layered on top (pilot lesson 9).
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('invite', key, editable, onEdit);
 </script>
 
 {#snippet badge()}

@@ -299,6 +299,30 @@
   let previewMode = $state(false);
   let saving = $state(false);
 
+  /**
+   * The canvas's "« Sections" toggle.
+   *
+   * IT STAYS VISIBLE IN THE FIVE SETTINGS MODES, where the rail does not exist at
+   * all (`{#if mode === 'design'}` in the shell below), so pressing it there used
+   * to do nothing — the same dead-control shape as a decorative input. It now
+   * switches BACK to Design and shows the rail, which is what a press of a button
+   * labelled "Sections" should mean in every mode. Hiding the button outside
+   * Design was the alternative, but it lives in `JourneyBuilderCanvas`, and a
+   * control that takes you to its own surface is more use than one that vanishes.
+   *
+   * It matters more below lg than above it: there the rail is a BAND in a stack
+   * rather than a column, so this is the only way to collapse it and hand the
+   * height back to the canvas.
+   */
+  function toggleRail(): void {
+    if (mode !== 'design') {
+      mode = 'design';
+      railCollapsed = false;
+      return;
+    }
+    railCollapsed = !railCollapsed;
+  }
+
   // `label` is a THUNK, not a string: these tables live at module scope, and a
   // message read there would resolve once, before the request's language tag is
   // set. Called at render, each one resolves per request.
@@ -821,8 +845,22 @@
 <svelte:window onkeydown={onWindowKeydown} />
 
 {#if pageBuilder.isOpen && pending}
+  <!--
+    `data-studio-fullbleed` is the OPT-IN the studio shell honours (see
+    `studio/+layout.svelte`): it drops the shell's content cap and its padding for
+    this route only. Every one of this route's four tails carries it, because all
+    four are `100dvh` surfaces — and a `100dvh` child of a padded container
+    overflows by twice the padding (measured: document scrollHeight 948 against
+    clientHeight 900 at 1440x900, so the bottom of all three panes sat below the
+    fold and the studio grew a scrollbar it should never have).
+
+    It is an ATTRIBUTE ON THIS ELEMENT rather than a rule in the shell keyed on
+    the pathname, so the shell needs no knowledge of which routes are full-bleed
+    and no other studio page changes.
+  -->
   <div
     class="jb"
+    data-studio-fullbleed
     data-mode={mode}
     class:jb--preview={previewMode}
     class:jb--rail-collapsed={railCollapsed}
@@ -1005,7 +1043,7 @@
           editable={!previewMode}
           {device}
           {railCollapsed}
-          onToggleRail={() => (railCollapsed = !railCollapsed)}
+          onToggleRail={toggleRail}
           {slug}
           {orgDomain}
           {stages}
@@ -1035,7 +1073,7 @@
     spinner was not. `role="alert"` because the surface has no other content to
     read, so the failure must be announced rather than only painted.
   -->
-  <div class="jb-empty" role="alert">
+  <div class="jb-empty" role="alert" data-studio-fullbleed>
     <p class="jb-empty__title">{m.studio_builder_error_title()}</p>
     <p class="jb-empty__body">{draftError}</p>
     <div class="jb-empty__acts">
@@ -1052,7 +1090,7 @@
     takes the PORTAL page id, not the course id, and the two are interchangeable to
     the eye.
   -->
-  <div class="jb-empty">
+  <div class="jb-empty" data-studio-fullbleed>
     <p class="jb-empty__title">{m.studio_builder_missing_title()}</p>
     <p class="jb-empty__body">
       {m.studio_builder_missing_body()}
@@ -1062,7 +1100,7 @@
     </div>
   </div>
 {:else}
-  <div class="jb-loading" aria-busy="true"><p>{m.studio_builder_loading()}</p></div>
+  <div class="jb-loading" aria-busy="true" data-studio-fullbleed><p>{m.studio_builder_loading()}</p></div>
 {/if}
 
 <style>
@@ -1071,6 +1109,26 @@
     track is sized to its item's max-content, so the top bar's min-content width
     would push the whole workspace wider than the viewport and give the page a
     horizontal scrollbar. Capping the track lets the bar wrap instead.
+  */
+  /*
+    `100dvh` STAYS, and `height: 100%` was tried and rejected — worth recording,
+    because "take the shell's row instead of guessing the viewport" is the obvious
+    fix for F37 and it does not work here. Measured: `.org-main` between the org
+    layout and the studio layout is a plain block with auto height, so
+    `.studio-layout` carries `min-height: 100vh` and NO definite height; its `1fr`
+    row therefore sizes to content, the studio column's row does too, and a child
+    asking for `100%` is asking a circular question. The result was the whole
+    workspace growing to its content — `.jb` 3532px tall at a 900px viewport, with
+    every pane's internal scroll gone.
+
+    So the viewport unit is the honest answer for a surface whose ancestors hand it
+    no definite height, and what F37 was actually about is the INSET: the shell
+    padded this route by `--space-6` on every side, so a `100dvh` child overflowed
+    its own container by 48px (measured, document scrollHeight 948 against
+    clientHeight 900 at 1440x900) and the bottom of all three panes sat below the
+    fold. That is what the `data-studio-fullbleed` opt-in on the element above
+    removes. Making `100%` work would mean giving `.org-main` a definite height,
+    which is a different file and a wider blast radius.
   */
   .jb {
     display: grid;
@@ -1516,7 +1574,55 @@
     background-color: var(--color-surface-secondary);
   }
 
+  /*
+    ── below lg: three columns become one stack, and every panel stays reachable ──
+
+    THIS BLOCK USED TO BE `display: none` ON ALL THREE PANELS while the six mode
+    tabs stayed enabled. Measured at 834x1112 and at 390x844: pressing "Pricing"
+    flipped `aria-pressed` and `data-mode`, and the panel it selects measured 0x0
+    — no panel, no message, no hint that the surface exists on a wider screen.
+    Same for Look, Media, Brand, SEO, and for the whole section inspector in
+    Design mode. A control that accepts the press and does nothing is the exact
+    shape three rounds of this effort removed from the public page.
+
+    THE TARGET IS MADE REACHABLE RATHER THAN THE TABS DISABLED, because the
+    canvas is already honest at these widths: it renders the chosen device's real
+    width and states its own scale ("Tablet · 834px · 94%"), so at 834 and at 390
+    the preview is near 1:1 and genuinely editable. The only thing missing was
+    somewhere to put the panels. One code path, no mobile-only component: the
+    same `<aside>` elements, restacked.
+
+    THE ORDER IS PANELS-THEN-CANVAS, and that is the whole point. The canvas sits
+    between the two Design-mode panels in DOM order (outline · canvas ·
+    inspector), which is the right three-COLUMN order and the wrong stacking
+    order: the inspector would land under a 70dvh canvas and a tab press would
+    still look inert until you scrolled. `order` on the canvas keeps every
+    control contiguous under the tabs, so pressing a tab reveals its panel with
+    no scrolling at all — which is the defect being repaired.
+  */
   @media (--below-lg) {
+    /*
+      THE WINDOW BECOMES THE SCROLLER, because the stack is taller than one screen
+      by design: a panel band, then the canvas. A fixed `100dvh` here would cap the
+      stack at one viewport and clip the canvas off the bottom of it, so the height
+      is released and the floor kept — the floor is what stops a short draft (two
+      sections, Brand mode) floating in a part-painted surface.
+
+      THE ONE THING THIS CANNOT FIX FROM INSIDE THE ROUTE: below lg the shell puts
+      its own mobile top bar (65px measured) above this route, so `100dvh` is 65px
+      more than the room there is, and a page SHORTER than the viewport carries a
+      65px tail of scroll. Every real draft measured here is far taller than one
+      viewport, so it shows only on the loading and not-found tails. Fixing it
+      exactly needs the shell to hand over a definite row, which needs a definite
+      height on `.org-main` — see the note on `.jb` above.
+    */
+    .jb,
+    .jb-loading,
+    .jb-empty {
+      height: auto;
+      min-height: 100dvh;
+    }
+
     .jb__shell,
     .jb[data-mode='look'] .jb__shell,
     .jb[data-mode='pricing'] .jb__shell,
@@ -1526,10 +1632,58 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
+    /*
+      Bands in a stack, not columns. Two changes only:
+
+      · A HEIGHT CAP, because the shell's rows are now content-sized. The panels
+        already scroll themselves (`overflow-y: auto` above, unchanged — so a band
+        behaves exactly like the column it replaces), but with nothing to size
+        against, an uncapped band grows and pushes the canvas out of reach:
+        measured at 834 in Design mode with the hero selected, the inspector alone
+        was 3146px tall and put the canvas 3649px down the page. Capped, the
+        canvas is always about one screen below the tabs, whichever panel is open.
+      · ONE BOTTOM EDGE, because a `border-right` on a full-width band is a
+        hairline down the middle of nothing.
+    */
     .jb__outline,
     .jb__settings,
     .jb__inspector {
-      display: none;
+      max-height: 60dvh;
+      border-inline: 0;
+      border-bottom: var(--border-width) var(--border-style) var(--color-border);
+    }
+
+    /*
+      Last in the stack, and with a DEFINITE height. `.jbc__stage` inside the
+      canvas is `overflow: auto`, which only scrolls against a definite height —
+      without one the band grows to the full scaled page (at 834/tablet, 94% of a
+      several-thousand-pixel sales page) and takes the window's scroll with it.
+    */
+    .jb__canvas {
+      order: 3;
+      height: 70dvh;
+    }
+
+    /* Full-width preview has no panel band to share the stack with, so the canvas
+       takes the viewport. `dvh` and not `100%` here on purpose: `.jb` is
+       `height: auto` in this block, so a percentage has nothing definite to
+       resolve against and would collapse to the content height. */
+    .jb--preview .jb__canvas {
+      height: 100dvh;
+    }
+
+    /*
+      Six tabs do not fit 390px: measured scrollWidth 466 against clientWidth
+      358, inside a studio column that is `overflow-x: clip`, so Brand was cut
+      mid-word and SEO could not be pressed at all. They wrap instead. `height`
+      must become `min-height` with it — a fixed height clips the second row,
+      which is the mistake `.jb__top`'s own comment records.
+    */
+    .jb__modes {
+      flex-wrap: wrap;
+      height: auto;
+      min-height: var(--space-11, 2.75rem);
+      padding: var(--space-1) var(--space-3);
     }
   }
 </style>

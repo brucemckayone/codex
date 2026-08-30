@@ -76,6 +76,7 @@
   import * as m from '$paraglide/messages';
   import { reveal } from '../reveal';
   import { aliasKeys, asString, asStringArray, asStringFrom } from '../coerce';
+  import { editFieldAttrs } from '../editable';
   import type { Snippet } from 'svelte';
   import type {
     ReelSectionProps,
@@ -306,23 +307,22 @@
   };
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all. DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it fills
-   * `textContent` from a Svelte action and actions do not run during SSR, so the
-   * public page would serve an empty heading and paint it in after hydration
-   * (pilot lesson 9). Here the text is a real child node.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
+   *
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('reel', key, editable, onEdit);
 
   onMount(() => {
     mounted = true;
