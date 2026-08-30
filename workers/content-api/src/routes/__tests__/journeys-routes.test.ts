@@ -69,9 +69,36 @@ vi.mock('@codex/access', async (importOriginal) => {
   };
 });
 
-// Import routes AFTER the mock so the real registry resolves the mocked classes.
+/**
+ * Route modules — two kinds, one block, because biome's `organizeImports` sorts
+ * the whole run alphabetically and would orphan a comment attached to half of
+ * it. Both kinds sit BELOW the `vi.mock` above (biome never moves an import
+ * across a statement), which is what makes the real service registry resolve
+ * the mocked `@codex/access` classes.
+ *
+ * `../x` — the mounted Hono routers this file drives via `app.fetch`.
+ *
+ * `../x.ts?raw` — the SAME files imported as TEXT with Vite's `?raw` (inlined at
+ * build time, so it works under workerd where there is no `node:fs`; the same
+ * technique the denoise proofs in workers/organization-api use). Never executed.
+ * They exist so the carve-out guard at the bottom of this file can DISCOVER
+ * which routes declare `variesBySession: false` instead of trusting a
+ * hand-written list that only ever describes the day it was written. One per
+ * `app.route(...)` in `src/index.ts`; the helper modules (`journeys-cache.ts`,
+ * `public-cache.ts`, `category-space.ts`, `category-cover-url.ts`,
+ * `content-cleanup.ts`) are excluded deliberately — they register no routes, so
+ * they can hold no policy.
+ */
+import workerIndexSrc from '../../index.ts?raw';
+import categoriesSrc from '../categories.ts?raw';
+import contentSrc from '../content.ts?raw';
 import contentAccess from '../content-access';
+import contentAccessSrc from '../content-access.ts?raw';
+import journeyInsightsSrc from '../journey-insights.ts?raw';
 import journeys from '../journeys';
+import journeysSrc from '../journeys.ts?raw';
+import mediaSrc from '../media.ts?raw';
+import publicSrc from '../public.ts?raw';
 
 // ─── Fixtures (valid RFC4122 v4 UUIDs so uuidSchema accepts them) ─────────────
 
@@ -284,12 +311,22 @@ function buildApp(user: Record<string, unknown> | null) {
   return app;
 }
 
+/**
+ * Drive one request against a mounted app.
+ *
+ * `envOverride` exists for the carve-out guard at the bottom of this file, which
+ * has to take `CACHE_KV` AWAY: both carve-out routes are KV cache-aside, so with
+ * the binding present the second of two identical requests is served from the
+ * data slot and the two bodies match BY CONSTRUCTION, whatever the handler did
+ * with the session. Every other caller keeps the real Miniflare binding.
+ */
 async function dispatch(
   app: ReturnType<typeof buildApp>,
-  req: Request
+  req: Request,
+  envOverride: typeof env = testEnv
 ): Promise<Response> {
   const ec = createExecutionContext();
-  const res = await app.fetch(req, testEnv, ec);
+  const res = await app.fetch(req, envOverride, ec);
   await waitOnExecutionContext(ec);
   return res;
 }
@@ -627,8 +664,28 @@ describe('portal public reads — KV cache-aside through the real route', () => 
   });
 });
 
-describe('portal CDN headers — allow-list enforced by the middleware', () => {
-  it('the two public reads carry a shared-cache header', async () => {
+/**
+ * Cache-Control per route (Codex-1j5fw).
+ *
+ * These assertions used to cover a router-wide `app.use('*')` gated by an
+ * exact-path allow-list (`isPublicPortalRead`). Both are gone: each route
+ * declares `policy.cache` (+ `variesBySession` for the two public ones) and
+ * `procedure()` emits `CACHE_PRESETS[…]`. The header values are pinned as exact
+ * strings on purpose — a preset drifting to carry an `s-maxage` on a per-viewer
+ * body is the leak this whole vocabulary exists to prevent, and only a
+ * whole-string assertion catches a widening.
+ *
+ * NOT-VACUOUS DISCIPLINE: every `.not.toContain('public')` below is paired with
+ * a `toBe('private, no-cache')` on the same response. A negative assertion
+ * against a header that turns out to be ABSENT passes for the wrong reason —
+ * which is exactly what these two guards were doing before `procedure()` emitted
+ * a default, when the value they tested was the empty string.
+ */
+describe('Cache-Control per route — declared on the policy, emitted by procedure()', () => {
+  const PUBLIC_60 = 'public, max-age=60, s-maxage=60';
+  const PRIVATE = 'private, no-cache';
+
+  it('the two portal reads that were allow-listed still carry the shared-cache header', async () => {
     const courses = await dispatch(
       buildApp(USER),
       getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
@@ -638,19 +695,68 @@ describe('portal CDN headers — allow-list enforced by the middleware', () => {
       getReq(`/api/journeys/published?organizationId=${ORG_ID}&limit=12`)
     );
 
-    expect(courses.headers.get('Cache-Control')).toBe(
-      'public, max-age=60, s-maxage=60'
+    expect(courses.headers.get('Cache-Control')).toBe(PUBLIC_60);
+    expect(published.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it('a public read carries the shared-cache header for an ANONYMOUS caller too', async () => {
+    // WHAT THIS PROVES, EXACTLY: `procedure()` emits the declared preset on the
+    // ANONYMOUS branch of `auth: 'optional'` as well as the resolved-session
+    // branch. That is a real property — the two branches take different paths
+    // through `authenticateSession()`, and an implementation that stamped the
+    // header only after resolving a user would fail here.
+    //
+    // WHAT IT DOES NOT PROVE, AND USED TO CLAIM IT DID. This assertion once
+    // carried a comment saying it showed `variesBySession: false` — that the
+    // BODY ignores the session. It cannot: the header is emitted from a
+    // compile-time-constant policy (`CACHE_PRESETS[policy.cache]`), so it is
+    // incapable of varying by session and the comparison was a tautology.
+    // Injecting `if (!ctx.user) return [];` into the `/published` handler made
+    // the BODY differ between an anonymous and a signed-in caller while the
+    // policy still declared it did not, and this file stayed green. The claim
+    // now lives in "the `variesBySession: false` carve-out" block below, where
+    // it is asserted on the response BYTES.
+    const anon = await dispatch(
+      buildApp(null),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
     );
-    expect(published.headers.get('Cache-Control')).toBe(
-      'public, max-age=60, s-maxage=60'
-    );
+
+    expect(anon.status).toBe(200);
+    expect(anon.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it.each([
+    [
+      '/courses/by-slug',
+      `/api/journeys/courses/by-slug?organizationId=${ORG_ID}&slug=${SLUG}`,
+    ],
+    [
+      '/content/:contentId/courses',
+      `/api/journeys/content/${CONTENT_ID}/courses`,
+    ],
+    [
+      '/pages/by-slug',
+      `/api/journeys/pages/by-slug?organizationId=${ORG_ID}&slug=${SLUG}`,
+    ],
+    [
+      '/courses/:courseId/sell-preview',
+      `/api/journeys/courses/${COURSE_ID}/sell-preview`,
+    ],
+  ])('the auth:optional read %s was never allow-listed and stays out of shared caches', async (_name, path) => {
+    const res = await dispatch(buildApp(USER), getReq(path));
+
+    expect(res.status).toBe(200);
+    // Pinned so a future widening to `cache: 'public'` on one of these is a
+    // deliberate act with a red test attached, not a silent side effect.
+    expect(res.headers.get('Cache-Control')).toBe(PRIVATE);
   });
 
   it('CACHE POISONING GUARD: the per-user enrolled shelf is NEVER publicly cacheable', async () => {
     // `/enrolled` is auth:'required' and its body varies by session, while shared
     // caches key by URL and NOT by Cookie. If this response ever carried
     // `public, max-age=...`, the first member's shelf would be served to every
-    // subsequent visitor to the same URL.
+    // subsequent visitor to the same URL. The type rule now makes `cache:
+    // 'public'` here a COMPILE error; this is the runtime half of that guard.
     journeySpies.listEnrolledJourneys.mockResolvedValue([]);
     const res = await dispatch(
       buildApp(USER),
@@ -658,19 +764,398 @@ describe('portal CDN headers — allow-list enforced by the middleware', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe(PRIVATE);
     expect(res.headers.get('Cache-Control') ?? '').not.toContain('public');
   });
 
   it('CACHE POISONING GUARD: an entitlement-gated course read is not publicly cacheable', async () => {
-    // Shares the `/courses` prefix with the public list, which is exactly why the
-    // middleware matches an exact-path allow-list rather than `/courses/*`.
+    // Shares the `/courses` prefix with the public list. Under the old
+    // middleware that mattered because a `/courses/*` pattern would have caught
+    // it; now the two routes simply declare different presets, and no pattern
+    // can reach across them.
     journeySpies.getCourseDashboard.mockResolvedValue(null);
     const res = await dispatch(
       buildApp(USER),
       getReq(`/api/journeys/courses/${COURSE_ID}/dashboard`)
     );
 
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe(PRIVATE);
     expect(res.headers.get('Cache-Control') ?? '').not.toContain('public');
+  });
+
+  it('NO s-maxage on a validation FAILURE for an allow-listed public path', async () => {
+    // The deleted middleware gated on `c.req.path` and ran AFTER `await next()`,
+    // so it stamped the shared-cache header on this route's 400s and 429s too —
+    // an edge-cached rate-limit or validation error is a 60-second outage for
+    // that URL, reachable by anyone since `organizationId` is caller-supplied.
+    // `procedure()` emits the preset on the SUCCESS path only. Verified by
+    // reinstating the old middleware, which turns this red.
+    const res = await dispatch(
+      buildApp(null),
+      getReq('/api/journeys/published?organizationId=not-a-uuid')
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('Cache-Control') ?? '').not.toContain('s-maxage');
+  });
+
+  it('FAILS CLOSED: an undeclared auth:required read is private, not header-less', async () => {
+    // The property the deleted allow-list provided ("a route added later carries
+    // no public header until someone adds it deliberately") is now the
+    // framework's: `resolveCacheControl` defaults an undeclared policy to
+    // `private`. `/user/enrollments` declares no `cache` at all, and it is the
+    // member's OWN enrollment shelf — the body a shared cache must never reuse.
+    // Asserted by VALUE, because a header-less response would also satisfy a
+    // `.not.toContain('public')` check and prove nothing.
+    journeySpies.listEnrolledCourses.mockResolvedValue([]);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/user/enrollments?organizationId=${ORG_ID}`)
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe(PRIVATE);
+  });
+});
+
+/**
+ * The `variesBySession: false` carve-out, asserted on the BODY.
+ *
+ * WHY A SECOND BLOCK. Everything above tests HEADERS. `procedure()` emits the
+ * header from a compile-time-constant policy — `CACHE_PRESETS[policy.cache]` —
+ * so no header assertion can ever fail for the reason `variesBySession: false`
+ * exists. PROVEN, not reasoned: injecting `if (!ctx.user) return [];` at the top
+ * of the `/published` handler makes the BODY differ between an anonymous and a
+ * signed-in caller while the policy still declares it does not, and the header
+ * block above stays green.
+ *
+ * WHAT THE DECLARATION ACTUALLY PROMISES. `CACHE_PRESETS.public` carries
+ * `s-maxage=60`, and a shared cache keys on the URL and NEVER on Cookie. So
+ * `variesBySession: false` is a promise about BYTES: for one URL, every viewer
+ * gets the same body, and whichever viewer arrives first may have theirs served
+ * to all the others for the next 60 seconds. These are the only two routes in
+ * the repo where a shared window sits on a route that RESOLVES A SESSION, so
+ * they are the only two where the promise can be broken.
+ *
+ * WHY `CACHE_KV` IS TAKEN AWAY. Both routes are KV cache-aside. Left in place,
+ * the first request populates the data slot and the rest are served from it —
+ * byte-identical whatever the handler does with the session, and the comparison
+ * would be vacuous again for a new reason. The handler's own
+ * `if (!ctx.env.CACHE_KV) return fetchX()` branch is the seam that puts every
+ * request back through the handler.
+ *
+ * WHY THE ROUTE SET IS DERIVED FROM SOURCE. A list covers today's two routes and
+ * silently misses the third. `carveOutRoutesIn` reads every mounted route
+ * module's TEXT and names each route declaring the carve-out; TOTALITY below
+ * asserts the derived set EQUALS the covered set in both directions, so adding
+ * `variesBySession: false` anywhere in this worker turns this file red until a
+ * request URL is supplied for it, and deleting one turns it red until the stale
+ * entry goes. This file owns that guard for the whole worker, not just journeys.
+ */
+
+/** A route registration at column 0 — `app.get(\n  '/path',` and friends. */
+const ROUTE_REGISTRATION =
+  /^app\.(?:get|post|put|patch|delete|all)\(\s*(['"`])([^'"`\n]*)\1/gm;
+
+/**
+ * A carve-out DECLARATION, matched code-shaped: the line is whitespace, then the
+ * property, then an OPTIONAL trailing comment. Prose mentions of the phrase are
+ * indented `* ` inside a JSDoc block, and `*` is not whitespace, so a docstring
+ * can never register coverage it does not have — journeys.ts has three such
+ * prose mentions today and none of them matches.
+ *
+ * THE TRAILING-COMMENT ALTERNATION IS NOT DECORATION. Without it this pattern
+ * required end-of-line right after the comma, and `variesBySession: false, //
+ * the handler never reads ctx.user` — the house style two lines up in every one
+ * of these policies is `rateLimit: 'api', // 100 req/min` — was INVISIBLE. That
+ * is fail-OPEN: the route would carry a shared 60s window with TOTALITY below
+ * still reporting full coverage. Found by mutation, not by reading: adding a
+ * carve-out with a trailing comment to `/courses/by-slug` left this file 66/66
+ * green. The control test below now pins the trailing-comment form.
+ */
+const CARVE_OUT_DECLARATION =
+  /^[ \t]*variesBySession:\s*false\s*,?[ \t]*(?:\/\/[^\n]*|\/\*[^\n]*\*\/[ \t]*)?$/gm;
+
+/**
+ * Name every route in one module that declares the carve-out, as
+ * `"<file> <router-relative path>"`.
+ *
+ * Attribution is "nearest column-0 registration ABOVE the declaration". If a
+ * route were ever registered indented (inside a helper), attribution would name
+ * the wrong path or none — and TOTALITY would then fail on set equality rather
+ * than pass, so the guard degrades closed.
+ */
+function carveOutRoutesIn(file: string, src: string): string[] {
+  const registrations = [...src.matchAll(ROUTE_REGISTRATION)].map((m) => ({
+    at: m.index ?? 0,
+    path: m[2] ?? '',
+  }));
+  return [...src.matchAll(CARVE_OUT_DECLARATION)].map((m) => {
+    const at = m.index ?? 0;
+    let owner: string | null = null;
+    for (const r of registrations) if (r.at < at) owner = r.path;
+    return `${file} ${owner ?? `<unattributed@${at}>`}`;
+  });
+}
+
+/**
+ * The route modules whose text is scanned. Hand-written — `?raw` specifiers must
+ * be static for Vite to inline them, so this list cannot be built at runtime.
+ *
+ * It is therefore the LAST convention in the chain, and the test below removes
+ * it as one: `mountedModulesIn(workerIndexSrc)` reads `src/index.ts` and names
+ * every module actually reached by an `app.route(...)`, and the keys here must
+ * equal that. Mount a new router with a carve-out in it and this file goes red
+ * pointing at the module it cannot see, instead of quietly not scanning it.
+ */
+const MOUNTED_ROUTE_SOURCES: ReadonlyArray<readonly [string, string]> = [
+  ['public.ts', publicSrc],
+  ['content.ts', contentSrc],
+  ['categories.ts', categoriesSrc],
+  ['media.ts', mediaSrc],
+  ['content-access.ts', contentAccessSrc],
+  ['journey-insights.ts', journeyInsightsSrc],
+  ['journeys.ts', journeysSrc],
+];
+
+/**
+ * Name every `./routes/*` module that `src/index.ts` actually MOUNTS, as
+ * `"<file>.ts"`.
+ *
+ * Two steps, because `app.route()` takes the local binding, not the path:
+ * collect `import <ident> from './routes/<name>'`, then keep the ones an
+ * `app.route('<prefix>', <ident>)` names. An imported-but-never-mounted module
+ * is correctly excluded (it registers no reachable route); a mounted module with
+ * no matching import is impossible.
+ */
+function mountedModulesIn(src: string): string[] {
+  const byIdent = new Map<string, string>();
+  for (const m of src.matchAll(
+    /^import\s+(\w+)\s+from\s+'\.\/routes\/([\w-]+)';/gm
+  )) {
+    byIdent.set(m[1] ?? '', `${m[2] ?? ''}.ts`);
+  }
+  const mounted = new Set<string>();
+  for (const m of src.matchAll(/^app\.route\(\s*'[^']*'\s*,\s*(\w+)\s*\)/gm)) {
+    const file = byIdent.get(m[1] ?? '');
+    if (file) mounted.add(file);
+  }
+  return [...mounted];
+}
+
+describe('variesBySession: false — the carve-out asserted on the response BYTES', () => {
+  // The env WITHOUT the cache-aside binding — see the block docstring.
+  const NO_KV_ENV = {
+    ...testEnv,
+    CACHE_KV: undefined,
+  } as unknown as typeof env;
+
+  /**
+   * Three callers that differ in every way a handler could observe: no session
+   * at all; the member the rest of this file uses; and a different user id with
+   * a different platform role. `ctx.user` / `ctx.session` are the entire
+   * session-derived surface these two handlers can reach.
+   */
+  const OTHER_USER = {
+    id: '9b2e1f3a-4c5d-4e6f-8071-223344556677',
+    email: 'admin@test.com',
+    role: 'admin',
+  };
+  const CALLERS: ReadonlyArray<readonly [string, typeof USER | null]> = [
+    ['anonymous', null],
+    ['session USER (creator)', USER],
+    ['session OTHER_USER (admin, different id)', OTHER_USER],
+  ];
+
+  /**
+   * A NON-EMPTY projection for both routes.
+   *
+   * This is load-bearing, not fixture noise. The top-level `beforeEach` primes
+   * `listPublishedJourneys` with `[]`, and `[]` is also exactly what an
+   * `if (!ctx.user) return []` leak returns — so under the default fixture the
+   * leak and the truth serialise to the same bytes and a byte comparison proves
+   * nothing. The non-vacuity assertion in the body test below pins that: the
+   * compared bodies must actually carry a row before their equality means
+   * anything.
+   */
+  const CARVE_OUT_JOURNEY_CARDS = [
+    {
+      id: COURSE_ID,
+      slug: SLUG,
+      title: 'Rootwork',
+      kicker: 'A guided five-practice descent',
+      coverImageUrl: `${R2_PUBLIC_URL_BASE}/covers/rootwork/md.webp`,
+      priceCents: 4900,
+      stageCount: 5,
+    },
+  ];
+
+  /**
+   * Request URL + the service spy each carve-out route calls, keyed by the name
+   * `carveOutRoutesIn` derives. The keys are the coverage claim TOTALITY checks.
+   */
+  const CARVE_OUT_REQUESTS: Record<
+    string,
+    { path: string; spy: ReturnType<typeof vi.fn> }
+  > = {
+    'journeys.ts /courses': {
+      path: `/api/journeys/courses?organizationId=${ORG_ID}`,
+      spy: journeySpies.listPublishedCourses,
+    },
+    'journeys.ts /published': {
+      path: `/api/journeys/published?organizationId=${ORG_ID}&limit=12`,
+      spy: journeySpies.listPublishedJourneys,
+    },
+  };
+
+  beforeEach(() => {
+    journeySpies.listPublishedCourses.mockResolvedValue(COURSE_CARDS);
+    journeySpies.listPublishedJourneys.mockResolvedValue(
+      CARVE_OUT_JOURNEY_CARDS
+    );
+  });
+
+  it('EXTRACTOR CONTROL: finds a code-shaped declaration, ignores a prose one', () => {
+    // A positive and a negative control on the discovery mechanism itself. A
+    // silently-broken extractor returns `[]`, which would make TOTALITY's "every
+    // declared route is covered" direction vacuously true; set EQUALITY is what
+    // catches that, and this test is what says why it broke.
+    const synthetic = [
+      '/**',
+      ' * A docstring mentioning variesBySession: false inline.',
+      ' */',
+      'app.get(',
+      "  '/decoy',",
+      "  procedure({ policy: { auth: 'optional', cache: 'private' } })",
+      ');',
+      'app.get(',
+      "  '/real',",
+      '  procedure({',
+      '    policy: {',
+      "      auth: 'optional',",
+      "      cache: 'public',",
+      '      variesBySession: false,',
+      '    },',
+      '  })',
+      ');',
+      'app.get(',
+      "  '/real-with-trailing-comment',",
+      '  procedure({',
+      '    policy: {',
+      "      auth: 'optional',",
+      "      cache: 'public',",
+      '      variesBySession: false, // the handler never reads ctx.user',
+      '    },',
+      '  })',
+      ');',
+      '// A line comment mentioning variesBySession: false.',
+    ].join('\n');
+
+    // Three decoys, one per way the phrase appears WITHOUT being a declaration
+    // (JSDoc prose, a `//` line comment, a route that simply does not declare
+    // it) and two real forms, including the trailing-comment form that a
+    // mutation caught this pattern missing.
+    expect(carveOutRoutesIn('synthetic.ts', synthetic)).toEqual([
+      'synthetic.ts /real',
+      'synthetic.ts /real-with-trailing-comment',
+    ]);
+    // And the real files agree with the eyeball: journeys.ts holds both, and it
+    // holds them despite three prose mentions of the same phrase.
+    expect(carveOutRoutesIn('journeys.ts', journeysSrc)).toEqual([
+      'journeys.ts /courses',
+      'journeys.ts /published',
+    ]);
+  });
+
+  it('SCAN COVERAGE: every route module src/index.ts mounts is one this file scans', () => {
+    // Without this, TOTALITY below is only total over the modules someone
+    // remembered to add to MOUNTED_ROUTE_SOURCES — a list that looks complete
+    // whether or not it is. Derived from index.ts, so mounting a new router is
+    // what turns it red.
+    expect(mountedModulesIn(workerIndexSrc).sort()).toEqual(
+      MOUNTED_ROUTE_SOURCES.map(([file]) => file).sort()
+    );
+  });
+
+  it('TOTALITY: every carve-out route in this worker has a body-invariance case here', () => {
+    const declared = MOUNTED_ROUTE_SOURCES.flatMap(([file, src]) =>
+      carveOutRoutesIn(file, src)
+    ).sort();
+    const covered = Object.keys(CARVE_OUT_REQUESTS).sort();
+
+    // EQUALITY, both directions. `declared ⊄ covered` = a route earned a shared
+    // 60s window with nothing proving its body ignores the session. `covered ⊄
+    // declared` = this file claims to guard a route that no longer declares the
+    // carve-out, i.e. a stale promise.
+    expect(declared).toEqual(covered);
+  });
+
+  it.each(
+    Object.entries(CARVE_OUT_REQUESTS)
+  )('%s: three different callers get BYTE-IDENTICAL bodies for one URL', async (name, {
+    path,
+  }) => {
+    const bodies: Array<[string, string]> = [];
+    for (const [who, caller] of CALLERS) {
+      const res = await dispatch(buildApp(caller), getReq(path), NO_KV_ENV);
+      expect(res.status, `${name} · ${who}`).toBe(200);
+      bodies.push([who, await res.text()]);
+    }
+
+    const [[baselineWho, baseline], ...rest] = bodies as [
+      [string, string],
+      ...Array<[string, string]>,
+    ];
+
+    // THE CLAIM, asserted before the non-vacuity guard below so that a real
+    // leak reports as "the bodies differ" rather than as "the baseline was
+    // empty" — a leak makes ONE of these bodies empty, and whichever caller
+    // happens to be the baseline should not decide which message a reviewer
+    // reads.
+    for (const [who, body] of rest) {
+      expect(
+        body,
+        `${name}: the body served to "${who}" differs from "${baselineWho}" — ` +
+          'a shared cache keys on URL and NOT on Cookie, so whichever of ' +
+          'these arrives first would be served to the other for 60s'
+      ).toBe(baseline);
+    }
+
+    // NON-VACUITY, and it has to come from the SAME dispatches the equality
+    // above compared. An all-empty envelope is byte-identical under a leak
+    // too, so equality alone can pass for the wrong reason. Equality is
+    // already proven here, so pinning the baseline pins all three.
+    expect(
+      baseline,
+      `${name}: every caller got an EMPTY body, so the equality above proved ` +
+        'nothing — the fixture stopped returning rows'
+    ).toContain(COURSE_ID);
+  });
+
+  it.each(
+    Object.entries(CARVE_OUT_REQUESTS)
+  )('%s: the service sees identical arguments from every caller — nothing session-derived reaches it', async (name, {
+    path,
+    spy,
+  }) => {
+    for (const [, caller] of CALLERS) {
+      await dispatch(buildApp(caller), getReq(path), NO_KV_ENV);
+    }
+
+    // Body equality alone cannot see this: the service is a spy returning a
+    // constant, so a handler that forwarded `ctx.user.id` into the query would
+    // still hand back identical bytes HERE while returning per-viewer rows in
+    // production. Arity/argument invariance is the half that catches it.
+    const calls = spy.mock.calls.map((args) => JSON.stringify(args));
+    expect(calls, `${name}: one service call per caller`).toHaveLength(
+      CALLERS.length
+    );
+    expect(
+      new Set(calls).size,
+      `${name}: the service was called with more than one argument list — ` +
+        `a session-derived value reached it (${calls.join(' | ')})`
+    ).toBe(1);
   });
 });
 

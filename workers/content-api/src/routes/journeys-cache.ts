@@ -38,48 +38,28 @@ import type { HonoEnv } from '@codex/shared-types';
  */
 export const PUBLIC_JOURNEYS_CACHE_TTL = 300;
 
-/**
- * `Cache-Control` for the PUBLIC portal reads.
+/*
+ * THE CDN `Cache-Control` FOR THE PORTAL READS NO LONGER LIVES HERE.
  *
- * Applied PER ROUTE, never as a router-wide `app.use('*')` — unlike `public.ts`,
- * whose router is public end-to-end, `journeys.ts` mixes public reads with
- * `auth: 'required'` (`/enrolled`) and `requireOrgManagement` (`/studio/*`)
- * routes on the SAME Hono app. A blanket public header there would invite a
- * shared cache to store one member's enrolled shelf and serve it to the next
- * visitor, because CDNs key by URL and NOT by Cookie.
- */
-export const PUBLIC_JOURNEYS_CACHE_CONTROL = 'public, max-age=60, s-maxage=60';
-
-/**
- * The ONLY paths on the journeys router that may carry a shared-cache header —
- * an explicit allow-list, matched exactly.
+ * This module used to export `PUBLIC_JOURNEYS_CACHE_CONTROL` (a hand-typed
+ * `'public, max-age=60, s-maxage=60'`) plus `isPublicPortalRead` over a
+ * `PUBLIC_PORTAL_READ_PATHS` set of two absolute pathnames, which a
+ * `app.use('*')` in `journeys.ts` consulted after `await next()`. All three are
+ * gone: each route now declares `cache` / `variesBySession` on its own
+ * `procedure()` policy and `procedure()` emits `CACHE_PRESETS[…]` centrally.
  *
- * Deliberately not expressed as a Hono path pattern. `/courses` and
- * `/courses/:courseId/dashboard` share a prefix but not a security posture: the
- * bare list is public chrome, while the dashboard returns curriculum data gated
- * on `canEnterCourse`. A `'/courses/*'` middleware would mark the entitlement-
- * gated read publicly cacheable, and CDNs key by URL and NOT by Cookie — so the
- * first entitled member's curriculum would be served to everyone who followed.
- * Matching the full pathname against this set is immune to that class of
- * mistake, and fails CLOSED: a route added later carries no public header until
- * someone adds it here deliberately.
+ * Deleted rather than kept as a re-export, on purpose. The allow-list was a
+ * second description of each route's security posture, living in a different
+ * file from the route and spelled with the `/api/journeys` mount prefix baked
+ * in; the header string was a third copy of a value `@codex/constants` now owns.
+ * Two of the three drift silently, and the drift is a data leak — a shared cache
+ * keys on URL and NEVER on Cookie. `journeys.ts`'s module comment carries the
+ * argument the allow-list docstring made, at the place a route author reads it.
  *
- * Paths are absolute (mount prefix included) because Hono's `c.req.path` is the
- * request pathname; the router is mounted at `/api/journeys` in `index.ts`.
+ * What remains here is the KV cache-aside layer (version keys, data slots, the
+ * write-side bump). That is a DIFFERENT cache from the CDN header and keeps its
+ * own contract — see the module docstring above.
  */
-const PUBLIC_PORTAL_READ_PATHS = new Set([
-  '/api/journeys/published',
-  '/api/journeys/courses',
-]);
-
-/**
- * True when `pathname` is a fully public, org-scoped portal read that a shared
- * cache may store. Exported for the wiring test — the allow-list is a security
- * boundary, so it is asserted directly rather than only through the middleware.
- */
-export function isPublicPortalRead(pathname: string): boolean {
-  return PUBLIC_PORTAL_READ_PATHS.has(pathname);
-}
 
 /**
  * Builds the per-variant cache `type` suffix for the portal discovery list.

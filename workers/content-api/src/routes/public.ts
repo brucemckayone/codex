@@ -104,31 +104,49 @@ function resolveR2Urls(items: ContentWithRelations[], bases: R2PublicBases) {
 }
 
 /**
- * Cache-Control middleware for public content endpoints.
+ * WHY EVERY ROUTE BELOW DECLARES `cache: 'public'` RATHER THAN THIS ROUTER
+ * CARRYING AN `app.use('*')`.
  *
- * Set to 60s (s-maxage=60 for CDN) so edge drift stays bounded now that
- * the KV layer has working event-driven invalidation. A longer window
- * would let CDN-cached responses serve stale content up to max-age after
- * publish, defeating the invalidation. See public-cache.ts for the KV
- * layer's invalidation contract.
+ * There used to be one here, setting `public, max-age=60, s-maxage=60` after
+ * `await next()`. It emitted the right bytes and was safe on THIS router (every
+ * route is `auth: 'none'`), but it was safe by coincidence of the file's current
+ * contents: the next `auth: 'required'` route added to `public.ts` would have
+ * been stamped publicly cacheable on the way out, and shared caches key on URL
+ * and NEVER on Cookie. `policy.cache` moves the decision onto the route that
+ * knows the answer, and `procedure()` emits the header centrally
+ * (`resolveCacheControl`), defaulting an undeclared route to `private`. There is
+ * no wildcard mount left to mis-scope, and the preset strings live in one place
+ * (`CACHE_PRESETS` in `@codex/constants`) instead of being retyped per router.
+ *
+ * THE 60s IN THAT PRESET IS BOUNDED BY THE INVALIDATION MECHANISM, NOT BY THE
+ * HIT RATE — the argument the deleted docstring carried, and it still applies to
+ * exactly these routes. Content freshness here is event-driven: a publish bumps
+ * one KV version and every `VersionedCache` entry for the org stales at once
+ * (`public-cache.ts` holds that contract). No such event can reach a CDN or a
+ * browser — an HTTP cache only expires on the clock — so a shared-cache window
+ * is a window during which a publish is INVISIBLE, and it must not outlive the
+ * mechanism that is supposed to make the publish visible. 60s is the value this
+ * router chose on those grounds and the value `CACHE_PRESETS.public` now carries
+ * platform-wide.
  */
-app.use('*', async (c, next) => {
-  await next();
-  c.header('Cache-Control', 'public, max-age=60, s-maxage=60');
-});
 
 /**
  * GET /api/content/public
  * List published content for an organization (requires orgId or slug)
  *
  * Security: Public endpoint, API rate limit. Schema enforces org scoping.
- * Cache: 5 minute public cache for CDN/browser
+ * Cache: `public` — the body is the org's PUBLISHED catalogue page, identical
+ * for every viewer (no session is read; `auth: 'none'` means none is even
+ * resolved), so any shared cache may serve one visitor's copy to the next. 60s
+ * browser + CDN, bounded by the KV invalidation window above. The docstring
+ * used to say "5 minute public cache"; the header it sat over has emitted 60s
+ * since the KV layer's event-driven invalidation landed, and now says so.
  * @returns {PublicContentListResponse}
  */
 app.get(
   '/',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: { query: publicContentQuerySchema },
     handler: async (ctx) => {
       const { orgId } = ctx.input.query;
@@ -193,12 +211,13 @@ app.get(
  * Security: Public endpoint, API rate limit. Requires orgId.
  * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
  * mutation AND on content publish/unpublish/delete (which changes the
- * ≥1-published set). CDN Cache-Control from the shared middleware above.
+ * ≥1-published set). CDN `Cache-Control` is `cache: 'public'` on the policy —
+ * the taxonomy is org chrome, identical for every viewer.
  */
 app.get(
   '/categories',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: { query: publicCategoriesQuerySchema },
     handler: async (ctx) => {
       const { orgId } = ctx.input.query;
@@ -244,13 +263,16 @@ app.get(
  * Browse all published content platform-wide (discover page)
  *
  * Security: Public endpoint, API rate limit. No org scoping — intentionally platform-wide.
- * Cache: 5 minute public cache for CDN/browser
+ * Cache: `public` — platform-wide published content, no viewer input of any
+ * kind, so the body is shared by construction. NOT KV-cached (unlike `/` above,
+ * which keys on orgId): the 60s CDN window is this route's only cache, and it
+ * is the same 60s bound for the same reason.
  * @returns {PublicContentListResponse}
  */
 app.get(
   '/discover',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: { query: discoverContentQuerySchema },
     handler: async (ctx) => {
       const result = await ctx.services.content.listPublic(ctx.input.query);

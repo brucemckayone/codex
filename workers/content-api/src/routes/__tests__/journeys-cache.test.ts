@@ -12,11 +12,17 @@
  *    content side and is invisible in production (the cache looks healthy and
  *    just serves stale rows until TTL).
  *
- * 2. THE CDN ALLOW-LIST. `isPublicPortalRead` decides which paths on the
- *    journeys router may carry `public, max-age=...`. That router also serves
- *    per-user and entitlement-gated reads, and shared caches key by URL and NOT
- *    by Cookie, so a wrong answer here leaks one member's data to the next
- *    visitor. Asserted directly rather than only through the middleware.
+ * 2. (RETIRED) THE CDN ALLOW-LIST. This file used to assert `isPublicPortalRead`
+ *    directly, because a path allow-list deciding which routes may carry
+ *    `public, max-age=...` is a security boundary and shared caches key by URL
+ *    and NOT by Cookie. That function no longer exists: cacheability is declared
+ *    per route as `policy.cache` / `policy.variesBySession` and emitted by
+ *    `procedure()`. The equivalent guard is therefore now an assertion on the
+ *    EMITTED HEADER, which is strictly stronger — it covers the whole path from
+ *    declaration to wire, where the allow-list test could only prove the
+ *    predicate agreed with itself. It lives in `journeys-routes.test.ts`
+ *    ("Cache-Control per route"), including the two CACHE POISONING GUARD cases
+ *    that were already there.
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
@@ -31,7 +37,6 @@ import {
   buildPublishedJourneysCacheType,
   getCachedPublishedCourses,
   getCachedPublishedJourneys,
-  isPublicPortalRead,
 } from '../journeys-cache';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,48 +117,6 @@ describe('buildPublishedJourneysCacheType', () => {
     expect(buildPublishedJourneysCacheType({ limit: 4 })).not.toBe(
       buildPublishedJourneysCacheType({ limit: 12 })
     );
-  });
-});
-
-describe('isPublicPortalRead (CDN allow-list — security boundary)', () => {
-  it('allows the two fully public, org-scoped portal reads', () => {
-    expect(isPublicPortalRead('/api/journeys/published')).toBe(true);
-    expect(isPublicPortalRead('/api/journeys/courses')).toBe(true);
-  });
-
-  it('REFUSES the per-user enrolled shelf', () => {
-    // `auth: 'required'`, response varies by session. A shared cache storing
-    // this would serve one member's shelf to the next visitor.
-    expect(isPublicPortalRead('/api/journeys/enrolled')).toBe(false);
-    expect(isPublicPortalRead('/api/journeys/user/enrollments')).toBe(false);
-  });
-
-  it('REFUSES entitlement-gated course reads that share the /courses prefix', () => {
-    // This is why the allow-list is not the Hono pattern '/courses/*': the bare
-    // list is public chrome, but these return curriculum data gated on
-    // `canEnterCourse`.
-    expect(isPublicPortalRead('/api/journeys/courses/abc-123/dashboard')).toBe(
-      false
-    );
-    expect(
-      isPublicPortalRead('/api/journeys/courses/abc-123/practices/breathing')
-    ).toBe(false);
-  });
-
-  it('REFUSES studio management routes', () => {
-    expect(isPublicPortalRead('/api/journeys/studio/journeys')).toBe(false);
-    expect(
-      isPublicPortalRead('/api/journeys/studio/journeys/abc-123/curriculum')
-    ).toBe(false);
-  });
-
-  it('FAILS CLOSED for anything not named, including near-misses', () => {
-    // A route added later must carry no public header until someone adds it
-    // here deliberately.
-    expect(isPublicPortalRead('/api/journeys/published/')).toBe(false);
-    expect(isPublicPortalRead('/api/journeys/publishedx')).toBe(false);
-    expect(isPublicPortalRead('/api/journeys')).toBe(false);
-    expect(isPublicPortalRead('/api/journeys/some-future-route')).toBe(false);
   });
 });
 

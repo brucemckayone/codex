@@ -47,8 +47,6 @@ import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
   getCachedPublishedJourneys,
-  isPublicPortalRead,
-  PUBLIC_JOURNEYS_CACHE_CONTROL,
 } from './journeys-cache';
 
 /**
@@ -76,21 +74,43 @@ import {
 const app = new Hono<HonoEnv>();
 
 /**
- * CDN `Cache-Control` for the PUBLIC portal reads only (Codex-72k55).
+ * CDN `Cache-Control` ON THIS ROUTER IS PER-ROUTE (`policy.cache`), and there is
+ * deliberately no `app.use('*')` left.
  *
- * Registered on `'*'` but gated by an exact-path ALLOW-LIST rather than a path
- * pattern, because this router mixes public reads with `auth: 'required'`
- * (`/enrolled`, `/user/enrollments`), entitlement-gated reads
- * (`/courses/:courseId/dashboard`) and `requireOrgManagement` studio routes.
- * `public.ts` can safely blanket its whole router; this one cannot. See
- * `isPublicPortalRead` for why the allow-list is not a wildcard.
+ * WHAT WAS HERE, AND WHY IT WENT. A wildcard middleware set
+ * `public, max-age=60, s-maxage=60` after `await next()`, but only when
+ * `c.req.path` matched a hand-maintained set of two exact pathnames
+ * (`isPublicPortalRead` / `PUBLIC_PORTAL_READ_PATHS` in `journeys-cache.ts`).
+ * The allow-list existed because this router mixes fully public portal reads
+ * with `auth: 'required'` shelves (`/enrolled`, `/user/enrollments`),
+ * entitlement-gated reads (`/courses/:courseId/dashboard`) and
+ * `requireOrgManagement` studio writes on ONE Hono app — a `'/courses/*'`
+ * pattern would have marked the `canEnterCourse`-gated dashboard publicly
+ * cacheable, and shared caches key on URL and NEVER on Cookie.
+ *
+ * A path allow-list is a second, parallel description of each route's security
+ * posture, kept in a different file from the route. It failed closed, which is
+ * the right default, but "failed closed" also means every genuinely public read
+ * added later silently lost its CDN window until someone remembered to edit the
+ * set — and the set had to be spelled with the mount prefix (`/api/journeys/…`)
+ * baked in, so it broke if the router were ever mounted elsewhere.
+ * `policy.cache` puts the answer on the route, next to its `auth` level, where
+ * a reviewer reads both at once; `procedure()` emits it centrally and defaults
+ * anything undeclared to `private` (`resolveCacheControl`), so the fail-closed
+ * property is now a property of the framework rather than of this file.
+ *
+ * THE 60s IS STILL BOUNDED BY THE INVALIDATION MECHANISM. `CACHE_PRESETS.public`
+ * is 60s because a publish stales the KV layer through one version bump
+ * (`bumpOrgJourneysVersion`) and no such event can reach a CDN — an HTTP cache
+ * only expires on the clock, so a shared window is a window during which a
+ * publish is invisible.
+ *
+ * `auth: 'optional'` IS NOT ENOUGH TO EARN `cache: 'public'` — the type rule
+ * demands `variesBySession: false` alongside it, because `optional` covers both
+ * routes that ignore the session (the portal reads below) and routes that branch
+ * on it, and no type can tell them apart. Only the two reads that carried the
+ * public header before this change assert it; see each route.
  */
-app.use('*', async (c, next) => {
-  await next();
-  if (isPublicPortalRead(c.req.path)) {
-    c.header('Cache-Control', PUBLIC_JOURNEYS_CACHE_CONTROL);
-  }
-});
 
 /**
  * GET /api/journeys/courses?organizationId=
@@ -103,8 +123,13 @@ app.use('*', async (c, next) => {
  *
  * Cache: KV cache-aside under `COLLECTION_ORG_JOURNEYS(orgId)` (Codex-72k55),
  * the same version key the landing rails use, so one portal write stales this
- * rail and those together. CDN header set per-route — see
- * `PUBLIC_JOURNEYS_CACHE_CONTROL` for why this router cannot use `app.use('*')`.
+ * rail and those together. CDN: `cache: 'public'` + `variesBySession: false`.
+ * The assertion is safe to make here and was verified against the handler, not
+ * inferred from the docstring: the handler's only inputs are the validated
+ * `organizationId` query param and `ctx.env.R2_PUBLIC_URL_BASE`. It never reads
+ * `ctx.user` or `ctx.session`, and `listPublishedCourses` takes no user
+ * argument, so no session-derived value can reach the body. This route carried
+ * the same header via the deleted allow-list.
  * @returns {CourseCardSummary[]}
  */
 app.get(
@@ -113,6 +138,8 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'public',
+      variesBySession: false,
     },
     input: {
       query: listPublishedCoursesQuerySchema,
@@ -147,6 +174,17 @@ app.get(
  * `auth: 'optional'` — returns only PUBLISHED-course public chrome, so it serves
  * both the member flow and public landings; no user data leaks. Returns `null`
  * when no such course exists.
+ *
+ * Cache: `private`, DELIBERATELY NOT `public`, and the reason is a scope
+ * boundary rather than a doubt about the body. The handler was read: its inputs
+ * are the two validated query params and nothing else, so `variesBySession:
+ * false` would be a TRUE assertion and `public` would be safe. But this route
+ * was NOT in the deleted CDN allow-list, so it has never been shared-cached;
+ * turning it on is a new caching decision with its own invalidation question
+ * (there is no KV cache-aside layer behind it — the 60s CDN window would be its
+ * only cache and its only staleness), and that decision belongs to whoever owns
+ * the CDN budget, not to a vocabulary migration. Declared rather than omitted so
+ * the choice is visible as a choice.
  * @returns {JourneyCourseSummary | null}
  */
 app.get(
@@ -155,6 +193,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       query: courseBySlugQuerySchema,
@@ -176,6 +215,12 @@ app.get(
  * anonymous visitor the same as an owner — mirroring the by-slug / sales-page
  * reads (HARDENING §E course-sell row). Returns `{ courses: [] }` when the item
  * belongs to no published course.
+ *
+ * Cache: `private` — session-invariant (the handler forwards only the validated
+ * `contentId` param; `getContentCourses` takes no user), so `public` would be
+ * safe, but this route was never in the deleted CDN allow-list. See
+ * `/courses/by-slug` above for the full reasoning; widening is a separate,
+ * owner-visible decision.
  * @returns {ContentCourseLinks}
  */
 app.get(
@@ -184,6 +229,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       params: contentCoursesParamsSchema,
@@ -205,6 +251,13 @@ app.get(
  * passed as `organizationId` (the slug is org-scoped, mirroring `by-slug`).
  * Returns `null` when no published page/course matches (→ the load 404s). The
  * streamed sell-preview media is a separate read (`sell-preview` below).
+ *
+ * Cache: `private` — session-invariant (inputs are the two validated query
+ * params plus the env-owned CDN base; `getCoursePage` takes no user), so `public`
+ * would be safe, but this route was never in the deleted CDN allow-list. See
+ * `/courses/by-slug` above. This is the highest-value widening candidate on the
+ * router — it is the awaited shell of the public sales page — which is exactly
+ * why it should be turned on deliberately rather than as a side effect.
  * @returns {JourneyCoursePage | null}
  */
 app.get(
@@ -213,6 +266,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       // Same `{ organizationId, slug }` shape as the course by-slug read — here
@@ -247,6 +301,11 @@ app.get(
  * by the route (env-owned) and resolved inside the service. Returns `null` when
  * the course is not published/non-deleted; a clip is `null` when its media has
  * no transcoded preview.
+ *
+ * Cache: `private` — session-invariant (the validated `courseId` param plus the
+ * env-owned CDN base; the clip URLs are PUBLIC preview paths, never signed, so
+ * they carry no per-user credential either), so `public` would be safe, but this
+ * route was never in the deleted CDN allow-list. See `/courses/by-slug` above.
  * @returns {CourseSellPreview | null}
  */
 app.get(
@@ -255,6 +314,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       params: courseParamsSchema,
@@ -448,6 +508,15 @@ app.post(
  * take separate data slots under the shared org version key — the landing page
  * reads this endpoint TWICE per render (featured picks + the full rail), so the
  * two must not collide.
+ *
+ * CDN: `cache: 'public'` + `variesBySession: false`, verified against the
+ * handler rather than the docstring — the inputs are the validated
+ * `organizationId` / `featured` / `limit` query params and the env-owned CDN
+ * base, `ctx.user` and `ctx.session` are never touched, and
+ * `listPublishedJourneys` takes no user argument. `featured` and `limit` ride the
+ * QUERY STRING, which a shared cache keys on, so the two rails cannot serve each
+ * other's rows at the edge either. This route carried the same header via the
+ * deleted allow-list.
  * @returns {JourneyCardView[]}
  */
 app.get(
@@ -456,6 +525,8 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'public',
+      variesBySession: false,
     },
     input: {
       query: listPublishedJourneysQuerySchema,
