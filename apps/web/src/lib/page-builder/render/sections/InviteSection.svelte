@@ -534,17 +534,43 @@
            `hrefFor(null)` already resolves to `dashboardUrl` and `ctaLabel`
            already reads the enrolled string, so the enrolled state needs no new
            markup — only this branch. -->
-      <div class="invite__single jp-reveal" data-jp-step="2">
-        <div class="invite__pool" aria-hidden="true"></div>
-        <CtaLink href={hrefFor(null)} variant="primary" size="lg">
-          {ctaLabel}
-        </CtaLink>
-        <!-- The risk note ("Start free · cancel anytime") is purchase copy. It
-             says nothing true to a member who has already joined. -->
-        {#if priceNote && !context.enrolled}
-          <p class="invite__note" {...editAttrs('risk')}>{priceNote}</p>
-        {/if}
-      </div>
+      <!-- THE LAST DEAD END, closed. A viewer who is not enrolled AND whose
+           course has no purchasable path gets NO transactional affordance here.
+           This branch used to render `hrefFor(null)` → `checkoutUrl` for them,
+           and that checkout answers "<Course> isn't open for enrolment just
+           now" after re-pitching the course in full — a closed loop back to the
+           page they came from. It was the third of three such affordances; the
+           hero CTA and the floating pill were withheld earlier, and this one
+           could not be fixed in the same change because the file was owned by a
+           different writer.
+
+           THE TEST IS `=== false`, NOT `!context.purchasable`, and the
+           distinction is the whole point: `purchasable` is a CONFIDENT NEGATIVE.
+           A FAILED offer read leaves it true (the read is `.catch(() => null)`-
+           guarded on an SEO-critical page), and a failed read also produces an
+           empty `paths` array — so testing truthiness would strip the buy button
+           off a perfectly purchasable page on any transient pricing hiccup. That
+           is the opposite defect, on the same element.
+
+           AN ENROLLED VIEWER IS UNAFFECTED: `hrefFor(null)` resolves to
+           `dashboardUrl` for them and `ctaLabel` already reads the enrolled
+           string, so their doorway is not transactional and stays exactly as it
+           was. The eyebrow, heading and sub above still render — they are the
+           creator's editorial copy, and a section with something to say is not
+           the same as a section with something to sell. -->
+      {#if context.enrolled || context.purchasable !== false}
+        <div class="invite__single jp-reveal" data-jp-step="2">
+          <div class="invite__pool" aria-hidden="true"></div>
+          <CtaLink href={hrefFor(null)} variant="primary" size="lg">
+            {ctaLabel}
+          </CtaLink>
+          <!-- The risk note ("Start free · cancel anytime") is purchase copy. It
+               says nothing true to a member who has already joined. -->
+          {#if priceNote && !context.enrolled}
+            <p class="invite__note" {...editAttrs('risk')}>{priceNote}</p>
+          {/if}
+        </div>
+      {/if}
     {:else if composition === 'table'}
       <!-- COMPOSITION · table — a comparison matrix across the available paths.
 

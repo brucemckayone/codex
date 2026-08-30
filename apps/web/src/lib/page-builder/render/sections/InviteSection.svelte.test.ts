@@ -116,6 +116,24 @@ function render(enrolled: boolean): void {
   flushSync();
 }
 
+/**
+ * Render with an arbitrary context, so a case can vary `purchasable` and `offer`
+ * independently of enrolment. `render(enrolled)` above stays as-is because five
+ * existing cases read it.
+ */
+function renderWith(overrides: Partial<JourneySalesContext>): void {
+  component = mount(InviteSection, {
+    target: document.body,
+    props: {
+      config: COPY,
+      context: context(overrides),
+      variant: 'tiers',
+      design: CANDLELIT,
+    },
+  });
+  flushSync();
+}
+
 function ctaHrefs(): string[] {
   return [...document.body.querySelectorAll('a[href]')].map(
     (a) => a.getAttribute('href') ?? ''
@@ -182,6 +200,49 @@ describe('InviteSection — the enrolled viewer', () => {
     // A member arriving at the page should still meet its close. Only the
     // purchase machinery goes.
     render(true);
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('The ground');
+    expect(text).toContain('is waiting.');
+  });
+});
+
+describe('InviteSection — a course with nothing to sell', () => {
+  it('offers NO transactional affordance when the offer RESOLVED with no path', () => {
+    // The third of three dead-end "Begin" affordances. The hero CTA and the
+    // floating pill were withheld in an earlier change; this branch still sent a
+    // visitor to a checkout that answers "isn't open for enrolment just now"
+    // after re-pitching the course — a closed loop back to where they started.
+    // Five of the seven seeded courses are in exactly this state.
+    renderWith({ enrolled: false, purchasable: false, offer: null });
+    expect(ctaHrefs().filter((h) => h.includes('/checkout'))).toEqual([]);
+  });
+
+  it('KEEPS the affordance when the offer read merely FAILED — purchasable is a CONFIDENT negative', () => {
+    // `offer: null` alone means the `.catch(() => null)`-guarded read failed, and
+    // a failed read produces an empty `paths` array just as a genuinely unsellable
+    // course does. Testing `!context.purchasable` instead of `=== false` would
+    // strip the buy button off a perfectly purchasable page on any transient
+    // pricing hiccup — the opposite defect, on the same element. This case is the
+    // guard against that, and it is why the two cases must both exist.
+    renderWith({ enrolled: false, purchasable: true, offer: null });
+    expect(
+      ctaHrefs().filter((h) => h.includes('/checkout')).length
+    ).toBeGreaterThan(0);
+  });
+
+  it('KEEPS an enrolled member their dashboard doorway even with no purchasable path', () => {
+    // An enrolled viewer has nothing to buy but everything to return to, so the
+    // suppression must not reach them. Their CTA is not transactional.
+    renderWith({ enrolled: true, purchasable: false, offer: null });
+    const hrefs = ctaHrefs();
+    expect(
+      hrefs.filter((h) => h.includes('/dashboard')).length
+    ).toBeGreaterThan(0);
+    expect(hrefs.filter((h) => h.includes('/checkout'))).toEqual([]);
+  });
+
+  it('still renders the authored copy — the section has something to SAY, not to sell', () => {
+    renderWith({ enrolled: false, purchasable: false, offer: null });
     const text = document.body.textContent ?? '';
     expect(text).toContain('The ground');
     expect(text).toContain('is waiting.');
