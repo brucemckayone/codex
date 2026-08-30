@@ -1624,6 +1624,58 @@ export function createServerApi(
           )}/hero-image?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'DELETE' }
         ),
+
+      /**
+       * Upload the course's SIGNATURE image — the third still-image slot, and the
+       * one `guide.letter` needs to render what its name describes
+       * (Codex-wqxv4 option A, contract A32).
+       *
+       * Third sibling of `uploadJourneyCover` and `uploadJourneyHeroImage`, kept
+       * separate for the same reasons: the three write different columns, land
+       * under different R2 prefixes, and the worker declares a different
+       * multipart field for the cover than for these two.
+       *
+       * `fieldName: 'image'` MUST match the worker's `files` key, and
+       * `fallbackFilename` MUST be present — a plain re-forward of a `File` from
+       * web to worker LOSES the filename in workerd and the worker 400s, which
+       * is a production-only failure.
+       */
+      uploadJourneySignatureImage: (
+        organizationId: string,
+        pageId: string,
+        file: File
+      ): Promise<{ signatureImageUrl: string }> =>
+        forwardMultipartUpload<{ signatureImageUrl: string }>({
+          url: `${serverApiUrl(
+            platform,
+            'access'
+          )}/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/signature-image?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          fieldName: 'image',
+          file,
+          fallbackFilename: 'signature',
+          sessionCookie,
+          failureMessage: 'Signature upload failed',
+        }),
+
+      /**
+       * Clear the course's signature. The guide then falls back down A32's chain
+       * — the signature media ref's poster still, then whatever the composition
+       * draws without one — so clearing this is not the same as having none.
+       */
+      deleteJourneySignatureImage: (organizationId: string, pageId: string) =>
+        request<void>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/signature-image?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { method: 'DELETE' }
+        ),
     },
 
     /**

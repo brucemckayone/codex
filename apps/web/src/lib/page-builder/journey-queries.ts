@@ -294,6 +294,28 @@ export interface JourneySellMedia {
    * so every reader treats `undefined` as "no uploaded hero" (`?? null`).
    */
   heroImageUrl?: string | null;
+  /**
+   * The UPLOADED signature-image CDN URL (`courses.signatureImageKey` → `md.webp`),
+   * or null when the creator has uploaded none — `guide.letter`'s sign-off mark.
+   *
+   * Same contract as `heroImageUrl` above and for the same reasons: the UPLOAD
+   * ONLY, never A32's public fallback chain, because the panel's Replace / Remove
+   * act on the uploaded file and a value that could also be a media ref's poster
+   * frame would offer a Remove that removes nothing.
+   *
+   * OPTIONAL-additive, and this one was OBSERVED rather than merely anticipated:
+   * the running worker fleet omits BOTH this key and `heroImageUrl` outright, so a
+   * reader must treat `undefined` as "none" — not as null.
+   *
+   * ADDED because its absence was a real compile error rather than a theoretical
+   * gap: the sell-media store's save-echo could not read
+   * `persisted.signatureImageUrl` (TS2339) while the shared-types twin already
+   * declared it. That is precisely the drift this interface's own header warns
+   * about — the twin is not checked by the compiler — and it is why the store also
+   * carries a narrow local bridge type. That bridge is optional-only by design, so
+   * it stays correct rather than becoming wrong now this field exists.
+   */
+  signatureImageUrl?: string | null;
 }
 
 /** One org tier the pricing panel offers as a way into the course. */

@@ -1232,6 +1232,114 @@ app.delete(
 );
 
 /**
+ * POST /api/journeys/studio/journeys/:pageId/signature-image?organizationId=
+ *
+ * Upload the course's SIGNATURE image — the third still-image slot, and the one
+ * `guide.letter` needs to render what its name describes (Codex-wqxv4 option A,
+ * contract A32). Deliberately identical in shape to the `hero-image` pair above
+ * and to `cover`: `media_items` is CHECK-constrained to ('video','audio'), so a
+ * still cannot live there, which is why all three of these are R2-key columns
+ * rather than media refs.
+ *
+ * The page is resolved (and org-scoped) BEFORE R2 is written, so an out-of-org id
+ * can never seed an orphaned object.
+ * @returns {{ signatureImageUrl: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/signature-image',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      image: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ signatureImageUrl: string }> => {
+      // Resolve (and org-scope) the subject course FIRST — a foreign or
+      // non-course page must 404 before any R2 object exists.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed =
+        await ctx.services.imageProcessing.processCourseSignature(
+          courseId,
+          new File([ctx.files.image.buffer], ctx.files.image.name, {
+            type: ctx.files.image.type,
+          })
+        );
+
+      await ctx.services.courseJourney.setCourseSignatureImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        processed.signatureImageKey
+      );
+
+      // NO `bumpOrgJourneysVersion` HERE, and that is a decision rather than an
+      // omission. The org journeys version keys only the two CACHED list reads,
+      // and a signature reaches a visitor solely through
+      // `/courses/:courseId/sell-preview`, which is UNCACHED. The hero route
+      // above bumps it as belt-and-braces because a card may one day carry a
+      // hero; a signature is a guide-section mark and will never be on a card,
+      // so a KV write per upload would buy nothing. If a card ever renders one,
+      // add the bump here and delete this comment.
+      return { signatureImageUrl: processed.url };
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId/signature-image?organizationId=
+ *
+ * Clear the course's uploaded signature.
+ *
+ * As with the hero, this does NOT leave the slot blank: it drops back to A32's
+ * next link (`courses.signatureMediaId`'s poster still) and then to whatever the
+ * guide composition draws without one. That degradation is why the uploaded image
+ * is its own column rather than a replacement for the media ref.
+ *
+ * Clears the DB key only; the R2 variants are left in place. The key is
+ * deterministic per course id, so a later re-upload overwrites them rather than
+ * accumulating orphans, and the objects are unreachable in the meantime (no
+ * client is ever handed a raw key).
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId/signature-image',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setCourseSignatureImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        null
+      );
+      return null;
+    },
+  })
+);
+
+/**
  * GET /api/journeys/studio/journeys/:pageId/curriculum?organizationId=
  *
  * The admin CURRICULUM read for the two-pane editor (Codex-03cwh): the journey's

@@ -3,8 +3,9 @@
  *
  * The pending-draft spine for the six media slots the sales page's `hero` /
  * `introVideo` / `reel` / `guide` sections resolve their primary content from,
- * plus the two UPLOADED stills — the card cover and, since A32 (Codex-490z7), the
- * hero image. Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
+ * plus the three UPLOADED stills — the card cover, the hero image (A32,
+ * Codex-490z7) and the guide's signature (Codex-wqxv4's named-slot half).
+ * Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
  * (`open()` on load → edit via the panel or a section inspector → `save()` →
  * `close()` on destroy), and every surface that can set media reads and writes
  * THIS store, so the media panel and the per-section pickers can never disagree
@@ -25,6 +26,7 @@
 import {
   deleteJourneyCover,
   deleteJourneyHeroImage,
+  deleteJourneySignatureImage,
   getJourneySellMedia,
   updateJourneySellMedia,
 } from '$lib/remote/journeys.remote';
@@ -94,6 +96,34 @@ export const SLOT_ACCEPTS: Readonly<
 /** The six slots, all independently clearable. `null` = empty. */
 export type SellMediaSlots = Record<JourneySellMediaSlot, string | null>;
 
+/**
+ * The ADDITIVE uploaded stills, as they arrive ON THE WIRE — and the reason this
+ * shape has to exist at all rather than being read off `JourneySellMedia`.
+ *
+ * `journey-queries.ts`'s `JourneySellMedia` is a HAND-KEPT FE mirror of the
+ * `@codex/shared-types` interface of the same name, and that file states in its
+ * own doc comment that nothing in the build makes the pair agree (a BE package
+ * cannot import an apps/web `$lib` type, which is why the twin exists). The
+ * shared-types side carries `signatureImageUrl` and the worker sends it; the
+ * mirror has not been given it yet, so reading it off the mirror does not
+ * compile. THE REAL FIX IS ONE LINE ON THE MIRROR — handed off, not done here,
+ * because that file belongs to another writer this round.
+ *
+ * This is NOT a type escape, and deliberately not a cast:
+ *   · every field is OPTIONAL, so a mirror that lacks them satisfies it — which
+ *     is exactly the deployment-skew truth anyway (an older worker omits them);
+ *   · it keeps working unchanged, and stays correct, once the mirror carries the
+ *     field, so nothing has to be unwound in a hurry;
+ *   · it names ONLY the two additive stills. The six SLOTS are declared on the
+ *     mirror and MUST stay compiler-checked — widening those is how a crossed or
+ *     dropped mapping would stop being a compile error and start being a bug the
+ *     tests have to catch alone.
+ */
+type UploadedStillsOnTheWire = {
+  heroImageUrl?: string | null;
+  signatureImageUrl?: string | null;
+};
+
 const EMPTY_SLOTS: SellMediaSlots = {
   introVideoMediaId: null,
   previewVideoMediaId: null,
@@ -122,11 +152,23 @@ class SellMediaStore {
    * removes nothing.
    */
   #heroImageUrl = $state<string | null>(null);
+  /**
+   * Resolved UPLOADED signature-image CDN URL, or null when none is uploaded
+   * (Codex-wqxv4's named-slot half).
+   *
+   * The UPLOAD only, for the identical reason as {@link #heroImageUrl}: if this
+   * also held `signatureMediaId`'s poster frame, the panel could not tell "the
+   * creator uploaded a mark" from "a film happens to have a frame", and it would
+   * offer a Remove that removes nothing. `CourseSellPreview.signatureUrl` owns
+   * the public chain.
+   */
+  #signatureImageUrl = $state<string | null>(null);
   /** The org's ready media items, for the pickers. */
   #options = $state<SellMediaOption[]>([]);
   #loading = $state(false);
   #coverBusy = $state(false);
   #heroImageBusy = $state(false);
+  #signatureImageBusy = $state(false);
   /**
    * Why the last {@link open} could not read the attached media, if it could not.
    *
@@ -169,6 +211,12 @@ class SellMediaStore {
   get heroImageUrl(): string | null {
     return this.#heroImageUrl;
   }
+  /**
+   * The UPLOADED signature's URL, or null — see {@link #signatureImageUrl}.
+   */
+  get signatureImageUrl(): string | null {
+    return this.#signatureImageUrl;
+  }
   get options(): SellMediaOption[] {
     return this.#options;
   }
@@ -181,6 +229,10 @@ class SellMediaStore {
   /** True while the hero image is being cleared (the upload owns its own form). */
   get heroImageBusy(): boolean {
     return this.#heroImageBusy;
+  }
+  /** True while the signature is being cleared — same split as the hero. */
+  get signatureImageBusy(): boolean {
+    return this.#signatureImageBusy;
   }
   /**
    * A creator-readable reason the media could not be read, or `null`.
@@ -293,6 +345,13 @@ class SellMediaStore {
         // worker deployment predating A32 omits the key entirely, and `undefined`
         // must read as "no uploaded hero", never leak into the DOM as a src.
         this.#heroImageUrl = media.heroImageUrl ?? null;
+        // Same reasoning, same reason to keep it: `signatureImageUrl` is
+        // optional-additive too, so a worker still serving an older dist omits
+        // the key rather than sending null. `undefined` would make
+        // `{#if sellMedia.signatureImageUrl}` false either way — but it would
+        // also let `src={undefined}` reach the DOM if the guard were ever
+        // loosened, so it is normalised HERE, once, at the wire boundary.
+        this.#signatureImageUrl = media.signatureImageUrl ?? null;
       }
 
       this.#options = (library?.items ?? []).map((item) => ({
@@ -347,11 +406,14 @@ class SellMediaStore {
     };
     this.#pending = { ...slots };
     this.#saved = { ...slots };
-    // The write path does not touch either uploaded still, but the service echoes
-    // both resolved from the row it just wrote — so this is a refresh, not a
-    // clobber. `?? null` for the same optional-additive reason as `open()`.
+    // The write path does not touch any of the three uploaded stills, but the
+    // service echoes all three resolved from the row it just wrote — so this is a
+    // refresh, not a clobber. `?? null` for the same optional-additive reason as
+    // `open()`.
     this.#coverImageUrl = persisted.coverImageUrl;
-    this.#heroImageUrl = persisted.heroImageUrl ?? null;
+    const echoed: UploadedStillsOnTheWire = persisted;
+    this.#heroImageUrl = echoed.heroImageUrl ?? null;
+    this.#signatureImageUrl = echoed.signatureImageUrl ?? null;
   }
 
   /**
@@ -413,6 +475,39 @@ class SellMediaStore {
     }
   }
 
+  /**
+   * Record a signature the PANEL has just uploaded (Codex-wqxv4's named-slot
+   * half).
+   *
+   * Same split as {@link applyCoverUrl} and {@link applyHeroImageUrl}, for the
+   * same reason: a `File` cannot cross a `command()` boundary (devalue cannot
+   * serialize one), so the multipart `<form>` lives in the component and the
+   * store owns the resolved URL.
+   */
+  applySignatureImageUrl(url: string | null): void {
+    this.#signatureImageUrl = url;
+  }
+
+  /**
+   * Clear the UPLOADED signature.
+   *
+   * This does NOT unsign the letter: the public chain then falls through to
+   * `signatureMediaId`'s poster frame, and only with neither does the letter sign
+   * off with the typeset name alone. So the panel must not describe this as
+   * "remove the signature".
+   */
+  async clearSignatureImage(): Promise<void> {
+    const pageId = this.#pageId;
+    if (!pageId) return;
+    this.#signatureImageBusy = true;
+    try {
+      await deleteJourneySignatureImage({ pageId });
+      this.#signatureImageUrl = null;
+    } finally {
+      this.#signatureImageBusy = false;
+    }
+  }
+
   /** Reset to the closed state (the route calls this on destroy). */
   close(): void {
     this.#pageId = null;
@@ -420,10 +515,12 @@ class SellMediaStore {
     this.#saved = { ...EMPTY_SLOTS };
     this.#coverImageUrl = null;
     this.#heroImageUrl = null;
+    this.#signatureImageUrl = null;
     this.#options = [];
     this.#loading = false;
     this.#coverBusy = false;
     this.#heroImageBusy = false;
+    this.#signatureImageBusy = false;
     this.#loadError = null;
     this.#loaded = false;
   }

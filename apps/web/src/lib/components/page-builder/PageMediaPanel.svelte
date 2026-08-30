@@ -16,6 +16,14 @@
       The two coexist as A32's chain — uploaded ?? the film's frame ?? the
       section's synthetic gradient — so clearing the upload degrades rather than
       blanks, which is why the toast says so.
+    • the still SIGNATURE (Codex-wqxv4's named-slot half) — an UPLOADED mark, to
+      `courses.signature_image_key`. Same shape as the hero image and the same
+      cause, only sharper: the "Signature film" slot below (`signatureMediaId`) is
+      a `media_items` ref, so the only signature A27 could express was a frame of
+      a FILM of a signature — and nobody films a signature. `guide.letter` has
+      described signing off with the guide's mark since it shipped and rendered
+      typeset text alone. The chain is uploaded ?? the film's frame ?? the typeset
+      name, so clearing the upload degrades rather than unsigns.
     • the three sell VIDEOS + the guide PORTRAIT — `courses.introVideoMediaId`,
       `previewVideoMediaId`, `guideVideoMediaId` and `guide.portraitMediaId`. All
       four were READ-ONLY codebase-wide before this, so the `introVideo`, `reel`
@@ -33,10 +41,15 @@
   offer a different one, and the server re-checks it, because a picker is not a
   boundary.
 
-  Cover and hero-image upload/clear apply IMMEDIATELY (a multipart upload has a
-  different failure mode from a JSON patch, and the creator needs the resolved URL
-  back to see what they picked). The media slots are pending until Save, like page
-  copy.
+  All THREE uploads (cover, hero image, signature) and their clears apply
+  IMMEDIATELY (a multipart upload has a different failure mode from a JSON patch,
+  and the creator needs the resolved URL back to see what they picked). The media
+  slots are pending until Save, like page copy.
+
+  EACH UPLOAD IS PAIRED WITH THE LIBRARY SLOT IT OUTRANKS, in the copy rather than
+  the layout: "Hero image" above / "Hero film" below, "Signature image" above /
+  "Signature film" below. Two controls that both read as "the signature" would be
+  worse than one, so each hint names the other and says which wins.
 -->
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
@@ -48,6 +61,7 @@
   import {
     uploadJourneyCoverForm,
     uploadJourneyHeroImageForm,
+    uploadJourneySignatureImageForm,
   } from '$lib/remote/journeys.remote';
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
@@ -100,8 +114,9 @@
   ];
 
   let fileInput = $state<HTMLInputElement | null>(null);
-  /** Own ref — two independent upload forms, so two independent file inputs. */
+  /** Own ref — three independent upload forms, so three independent file inputs. */
   let heroFileInput = $state<HTMLInputElement | null>(null);
+  let signatureFileInput = $state<HTMLInputElement | null>(null);
 
   /**
    * Busy while EITHER the cover form is in flight or the store is clearing.
@@ -117,6 +132,12 @@
   /** The same split for the hero image — its own form, its own busy state. */
   const heroImageBusy = $derived(
     !!uploadJourneyHeroImageForm.pending || sellMedia.heroImageBusy
+  );
+
+  /** And again for the signature. Three uploads, three independent busy states —
+      shared one would disable all three buttons on any one upload. */
+  const signatureImageBusy = $derived(
+    !!uploadJourneySignatureImageForm.pending || sellMedia.signatureImageBusy
   );
 
   async function onClearCover(): Promise<void> {
@@ -141,6 +162,22 @@
         err instanceof Error
           ? err.message
           : m.studio_builder_media_toast_hero_image_remove_failed()
+      );
+    }
+  }
+
+  async function onClearSignatureImage(): Promise<void> {
+    try {
+      await sellMedia.clearSignatureImage();
+      // Says what actually happens next: the chain falls through to the
+      // signature film's frame, so this is a step DOWN the chain rather than
+      // "the letter is now unsigned".
+      toast.success(m.studio_builder_media_toast_signature_image_removed());
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : m.studio_builder_media_toast_signature_image_remove_failed()
       );
     }
   }
@@ -346,6 +383,106 @@
     </div>
   </section>
 
+  <!-- ── Signature image (Codex-wqxv4 · the named-slot half) ───────────── -->
+  <section class="panel__group">
+    <h3 class="panel__group-title">{m.studio_builder_media_signature_image()}</h3>
+    <p class="panel__hint">
+      {m.studio_builder_media_signature_image_hint()}
+    </p>
+
+    <div class="cover">
+      <div class="cover__frame cover__frame--signature">
+        {#if sellMedia.signatureImageUrl}
+          <img
+            class="cover__img cover__img--contain"
+            src={sellMedia.signatureImageUrl}
+            alt={m.studio_builder_media_signature_image_alt()}
+          />
+        {:else}
+          <span class="cover__empty"
+            >{m.studio_builder_media_signature_image_none()}</span
+          >
+        {/if}
+      </div>
+
+      <!--
+        The third real multipart <form>, deliberately identical to the two above.
+        `File` cannot be an argument to a `command()` — devalue cannot serialize
+        it, and the call throws in the BROWSER before reaching the network — so an
+        upload has to be a `form()` submission. See
+        `uploadJourneySignatureImageForm`.
+      -->
+      <form
+        class="cover__actions"
+        enctype="multipart/form-data"
+        {...uploadJourneySignatureImageForm.enhance(async ({ form, submit }) => {
+          try {
+            await submit();
+            const result = uploadJourneySignatureImageForm.result;
+            if (result?.outcome === 'uploaded') {
+              sellMedia.applySignatureImageUrl(result.signatureImageUrl);
+              toast.success(m.studio_builder_media_toast_signature_image_updated());
+            } else {
+              // The server's own message (an unsupported format, most commonly),
+              // never a generic failure — a creator can only fix what they see.
+              toast.error(
+                result?.message ??
+                  m.studio_builder_media_toast_signature_image_upload_failed()
+              );
+            }
+          } catch (err) {
+            toast.error(
+              err instanceof Error
+                ? err.message
+                : m.studio_builder_media_toast_signature_image_upload_failed()
+            );
+          } finally {
+            // Reset so re-picking the SAME file fires `change` again — without
+            // this a failed upload cannot be retried with the identical file.
+            form.reset();
+          }
+        })}
+      >
+        <input
+          {...uploadJourneySignatureImageForm.fields.pageId.as(
+            'hidden',
+            sellMedia.pageId ?? ''
+          )}
+        />
+        <input
+          bind:this={signatureFileInput}
+          class="cover__file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          {...uploadJourneySignatureImageForm.fields.image.as('file')}
+          onchange={(event) => event.currentTarget.form?.requestSubmit()}
+        />
+        <button
+          type="button"
+          class="cover__btn"
+          disabled={signatureImageBusy || !sellMedia.pageId}
+          onclick={() => signatureFileInput?.click()}
+        >
+          {signatureImageBusy
+            ? m.studio_builder_media_uploading()
+            : sellMedia.signatureImageUrl
+              ? m.studio_builder_media_replace()
+              : m.studio_builder_media_upload()}
+        </button>
+        {#if sellMedia.signatureImageUrl}
+          <button
+            type="button"
+            class="cover__btn cover__btn--quiet"
+            disabled={signatureImageBusy}
+            onclick={onClearSignatureImage}
+          >
+            {m.studio_builder_media_remove()}
+          </button>
+        {/if}
+        <span class="panel__hint">{m.studio_builder_media_formats({ mb: MAX_COVER_MB })}</span>
+      </form>
+    </div>
+  </section>
+
   <!-- ── Sell media ────────────────────────────────────────────────────── -->
   <section class="panel__group">
     <h3 class="panel__group-title">{m.studio_builder_media_slots_title()}</h3>
@@ -478,11 +615,39 @@
     aspect-ratio: 21 / 9;
   }
 
+  /*
+    A signature is WIDE and SHORT, and painted small: `GuideSection`'s
+    `.guide__sig` is sized by HEIGHT (`calc(var(--jp-heading-size) * 1.6)`) with
+    `width: auto`, so a typical mark lands around 200–400px wide by 50–100px tall.
+    4/1 previews that proportion instead of a card-shaped box a signature never
+    fills.
+
+    The surface stays `--color-surface-secondary` — a theme-following token, NOT a
+    forced white plate. A signature is usually dark ink on transparency, so a fixed
+    light plate here would flatter the file in dark theme while the letter itself
+    paints it on a dark background. Previewing on the same surface the creator's
+    own theme gives is the honest read.
+  */
+  .cover__frame--signature {
+    aspect-ratio: 4 / 1;
+  }
+
   .cover__img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /*
+    `contain`, not the sibling's `cover`: a cover and a hero are CROPPED to a frame
+    on the page, so previewing them cropped is accurate. A signature is never
+    cropped — the whole mark is painted — and `cover` on a 4/1 box would slice the
+    ends off a wide one, which is exactly the part a creator checks.
+  */
+  .cover__img--contain {
+    object-fit: contain;
+    padding: var(--space-2);
   }
 
   .cover__empty {

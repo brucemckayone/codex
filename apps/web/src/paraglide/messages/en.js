@@ -12663,7 +12663,7 @@ export const studio_builder_media_slot_guide_video_hint = () => `A talking-head 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature = () => `Guide signature`
+export const studio_builder_media_slot_signature = () => `Signature film`
 
 
 /**
@@ -12671,7 +12671,7 @@ export const studio_builder_media_slot_signature = () => `Guide signature`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature_hint = () => `The sign-off mark at the foot of the guide’s letter. Unset leaves the letter unsigned. Video only — its frame is what shows.`
+export const studio_builder_media_slot_signature_hint = () => `A film of the guide’s mark. With no signature image uploaded above, its still frame stands in as the signature. Video only — an audio item has no frame.`
 
 
 /**
@@ -12792,6 +12792,70 @@ export const studio_builder_media_toast_hero_image_removed = () => `Hero image r
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_media_toast_hero_image_remove_failed = () => `Could not remove the hero image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_signature_image = () => `Signature image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_signature_image_hint = () => `The mark the guide’s letter signs off with — a scan or photo of ink, painted small. Unset → the signature film’s frame stands in, and with neither the letter signs off with the typeset name alone. Use a PNG on transparency; a JPEG carries none, so it arrives as ink on a white rectangle.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_signature_image_alt = () => `Guide signature`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_signature_image_none = () => `No signature image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_signature_image_updated = () => `Signature updated`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_signature_image_upload_failed = () => `Signature upload failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_signature_image_removed = () => `Signature removed — the letter falls back to the signature film, if there is one`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_signature_image_remove_failed = () => `Could not remove the signature`
 
 
 /**

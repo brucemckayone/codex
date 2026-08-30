@@ -1066,6 +1066,86 @@ export const deleteJourneyHeroImage = command(
 );
 
 /**
+ * Upload the course's SIGNATURE image — the mark `guide.letter` signs off with
+ * (Codex-wqxv4 option A, contract A32).
+ *
+ * BOTH CONSTRAINTS ON THE HERO FORM ABOVE APPLY HERE UNCHANGED, and for the same
+ * reasons — see that doc comment rather than re-deriving them:
+ *   1. `form()`, NEVER `command()` — devalue cannot represent a `File`, and the
+ *      call throws in the BROWSER before any request is made.
+ *   2. The server hop goes through `forwardMultipartUpload` (which
+ *      `api.access.uploadJourneySignatureImage` does), because a plain re-forward
+ *      strips the filename in workerd and 400s only in production.
+ *
+ * WHY IT IS ITS OWN COLUMN rather than a `media_items` ref: identical to the hero.
+ * `signatureMediaId` points at a table CHECK-constrained to ('video','audio'), so
+ * the "signature" a creator could pick there was a VIDEO's poster frame — which is
+ * not a thing anyone signs a letter with. This writes
+ * `courses.signatureImageKey`, the first link in A32's chain, so the two coexist
+ * and clearing the upload degrades to the ref rather than to nothing.
+ *
+ * The field is named `image` to match the worker's `files` key, as the hero does.
+ */
+export const uploadJourneySignatureImageForm = form(
+  z.object({
+    pageId: z.string().uuid(),
+    image: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `The signature must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, image }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      return {
+        outcome: 'failed' as const,
+        message: 'A signature can only be set within an organization',
+      };
+    }
+    try {
+      const { signatureImageUrl } =
+        await ctx.api.access.uploadJourneySignatureImage(
+          ctx.orgId,
+          pageId,
+          image
+        );
+      return { outcome: 'uploaded' as const, signatureImageUrl };
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        return { outcome: 'failed' as const, message: err.message };
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Clear the course's uploaded signature.
+ *
+ * NOT the same as "the guide has no signature": clearing drops back to A32's next
+ * link, the signature media ref's poster still, and only then to whatever the
+ * composition draws without one.
+ */
+export const deleteJourneySignatureImage = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A signature can only be cleared within an organization');
+    }
+    await ctx.api.access.deleteJourneySignatureImage(ctx.orgId, pageId);
+  }
+);
+
+/**
  * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2). Resolves the sell-page envelope
  * for ANY status (drafts included) so the builder iframe can render an
  * unpublished draft. Management-gated by the worker (`requireOrgManagement`); the
