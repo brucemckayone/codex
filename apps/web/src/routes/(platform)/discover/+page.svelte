@@ -19,13 +19,26 @@
   import DiscoverFilters, {
     type DiscoverFilterValues,
   } from '$lib/components/discover/DiscoverFilters.svelte';
+  import { gateSearchQuery } from '@codex/validation';
   import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
 
   function updateFilters(next: DiscoverFilterValues) {
+    // The client-side search floor (Codex-k618q). `q` reaches the database
+    // via `+page.server.ts`, so a below-floor value must never enter the URL:
+    // pg_trgm has no trigram to probe its index with under three characters,
+    // and this page's SearchPill is DEBOUNCED-live, so every 300ms of typing
+    // used to navigate and re-scan the whole table.
+    //
+    // The HOLD (type two letters → change nothing) lives in DiscoverFilters'
+    // search handlers, not here: `updateFilters` also carries type and sort
+    // changes, and returning early on a below-floor `q` would make every
+    // drawer facet a silent no-op for anyone on a hand-typed `?q=Bo`.
+    const gatedQ = gateSearchQuery(next.q);
+
     const params = new URLSearchParams();
-    if (next.q.trim()) params.set('q', next.q.trim());
+    if (gatedQ) params.set('q', gatedQ);
     if (next.type !== 'all') params.set('type', next.type);
     if (next.sort !== 'newest') params.set('sort', next.sort);
     const qs = params.toString();

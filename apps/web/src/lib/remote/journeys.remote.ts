@@ -16,6 +16,7 @@
 
 import {
   createJourneyBodySchema,
+  createSearchQuerySchema,
   journeyPageStatusSchema,
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
@@ -1335,7 +1336,7 @@ export const getCourseCurriculum = query(
 
 const listCurriculumContentSchema = z.object({
   contentType: z.enum(['video', 'audio', 'written']).optional(),
-  search: z.string().trim().max(200).optional(),
+  search: createSearchQuerySchema(200),
 });
 
 /**

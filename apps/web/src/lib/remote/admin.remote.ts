@@ -10,6 +10,7 @@
  * - Typed error handling
  */
 
+import { createSearchQuerySchema } from '@codex/validation';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
@@ -355,7 +356,7 @@ const customersQuerySchema = z.object({
   organizationId: z.string().uuid().optional(),
   page: z.coerce.number().min(1).optional().default(1),
   limit: z.coerce.number().min(1).max(100).optional().default(20),
-  search: z.string().optional(),
+  search: createSearchQuerySchema(200),
   role: z.string().optional(),
   status: z.string().optional(),
   contentId: z.string().uuid().optional(),

@@ -21,6 +21,7 @@
     type ActiveFilterChip,
   } from '$lib/components/ui/ActiveFiltersStrip';
   import DiscoverFilterDrawer from './DiscoverFilterDrawer.svelte';
+  import { isSearchQueryBelowFloor } from '@codex/validation';
   import * as m from '$paraglide/messages';
 
   export type DiscoverContentType = 'all' | 'video' | 'audio' | 'written';
@@ -48,12 +49,19 @@
   }
 
   // ── Search flush (debounced live; matches old 300ms cadence) ───────
+  //
+  // HOLD below the client-side search floor (Codex-k618q): one or two typed
+  // characters commit nothing, so no navigation happens, the results stand,
+  // and the SearchPill keeps the partial word. Emptying the field is NOT a
+  // hold — it commits, clearing any active search.
   function handleSearchChange(next: string) {
     if (next === values.q) return;
+    if (isSearchQueryBelowFloor(next)) return;
     onChange({ ...values, q: next });
   }
   function handleSearchSubmit(next: string) {
     if (next === values.q) return;
+    if (isSearchQueryBelowFloor(next)) return;
     onChange({ ...values, q: next });
   }
 

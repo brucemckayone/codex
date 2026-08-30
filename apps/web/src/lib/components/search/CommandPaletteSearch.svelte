@@ -6,6 +6,7 @@
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
 	import { buildContentUrl } from '$lib/utils/subdomain';
+	import { gateSearchQuery } from '@codex/validation';
 	import * as m from '$paraglide/messages';
 
 	interface Props {
@@ -47,8 +48,15 @@
 		creators: [],
 	});
 
+	// Recents are replayed as `?q=` navigations by `selectItem`, so a term
+	// persisted before the search floor landed (Codex-k618q) would still be one
+	// click away from a below-floor scan. Filter on READ as well as on write.
 	let recentSearches = $state<string[]>(
-		browser ? JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') : []
+		browser
+			? ((JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[]) ?? []).filter(
+					(term) => !!gateSearchQuery(term)
+				)
+			: []
 	);
 
 	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
@@ -91,7 +99,21 @@
 		if (debounceTimer) clearTimeout(debounceTimer);
 		activeIndex = -1;
 
-		if (!query.trim()) {
+		// The client-side search floor (Codex-k618q). This palette is the most
+		// expensive search surface on the platform: one keystroke fans out to an
+		// org lookup PLUS a content search PLUS a creators search, on every
+		// scope, for every visitor. Below SEARCH_MIN_QUERY_LENGTH pg_trgm has no
+		// trigram with which to probe its index, so each of those searches is a
+		// sequential scan of the whole table — three of them, per 300ms of
+		// typing, for the one- and two-character prefix of every word anyone
+		// ever looks up.
+		//
+		// `gateSearchQuery` returns null for an empty AND for a below-floor
+		// query, and both cases are the same here: no request, no results, not
+		// loading. `/api/search` itself still answers a short `?q=` with 200 —
+		// the floor is a performance gate on the caller, not a validation rule.
+		const gatedQuery = gateSearchQuery(query);
+		if (!gatedQuery) {
 			results = { content: [], creators: [] };
 			loading = false;
 			return;
@@ -100,7 +122,7 @@
 		loading = true;
 		debounceTimer = setTimeout(async () => {
 			try {
-				const params = new URLSearchParams({ q: query.trim(), limit: '5' });
+				const params = new URLSearchParams({ q: gatedQuery, limit: '5' });
 				if (scope === 'org' && orgSlug) params.set('scope', orgSlug);
 				const res = await fetch(`/api/search?${params}`);
 				if (res.ok) {
@@ -116,8 +138,10 @@
 
 	// ── Recent searches ───────────────────────────────────────
 	function saveRecent(term: string) {
-		if (!browser || !term.trim()) return;
-		const trimmed = term.trim();
+		if (!browser) return;
+		// Never persist a term the floor would refuse to issue.
+		const trimmed = gateSearchQuery(term);
+		if (!trimmed) return;
 		recentSearches = [trimmed, ...recentSearches.filter((s) => s !== trimmed)].slice(
 			0,
 			MAX_RECENT
@@ -169,16 +193,25 @@
 				e.preventDefault();
 				activeIndex = len > 0 ? (activeIndex - 1 + len) % len : -1;
 				break;
-			case 'Enter':
+			case 'Enter': {
 				e.preventDefault();
 				if (activeIndex >= 0 && activeIndex < len) {
 					selectItem(allItems[activeIndex]);
-				} else if (query.trim()) {
-					saveRecent(query.trim());
-					open = false;
-					goto(`${searchUrl}?q=${encodeURIComponent(query.trim())}`);
+					break;
 				}
+				// "See all results" obeys the SAME floor as the live fetch above
+				// (Codex-k618q). This navigates to /discover or /explore, whose
+				// `+page.server.ts` reads `?q=` and issues the search — so a
+				// below-floor Enter would walk straight past the gate into the
+				// sequential scan the gate exists to prevent. Below the floor
+				// Enter holds: the palette stays open with the partial word.
+				const gatedQuery = gateSearchQuery(query);
+				if (!gatedQuery) break;
+				saveRecent(gatedQuery);
+				open = false;
+				goto(`${searchUrl}?q=${encodeURIComponent(gatedQuery)}`);
 				break;
+			}
 			case 'Escape':
 				open = false;
 				break;

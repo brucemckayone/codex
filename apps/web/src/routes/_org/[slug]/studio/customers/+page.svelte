@@ -21,6 +21,7 @@
   import { UsersIcon, DownloadIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { gateSearchQuery } from '@codex/validation';
   import { getCustomers, listAdminContent } from '$lib/remote/admin.remote';
   import { formatPrice } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
@@ -30,7 +31,12 @@
 
   // ── URL-derived state (all filters are URL-based for server-side filtering) ──
   const currentUrlPage = $derived(parseInt(page.url.searchParams.get('page') || '1', 10) || 1);
-  const urlSearch = $derived(page.url.searchParams.get('search')?.trim() || undefined);
+  // Client-side search floor (Codex-k618q) — below SEARCH_MIN_QUERY_LENGTH
+  // this is null, the `...(urlSearch && …)` spread drops the arg, and
+  // `getCustomers` issues no pattern pg_trgm would have to scan for.
+  const urlSearch = $derived(
+    gateSearchQuery(page.url.searchParams.get('search')) ?? undefined
+  );
   const urlContentId = $derived(page.url.searchParams.get('contentId') || undefined);
   const urlJoined = $derived(page.url.searchParams.get('joined') || undefined);
   const urlSpend = $derived(page.url.searchParams.get('spend') || undefined);

@@ -30,6 +30,7 @@
   import type { CourseCardSummary } from '$lib/journeys/types';
   import type { ContentWithRelations } from '$lib/types';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
+  import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
   import { applyFilterPatch } from '$lib/utils/filter-url';
   import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
@@ -408,9 +409,20 @@
     }
   }
 
+  /**
+   * The client-side search floor (Codex-k618q). `q` reaches the database
+   * through `+page.server.ts`, so the gate has to sit on the URL write:
+   * below SEARCH_MIN_QUERY_LENGTH pg_trgm has no trigram to probe its index
+   * with and the search degrades to a sequential scan of the whole table.
+   *
+   * A below-floor NON-EMPTY value HOLDS — no navigation, so the results and
+   * the input both stay as they are until the third character arrives.
+   * Clearing the box still commits (`gateSearchQuery('')` → null → param
+   * deleted), so the clear button and an emptied field behave as before.
+   */
   function handleSearchSubmit(value: string) {
-    const trimmed = value.trim();
-    updateFilters({ q: trimmed || null });
+    if (isSearchQueryBelowFloor(value)) return;
+    updateFilters({ q: gateSearchQuery(value) });
   }
 
   /** Page-wide clear — every facet, including the ones the drawer doesn't own. */

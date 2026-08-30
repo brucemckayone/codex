@@ -5,6 +5,7 @@
   and SEO-friendly pagination. Uses ContentCard grid and Pagination component.
 -->
 <script lang="ts">
+  import { gateSearchQuery, isSearchQueryBelowFloor } from '@codex/validation';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -51,7 +52,13 @@
     const search = overrides.search ?? searchInput;
     const type = overrides.type ?? activeType;
 
-    if (search) params.set('search', search);
+    // Client-side search floor (Codex-k618q) — gated HERE rather than in
+    // `handleSearch` because `handleTypeChange` carries `searchInput` along
+    // too, and a below-floor value must not ride into the URL either way.
+    // `?search=` reaches the database via `+page.server.ts`, where a 1-2
+    // character pattern is unindexable by pg_trgm and scans the whole table.
+    const gatedSearch = gateSearchQuery(search);
+    if (gatedSearch) params.set('search', gatedSearch);
     if (type && type !== 'all') params.set('type', type);
     // Reset page to 1 when filters change
     if (overrides.page) params.set('page', overrides.page);
@@ -62,6 +69,10 @@
 
   function handleSearch(event: Event) {
     event.preventDefault();
+    // HOLD below the floor: submitting two letters neither issues a query nor
+    // drops an active one, so the field keeps the partial word. Emptying the
+    // field still commits the clear.
+    if (isSearchQueryBelowFloor(searchInput)) return;
     void goto(buildFilterUrl({ search: searchInput }));
   }
 
