@@ -10,15 +10,21 @@
   wrapper as a `data-jp-*` attribute. COLOUR STAYS `--color-*` (contract A11);
   the one exception is the `--jp-accent-*` family.
 
-  `media` is DELIBERATELY unconsumed. Research §2.2 names the five types where it
-  is meaningful — `hero`, `introVideo`, `reel`, `guide`, `proof` — and says the
-  rest "ignore it, exactly as they ignore a variant they do not offer." The
-  free-taste player looks like media but is not: it is a synthetic waveform drawn
-  from a deterministic function, and `context.sellPreview.reel`'s real manifest is
-  still unwired (`Codex-scab9`). There is no image, no video and no aspect ratio
-  for `--jp-media-*` to shape, so claiming nine would have meant inventing a
-  consumer (contract A50). If `Codex-scab9` ever wires real playback, `media`
-  becomes this section's ninth axis.
+  `media` is DELIBERATELY unconsumed, and it STAYS unconsumed now that playback is
+  real. Research §2.2 names the five types where the axis is meaningful — `hero`,
+  `introVideo`, `reel`, `guide`, `proof` — and says the rest "ignore it, exactly as
+  they ignore a variant they do not offer."
+
+  The note here used to say the axis would become this section's ninth "if
+  `Codex-scab9` ever wires real playback". It is now wired — the taste plays
+  `context.sellPreview.reel`'s 30s public manifest through the same
+  `createHlsPlayer` handle `IntroVideoModal` and `AudioPlayer` use — and the axis
+  still has nothing to shape, because this section's clip has no VISIBLE box: the
+  element is an off-layout `<video>` carrying the SOUND, and the waveform is the
+  picture. `--jp-media-*` are an aspect ratio, a frame treatment and a bleed; a
+  1px sound source has none of them, so claiming nine would still mean inventing a
+  consumer (contract A50). What WOULD make this section media-aware is giving the
+  clip a frame of its own — and that composition already exists as `reel`.
 
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `paired` (default) · `column` · `statement` · `grid` · `ledger` · `stack`.
@@ -44,23 +50,60 @@
     waveform drawn at rest, the inclusion list complete. This is what the server
     emits, so the section is never blank and never JS-gated. The bars are computed
     deterministically (pure, SSR-safe) so they paint identically on both sides.
+    THE TRANSPORT IS NOT IN THE BASELINE, and that is the point: play/pause/mute
+    only exist once the component has mounted, because they only WORK once it has.
+    A play button served to a no-JS client is the same broken promise the mock was.
   • ENHANCED (browser + motion OK): blocks arrive on the `motion` axis's timing,
-    and the free-taste player animates as a breathing equaliser with a live
-    playhead.
+    the free-taste player breathes as an equaliser, and the playhead tracks the
+    clip's own `timeupdate`.
+
+  ── THE FREE TASTE PLAYS THE REAL CLIP (`Codex-scab9`) ─────────────────────
+  It did not. `playing` was a boolean, `elapsed` was advanced by a rAF accumulator
+  against an invented 8-minute duration, and there was no media element anywhere in
+  the file — `context` was not even destructured, so the section COULD NOT have
+  read `sellPreview` by accident. A visitor pressed play on the most
+  conversion-critical page in the product, watched a clock run and a waveform move,
+  and heard nothing; and because the rAF effect bailed on `!enhanced`, a
+  reduced-motion visitor got a button that reported `aria-pressed="true"` while the
+  clock never moved at all. Two failures, one control.
+
+  Now: `previewTitle` is the AUTHOR's switch and `context.sellPreview.reel` is the
+  FACT, and BOTH are required. With a title and no clip the transport does not
+  render — mirroring `ReelSection`, which deleted its own `reel__play--empty` glyph
+  for the same reason. No second player was written: the manifest goes to
+  `createHlsPlayer` (`$lib/components/VideoPlayer/hls`), the same factory behind
+  `IntroVideoModal` (which `ReelSection` mounts) and `AudioPlayer`.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import * as m from '$paraglide/messages';
-  import { PauseIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import {
+    PauseIcon,
+    PlayIcon,
+    Volume2Icon,
+    VolumeXIcon,
+  } from '$lib/components/ui/Icon';
+  import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { aliasKeys, asObjectArray, asString, asStringFrom, fieldString } from '../coerce';
   import { reveal } from '../reveal';
-  import type { FeelSectionProps, FeelInclusion, JourneySalesContext } from '../types';
+  import type {
+    FeelSectionProps,
+    FeelInclusion,
+    JourneySalesContext,
+    PreviewMedia,
+  } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
+  import type Hls from 'hls.js';
 
   interface Props {
     config: SectionProps;
-    /** Present for a uniform section-component contract; unused by this section. */
+    /**
+     * Read for ONE thing: `context.sellPreview`, the streamed 30s public preview
+     * this section's free taste plays. It used to be annotated "unused by this
+     * section" and was not destructured at all, which is what made the transport a
+     * mock rather than merely unwired (`Codex-scab9`).
+     */
     context: JourneySalesContext;
     variant?: string;
     /**
@@ -73,7 +116,7 @@
     onEdit?: (key: string, value: string) => void;
   }
 
-  const { config, variant, editable = false, onEdit }: Props = $props();
+  const { config, context, variant, editable = false, onEdit }: Props = $props();
 
   const p: FeelSectionProps = $derived({
     /**
@@ -97,22 +140,42 @@
     }),
   });
 
-  // ── The optional free-taste player. `previewTitle` is the switch; absent ⇒ the
-  //    whole player self-hides. `previewDuration` stays a DEFENSIVE numeric read
-  //    because its `number` control has no editor UI yet (contract A29) and the
-  //    text fallthrough writes a string like "480", which must not be trusted.
+  // ── The optional free-taste player. `previewTitle` is the AUTHOR's switch and
+  //    `context.sellPreview.reel` is the FACT; both are required, so `hasPlayer`
+  //    alone no longer decides anything visible (see the `{#await}` in markup).
+  //    `previewDuration` stays a DEFENSIVE numeric read because its `number`
+  //    control has no editor UI yet (contract A29) and the text fallthrough writes
+  //    a string like "480", which must not be trusted.
   const previewTitle = $derived(asString(config, 'previewTitle'));
   const previewSub = $derived(asString(config, 'previewSub'));
-  const previewDuration = $derived.by(() => {
+
+  /**
+   * The authored runtime, or `undefined`. IT NO LONGER DEFAULTS TO 480.
+   *
+   * The 8-minute default was the loudest part of the mock: a page that authored no
+   * duration published a clock counting towards `8:00` on a clip that is thirty
+   * seconds long. With nothing authored the total is now taken from the clip, and
+   * with nothing known the total is not printed at all — an elapsed reading with no
+   * total is honest, and "0:00 / 8:00" was not.
+   */
+  const authoredDuration = $derived.by(() => {
     const raw = config['previewDuration'];
-    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 480;
+    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+      ? raw
+      : undefined;
   });
   const hasPlayer = $derived(previewTitle ? 'yes' : 'no');
 
   const inclusions = $derived(p.inclusions ?? []);
-  const hasContent = $derived(
-    !!(p.eyebrow || p.heading || p.body || inclusions.length > 0) ||
-      hasPlayer === 'yes'
+
+  /**
+   * The SSR-CRITICAL half of the section: everything a crawler must see and
+   * everything that cannot flicker. Deliberately excludes the player, because the
+   * player's existence now depends on an awaited promise — see the bottom of the
+   * markup for why the copy branch must not live inside an `{#await}`.
+   */
+  const hasText = $derived(
+    !!(p.eyebrow || p.heading || p.body || inclusions.length > 0)
   );
 
   const COMPOSITIONS = [
@@ -173,24 +236,80 @@
   let mounted = $state(false);
   let reduced = $state(false);
 
-  // ── Mock free-taste transport (a visual "taste", no real audio — `Codex-scab9`
-  //    tracks wiring it to `context.sellPreview.reel`). `elapsed` advances via rAF
-  //    only when motion is welcome.
+  // ══════════════════════════════════════════════════════════════════════════
+  //  THE FREE-TASTE TRANSPORT — REAL PLAYBACK (`Codex-scab9`)
+  //
+  //  What was here: `playing` as a bare boolean, `elapsed` advanced by a rAF
+  //  accumulator, and no media element. `elapsed` is now READ from the element's
+  //  own `currentTime`, so the playhead cannot disagree with what is audible, and
+  //  the rAF loop is gone — with it the reduced-motion failure, where the effect
+  //  bailed on `!enhanced` and left a button reporting `aria-pressed="true"` while
+  //  the clock stood still. `enhanced` now gates ANIMATION only, never state.
+  // ══════════════════════════════════════════════════════════════════════════
+  let mediaEl: HTMLVideoElement | undefined = $state();
   let playing = $state(false);
+  let muted = $state(false);
+  /** Seconds, read from `timeupdate`. Never advanced by this component. */
   let elapsed = $state(0);
+  /** The element's OWN duration once `loadedmetadata` lands; 0 until then. */
+  let metaDuration = $state(0);
+  /**
+   * A real playback failure, which HIDES the transport rather than leaving a
+   * control that cannot do its job. Same rule as "no clip ⇒ no transport", applied
+   * to "no playable clip" — and it matters here because the preview manifest is
+   * known to 404 in production today (`Codex-1g5lh.13`: `hlsPreviewKey` lives in
+   * the private media bucket while the public CDN host serves the assets bucket).
+   * Until that is fixed, this is the branch most real visitors would hit.
+   */
+  let unplayable = $state(false);
+
+  /** The HLS handle, exactly as `IntroVideoModal` holds it: `{ hls, cleanup }`. */
+  let hlsInstance: Hls | null = null;
+  let hlsCleanup: (() => void) | null = null;
+  /** The manifest currently attached, so a second play does not rebuild it. */
+  let attachedUrl: string | null = null;
 
   const enhanced = $derived(mounted && !reduced);
-  const progress = $derived(previewDuration > 0 ? elapsed / previewDuration : 0);
-  const playedBars = $derived(Math.round(progress * BAR_COUNT));
-  const headPct = $derived(Math.min(Math.max(progress * 100, 0), 100));
 
-  const fmt = (secs: number): string => {
-    const s = Math.max(0, Math.min(previewDuration, Math.round(secs)));
-    const m = Math.floor(s / 60);
-    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  /**
+   * THE 30-SECOND CAP, AND IT IS SOMEONE ELSE'S BUG THIS SECTION MUST NOT INHERIT.
+   *
+   * `packages/access` `toClip()` builds the preview clip from `media.hlsPreviewKey`
+   * — a fixed 30s rendition ("30s preview" in the schema; `create_preview` caps it
+   * in the RunPod handler) — but reports `durationSeconds` from the SOURCE asset.
+   * So a 30-minute intro yields `durationSeconds: 1800` on a clip that plays for
+   * thirty seconds. Sizing a playhead off that number makes it crawl across 1.7% of
+   * the bar and stop, which reads as a broken player rather than a finished clip.
+   *
+   * Capping is the local defence; the upstream fix is a handoff, not a licence to
+   * trust the field. The element's own `loadedmetadata` duration outranks this the
+   * moment it arrives, which is why the cap only ever governs the pre-play label.
+   */
+  const PREVIEW_CAP_SECONDS = 30;
+
+  const clipDuration = (clip: PreviewMedia | null): number | undefined => {
+    const raw = clip?.durationSeconds;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+      return undefined;
+    }
+    return Math.min(raw, PREVIEW_CAP_SECONDS);
   };
-  const curLabel = $derived(fmt(elapsed));
-  const totLabel = $derived(fmt(previewDuration));
+
+  /**
+   * The total the clock counts towards, in precedence order: the ELEMENT's own
+   * duration (the only source that cannot be wrong), then the authored number,
+   * then the clip's capped advisory figure. `0` ⇒ unknown, and an unknown total is
+   * not printed.
+   */
+  const totalSeconds = (clip: PreviewMedia | null): number =>
+    metaDuration > 0 ? metaDuration : (authoredDuration ?? clipDuration(clip) ?? 0);
+
+  const fmt = (secs: number, total: number): string => {
+    const ceiling = total > 0 ? total : secs;
+    const s = Math.max(0, Math.min(ceiling, Math.round(secs)));
+    const mins = Math.floor(s / 60);
+    return `${mins}:${String(s % 60).padStart(2, '0')}`;
+  };
 
   onMount(() => {
     mounted = true;
@@ -200,42 +319,88 @@
       reduced = e.matches;
     };
     mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  });
-
-  // Advance the playhead while playing (motion path only). Tears down on pause /
-  // reduced-motion / unmount so no rAF leaks across the section's lifetime.
-  //
-  // `svelte-autofixer` flags the `elapsed` / `playing` assignments inside this
-  // `$effect` as malpractice and suggests `$derived`. DELIBERATELY NOT CHANGED:
-  // this is a wall-clock ticker, and `$derived` has no expression for "the time
-  // now" — the value comes from `performance.now()` deltas, not from any reactive
-  // input. A rAF loop that writes its own accumulator IS the correct shape here,
-  // and the effect is the only thing that can own its teardown. Every other
-  // derived value in this file (`progress`, `playedBars`, `headPct`, the labels)
-  // IS a `$derived` off `elapsed`, which is the part the rule is really about.
-  $effect(() => {
-    if (!playing || !enhanced) return;
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      elapsed += (now - last) / 1000;
-      last = now;
-      if (elapsed >= previewDuration) {
-        elapsed = 0;
-        playing = false;
-        return;
-      }
-      raf = requestAnimationFrame(tick);
+    return () => {
+      mql.removeEventListener('change', onChange);
+      teardownHls();
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
   });
 
-  function togglePlay() {
-    playing = !playing;
+  /**
+   * BOTH HALVES OF THE HANDLE, and the reason is recorded in `IntroVideoModal`:
+   * assigning `createHlsPlayer`'s handle straight to an `Hls`-typed variable made
+   * `destroy is not a function` throw on every close, so `cleanup()` never ran and
+   * each open leaked a player whose worker kept fetching segments. `cleanup` is a
+   * no-op on the hls.js branch and a `removeEventListener` on the Safari native
+   * branch, so both are needed.
+   */
+  function teardownHls() {
+    if (hlsCleanup) {
+      hlsCleanup();
+      hlsCleanup = null;
+    }
+    if (hlsInstance) {
+      hlsInstance.destroy();
+      hlsInstance = null;
+    }
+    attachedUrl = null;
   }
 
+  /**
+   * Attach the manifest LAZILY — on the first play, never on mount. This is a
+   * public sales page: an unasked-for manifest plus its first segments on every
+   * page load is bandwidth spent on a visitor who never pressed play, and
+   * `preload="none"` on the element says the same thing to the native path.
+   */
+  async function attachClip(url: string): Promise<boolean> {
+    if (!mediaEl) return false;
+    if (attachedUrl === url) return true;
+    teardownHls();
+    try {
+      const handle = await createHlsPlayer({
+        media: mediaEl,
+        src: url,
+        onError: () => {
+          unplayable = true;
+          playing = false;
+          teardownHls();
+        },
+      });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+      attachedUrl = url;
+      return true;
+    } catch {
+      unplayable = true;
+      return false;
+    }
+  }
+
+  /**
+   * CLICK TO PLAY, and unmuted by default — which is only allowed BECAUSE it is a
+   * click. Autoplay policy blocks unmuted playback without a user gesture, and
+   * hover is not a gesture in this codebase, so the two constraints agree: the
+   * only honest free taste is one the visitor asks for. A rejected `play()` leaves
+   * the button in its resting state rather than claiming to be playing.
+   */
+  async function togglePlay(url: string) {
+    if (!mediaEl) return;
+    if (playing) {
+      mediaEl.pause();
+      return;
+    }
+    if (!(await attachClip(url))) return;
+    mediaEl.muted = muted;
+    try {
+      await mediaEl.play();
+    } catch {
+      playing = false;
+    }
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    if (mediaEl) mediaEl.muted = muted;
+  }
 
   /**
    * The props key an inline edit must write BACK to: the one the displayed value
@@ -287,7 +452,192 @@
       : {};
 </script>
 
-{#if hasContent}
+<!--
+  THE FREE TASTE. One snippet, and every control inside it is gated on `live` —
+  `clip !== null && mounted && !unplayable` — so there is exactly ONE predicate
+  deciding whether this block can do what it looks like it does. Three separate
+  conditions at three call sites is how the old markup came to promise playback it
+  did not have.
+
+  WHAT SURVIVES WITHOUT `live`: the title, the sub-line and the waveform at rest.
+  That is a still of the practice, which is honest. What does NOT survive: the
+  play button, the mute toggle and the clock — the three things that would be
+  lying.
+-->
+{#snippet taste(clip: PreviewMedia)}
+  {@const total = totalSeconds(clip)}
+  {@const live = mounted && !unplayable}
+  {@const progress = total > 0 ? Math.min(Math.max(elapsed / total, 0), 1) : 0}
+  {@const playedBars = live ? Math.round(progress * BAR_COUNT) : 0}
+  {@const headPct = live ? progress * 100 : 0}
+  <div class="feel__player jp-reveal" data-jp-step="3">
+    <div
+      class="feel-taste"
+      role="group"
+      aria-label={m.journey_feel_preview_label({ title: previewTitle })}
+    >
+      <div class="feel-taste__aura" aria-hidden="true"></div>
+      {#if live}
+        <!--
+          THE CLIP ITSELF — a `<video>`, off-layout, carrying the SOUND.
+
+          `<video>` and not `<audio>`, and the reason is mechanical: the manifest is
+          a video rendition, hls.js appends video buffers through MSE, and an
+          `<audio>` element's media source cannot accept them. (`AudioPlayer` uses
+          `<audio>` with this same factory, correctly — its manifests are audio-only.)
+
+          Off-layout rather than `display: none`, because a display-none media
+          element is entitled to have its decode pipeline dropped, and the audio is
+          the entire point. `aria-hidden` + `tabindex="-1"` keep it out of the
+          accessibility tree and the tab order: the accessible transport is the
+          button below, and two focus stops for one clip is a worse experience than
+          one.
+
+          `preload="none"`: nothing is fetched until the visitor presses play.
+        -->
+        <video
+          bind:this={mediaEl}
+          class="feel-taste__media"
+          playsinline
+          preload="none"
+          tabindex="-1"
+          aria-hidden="true"
+          onplay={() => {
+            playing = true;
+          }}
+          onpause={() => {
+            playing = false;
+          }}
+          ontimeupdate={() => {
+            elapsed = mediaEl?.currentTime ?? 0;
+          }}
+          onloadedmetadata={() => {
+            const own = mediaEl?.duration;
+            metaDuration =
+              typeof own === 'number' && Number.isFinite(own) && own > 0 ? own : 0;
+          }}
+          onended={() => {
+            playing = false;
+            elapsed = 0;
+            if (mediaEl) mediaEl.currentTime = 0;
+          }}
+        ></video>
+      {/if}
+      <div class="feel-taste__head">
+        {#if live}
+          <button
+            class="feel-play"
+            class:is-playing={playing}
+            type="button"
+            aria-pressed={playing}
+            aria-label={playing
+              ? m.journey_feel_preview_pause()
+              : m.journey_feel_preview_play()}
+            onclick={() => togglePlay(clip.playlistUrl)}
+          >
+            <!-- `Icon/*Icon.svelte` via `IconBase`, not an inline `<svg>`
+                 (contract A8). `IconBase` sets `aria-hidden` itself, and
+                 the button carries the accessible name. -->
+            {#if playing}
+              <PauseIcon class="feel-play__glyph" />
+            {:else}
+              <PlayIcon class="feel-play__glyph" />
+            {/if}
+          </button>
+        {/if}
+        <div class="feel-taste__meta">
+          <div class="feel-taste__title">{previewTitle}</div>
+          {#if previewSub}
+            <div class="feel-taste__sub">{previewSub}</div>
+          {/if}
+        </div>
+        {#if live}
+          <!-- The total is printed only when one is KNOWN. It used to be
+               `fmt(480)` on every page that authored no duration — "0:00 / 8:00"
+               over a thirty-second clip. -->
+          <div class="feel-taste__time" aria-hidden="true">
+            <span class="feel-cur">{fmt(elapsed, total)}</span>
+            {#if total > 0}
+              <span class="feel-sep">/</span>
+              <span>{fmt(total, total)}</span>
+            {/if}
+          </div>
+          <!-- A MUTE TOGGLE, NOT A VOLUME SLIDER. Playback starts unmuted because
+               it starts from a click, and the one thing a visitor needs after that
+               is a way to silence it without hunting for the pause button. -->
+          <button
+            class="feel-mute"
+            type="button"
+            aria-pressed={muted}
+            aria-label={muted
+              ? m.journey_feel_preview_unmute()
+              : m.journey_feel_preview_mute()}
+            onclick={toggleMute}
+          >
+            {#if muted}
+              <VolumeXIcon class="feel-mute__glyph" />
+            {:else}
+              <Volume2Icon class="feel-mute__glyph" />
+            {/if}
+          </button>
+        {/if}
+      </div>
+
+      <!--
+        THE WAVEFORM IS DECORATION, AND IT NO LONGER PRETENDS OTHERWISE.
+        It used to carry `role="presentation"`, `aria-hidden="true"` AND an
+        `onclick` seek handler: a control with no keyboard path, no role, no name
+        and no route into the accessibility tree.
+
+        It stays decoration now that playback is real, because a synthetic
+        56-bar envelope is not this clip's amplitude — it is the same deterministic
+        function it always was. What changed is that the FILL and the PLAYHEAD are
+        now driven by the element's own `currentTime`, so the decoration tracks
+        something true. A real scrubber is a separate piece of work and wants a
+        real `<input type="range">`; `AudioPlayer` already has one, against a
+        real `waveform.json`.
+      -->
+      <div
+        class="feel-wave"
+        class:is-playing={playing && enhanced}
+        aria-hidden="true"
+      >
+        {#each bars as bar, i (i)}
+          <i
+            class:is-on={i < playedBars}
+            style="--h: {bar.h}%; --d: {bar.dur}s; --delay: {bar.delay}s"
+          ></i>
+        {/each}
+        <span class="feel-wave__head" style="left: {headPct}%"></span>
+      </div>
+    </div>
+  </div>
+{/snippet}
+
+<!--
+  BOTH CONDITIONS, IN ONE PLACE. `previewTitle` is the author's switch and the
+  resolved `reel` is the fact. With a title and no clip NOTHING renders here —
+  mirroring `ReelSection`, which deleted its `reel__play--empty` glyph and its
+  `reel__rest-rail` for exactly this reason: "a play affordance and a transport
+  that are not controls, cannot become controls, and are the exact shape of a
+  broken player".
+
+  NO PENDING PLACEHOLDER, deliberately. A resting transport drawn while the
+  promise is in flight is indistinguishable from the mock this replaces, and it
+  would have to VANISH on a course with no clip — a worse shift than the one it
+  avoids. The copy above it is unaffected either way.
+-->
+{#snippet player()}
+  {#if hasPlayer === 'yes'}
+    {#await context.sellPreview then preview}
+      {#if preview?.reel?.playlistUrl}
+        {@render taste(preview.reel)}
+      {/if}
+    {/await}
+  {/if}
+{/snippet}
+
+{#snippet shell()}
   <div class="feel" data-feel={composition} data-split={split}>
     <!-- ONE observer for the whole section, on the container: the shared atom is
          `.reveal--armed .jp-reveal` (a DESCENDANT selector) and the action adds
@@ -327,73 +677,7 @@
             </div>
           {/if}
 
-          {#if hasPlayer === 'yes'}
-            <div class="feel__player jp-reveal" data-jp-step="3">
-              <div
-                class="feel-taste"
-                role="group"
-                aria-label={m.journey_feel_preview_label({ title: previewTitle })}
-              >
-                <div class="feel-taste__aura" aria-hidden="true"></div>
-                <div class="feel-taste__head">
-                  <button
-                    class="feel-play"
-                    class:is-playing={playing}
-                    type="button"
-                    aria-pressed={playing}
-                    aria-label={playing
-                      ? m.journey_feel_preview_pause()
-                      : m.journey_feel_preview_play()}
-                    onclick={togglePlay}
-                  >
-                    <!-- `Icon/*Icon.svelte` via `IconBase`, not an inline `<svg>`
-                         (contract A8). `IconBase` sets `aria-hidden` itself, and
-                         the button carries the accessible name. -->
-                    {#if playing}
-                      <PauseIcon class="feel-play__glyph" />
-                    {:else}
-                      <PlayIcon class="feel-play__glyph" />
-                    {/if}
-                  </button>
-                  <div class="feel-taste__meta">
-                    <div class="feel-taste__title">{previewTitle}</div>
-                    {#if previewSub}
-                      <div class="feel-taste__sub">{previewSub}</div>
-                    {/if}
-                  </div>
-                  <div class="feel-taste__time" aria-hidden="true">
-                    <span class="feel-cur">{curLabel}</span>
-                    <span class="feel-sep">/</span>
-                    <span>{totLabel}</span>
-                  </div>
-                </div>
-
-                <!--
-                  THE WAVEFORM IS DECORATION, AND IT NO LONGER PRETENDS OTHERWISE.
-                  It used to carry `role="presentation"`, `aria-hidden="true"` AND
-                  an `onclick` seek handler: a control with no keyboard path, no
-                  role, no name and no route into the accessibility tree. The seek
-                  is removed rather than made accessible because there is nothing
-                  to seek — the transport is a visual taste with no audio behind it
-                  (`Codex-scab9`). Wiring real playback is what should bring a real
-                  scrubber, with a real `<input type="range">`.
-                -->
-                <div
-                  class="feel-wave"
-                  class:is-playing={playing && enhanced}
-                  aria-hidden="true"
-                >
-                  {#each bars as bar, i (i)}
-                    <i
-                      class:is-on={i < playedBars}
-                      style="--h: {bar.h}%; --d: {bar.dur}s; --delay: {bar.delay}s"
-                    ></i>
-                  {/each}
-                  <span class="feel-wave__head" style="left: {headPct}%"></span>
-                </div>
-              </div>
-            </div>
-          {/if}
+          {@render player()}
         </div>
 
         <!-- what is inside -->
@@ -417,6 +701,30 @@
       </div>
     </div>
   </div>
+{/snippet}
+
+<!--
+  SELF-HIDE, THE WAY NINE OF THE ELEVEN SECTIONS ALREADY DO — and the copy branch
+  is NOT inside the `{#await}`, deliberately. The eyebrow, heading, body and
+  inclusion list are SEO-critical and paint immediately; putting them inside an
+  await branch would destroy and re-create them when the promise resolved,
+  re-running `use:reveal` and making the copy flash out and back in. That is
+  `ReelSection`'s reasoning verbatim, and it applies unchanged here.
+
+  The await wrapper is reached only when there is NO text — where there is nothing
+  to flicker and nothing to index, and the section's whole existence depends on
+  whether a clip turned up. Before this, a `feel` section holding a `previewTitle`
+  and nothing else rendered its bordered box, its aura and a fake transport for a
+  course with no preview clip at all.
+-->
+{#if hasText}
+  {@render shell()}
+{:else if hasPlayer === 'yes'}
+  {#await context.sellPreview then preview}
+    {#if preview?.reel?.playlistUrl}
+      {@render shell()}
+    {/if}
+  {/await}
 {/if}
 
 <style>
@@ -569,6 +877,27 @@
     );
   }
 
+  /*
+    THE SOUND SOURCE — present, rendered, and off-layout.
+
+    NOT `display: none` and NOT `visibility: hidden`: both make the element
+    invisible in a way an engine is entitled to read as "no rendering needed", and
+    the audio is the only thing this element is here for. 1px at zero opacity with
+    no pointer surface is the shape that keeps a media element fully alive while
+    taking no space and drawing nothing. `position: absolute` against `.feel-taste`
+    (which is already `position: relative` for its aura) keeps it out of the flex
+    row entirely, so it cannot open a gap in the transport.
+  */
+  .feel-taste__media {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .feel-taste__head,
   .feel-wave {
     position: relative;
@@ -664,6 +993,53 @@
       opacity: 0;
       transform: scale(1.5);
     }
+  }
+
+  /*
+    MUTE — the secondary control, so a quiet ghost button rather than a second
+    brand plate. Two filled circles side by side would read as two equal choices,
+    and play is the one that matters.
+
+    It still clears `--tap-target-min` (WCAG 2.5.5) even though it looks small:
+    the floor is on the BOX, and the glyph is what shrinks. `--color-text-secondary`
+    on the card's own surface, never `--jp-faint` — `faint` is reserved for
+    non-essential text and a control's glyph is not that.
+  */
+  .feel-mute {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--tap-target-min);
+    height: var(--tap-target-min);
+    padding: 0;
+    border: var(--border-width) solid var(--jp-edge-color);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      color var(--duration-normal) var(--ease-out),
+      border-color var(--duration-normal) var(--ease-out);
+  }
+
+  .feel-mute:hover {
+    color: var(--color-heading);
+    border-color: var(--jp-accent-mark);
+  }
+
+  /* `edge: none` and `edge: soft` remove borders, but a focus ring is never
+     optional (research §5.1). */
+  .feel-mute:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* `:global` because the class lands on an `IconBase` `<svg>` in a child
+     component, which Svelte's scoping cannot reach. */
+  .feel-mute :global(.feel-mute__glyph) {
+    display: block;
+    width: 45%;
+    height: 45%;
   }
 
   .feel-taste__meta {

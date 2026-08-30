@@ -652,6 +652,13 @@
       "when": 1788057028581,
       "tag": "0092_courses_hero_image_key",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1788062701845,
+      "tag": "0093_courses_signature_image_key",
+      "breakpoints": true
     }
   ]
 }

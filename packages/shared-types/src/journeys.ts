@@ -803,6 +803,23 @@ export interface JourneyListItem {
    */
   featured: boolean;
   updatedAt: string;
+  /**
+   * Public CDN URL for the subject course's cover (`courses.coverImageKey` →
+   * `md.webp`), or null when there is no cover, no configured URL base, or the
+   * page has no subject course. Never a raw R2 key.
+   *
+   * The SAME variant {@link JourneyCardView.coverImageUrl} serves, deliberately:
+   * the studio row's thumbnail exists so a creator can tell their portals apart
+   * AND check the image the public card renders, so the two must resolve one
+   * column to one meaning. A studio-only variant would preview something the
+   * product never shows.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): the web app
+   * and the workers deploy separately, so a worker predating this field omits the
+   * key and the studio row renders its typographic fallback tile rather than a
+   * broken `<img>`. Readers therefore treat `undefined` as "no cover" (`?? null`).
+   */
+  coverImageUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -957,6 +974,23 @@ export interface JourneySellMedia {
    * empty state rather than crashing on a missing field.
    */
   heroImageUrl?: string | null;
+  /**
+   * UPLOADED signature-image CDN URL (`courses.signatureImageKey` → `md.webp`),
+   * or null when the creator has uploaded no signature (Codex-wqxv4's named-slot
+   * half).
+   *
+   * `md`, not `lg` like the hero and not `sm`: the letter paints the mark at a
+   * height derived from the heading size, so a wide signature lands around
+   * 200–400 CSS px — see `ImageProcessingService.processCourseSignature`.
+   *
+   * The UPLOAD ONLY, for the identical reason as {@link heroImageUrl}: the
+   * panel's Replace / Remove act on the uploaded file, so a value that could also
+   * be a video's poster frame would offer a Remove that removes nothing.
+   * `CourseSellPreview.signatureUrl` owns the chain.
+   *
+   * OPTIONAL-additive, same deployment-skew reason as the two above.
+   */
+  signatureImageUrl?: string | null;
 }
 
 /**
@@ -1081,9 +1115,21 @@ export interface CourseSellPreview {
    */
   heroClip?: CourseSellPreviewClip | null;
   /**
-   * The guide's SIGNATURE mark — a public CDN URL resolved from the thumbnail of
-   * `courses.signatureMediaId` (A27). `guide.letter` signs off with it; null
-   * leaves the letter unsigned. Same `toStill` resolution as the portrait.
+   * The guide's SIGNATURE mark — a public CDN URL, or null when there is none,
+   * which leaves `guide.letter` signed with the typeset name alone.
+   *
+   * Resolved down an ORDERED chain, uploaded first, exactly as {@link
+   * heroImageUrl} is (Codex-wqxv4's named-slot half):
+   *
+   *   signatureImageKey (an uploaded PNG/JPEG/WebP, `md.webp`)
+   *     ?? signatureMediaId's poster frame (a video's `thumbnailKey`, A27)
+   *       ?? nothing
+   *
+   * The uploaded link had to exist for this field to be usable at all, not merely
+   * to be better: `media_items` is CHECK-constrained to ('video','audio'), so the
+   * only signature A27 could express was a frame of a FILM of a signature. The
+   * media ref stays as the second link rather than being replaced, so a journey
+   * that already picked one does not lose its mark.
    */
   signatureUrl?: string | null;
 }

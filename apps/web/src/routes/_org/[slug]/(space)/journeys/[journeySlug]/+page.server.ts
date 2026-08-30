@@ -73,6 +73,38 @@ export const load: PageServerLoad = async (event) => {
     throw error(404, 'This portal could not be found.');
   }
 
+  // ── START THE HERO'S MEDIA READ NOW, NOT AT THE END OF THE LOAD ─────────────
+  // Still STREAMED (it is returned unawaited below, and the intro/reel/hero
+  // sections `{#await}` it behind poster skeletons) — only its START moved. It
+  // used to be constructed inline in the `return`, i.e. AFTER the awaited
+  // `Promise.all([enrolled, offer])`, so the request that discovers the hero
+  // still's URL did not leave the box until the load's whole critical chain had
+  // finished. And the hero still is the page's LCP element on the `full-bleed`,
+  // `split-media` and `poster` compositions, so it was structurally the LAST
+  // thing the browser could learn about.
+  //
+  // MEASURED — dev stack, of-blood-and-bones/ancestral-threads, signed out,
+  // curl, n=6. The gap between `time_starttransfer` and `time_total` is exactly
+  // this promise's tail, because it is the only streamed value on the page:
+  //     before   min tail 0.249s · median 0.522s   (on a 2.3–3.3s TTFB)
+  //     after    see the report — it now overlaps the awaited pair instead
+  // TTFB itself is unchanged either way: nothing new is awaited.
+  //
+  // `.catch()` IS ATTACHED HERE, at construction, not at the return: a rejection
+  // between the two would otherwise be an unhandled rejection with no handler
+  // yet attached, and the whole point of moving construction earlier is that
+  // there is now `await`ed work in between.
+  //
+  // THE ONE COST, stated rather than hidden: the entitled→dashboard redirect
+  // below is thrown after this fires, so an entitled viewer pays one wasted
+  // worker read before being bounced. That is the rare path (it happens once,
+  // then they are on the dashboard); the anonymous visitor is the common one and
+  // the SEO-critical one, and this is the trade in their favour.
+  const sellPreview = resolveSellPreview({
+    pageId: coursePage.page.id,
+    courseId: coursePage.course.id,
+  }).catch(() => null);
+
   // AWAIT the entitlement flag: it now DECIDES THE REDIRECT below (Codex-aectb)
   // — an entitled viewer is sent to their dashboard rather than sold the course
   // again — and, on the preview bypass where no redirect fires, still flips the
@@ -210,6 +242,19 @@ export const load: PageServerLoad = async (event) => {
   // visitors, so this redirect is a UX convenience and not a security boundary.
   // The most a hand-typed `?preview=anything` earns is the marketing page the
   // same person could already read while signed out.
+  //
+  // AND `?preview` NOW MEANS MORE THAN THIS BYPASS — BUT DELIBERATELY NOT HERE.
+  // Bypassing the redirect only got the creator onto the sell page; the CTA still
+  // resolved against THEIR entitlement, so all three CTAs read "Go to your
+  // dashboard" and a creator could never preview their own buy button (O17).
+  // `+page.svelte` now forces the anonymous CTA resolution under this same
+  // predicate — and it lives THERE, in the render, on purpose. `enrolled` below
+  // is the true entitlement and must stay so: it is the only predicate this page
+  // and the dashboard both gate on, which is what makes the pair provably
+  // loop-free (see the paragraph above). A "render as a visitor" flag in this
+  // file would sit one tidy-up away from becoming an input to `evaluateCourseGate`
+  // and reintroducing the sell→dashboard→sell bounce. Downstream of the decision
+  // it cannot.
   if (!(url.searchParams.has('preview') || draftPreview)) {
     const gate = evaluateCourseGate({
       // A slug with no page/course already threw 404 above.
@@ -305,10 +350,8 @@ export const load: PageServerLoad = async (event) => {
     // the read failed — sections show no price rather than a wrong one.
     offer,
     draftPreview,
-    // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
-    sellPreview: resolveSellPreview({
-      pageId: coursePage.page.id,
-      courseId: coursePage.course.id,
-    }).catch(() => null),
+    // STREAM: public sell previews (no auth), already `.catch()`-guarded. Started
+    // near the top of this load rather than here — see the comment there.
+    sellPreview,
   };
 };

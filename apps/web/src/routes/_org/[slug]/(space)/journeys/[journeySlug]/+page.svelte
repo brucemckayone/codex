@@ -83,12 +83,56 @@
   // address. Canonical consolidates it; `robots` below is the hard signal.
   const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
 
-  // NEVER INDEXED: a draft (manager-only) or ANY preview URL. The `.has()` test
-  // mirrors the load's bypass exactly — `?preview=0` bypasses the redirect, so it
-  // must also earn the noindex, or the two would disagree about what a preview is.
-  const noIndex = $derived(
+  // ── ONE PREDICATE FOR "THIS IS A PREVIEW", AND EVERYTHING BRANCHES ON IT ────
+  // A draft (manager-only, proven by which read served the page) or ANY
+  // `?preview` value. The `.has()` test mirrors the load's bypass exactly —
+  // `?preview=0` bypasses the redirect, so it must earn the same treatment here,
+  // or the two would disagree about what a preview is.
+  //
+  // It is NAMED because three separate things now read it — `robots`, the banner,
+  // and how the CTA resolves — and an inline re-derivation at each site is how
+  // they drift apart silently.
+  const previewing = $derived(
     draftPreview || page.url.searchParams.has('preview')
   );
+
+  // NEVER INDEXED: a preview URL is a second, fully-rendered address for the
+  // canonical page, and the builder's "View live ↗" hands the creator one.
+  const noIndex = $derived(previewing);
+
+  // ── `?preview` MEANS "SHOW ME WHAT A VISITOR SEES" — INCLUDING THE BUTTON ───
+  // The most important element on a sales page is the one that takes the money,
+  // and it was the one thing a creator could never preview. Measured signed in
+  // as the of-blood-and-bones owner on `/journeys/ancestral-threads?preview=1`
+  // (a course with a real £49 one-off path): ALL THREE CTAs — the hero's, the
+  // invite's and the floating pill — read "Go to your dashboard" and pointed at
+  // `/dashboard`. So a creator could preview their copy, layout, media and
+  // atmosphere, and never the offer. `View live ↗` promises "the real sales
+  // page"; this is the half of that promise that was missing.
+  //
+  // `+page.server.ts` already bypasses the entitled→dashboard REDIRECT on this
+  // same predicate. Nothing changed how the CTA RESOLVED, so the bypass got the
+  // creator onto the sell page and then showed them the wrong page.
+  //
+  // WHY THE OVERRIDE LIVES HERE AND NOT IN THE LOAD — this is not a matter of
+  // taste. The load's redirect and the dashboard's own gate deliberately agree
+  // on ONE predicate, entitlement, "because it is the exact predicate the
+  // dashboard gates on", and anything else "would bounce them
+  // sell→dashboard→sell forever" (`+page.server.ts`). A forced-anonymous flag
+  // sitting in the load is one tidy-up away from becoming an input to that
+  // decision. Here it cannot be: `data.enrolled` remains the TRUE entitlement,
+  // the load still redirects on it, and the override exists only between that
+  // prop and the renderer. No grant, no access decision, no analytics event can
+  // read it, because there is nothing server-side to read.
+  const renderEnrolled = $derived(previewing ? false : data.enrolled === true);
+
+  // Only worth announcing when the override actually CHANGED something: this
+  // viewer really is entitled and is being shown the visitor's page anyway. A
+  // creator with no entitlement — or an anonymous reader who hand-typed
+  // `?preview=1`, which the deliberately-loose `.has()` test allows — sees
+  // exactly what they would see without the param, so a banner there would be
+  // internal chrome on a public page with nothing true to say.
+  const previewAsVisitor = $derived(previewing && data.enrolled === true);
 
   // The share image. `courses.coverImageKey` resolved to a public CDN URL by the
   // service (`resolveCourseCoverUrl`) and carried on the AWAITED envelope — the
@@ -282,15 +326,32 @@
   {/if}
 </svelte:head>
 
-{#if draftPreview}
-  <DraftPreviewBanner status={data.coursePage.page.status} {builderHref} />
+{#if draftPreview || previewAsVisitor}
+  <!--
+    `builderHref` ONLY for a draft. `draftPreview` can only be true when the
+    management-gated preview read succeeded, so it is already proof the viewer
+    manages this org (`+page.server.ts`). Entitlement is NOT that proof — a buyer
+    who types `?preview=1` is entitled and manages nothing — and this page
+    performs no role read by design, so the visitor-preview banner offers no
+    studio deep link rather than offering one on a guess.
+  -->
+  <DraftPreviewBanner
+    status={data.coursePage.page.status}
+    builderHref={draftPreview ? builderHref : null}
+    asVisitor={previewAsVisitor}
+  />
 {/if}
 
 <StructuredData data={structuredData} />
 
+<!--
+  `renderEnrolled`, NOT `data.enrolled`: under `?preview` the CTA resolves as a
+  visitor's so the creator can see their own buy button. See the derivation for
+  why the override is here and not in the load.
+-->
 <JourneyRenderer
   coursePage={renderCoursePage}
   sellPreview={data.sellPreview}
-  enrolled={data.enrolled}
+  enrolled={renderEnrolled}
   offer={data.offer}
 />

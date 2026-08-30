@@ -151,6 +151,32 @@ function resolveCourseHeroUrl(
 }
 
 /**
+ * Resolve a stored `courses.signatureImageKey` to its public CDN URL
+ * (Codex-wqxv4's named-slot half).
+ *
+ * Same raw-key → CDN-URL convention as {@link resolveCourseCoverUrl} and
+ * {@link resolveCourseHeroUrl}. The variant is **md**: `GuideSection` sizes the
+ * mark by HEIGHT off the heading scale with `width: auto`, which puts a wide
+ * signature around 200–400 CSS px, so `sm` is soft on retina and `lg` is 800px
+ * for a mark never painted that wide. `ImageProcessingService.
+ * processCourseSignature` writes {sm,md,lg} under the base key and returns `md`
+ * for exactly this reason.
+ *
+ * Returns null when there is no uploaded signature OR no configured base, so a
+ * client never receives a raw R2 key and never a half-formed URL. Null is a
+ * legitimate state — the chain then falls to `signatureMediaId`'s poster frame,
+ * and then to the letter signing off with its typeset name alone.
+ */
+function resolveCourseSignatureUrl(
+  signatureImageKey: string | null | undefined,
+  r2PublicUrlBase: string | undefined
+): string | null {
+  return signatureImageKey && r2PublicUrlBase
+    ? `${r2PublicUrlBase}/${signatureImageKey}/md.webp`
+    : null;
+}
+
+/**
  * Summarise the member-library journey-card rollup from the SAME curriculum +
  * completion shapes the dashboard uses (`practice_completions ⋈ stage_practices`,
  * SPEC §11). Flattens the curriculum in course order (stage → practice
@@ -626,6 +652,11 @@ export class CourseJourneyService extends BaseService {
           // A32 (Codex-490z7): the UPLOADED hero still. An R2 key, not a media
           // ref — see the column comment for why `media_items` cannot hold one.
           heroImageKey: courses.heroImageKey,
+          // The UPLOADED signature mark (Codex-wqxv4's named-slot half). An R2
+          // key for the same reason, and here the reason bites hardest: nobody
+          // films a signature, so the media ref could only ever hold a frame of a
+          // film OF one.
+          signatureImageKey: courses.signatureImageKey,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
           guide: courses.guide,
@@ -738,7 +769,24 @@ export class CourseJourneyService extends BaseService {
         // was thrown away here, so a creator's hero video could only ever appear
         // as its own poster frame (Codex-uj4jc).
         heroClip: toClip(courseRow.heroMediaId),
-        signatureUrl: toStill(courseRow.signatureMediaId),
+        // The guide's signature, down the SAME ordered chain as the hero above
+        // and for a sharper version of the same reason (Codex-wqxv4's named-slot
+        // half):
+        //
+        //   signatureImageKey (an uploaded PNG/JPEG/WebP) ?? signatureMediaId's
+        //   poster frame ?? nothing (the letter signs with its typeset name)
+        //
+        // A27 gave `guide.letter` a signature SLOT and no way to fill it with a
+        // signature: `media_items` is video/audio-only, so `toStill` could only
+        // ever return a frame of a FILM of a mark. Uploaded therefore does not
+        // merely outrank derived here — it is the only link that can hold the
+        // thing the composition is named after. The media ref stays as the second
+        // link so a journey that already picked one keeps rendering it.
+        signatureUrl:
+          resolveCourseSignatureUrl(
+            courseRow.signatureImageKey,
+            r2PublicUrlBase
+          ) ?? toStill(courseRow.signatureMediaId),
       };
     } catch (error) {
       this.handleError(error, 'getCourseSellPreview');
@@ -1389,10 +1437,27 @@ export class CourseJourneyService extends BaseService {
    * CURRENT state — {@link setJourneyFeatured} is the write, this is the read that
    * makes it visible. Carried for EVERY status, since the flag is orthogonal to
    * publish state (a featured draft is stored intent with no public effect).
+   *
+   * `coverImageUrl` is resolved from the SUBJECT COURSE's `coverImageKey` (null
+   * for a plain landing page, which owns no course and therefore no cover), at the
+   * SAME `md` variant the public portal card serves. The studio row's thumbnail is
+   * there to let a creator tell their portals apart at a glance AND check the image
+   * a visitor will see, so it must not preview a variant or a crop the product
+   * never renders — the rule `CategoryList`'s cover tile states for topics.
    */
   async listJourneysForOrg(
     organizationId: string,
-    status?: PageStatus
+    status?: PageStatus,
+    /**
+     * Env-owned CDN base, supplied by the ROUTE — the same split
+     * {@link getJourneySellMedia} and {@link getCourseSellPreview} use, so no
+     * service method ever invents a URL base.
+     *
+     * Omitted ⇒ every `coverImageUrl` resolves to null and the studio rows render
+     * their typographic fallback tile. That is the pre-existing behaviour, so an
+     * older caller is unaffected rather than broken.
+     */
+    r2PublicUrlBase?: string
   ): Promise<JourneyListItem[]> {
     try {
       const pageRows = await this.db
@@ -1442,6 +1507,14 @@ export class CourseJourneyService extends BaseService {
           revenueCents: null,
           featured: p.featured,
           updatedAt: p.updatedAt.toISOString(),
+          // Null for a plain landing page (no subject course ⇒ no cover column)
+          // and for a course with no uploaded cover — both are the studio row's
+          // typographic-fallback state, which is exactly what the public card
+          // does with the same absence.
+          coverImageUrl: resolveCourseCoverUrl(
+            roll?.coverImageKey,
+            r2PublicUrlBase
+          ),
         };
       });
     } catch (error) {
@@ -2120,16 +2193,18 @@ export class CourseJourneyService extends BaseService {
   // content. These three methods are that missing write path.
 
   /**
-   * Read the journey's SELL MEDIA — the four `media_items` refs the sales page's
-   * `introVideo` / `reel` / `guide` sections resolve, plus the two UPLOADED still
-   * URLs (the card cover and, since A32, the hero image).
+   * Read the journey's SELL MEDIA — the six `media_items` refs the sales page's
+   * `hero` / `introVideo` / `reel` / `guide` sections resolve, plus the THREE
+   * UPLOADED still URLs (the card cover, the hero image since A32, and the guide's
+   * signature since Codex-wqxv4's named-slot half).
    *
-   * `heroImageUrl` here is the UPLOADED hero only — deliberately NOT A32's public
-   * fallback chain. The panel needs to know whether an upload EXISTS, because
-   * that is what its Replace / Remove affordances act on; resolving the chain
-   * here would make a video's poster frame indistinguishable from an uploaded
-   * file and offer the creator a "Remove" that removes nothing. The public read
-   * ({@link getCourseSellPreview}) owns the chain.
+   * `heroImageUrl` and `signatureImageUrl` here are the UPLOADS only —
+   * deliberately NOT their public fallback chains. The panel needs to know whether
+   * an upload EXISTS, because that is what its Replace / Remove affordances act
+   * on; resolving the chain here would make a video's poster frame
+   * indistinguishable from an uploaded file and offer the creator a "Remove" that
+   * removes nothing. The public read ({@link getCourseSellPreview}) owns both
+   * chains.
    *
    * Org-scoped through {@link resolveCourseIdForPage} (a foreign, missing, or
    * non-course page 404s), then re-scoped on the course row itself as
@@ -2156,6 +2231,7 @@ export class CourseJourneyService extends BaseService {
           guide: courses.guide,
           coverImageKey: courses.coverImageKey,
           heroImageKey: courses.heroImageKey,
+          signatureImageKey: courses.signatureImageKey,
         })
         .from(courses)
         .where(
@@ -2184,6 +2260,10 @@ export class CourseJourneyService extends BaseService {
           r2PublicUrlBase
         ),
         heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
+        signatureImageUrl: resolveCourseSignatureUrl(
+          row.signatureImageKey,
+          r2PublicUrlBase
+        ),
       };
     } catch (error) {
       this.handleError(error, 'getJourneySellMedia');
@@ -2340,6 +2420,7 @@ export class CourseJourneyService extends BaseService {
             guide: courses.guide,
             coverImageKey: courses.coverImageKey,
             heroImageKey: courses.heroImageKey,
+            signatureImageKey: courses.signatureImageKey,
           });
 
         // Zero rows ⇒ the course was soft-deleted between the resolve and the
@@ -2373,6 +2454,10 @@ export class CourseJourneyService extends BaseService {
             r2PublicUrlBase
           ),
           heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
+          signatureImageUrl: resolveCourseSignatureUrl(
+            row.signatureImageKey,
+            r2PublicUrlBase
+          ),
         };
       });
     } catch (error) {
@@ -2480,6 +2565,64 @@ export class CourseJourneyService extends BaseService {
       return { courseId, heroImageKey: row.heroImageKey };
     } catch (error) {
       this.handleError(error, 'setCourseHeroImageKey');
+    }
+  }
+
+  /**
+   * Persist (or clear) the subject course's SIGNATURE IMAGE R2 key, org-scoped
+   * (Codex-wqxv4's named-slot half).
+   *
+   * The DB half of the signature upload, and the third sibling of
+   * {@link setCourseCoverImageKey} / {@link setCourseHeroImageKey}:
+   * `ImageProcessingService.processCourseSignature` owns the R2 variants and
+   * returns the base key, this owns the scoped write. Same split, same reason —
+   * no scope logic in the image layer.
+   *
+   * Pass `null` to clear. The R2 objects are left in place: keys are
+   * deterministic per course, so a later re-upload overwrites them rather than
+   * accumulating orphans, and no client is ever handed a raw key so the
+   * unreferenced variants are unreachable in the meantime.
+   *
+   * Clearing does NOT necessarily leave the letter unsigned — it drops to the
+   * next link, `signatureMediaId`'s poster frame, and only then to the typeset
+   * name alone. That is why this is a separate column rather than a replacement
+   * for the media ref.
+   *
+   * @returns the persisted key (null when cleared).
+   */
+  async setCourseSignatureImageKey(
+    organizationId: string,
+    pageId: string,
+    signatureImageKey: string | null
+  ): Promise<{ courseId: string; signatureImageKey: string | null }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const updated = await this.db
+        .update(courses)
+        .set({ signatureImageKey })
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does), exactly as
+        // `setCourseCoverImageKey` documents.
+        .returning();
+
+      const [row] = updated;
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, signatureImageKey: row.signatureImageKey };
+    } catch (error) {
+      this.handleError(error, 'setCourseSignatureImageKey');
     }
   }
 
@@ -2955,6 +3098,13 @@ export class CourseJourneyService extends BaseService {
       string,
       {
         tagline: string | null;
+        /**
+         * The RAW `courses.coverImageKey`, not a URL. The CDN base is env-owned
+         * and arrives at the public boundary ({@link listJourneysForOrg}), so
+         * this private rollup stays base-free and the ONE resolver
+         * (`resolveCourseCoverUrl`) keeps deciding which variant a cover means.
+         */
+        coverImageKey: string | null;
         stageCount: number;
         practiceCount: number;
         enrolledCount: number;
@@ -2965,6 +3115,7 @@ export class CourseJourneyService extends BaseService {
       string,
       {
         tagline: string | null;
+        coverImageKey: string | null;
         stageCount: number;
         practiceCount: number;
         enrolledCount: number;
@@ -2972,9 +3123,16 @@ export class CourseJourneyService extends BaseService {
     >();
     if (courseIds.length === 0) return map;
 
-    // Course lede (tagline) — org-scoped, non-deleted. Seeds the map.
+    // Course lede (tagline) + cover key — org-scoped, non-deleted. Seeds the map.
+    // The cover rides THIS query rather than a new one: it is a column on the row
+    // the tagline already comes from, so the studio index's thumbnail costs no
+    // extra round-trip.
     const courseRows = await this.db
-      .select({ id: courses.id, lede: courses.lede })
+      .select({
+        id: courses.id,
+        lede: courses.lede,
+        coverImageKey: courses.coverImageKey,
+      })
       .from(courses)
       .where(
         and(
@@ -2986,6 +3144,7 @@ export class CourseJourneyService extends BaseService {
     for (const c of courseRows) {
       map.set(c.id, {
         tagline: c.lede ?? null,
+        coverImageKey: c.coverImageKey ?? null,
         stageCount: 0,
         practiceCount: 0,
         enrolledCount: 0,

@@ -198,6 +198,34 @@ export const courses = pgTable(
     // place, so replacing a hero never orphans an object.
     heroImageKey: varchar('hero_image_key', { length: 500 }),
 
+    // Still-image SIGNATURE — the guide's sign-off mark, an UPLOADED image
+    // (Codex-wqxv4's remaining named-slot half). Third instance of the same
+    // shape as `coverImageKey` / `heroImageKey`, and the shape exists because of
+    // the same constraint: `media_items` is CHECK-constrained to
+    // ('video','audio'), so `signatureMediaId` below can only ever name a VIDEO
+    // and the "signature" it resolves is that video's poster frame.
+    //
+    // A signature is a scan of ink. Nobody films one. So of the three columns
+    // that CANNOT be a media ref, this was the one where the media ref was not
+    // merely a compromise but useless: `guide.letter` describes signing off with
+    // the guide's own mark, and until this column there was no way to put a mark
+    // there at all. That is why A27 shipped `signatureMediaId` and the letter
+    // still rendered only typeset text.
+    //
+    // The same ORDERED chain as the hero, resolved by `getCourseSellPreview`:
+    //   signatureImageKey (this) ?? signatureMediaId's poster frame ?? nothing
+    //     (the letter signs off with the typeset name alone).
+    // Uploaded outranks derived, for the reason A32 gives: an explicit choice
+    // beats a by-product.
+    //
+    // `ImageProcessingService.processCourseSignature` writes {sm,md,lg}.webp
+    // under this base key and the letter serves `md` — a signature is a small
+    // inline mark (~180px in `GuideSection`), so `lg` would be 800px of payload
+    // for a 180px slot while `sm` (200px) leaves nothing for a 2x display.
+    // Deterministic per course id ⇒ a re-upload overwrites in place, so
+    // replacing a signature never orphans an object.
+    signatureImageKey: varchar('signature_image_key', { length: 500 }),
+
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(
       () => mediaItems.id,
