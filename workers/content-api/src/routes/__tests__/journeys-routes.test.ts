@@ -865,17 +865,42 @@ const ROUTE_REGISTRATION =
  * can never register coverage it does not have — journeys.ts has three such
  * prose mentions today and none of them matches.
  *
- * THE TRAILING-COMMENT ALTERNATION IS NOT DECORATION. Without it this pattern
- * required end-of-line right after the comma, and `variesBySession: false, //
- * the handler never reads ctx.user` — the house style two lines up in every one
- * of these policies is `rateLimit: 'api', // 100 req/min` — was INVISIBLE. That
- * is fail-OPEN: the route would carry a shared 60s window with TOTALITY below
- * still reporting full coverage. Found by mutation, not by reading: adding a
- * carve-out with a trailing comment to `/courses/by-slug` left this file 66/66
- * green. The control test below now pins the trailing-comment form.
+ * TWO FAIL-OPEN BUGS HAVE BEEN FOUND IN THIS ONE PATTERN, both by mutation and
+ * neither by reading it. Recording both, because the shape kept reappearing:
+ *
+ *   1. It required end-of-line right after the comma, so
+ *      `variesBySession: false, // the handler never reads ctx.user` was
+ *      INVISIBLE — and `rateLimit: 'api', // 100 req/min` is the house style two
+ *      lines up in every one of these policies. Adding a carve-out with a
+ *      trailing comment to `/courses/by-slug` left the file 66/66 green.
+ *   2. It was anchored to start-of-line (`^[ \t]*`), so a policy written on ONE
+ *      line — `policy: { auth: 'optional', cache: 'public', variesBySession: false }`
+ *      — was also invisible. That is the repo's dominant style for short policies.
+ *
+ * Both are fail-OPEN: the route carries a shared 60s window while TOTALITY below
+ * reports full coverage, which is the one direction this guard must never fail.
+ *
+ * THE ANCHOR IS GONE, AND SO IS ITS REASON. `^[ \t]*` existed to stop prose
+ * mentions inside JSDoc from registering coverage — `*` is not whitespace, so an
+ * indented `* variesBySession: false` could not match. Blanking comments FIRST
+ * removes that problem at the source and lets the declaration be found anywhere on
+ * a line, which is what both bugs above needed. journeys.ts has three prose
+ * mentions today; the control test below pins that none of them counts.
  */
-const CARVE_OUT_DECLARATION =
-  /^[ \t]*variesBySession:\s*false\s*,?[ \t]*(?:\/\/[^\n]*|\/\*[^\n]*\*\/[ \t]*)?$/gm;
+const CARVE_OUT_DECLARATION = /variesBySession:\s*false\b/g;
+
+/**
+ * Blank every comment, preserving byte offsets so route attribution still works.
+ *
+ * Offsets matter: `carveOutRoutesIn` attributes a declaration to the nearest
+ * registration ABOVE it by index, so deleting bytes rather than replacing them
+ * would silently re-attribute every match after the first comment.
+ */
+function blankComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) =>
+    m.replace(/[^\n]/g, ' ')
+  );
+}
 
 /**
  * Name every route in one module that declares the carve-out, as
@@ -886,7 +911,8 @@ const CARVE_OUT_DECLARATION =
  * the wrong path or none — and TOTALITY would then fail on set equality rather
  * than pass, so the guard degrades closed.
  */
-function carveOutRoutesIn(file: string, src: string): string[] {
+function carveOutRoutesIn(file: string, rawSrc: string): string[] {
+  const src = blankComments(rawSrc);
   const registrations = [...src.matchAll(ROUTE_REGISTRATION)].map((m) => ({
     at: m.index ?? 0,
     path: m[2] ?? '',

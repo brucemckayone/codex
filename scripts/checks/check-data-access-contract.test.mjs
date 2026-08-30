@@ -3,7 +3,11 @@
  *
  * "A check that has never failed has proven nothing" is the bead's acceptance
  * criterion, so every rule here is asserted in BOTH directions: a fixture that
- * must be caught, and the near-miss shape that must NOT be. The near-misses are
+ * must be caught, and the near-miss shape that must NOT be. Rule 5 carries one
+ * extra obligation the other two do not: its defect was invisible to the
+ * obvious audit command, so one of its cases runs that command alongside the
+ * gate and asserts they DISAGREE — a rule that inherits the bug's blind spot
+ * certifies the drift instead of catching it. The near-misses are
  * the load-bearing half — a gate that flags `Strict-Transport-Security` or a
  * JSDoc block that documents the presets gets switched off within a week, and a
  * gate switched off is a convention again.
@@ -28,12 +32,16 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 
 import {
+  classifySearchFieldValue,
   collectCacheControlViolations,
   collectFloatingKvWriteViolations,
+  collectSearchBuilderViolations,
   formatPresetMenu,
+  formatSearchBuilderGuidance,
   isCacheControlValue,
   isKvReceiver,
   readCachePresets,
+  searchValueHead,
   tokenize,
 } from './check-data-access-contract.mjs';
 
@@ -65,6 +73,13 @@ function scanCache(extraRoots = []) {
 
 function scanKv() {
   return collectFloatingKvWriteViolations({
+    roots: [join(root, WORKER_SRC)],
+    cwd: root,
+  });
+}
+
+function scanSearch() {
+  return collectSearchBuilderViolations({
     roots: [join(root, WORKER_SRC)],
     cwd: root,
   });
@@ -479,4 +494,395 @@ test('the derived preset menu matches the REAL vocabulary (this case reads packa
       `preset '${name}' is listed without its value in the failure message`
     );
   }
+});
+
+// ===========================================================================
+// RULE 5 — CAUGHT
+// ===========================================================================
+//
+// WHY EVERY SPELLING GETS ITS OWN CASE. The original defect survived because
+// its two "fixed" sites were written `z.string().trim().min(1)`, so the obvious
+// audit command — a literal grep for `z.string().min` — matched NONE of the
+// twelve declarations and reported the tree clean. A rule with the same blind
+// spot as the bug is worse than no rule, because it certifies the drift. So the
+// bare spelling and the `.trim().min(1)` spelling are asserted separately, and
+// one case runs the naive grep alongside the gate to show they disagree.
+
+test('RULE 5 CATCHES a bare search: z.string()', () => {
+  writeFixture(
+    `${WORKER_SRC}/schemas.ts`,
+    'export const q = z.object({\n  search: z.string(),\n});\n'
+  );
+  const { violations, declarationsFound } = scanSearch();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].file, `${WORKER_SRC}/schemas.ts`);
+  assert.equal(violations[0].line, 2);
+  assert.equal(violations[0].field, 'search');
+  assert.equal(violations[0].kind, 'raw-zod');
+  assert.equal(violations[0].head, 'z.string()');
+  assert.equal(declarationsFound, 1);
+});
+
+test('RULE 5 CATCHES the z.string().trim().min(1) spelling that a literal `z.string().min` grep MISSES', () => {
+  const source = 'export const q = z.object({\n  search: z.string().trim().min(1),\n});\n';
+  writeFixture(`${WORKER_SRC}/trimmed.ts`, source);
+
+  // The blind spot, demonstrated on the same bytes: this is the audit command
+  // the bead records as returning 0 across both trees, and it still does.
+  assert.equal(
+    source.split('\n').filter((l) => /^\s*search:\s*z\.string\(\)\.min/.test(l))
+      .length,
+    0,
+    'the naive grep is supposed to miss this — if it now matches, this case has stopped testing the blind spot and needs rewriting'
+  );
+
+  const { violations } = scanSearch();
+  assert.equal(violations.length, 1, 'the gate must NOT share the naive grep blind spot');
+  assert.equal(violations[0].head, 'z.string().trim().min(1)');
+  assert.equal(violations[0].kind, 'raw-zod');
+});
+
+test('RULE 5 CATCHES every other Zod spelling, invented or not', () => {
+  writeFixture(
+    `${WORKER_SRC}/spellings.ts`,
+    [
+      'export const a = z.object({ search: z.string().optional() });',
+      'export const b = z.object({ search: z.coerce.string() });',
+      'export const c = z.object({ search: z.string().trim().max(255) });',
+      'export const d = z.object({ search: zod.string() });',
+    ].join('\n')
+  );
+  const { violations } = scanSearch();
+  assert.deepEqual(
+    violations.map((v) => v.head),
+    [
+      'z.string().optional()',
+      'z.coerce.string()',
+      'z.string().trim().max(255)',
+      'zod.string()',
+    ],
+    'the rule looks for the ABSENCE of the builder, so a spelling nobody has invented yet fails too'
+  );
+});
+
+test('RULE 5 CATCHES a search field built from a hand-rolled named schema', () => {
+  // The indirection dodge: move `z.string()` one line up and the field no
+  // longer reads as Zod. An identifier ending `Schema` is still a schema.
+  writeFixture(
+    `${WORKER_SRC}/indirect.ts`,
+    [
+      'const localSearchSchema = z.string().trim().min(1);',
+      'export const q = z.object({ search: localSearchSchema });',
+    ].join('\n')
+  );
+  const { violations } = scanSearch();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].kind, 'foreign-schema');
+  assert.equal(violations[0].head, 'localSearchSchema');
+});
+
+test('RULE 5 CATCHES the un-invoked builder — createSearchQuerySchema without its call', () => {
+  // `search: createSearchQuerySchema` assigns the FUNCTION, not a schema. It
+  // must not pass just because the right identifier appears: the conforming
+  // test is `createSearchQuerySchema(`, with the paren.
+  writeFixture(
+    `${WORKER_SRC}/uninvoked.ts`,
+    'export const q = z.object({ search: createSearchQuerySchema });\n'
+  );
+  const { violations } = scanSearch();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].head, 'createSearchQuerySchema');
+});
+
+test('RULE 5 CATCHES every name in the stated family, including the ?q= spelling', () => {
+  writeFixture(
+    `${WORKER_SRC}/family.ts`,
+    [
+      'export const a = z.object({ q: z.string() });',
+      'export const b = z.object({ searchQuery: z.string() });',
+      'export const c = z.object({ searchTerm: z.string() });',
+      'export const d = z.object({ searchText: z.string() });',
+      'export const e = z.object({ searchString: z.string() });',
+    ].join('\n')
+  );
+  const { violations } = scanSearch();
+  assert.deepEqual(
+    violations.map((v) => v.field),
+    ['q', 'searchQuery', 'searchTerm', 'searchText', 'searchString'],
+    'each longer name must be captured WHOLE — `searchQuery` reported as `search` would mean the key regex stopped at the shorter alternative'
+  );
+});
+
+test('RULE 5 CATCHES a declaration whose value sits on the next line', () => {
+  writeFixture(
+    `${WORKER_SRC}/wrapped.ts`,
+    ['export const q = z.object({', '  search:', '    z.string(),', '});'].join('\n')
+  );
+  const { violations } = scanSearch();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].line, 2, 'reported at the KEY, which is where the fix goes');
+  assert.equal(violations[0].head, 'z.string()');
+});
+
+test('RULE 5 CATCHES a declaration inside a .svelte module script', () => {
+  writeFixture(
+    `${WORKER_SRC}/Widget.svelte`,
+    [
+      '<script lang="ts">',
+      "  const argsSchema = z.object({ search: z.string() });",
+      '</script>',
+      '<input />',
+    ].join('\n')
+  );
+  const { violations } = scanSearch();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].head, 'z.string()');
+});
+
+// ===========================================================================
+// RULE 5 — NEAR-MISSES THAT MUST PASS
+// ===========================================================================
+//
+// This half is the load-bearing half. The repo has far more `search:`-keyed
+// DATA than `search:` declarations — spread objects, URL params, props
+// interfaces, an icon map, even a CSS selector — and a rule that flags any of
+// them fails the build on conforming code and gets switched off.
+
+test('RULE 5 PASSES the builder, and the one composed form the tree needs', () => {
+  // listUserLibrarySchema must land `search` as '' rather than undefined
+  // (packages/validation/src/schemas/access.test.ts asserts that defaults
+  // object), so the composed form is legal. A check that accepted only a bare
+  // call would flag the one site that cannot be written any other way.
+  writeFixture(
+    `${WORKER_SRC}/conforming.ts`,
+    [
+      'export const a = z.object({ search: createSearchQuerySchema(255) });',
+      "export const b = z.object({ search: createSearchQuerySchema(200).default('') });",
+      'export const c = z.object({ search: createSearchQuerySchema() });',
+      'export const d = z.object({',
+      '  search: createSearchQuerySchema(',
+      '    120',
+      '  ),',
+      '});',
+    ].join('\n')
+  );
+  const { violations, declarationsFound } = scanSearch();
+  assert.deepEqual(violations, []);
+  assert.equal(declarationsFound, 4, 'conforming declarations still COUNT — that count is what proves the rule has a subject');
+});
+
+test('RULE 5 PASSES search-keyed DATA: spreads, URL params, props types, an icon map', () => {
+  writeFixture(
+    `${WORKER_SRC}/data.ts`,
+    [
+      'onFilterChange({ ...filters, search: value });',
+      "onFilterChange({ ...filters, search: '' });",
+      'const args = { ...(urlSearch && { search: urlSearch }) };',
+      "const p = new URLSearchParams({ search: q, limit: String(limit) });",
+      "const s = { search: page.url.searchParams.get('search') ?? '' };",
+      'export const RAIL_ICONS = { search: SearchIcon };',
+      'export interface Filters { search: string; contentType: string }',
+      'const forwarded = { search: input.search };',
+      'const fromCtx = { search: ctx.input.query.search };',
+    ].join('\n')
+  );
+  assert.deepEqual(scanSearch().violations, []);
+  assert.equal(scanSearch().declarationsFound, 0, 'none of these is a declaration');
+});
+
+test('RULE 5 PASSES a z.infer / z.input / z.output TYPE position', () => {
+  writeFixture(
+    `${WORKER_SRC}/types.ts`,
+    [
+      'type A = { search: z.infer<typeof searchField> };',
+      'type B = { search: z.input<typeof searchField> };',
+      'type C = { search: z.output<typeof searchField> };',
+    ].join('\n')
+  );
+  assert.deepEqual(scanSearch().violations, []);
+});
+
+test('RULE 5 PASSES a CSS selector containing --search: in a .svelte file', () => {
+  // MobileBottomNav.svelte really contains `.bottom-nav__tab--search:active`.
+  // NOTE WHAT THIS CASE DOES AND DOES NOT PROVE: it passes because `active {
+  // opacity: 0.6; }` is not a schema head, so it would still pass with the
+  // lookbehind removed. It documents the real-tree shape; the lookbehind itself
+  // is falsified by the `content_search:` / `'org-search':` cases above.
+  writeFixture(
+    `${WORKER_SRC}/Nav.svelte`,
+    [
+      '<nav></nav>',
+      '<style>',
+      '  .bottom-nav__tab--search:active { opacity: 0.6; }',
+      '  .bottom-nav__tab--search:active .circle { transform: scale(0.94); }',
+      '</style>',
+    ].join('\n')
+  );
+  assert.deepEqual(scanSearch().violations, []);
+  assert.equal(scanSearch().declarationsFound, 0);
+});
+
+test("RULE 5 PASSES procedure()'s `query:` input slot — the deliberate narrowing, pinned", () => {
+  // `query` is NOT in SEARCH_FIELD_NAMES and must not be added. It is
+  // procedure()'s input-slot name and sits in this position 79 times across
+  // workers/*/src; including it would turn the gate red on essentially every
+  // route in the repo, which is not a stricter gate but a deleted one. The cost
+  // — a genuine search facet NAMED `query` is invisible — is stated in the
+  // header. If someone adds `query` to the family, this case goes red and says
+  // why.
+  writeFixture(
+    `${WORKER_SRC}/routes/content.ts`,
+    [
+      'procedure({ input: { query: contentQuerySchema } });',
+      'procedure({ input: { params: idParamSchema, query: orgScopeQuerySchema } });',
+    ].join('\n')
+  );
+  assert.deepEqual(scanSearch().violations, []);
+});
+
+test('RULE 5 PASSES a commented-out violation, and prose that quotes one', () => {
+  writeFixture(
+    `${WORKER_SRC}/commented.ts`,
+    [
+      '// search: z.string(),',
+      '/* There were twelve `search: z.string()` declarations. */',
+      '/**',
+      ' * @example',
+      ' *   search: z.string().trim().min(1),',
+      ' */',
+      'export const q = z.object({ search: createSearchQuerySchema(255) });',
+    ].join('\n')
+  );
+  const { violations, declarationsFound } = scanSearch();
+  assert.deepEqual(violations, []);
+  assert.equal(
+    declarationsFound,
+    1,
+    'search-schema.ts documents the bad spellings in its own module comment; if prose counted, the builder file would fail its own rule'
+  );
+});
+
+test('RULE 5 skips test files and __tests__ directories', () => {
+  writeFixture(
+    `${WORKER_SRC}/__tests__/search.test.ts`,
+    'const bad = z.object({ search: z.string() });\n'
+  );
+  writeFixture(
+    `${WORKER_SRC}/other.spec.ts`,
+    'const bad = z.object({ search: z.string() });\n'
+  );
+  assert.deepEqual(scanSearch().violations, []);
+});
+
+test('RULE 5 does not read a longer identifier as the field name — this is what the lookbehind is for', () => {
+  // These are the cases that FALSIFY the lookbehind: every one of them ends in
+  // a family name and every one of them has a Zod value, so dropping
+  // `(?<![\\w$.-])` from SEARCH_FIELD_KEY_RE turns all five into violations.
+  // (The CSS-selector case below cannot falsify it — `active { ... }` is not a
+  // schema head, so that fixture passes for the wrong reason without these.)
+  writeFixture(
+    `${WORKER_SRC}/lookalikes.ts`,
+    [
+      'export const a = z.object({ mySearch: z.string() });',
+      'export const b = z.object({ content_search: z.string() });',
+      "export const c = z.object({ 'org-search': z.string() });",
+      'export const d = z.object({ faq: z.string() });',
+      'export const e = z.object({ researchNotes: z.string() });',
+    ].join('\n')
+  );
+  assert.deepEqual(
+    scanSearch().violations,
+    [],
+    'a field whose name merely ENDS in a family name is a different field'
+  );
+  assert.equal(scanSearch().declarationsFound, 0);
+});
+
+// ===========================================================================
+// RULE 5 — the fail-closed subject, and the unit-level predicates
+// ===========================================================================
+
+test('RULE 5 reports declarationsFound === 0 for a tree with no search facet — the state main() fails closed on', () => {
+  // A rule can read green two ways: nothing is broken, or nothing is checked.
+  // Renaming every `search` field away, or moving the declarations out of the
+  // scanned roots, produces the second. main() exits 1 on this.
+  writeFixture(
+    `${WORKER_SRC}/nothing.ts`,
+    "export const q = z.object({ page: z.number(), sort: z.enum(['asc']) });\n"
+  );
+  const { violations, filesScanned, declarationsFound } = scanSearch();
+  assert.deepEqual(violations, []);
+  assert.ok(filesScanned > 0, 'files were scanned...');
+  assert.equal(declarationsFound, 0, '...but nothing in them was a subject');
+});
+
+test('classifySearchFieldValue judges both original spellings, the composed form, and the non-declarations', () => {
+  const kind = (v) => classifySearchFieldValue(v)?.kind ?? null;
+
+  // The two spellings the twelve declarations were actually written in.
+  assert.equal(kind('z.string()'), 'raw-zod');
+  assert.equal(kind('z.string().trim().min(1)'), 'raw-zod');
+
+  // Conforming, including the one composed form the tree needs.
+  assert.equal(kind('createSearchQuerySchema(255)'), 'conforming');
+  assert.equal(kind("createSearchQuerySchema(200).default('')"), 'conforming');
+  assert.equal(kind('createSearchQuerySchema()'), 'conforming');
+  assert.equal(kind('\n    createSearchQuerySchema(120)'), 'conforming');
+
+  // A named schema that is not the builder, and the un-invoked builder.
+  assert.equal(kind('localSearchSchema'), 'foreign-schema');
+  assert.equal(kind('createSearchQuerySchema'), 'foreign-schema');
+
+  // Not declarations at all.
+  assert.equal(kind('value'), null);
+  assert.equal(kind("''"), null);
+  assert.equal(kind('string;'), null);
+  assert.equal(kind('SearchIcon'), null);
+  assert.equal(kind('z.infer<typeof f>'), null);
+  assert.equal(kind('active { opacity: 0.6; }'), null);
+  assert.equal(kind(''), null);
+});
+
+test('searchValueHead quotes the expression and stops where it ends', () => {
+  // A closer that belongs to the enclosing object is dropped; a closer that
+  // belongs to the expression is kept, so the printed value stays recognisable
+  // on sight rather than being mangled.
+  assert.equal(searchValueHead('z.string().optional() });'), 'z.string().optional()');
+  assert.equal(searchValueHead('z.string().max(5) });'), 'z.string().max(5)');
+  assert.equal(searchValueHead('z.string(),\n  page: z.number(),'), 'z.string()');
+  assert.equal(searchValueHead('localSearchSchema });'), 'localSearchSchema');
+  assert.equal(searchValueHead('z.string()'), 'z.string()');
+});
+
+test('the rule-5 guidance names the right repair and refuses a waiver', () => {
+  // A gate that forbids a shape without saying what to write instead gets
+  // satisfied by whatever silences it — and here the intuitive silencer,
+  // `.min(3)` on the server, is itself the regression. Same obligation as
+  // rule 3's preset menu: the message has to carry the decision.
+  const g = formatSearchBuilderGuidance();
+  assert.match(g, /createSearchQuerySchema\(255\)/);
+  assert.match(g, /createSearchQuerySchema\(200\)\.default\(''\)/);
+  assert.match(g, /do NOT[\s\S]*\.min\(3\)/);
+  assert.match(g, /CLIENT gate/);
+  assert.match(g, /gateSearchQuery/);
+  assert.match(g, /trigram/);
+  assert.match(g, /packages\/validation\/src\/shared\/search-schema\.ts/);
+  assert.match(g, /no waiver list by design/);
+});
+
+test('RULE 5 against the REAL tree: every declared search input uses the builder, and there are some (this case reads packages/ workers/ apps/)', () => {
+  // The fixture cases prove the matcher. This one proves the matcher is still
+  // POINTED AT SOMETHING — the failure mode a gate cannot detect about itself.
+  // If SEARCH_FIELD_NAMES goes stale or a root moves, the fixtures stay green
+  // and only this case notices.
+  const { violations, declarationsFound } = collectSearchBuilderViolations();
+  assert.deepEqual(
+    violations.map((v) => `${v.file}:${v.line} ${v.field}: ${v.head}`),
+    [],
+    'a declared search input in the real tree is not built by createSearchQuerySchema()'
+  );
+  assert.ok(
+    declarationsFound > 0,
+    'rule 5 found ZERO search declarations in the real tree, so it is checking nothing — fix SEARCH_FIELD_NAMES or the scan roots, do not delete this test'
+  );
 });

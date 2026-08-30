@@ -32,12 +32,9 @@
  *
  *  3. No hand-written `Cache-Control`.  <-- IMPLEMENTED HERE (rule 3)
  *  4. No floating KV write in a request path.  <-- IMPLEMENTED HERE (rule 4)
- *
- *  5. Every search input uses the shared Zod search-input builder.
- *     DELIBERATELY NOT IMPLEMENTED, AND NOT AN OVERSIGHT. It depends on WP6's
- *     shared search-input builder, which the owner excluded from this PR
- *     because it needs a live database. CHECK 5 LANDS WITH WP6 — add it here,
- *     next to rules 3 and 4, when that builder exists.
+ *  5. Every search input uses the shared Zod builder.  <-- IMPLEMENTED HERE (rule 5)
+ *     Landed with WP6, which created the builder this rule requires. Rule 5 sees
+ *     DECLARATIONS only; the sibling limit is stated in its own section below.
  *
  * ============================================================================
  * RULE 3 — NO HAND-WRITTEN `Cache-Control`
@@ -116,6 +113,7 @@
  *   - `const w = kv.put(...); cacheWrite(w)`   legal anywhere — handed off
  *   - `const w = kv.put(...); cacheWrite?.(w)` ACCEPTED, BUT UNPROVEN — see below
  *   - `kv.put(...).catch(() => {})`            A BUG anywhere
+ *   - `void kv.put(...)`                       A BUG anywhere — `void` discards
  *
  * That last line is the defect WP4 fixed. A Workers response CANCELS every
  * promise still in flight that nothing is holding, so two write-through caches
@@ -178,6 +176,127 @@
  * this — in that order, or the gate goes red on conforming code.
  *
  * ============================================================================
+ * RULE 5 — EVERY SEARCH INPUT COMES FROM THE SHARED BUILDER
+ * ============================================================================
+ *
+ * `createSearchQuerySchema()` in
+ * `packages/validation/src/shared/search-schema.ts` is the whole vocabulary for
+ * a free-text search facet, exactly as `CACHE_PRESETS` is for a cache window. A
+ * search field built any other way is drift, because the reasoning that sets
+ * the trim, the length cap and — above all — the THREE-CHARACTER FLOOR lives
+ * next to the builder and not next to the copy.
+ *
+ * WHY A GATE AND NOT A CONVENTION. There were twelve independent
+ * `search: z.string()` declarations across `@codex/validation` and
+ * `apps/web/src/lib/remote`. Ten set no minimum at all; TWO were written
+ * `z.string().trim().min(1)`, which rejects only the empty string. Note what
+ * that second spelling did to the tree's own observability: a literal search
+ * for `z.string().min` matched NONE of the twelve, so "are they consistent?"
+ * could not be answered by the obvious command, and the answer everybody
+ * assumed — they are — was wrong for all twelve. A one-character query reached
+ * a `LIKE '%a%'` and scanned the table.
+ *
+ * SO THIS RULE DOES NOT GREP FOR THE BAD SPELLINGS. IT GREPS FOR THE ABSENCE OF
+ * THE GOOD ONE. The subject is a search-named field whose value is a SCHEMA,
+ * and the only conforming value is one that ORIGINATES in
+ * `createSearchQuerySchema(`. `z.string()`, `z.string().trim().min(1)`,
+ * `z.string().optional()`, `z.coerce.string()` and a hand-rolled
+ * `localSearchSchema` all fail identically — and so does a spelling nobody has
+ * invented yet. There is no list of bad forms to keep up to date, which is the
+ * only version of this rule that cannot acquire the very blind spot that hid
+ * the original defect.
+ *
+ * CHAINING ONTO THE BUILDER IS LEGAL, and one site needs it:
+ * `createSearchQuerySchema(200).default('')` in
+ * `packages/validation/src/schemas/access.ts`, because `listUserLibrarySchema`
+ * must land `search` as `''` rather than `undefined` and
+ * `schemas/access.test.ts` asserts that defaults object. So this rule checks
+ * PROVENANCE — the builder is the origin — and NOT that nothing is chained on
+ * afterwards.
+ *
+ * THEREFORE A CHAINED `.min(3)` WOULD PASS THIS RULE, AND THAT MUST NOT BE
+ * CLAIMED OTHERWISE. Re-imposing a server-side minimum is a real regression: it
+ * turns a legal short search into a 400 for every caller that has not heard
+ * about the floor (a curl, a bookmarked `?search=Bo`, a stale client build). It
+ * is pinned where it can be pinned properly — by the witness test in
+ * `packages/validation/src/shared/search-schema.test.ts`, which asserts the
+ * server still parses a 1-2 character query and goes red the instant a
+ * `.min(3)` appears. A textual rule cannot tell "`.default('')` is fine" from
+ * "`.min(3)` is not" without knowing what each means; a parse test can, so that
+ * half lives there and not here.
+ *
+ * ---------------------------------------------------------------------------
+ * SCOPE, STATED — WHICH FIELDS, WHICH FILES, AND WHAT THIS CANNOT SEE
+ * ---------------------------------------------------------------------------
+ *
+ * FILES AND EXTENSIONS: identical to rules 3 and 4 — every non-test
+ * `.ts` / `.tsx` / `.js` / `.mjs` / `.svelte` module under `packages/*&#47;src`,
+ * `workers/*&#47;src` and `apps/*&#47;src`, with comments blanked (and
+ * `<!-- -->` stripped in `.svelte`) so prose quoting `search: z.string()` —
+ * including the paragraph above and the module comment of `search-schema.ts`
+ * itself — cannot register as a declaration. `search-schema.ts` is NOT
+ * special-cased and needs no exemption: it declares the builder, never a
+ * `search:` field.
+ *
+ * FIELD NAMES: a STATED family — `search`, `searchQuery`, `searchTerm`,
+ * `searchText`, `searchString`, `q`. That family is the rule's SUBJECT, not a
+ * waiver list; there are no per-file exemptions anywhere in this script.
+ *
+ * `query` IS DELIBERATELY NOT IN THE FAMILY, and this is the one place the rule
+ * is knowingly narrower than its intent. `query` is `procedure()`'s INPUT SLOT
+ * name — `input: { query: contentQuerySchema }` — so it sits in this exact
+ * position on essentially EVERY list route in `workers/*&#47;src`, each time
+ * holding an identifier ending `Schema` that this rule would score as a foreign
+ * schema. (Measured at 79 such sites on 2026-08-30; the argument does not
+ * depend on the figure, only on the shape being the norm rather than the
+ * exception, which is why the rule does not compute or assert it.) Adding
+ * `query` would turn the gate red on almost every route in the repo, which is
+ * not a stricter gate, it is a gate that gets deleted. The cost is stated
+ * rather than hidden: a genuine search facet NAMED `query` is invisible to
+ * rule 5.
+ *
+ * WHAT COUNTS AS A "SCHEMA" VALUE. The rule fires only when the head of the
+ * value expression says schema:
+ *
+ *   `createSearchQuerySchema(`            -> CONFORMING
+ *   `z.` / `zod.`                         -> a Zod expression: VIOLATION
+ *   an identifier ending `Schema`         -> a named schema that is not the
+ *                                            builder: VIOLATION
+ *   `z.infer<` / `z.input<` / `z.output<` -> a TYPE position, not a schema:
+ *                                            skipped
+ *   anything else                          -> not a declaration: skipped
+ *
+ * THAT LAST LINE IS LOAD-BEARING, and it is where the precision is bought. The
+ * repo is full of `search:`-keyed values that are DATA and not schemas, and
+ * flagging any of them would be a false positive on conforming code:
+ * `{ ...filters, search: value }`, `search: urlSearch`,
+ * `search: page.url.searchParams.get('search') ?? ''`, `search: SearchIcon`, a
+ * TypeScript `search: string;` in a props interface, `search: input.search` in
+ * a service, and even the CSS selector `.bottom-nav__tab--search:active` inside
+ * a `.svelte` file. The price of not flagging those is that a search field
+ * built through an indirection this rule cannot name — `search: buildIt()`, or
+ * an imported schema whose identifier does not end in `Schema` — is invisible.
+ *
+ * AND THE WHOLE RULE IS DECLARATION-SHAPED, WHICH IS ITS LARGEST LIMIT. WP6
+ * found a THIRTEENTH search surface that declares no Zod schema at all: the
+ * Cmd-K command palette (`apps/web/src/lib/components/search/`
+ * `CommandPaletteSearch.svelte`) hand-builds a `URLSearchParams` and fetches
+ * `/api/search`, which fans out to an org lookup plus a content search plus a
+ * creators search — once per 300ms of typing, for a one-character term. NO
+ * declaration-shaped check would ever have seen it. It is gated now, and the
+ * counter-measure for that SHAPE is not here and cannot be: it is the `?q=`
+ * navigation sweep and the `/api/search` fetch sweep in
+ * `apps/web/src/lib/remote/search-floor-sweep.test.ts`. A clean run of rule 5
+ * means EVERY DECLARED SEARCH INPUT USES THE BUILDER. It does not mean every
+ * search surface is gated, and it must not be reported as though it did.
+ *
+ * FAILS CLOSED ON ZERO DECLARATIONS. `main()` fails the build if the whole tree
+ * yields no search declaration at all, for the same reason it fails closed on
+ * zero files scanned: no subject is indistinguishable from a stale field-name
+ * family or a moved root, and that is exactly the blind spot where a gate
+ * quietly stops having anything to check and reads green forever.
+ *
+ * ============================================================================
  * TECHNIQUE
  * ============================================================================
  *
@@ -215,7 +334,7 @@
  *     entirely would be missed. Every KV binding in this repo is `*_KV` or
  *     `kv`, and `HonoEnv` is where that convention is declared.
  *
- * The two collectors are exported so the accompanying `node --test` suite can
+ * The three collectors are exported so the accompanying `node --test` suite can
  * point them at fixture trees; `main()` runs only as the CLI entrypoint.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -638,7 +757,15 @@ const OWNERSHIP_CALL_RE = new RegExp(
 );
 
 /** `await` / `return` / `void` / `yield` immediately before the receiver. */
-const AWAITED_RE = /\b(?:await|return|void|yield)\s*$/;
+// `void` is DELIBERATELY ABSENT. It was here, and it was backwards: `void p`
+// explicitly DISCARDS the promise — the exact opposite of taking ownership of it —
+// so `void kv.put(...)` is cancelled at response return in precisely the way
+// `kv.put(...).catch(() => {})` is, and the gate waved it through. It was never in
+// the legal-forms list at the top of this file, and the self-test had no case for
+// it, so the acceptance was both undocumented and unasserted. It also happens to be
+// the spelling a floating-promise linter suggests, which made it the likeliest next
+// instance of the defect this rule exists to prevent.
+const AWAITED_RE = /\b(?:await|return|yield)\s*$/;
 
 /** `const write = ` / `let write = ` — a named promise that may be handed off. */
 const ASSIGNMENT_RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=\s*$/;
@@ -739,6 +866,208 @@ export function collectFloatingKvWriteViolations({
 }
 
 // ---------------------------------------------------------------------------
+// RULE 5 — every search input comes from the shared builder
+// ---------------------------------------------------------------------------
+
+/**
+ * The ONE conforming origin for a search field's schema. Named once so the
+ * matcher, the failure message and this file's docs cannot drift apart — the
+ * same property `readCachePresets()` gives rule 3's menu.
+ */
+const SEARCH_BUILDER = 'createSearchQuerySchema';
+
+/** Where the builder and its reasoning live, for the failure message. */
+const SEARCH_BUILDER_MODULE = 'packages/validation/src/shared/search-schema.ts';
+
+/**
+ * The field names this rule judges. See SCOPE, STATED in the header: this is
+ * the rule's SUBJECT, and `query` is deliberately absent because it is
+ * `procedure()`'s input-slot name, not a search facet.
+ */
+const SEARCH_FIELD_NAMES = [
+  'search',
+  'searchQuery',
+  'searchTerm',
+  'searchText',
+  'searchString',
+  'q',
+];
+
+/** How far past the `:` to read the value expression. */
+const SEARCH_VALUE_LOOKAHEAD = 200;
+
+/**
+ * A search-named property KEY.
+ *
+ * The lookbehind IS load-bearing, and the shapes that prove it are real:
+ * without it, `content_search: z.string()` and `'org-search': z.string()` — two
+ * different fields — are both read as a field named `search`, and the CSS
+ * selector `.bottom-nav__tab--search:active` in MobileBottomNav.svelte is read
+ * as a field named `search` whose value is `active`.
+ *
+ * The alternation order is NOT load-bearing, and this comment used to claim it
+ * was ("longest name first so `searchQuery:` is captured whole"). It is not:
+ * the `\s*:` suffix forces the engine to backtrack out of the `search` branch
+ * when the next character is `Q`, so `searchQuery` is captured whole in any
+ * order. The sort has been removed rather than left in with a false reason —
+ * mutating it changed no test result, which is how the overclaim was found.
+ */
+const SEARCH_FIELD_KEY_RE = new RegExp(
+  `(?<![\\w$.-])(${SEARCH_FIELD_NAMES.join('|')})\\s*:`,
+  'g'
+);
+
+/**
+ * `z.infer<T>` / `z.input<T>` / `z.output<T>` / `z.TypeOf<T>` — these appear in
+ * TYPE positions (`type Args = { search: z.infer<typeof s> }`), where there is
+ * no schema to build with the builder. Skipped rather than flagged, because a
+ * gate that fails on a type annotation is a gate that gets a waiver added.
+ */
+const ZOD_TYPE_HELPER_RE = /^(?:z|zod)\s*\.\s*(?:infer|input|output|TypeOf)\b/;
+
+/**
+ * The offending value expression, as it will be printed in the failure.
+ *
+ * A gate's report has to be recognisable on sight — rule 3 prints its literal
+ * verbatim for the same reason — so this quotes the source rather than
+ * paraphrasing it, and stops where the expression does.
+ *
+ * @param {string} expr source from the start of the value expression
+ * @returns {string}
+ */
+export function searchValueHead(expr) {
+  const line = expr.split('\n')[0].slice(0, 120);
+  // Truncate where a closer belongs to the ENCLOSING object, so
+  // `z.string().optional() });` prints as `z.string().optional()` while
+  // `z.string().max(5)` — whose closers are its own — survives intact.
+  let depth = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth -= 1;
+      if (depth < 0) return line.slice(0, i).trim().replace(/[,;]+$/, '');
+    } else if (depth === 0 && (ch === ',' || ch === ';')) {
+      return line.slice(0, i).trim();
+    }
+  }
+  return line.trim().replace(/[,;]+$/, '');
+}
+
+/**
+ * Decide what the expression after a search-named `:` is.
+ *
+ * Exported so the self-test can assert BOTH original spellings — the bare
+ * `z.string()` and the `z.string().trim().min(1)` that a literal
+ * `z.string().min` grep misses — at the unit level as well as through a
+ * fixture tree.
+ *
+ * @param {string} value source immediately following the `:`
+ * @returns {{kind:'conforming'}|{kind:'raw-zod'|'foreign-schema',head:string}|null}
+ *   `null` means "not a schema declaration at all" — data, a type, an icon, a
+ *   CSS value — and is the answer for the overwhelming majority of `search:`
+ *   keys in this repo.
+ */
+export function classifySearchFieldValue(value) {
+  const expr = value.replace(/^\s+/, '');
+  if (expr.length === 0) return null;
+
+  /** What to print in the failure: the offending value expression, verbatim. */
+  const head = searchValueHead(expr);
+
+  // Checked FIRST, because `createSearchQuerySchema` itself ends in `Schema`
+  // and would otherwise be scored a foreign schema by the branch below. The
+  // un-invoked form (`search: createSearchQuerySchema` with no `(`) falls
+  // through to that branch on purpose — it is a genuine bug, not a hand-off.
+  if (new RegExp(`^${SEARCH_BUILDER}\\s*\\(`).test(expr)) {
+    return { kind: 'conforming' };
+  }
+  if (ZOD_TYPE_HELPER_RE.test(expr)) return null;
+  if (/^(?:z|zod)\s*\./.test(expr)) return { kind: 'raw-zod', head };
+  if (/^[A-Za-z_$][\w$]*Schema\b/.test(expr)) {
+    return { kind: 'foreign-schema', head };
+  }
+  return null;
+}
+
+/**
+ * @returns {{ violations: {file:string,line:number,field:string,head:string,kind:'raw-zod'|'foreign-schema'}[], filesScanned: number, declarationsFound: number }}
+ *   `declarationsFound` counts CONFORMING and violating declarations alike. It
+ *   is the rule's proof that it still has a subject; `main()` fails closed when
+ *   it is 0. See FAILS CLOSED ON ZERO DECLARATIONS in the header.
+ */
+export function collectSearchBuilderViolations({
+  roots = defaultRoots(),
+  cwd = REPO_ROOT,
+} = {}) {
+  const violations = [];
+  let filesScanned = 0;
+  let declarationsFound = 0;
+
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const file of walk(root)) {
+      filesScanned += 1;
+      const source = readFileSync(file, 'utf8');
+      const { code } = tokenize(source, {
+        stripHtmlComments: file.endsWith('.svelte'),
+      });
+
+      for (const match of code.matchAll(SEARCH_FIELD_KEY_RE)) {
+        const valueStart = match.index + match[0].length;
+        const verdict = classifySearchFieldValue(
+          code.slice(valueStart, valueStart + SEARCH_VALUE_LOOKAHEAD)
+        );
+        if (verdict === null) continue;
+
+        declarationsFound += 1;
+        if (verdict.kind === 'conforming') continue;
+
+        violations.push({
+          file: toPosix(relative(cwd, file)),
+          line: lineAt(source, match.index),
+          field: match[1],
+          head: verdict.head,
+          kind: verdict.kind,
+        });
+      }
+    }
+  }
+
+  return { violations, filesScanned, declarationsFound };
+}
+
+/**
+ * The instruction an author reads out of a rule-5 failure.
+ *
+ * Deliberately states the FLOOR'S MECHANISM and not just the rule, because the
+ * one wrong repair — adding `.min(3)` on the server — is the intuitive one, and
+ * a gate that forbids a shape without saying what to write instead gets
+ * satisfied by whatever silences it.
+ */
+export function formatSearchBuilderGuidance() {
+  return [
+    `  ${SEARCH_BUILDER}() is the whole vocabulary for a free-text search facet. Use it:`,
+    '',
+    `    import { ${SEARCH_BUILDER} } from '@codex/validation';`,
+    `    search: ${SEARCH_BUILDER}(255),   // 255 = max length AFTER trimming`,
+    '',
+    '  It trims, caps and optionalises. Chaining onto it is fine — listUserLibrarySchema',
+    `  uses ${SEARCH_BUILDER}(200).default('') so the field lands as '' — but do NOT`,
+    '  add `.min(3)`: the 3-character floor is a CLIENT gate (gateSearchQuery /',
+    '  isSearchQueryBelowFloor), because a server minimum turns a legal short search into',
+    '  a 400 for any caller that has not heard about the floor. Below three characters',
+    '  pg_trgm has no extractable trigram to probe its GIN index with, so the planner',
+    '  falls back to a sequential scan — that is the cost the floor exists to avoid.',
+    `  The reasoning is written out in ${SEARCH_BUILDER_MODULE}.`,
+    '',
+    '  If a field this rule judged is genuinely NOT a free-text search, that is a finding',
+    '  to raise — rename the field, or widen the builder — not a case to exempt. This gate',
+    '  has no waiver list by design.',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -746,14 +1075,35 @@ function main() {
   const roots = defaultRoots();
   const cache = collectCacheControlViolations({ roots });
   const kv = collectFloatingKvWriteViolations({ roots });
+  const search = collectSearchBuilderViolations({ roots });
 
   // Fail closed on an empty scan. A broken root path would otherwise read as
   // green with 0 files — the exact blind spot that lets a newly added gate
   // never run. See apps/web/scripts/check-brand-editor-boundary.mjs, which
   // fails closed for the same reason.
-  if (cache.filesScanned === 0 || kv.filesScanned === 0) {
+  if (
+    cache.filesScanned === 0 ||
+    kv.filesScanned === 0 ||
+    search.filesScanned === 0
+  ) {
     console.error(
       'Data-access contract gate scanned 0 files — scan roots are misconfigured. Failing closed.'
+    );
+    process.exit(1);
+  }
+
+  // Rule 5 has a second way to read green without checking anything: the files
+  // are there, but nothing in them is a search declaration any more. That is
+  // indistinguishable from SEARCH_FIELD_NAMES having gone stale (the field was
+  // renamed) or the declarations having moved out of the scanned roots, so it
+  // fails closed too rather than reporting a clean sweep of an empty subject.
+  if (search.declarationsFound === 0) {
+    console.error(
+      '\nRULE 5 — the gate found ZERO search declarations in the whole tree, so it checked\n' +
+        'nothing. Twelve existed when it was written. Either every search facet is gone, or\n' +
+        "the rule's field-name family no longer matches what they are called, or the scan\n" +
+        'roots moved. Failing closed: fix SEARCH_FIELD_NAMES in\n' +
+        'scripts/checks/check-data-access-contract.mjs, do not delete the rule.\n'
     );
     process.exit(1);
   }
@@ -808,9 +1158,29 @@ function main() {
     );
   }
 
+  if (search.violations.length > 0) {
+    failed = true;
+    console.error(
+      `\nRULE 5 — a search input not built by ${SEARCH_BUILDER}():\n`
+    );
+    for (const v of search.violations) {
+      console.error(`  ${v.file}:${v.line}: ${v.field}: ${v.head}`);
+    }
+    console.error(
+      '\n  Ten of the twelve original declarations set no minimum and two were written\n' +
+        "  `z.string().trim().min(1)` — so a grep for `z.string().min` matched NONE of them\n" +
+        '  and the drift was invisible. This rule does not look for the bad spellings; it\n' +
+        '  looks for the absence of the good one.\n' +
+        formatSearchBuilderGuidance()
+    );
+  }
+
   if (failed) {
     const total =
-      shared.length + offVocab.length + kv.violations.length;
+      shared.length +
+      offVocab.length +
+      kv.violations.length +
+      search.violations.length;
     console.error(
       `\n${total} data-access contract violation(s). See scripts/checks/check-data-access-contract.mjs for the rules.\n`
     );
@@ -818,8 +1188,10 @@ function main() {
   }
 
   console.log(
-    `OK: no hand-written Cache-Control and no floating KV write in ${cache.filesScanned} source file(s) ` +
-      `across ${roots.length} package/worker/app src root(s).`
+    `OK: no hand-written Cache-Control, no floating KV write, and all ` +
+      `${search.declarationsFound} declared search input(s) built by ${SEARCH_BUILDER}() ` +
+      `in ${cache.filesScanned} source file(s) across ${roots.length} ` +
+      `package/worker/app src root(s).`
   );
 }
 
