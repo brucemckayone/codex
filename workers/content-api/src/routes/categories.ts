@@ -68,20 +68,22 @@ const CATEGORY_MANAGER_ROLES = [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN];
 /**
  * A `waitUntil` for CACHE WRITES ONLY — the shape of `ProcedureContext.cacheWrite`
  * (see `packages/worker-utils/src/procedure/types.ts`). Declared structurally
- * rather than imported because worker-utils keeps its `CacheWrite` alias private
- * to `org-helpers.ts`; the two must stay assignable, and passing `ctx.cacheWrite`
- * straight through at every call site below is what checks that.
+ * rather than imported; the two must stay assignable, and passing `ctx.cacheWrite`
+ * straight through at every call site below is what checks that. If `CacheWrite`
+ * is ever exported from the barrel, import it and delete this alias.
  */
 type CacheWriteFn = (promise: Promise<unknown>) => void;
 
 /**
  * Bind the audited membership lookup to this request's env/obs/cacheWrite.
  *
- * `cacheWrite` IS REQUIRED HERE, deliberately, even though
- * `checkOrganizationMembership`'s own parameter is optional. That helper's
- * membership write-through is `kv.put(...).catch(() => {})`, handed to
- * `cacheWrite?.()` — so omitting the argument does not make the write
- * best-effort, it makes the write DEAD: an in-flight `put` with nothing holding
+ * `cacheWrite` IS REQUIRED HERE, and `checkOrganizationMembership`'s own parameter
+ * is now required too — it was optional, and that optionality is exactly what let
+ * this call site and `identity-api/routes/membership.ts` keep the broken behaviour
+ * silently. That helper's membership write-through is
+ * `kv.put(...).catch(() => {})` handed to `cacheWrite()` — so omitting the argument
+ * did not make the write best-effort, it made the write DEAD: an in-flight `put`
+ * with nothing holding
  * the request open is cancelled the moment the response returns, which is how
  * the production cache accumulated version keys and no data keys (Codex-e32xz).
  * Every category route below runs inside a `procedure()` handler and therefore

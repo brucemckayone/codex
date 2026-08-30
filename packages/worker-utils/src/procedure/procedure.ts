@@ -180,8 +180,12 @@ export function procedure<
       // responses therefore keep the header-less behaviour they have today.
       //
       // A router-level middleware that sets Cache-Control AFTER `await next()`
-      // still wins, which is how content-api's public + journeys routers keep
-      // their `public, max-age=60, s-maxage=60` until they adopt a preset.
+      // would still win, and NOTHING SHOULD DO THAT. Both instances are gone:
+      // content-api's `public.ts` and `journeys.ts` wildcards were deleted when
+      // their routes adopted presets. Re-adding one moves the decision out of the
+      // policy, where the auth-to-preset type rule cannot see it — which is how
+      // `organizations.ts` would have stamped `public` on eight authenticated
+      // responses. Declare `cache` on the route instead.
       c.header('Cache-Control', resolveCacheControl(policy));
 
       if (successStatus === 204) {

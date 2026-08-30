@@ -311,11 +311,50 @@ test('RULE 4 PASSES a write handed straight to an ownership call', () => {
   assert.deepEqual(scanKv().violations, []);
 });
 
-test('RULE 4 PASSES the named-promise hand-off, including the optional-call form', () => {
+test('RULE 4 PASSES the named-promise hand-off', () => {
+  // Legal because of the ASSIGNMENT, not because of what follows: naming the
+  // promise takes it out of the floating position. This case does NOT exercise
+  // the optional-call form — see the two cases below, which do.
   writeFixture(
     `${WORKER_SRC}/handoff.ts`,
     'const write = kv.put(cacheKey, org.id).catch(() => {});\ncacheWrite?.(write);\n'
   );
+  assert.deepEqual(scanKv().violations, []);
+});
+
+test('RULE 4 CATCHES `void kv.put(...)` — `void` DISCARDS, it does not own', () => {
+  // This passed the gate silently. `AWAITED_RE` listed `void` alongside `await`
+  // and `return`, which is backwards: `void p` explicitly throws the promise
+  // away, so the write is cancelled at response return exactly as a bare
+  // `.catch(() => {})` is. It was never in the documented legal-forms list and
+  // had no case here, so the acceptance was undocumented AND unasserted — and it
+  // is the spelling a floating-promise linter suggests.
+  writeFixture(`${WORKER_SRC}/voided.ts`, "void kv.put('k', 'v');\n");
+  const { violations } = scanKv();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].text, 'kv.put(...)');
+});
+
+test('RULE 4 CATCHES the INLINE optional-call form `cacheWrite?.(kv.put(...))`', () => {
+  // Accepted while `org-helpers.ts` declared `cacheWrite?:`, because `?.` was
+  // then the correct spelling. That parameter is now required, so `?.` is dead
+  // syntax — an optional call on a non-optional value — and accepting it only
+  // preserved the hole it came from: a caller passing nothing got `undefined`,
+  // `?.(` called nothing, and the promise was cancelled while this rule reported
+  // the file clean.
+  writeFixture(
+    `${WORKER_SRC}/optcall.ts`,
+    "cacheWrite?.(kv.put('k', 'v'));\n"
+  );
+  const { violations } = scanKv();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].text, 'kv.put(...)');
+});
+
+test('RULE 4 PASSES the required-call form `cacheWrite(kv.put(...))`', () => {
+  // The control for the case above: tightening `?.` must not reject the spelling
+  // that replaced it, or the gate goes red on conforming code.
+  writeFixture(`${WORKER_SRC}/reqcall.ts`, "cacheWrite(kv.put('k', 'v'));\n");
   assert.deepEqual(scanKv().violations, []);
 });
 

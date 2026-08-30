@@ -312,11 +312,14 @@ export async function extractOrganizationFromSubdomain(
 /**
  * Build the KV key for a membership cache entry.
  *
- * Exported so a mutation handler can DELETE it. Note what the one existing
- * consumer does with it instead: `members.ts` passes this string to
- * `VersionedCache.invalidate()`, which writes `cache:version:` + this key —
- * a different key, which `checkOrganizationMembership` never reads. Anything
- * calling this to invalidate must `kv.delete` the key it returns.
+ * Exported so a mutation handler can DELETE it, and `members.ts` now does exactly
+ * that. It used to pass this string to `VersionedCache.invalidate()`, which writes
+ * `cache:version:` + this key — a DIFFERENT key that `checkOrganizationMembership`
+ * never reads — so for three months nothing dislodged a stale entry (Codex-rxjwp).
+ *
+ * ANYTHING CALLING THIS TO INVALIDATE MUST `kv.delete` THE KEY IT RETURNS, and must
+ * call this builder rather than hand-writing the format: two independent definitions
+ * of the key is precisely how the reader and the invalidator drifted apart.
  */
 export function membershipCacheKey(
   organizationId: string,

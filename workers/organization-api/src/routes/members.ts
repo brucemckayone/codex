@@ -49,9 +49,12 @@ interface CacheCtx {
  *
  * DELETES THE KEY THE READER ACTUALLY READS. `checkOrganizationMembership()`
  * (packages/worker-utils/src/procedure/org-helpers.ts) is a write-through
- * cache with NO TTL and NO version check: it does a bare
+ * cache with NO VERSION CHECK: it does a bare
  * `kv.get(membershipCacheKey(orgId, userId), 'json')` and returns whatever it
- * finds. The only thing that can dislodge a stale entry is deleting that exact
+ * finds. It now also carries a 60s `expirationTtl` as defence in depth — a bound
+ * on residual access if this invalidation ever regresses again, not a substitute
+ * for it. Within that window the only thing that dislodges a stale entry is
+ * deleting that exact
  * key, which is what this does.
  *
  * WHY NOT `VersionedCache.invalidate()`. It was, between 2d1c065a and this
@@ -256,9 +259,10 @@ app.delete(
       // Bust per-user membership cache — the removed user's next
       // `requireOrgMembership` check refetches and sees `null`, denying access.
       // That sentence is only true because `invalidateMembershipCache` DELETES
-      // `membership:{orgId}:{userId}`; the reader has no TTL and no version
-      // check, so a bump-style invalidation leaves the removed member's cached
-      // `role` readable and this comment becomes a lie. Guarded by
+      // `membership:{orgId}:{userId}`; the reader has no version check, so a
+      // bump-style invalidation leaves the removed member's cached `role`
+      // readable for the full 60s TTL and this comment becomes a lie for that
+      // long. Guarded by
       // `src/routes/__tests__/members-cache-invalidation.test.ts`, which
       // asserts the deleted key equals the key the reader's `kv.get` asked for
       // — and that the next check really does return `null`.

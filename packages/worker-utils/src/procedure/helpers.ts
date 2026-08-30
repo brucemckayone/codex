@@ -190,10 +190,15 @@ export function resolveCacheControl(policy: ProcedurePolicy): string {
  * Threaded into `org-helpers`' two write-through caches from here, where the
  * Hono context is in scope — those helpers take `env`, not a context, so
  * neither could reach a `waitUntil` on its own, and both fired their `kv.put`
- * bare. Optional-and-guarded, mirroring
- * `packages/purchase/src/services/fee-config-service.ts`: a caller with no
- * execution context (every hand-mocked unit-test context) still performs the
- * write, it just does not get the cancellation protection.
+ * bare.
+ *
+ * THE PARAMETER ON THOSE HELPERS IS REQUIRED, NOT OPTIONAL — see the note on
+ * `org-helpers.extractOrganizationFromSubdomain`. The optional-and-guarded shape
+ * this comment used to recommend (mirroring `fee-config-service.ts`) was a silent
+ * opt-out of the fix: two production callers passed nothing, `cacheWrite?.(write)`
+ * was a no-op, and neither the typecheck nor the contract gate reported it. This
+ * function still guards internally, because a hand-mocked test context legitimately
+ * has no `executionCtx` — but a CALLER can no longer omit the argument.
  */
 function cacheWriteFor(c: Context<HonoEnv>): (p: Promise<unknown>) => void {
   return (promise) => {

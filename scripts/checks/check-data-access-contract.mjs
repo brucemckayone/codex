@@ -150,8 +150,10 @@
  * target evaluates to `undefined` and CALLS NOTHING: the promise is then held
  * by no one and the response cancels it, exactly as if the `?.(` line were
  * absent. `org-helpers.ts` declares that parameter as `cacheWrite?: CacheWrite`
- * — OPTIONAL — so a caller that omits argument 4/5 gets the dead write and this
- * rule reports the file clean. Two callers did omit it
+ * — that WAS the declaration, and it is why a caller could omit argument 4/5, get
+ * the dead write, and have this rule report the file clean. The parameter is now
+ * REQUIRED, so the omission is a compile error and `?.` is dead syntax (rejected
+ * below). Two callers did omit it
  * (`workers/identity-api/src/routes/membership.ts`,
  * `workers/content-api/src/routes/categories.ts`); both now thread
  * `ctx.cacheWrite`, and `content-api`'s local `membershipChecker` makes its own
@@ -169,11 +171,13 @@
  * dead syntax — an optional call on a value that cannot be nullish — and the
  * `?.` form could be rejected outright by dropping `\??` from
  * `OWNERSHIP_CALL_RE` and adding an explicit report for it. That is a
- * one-expression change. It is deliberately NOT made today because the premise
- * is false in this tree: `org-helpers.ts` still declares `cacheWrite?:`, so
- * rejecting `?.` would fail the build on the two call sites that are currently
- * the correct way to write it. Make the parameter required first, then tighten
- * this — in that order, or the gate goes red on conforming code.
+ * one-expression change, and IT IS NOW APPLIED. It was deferred while the premise
+ * was false — `org-helpers.ts` declared `cacheWrite?:`, so rejecting `?.` would
+ * have failed the build on the then-correct spelling. The parameter was made
+ * required (see `DeclaredCache`'s sibling note in worker-utils), the `?.` form
+ * disappeared from every non-comment call site, and the tightening landed in that
+ * order — which is the order it has to happen in, or the gate goes red on
+ * conforming code.
  *
  * ============================================================================
  * RULE 5 — EVERY SEARCH INPUT COMES FROM THE SHARED BUILDER
@@ -752,11 +756,20 @@ export function formatPresetMenu(presets = readCachePresets()) {
  */
 const OWNERSHIP_CALLS = ['cacheWrite', 'waitUntil', 'background'];
 
+// THE OPTIONAL-CALL FORM IS NO LONGER ACCEPTED. `\\??` is gone from this pattern,
+// so `cacheWrite?.(promise)` no longer counts as a hand-off. The header above
+// recorded this tightening as deferred because the premise was false in the tree:
+// `org-helpers.ts` declared `cacheWrite?:`, and rejecting `?.` would have failed
+// the build on the two call sites that were then the correct spelling. That
+// parameter is now REQUIRED, so `?.` is dead syntax — an optional call on a
+// non-optional value — and accepting it only preserved the hole it came from: a
+// caller that passed nothing got `undefined`, `?.(` called nothing, and the
+// promise was cancelled while this rule reported the file clean.
 const OWNERSHIP_CALL_RE = new RegExp(
-  `\\b(?:${OWNERSHIP_CALLS.join('|')})\\s*\\??\\.?\\s*\\(\\s*$`
+  `\\b(?:${OWNERSHIP_CALLS.join('|')})\\s*\\.\\s*\\(\\s*$|\\b(?:${OWNERSHIP_CALLS.join('|')})\\s*\\(\\s*$`
 );
 
-/** `await` / `return` / `void` / `yield` immediately before the receiver. */
+/** `await` / `return` / `yield` immediately before the receiver. */
 // `void` is DELIBERATELY ABSENT. It was here, and it was backwards: `void p`
 // explicitly DISCARDS the promise — the exact opposite of taking ownership of it —
 // so `void kv.put(...)` is cancelled at response return in precisely the way
