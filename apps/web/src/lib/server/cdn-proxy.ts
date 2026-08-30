@@ -50,9 +50,22 @@ type CdnBinding =
 /**
  * `platform.env` as this module reads it.
  *
- * `MEDIA_PREVIEW_BUCKET` is a READ-ONLY binding to the otherwise-private media
- * bucket, present only in environments whose wildcard route shadows the assets
- * host. It is declared here rather than in `app.d.ts` only because this branch
+ * `MEDIA_PREVIEW_BUCKET` is a read-only-BY-CONVENTION binding to the
+ * otherwise-private media bucket, present only in environments whose wildcard
+ * route shadows the assets host.
+ *
+ * "By convention" is the honest wording and the earlier "READ-ONLY" was not:
+ * wrangler has no read-only mode for an R2 binding, so this handle also carries
+ * `put()` and `delete()` over a bucket holding every creator original and every
+ * paid rendition. This module calls only `.head()` and `.get()` — keep it that
+ * way, and treat any new call as a security change rather than a feature.
+ *
+ * THE GATE BELOW HARDCODES A LAYOUT ANOTHER PACKAGE OWNS. `@codex/transcoding`
+ * writes these keys (`packages/transcoding/src/paths.ts`), and apps/web does
+ * not depend on it, so the prefix here is a RESTATEMENT that cannot be
+ * type-checked against its source. The reciprocal pin lives in that package's
+ * `__tests__/paths.test.ts` ("pinned against the public CDN gate"), which fails
+ * if the layout moves. If you change either side, change both. It is declared here rather than in `app.d.ts` only because this branch
  * does not own that file — the canonical declaration belongs alongside
  * `ASSETS_BUCKET` / `PLATFORM_BUCKET` in `apps/web/src/app.d.ts`.
  */

@@ -121,6 +121,13 @@
         // rejected. The binding name is deliberately NOT `MEDIA_BUCKET`, so no
         // future code picks it up expecting a general media handle.
         // ────────────────────────────────────────────────────────────────────
+        // NOT PLATFORM-READ-ONLY. Wrangler has no read-only mode for an R2
+        // binding, so this grants put() and delete() on the production media
+        // bucket as well as get() — every creator's original upload and every
+        // paid rendition live in it. cdn-proxy.ts calls ONLY .head() and
+        // .get(), and that restraint is the code's discipline, not a guarantee
+        // the platform enforces. Treat any new call on this binding as a
+        // security change.
         {
           "binding": "MEDIA_PREVIEW_BUCKET",
           "bucket_name": "codex-media-production"
