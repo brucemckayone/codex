@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex data architecture — how it works, what is wrong, what changes</title>
+<style>
+:root{
+  --bg:#fbfaf8; --surface:#fff; --surface-2:#f4f2ee; --line:#ddd8ce; --line-2:#c9c2b6;
+  --text:#1b1917; --text-2:#5a544b; --text-3:#8b8378;
+  --accent:#7a4a1e; --accent-soft:#fdf3e8;
+  --bad:#9a2f2f; --bad-soft:#fdf0ef; --good:#2f6b40; --good-soft:#eef6f0;
+  --mid:#7a5c14; --mid-soft:#fdf8ea; --cool:#2f5b7a; --cool-soft:#eef4f8;
+  --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#131211; --surface:#1b1a18; --surface-2:#232120; --line:#332f2b; --line-2:#48423c;
+  --text:#eae6e0; --text-2:#a9a29a; --text-3:#7c756c;
+  --accent:#d9a76a; --accent-soft:#241c13;
+  --bad:#e2908a; --bad-soft:#2a1a19; --good:#93c9a4; --good-soft:#162117;
+  --mid:#d8bd72; --mid-soft:#231e12; --cool:#87b4d4; --cool-soft:#151f27;
+}}
+:root[data-theme="dark"]{
+  --bg:#131211; --surface:#1b1a18; --surface-2:#232120; --line:#332f2b; --line-2:#48423c;
+  --text:#eae6e0; --text-2:#a9a29a; --text-3:#7c756c;
+  --accent:#d9a76a; --accent-soft:#241c13;
+  --bad:#e2908a; --bad-soft:#2a1a19; --good:#93c9a4; --good-soft:#162117;
+  --mid:#d8bd72; --mid-soft:#231e12; --cool:#87b4d4; --cool-soft:#151f27;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15.5px/1.6 var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 1.2rem 6rem}
+.wrap{max-width:70rem;margin:0 auto}
+header.mast{padding:3.2rem 0 1.5rem;border-bottom:2px solid var(--text);margin-bottom:2rem}
+h1{font:600 2rem/1.15 var(--serif);margin:0 0 .55rem;letter-spacing:-.018em}
+.sub{color:var(--text-2);font-size:.97rem;max-width:52rem;margin:0}
+.meta{margin-top:.9rem;font:500 .7rem/1.5 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.08em}
+h2{font:600 1.5rem/1.2 var(--serif);margin:3.6rem 0 .4rem;padding-top:1.5rem;border-top:1px solid var(--line);letter-spacing:-.012em}
+h2 .n{display:block;font:600 .7rem/1 var(--mono);color:var(--accent);letter-spacing:.12em;margin-bottom:.6rem}
+h3{font:600 1.02rem/1.3 var(--sans);margin:2.2rem 0 .4rem}
+p{margin:.6rem 0;max-width:58rem}
+.lede{font-size:1rem;color:var(--text-2)}
+code{font:.86em/1.4 var(--mono);background:var(--surface-2);padding:.1em .34em;border-radius:3px;border:1px solid var(--line);word-break:break-word}
+strong{font-weight:640;color:var(--text)}
+a{color:var(--accent)}
+figure{margin:1.6rem 0 1.4rem;padding:0}
+.fig{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:1.1rem 1rem .8rem;overflow-x:auto}
+.fig svg{display:block;width:100%;height:auto;min-width:34rem}
+figcaption{font-size:.85rem;color:var(--text-2);margin-top:.7rem;line-height:1.55}
+figcaption b{color:var(--text);font-weight:640}
+svg text{font-family:var(--sans);fill:var(--text)}
+svg .lbl{font-size:12px;font-weight:600}
+svg .sm{font-size:10.5px;fill:var(--text-2);font-family:var(--mono)}
+svg .box{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+svg .box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.2}
+svg .box-good{fill:var(--good-soft);stroke:var(--good);stroke-width:1.2}
+svg .box-mid{fill:var(--mid-soft);stroke:var(--mid);stroke-width:1.2}
+svg .box-cool{fill:var(--cool-soft);stroke:var(--cool);stroke-width:1.2}
+svg .arw{stroke:var(--text-3);stroke-width:1.4;fill:none}
+svg .arw-bad{stroke:var(--bad);stroke-width:1.6;fill:none}
+svg .arw-good{stroke:var(--good);stroke-width:1.6;fill:none}
+svg .dash{stroke-dasharray:4 3}
+.tw{overflow-x:auto;margin:1.1rem 0;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.885rem;min-width:32rem}
+th{text-align:left;font:600 .69rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:.7rem .85rem;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+td{padding:.72rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.k{font:500 .8rem/1.45 var(--mono);white-space:nowrap;color:var(--text-2)}
+td.bad{background:var(--bad-soft)} td.good{background:var(--good-soft)} td.mid{background:var(--mid-soft)}
+.tiny{font-size:.82rem;color:var(--text-2);display:block;margin-top:.3rem;line-height:1.55}
+.box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:1rem 1.15rem;margin:1.4rem 0}
+.box.warn{border-left-color:var(--bad)} .box.ok{border-left-color:var(--good)}
+.box h4{font:600 .7rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin:0 0 .5rem}
+.box p:last-child{margin-bottom:0}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.15rem;margin:0 0 2.4rem;font-size:.9rem}
+.toc a{display:inline-block;margin-right:1.15rem;text-decoration:none;color:var(--text-2)}
+.toc a:hover{color:var(--accent)}
+.toc a b{color:var(--accent);font:600 .72rem var(--mono);margin-right:.35rem}
+footer{margin-top:3.6rem;padding-top:1.3rem;border-top:1px solid var(--line);font-size:.87rem;color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <h1>How the data layer works, what is wrong with it, and what changes</h1>
+  <p class="sub">A visual companion to <a href="./index.html">the decision</a>. Same conclusions, same figures —
+  drawn rather than argued, so the mechanism is visible before the reasoning.</p>
+  <p class="meta">2026-08-30 · <a href="./index.html">decision</a> · <a href="./plan.html">plan</a> · <a href="./reference.html">evidence</a></p>
+</header>
+
+<nav class="toc">
+  <a href="#now"><b>1</b> How it works today</a>
+  <a href="#problem"><b>2</b> What is wrong</a>
+  <a href="#nod1"><b>3</b> Why not D1</a>
+  <a href="#solution"><b>4</b> What changes</a>
+  <a href="#outcome"><b>5</b> The likely outcome</a>
+</nav>
+
+<h2 id="now"><span class="n">SECTION 1</span>How it works today</h2>
+
+<p class="lede">One page render, end to end. <strong>The shape that matters is on the right: every SQL statement
+opens its own HTTPS connection to the database.</strong></p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 84 900 232" role="img" aria-label="A request path from browser through Cloudflare and a worker to Neon, with 31 separate connections">
+  <rect class="box" x="8" y="130" width="96" height="52" rx="6"/>
+  <text class="lbl" x="56" y="152" text-anchor="middle">Browser</text>
+  <text class="sm" x="56" y="168" text-anchor="middle">a visitor</text>
+
+  <rect class="box-bad" x="140" y="118" width="126" height="76" rx="6"/>
+  <text class="lbl" x="203" y="142" text-anchor="middle">Cloudflare edge</text>
+  <text class="sm" x="203" y="159" text-anchor="middle">CDN — no cache</text>
+  <text class="sm" x="203" y="174" text-anchor="middle">header, so it</text>
+  <text class="sm" x="203" y="187" text-anchor="middle">passes through</text>
+
+  <rect class="box" x="302" y="106" width="132" height="100" rx="6"/>
+  <text class="lbl" x="368" y="130" text-anchor="middle">Worker</text>
+  <text class="sm" x="368" y="147" text-anchor="middle">SSR + API</text>
+  <text class="sm" x="368" y="164" text-anchor="middle">Drizzle over</text>
+  <text class="sm" x="368" y="177" text-anchor="middle">neon-http</text>
+  <text class="sm" x="368" y="196" text-anchor="middle">eu-west-2 or edge</text>
+
+  <rect class="box-bad" x="700" y="96" width="120" height="120" rx="6"/>
+  <text class="lbl" x="760" y="126" text-anchor="middle">Neon</text>
+  <text class="sm" x="760" y="144" text-anchor="middle">Postgres 17</text>
+  <text class="sm" x="760" y="160" text-anchor="middle">aws-eu-west-2</text>
+  <text class="sm" x="760" y="176" text-anchor="middle">48 tables</text>
+  <text class="sm" x="760" y="196" text-anchor="middle">0.25–2 CU</text>
+
+  <path class="arw" d="M104 156 H136"/>
+  <path class="arw" d="M266 156 H298"/>
+
+  <g class="arw-bad">
+    <path d="M434 118 C 520 118, 600 106, 696 112"/>
+    <path d="M434 130 C 520 132, 600 128, 696 130"/>
+    <path d="M434 142 C 520 148, 600 148, 696 148"/>
+    <path d="M434 154 C 520 162, 600 166, 696 166"/>
+    <path d="M434 166 C 520 176, 600 184, 696 184"/>
+    <path d="M434 178 C 520 190, 600 200, 696 202"/>
+  </g>
+  <text class="sm" x="548" y="98" text-anchor="middle">31 statements → 31 separate HTTPS connections</text>
+  <text class="sm" x="600" y="228" text-anchor="middle">each one a fresh TCP + TLS handshake · ~81 ms</text>
+
+  <rect class="box-mid" x="302" y="248" width="132" height="56" rx="6"/>
+  <text class="lbl" x="368" y="270" text-anchor="middle">KV</text>
+  <text class="sm" x="368" y="286" text-anchor="middle">org slug → id</text>
+  <text class="sm" x="368" y="299" text-anchor="middle">write cancelled</text>
+  <path class="arw arw-bad dash" d="M368 206 V244"/>
+  <text class="sm" x="356" y="228" text-anchor="end" style="fill:var(--bad)">never populates</text>
+
+  <text class="sm" x="565" y="266" text-anchor="middle" style="font-size:12px;fill:var(--bad)">≈ 2.5 s of network per render</text>
+  <text class="sm" x="565" y="284" text-anchor="middle">the compute stays awake for all of it</text>
+</svg>
+</div>
+<figcaption><b>Read the six curved lines as thirty-one.</b> The <code>neon-http</code> driver opens a new
+connection for every statement, so a page needing 31 queries pays 31 handshakes. <b>Same-region round-trip time
+is 5–10 ms</b> — so most of each 81 ms is HTTP and TLS setup, not distance. <b>The dashed line is the defect
+that matters most:</b> the worker tries to cache the slug→id lookup in KV, and the write is cancelled before it
+lands.</figcaption>
+</figure>
+
+<h3>The parts, and which are load-bearing</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Layer</th><th>What it does today</th><th>State</th></tr></thead>
+  <tbody>
+    <tr><td class="k">Cloudflare CDN</td>
+      <td>Would serve public pages from the edge — but organization-api sends no
+      <code>Cache-Control</code>, so <strong>every anonymous visitor reaches a worker.</strong></td>
+      <td class="bad">inert</td></tr>
+    <tr><td class="k">Worker</td>
+      <td>SSR and API. Resolves the org from the hostname, checks access, renders. <strong>~31 SQL statements
+      for a landing page.</strong></td>
+      <td class="mid">works, but chatty</td></tr>
+    <tr><td class="k">KV cache</td>
+      <td>Two write-throughs — org slug→id and membership. Both call <code>kv.put(...)</code> without passing it
+      to <code>waitUntil</code>, <strong>so the platform cancels the write when the response returns.</strong></td>
+      <td class="bad">0% hit rate</td></tr>
+    <tr><td class="k">Driver</td>
+      <td><code>drizzle-orm/neon-http</code> — one HTTPS request per statement. <strong>No pooling, no
+      reuse.</strong></td>
+      <td class="bad">the root cost</td></tr>
+    <tr><td class="k">Neon</td>
+      <td>System of record. All 48 domain tables, one region, transactions and foreign keys intact.
+      <strong>Nothing wrong with it.</strong></td>
+      <td class="good">healthy</td></tr>
+    <tr><td class="k">Durable Objects</td>
+      <td>Two, both correct: auth rate limiting keyed on the email being tried, and an alarm-driven orphaned-file
+      cleanup.</td>
+      <td class="good">healthy</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="problem"><span class="n">SECTION 2</span>What is wrong</h2>
+
+<p class="lede"><strong>Three caches sit between a visitor and the database. All three are open.</strong> Not
+misconfigured — absent, cancelled, and never built.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 74 900 212" role="img" aria-label="Three cache layers, all failing to hold requests back">
+  <rect class="box" x="8" y="120" width="86" height="50" rx="6"/>
+  <text class="lbl" x="51" y="142" text-anchor="middle">Request</text>
+  <text class="sm" x="51" y="158" text-anchor="middle">anonymous</text>
+
+  <g>
+    <rect class="box-bad" x="140" y="86" width="150" height="118" rx="6"/>
+    <text class="lbl" x="215" y="110" text-anchor="middle">1 · CDN</text>
+    <text class="sm" x="215" y="130" text-anchor="middle">should answer at</text>
+    <text class="sm" x="215" y="144" text-anchor="middle">the edge, free</text>
+    <text class="sm" x="215" y="168" text-anchor="middle" style="fill:var(--bad)">no Cache-Control</text>
+    <text class="sm" x="215" y="182" text-anchor="middle" style="fill:var(--bad)">on 5 public routes</text>
+    <text class="sm" x="215" y="196" text-anchor="middle" style="fill:var(--bad)">→ 0 requests held</text>
+  </g>
+
+  <g>
+    <rect class="box-bad" x="336" y="86" width="150" height="118" rx="6"/>
+    <text class="lbl" x="411" y="110" text-anchor="middle">2 · KV</text>
+    <text class="sm" x="411" y="130" text-anchor="middle">should answer the</text>
+    <text class="sm" x="411" y="144" text-anchor="middle">slug lookup</text>
+    <text class="sm" x="411" y="168" text-anchor="middle" style="fill:var(--bad)">write cancelled —</text>
+    <text class="sm" x="411" y="182" text-anchor="middle" style="fill:var(--bad)">no waitUntil</text>
+    <text class="sm" x="411" y="196" text-anchor="middle" style="fill:var(--bad)">→ 0% hit rate</text>
+  </g>
+
+  <g>
+    <rect class="box-bad" x="532" y="86" width="150" height="118" rx="6"/>
+    <text class="lbl" x="607" y="110" text-anchor="middle">3 · connection pool</text>
+    <text class="sm" x="607" y="130" text-anchor="middle">should reuse one</text>
+    <text class="sm" x="607" y="144" text-anchor="middle">connection</text>
+    <text class="sm" x="607" y="168" text-anchor="middle" style="fill:var(--bad)">does not exist —</text>
+    <text class="sm" x="607" y="182" text-anchor="middle" style="fill:var(--bad)">neon-http opens one</text>
+    <text class="sm" x="607" y="196" text-anchor="middle" style="fill:var(--bad)">per statement</text>
+  </g>
+
+  <rect class="box-bad" x="726" y="104" width="96" height="82" rx="6"/>
+  <text class="lbl" x="774" y="132" text-anchor="middle">Neon</text>
+  <text class="sm" x="774" y="150" text-anchor="middle">wakes up</text>
+  <text class="sm" x="774" y="166" text-anchor="middle">and stays</text>
+  <text class="sm" x="774" y="180" text-anchor="middle">awake</text>
+
+  <path class="arw-bad" d="M94 145 H136"/>
+  <path class="arw-bad" d="M290 145 H332"/>
+  <path class="arw-bad" d="M486 145 H528"/>
+  <path class="arw-bad" d="M682 145 H722"/>
+
+  <text class="sm" x="450" y="252" text-anchor="middle" style="font-size:12px">Every request traverses all three and arrives at the database.</text>
+  <text class="sm" x="450" y="272" text-anchor="middle">Neon bills TIME AWAKE — so the cost is not the query, it is that the database never gets to sleep.</text>
+</svg>
+</div>
+<figcaption><b>The three failures are different in kind, which is why they were not noticed together.</b> The
+CDN header is missing (organization-api has zero cache-header references, while content-api has thirteen). The
+KV write is <em>present and cancelled</em> — its test asserts the call was made, which is true either way. The
+pool was never there, because <code>neon-http</code> is a per-statement HTTP driver by design.</figcaption>
+</figure>
+
+<div class="box warn">
+  <h4>Why this shows up as a bill rather than as slowness</h4>
+  <p><strong>Neon charges for the time the compute is awake, not for queries.</strong> A render that holds it
+  awake for 2.5 seconds costs 2.5 seconds of compute — and the free allowance is <strong>0.55–0.60× what one
+  minimum-size instance costs to stay awake for a month.</strong> <em>The free tier is a bet that your database
+  sleeps.</em></p>
+  <p><strong>That allowance has been consumed at a traffic level of roughly one test user.</strong> The database
+  is awake 38 hours a month — 5.2% — and the branch archived on 2026-08-30 after 24 hours with no caller at all.
+  <em>So the 5.2% is not a low steady load with room to grow. It is bursts separated by silence, and launch
+  traffic removes the silence.</em></p>
+</div>
+
+<h2 id="nod1"><span class="n">SECTION 3</span>Why not D1</h2>
+
+<p class="lede">The proposal was a database per organisation. <strong>The schema has no line you can draw to
+separate them.</strong></p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 18 900 314" role="img" aria-label="The tenancy model, showing that no partition line separates organisations">
+  <rect class="box-cool" x="60" y="30" width="120" height="48" rx="6"/>
+  <text class="lbl" x="120" y="52" text-anchor="middle">users</text>
+  <text class="sm" x="120" y="68" text-anchor="middle">a person</text>
+
+  <rect class="box-cool" x="380" y="30" width="130" height="48" rx="6"/>
+  <text class="lbl" x="445" y="52" text-anchor="middle">organizations</text>
+  <text class="sm" x="445" y="68" text-anchor="middle">the tenant</text>
+
+  <path class="arw" d="M180 44 H376"/>
+  <text class="sm" x="278" y="38" text-anchor="middle">memberships — many-to-many</text>
+  <path class="arw" d="M180 64 H376"/>
+  <text class="sm" x="278" y="80" text-anchor="middle">followers — many-to-many</text>
+
+  <rect class="box" x="46" y="150" width="152" height="64" rx="6"/>
+  <text class="lbl" x="122" y="172" text-anchor="middle">content</text>
+  <text class="sm" x="122" y="189" text-anchor="middle">creatorId — NOT NULL</text>
+  <text class="sm" x="122" y="204" text-anchor="middle" style="fill:var(--bad)">organizationId — NULL</text>
+
+  <rect class="box" x="46" y="240" width="152" height="58" rx="6"/>
+  <text class="lbl" x="122" y="262" text-anchor="middle">mediaItems</text>
+  <text class="sm" x="122" y="279" text-anchor="middle">creatorId only</text>
+  <text class="sm" x="122" y="293" text-anchor="middle" style="fill:var(--bad)">no org column</text>
+
+  <path class="arw dash" d="M198 182 C 290 182, 350 120, 420 82"/>
+  <text class="sm" x="286" y="130" style="fill:var(--bad)">optional — absent on personal-studio rows</text>
+  <path class="arw" d="M122 214 V236"/>
+
+  <path d="M262 152 V312" stroke="var(--bad)" stroke-width="1.6" stroke-dasharray="7 5" fill="none"/>
+  <text class="sm" x="268" y="322" style="fill:var(--bad)">a partition line has to cut somewhere — and every cut severs a real query</text>
+
+  <rect class="box-bad" x="560" y="150" width="300" height="148" rx="6"/>
+  <text class="lbl" x="710" y="174" text-anchor="middle">What breaks if you cut here</text>
+  <text class="sm" x="576" y="196">· a library spanning every org you follow</text>
+  <text class="sm" x="576" y="214">· a creator's work across their studios</text>
+  <text class="sm" x="576" y="232">· any admin view over all of it</text>
+  <text class="sm" x="576" y="256">· content with no org at all has no home</text>
+  <text class="sm" x="576" y="274">· media has no org column to route on</text>
+  <text class="sm" x="576" y="292" style="fill:var(--bad)">all become cross-database fan-out</text>
+</svg>
+</div>
+<figcaption><b>You asked how to design so as to avoid sharding.</b> Read from the schema, the answer is that
+<b>there is no shard key</b> — <code>content.organizationId</code> is nullable and <code>mediaItems</code> has no
+organisation column at any point. <b>And multi-org queries are not something to preserve through a migration:
+they are what a migration would have cost.</b> Today each one is a single SQL statement against one database,
+with foreign keys and a transaction boundary.</figcaption>
+</figure>
+
+<h3>Two facts settle it before capacity is ever reached</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Fact</th><th>Consequence</th><th>Buyable?</th></tr></thead>
+  <tbody>
+    <tr><td><strong>D1 bindings are static.</strong> There is no runtime addressing — you declare one binding per
+      database in configuration, at deploy time.</td>
+      <td class="bad">Per-tenant means one config entry <em>plus a redeploy</em> to onboard anybody, against a
+      ~5,000-binding ceiling. <strong>A fixed roster, not a multi-tenant architecture.</strong></td>
+      <td class="bad">No</td></tr>
+    <tr><td><strong>A Durable Object is one instance in one location.</strong> It cannot be replicated.</td>
+      <td class="bad">A distant reader still crosses the network to reach it — <strong>so the per-tenant DO
+      alternative reintroduces exactly the round trip the exercise exists to remove.</strong></td>
+      <td class="bad">No</td></tr>
+    <tr><td>Free-plan D1 is 500&#8202;MB with 50 queries per invocation.</td>
+      <td class="mid">The only objection money reaches — and <strong>the catalogue is 36.6&#8202;MB, so the
+      10&#8202;GB limit never comes up.</strong></td>
+      <td class="good">Yes</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="solution"><span class="n">SECTION 4</span>What changes</h2>
+
+<p class="lede"><strong>Two layers, both plumbing.</strong> The data model, the transaction boundaries and the
+multi-tenant query paths are untouched.</p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 92 900 232" role="img" aria-label="The target architecture with three working cache tiers in front of Neon">
+  <rect class="box" x="8" y="140" width="86" height="50" rx="6"/>
+  <text class="lbl" x="51" y="162" text-anchor="middle">Request</text>
+
+  <rect class="box-good" x="130" y="104" width="146" height="122" rx="6"/>
+  <text class="lbl" x="203" y="128" text-anchor="middle">1 · CDN</text>
+  <text class="sm" x="203" y="148" text-anchor="middle">Cache-Control on the</text>
+  <text class="sm" x="203" y="162" text-anchor="middle">5 public routes</text>
+  <text class="sm" x="203" y="176" text-anchor="middle">s-maxage=60</text>
+  <text class="sm" x="203" y="198" text-anchor="middle" style="fill:var(--good)">answers without</text>
+  <text class="sm" x="203" y="212" text-anchor="middle" style="fill:var(--good)">waking anything</text>
+
+  <rect class="box" x="316" y="116" width="132" height="98" rx="6"/>
+  <text class="lbl" x="382" y="140" text-anchor="middle">Worker</text>
+  <text class="sm" x="382" y="158" text-anchor="middle">Drizzle — unchanged</text>
+  <text class="sm" x="382" y="174" text-anchor="middle">no query rewritten</text>
+  <text class="sm" x="382" y="196" text-anchor="middle">placement: eu-west-2</text>
+  <text class="sm" x="382" y="209" text-anchor="middle">(if traffic warrants)</text>
+
+  <rect class="box-good" x="316" y="252" width="132" height="60" rx="6"/>
+  <text class="lbl" x="382" y="274" text-anchor="middle">2 · KV</text>
+  <text class="sm" x="382" y="290" text-anchor="middle">slug → id, cached</text>
+  <text class="sm" x="382" y="304" text-anchor="middle">waitUntil threaded</text>
+  <path class="arw-good" d="M382 214 V248"/>
+
+  <rect class="box-good" x="490" y="104" width="152" height="122" rx="6"/>
+  <text class="lbl" x="566" y="128" text-anchor="middle">3 · Hyperdrive</text>
+  <text class="sm" x="566" y="148" text-anchor="middle">one pooled connection</text>
+  <text class="sm" x="566" y="166" text-anchor="middle">config A — cached 60 s</text>
+  <text class="sm" x="566" y="182" text-anchor="middle">config B — no cache,</text>
+  <text class="sm" x="566" y="195" text-anchor="middle">for auth &amp; post-write</text>
+  <text class="sm" x="566" y="214" text-anchor="middle" style="fill:var(--good)">no handshake per query</text>
+
+  <rect class="box-good" x="700" y="116" width="120" height="98" rx="6"/>
+  <text class="lbl" x="760" y="140" text-anchor="middle">Neon</text>
+  <text class="sm" x="760" y="158" text-anchor="middle">unchanged</text>
+  <text class="sm" x="760" y="174" text-anchor="middle">48 tables</text>
+  <text class="sm" x="760" y="190" text-anchor="middle">+ pg_trgm index</text>
+  <text class="sm" x="760" y="206" text-anchor="middle">one region</text>
+
+  <path class="arw" d="M94 165 H126"/>
+  <path class="arw" d="M276 165 H312"/>
+  <path class="arw-good" d="M448 165 H486"/>
+  <path class="arw-good" d="M642 165 H696"/>
+
+  <text class="sm" x="203" y="248" text-anchor="middle">most anonymous traffic stops here</text>
+  <text class="sm" x="566" y="248" text-anchor="middle">the rest arrives pooled</text>
+
+  <rect class="box" x="688" y="252" width="146" height="60" rx="6"/>
+  <text class="lbl" x="761" y="274" text-anchor="middle">2 Durable Objects</text>
+  <text class="sm" x="761" y="290" text-anchor="middle">rate limit · cleanup</text>
+  <text class="sm" x="761" y="304" text-anchor="middle">unchanged</text>
+</svg>
+</div>
+<figcaption><b>Compare with the first diagram: the thirty-one lines become one.</b> Hyperdrive holds a pooled
+connection, so a statement no longer pays a handshake — and <b>the 81 ms was mostly handshake</b>, since
+same-region round-trip time is 5–10 ms. <b>Two Hyperdrive configurations, not one:</b> caching is on by default
+with a 75-second staleness window and no purge on write, so auth, sessions, permissions, billing and any
+read-after-write go through a second <code>--caching-disabled</code> binding.</figcaption>
+</figure>
+
+<h3>The changes, in order</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Change</th><th>Size</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td class="k">1</td>
+      <td><strong>Add <code>Cache-Control</code> to organization-api's public routes.</strong> Three lines of Hono
+      middleware, copied from content-api along with its negative-control test.
+      <span class="tiny"><strong>Mount on the five public paths, not <code>'*'</code></strong> — that file has 13
+      routes and only 5 are public, so a blanket mount would stamp <code>public</code> on eight authenticated
+      responses.</span></td>
+      <td class="k">1 file<br>+ its test</td>
+      <td class="good"><strong>Prevents the wake.</strong> The only change where a request never reaches a
+      worker.</td></tr>
+    <tr><td class="k">2</td>
+      <td><strong>Thread <code>waitUntil</code> through to the two <code>kv.put</code> calls.</strong>
+      <span class="tiny">Not two lines: neither function receives an <code>executionCtx</code>, so it needs an
+      optional parameter passed from <code>procedure/helpers.ts</code>. The pattern already exists at
+      <code>fee-config-service.ts:647</code>.</span></td>
+      <td class="k">~6 edits<br>2 files</td>
+      <td class="good"><strong>Stops a real page render waking Neon</strong> for a slug lookup.</td></tr>
+    <tr><td class="k">3</td>
+      <td><strong>Swap <code>neon-http</code> for Hyperdrive + <code>node-postgres</code>.</strong> Two adjacent
+      expressions in <code>client.ts</code>; Drizzle's adapter interface is identical, so no query changes.
+      <span class="tiny">Needs a dedicated Neon role and the <strong>unpooled</strong> connection string —
+      Hyperdrive is itself the pooler. Gated on $5 Workers Paid, because free-plan Hyperdrive fails past
+      100,000 queries a day.</span></td>
+      <td class="k">2 expressions<br>~20 files</td>
+      <td class="mid"><strong>Makes each wake cheaper</strong> — removes the handshake, not the request.</td></tr>
+    <tr><td class="k">4</td>
+      <td><strong>Enable <code>pg_trgm</code> with a GIN index</strong>, and gate search at three characters in
+      the client.</td>
+      <td class="k">1 migration</td>
+      <td class="good">Mid-word search in Postgres — <strong>the last thing only D1 could do.</strong></td></tr>
+    <tr><td class="k">5</td>
+      <td><code>placement: { region: "aws:eu-west-2" }</code> — <em>only if traffic is meaningfully
+      non-European.</em></td>
+      <td class="k">1 line ×9</td>
+      <td class="mid">Puts the worker beside the database.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="outcome"><span class="n">SECTION 5</span>The likely outcome</h2>
+
+<p class="lede"><strong>The honest version: two effects are near-certain, one is measurable-not-predictable, and
+one thing does not improve at all.</strong></p>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 900 250" role="img" aria-label="Before and after, showing where each fix removes cost">
+  <text class="lbl" x="20" y="30">BEFORE — one anonymous landing render</text>
+  <rect class="box-bad" x="20" y="44" width="840" height="34" rx="4"/>
+  <text class="sm" x="440" y="66" text-anchor="middle">31 statements × 81 ms handshake  ·  ≈ 2.5 s network  ·  compute awake throughout</text>
+
+  <text class="lbl" x="20" y="118">AFTER — the same render, once fixes 1–3 land</text>
+  <rect class="box-good" x="20" y="132" width="470" height="34" rx="4"/>
+  <text class="sm" x="255" y="154" text-anchor="middle">CDN answers it — 0 statements, 0 wake</text>
+  <rect class="box-mid" x="496" y="132" width="180" height="34" rx="4"/>
+  <text class="sm" x="586" y="154" text-anchor="middle">KV answers the slug</text>
+  <rect class="box-cool" x="682" y="132" width="178" height="34" rx="4"/>
+  <text class="sm" x="771" y="154" text-anchor="middle">pooled — no handshake</text>
+
+  <text class="sm" x="20" y="196">Fix 1 removes the request. Fix 2 removes a query from the requests that remain.</text>
+  <text class="sm" x="20" y="214">Fix 3 removes the handshake from every query that still happens — the 81 ms is mostly TLS setup, not distance.</text>
+  <text class="sm" x="20" y="238" style="fill:var(--bad)">Not shown, because nothing here fixes it: the user→worker hop for a distant visitor.</text>
+</svg>
+</div>
+<figcaption><b>The bars are proportional to the work removed, not to time.</b> A precise post-fix latency is
+deliberately not quoted: it depends on what fraction of the 31 statements are cacheable, and that has not been
+measured.</figcaption>
+</figure>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Outcome</th><th>Confidence</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Anonymous page loads stop reaching the database.</strong></td>
+      <td class="good">near-certain</td>
+      <td>A CDN cache hit does not invoke a worker. The only question is the <code>max-age</code> you choose, and
+      content-api has already chosen 60 s for the same kind of content.</td></tr>
+    <tr><td><strong>The compute sleeps far more often.</strong></td>
+      <td class="good">near-certain</td>
+      <td>Neon archives a branch untouched for 24 hours — <strong>so you can watch this happen for free</strong>
+      by reading <code>current_state</code> before and after.</td></tr>
+    <tr><td><strong>Per-render latency drops substantially.</strong></td>
+      <td class="mid">measurable,<br>not predictable</td>
+      <td>Same-region RTT is 5–10 ms against 81 ms per statement, so the handshake is ~90% of it.
+      <strong>Record p50, p95, statement count and 504 rate before you start</strong> — the same reading also
+      replaces the six figures in this document that come from four-day-old measurements.</td></tr>
+    <tr><td><strong>The compute-quota problem goes away.</strong></td>
+      <td class="mid">likely, with a caveat</td>
+      <td>89% of consumption is production traffic, which these fixes reduce. <strong>But whether the free
+      allowance is monthly or a spent grant is unresolved</strong> — one command after 2026-09-01 settles it, and
+      the prudent assumption is that you pay.</td></tr>
+    <tr><td><strong>Cross-region reads get faster.</strong></td>
+      <td class="bad">not addressed</td>
+      <td>Nothing above shortens a transatlantic round trip. <strong>Every latency figure in this document is a
+      European measurement.</strong> <em>Fix 5 (placement) is the cheap first answer if the traffic reading says
+      it matters — one line per config, currently unset in all eleven.</em></td></tr>
+    <tr><td><strong>Data is at risk.</strong></td>
+      <td class="good">no</td>
+      <td>All three changes touch how reads are <em>served</em> — a response header, an argument, a driver.
+      <strong>Neon's counters record zero bytes written this period</strong>; there is no write path in play.
+      Worst case is a page 60 seconds stale, reversible by reverting one line.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box ok">
+  <h4>What to do first, and what it depends on</h4>
+  <p><strong>Fixes 1 and 2 can be written and verified today</strong>, while CI is still red — both of their test
+  files mock <code>@codex/database</code>, so neither needs a Neon branch. <em>They are also the two biggest
+  levers on how often the database wakes.</em></p>
+  <p><strong>Everything after that waits on two readings:</strong> <code>cpu_used_sec</code> after 2026-09-01,
+  which decides how urgent the Neon plan is; and the colo distribution in the Workers logs, which decides whether
+  fix 5 is worth doing at all. <em>Both are one command; the second needs a Cloudflare token with
+  <code>account:read</code>.</em></p>
+</div>
+
+<footer>
+  <p><strong>Where the detail is.</strong> <a href="./index.html">The decision</a> carries every figure with its
+  source, the file-level scope of each change, and the three questions still open.
+  <a href="./reference.html">The reference</a> is the audit trail behind both — including the six
+  recommendations retracted as already-done, and the corrections this analysis made to itself.</p>
+  <p class="tiny" style="margin-top:.6rem">Diagrams are inline SVG with no external dependencies, and use the
+  same tokens as the text — they follow your system light or dark theme.</p>
+</footer>
+
+</div>
+</body>
+</html>
