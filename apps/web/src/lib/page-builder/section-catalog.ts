@@ -330,6 +330,25 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
         hint: '“This is you if…” as ticked rows',
         thumb: 'checklist',
       },
+      {
+        // THE FULL-SCREEN DESCENT. Each point takes the whole viewport and the
+        // next one arrives as the reader scrolls — a pinned stage, one ache at a
+        // time, rather than a list they can skim past.
+        //
+        // IT IS A COMPOSITION, deliberately, and that is the whole fix. This
+        // behaviour existed once and was removed because it could not be chosen,
+        // escaped, or seen in this picker: it armed itself whenever a section
+        // happened to have two blocks of prose. A creator picks it here or never
+        // meets it — which answers every objection raised when it was retired,
+        // without giving up the effect.
+        //
+        // It reads the SAME `points` list the List and Checklist layouts read, so
+        // choosing it does not re-author anything: the points ARE the aches.
+        id: 'descent',
+        label: 'Descent',
+        hint: 'Full screen, one ache at a time — each arrives as the reader scrolls',
+        thumb: 'descent',
+      },
     ],
     defaultVariant: 'column',
     defaultProps: {

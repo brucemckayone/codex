@@ -275,3 +275,131 @@ describe('AcheSection — the editable seam', () => {
     expect(onEdit).toHaveBeenCalledWith('heading', 'Edited');
   });
 });
+
+describe('AcheSection — the descent, a full-screen scroll sequence', () => {
+  afterEach(reset);
+
+  // WHY THIS BLOCK EXISTS. This behaviour shipped once, was deleted as a defect,
+  // and had to be rebuilt. It was deleted for four stated reasons, and the one
+  // that mattered was a DATA-SOURCE bug: the beats were synthesised from
+  // `[heading, body]`, so writing two paragraphs armed a scrolljack nobody chose.
+  // These tests pin the source and the opt-in, so the same mistake cannot be made
+  // twice — and so nobody "retires" the effect again without a test going red.
+
+  const descentRoot = () => document.body.querySelector('.ache--descent');
+  const beatTexts = () =>
+    [...document.body.querySelectorAll('.ache__beat-lead')].map((e) =>
+      e.textContent?.trim()
+    );
+
+  it('is a declared composition, so a creator can choose it', () => {
+    render({ variant: 'descent', config: WITH_POINTS });
+    expect(root()?.getAttribute('data-ache')).toBe('descent');
+    expect(descentRoot()).not.toBeNull();
+  });
+
+  it('takes its beats from the AUTHORED points, one beat per point', () => {
+    // THE REGRESSION GUARD. The old version built beats from [heading, body];
+    // this asserts the beats are exactly the points the creator wrote, so a
+    // heading can never become a beat and prose can never arm the sequence.
+    render({ variant: 'descent', config: WITH_POINTS });
+    // The LEAD only — a point's gloss is split into its own span, asserted in the
+    // next test. Two beats for two points is the claim that matters: the count
+    // tracks the authored array and nothing else.
+    expect(beatTexts()).toEqual([
+      'You brace for it',
+      'You are told time helps',
+    ]);
+  });
+
+  it('splits a point on the dash, like every other points layout', () => {
+    render({ variant: 'descent', config: WITH_POINTS });
+    const gloss = document.body.querySelector('.ache__beat-gloss');
+    expect(gloss?.textContent?.trim()).toBe('and it still arrives sideways');
+  });
+
+  it('renders EVERY beat in the markup, in order, as a list', () => {
+    // The pin is presentational: the server emits all beats and a screen reader
+    // gets all of them. Only opacity hides one in the browser, and only when
+    // enhanced. If this ever renders one beat at a time server-side, the page is
+    // broken for no-JS and for assistive tech.
+    render({ variant: 'descent', config: WITH_POINTS });
+    const list = document.body.querySelector('ol.ache__beats');
+    expect(list).not.toBeNull();
+    expect(list?.querySelectorAll('li.ache__beat').length).toBe(2);
+  });
+
+  it('does NOT pin in the builder canvas, and says what publishing will do', () => {
+    // The canvas is a short, scaled viewport with its own scroller. Pinning there
+    // would fight that scroller and hide the creator's own text — so `editable`
+    // gets the stacked form plus an honest label.
+    render({ variant: 'descent', config: WITH_POINTS, editable: true });
+    expect(descentRoot()?.classList.contains('ache--enhanced')).toBe(false);
+    const note = document.body.querySelector('.ache__descent-note');
+    expect(note?.textContent).toContain('full screens');
+    // every beat still legible, because this is where they are written
+    expect(beatTexts().length).toBe(2);
+  });
+
+  it('enhances once mounted in a browser that welcomes motion', () => {
+    // Recording what I got wrong: I expected this to be false here, reasoning that
+    // `mounted` needs an $effect. jsdom MOUNTS CLIENT-SIDE and runs effects, so
+    // this path is the real enhanced one — which makes it the right place to
+    // assert the pin arms at all.
+    render({ variant: 'descent', config: WITH_POINTS });
+    expect(descentRoot()?.classList.contains('ache--enhanced')).toBe(true);
+    // and every beat is still IN THE MARKUP; only CSS opacity hides them
+    expect(beatTexts().length).toBe(2);
+  });
+
+  it('does NOT enhance under prefers-reduced-motion', () => {
+    // The one gate that must hold without a composition change: a reader who has
+    // asked for less motion gets the legible stack, never a hijacked screen.
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) =>
+      ({
+        matches: query.includes('prefers-reduced-motion'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList) as typeof window.matchMedia;
+    try {
+      render({ variant: 'descent', config: WITH_POINTS });
+      expect(descentRoot()?.classList.contains('ache--enhanced')).toBe(false);
+      expect(beatTexts().length).toBe(2);
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('needs TWO beats to sequence — one point adds no scroll distance', () => {
+    // A single-beat descent would pin a screen with nothing to advance to, which
+    // is the "viewport of empty scroll" the old version was rightly criticised
+    // for. One point renders, and renders unpinned.
+    render({
+      variant: 'descent',
+      config: { ...FLAT, points: ['Only the one ache'] },
+    });
+    expect(descentRoot()).not.toBeNull();
+    expect(descentRoot()?.classList.contains('ache--enhanced')).toBe(false);
+  });
+
+  it('degrades to the ordinary section when there are no points', () => {
+    // Nothing to sequence. It must not render an empty pinned stage — the
+    // one-viewport-of-nothing failure the old version was rightly criticised for.
+    render({ variant: 'descent', config: FLAT });
+    expect(descentRoot()).toBeNull();
+    expect(root()).not.toBeNull();
+  });
+
+  it('shows one progress segment per beat while sequencing, and none in the canvas', () => {
+    // Dots imply a position in a sequence. Enhanced, there IS one — one segment
+    // per beat. In the canvas there is no sequence, so showing them would be a
+    // lie about the layout.
+    render({ variant: 'descent', config: WITH_POINTS });
+    expect(document.body.querySelectorAll('.ache__seg').length).toBe(2);
+    reset();
+    render({ variant: 'descent', config: WITH_POINTS, editable: true });
+    expect(document.body.querySelectorAll('.ache__seg').length).toBe(0);
+  });
+});

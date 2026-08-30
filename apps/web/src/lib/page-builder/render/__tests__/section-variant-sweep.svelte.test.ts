@@ -685,9 +685,14 @@ describe('the probes fire', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('the inventory', () => {
-  it('is 11 section types and 62 declared (section, variant) pairs', () => {
+  it('is 11 section types and 63 declared (section, variant) pairs', () => {
+    // 62 -> 63 on 2026-08-30: `ache · descent` was added, restoring the
+    // full-screen scroll sequence that had been removed. This count is here so a
+    // composition cannot appear or DISAPPEAR unnoticed — which is exactly how the
+    // descent went missing the first time. If you change it, say why in this
+    // comment.
     expect(TYPES).toHaveLength(11);
-    expect(PAIRS).toHaveLength(62);
+    expect(PAIRS).toHaveLength(63);
   });
 
   it('declares exactly one unbuilt composition, and names its reason', () => {
