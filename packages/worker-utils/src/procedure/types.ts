@@ -372,11 +372,17 @@ export type CachePresetForAuth<TAuth extends AuthLevel> = [TAuth] extends [
  * tuple-wrapping it without re-reading `CacheRuleFor`: the union is the honest
  * answer to "what auth level is this?", and the rule is what must fail closed
  * on it.
+ *
+ * READS AN OPTIONAL PROPERTY, AND MUST. `ProcedurePolicy` declares `auth?:`, so a
+ * test for a REQUIRED `auth:` is false for any policy typed as `ProcedurePolicy` —
+ * see the note on `DeclaredCache` for what that cost.
  */
 type DeclaredAuth<TPolicy> = TPolicy extends {
-  auth: infer TAuth extends AuthLevel;
+  auth?: infer TAuth;
 }
-  ? TAuth
+  ? [Extract<TAuth, AuthLevel>] extends [never]
+    ? 'required'
+    : Extract<TAuth, AuthLevel>
   : 'required';
 
 /**
@@ -390,11 +396,34 @@ type DeclaredAuth<TPolicy> = TPolicy extends {
  * `resolveCacheControl` reads `policy.cache ?? 'private'` off whichever arm was
  * actually built and emits `public`. `Extract` keeps the preset members and
  * discards the `undefined`, so the declared half is still judged.
+ *
+ * IT MUST TEST AN OPTIONAL PROPERTY, AND THIS IS THE SUBTLE PART. `ProcedurePolicy`
+ * declares `cache?: CachePresetName`. A test for a REQUIRED `cache:` is FALSE for
+ * any type whose property is optional, so the previous form —
+ * `TPolicy extends { cache: infer TCache extends CachePresetName }` — resolved to
+ * `undefined` for every policy typed as `ProcedurePolicy`, which made
+ * `CacheRuleFor` return `unknown` and switched the ENTIRE RULE OFF:
+ *
+ *   const POLICY: ProcedurePolicy = { auth: 'required', cache: 'public' };
+ *   procedure({ policy: POLICY, handler });   // compiled clean. Emitted `public`
+ *                                             // on an authenticated route.
+ *
+ * That is a worse hole than the distributive-union one, because sharing a policy
+ * object across routes is the natural DRY move rather than an unusual construction,
+ * and the CI gate cannot see it either — there is no literal left to scan.
+ *
+ * A widened `cache` (annotated, so the compiler no longer knows WHICH preset) now
+ * resolves to the whole `CachePresetName` union and is therefore rejected by the
+ * union arm of `CacheViolationMessage`. That is deliberate: if the compiler cannot
+ * read the literal, the pairing cannot be verified, and an unverifiable safety
+ * assertion must fail closed. Use `satisfies ProcedurePolicy` rather than
+ * `: ProcedurePolicy` — `satisfies` checks assignability while PRESERVING the
+ * literal types the rule needs.
  */
 type DeclaredCache<TPolicy> = TPolicy extends {
-  cache: infer TCache extends CachePresetName;
+  cache?: infer TCache;
 }
-  ? TCache
+  ? Extract<TCache, CachePresetName>
   : undefined;
 
 /**
@@ -463,7 +492,7 @@ type CacheViolationMessage<
   TAuth extends AuthLevel,
   TCache,
 > = IsUnion<TCache> extends true
-  ? "cache must be ONE preset name, not a union — declare the safe preset unconditionally (a conditional such as `cache: FLAG ? 'public' : 'private'` used to compile, because the illegal member hid inside the union)"
+  ? "cache must be ONE preset name the compiler can read. Two causes: a conditional (`cache: FLAG ? 'public' : 'private'`) — declare the safe preset unconditionally; or a policy annotated `: ProcedurePolicy`, which widens `cache` to the whole vocabulary and loses the literal — use `satisfies ProcedurePolicy` instead, which checks the shape and KEEPS the literal. An unverifiable pairing fails closed on purpose"
   : IsUnion<TAuth> extends true
     ? "auth must be ONE level, not a union — a union is judged by its strictest member, which may declare only cache: 'private' or 'fresh'"
     : [TAuth] extends ['optional']

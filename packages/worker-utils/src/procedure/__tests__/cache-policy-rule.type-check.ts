@@ -47,6 +47,7 @@ import { z } from 'zod';
 import { binaryUploadProcedure } from '../binary-upload-procedure';
 import { multipartProcedure } from '../multipart-procedure';
 import { procedure } from '../procedure';
+import type { ProcedurePolicy } from '../types';
 
 /**
  * A value the compiler knows only as `boolean` — the shape a feature flag,
@@ -497,5 +498,64 @@ export const optionalStaticAsserted = procedure({
 export const optionalAsset = procedure({
   // @ts-expect-error auth: 'optional' may not declare cache: 'asset'
   policy: { auth: 'optional', cache: 'asset' },
+  handler: async () => ({ ok: true }),
+});
+
+// ============================================================================
+// NON-LITERAL POLICIES — the rule must not switch itself off
+// ============================================================================
+//
+// `ProcedurePolicy` declares `cache?:` and `auth?:`. A conditional testing for a
+// REQUIRED property is false for an optional one, so the first version of
+// `DeclaredCache` resolved to `undefined` for every policy typed as
+// `ProcedurePolicy` — `CacheRuleFor` returned `unknown` and the ENTIRE RULE was a
+// no-op. That is a worse hole than the distributive-union one, because sharing a
+// policy object across routes is the natural DRY move, and the CI gate cannot see
+// it either: there is no literal left to scan.
+//
+// The cases below are the ones that regression-guard it. An annotated policy is
+// REJECTED rather than skipped: if the compiler cannot read the literal, the
+// pairing cannot be verified, and an unverifiable safety assertion must fail
+// closed. `satisfies` is the sanctioned spelling — it checks the shape while
+// PRESERVING the literal types the rule needs.
+
+const ANNOTATED_ILLEGAL: ProcedurePolicy = {
+  auth: 'required',
+  cache: 'public',
+};
+export const annotatedIllegal = procedure({
+  // @ts-expect-error `: ProcedurePolicy` widens `cache` to the whole vocabulary, so the pairing is unverifiable and must fail closed
+  policy: ANNOTATED_ILLEGAL,
+  handler: async (ctx) => ({ userId: ctx.user.id }),
+});
+
+// Even a LEGAL pairing is rejected once annotated — the compiler cannot confirm it.
+const ANNOTATED_LEGAL: ProcedurePolicy = { auth: 'none', cache: 'public' };
+export const annotatedLegal = procedure({
+  // @ts-expect-error annotation loses the literal; use `satisfies ProcedurePolicy`
+  policy: ANNOTATED_LEGAL,
+  handler: async () => ({ ok: true }),
+});
+
+// `satisfies` keeps the literals, so an illegal pairing is still caught...
+const SATISFIES_ILLEGAL = {
+  auth: 'required',
+  cache: 'public',
+} satisfies ProcedurePolicy;
+export const satisfiesIllegal = procedure({
+  // @ts-expect-error auth: 'required' may not declare cache: 'public', shared const or not
+  policy: SATISFIES_ILLEGAL,
+  handler: async (ctx) => ({ userId: ctx.user.id }),
+});
+
+// ...and a legal one still compiles. NO @ts-expect-error here on purpose: this is
+// what proves the rule has not simply started rejecting everything, which is the
+// failure mode a file of negative assertions cannot otherwise detect.
+const SATISFIES_LEGAL = {
+  auth: 'none',
+  cache: 'public',
+} satisfies ProcedurePolicy;
+export const satisfiesLegal = procedure({
+  policy: SATISFIES_LEGAL,
   handler: async () => ({ ok: true }),
 });
