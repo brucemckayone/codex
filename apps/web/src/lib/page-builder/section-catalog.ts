@@ -428,13 +428,47 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
         hint: 'A row of clip thumbnails; one plays inline',
         thumb: 'grid',
         // DESCOPED per contract A27, and `ReelSection.svelte`'s header carries
-        // the full reasoning: it needs 3-5 clips against a single
+        // the original reasoning: it needs 3-5 clips against a single
         // `previewVideoMediaId`, an array-cardinality problem rather than a
         // missing slot. Migration 0086 added `courses.hero_media_id` and
         // `courses.signature_media_id`, both scalar `uuid`, so the clip count
         // available here is still exactly one. A synthetic gradient plate
         // standing in for the absent clips is specifically NOT the answer —
         // A27 names that as the mistake `hero.split` already makes.
+        //
+        // THE BLOCKER IS NOT A COLUMN, AND IT IS NOT CARDINALITY — TRACED, and
+        // recorded here because "an array-cardinality problem" has twice been
+        // read as "this needs a schema decision: a join table, or a jsonb
+        // column". It needs NEITHER, and that is worth knowing before anyone
+        // scopes a migration for it.
+        //
+        // `props` is ALREADY the jsonb column, and it already round-trips an
+        // array with the type intact (`pageSectionSchema.props` is a passthrough
+        // record under a 16KB byte cap). So STORING `clips: string[]` is free.
+        // What cannot be done is RESOLVING one. A media id becomes a playable
+        // URL in exactly one place — `CourseJourneyService.getCourseSellPreview`
+        // — which SELECTs six FIXED scalar `courses` columns and projects seven
+        // NAMED slots (`intro`, `reel`, `heroClip`, …). Its two inputs are a
+        // `media_items.hlsPreviewKey` row and `R2_PUBLIC_URL_BASE`, worker env
+        // handed in by the route; neither is reachable from a section's props,
+        // and the route is keyed on `:courseId` alone. Every playable media in
+        // all eleven sections therefore arrives as `sellPreview.<named slot>`,
+        // never out of `props` — which is what `section-fields.ts`'s `mediaSlot`
+        // comment means by "a picker that wrote into `props` could never affect
+        // what renders", the decorative-control defect Codex-eqh0z fixed.
+        //
+        // So the work is a PROJECTION, not a migration: `CourseSellPreview` and
+        // its `render/types.ts` mirror need a shape that can carry N clips
+        // resolved from the page's own sections, and `getCourseSellPreview` needs
+        // the page (it is given only a course id today). Three packages, no DDL.
+        //
+        // AND WHOEVER BUILDS IT MUST CARRY THE ORG SCOPE ACROSS. Media ids are
+        // scoped by `assertMediaItemsInOrg`, whose own comment claims it "cannot
+        // be bypassed — the panel, the section inspector and any future picker
+        // all funnel through this one write". Props do NOT funnel through it:
+        // `saveJourneyPage` writes `sections` straight through and never calls
+        // it. Ids held in `props` are an unscoped media reference, so the
+        // resolver — not the editor — has to re-check ownership.
         unavailable:
           'Not built yet — needs three to five clips, and a journey supplies one',
       },

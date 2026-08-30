@@ -537,3 +537,80 @@ describe('editor ↔ renderer round trip', () => {
     }
   });
 });
+
+// ── A REPEATER ENTRY MAY ONLY DECLARE A CONTROL `ArrayField` CAN DRAW ────────
+//
+// THE HOLE THIS CLOSES, and it is the exact shape the obvious `reel: strip`
+// implementation takes (Codex-wqxv4). `strip` wants three to five clips, so the
+// natural field is a REPEATER OF MEDIA PICKERS. That declaration type-checks, and
+// the guard above ("a media field names a sell-media slot, and nothing else
+// does") passes it too, because `everyField` walks `itemFields` and a `mediaSlot`
+// can be named there. What happens next is silent: `ArrayField`'s entry branch
+// handles `list`, `toggle`, `textarea` and `select` and FALLS THROUGH TO A PLAIN
+// `<input type="text">` for everything else, so the creator gets a text box where
+// a media picker was declared — a decorative control writing a raw string into
+// `props`. That is precisely the defect Codex-eqh0z fixed once at the top level
+// ("which is why the old control was a decorative text input"), reachable again
+// one level down.
+//
+// `number` fails for the same reason and costs more than it looks: the fallthrough
+// writes `"480"` where a `typeof raw === 'number'` guard is reading, so the
+// section silently keeps its default — the failure `SectionFieldControl`'s own
+// table warns about.
+//
+// DERIVED FROM `ArrayField.svelte`, NOT RESTATED HERE, for the reason
+// `section-catalog.test.ts` gives about the renderers: a hand-written list of
+// "controls the entry editor supports" is the thing that goes stale, and the
+// `sub.control === '…'` cases are what the component actually branches on. `text`
+// is added because it IS the documented fallthrough, not an omission.
+describe('every repeater entry control is one ArrayField can draw', () => {
+  /** The controls `ArrayField`'s OBJECT-ROW branch explicitly handles. */
+  const entryControls = (): Set<string> => {
+    const src = readFileSync(resolve(HERE, 'ArrayField.svelte'), 'utf8');
+    const start = src.indexOf('{#if isObjectRows}');
+    expect(
+      start,
+      'ArrayField.svelte no longer has an isObjectRows branch — this guard has gone vacuous'
+    ).toBeGreaterThan(-1);
+    const drawn = [
+      ...src.slice(start).matchAll(/sub\.control === '([a-z]+)'/g),
+    ].map((m) => m[1]);
+    expect(drawn.length, 'no sub.control cases found').toBeGreaterThan(0);
+    // The `{:else}` arm of that branch renders a text input, so `text` is drawn
+    // correctly rather than by accident.
+    return new Set([...drawn, 'text']);
+  };
+
+  it('finds the entry-editor branch and its cases', () => {
+    // Guards the guard: a renamed marker would make the assertion below vacuous.
+    expect([...entryControls()].sort()).toEqual([
+      'list',
+      'select',
+      'text',
+      'textarea',
+      'toggle',
+    ]);
+  });
+
+  it('declares no entry control ArrayField would render as a bare text box', () => {
+    const drawn = entryControls();
+    const undrawable: string[] = [];
+    for (const [type, fields] of Object.entries(SECTION_FIELDS)) {
+      for (const field of fields) {
+        for (const item of field.itemFields ?? []) {
+          if (!drawn.has(item.control)) {
+            undrawable.push(
+              `${type}.${field.key}[].${item.key} declares control '${item.control}', ` +
+                'which ArrayField draws as a plain text input — add a case to its ' +
+                'entry branch, or field it at the top level'
+            );
+          }
+        }
+      }
+    }
+    expect(
+      undrawable,
+      undrawable.length ? `\n  ${undrawable.join('\n  ')}` : ''
+    ).toEqual([]);
+  });
+});
