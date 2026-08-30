@@ -6,12 +6,18 @@
   components the live page uses — one {@link SectionFrame} per section — so the
   canvas IS the page, compositions and design axes included (Codex-eckbx W1–W3).
 
-  IT USED TO BE A COPY. `render-edit/` held 8 static twins for 11 public types,
-  and the cost was not just fidelity: three types had no twin at all, the canvas
-  emitted none of the nine `data-jp-*` axes (so every design control appeared
-  inert), and Hero's six compositions collapsed to two distinguishable layouts
-  because only `split-media` had a branch. Every section change had to be made
-  twice or the two drifted — and they did.
+  IT USED TO BE A COPY. `render-edit/` held 8 static twins for 11 public types —
+  eight components served all eleven of them (one prose renderer backed
+  ache/turn/feel, one video renderer backed introVideo/reel), so nothing was
+  MISSING from the canvas; the cost was fidelity, not coverage (Codex-acud8: an
+  earlier draft of this comment claimed three types had no twin at all, which sent
+  a reader hunting a missing-section bug that never existed — the deleted map at
+  `c42868fb^:apps/web/src/lib/page-builder/render-edit/section-registry.ts` keys
+  all eleven). The fidelity cost was real and is what the unification bought: the
+  canvas emitted none of the nine `data-jp-*` axes (so every design control
+  appeared inert), and Hero's six compositions collapsed to two distinguishable
+  layouts because only `split-media` had a branch. Every section change had to be
+  made twice or the two drifted — and they did.
 
   The canvas keeps its own section LOOP because it interleaves per-block editing
   chrome, which is why it mounts `SectionFrame` per section rather than
@@ -36,6 +42,7 @@
 -->
 <script lang="ts">
   import type { CourseOffer, EditorStageView, JourneyCourseView } from '$lib/page-builder';
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import {
     brandOverridesToStyleAttr,
@@ -222,6 +229,20 @@
      against the transformed ancestor, so the sales page's own floating CTA stays
      INSIDE the canvas instead of escaping to the studio viewport. */
   const frame = $derived(journeyPreviewDevice(device));
+
+  /**
+   * The creator-facing name of the previewed device.
+   *
+   * `JOURNEY_PREVIEW_DEVICES` is a GEOMETRY table — widths, heights and the
+   * `NNNpx` label `canvas-device-frame.svelte.test.ts` pins — so its `label` is
+   * left as raw data and the localised name is resolved here, from the same
+   * three message keys the route's device switch reads. One device, one name.
+   */
+  function deviceLabel(id: JourneyPreviewDeviceId): string {
+    if (id === 'tablet') return m.studio_builder_device_tablet();
+    if (id === 'mobile') return m.studio_builder_device_mobile();
+    return m.studio_builder_device_desktop();
+  }
 
   /** The stage's CONTENT width (padding excluded) — see the observer below. */
   let stageWidth = $state(0);
@@ -419,23 +440,27 @@
         type="button"
         class="jbc__railtoggle"
         aria-pressed={railCollapsed}
-        title={railCollapsed ? 'Show the sections panel' : 'Collapse the sections panel'}
+        title={railCollapsed
+          ? m.studio_builder_canvas_rail_show()
+          : m.studio_builder_canvas_rail_collapse()}
         onclick={onToggleRail}
       >
         <span class="jbc__chev" class:jbc__chev--collapsed={railCollapsed} aria-hidden="true">«</span>
-        Sections
+        {m.studio_builder_sections()}
       </button>
     {/if}
-    <span class="jbc__live"><span class="jbc__live-dot" aria-hidden="true"></span> Live</span>
+    <span class="jbc__live"><span class="jbc__live-dot" aria-hidden="true"></span> {m.studio_builder_canvas_live()}</span>
     <span class="jbc__url">{orgDomain || 'your-space'} / journeys / {slug || 'draft'}</span>
     <!-- The scale, stated. An author who reads "Desktop · 1440px · 49%"
          understands why the type looks small; one who reads "Desktop" concludes
          the page is wrong. -->
     <span class="jbc__scale">
-      {frame.label} · {frame.width}px{scale < 1 ? ` · ${scalePercent}%` : ''}
+      {deviceLabel(frame.id)} · {frame.width}px{scale < 1
+        ? ` · ${scalePercent}%`
+        : ''}
     </span>
     {#if editable}
-      <span class="jbc__hint">Click a block to edit · type directly into text</span>
+      <span class="jbc__hint">{m.studio_builder_canvas_hint()}</span>
     {/if}
   </div>
 
@@ -482,7 +507,7 @@
             class:jbc-block--selected={isSel}
             data-sec={section.id}
             role="group"
-            aria-label={editable ? `${name} section` : undefined}
+            aria-label={editable ? m.studio_builder_canvas_section({ section: name }) : undefined}
             aria-current={isSel ? 'true' : undefined}
             tabindex={editable ? 0 : undefined}
             onmousedown={editable ? () => pageBuilder.selectSection(section.id) : undefined}
@@ -515,12 +540,16 @@
                      undo step (`removeSection` → `snapshot()`), and undo is on
                      the top bar and ⌘Z. A confirm on an undoable action trains
                      people to dismiss confirms. -->
-                <div class="jbc-block__bar" role="toolbar" aria-label="{name} actions">
+                <div
+                  class="jbc-block__bar"
+                  role="toolbar"
+                  aria-label={m.studio_builder_canvas_block_actions({ section: name })}
+                >
                   <button
                     type="button"
                     class="jbc-block__btn"
-                    title="Move up"
-                    aria-label="Move {name} up"
+                    title={m.studio_builder_move_up()}
+                    aria-label={m.studio_builder_section_move_up({ section: name })}
                     disabled={vi <= 0}
                     onmousedown={stop}
                     onclick={() => moveVisible(section.id, -1)}
@@ -530,8 +559,8 @@
                   <button
                     type="button"
                     class="jbc-block__btn"
-                    title="Move down"
-                    aria-label="Move {name} down"
+                    title={m.studio_builder_move_down()}
+                    aria-label={m.studio_builder_section_move_down({ section: name })}
                     disabled={vi >= renderables.length - 1}
                     onmousedown={stop}
                     onclick={() => moveVisible(section.id, 1)}
@@ -541,8 +570,8 @@
                   <button
                     type="button"
                     class="jbc-block__btn"
-                    title="Duplicate"
-                    aria-label="Duplicate {name}"
+                    title={m.studio_builder_inspector_duplicate()}
+                    aria-label={m.studio_builder_canvas_duplicate({ section: name })}
                     onmousedown={stop}
                     onclick={() => pageBuilder.duplicateSection(section.id)}
                   >
@@ -551,8 +580,8 @@
                   <button
                     type="button"
                     class="jbc-block__btn"
-                    title="Add a section after this"
-                    aria-label="Add a section after {name}"
+                    title={m.studio_builder_canvas_add_after_title()}
+                    aria-label={m.studio_builder_canvas_add_after({ section: name })}
                     onmousedown={stop}
                     onclick={(e) => openAdd(section.id, e.currentTarget)}
                   >
@@ -561,8 +590,8 @@
                   <button
                     type="button"
                     class="jbc-block__btn jbc-block__btn--danger"
-                    title="Delete"
-                    aria-label="Delete {name}"
+                    title={m.studio_builder_inspector_delete()}
+                    aria-label={m.studio_builder_canvas_delete({ section: name })}
                     onmousedown={stop}
                     onclick={() => pageBuilder.removeSection(section.id)}
                   >
@@ -588,7 +617,7 @@
         {/each}
 
         {#if renderables.length === 0}
-          <p class="jbc-empty">No visible sections. Enable one in the rail, or add a section.</p>
+          <p class="jbc-empty">{m.studio_builder_canvas_empty()}</p>
         {/if}
       </div>
     </div>
@@ -606,7 +635,7 @@
     <button
       type="button"
       class="jbc-addpop__scrim"
-      aria-label="Close add-section picker"
+      aria-label={m.studio_builder_canvas_close_picker()}
       onclick={() => (addAfterId = null)}
     ></button>
   {/if}

@@ -15,11 +15,13 @@
   import { goto } from '$app/navigation';
   import type { PageStatus } from '@codex/shared-types';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import ConfirmDialog from '$lib/components/ui/Feedback/ConfirmDialog.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
   import {
     listJourneys,
     listJourneyRevenue,
     setJourneyFeatured,
+    setJourneyStatus,
   } from '$lib/remote/journeys.remote';
   import { queryErrorMessage } from '$lib/remote/query-result';
 
@@ -105,6 +107,131 @@
     }
   }
 
+  /*
+    LIFECYCLE — publish · unpublish · archive · restore, WITHOUT opening the
+    builder (Codex-c3lky). The owner's complaint was exact: "portals home is
+    basic as fuck, there is no way to unpublish from there". Until now the only
+    way to take a live page down was to open the builder, change a <select> and
+    press Save — a route change and three steps to undo one mistake.
+
+    Tracked per-ROW, like `featurePendingId` above and for the same reason: a
+    single page-wide flag would disable every row's controls while one write was
+    in flight, which reads as the page having frozen. The target status is kept
+    beside the id so the button that was pressed is the one that reports it.
+  */
+  let statusPending = $state<{ pageId: string; to: PageStatus } | null>(null);
+  let statusError = $state<string | null>(null);
+
+  function busyLabel(
+    pageId: string,
+    to: PageStatus,
+    idle: string,
+    busy: string
+  ): string {
+    return statusPending?.pageId === pageId && statusPending.to === to
+      ? busy
+      : idle;
+  }
+
+  async function applyStatus(pageId: string, next: PageStatus) {
+    statusPending = { pageId, to: next };
+    statusError = null;
+    try {
+      await setJourneyStatus({ pageId, status: next });
+      // Re-read rather than patch the row in place: the status filter, the header
+      // count and — for a course page — the subject course's own published state
+      // all move with this write, so the server's view is the only honest one.
+      await journeysQuery.refresh();
+    } catch (err) {
+      // Through `queryErrorMessage`, never `err.message` — SvelteKit rejects with
+      // an `HttpError`, which carries its text at `body.message` and has NO
+      // top-level `message`, so the direct read is `undefined` for every failure
+      // and the alert renders as an empty box (Codex-xo3bl).
+      statusError = queryErrorMessage(
+        err,
+        'Could not change this portal’s status. Please try again.'
+      );
+    } finally {
+      statusPending = null;
+    }
+  }
+
+  /*
+    CONFIRM, but only where the PUBLIC is affected.
+
+    Unpublish and Archive both take a live page offline and — through the course
+    cascade in `saveJourneyPage` — remove it from the library of everyone already
+    enrolled, because `courses.status` is the only gate on the enrolled shelves
+    and the course dashboard. That is not what "unpublish" sounds like it does,
+    so both ask first and the copy names the consequence and what survives it,
+    in the register the builder's own panels set. Never "Are you sure?".
+
+    Publish and Restore do NOT ask: they are the forward directions, neither one
+    withdraws anything, and each is undone by the control beside it.
+  */
+  type LifecycleTarget = {
+    pageId: string;
+    title: string;
+    slug: string;
+    from: PageStatus;
+    to: PageStatus;
+  };
+  let confirmTarget = $state<LifecycleTarget | null>(null);
+  let confirmOpen = $state(false);
+
+  /**
+   * Typed to the four fields the gate actually reads, rather than to
+   * `JourneyListItem` — which exists as TWO parallel definitions
+   * (`@codex/shared-types` and `$lib/page-builder/journey-queries`, each
+   * documented as mirroring the other). Naming either one couples this gate to a
+   * type it does not need, and the next additive field on the other side breaks
+   * the assignment for no reason.
+   */
+  function requestStatus(
+    j: { id: string; title: string; slug: string; status: PageStatus },
+    to: PageStatus
+  ): void {
+    if (to === 'published' || j.status === 'archived') {
+      void applyStatus(j.id, to);
+      return;
+    }
+    confirmTarget = {
+      pageId: j.id,
+      title: j.title,
+      slug: j.slug,
+      from: j.status,
+      to,
+    };
+    confirmOpen = true;
+  }
+
+  const confirmCopy = $derived.by(() => {
+    const t = confirmTarget;
+    if (!t) return null;
+    if (t.to === 'draft') {
+      return {
+        title: `Unpublish “${t.title}”?`,
+        description: `The sales page stops resolving at /journeys/${t.slug}, and the portal leaves the homepage rails and Explore. Anyone already enrolled loses it from their library until you publish again — their purchase and their progress are kept, and nothing is deleted.`,
+        confirmText: 'Unpublish',
+        cancelText: 'Keep it published',
+      };
+    }
+    if (t.from === 'published') {
+      return {
+        title: `Archive “${t.title}”?`,
+        description: `Archiving takes the portal offline exactly as unpublishing does — /journeys/${t.slug} stops resolving, and anyone already enrolled loses it from their library — and shelves it out of the Draft and Published views. Purchases and progress are kept; Restore brings it back as a draft.`,
+        confirmText: 'Archive',
+        cancelText: 'Keep it published',
+      };
+    }
+    return {
+      title: `Archive “${t.title}”?`,
+      description: `This portal is a draft, so nothing changes for visitors. It moves out of the Draft view into Archived, where Restore brings it back as a draft. Nothing is deleted.`,
+      confirmText: 'Archive',
+      cancelText: 'Leave it in Draft',
+    };
+  });
+
   // Authoritative per-journey revenue, keyed by landing-page id. A SEPARATE
   // query (independent of the status filter) so the row list paints immediately
   // and the badge streams in — the figure `listJourneys` omits by design.
@@ -131,7 +258,13 @@
     return relative.format(new Date(iso));
   }
 
-  function setStatus(next: StatusFilter): void {
+  /**
+   * The URL-driven FILTER, not a mutation. Named `setStatusFilter` rather than
+   * the shorter `setStatus` it used to be, because the row lifecycle above now
+   * also writes a status — and two functions called `setStatus`/`applyStatus` in
+   * one 900-line component is a mis-click waiting to happen in a diff.
+   */
+  function setStatusFilter(next: StatusFilter): void {
     const params = new URLSearchParams(page.url.searchParams);
     if (next === 'all') params.delete('status');
     else params.set('status', next);
@@ -164,7 +297,7 @@
           type="button"
           class="journeys__filter-btn"
           aria-pressed={urlStatus === f.id}
-          onclick={() => setStatus(f.id)}
+          onclick={() => setStatusFilter(f.id)}
         >
           {f.label}
         </button>
@@ -179,9 +312,12 @@
 
   <div class="journeys__body">
     <!-- `role="alert"` so the failure is announced rather than only painted —
-         the toggle's own label snaps back on refresh, which is silent. -->
+         a control's own label snaps back on refresh, which is silent. -->
     {#if featureError}
-      <p class="journeys__feature-error" role="alert">{featureError}</p>
+      <p class="journeys__action-error" role="alert">{featureError}</p>
+    {/if}
+    {#if statusError}
+      <p class="journeys__action-error" role="alert">{statusError}</p>
     {/if}
     {#if loading}
       <ul class="journeys__rows" role="list">
@@ -242,53 +378,130 @@
             </div>
             <div class="journey-row__actions">
               <!--
-                Homepage promotion. A toggle BUTTON with `aria-pressed` rather
-                than a link, because it mutates rather than navigates, and rather
-                than a `<Switch>` (which is what the content form uses) because
-                this sits in a compact row of text actions where a switch's
-                track would be the only control of its kind.
+                LIFECYCLE, and CONTEXTUAL rather than always-on: a row offers only
+                the transitions its CURRENT status has. A published page shows
+                Unpublish, a draft shows Publish, and an archived page shows only
+                Restore — Archive on an already-archived row is a no-op, and an
+                archive with no way back is a trap.
 
-                Shown for drafts too. `featured` is orthogonal to status — the
-                public read filters `status = PUBLISHED` on its own — so the flag
-                is harmless on a draft, just inert; the title says so instead of
-                the control disappearing and leaving the creator wondering where
-                it went.
+                These are buttons, not links, because they mutate. Every one of
+                them routes through `setJourneyStatus`, whose write goes through
+                the SAME `saveJourneyPage` path the builder uses, so the subject
+                course moves with the page (`cascadeCourseFromPage`). That
+                cascade is the bead's own precondition — "do not add an unpublish
+                button on top of a publish path that ... does not cascade" — and
+                it is why there is no shortcut endpoint here.
               -->
-              <button
-                type="button"
-                class="journey-row__action journey-row__action--feature"
-                aria-pressed={j.featured ? 'true' : 'false'}
-                disabled={featurePendingId === j.id}
-                title={j.status === 'published'
-                  ? j.featured
-                    ? 'Showing in Editor’s picks on the homepage'
-                    : 'Give this portal a slide in Editor’s picks'
-                  : 'Takes effect on the homepage once this portal is published'}
-                onclick={() => toggleFeatured(j.id, !j.featured)}
-              >
-                {featurePendingId === j.id
-                  ? 'Saving…'
-                  : j.featured
-                    ? 'Featured'
-                    : 'Feature'}
-              </button>
-              <!--
-                Curriculum and Insights are both COURSE artifacts (each resolves
-                the page to its subject course server-side), so both sit behind
-                the same subject-type guard — a non-course journey has neither,
-                and an ungated link would 404.
-              -->
-              {#if j.subjectType === 'course'}
-                <a class="journey-row__action" href="/studio/journeys/{j.id}/curriculum">
-                  Curriculum
+              <div class="journey-row__lifecycle">
+                {#if j.status === 'published'}
+                  <!--
+                    `?preview=1` is REQUIRED, not decoration. The public sell page
+                    redirects an ENTITLED visitor to the course dashboard, and an
+                    org owner is always entitled, so without the param a creator
+                    checking their own page never sees the page (O11). The load
+                    bypasses that redirect on the mere PRESENCE of the key.
+                  -->
+                  <a
+                    class="journey-row__action"
+                    href="/journeys/{j.slug}?preview=1"
+                    target="_blank"
+                    rel="noopener"
+                    title="Open the live sales page in a new tab"
+                  >
+                    View live ↗
+                  </a>
+                  <button
+                    type="button"
+                    class="journey-row__action"
+                    disabled={statusPending?.pageId === j.id}
+                    title="Take the portal offline — anyone enrolled loses it until you publish again"
+                    onclick={() => requestStatus(j, 'draft')}
+                  >
+                    {busyLabel(j.id, 'draft', 'Unpublish', 'Unpublishing…')}
+                  </button>
+                {:else if j.status === 'archived'}
+                  <button
+                    type="button"
+                    class="journey-row__action"
+                    disabled={statusPending?.pageId === j.id}
+                    title="Bring this portal back as a draft — it stays offline until you publish it"
+                    onclick={() => requestStatus(j, 'draft')}
+                  >
+                    {busyLabel(j.id, 'draft', 'Restore', 'Restoring…')}
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    class="journey-row__action"
+                    disabled={statusPending?.pageId === j.id}
+                    title="Make this portal public at /journeys/{j.slug}"
+                    onclick={() => requestStatus(j, 'published')}
+                  >
+                    {busyLabel(j.id, 'published', 'Publish', 'Publishing…')}
+                  </button>
+                {/if}
+                {#if j.status !== 'archived'}
+                  <button
+                    type="button"
+                    class="journey-row__action"
+                    disabled={statusPending?.pageId === j.id}
+                    title="Shelve this portal — Restore brings it back as a draft"
+                    onclick={() => requestStatus(j, 'archived')}
+                  >
+                    {busyLabel(j.id, 'archived', 'Archive', 'Archiving…')}
+                  </button>
+                {/if}
+              </div>
+              <div class="journey-row__nav">
+                <!--
+                  Homepage promotion. A toggle BUTTON with `aria-pressed` rather
+                  than a link, because it mutates rather than navigates, and rather
+                  than a `<Switch>` (which is what the content form uses) because
+                  this sits in a compact row of text actions where a switch's
+                  track would be the only control of its kind.
+
+                  Shown for drafts too. `featured` is orthogonal to status — the
+                  public read filters `status = PUBLISHED` on its own — so the flag
+                  is harmless on a draft, just inert; the title says so instead of
+                  the control disappearing and leaving the creator wondering where
+                  it went.
+                -->
+                <button
+                  type="button"
+                  class="journey-row__action journey-row__action--feature"
+                  aria-pressed={j.featured ? 'true' : 'false'}
+                  disabled={featurePendingId === j.id}
+                  title={j.status === 'published'
+                    ? j.featured
+                      ? 'Showing in Editor’s picks on the homepage'
+                      : 'Give this portal a slide in Editor’s picks'
+                    : 'Takes effect on the homepage once this portal is published'}
+                  onclick={() => toggleFeatured(j.id, !j.featured)}
+                >
+                  {featurePendingId === j.id
+                    ? 'Saving…'
+                    : j.featured
+                      ? 'Featured'
+                      : 'Feature'}
+                </button>
+                <!--
+                  Curriculum and Insights are both COURSE artifacts (each resolves
+                  the page to its subject course server-side), so both sit behind
+                  the same subject-type guard — a non-course journey has neither,
+                  and an ungated link would 404.
+                -->
+                {#if j.subjectType === 'course'}
+                  <a class="journey-row__action" href="/studio/journeys/{j.id}/curriculum">
+                    Curriculum
+                  </a>
+                  <a class="journey-row__action" href="/studio/journeys/{j.id}/insights">
+                    Insights
+                  </a>
+                {/if}
+                <a class="journey-row__action journey-row__action--primary" href="/studio/journeys/{j.id}/page">
+                  Edit page
                 </a>
-                <a class="journey-row__action" href="/studio/journeys/{j.id}/insights">
-                  Insights
-                </a>
-              {/if}
-              <a class="journey-row__action journey-row__action--primary" href="/studio/journeys/{j.id}/page">
-                Edit page
-              </a>
+              </div>
             </div>
           </li>
         {/each}
@@ -308,6 +521,25 @@
     {/if}
   </div>
 </div>
+
+<!--
+  ONE dialog for every row, driven by `confirmTarget`, rendered unconditionally
+  rather than inside an `{#if}`: `ConfirmDialog` sets `open = false` itself on
+  confirm/cancel, and unmounting it in the same tick would tear the dialog out
+  from under its own close. `title` is a required string prop, hence the `?? ''`
+  while nothing is targeted (the dialog paints nothing at `open = false`).
+-->
+<ConfirmDialog
+  bind:open={confirmOpen}
+  title={confirmCopy?.title ?? ''}
+  description={confirmCopy?.description ?? ''}
+  confirmText={confirmCopy?.confirmText ?? 'Confirm'}
+  cancelText={confirmCopy?.cancelText ?? 'Cancel'}
+  variant="destructive"
+  onConfirm={() => {
+    if (confirmTarget) void applyStatus(confirmTarget.pageId, confirmTarget.to);
+  }}
+/>
 
 <style>
   /*
@@ -489,8 +721,32 @@
     }
   }
 
+  /*
+    WRAPPING, and the flex-basis pair, both come from a MEASURED regression.
+
+    The lifecycle group takes the actions cluster from ~350px to ~640px, and with
+    `flex-wrap: nowrap` plus `flex-shrink: 0` on the actions the only thing left
+    to give was the TEXT: at a 900px viewport the main column was crushed to
+    165px and the row grew to 306px tall, a narrow ribbon of wrapped tagline
+    beside a single line of buttons.
+
+    So the row wraps and the main column carries a flex BASIS. Wrapping in flex
+    is decided by base sizes, not by `min-width`, so 22rem + the cluster is what
+    drops the cluster onto its own full-width line once the studio column can no
+    longer seat both — which is also what the prototype does at its narrow
+    breakpoint (`.jacts { grid-column: 1 / -1 }`). `min-width: 0` stays: it is
+    what still lets the title truncate rather than force the row wider.
+
+    The cluster's own `flex-shrink: 0` had to GO for the same reason, measured at
+    420px: on its own line it is the only item, so wrapping cannot help it, and
+    with shrink disabled it stayed 614px wide inside a 388px row — clipped
+    buttons. Shrink only ever engages when a line cannot wrap its way out, which
+    is exactly that case; at every wider width the row wraps first and the
+    cluster keeps its natural width.
+  */
   .journey-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
@@ -506,6 +762,7 @@
   }
 
   .journey-row__main {
+    flex: 1 1 22rem;
     min-width: 0;
   }
 
@@ -558,11 +815,29 @@
     color: var(--color-text-muted);
   }
 
+  /*
+    TWO GROUPS, not one long strip. Lifecycle (what state the portal is in) and
+    navigation (where to go to work on it) are different kinds of act, and a
+    published course row now carries SEVEN controls (measured: 644px of them at a
+    1440 viewport, against 350px before), so the wider COLUMN gap
+    between the groups is the only separator. A border-left would break the
+    moment the cluster wraps, which it does inside the studio's content column at
+    tablet width.
+  */
   .journey-row__actions {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2) var(--space-4);
+  }
+
+  .journey-row__lifecycle,
+  .journey-row__nav {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
-    flex-shrink: 0;
   }
 
   .journey-row__action {
@@ -582,33 +857,45 @@
   }
 
   /*
+    Element-qualified so ONE rule covers every mutating control in the row — the
+    feature toggle and the four lifecycle buttons — rather than each modifier
+    re-declaring the button reset. `background-color: transparent` is load-bearing:
+    without it a <button> paints the UA's `buttonface` and reads as a filled chip
+    beside the anchors it is meant to match.
+
+    Specificity check: `.journey-row__action--feature[aria-pressed='true']` (0,2,0)
+    and `.journey-row__action--primary` (0,1,0 — and only ever on an <a>) both
+    still win their own declarations over this (0,1,1).
+  */
+  button.journey-row__action {
+    cursor: pointer;
+    background-color: transparent;
+    font-family: inherit;
+  }
+
+  button.journey-row__action:disabled {
+    cursor: progress;
+    opacity: 0.6;
+  }
+
+  /*
     The pressed state has to be legible without colour alone, because "Feature"
     and "Featured" differ by two characters. A filled brand chip carries it:
     `--color-text-on-brand` auto-derives its own contrast from the brand hue
     (org-brand.css), so it stays readable on any org's palette rather than
     assuming a light one.
   */
-  .journey-row__action--feature {
-    cursor: pointer;
-    background-color: transparent;
-    font-family: inherit;
-  }
-
   .journey-row__action--feature[aria-pressed='true'] {
     border-color: transparent;
     background-color: var(--color-interactive);
     color: var(--color-text-on-brand, var(--color-background));
   }
 
-  .journey-row__action--feature:disabled {
-    cursor: progress;
-    opacity: 0.6;
-  }
-
   /* `--color-error-600` matches the studio's existing error-text convention
      (monetisation/pricing-faq, sales) rather than introducing a fifth
-     treatment. */
-  .journeys__feature-error {
+     treatment. Shared by the feature toggle and the lifecycle actions — one
+     failure treatment for the row's two kinds of write. */
+  .journeys__action-error {
     margin: 0 0 var(--space-3);
     font-size: var(--text-sm);
     color: var(--color-error-600);

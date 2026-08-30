@@ -16,6 +16,7 @@
 
 import {
   createJourneyBodySchema,
+  journeyPageStatusSchema,
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
@@ -407,6 +408,98 @@ export const setJourneyFeatured = command(
       // Forward 4xx text (e.g. "not found" for a page in another org) so the
       // studio toast can say something true; 5xx propagates untouched because it
       // may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Move a portal between draft / published / archived FROM THE STUDIO LIST, so a
+ * creator can take a page down without opening the builder (Codex-c3lky — the
+ * owner's own words: "portals home is basic as fuck, there is no way to unpublish
+ * from there").
+ *
+ * READ-THEN-WRITE, and the round-trip is deliberate rather than lazy.
+ *
+ * There is no status-only endpoint: `PUT :pageId` is the ONLY writer of
+ * `landing_pages.status`, and its body is `.strict()` — id + pageType + slug +
+ * title + status + subjectType + subjectId + brandOverrides + sections, of which
+ * `JourneyListItem` carries only four. The list therefore CANNOT construct that
+ * body from what it has rendered; something has to load the persisted record
+ * first, and doing it here costs the client one call instead of two.
+ *
+ * A dedicated `PATCH :pageId/status` would save a hop, but it would also be a
+ * SECOND writer of that column, and the cascade is the whole reason this bead
+ * carried a blocker (Codex-xzwl5). `saveJourneyPage` keeps the subject course in
+ * lockstep through `cascadeCourseFromPage`, and `courses.status` — which is the
+ * only gate on /explore, the public by-slug read, the sell preview AND the
+ * enrolled shelves — is written NOWHERE else in the codebase. Routing the list's
+ * writes through the same path makes the cascade true by CONSTRUCTION instead of
+ * by a duplicated guard that can drift out of step. Verified live before this
+ * command existed: builder -> Draft -> Save left BOTH `landing_pages.status` and
+ * `courses.status` at 'draft', and the public sell page then rendered the 404 page
+ * with zero `[data-section-type]` while its published sibling rendered its
+ * sections.
+ *
+ * The body is assembled KEY BY KEY, never spread. The loaded record also carries
+ * `offer` (pricing's own route — {@link updateJourneyOffer}), `organizationId` and
+ * `publishedAt` (server-owned), and under `.strict()` any of those three would
+ * 400 the save. `design` and `seo` are forwarded ONLY when present: the service
+ * reads an absent key as "leave the stored bag alone", never as "clear it".
+ *
+ * `status` is a plain required enum, NOT nullable — `command()` infers a
+ * `.nullable()` field as OPTIONAL, so an intended value would travel as a missing
+ * key (the trap {@link updateJourneyOffer} documents above).
+ *
+ * A no-op when the stored status already matches: re-issuing the same state must
+ * not rewrite the row, bump `updated_at`, or re-run the cascade.
+ */
+export const setJourneyStatus = command(
+  z.object({
+    pageId: z.string().uuid(),
+    status: journeyPageStatusSchema,
+  }),
+  async ({ pageId, status }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be published within an organization');
+    }
+    try {
+      const record = await ctx.api.access.getJourneyForBuilder(
+        ctx.orgId,
+        pageId
+      );
+      // Org-scoped by the worker, so `null` is "foreign or gone" — never a silent
+      // cross-org write. 404 rather than a generic failure so the list can say
+      // something true after, say, a delete in another tab.
+      if (!record) {
+        error(404, 'That portal could not be found.');
+      }
+      if (record.status === status) return;
+
+      const body = {
+        id: record.id,
+        pageType: record.pageType,
+        slug: record.slug,
+        title: record.title,
+        status,
+        subjectType: record.subjectType,
+        subjectId: record.subjectId,
+        brandOverrides: record.brandOverrides,
+        sections: record.sections,
+        ...(record.design ? { design: record.design } : {}),
+        ...(record.seo ? { seo: record.seo } : {}),
+      };
+      await ctx.api.access.saveJourneyPage(ctx.orgId, body);
+    } catch (err) {
+      // Forward 4xx text (a slug that no longer passes the save schema, a 409 from
+      // the org slug-space, "not found" for a foreign page) so the list can render
+      // a sentence a creator can act on; 5xx propagates untouched because it may
+      // carry internals. A SvelteKit `HttpError` from the `error()` calls above is
+      // not an `ApiError`, so it falls through to the rethrow unchanged.
       if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
         error(err.status, err.message);
       }

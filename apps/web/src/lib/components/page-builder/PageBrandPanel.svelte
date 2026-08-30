@@ -32,6 +32,7 @@
   it also means the stored key cannot be cleared from here.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
   const overrides = $derived(pageBuilder.pending?.brandOverrides ?? {});
@@ -93,24 +94,24 @@
 
 <div class="panel">
   <header class="panel__head">
-    <h2 class="panel__title">Brand &amp; theme</h2>
-    <p class="panel__sub">Page-level · overrides the org brand</p>
+    <h2 class="panel__title">{m.studio_builder_brand_title()}</h2>
+    <p class="panel__sub">{m.studio_builder_brand_sub()}</p>
   </header>
 
   <div class="row" class:row--on={overridePrimary}>
-    <span class="row__copy">Override primary colour<small>only this page</small></span>
+    <span class="row__copy">{m.studio_builder_brand_override_primary()}<small>{m.studio_builder_brand_only_this_page()}</small></span>
     <button
       type="button"
       class="row__sw"
       aria-pressed={overridePrimary}
-      aria-label="Override primary colour"
+      aria-label={m.studio_builder_brand_override_primary()}
       onclick={toggleOverride}
     ></button>
   </div>
 
   {#if overridePrimary}
     <label class="panel__field panel__field--inline">
-      <span class="panel__label">Primary colour</span>
+      <span class="panel__label">{m.studio_builder_brand_primary_colour()}</span>
       <!-- No fallback value: this block renders only while `primaryColor` is set,
            because that is what `overridePrimary` reads. A `?? '#c24129'` here was
            unreachable, and it named the platform primary rather than the org's. -->
@@ -124,7 +125,7 @@
   {/if}
 
   <p class="panel__callout">
-    Every page inherits the org’s brand tokens. Overrides here affect <b>only this page</b>.
+    {m.studio_builder_brand_callout()} <b>{m.studio_builder_brand_only_this_page()}</b>.
   </p>
 </div>
 

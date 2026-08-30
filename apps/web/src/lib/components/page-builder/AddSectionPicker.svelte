@@ -9,6 +9,7 @@
   same way.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import {
     listSectionDefinitions,
     sectionMatchesQuery,
@@ -40,14 +41,14 @@
   }
 </script>
 
-<div class="add-picker" role="group" aria-label="Add a section">
+<div class="add-picker" role="group" aria-label={m.studio_builder_add_section()}>
   <div class="add-picker__search">
     <SearchIcon size={15} />
     <input
       type="text"
       class="add-picker__input"
-      placeholder="Search sections…"
-      aria-label="Search sections"
+      placeholder={m.studio_builder_add_section_search_placeholder()}
+      aria-label={m.studio_builder_add_section_search()}
       bind:value={query}
       onkeydown={onKeydown}
     />
@@ -71,7 +72,7 @@
       {/each}
     </ul>
   {:else}
-    <p class="add-picker__empty">No sections match “{query}”.</p>
+    <p class="add-picker__empty">{m.studio_builder_add_section_no_match({ query })}</p>
   {/if}
 </div>
 

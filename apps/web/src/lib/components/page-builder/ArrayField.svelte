@@ -65,6 +65,7 @@
   entry field rather than trusting this list.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { TrashIcon, PlusIcon, ChevronUpIcon, ChevronDownIcon } from '$lib/components/ui/Icon';
   // Self-import, which is how a Svelte 5 component recurses (`<svelte:self>` is
   // the legacy form). Used for ONE case only — a `list` entry field — and the
@@ -84,7 +85,7 @@
 
   /** `repeater` when the field declares an entry shape; `list` otherwise. */
   const isObjectRows = $derived((field.itemFields?.length ?? 0) > 0);
-  const itemNoun = $derived(field.itemLabel ?? 'item');
+  const itemNoun = $derived(field.itemLabel ?? m.studio_builder_array_item());
   const cap = $derived(field.maxItems ?? Number.POSITIVE_INFINITY);
 
   /**
@@ -176,7 +177,7 @@
 
 <div class="af">
   {#if rows.length === 0}
-    <p class="af__empty">No {itemNoun}s yet.</p>
+    <p class="af__empty">{m.studio_builder_array_empty({ noun: itemNoun })}</p>
   {/if}
 
   {#each rows as row, i (i)}
@@ -236,7 +237,7 @@
                     <!-- An explicit unset choice, FIRST: without it a new row
                          would read as the first legal value while storing none,
                          and the entry decorates nothing. -->
-                    <option value="">Choose…</option>
+                    <option value="">{m.studio_builder_array_choose()}</option>
                     {#each sub.options ?? [] as opt (opt.value)}
                       <option value={opt.value}>{opt.label}</option>
                     {/each}
@@ -261,18 +262,26 @@
             class="af__input"
             type="text"
             placeholder={field.placeholder}
-            aria-label={`${field.label} — ${itemNoun} ${rowIndex + 1}`}
+            aria-label={m.studio_builder_array_row_label({
+              field: field.label,
+              noun: itemNoun,
+              index: rowIndex + 1,
+            })}
             value={cellOf(row)}
             oninput={(e) => writeCell(rowIndex, undefined, e.currentTarget.value)}
           />
         {/if}
       </div>
 
-      <div class="af__tools" role="group" aria-label={`${itemNoun} ${rowIndex + 1} actions`}>
+      <div
+        class="af__tools"
+        role="group"
+        aria-label={m.studio_builder_array_row_actions({ noun: itemNoun, index: rowIndex + 1 })}
+      >
         <button
           type="button"
           class="af__btn"
-          title="Move up"
+          title={m.studio_builder_move_up()}
           disabled={rowIndex === 0}
           onclick={() => moveRow(rowIndex, -1)}
         >
@@ -281,7 +290,7 @@
         <button
           type="button"
           class="af__btn"
-          title="Move down"
+          title={m.studio_builder_move_down()}
           disabled={rowIndex === rows.length - 1}
           onclick={() => moveRow(rowIndex, 1)}
         >
@@ -290,7 +299,7 @@
         <button
           type="button"
           class="af__btn af__btn--danger"
-          title={`Remove ${itemNoun} ${rowIndex + 1}`}
+          title={m.studio_builder_array_remove_row({ noun: itemNoun, index: rowIndex + 1 })}
           onclick={() => removeRow(rowIndex)}
         >
           <TrashIcon size={13} />
@@ -301,11 +310,11 @@
 
   <button type="button" class="af__add" disabled={atCap} onclick={addRow}>
     <PlusIcon size={14} />
-    Add {itemNoun}
+    {m.studio_builder_array_add({ noun: itemNoun })}
   </button>
   {#if atCap}
     <p class="af__cap">
-      {cap} is the most this layout holds.
+      {m.studio_builder_array_cap({ cap })}
     </p>
   {/if}
 </div>

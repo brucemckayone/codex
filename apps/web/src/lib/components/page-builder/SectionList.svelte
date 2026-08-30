@@ -11,6 +11,7 @@
   flows to the live preview via the store's pending draft.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { findSectionDefinition } from '$lib/page-builder';
   import {
@@ -72,7 +73,7 @@
 
 <div class="section-list">
   <div class="section-list__head">
-    <h2 class="section-list__title">Sections</h2>
+    <h2 class="section-list__title">{m.studio_builder_sections()}</h2>
     <button
       type="button"
       class="section-list__add"
@@ -80,7 +81,7 @@
       onclick={() => (picking = !picking)}
     >
       <PlusIcon size={15} />
-      Add
+      {m.studio_builder_sections_add()}
     </button>
   </div>
 
@@ -111,7 +112,7 @@
           <span
             class="section-list__grip"
             draggable="true"
-            title="Drag to reorder"
+            title={m.studio_builder_sections_grip()}
             aria-hidden="true"
             ondragstart={(e) => onDragStart(e, section.id)}
           ><GripIcon size={14} /></span>
@@ -119,7 +120,7 @@
             <button
               type="button"
               class="section-list__icon-btn"
-              aria-label="Move {labelFor(section.type)} up"
+              aria-label={m.studio_builder_section_move_up({ section: labelFor(section.type) })}
               disabled={i === 0}
               onclick={() => pageBuilder.moveSection(section.id, -1)}
             >
@@ -128,7 +129,7 @@
             <button
               type="button"
               class="section-list__icon-btn"
-              aria-label="Move {labelFor(section.type)} down"
+              aria-label={m.studio_builder_section_move_down({ section: labelFor(section.type) })}
               disabled={i === sections.length - 1}
               onclick={() => pageBuilder.moveSection(section.id, 1)}
             >
@@ -153,9 +154,9 @@
               class="section-list__icon-btn"
               aria-pressed={section.enabled}
               aria-label={section.enabled
-                ? `Hide ${labelFor(section.type)}`
-                : `Show ${labelFor(section.type)}`}
-              title={section.enabled ? 'Hide section' : 'Show section'}
+                ? m.studio_builder_section_hide({ section: labelFor(section.type) })
+                : m.studio_builder_section_show({ section: labelFor(section.type) })}
+              title={section.enabled ? m.studio_builder_section_hide_title() : m.studio_builder_section_show_title()}
               onclick={() => pageBuilder.toggleSection(section.id)}
             >
               {#if section.enabled}
@@ -167,8 +168,8 @@
             <button
               type="button"
               class="section-list__icon-btn section-list__icon-btn--danger"
-              aria-label="Remove {labelFor(section.type)}"
-              title="Remove section"
+              aria-label={m.studio_builder_section_remove({ section: labelFor(section.type) })}
+              title={m.studio_builder_section_remove_title()}
               onclick={() => pageBuilder.removeSection(section.id)}
             >
               <TrashIcon size={15} />
@@ -178,7 +179,7 @@
       {/each}
     </ol>
   {:else}
-    <p class="section-list__empty">No sections yet. Add one to begin building the page.</p>
+    <p class="section-list__empty">{m.studio_builder_sections_empty()}</p>
   {/if}
 </div>
 

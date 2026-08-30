@@ -22,6 +22,7 @@
 -->
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
+  import * as m from '$paraglide/messages';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
@@ -41,38 +42,39 @@
    */
   const SLOTS: readonly {
     slot: JourneySellMediaSlot;
-    label: string;
-    hint: string;
+    /** Lazy so the label resolves through Paraglide at render, not at module load. */
+    label: () => string;
+    hint: () => string;
   }[] = [
     {
       slot: 'heroMediaId',
-      label: 'Hero image',
-      hint: 'The image the hero shows. Its still frame is used.',
+      label: () => m.studio_builder_media_slot_hero(),
+      hint: () => m.studio_builder_media_slot_hero_hint(),
     },
     {
       slot: 'introVideoMediaId',
-      label: 'Intro film',
-      hint: 'The short film the “intro” section plays.',
+      label: () => m.studio_builder_media_slot_intro(),
+      hint: () => m.studio_builder_media_slot_intro_hint(),
     },
     {
       slot: 'previewVideoMediaId',
-      label: 'Practice reel',
-      hint: 'The reel the “reel” section plays.',
+      label: () => m.studio_builder_media_slot_reel(),
+      hint: () => m.studio_builder_media_slot_reel_hint(),
     },
     {
       slot: 'guidePortraitMediaId',
-      label: 'Guide portrait',
-      hint: 'The still shown beside the guide’s bio.',
+      label: () => m.studio_builder_media_slot_guide_portrait(),
+      hint: () => m.studio_builder_media_slot_guide_portrait_hint(),
     },
     {
       slot: 'guideVideoMediaId',
-      label: 'Guide video',
-      hint: 'A talking-head clip for the guide section. Optional.',
+      label: () => m.studio_builder_media_slot_guide_video(),
+      hint: () => m.studio_builder_media_slot_guide_video_hint(),
     },
     {
       slot: 'signatureMediaId',
-      label: 'Guide signature',
-      hint: 'The sign-off mark at the foot of the guide’s letter. Optional.',
+      label: () => m.studio_builder_media_slot_signature(),
+      hint: () => m.studio_builder_media_slot_signature_hint(),
     },
   ];
 
@@ -92,33 +94,34 @@
   async function onClearCover(): Promise<void> {
     try {
       await sellMedia.clearCover();
-      toast.success('Cover removed');
+      toast.success(m.studio_builder_media_toast_cover_removed());
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not remove cover');
+      toast.error(
+        err instanceof Error ? err.message : m.studio_builder_media_toast_cover_remove_failed()
+      );
     }
   }
 </script>
 
 <div class="panel">
   <header class="panel__head">
-    <h2 class="panel__title">Media</h2>
-    <p class="panel__sub">Page-level</p>
+    <h2 class="panel__title">{m.studio_builder_media_title()}</h2>
+    <p class="panel__sub">{m.studio_builder_panel_page_level()}</p>
   </header>
 
   <!-- ── Cover ─────────────────────────────────────────────────────────── -->
   <section class="panel__group">
-    <h3 class="panel__group-title">Cover</h3>
+    <h3 class="panel__group-title">{m.studio_builder_media_cover()}</h3>
     <p class="panel__hint">
-      The image on this journey’s card. With no cover the card falls back to its
-      typographic form — nothing breaks, it is just quieter.
+      {m.studio_builder_media_cover_hint()}
     </p>
 
     <div class="cover">
       <div class="cover__frame">
         {#if sellMedia.coverImageUrl}
-          <img class="cover__img" src={sellMedia.coverImageUrl} alt="Journey cover" />
+          <img class="cover__img" src={sellMedia.coverImageUrl} alt={m.studio_builder_media_cover_alt()} />
         {:else}
-          <span class="cover__empty">No cover</span>
+          <span class="cover__empty">{m.studio_builder_media_cover_none()}</span>
         {/if}
       </div>
 
@@ -142,16 +145,18 @@
             const result = uploadJourneyCoverForm.result;
             if (result?.outcome === 'uploaded') {
               sellMedia.applyCoverUrl(result.coverImageUrl);
-              toast.success('Cover updated');
+              toast.success(m.studio_builder_media_toast_cover_updated());
             } else {
               // The server's own message (an unsupported format, most commonly)
               // rather than a generic failure — the creator can only fix what
               // they can see.
-              toast.error(result?.message ?? 'Cover upload failed');
+              toast.error(result?.message ?? m.studio_builder_media_toast_cover_upload_failed());
             }
           } catch (err) {
             toast.error(
-              err instanceof Error ? err.message : 'Cover upload failed'
+              err instanceof Error
+                ? err.message
+                : m.studio_builder_media_toast_cover_upload_failed()
             );
           } finally {
             // Reset so re-picking the SAME file fires `change` again — without
@@ -180,10 +185,10 @@
           onclick={() => fileInput?.click()}
         >
           {coverBusy
-            ? 'Uploading…'
+            ? m.studio_builder_media_uploading()
             : sellMedia.coverImageUrl
-              ? 'Replace'
-              : 'Upload'}
+              ? m.studio_builder_media_replace()
+              : m.studio_builder_media_upload()}
         </button>
         {#if sellMedia.coverImageUrl}
           <button
@@ -192,26 +197,24 @@
             disabled={coverBusy}
             onclick={onClearCover}
           >
-            Remove
+            {m.studio_builder_media_remove()}
           </button>
         {/if}
-        <span class="panel__hint">JPG, PNG, WebP or GIF · up to {MAX_COVER_MB}MB</span>
+        <span class="panel__hint">{m.studio_builder_media_formats({ mb: MAX_COVER_MB })}</span>
       </form>
     </div>
   </section>
 
   <!-- ── Sell media ────────────────────────────────────────────────────── -->
   <section class="panel__group">
-    <h3 class="panel__group-title">Videos &amp; portrait</h3>
+    <h3 class="panel__group-title">{m.studio_builder_media_slots_title()}</h3>
     <p class="panel__hint">
-      Picked from your media library, so they reuse the same transcoding as the rest
-      of your content. Only ready items are offered — an item still transcoding has
-      nothing to play yet. Saved with the page.
+      {m.studio_builder_media_slots_hint()}
     </p>
 
     {#each SLOTS as entry (entry.slot)}
       <div class="panel__field">
-        <span class="panel__label">{entry.label}</span>
+        <span class="panel__label">{entry.label()}</span>
         <MediaPicker
           mediaItems={sellMedia.options}
           value={sellMedia.slot(entry.slot)}
@@ -219,7 +222,7 @@
           showLibraryLink
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />
-        <span class="panel__hint">{entry.hint}</span>
+        <span class="panel__hint">{entry.hint()}</span>
       </div>
     {/each}
   </section>

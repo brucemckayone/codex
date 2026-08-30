@@ -41,6 +41,7 @@
   make the save payload invalid.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
   interface Props {
@@ -88,12 +89,12 @@
 {#if pending}
   <div class="panel">
     <header class="panel__head">
-      <h2 class="panel__title">SEO &amp; web address</h2>
-      <p class="panel__sub">Page-level</p>
+      <h2 class="panel__title">{m.studio_builder_seo_title()}</h2>
+      <p class="panel__sub">{m.studio_builder_panel_page_level()}</p>
     </header>
 
     <label class="panel__field">
-      <span class="panel__label">Web address</span>
+      <span class="panel__label">{m.studio_builder_seo_web_address()}</span>
       <input
         type="text"
         class="panel__input"
@@ -106,13 +107,12 @@
 
     {#if renamingLivePage}
       <p class="panel__warn" role="status">
-        This portal is live at <b>/journeys/{pageBuilder.saved?.slug}</b>. Saving the new
-        address will 404 every link already shared to the old one.
+        {m.studio_builder_seo_live_at()} <b>/journeys/{pageBuilder.saved?.slug}</b>. {m.studio_builder_seo_rename_warn()}
       </p>
     {/if}
 
     <label class="panel__field">
-      <span class="panel__label">Meta title</span>
+      <span class="panel__label">{m.studio_builder_seo_meta_title()}</span>
       <input
         type="text"
         class="panel__input"
@@ -120,11 +120,11 @@
         value={pending.seo?.title ?? ''}
         oninput={(e) => pageBuilder.updateSeo({ title: e.currentTarget.value })}
       />
-      <span class="panel__hint">Shown in search results &amp; the browser tab. Unset → the page title.</span>
+      <span class="panel__hint">{m.studio_builder_seo_meta_title_hint()}</span>
     </label>
 
     <label class="panel__field">
-      <span class="panel__label">Meta description</span>
+      <span class="panel__label">{m.studio_builder_seo_meta_description()}</span>
       <textarea
         class="panel__input panel__input--area"
         rows="3"
@@ -133,16 +133,16 @@
           pageBuilder.updateSeo({ description: e.currentTarget.value })}
       ></textarea>
       <span class="panel__hint">
-        The sentence search results and share cards show. Unset → the course’s lede.
+        {m.studio_builder_seo_meta_description_hint()}
       </span>
     </label>
 
-    <p class="panel__group">Share image</p>
+    <p class="panel__group">{m.studio_builder_seo_share_image()}</p>
     <div class="panel__media">
       <span class="panel__media-thumb" aria-hidden="true"></span>
       <span class="panel__media-copy">
-        Social preview
-        <small>1200×630 · media library soon</small>
+        {m.studio_builder_seo_social_preview()}
+        <small>{m.studio_builder_seo_social_preview_hint()}</small>
       </span>
     </div>
   </div>

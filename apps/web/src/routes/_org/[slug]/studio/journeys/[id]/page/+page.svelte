@@ -27,6 +27,7 @@
   import { page } from '$app/state';
   import type { PageStatus } from '@codex/shared-types';
   import { buildJourneyUrl } from '@codex/urls';
+  import * as m from '$paraglide/messages';
   import {
     JourneyBuilderCanvas,
     PageBrandPanel,
@@ -214,27 +215,33 @@
   let previewMode = $state(false);
   let saving = $state(false);
 
-  const MODES: readonly { id: BuilderMode; label: string }[] = [
-    { id: 'design', label: 'Design' },
+  // `label` is a THUNK, not a string: these tables live at module scope, and a
+  // message read there would resolve once, before the request's language tag is
+  // set. Called at render, each one resolves per request.
+  const MODES: readonly { id: BuilderMode; label: () => string }[] = [
+    { id: 'design', label: () => m.studio_builder_mode_design() },
     // "Look" is the page-scope design-axis preset picker (journey sections F-B2).
     // Beside Design rather than inside it: Design edits ONE section at a time,
     // Look sets what every section inherits, and merging the two put a page-wide
     // control inside a per-section inspector.
-    { id: 'look', label: 'Look' },
-    { id: 'pricing', label: 'Pricing' },
-    { id: 'media', label: 'Media' },
-    { id: 'brand', label: 'Brand' },
-    { id: 'seo', label: 'SEO' },
+    { id: 'look', label: () => m.studio_builder_look_title() },
+    { id: 'pricing', label: () => m.studio_builder_mode_pricing() },
+    { id: 'media', label: () => m.studio_builder_media_title() },
+    { id: 'brand', label: () => m.studio_builder_mode_brand() },
+    { id: 'seo', label: () => m.studio_builder_mode_seo() },
   ];
-  const DEVICES: readonly { id: 'desktop' | 'tablet' | 'mobile'; label: string }[] = [
-    { id: 'desktop', label: 'Desktop' },
-    { id: 'tablet', label: 'Tablet' },
-    { id: 'mobile', label: 'Mobile' },
+  const DEVICES: readonly {
+    id: 'desktop' | 'tablet' | 'mobile';
+    label: () => string;
+  }[] = [
+    { id: 'desktop', label: () => m.studio_builder_device_desktop() },
+    { id: 'tablet', label: () => m.studio_builder_device_tablet() },
+    { id: 'mobile', label: () => m.studio_builder_device_mobile() },
   ];
-  const STATUSES: readonly { id: PageStatus; label: string }[] = [
-    { id: 'draft', label: 'Draft' },
-    { id: 'published', label: 'Published' },
-    { id: 'archived', label: 'Archived' },
+  const STATUSES: readonly { id: PageStatus; label: () => string }[] = [
+    { id: 'draft', label: () => m.studio_builder_status_draft() },
+    { id: 'published', label: () => m.studio_builder_status_published() },
+    { id: 'archived', label: () => m.studio_builder_status_archived() },
   ];
 
   // Esc exits full-width preview; Cmd/Ctrl+Z undo (+Shift redo) walks the
@@ -354,7 +361,7 @@
     // Nothing loaded ⇒ nothing to save. Reported as NOT saved so callers can
     // never treat "there was no draft" as "the draft was persisted".
     if (!payload || !record) {
-      toast.error('The page draft is still loading — try again in a moment');
+      toast.error(m.studio_builder_toast_draft_loading());
       return false;
     }
     saving = true;
@@ -413,7 +420,7 @@
         return true;
       }
 
-      toast.success('Page saved');
+      toast.success(m.studio_builder_toast_saved());
       return true;
     } finally {
       saving = false;
@@ -442,7 +449,7 @@
     // through the flag rather than through a failed save.
     if (isDirty && !(await handleSave())) return;
     if (!slug) {
-      toast.error('Give the page a slug and save it before viewing live');
+      toast.error(m.studio_builder_toast_need_slug());
       return;
     }
     window.open(`/journeys/${slug}?preview=1`, '_blank', 'noopener');
@@ -460,7 +467,7 @@
       if (previousStatus) pageBuilder.updateMeta('status', previousStatus);
       return;
     }
-    toast.success('Page published');
+    toast.success(m.studio_builder_toast_published());
   }
 
   /**
@@ -491,6 +498,14 @@
    * call `preventDefault`. It cancels UNCONDITIONALLY, dirty or clean: a clean
    * draft got no prompt at all, so the author simply lost their place. "View
    * live ↗" is the way out to the real page, and it opens a new tab.
+   *
+   * (4) THE CONFIRM COPY IS NOT LOCALISED YET, for the same reason the status
+   * select's aria-label is not: `__tests__/builder-failure-states.test.ts:180`
+   * asserts the literal "unsaved changes" inside this callback's
+   * COMMENT-STRIPPED body, which is what pins the copy to all three resources
+   * rather than to the page draft alone. A message call satisfies neither half
+   * of that pair, so the swap needs the assertion to move to the message key in
+   * the same change.
    */
   /**
    * Write the status select's choice, confirming the one value that takes a page
@@ -501,9 +516,7 @@
     const next = select.value as PageStatus;
     if (
       next === 'archived' &&
-      !confirm(
-        'Archive this portal? It stops appearing on your site once you save.'
-      )
+      !confirm(m.studio_builder_confirm_archive())
     ) {
       select.value = pageBuilder.pending?.status ?? 'draft';
       return;
@@ -514,9 +527,7 @@
   beforeNavigate((navigation) => {
     if (isPublicJourneySurface(navigation.to?.url)) {
       navigation.cancel();
-      toast.info(
-        'The sales page’s buttons are inert while you edit. Use View live to open the real page.'
-      );
+      toast.info(m.studio_builder_toast_ctas_inert());
       return;
     }
     if (!isDirty) return;
@@ -549,7 +560,7 @@
 </script>
 
 <svelte:head>
-  <title>Page builder | {orgName}</title>
+  <title>{m.studio_builder_title()} | {orgName}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
@@ -571,16 +582,16 @@
         opened from, matching the prototype's own `href` — rather than /studio,
         so it reads as "up one level" from the page you are editing.
       -->
-      <a class="jb__brand" href="/studio/journeys" title="All portals">
+      <a class="jb__brand" href="/studio/journeys" title={m.studio_builder_all_portals()}>
         Studio<span aria-hidden="true">.</span>
       </a>
       <span class="jb__doc">
-        Journey ·
+        {m.studio_builder_doc_kind()} ·
         <input
           class="jb__doc-title"
           value={pending.title}
           oninput={(e) => pageBuilder.updateMeta('title', e.currentTarget.value)}
-          aria-label="Page title"
+          aria-label={m.studio_builder_page_title_label()}
         />
       </span>
       <!--
@@ -592,6 +603,15 @@
         the draft's real status, because a `<select>` keeps the user's choice on
         screen otherwise and would then disagree with the draft.
       -->
+      <!--
+        NOT LOCALISED, and deliberately. `__tests__/builder-top-bar.test.ts:96`
+        asserts the literal `aria-label="Page status"` in this file's SOURCE — it
+        is the guard that the publish affordance is still a labelled <select>
+        rather than the prototype's status pill — so moving this behind a message
+        turns that guard red, and the localisation pass did not own that test
+        file. Land the two together: add `studio_builder_status_label` /
+        "Page status" to messages/en.json and point the assertion at the key.
+      -->
       <select
         class="jb__status"
         value={pending.status}
@@ -599,16 +619,16 @@
         aria-label="Page status"
       >
         {#each STATUSES as s (s.id)}
-          <option value={s.id}>{s.label}</option>
+          <option value={s.id}>{s.label()}</option>
         {/each}
       </select>
 
-      <nav class="jb__art" aria-label="Journey artifacts">
+      <nav class="jb__art" aria-label={m.studio_builder_artifacts_label()}>
         {#if isCourse}
-          <a href="/studio/journeys/{pageId}/curriculum">Curriculum</a>
-          <a href="/studio/journeys/{pageId}/insights">Insights</a>
+          <a href="/studio/journeys/{pageId}/curriculum">{m.studio_builder_artifact_curriculum()}</a>
+          <a href="/studio/journeys/{pageId}/insights">{m.studio_builder_artifact_insights()}</a>
         {/if}
-        <span class="jb__art-on" aria-current="page">Sales page</span>
+        <span class="jb__art-on" aria-current="page">{m.studio_builder_artifact_sales_page()}</span>
       </nav>
 
       <!--
@@ -618,28 +638,28 @@
         bottom-left while the rest of the row stayed put.
       -->
       <div class="jb__actions">
-      <div class="jb__seg" role="group" aria-label="Device">
+      <div class="jb__seg" role="group" aria-label={m.studio_builder_device_label()}>
         {#each DEVICES as d (d.id)}
           <button type="button" aria-pressed={device === d.id} onclick={() => (device = d.id)}>
-            {d.label}
+            {d.label()}
           </button>
         {/each}
       </div>
 
-      <div class="jb__history" role="group" aria-label="History">
+      <div class="jb__history" role="group" aria-label={m.studio_builder_history_label()}>
         <button
           type="button"
           class="jb__icon-btn"
-          title="Undo (⌘Z)"
-          aria-label="Undo"
+          title={m.studio_builder_undo_title()}
+          aria-label={m.studio_builder_undo()}
           disabled={!pageBuilder.canUndo}
           onclick={() => pageBuilder.undo()}
         >↶</button>
         <button
           type="button"
           class="jb__icon-btn"
-          title="Redo (⌘⇧Z)"
-          aria-label="Redo"
+          title={m.studio_builder_redo_title()}
+          aria-label={m.studio_builder_redo()}
           disabled={!pageBuilder.canRedo}
           onclick={() => pageBuilder.redo()}
         >↷</button>
@@ -659,22 +679,22 @@
         type="button"
         class="jb__btn"
         class:jb__btn--on={previewMode}
-        title="Hide the editor rails (still the editable canvas, not the animated page)"
+        title={m.studio_builder_full_width_title()}
         onclick={() => (previewMode = !previewMode)}
       >
-        {previewMode ? 'Editing' : 'Full width'}
+        {previewMode ? m.studio_builder_editing() : m.studio_builder_full_width()}
       </button>
       <button
         type="button"
         class="jb__btn"
-        title="Open the real sales page in a new tab — full animations, saves first"
+        title={m.studio_builder_view_live_title()}
         disabled={saving}
         onclick={handleViewLive}
       >
-        View live ↗
+        {m.studio_builder_view_live()}
       </button>
       <button type="button" class="jb__btn" disabled={!isDirty || saving} onclick={handleSave}>
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? m.studio_builder_saving() : m.studio_builder_save()}
       </button>
       <button
         type="button"
@@ -682,16 +702,19 @@
         disabled={saving}
         onclick={handlePublish}
       >
-        {saving ? 'Publishing…' : 'Publish'}
+        {saving ? m.studio_builder_publishing() : m.studio_builder_publish()}
       </button>
       </div>
     </header>
 
     <!-- ── mode tabs ── -->
-    <nav class="jb__modes" aria-label="Builder mode">
-      {#each MODES as m (m.id)}
-        <button type="button" aria-pressed={mode === m.id} onclick={() => (mode = m.id)}>
-          {m.label}
+    <!-- The loop variable is `tab`, NOT `m`: `m` is the Paraglide message
+         namespace in this file, and an `{#each … as m}` would shadow it for the
+         whole block. -->
+    <nav class="jb__modes" aria-label={m.studio_builder_mode_label()}>
+      {#each MODES as tab (tab.id)}
+        <button type="button" aria-pressed={mode === tab.id} onclick={() => (mode = tab.id)}>
+          {tab.label()}
         </button>
       {/each}
     </nav>
@@ -745,7 +768,7 @@
           {#if selected}
             <SectionEditor section={selected} />
           {:else}
-            <p class="jb__inspector-empty">Select a section to edit its content and layout.</p>
+            <p class="jb__inspector-empty">{m.studio_builder_inspector_empty()}</p>
           {/if}
         </aside>
       {/if}
@@ -758,13 +781,13 @@
     read, so the failure must be announced rather than only painted.
   -->
   <div class="jb-empty" role="alert">
-    <p class="jb-empty__title">This page would not open</p>
+    <p class="jb-empty__title">{m.studio_builder_error_title()}</p>
     <p class="jb-empty__body">{draftError}</p>
     <div class="jb-empty__acts">
       <button type="button" class="jb-empty__btn" onclick={() => draftQuery?.refresh()}>
-        Try again
+        {m.studio_builder_error_retry()}
       </button>
-      <a class="jb-empty__link" href="/studio/journeys">All portals</a>
+      <a class="jb-empty__link" href="/studio/journeys">{m.studio_builder_all_portals()}</a>
     </div>
   </div>
 {:else if draftMissing}
@@ -775,17 +798,16 @@
     the eye.
   -->
   <div class="jb-empty">
-    <p class="jb-empty__title">No portal page with that id</p>
+    <p class="jb-empty__title">{m.studio_builder_missing_title()}</p>
     <p class="jb-empty__body">
-      This URL takes the PORTAL page id, not the course id. Open the portal from
-      All portals and use “Edit page”.
+      {m.studio_builder_missing_body()}
     </p>
     <div class="jb-empty__acts">
-      <a class="jb-empty__link" href="/studio/journeys">All portals</a>
+      <a class="jb-empty__link" href="/studio/journeys">{m.studio_builder_all_portals()}</a>
     </div>
   </div>
 {:else}
-  <div class="jb-loading" aria-busy="true"><p>Loading page…</p></div>
+  <div class="jb-loading" aria-busy="true"><p>{m.studio_builder_loading()}</p></div>
 {/if}
 
 <style>

@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import type { PageSection } from '@codex/shared-types';
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import {
@@ -175,16 +176,16 @@
         type="button"
         class="section-editor__reset"
         onclick={() => pageBuilder.resetSection(section.id)}
-        title="Reset this section to its saved values"
+        title={m.studio_builder_inspector_reset_title()}
       >
-        Reset
+        {m.studio_builder_inspector_reset()}
       </button>
     {/if}
   </header>
 
   {#if variants.length >= 2}
     <div class="section-editor__group">
-      <p class="section-editor__group-label">Layout · options</p>
+      <p class="section-editor__group-label">{m.studio_builder_inspector_layout()}</p>
       <VariantPicker
         {variants}
         selected={currentVariant}
@@ -206,15 +207,15 @@
   -->
   <div class="section-editor__group">
     <p class="section-editor__group-label">
-      Design
+      {m.studio_builder_inspector_design()}
       {#if overriddenCount > 0}
         <span class="section-editor__group-count">
-          · {overriddenCount} set here
+          {m.studio_builder_inspector_design_count({ count: overriddenCount })}
         </span>
       {/if}
     </p>
     <p class="section-editor__hint">
-      Inherited from the page's look unless you change it here.
+      {m.studio_builder_inspector_design_hint()}
     </p>
     <div class="section-editor__axes">
       {#each designAxes as axis (axis)}
@@ -246,7 +247,7 @@
   </div>
 
   <div class="section-editor__fields">
-    <p class="section-editor__group-label">Content</p>
+    <p class="section-editor__group-label">{m.studio_builder_inspector_content()}</p>
     {#each fields as field (field.key)}
       <!--
         Hoist the narrowed slot BEFORE the handler closure: Svelte 5 does not
@@ -357,17 +358,17 @@
 
   <footer class="section-editor__foot">
     <button type="button" class="section-editor__foot-btn" onclick={() => pageBuilder.duplicateSection(section.id)}>
-      Duplicate
+      {m.studio_builder_inspector_duplicate()}
     </button>
     <button type="button" class="section-editor__foot-btn" onclick={() => pageBuilder.toggleSection(section.id)}>
-      {section.enabled ? 'Hide' : 'Show'}
+      {section.enabled ? m.studio_builder_inspector_hide() : m.studio_builder_inspector_show()}
     </button>
     <button
       type="button"
       class="section-editor__foot-btn section-editor__foot-btn--danger"
       onclick={() => pageBuilder.removeSection(section.id)}
     >
-      Delete
+      {m.studio_builder_inspector_delete()}
     </button>
   </footer>
 </div>

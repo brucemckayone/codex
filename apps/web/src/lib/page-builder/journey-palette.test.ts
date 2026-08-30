@@ -34,6 +34,7 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import type { JourneyCoursePage } from './journey-queries';
+import JourneyRenderer from './render/JourneyRenderer.svelte';
 
 vi.mock('$app/state', () => ({
   page: { url: new URL('http://of-blood-and-bones.lvh.me:3000/journeys/demo') },
@@ -563,31 +564,37 @@ const coursePage = (
 });
 
 /**
- * TIMEOUT RAISED TO 45s — not a slow assertion, a one-time mount cost.
+ * THE MOUNT IMPORT IS STATIC (line 37), AND THAT IS THE WHOLE MITIGATION
+ * (Codex-prblb). Do not turn it back into `await import()` inside `render`.
  *
- * Whichever test in this block mounts FIRST absorbs the entire cost of Vite
- * transforming + jsdom instantiating the `JourneyRenderer` component graph; its
- * siblings then run in single-digit milliseconds. Measured here, same machine,
- * same file, back-to-back runs — the first mount was 13190ms on a cold Vite
- * cache, 7067ms warmer and 6641ms warmest, tracking `transform` (19.82s → 13.33s
- * → 8.34s) rather than anything in the test. It has been measured at 33138ms on a
- * loaded box, against a 15000ms global budget (`vite.config.ts` `testTimeout`).
+ * This block used to carry `{ timeout: 45000 }` against a 15000ms global budget
+ * (`vite.config.ts` `testTimeout`), justified by measurements of the first mount:
+ * 13190ms on a cold Vite cache, 6641ms warmest, 33138ms on a loaded box. Those
+ * numbers were real, but the diagnosis was one level off. The cost is Vite
+ * TRANSFORMING the `JourneyRenderer` graph — `render/section-registry.ts`
+ * statically imports all eleven section components — and a dynamic
+ * `await import()` inside the test body charged that transform to the TEST's
+ * timer. Nothing about the mount itself is slow.
  *
- * So this is not flake: it is reliably too slow and has only ever passed because
- * the machine happened to be quiet. 45s clears the worst observed run with
- * headroom. Scoped to this `describe` rather than to one `it`, because the cost
- * lands on whichever mount runs first and test order is not guaranteed — pinning
- * a single test would just move the failure to its sibling.
+ * Re-measured on a loaded box (8 cores, load average 13–46), same file,
+ * back-to-back:
+ *   dynamic import inside `render`   first mount 12065 / 13556 / 4890 ms
+ *   static import at module scope    first mount    28 /    35 ms
+ * The transform cost does not vanish, it moves to `collect` (1.4→6.5s), which no
+ * per-test timeout governs — which is exactly where the four other files that
+ * pull the same eleven-component graph have always paid it
+ * (render/SectionRenderer.svelte.test.ts, render/brand-overrides.test.ts,
+ * components/page-builder/canvas-public-parity.svelte.test.ts and
+ * preset-emission.svelte.test.ts all import it statically and all pass at 15000ms).
+ * So the override was covering a self-inflicted charge, not a slow assertion.
  *
- * NOT a weakened test: every assertion below is unchanged. The underlying
- * pathology — a component mount costing seconds in jsdom — is tracked separately;
- * this only stops it failing the suite on a busy machine.
- *
- * `describe(name, options, fn)` is the supported shape for a suite-level timeout
- * in Vitest 4 (`SuiteCollectorCallable`); passing options as the THIRD argument
- * is not — that overload takes a bare number.
+ * NOT a weakened test: every assertion below is unchanged, and the graph is still
+ * fully transformed and mounted. The PRODUCTION cost of those eleven static
+ * imports is separately measured and still open as Codex-ug311 — 171,088 B raw
+ * (77,990 JS + 93,098 CSS) shipped eagerly to the public sell page — and this
+ * change neither fixes nor hides it.
  */
-describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
+describe('JourneyRenderer (mount)', () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });
@@ -598,10 +605,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
       (el.getAttribute('class') ?? '').split(/\s+/).includes(cls)
     );
 
-  const render = async (page: JourneyCoursePage) => {
-    const { default: JourneyRenderer } = await import(
-      './render/JourneyRenderer.svelte'
-    );
+  const render = (page: JourneyCoursePage) => {
     const component = mount(JourneyRenderer, {
       target: document.body,
       props: { coursePage: page, sellPreview: Promise.resolve(null) },
@@ -611,7 +615,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   };
 
   it('puts the ladder on the wrapper and the re-points on a DESCENDANT', async () => {
-    const component = await render(coursePage());
+    const component = render(coursePage());
 
     const base = withClass('journey-palette');
     const page = withClass('journey-palette--page');
@@ -627,7 +631,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   });
 
   it('never carries both palette classes on one element', async () => {
-    const component = await render(coursePage());
+    const component = render(coursePage());
 
     const both = [...document.body.querySelectorAll('[class]')].filter((el) => {
       const tokens = (el.getAttribute('class') ?? '').split(/\s+/);
@@ -644,7 +648,7 @@ describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   it('still injects per-page brand overrides onto the wrapper', async () => {
     // The overrides were always computed and injected correctly — the bug was
     // that `.journey-page` overwrote them one level down. Assert they survive.
-    const component = await render(coursePage({ backgroundColor: '#F3F0E7' }));
+    const component = render(coursePage({ backgroundColor: '#F3F0E7' }));
 
     const [base] = withClass('journey-palette');
     expect(base.getAttribute('style')).toContain('--brand-bg');

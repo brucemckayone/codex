@@ -23,6 +23,7 @@
   selects are keyboard- and touch-correct without re-implementing a listbox.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { Badge } from '$lib/components/ui/Badge';
 
   interface Props {
@@ -65,7 +66,9 @@
     options.find((option) => option.value === inherited)?.label ?? inherited
   );
   const inheritedNote = $derived(
-    inheritedFrom === 'page' ? 'page look' : 'default'
+    inheritedFrom === 'page'
+      ? m.studio_builder_axis_source_page()
+      : m.studio_builder_axis_source_default()
   );
   /**
    * The full sentence, wired to the select via `aria-describedby` so the state is
@@ -74,8 +77,8 @@
    */
   const description = $derived(
     isOverridden
-      ? `Set on this section. The ${inheritedNote} is ${inheritedLabel}.`
-      : `Inherited from the ${inheritedNote} (${inheritedLabel}).`
+      ? m.studio_builder_axis_desc_overridden({ source: inheritedNote, value: inheritedLabel })
+      : m.studio_builder_axis_desc_inherited({ source: inheritedNote, value: inheritedLabel })
   );
   const selectId = $derived(`dax-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`);
 </script>
@@ -90,7 +93,7 @@
       chip and the row's spine below agree on one colour for one state.
     -->
     <Badge variant={isOverridden ? 'info' : 'neutral'}>
-      {isOverridden ? 'Overridden' : 'Inherited'}
+      {isOverridden ? m.studio_builder_axis_overridden() : m.studio_builder_axis_inherited()}
     </Badge>
   </div>
 
@@ -114,9 +117,9 @@
         type="button"
         class="dax__reset"
         onclick={onclear}
-        title={`Use the ${inheritedNote} for ${label.toLowerCase()}`}
+        title={m.studio_builder_axis_use_source_title({ source: inheritedNote, axis: label.toLowerCase() })}
       >
-        Use {inheritedNote}
+        {m.studio_builder_axis_use_source({ source: inheritedNote })}
       </button>
     {/if}
   </div>
