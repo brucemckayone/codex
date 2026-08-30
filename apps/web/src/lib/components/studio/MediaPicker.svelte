@@ -70,11 +70,19 @@
     /**
      * Disable the trigger.
      *
-     * A picker whose options have not loaded is otherwise still pickable, and such
-     * a pick is DROPPED rather than persisted — the sell-media store gates its save
-     * on its own `loaded` flag. A control that accepts a choice and discards it is
-     * the dead-end shape, so the caller that knows the load state has to be able to
-     * say so.
+     * NO CALLER PASSES THIS YET, deliberately, and that is worth knowing before you
+     * reach for it. The motivating case — a picker whose library has not loaded
+     * accepts a pick the sell-media store then drops, because `save()` no-ops on
+     * `!loaded` — is real, but wiring it to `!loaded` proved to be the wrong fix
+     * twice over: it is a UI-layer patch on a store-layer defect, and `!loaded` is
+     * ALSO true after a failed read, so every media field would go permanently dead
+     * instead of transiently. It also broke a negative control asserting that only
+     * the ONE axis-gated field is ever disabled, which is a guard worth more than
+     * the convenience.
+     *
+     * The capability stays because a disabled trigger is a legitimate thing for a
+     * caller to want. The load-window gap needs a guard in `setSlot` and its own
+     * test.
      */
     disabled?: boolean;
   }

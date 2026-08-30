@@ -384,14 +384,17 @@
                through to the shared placeholder — three stacked pickers in the guide
                inspector all announced as "Select media…". `field.label` is the same
                string the visible label shows, so the two cannot drift.
-               `disabled` while the library is still loading: a pick made then is
-               dropped, not persisted, because the store gates its save on `loaded`. -->
+               NO `disabled` here on purpose. A picker whose library has not loaded
+               accepts a pick the store then drops (`save()` no-ops on `!loaded`), but
+               disabling it is a UI-layer patch on a STORE-layer defect — and `!loaded`
+               is also true after a FAILED read, which would leave every media field
+               permanently dead. That gap is filed separately; it needs a guard in
+               `setSlot` and its own test, not a drive-by prop. -->
           <MediaPicker
             mediaItems={sellMedia.optionsFor(slot)}
             value={sellMedia.slot(slot)}
             name={`section-media-${slot}`}
             ariaLabel={field.label}
-            disabled={!sellMedia.loaded}
             showLibraryLink
             onchange={(mediaItemId) => sellMedia.setSlot(slot, mediaItemId)}
           />

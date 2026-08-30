@@ -61,6 +61,25 @@ import {
 import type { JourneySalesContext, SellPreview } from '../types';
 
 /**
+ * This file mounts 62 (section, variant) pairs across 55 cases — 846 assertions in
+ * one file, ~95s in isolation. Two of them intermittently exceeded vitest's default
+ * 15s timeout when the file ran alongside the other 41 suites, while passing in
+ * 630ms and 343ms on their own. So the failure was FORK CONTENTION, not logic: a
+ * sweep this size is the one file in the suite that cannot absorb a scheduling
+ * stall inside a per-test budget sized for a normal unit test.
+ *
+ * Raising the budget for THIS FILE ONLY is the honest fix. The alternatives are
+ * worse: lowering suite concurrency slows every other file to protect one, and
+ * splitting the sweep would defeat its purpose — the whole point is that a single
+ * pass sees the entire catalogue, so a rule holding in ten sections and failing in
+ * the eleventh goes red.
+ *
+ * If a case here ever takes anywhere near 60s on its own, that IS a logic problem
+ * and this line is not the thing to change.
+ */
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
+/**
  * `feel` and `reel` mount a real HLS player against the streamed clip. The
  * factory is stubbed rather than the sections: what the sweep needs to know is
  * that a media element with a source reaches the DOM, not that hls.js parses a

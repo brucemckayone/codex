@@ -565,15 +565,15 @@
              `aria-labelledby` left the TRIGGER falling through to the shared
              "Select media…" placeholder — four slots, one name between them.
              `entry.label()` is the visible label, so they cannot drift.
-             `disabled` until the library has loaded: `setSlot` is otherwise
-             unguarded and `save()` no-ops on an unloaded store, so a pick made
-             during the read is silently discarded. -->
+             NO `disabled` here on purpose — see the note at the section inspector's
+             picker. `setSlot` is unguarded and `save()` no-ops on an unloaded store,
+             so a pick made during the read IS silently discarded; the fix belongs in
+             the store, and `!loaded` is also true after a failed read. Filed. -->
         <MediaPicker
           mediaItems={sellMedia.optionsFor(entry.slot)}
           value={sellMedia.slot(entry.slot)}
           name={`journey-media-${entry.slot}`}
           ariaLabel={entry.label()}
-          disabled={!sellMedia.loaded}
           showLibraryLink
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />

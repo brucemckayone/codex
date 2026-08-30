@@ -863,17 +863,21 @@ describe('6 · a control that cannot do its job says so', () => {
 // The handoff's failing witness
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('the media picker’s own name is still a placeholder — handoff witness', () => {
-  it('has an aria-labelledby that points at nothing', () => {
-    // NOT A FAILING TEST — a PINNED one. Melt's combobox writes an
-    // `aria-labelledby` naming a `$label` element `MediaPicker` never renders, so
-    // the reference dangles and the widget's accessible name falls through to the
-    // shared placeholder. This directory's fix is the named GROUP around it
-    // (asserted in the per-row sweep); naming the widget itself needs a `label`
-    // prop on `MediaPicker`, which lives in `components/studio`.
-    //
-    // WHEN THAT PROP LANDS THIS TEST GOES RED, and that is the point: it is the
-    // witness that the handoff is still open, and it fails the moment it closes.
+describe('the media picker names ITSELF — the handoff closed, so this is now a guard', () => {
+  // THIS BLOCK USED TO BE A WITNESS. It asserted the defect still existed — a
+  // dangling `aria-labelledby` and a placeholder for a name — and its own comment
+  // said "when that prop lands this test goes red, and that is the point". The
+  // prop landed (`MediaPicker` gained `ariaLabel`, passed from both call sites),
+  // so the witness fired exactly as designed and is now inverted into the
+  // regression guard it was holding the place for.
+  //
+  // Melt's combobox writes `aria-labelledby` pointing at a `$label` element
+  // `MediaPicker` never renders. Rather than rely on the accessible-name
+  // algorithm falling through that broken reference to `aria-label`, the
+  // component CLEARS the dangling attribute when it is given a real name — so
+  // the name is stated outright. Both halves are asserted here, because either
+  // one regressing alone would put the widget back to being unnamed.
+  it('carries the field name as its own accessible name, with no dangling reference', () => {
     pageBuilder.open(PAGE_ID, pageWith(sectionOfType('hero')));
     mountEditor(live());
 
@@ -884,21 +888,32 @@ describe('the media picker’s own name is still a placeholder — handoff witne
       input,
       'no media picker rendered in the hero inspector'
     ).not.toBeNull();
-    const ids = input?.getAttribute('aria-labelledby') ?? '';
-    expect(
-      ids,
-      'Melt no longer sets aria-labelledby — re-read this test'
-    ).not.toBe('');
-    for (const id of ids.split(/\s+/)) {
-      expect(
-        document.getElementById(id),
-        `aria-labelledby "${id}" now resolves — MediaPicker gained a real label, so the group workaround can go`
-      ).toBeNull();
-    }
-    // Which leaves the placeholder as the widget's only name.
-    expect(input?.getAttribute('placeholder')).toBeTruthy();
 
-    // The GROUP is what carries the field's name meanwhile.
+    // 1. The widget's OWN name, and it is the same string the visible label shows
+    //    — three pickers stack in the guide inspector and used to be one name.
+    expect(input?.getAttribute('aria-label')).toBe('Hero image');
+
+    // 2. The dangling reference is GONE, not merely outranked. `aria-labelledby`
+    //    beats `aria-label` in the accname algorithm whenever it resolves, so
+    //    leaving a broken one in place would make the name depend on the
+    //    reference staying broken.
+    expect(
+      input?.getAttribute('aria-labelledby'),
+      'a dangling aria-labelledby is back — it would decide the name if it ever resolved'
+    ).toBeNull();
+
+    // 3. The placeholder still exists as a visual hint, but it is no longer what
+    //    a screen reader reads. This is the assertion that would catch a revert to
+    //    "Select media…" as the name.
+    expect(input?.getAttribute('placeholder')).toBeTruthy();
+    expect(input?.getAttribute('aria-label')).not.toBe(
+      input?.getAttribute('placeholder')
+    );
+
+    // 4. The named GROUP stays. It was introduced as the workaround while the
+    //    widget was unnamed, and it is kept deliberately: the group announces the
+    //    field on entry, the label names the control itself, and a media row has
+    //    a hint and an upload button that belong to the same field.
     const group = input?.closest('[role="group"]');
     expect(group).not.toBeNull();
     const labelledBy = group?.getAttribute('aria-labelledby') ?? '';
