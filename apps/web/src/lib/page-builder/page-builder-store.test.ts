@@ -179,6 +179,68 @@ describe('pageBuilder — section mutations', () => {
     expect(pageBuilder.sections.at(-1)?.id).toBe('sec-invite');
   });
 
+  it('setSectionProp DELETES the key when the value is undefined', () => {
+    // A cleared field must leave the key ABSENT, not present holding `undefined`.
+    // `toEqual` cannot see the difference — it treats {a: undefined} as {} — so
+    // this asserts on the KEY LIST, which is the only thing that distinguishes them.
+    pageBuilder.setSectionProp('sec-hero', 'headline', 'Come home');
+    pageBuilder.setSectionProp('sec-hero', 'kicker', 'A descent');
+    pageBuilder.setSectionProp('sec-hero', 'kicker', undefined);
+    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(Object.keys(hero?.props ?? {})).toEqual(['headline']);
+    expect('kicker' in (hero?.props ?? {})).toBe(false);
+  });
+
+  it('a cleared key is absent from the SAVE PAYLOAD, not present holding undefined', () => {
+    // This asserts the defect's actual consequence, through the store's own
+    // public path. `getSavePayload()` clones via `structuredClone($state.snapshot(…))`,
+    // and BOTH of those preserve a key whose value is `undefined` — while
+    // `JSON.stringify` on the way to the wire drops it. That is the disagreement:
+    // the payload the builder believes it is sending carries a key the column
+    // never receives, so the isDirty diff and the crash-recovery snapshot see a
+    // different draft from the one that is saved.
+    //
+    // (My first version of this test cloned `hero.props` directly and threw
+    // DataCloneError — `props` is a `$state` PROXY and structuredClone cannot
+    // clone a proxy at all. The store snapshots first for exactly that reason,
+    // which is why the payload is the right place to assert.)
+    pageBuilder.setSectionProp('sec-hero', 'headline', 'Come home');
+    pageBuilder.setSectionProp('sec-hero', 'duration', '4:30');
+    pageBuilder.setSectionProp('sec-hero', 'duration', undefined);
+    const payload = pageBuilder.getSavePayload();
+    const hero = payload?.sections.find((s) => s.id === 'sec-hero');
+    expect(Object.keys(hero?.props ?? {})).toEqual(['headline']);
+    expect('duration' in (hero?.props ?? {})).toBe(false);
+    // and the wire form agrees with the payload, which is the whole point
+    expect(Object.keys(JSON.parse(JSON.stringify(hero?.props ?? {})))).toEqual(
+      Object.keys(hero?.props ?? {})
+    );
+  });
+
+  it('setSectionProp still stores falsy values that are NOT undefined', () => {
+    // Negative control. Deleting on `undefined` must not become deleting on
+    // anything falsy: an empty string is a real authored value (it is how a
+    // creator blanks a heading while keeping the field), 0 is a real duration,
+    // and false is a real toggle state.
+    pageBuilder.setSectionProp('sec-hero', 'headline', '');
+    pageBuilder.setSectionProp('sec-hero', 'count', 0);
+    pageBuilder.setSectionProp('sec-hero', 'best', false);
+    pageBuilder.setSectionProp('sec-hero', 'nulled', null);
+    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(Object.keys(hero?.props ?? {}).sort()).toEqual([
+      'best',
+      'count',
+      'headline',
+      'nulled',
+    ]);
+    expect(hero?.props).toEqual({
+      headline: '',
+      count: 0,
+      best: false,
+      nulled: null,
+    });
+  });
+
   it('setSectionProp merges one key without clobbering the rest', () => {
     pageBuilder.setSectionProp(
       'sec-hero',

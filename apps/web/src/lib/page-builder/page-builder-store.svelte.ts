@@ -327,15 +327,34 @@ function setSectionProps(id: string, props: SectionProps): void {
   state.pending.sections[i].props = props;
 }
 
-/** Set a single key within a section's props bag (the config editor's per-field write). */
+/**
+ * Set a single key within a section's props bag (the config editor's per-field write).
+ *
+ * `undefined` DELETES THE KEY rather than storing it, mirroring
+ * {@link updateBrandOverrides} — which already documents the reason: a key holding
+ * `undefined` SURVIVES `structuredClone` while it does NOT survive
+ * `JSON.stringify`. Spreading it in leaves three consumers disagreeing about the
+ * same draft:
+ *   · `getSavePayload()` ships the phantom key,
+ *   · the `isDirty` diff and the crash-recovery snapshot (a `structuredClone`) keep it,
+ *   · and the jsonb column silently drops it on the way in.
+ * So a creator who clears a field could save a draft whose stored shape differs
+ * from the one the builder believes it holds, and absence is the only
+ * round-trip-stable way to say "this field has no value" — which is what the
+ * store's own contract says.
+ *
+ * Reached today only by the number field's cleared-box path
+ * (`feel.previewDuration`), so the live impact is bounded; this closes the shape
+ * rather than waiting for a second caller to widen it.
+ */
 function setSectionProp(id: string, key: string, value: unknown): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
   snapshotEdit(`prop:${id}:${key}`);
-  state.pending.sections[i].props = {
-    ...state.pending.sections[i].props,
-    [key]: value,
-  };
+  const next: SectionProps = { ...state.pending.sections[i].props };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  state.pending.sections[i].props = next;
 }
 
 /** Flip a section on/off (§4.1 toggleable). */

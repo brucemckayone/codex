@@ -13007,6 +13007,14 @@ export const studio_builder_pricing_tiers_course_only = () => `Only a course jou
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_pricing_no_course = () => `Pricing is read from the course this portal sells, and no course is attached to it yet — so nothing on this panel can be changed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_pricing_tiers_none = () => `This space has no membership tiers yet — create one in Studio → Monetisation, then choose it here.`
 
 

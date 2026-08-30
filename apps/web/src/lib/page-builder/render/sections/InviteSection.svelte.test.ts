@@ -67,6 +67,23 @@ function fourPathOffer(): CourseOffer {
   };
 }
 
+/**
+ * A RESOLVED offer with no paths — distinct from `offer: null`, which means the
+ * READ failed. Five of the seven seeded courses are in this state
+ * (`price_cents IS NULL`, no subscription plan, no tier grant).
+ */
+function emptyOffer(): CourseOffer {
+  return {
+    courseId: 'c1',
+    organizationId: 'o1',
+    paths: [],
+    purchase: null,
+    subscription: null,
+    tiers: [],
+    entitled: false,
+  };
+}
+
 function context(
   overrides: Partial<JourneySalesContext> = {}
 ): JourneySalesContext {
@@ -403,5 +420,123 @@ describe('InviteSection — the course title is borrowed, not assumed', () => {
     expect(headingEl()?.textContent?.replace(/ /g, ' ').trim()).toBe(
       'The ground is waiting.'
     );
+  });
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE TOP-LEVEL COLLAPSE (WP-2's section sweep).
+
+     Withholding the transactional affordance from a non-purchasable course was
+     correct, and it left the FRAME standing: `.invite` + its four-layer
+     `.invite__atmos` + an empty `.invite__head`, with zero characters of text.
+     `invite` was the only one of the eleven sections with no top-level guard, and
+     it is the LAST section of the default page template — so an empty glowing
+     band was the note a visitor left the page on.
+
+     Reachability, stated honestly: the seven seeded pages all author `heading` and
+     `accent`, so this was never live. It is one cleared field away on the five
+     whose course has `price_cents IS NULL`.
+     ═══════════════════════════════════════════════════════════════════════ */
+  describe('degrades to nothing rather than to a frame', () => {
+    /** Nothing to say and nothing to sell — a confident negative on both. */
+    function renderBare(overrides: Partial<JourneySalesContext> = {}): void {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: {},
+          context: context({
+            offer: emptyOffer(),
+            purchasable: false,
+            ...overrides,
+          }),
+          variant: 'tiers',
+          design: CANDLELIT,
+        },
+      });
+      flushSync();
+    }
+
+    it('renders NO element at all with no copy, no paths and purchasable false', () => {
+      for (const variant of [
+        'pool',
+        'banner',
+        'card',
+        'tiers',
+        'table',
+        'sticky',
+      ]) {
+        component = mount(InviteSection, {
+          target: document.body,
+          props: {
+            config: {},
+            context: context({ offer: emptyOffer(), purchasable: false }),
+            variant,
+            design: CANDLELIT,
+          },
+        });
+        flushSync();
+        expect(document.body.querySelector('.invite'), variant).toBeNull();
+        expect(
+          document.body.querySelector('.invite__atmos'),
+          variant
+        ).toBeNull();
+        teardown();
+      }
+    });
+
+    it('still renders for authored copy alone, with no offer', () => {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: { sub: 'A closing line the creator typed.' },
+          context: context({ offer: emptyOffer(), purchasable: false }),
+          variant: 'pool',
+          design: CANDLELIT,
+        },
+      });
+      flushSync();
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(document.body.textContent).toContain('A closing line');
+      // …and still no purchase affordance, which is the earlier fix holding.
+      expect(ctaHrefs()).toEqual([]);
+    });
+
+    it('still renders for a borrowed course title (the claimed fallback)', () => {
+      component = mount(InviteSection, {
+        target: document.body,
+        props: {
+          config: {},
+          context: context({ offer: emptyOffer(), purchasable: false }),
+          variant: 'pool',
+          design: CANDLELIT,
+          titleFallback: 'The Long Descent',
+        },
+      });
+      flushSync();
+      expect(document.body.querySelector('h2')?.textContent?.trim()).toBe(
+        'The Long Descent'
+      );
+    });
+
+    /*
+      THE CONFIDENT-NEGATIVE HALF, and it is the reason the guard reads
+      `purchasable !== false`. A FAILED offer read leaves `purchasable` true AND
+      empties `paths`; collapsing on truthiness would delete the whole section on
+      a transient pricing hiccup — the same defect as stripping the buy button,
+      one level up.
+    */
+    it('does NOT collapse when the offer read merely FAILED', () => {
+      renderBare({ offer: null, purchasable: true });
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(ctaHrefs()).toEqual([
+        'http://lvh.me:3000/journeys/the-long-descent/checkout',
+      ]);
+    });
+
+    it('does NOT collapse for an enrolled member with nothing authored', () => {
+      renderBare({ enrolled: true });
+      expect(document.body.querySelector('.invite')).not.toBeNull();
+      expect(ctaHrefs()).toEqual([
+        'http://lvh.me:3000/journeys/the-long-descent/dashboard',
+      ]);
+    });
   });
 });

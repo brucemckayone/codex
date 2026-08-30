@@ -203,6 +203,32 @@
   );
 
   /**
+   * WHETHER THE `<header>` HAS ANYTHING TO HOLD — the guard each of the four
+   * contents of `.descent__head` already had and the element around them did not.
+   *
+   * Every child of that header is individually `{#if}`-guarded (eyebrow, the
+   * self-hiding `<h2>`, sub, and the stats row, which `table` and
+   * `numbered-prose` drop), so on those two compositions all four can be false at
+   * once and the header rendered as an EMPTY LANDMARK carrying
+   * `margin: 0 0 calc(var(--space-12) * var(--jp-rhythm))` — a `--space-12` band
+   * of nothing above the stages, under a `header` role announcing no content.
+   *
+   * REACHABLE, and the whole-catalogue sweep is what found it: `props: {}` with
+   * no claimed title fallback on `map: table` or `map: numbered-prose`. The other
+   * four compositions are immune only because `showStats` is true for them — i.e.
+   * the header was empty on exactly the two compositions defined as having no
+   * chrome, which is the pair a creator picks when they want the stages and
+   * nothing else.
+   *
+   * Derived from the same four expressions the children read rather than from
+   * `config`: a guard that re-derives its own answer is how a heading self-hides
+   * while the frame around it still renders (this section's own `title` history),
+   * and `title` in particular depends on `titleFallback`, which only the page can
+   * decide.
+   */
+  const hasHead = $derived(!!(p.eyebrow || title || p.sub) || showStats);
+
+  /**
    * THE GENERIC CHROME, NOW THROUGH THE i18n LAYER.
    *
    * This block used to hold ten raw English literals with a comment explaining
@@ -455,55 +481,61 @@
     data-map={composition}
   >
     <div class="descent__inner">
-      <header class="descent__head" use:reveal={{ disabled: editable }}>
-        {#if p.eyebrow}
-          <p
-            class="jp-sec__eyebrow jp-reveal descent__eyebrow"
-            data-jp-step="1"
-            {...editAttrs('eyebrow')}
-          >
-            {p.eyebrow}
-          </p>
-        {/if}
-        {#if title}
-          <h2
-            class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
-            data-jp-step="2"
-            {...editAttrs('heading')}
-          >
-            {title}
-          </h2>
-        {/if}
-        {#if p.sub}
-          <p
-            class="jp-sec__measure jp-reveal descent__sub"
-            data-jp-step="3"
-            {...editAttrs('sub')}
-          >
-            {p.sub}
-          </p>
-        {/if}
-        {#if showStats}
-          <p class="jp-reveal descent__stats" data-jp-step="4">
-            <span class="descent__stat">
-              <b>{context.course.stageCount}</b>
-              {countLabel(
-                context.course.stageCount,
-                CHROME.stagesOne,
-                CHROME.stages
-              )}
-            </span>
-            <span class="descent__stat">
-              <b>{context.course.practiceCount}</b>
-              {countLabel(
-                context.course.practiceCount,
-                CHROME.practicesOne,
-                CHROME.practices
-              )}
-            </span>
-          </p>
-        {/if}
-      </header>
+      <!-- NO EMPTY LANDMARK, AND NO PHANTOM BAND — see `hasHead`. Every child
+           below self-hides, so on `table` / `numbered-prose` (the two that drop
+           the stats row) an unauthored section rendered this `<header>` with
+           nothing in it and `--space-12` of margin under it. -->
+      {#if hasHead}
+        <header class="descent__head" use:reveal={{ disabled: editable }}>
+          {#if p.eyebrow}
+            <p
+              class="jp-sec__eyebrow jp-reveal descent__eyebrow"
+              data-jp-step="1"
+              {...editAttrs('eyebrow')}
+            >
+              {p.eyebrow}
+            </p>
+          {/if}
+          {#if title}
+            <h2
+              class="jp-sec__heading jp-sec__heading--sub jp-reveal descent__title"
+              data-jp-step="2"
+              {...editAttrs('heading')}
+            >
+              {title}
+            </h2>
+          {/if}
+          {#if p.sub}
+            <p
+              class="jp-sec__measure jp-reveal descent__sub"
+              data-jp-step="3"
+              {...editAttrs('sub')}
+            >
+              {p.sub}
+            </p>
+          {/if}
+          {#if showStats}
+            <p class="jp-reveal descent__stats" data-jp-step="4">
+              <span class="descent__stat">
+                <b>{context.course.stageCount}</b>
+                {countLabel(
+                  context.course.stageCount,
+                  CHROME.stagesOne,
+                  CHROME.stages
+                )}
+              </span>
+              <span class="descent__stat">
+                <b>{context.course.practiceCount}</b>
+                {countLabel(
+                  context.course.practiceCount,
+                  CHROME.practicesOne,
+                  CHROME.practices
+                )}
+              </span>
+            </p>
+          {/if}
+        </header>
+      {/if}
 
       {#if composition === 'spine'}
         <div class="descent__body" bind:this={bodyEl}>
@@ -1102,7 +1134,49 @@
 
   .descent__card {
     flex: 1 1 11rem;
-    min-width: 0;
+    /*
+      THE FLOOR THAT MAKES THE ROW WRAP INSTEAD OF CRUSHING A CARD — the fix for a
+      live overflow at a 390px viewport.
+
+      WHERE THE SQUEEZE COMES FROM, and it is NOT the line above. The narrow
+      block near the foot of this stylesheet, `@container (max-width: 45rem)`,
+      deliberately overrides the basis to `flex: 1 1 8.25rem` (132px) so a narrow
+      container still gets a TWO-UP practice pool. At a 390px viewport the
+      practices row measures 279px, so two 132px cards plus the 12px gap (276px)
+      fit on one line — and each card's content box is 132 − 40 padding − 2 border
+      = 90px.
+
+      `.descent__card-top` is a flex row holding the uppercase type label
+      ("REFLECTION" at `--text-xs` / `--tracking-wider`, beside a 14px glyph) and
+      the lock, and its min-content is 131px. MEASURED LIVE on
+      of-blood-and-bones/bone-deep, 390 viewport, light, reveals forced in:
+      `.descent__card` scrollWidth 151 / clientWidth 130 and `.descent__card-top`
+      scrollWidth 131 / clientWidth 90 — the label spilling 41px past its box
+      under `overflow: visible`, painting over the card's own edge.
+      `document.documentElement.scrollWidth` stayed equal to `clientWidth`
+      throughout, which is why a horizontal-overflow check at three widths never
+      saw it.
+
+      `@container (max-width: 24rem)` below already forces `flex-basis: 100%`, so
+      the mitigation EXISTS — it just starts one breakpoint too late: 384px, and
+      390px is the width of every iPhone from the 12 to the 15. It missed by six
+      pixels. Raising it would be a third hand-maintained number in a chain whose
+      real constraint moves with the `type` and `density` axes.
+
+      So state the constraint instead. `min-width: min(100%, 11rem)` says a card is
+      never narrower than its BASE basis unless the row itself is narrower — so the
+      flex row wraps to one-up exactly when two-up would crush a card, at every
+      axis bag and every width, with no breakpoint to keep in step. The two-up
+      design SURVIVES wherever it fits: a 45rem container gives a ~609px row and
+      two 298px cards. The `100%` term is what stops a card overflowing a container
+      narrower than the floor.
+
+      FALSIFIED IN ISOLATION, narrow basis held at `8.25rem` in both arms and only
+      this declaration varied: `.descent__card-top` 121/92 (29px spill, both cards
+      on one line) → 92/92 (0px, one card per line). The live 41px and the
+      harness's 29px differ only by the page's real font stack and tracking.
+    */
+    min-width: min(100%, 11rem);
     padding: calc(var(--space-4) * var(--jp-rhythm));
   }
 
@@ -1503,6 +1577,14 @@
     .descent__practices {
       margin-top: calc(var(--space-4) * var(--jp-rhythm));
     }
+    /*
+      THE NARROW TWO-UP BASIS, KEPT — and it is no longer the whole story.
+      Unclamped it produced two 132px cards in a 279px row at a 390px viewport,
+      a 90px content box, and a 131px label spilling past the card edge. The
+      constraint now lives on `.descent__card`'s `min-width` floor rather than in
+      a breakpoint here, so this basis only decides how cards SHARE a line they
+      already fit on. Read that floor's comment before changing either number.
+    */
     .descent__card {
       flex: 1 1 8.25rem;
     }

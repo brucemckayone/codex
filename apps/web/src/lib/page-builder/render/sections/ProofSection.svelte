@@ -42,6 +42,9 @@
   once they have).
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import * as m from '$paraglide/messages';
+  import { PauseIcon, PlayIcon } from '$lib/components/ui/Icon';
   import { aliasKeys, asNumberedGroups, asString, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
   import { editFieldAttrs } from '../editable';
@@ -151,6 +154,40 @@
   const shown = $derived(solo ? testimonials.slice(0, 1) : testimonials);
 
   /**
+   * THE TWO COMPOSITIONS THAT BECOME A HORIZONTAL SCROLLER, and why they need a
+   * `tabindex` in MARKUP rather than a rule in CSS (WCAG 2.1.1).
+   *
+   * `grid` and `wall` are rewritten by `@container (max-width: 48rem)` into a
+   * snap-row: `display: flex`, `overflow-x: auto`, `flex: 0 0 84%` per quote and
+   * `scrollbar-width: none`. Nothing inside a quote is focusable — a `<figure>`
+   * with a `<blockquote>` and a `<figcaption>` — so the box scrolls and no
+   * keyboard can scroll it: Chrome gives no keyboard scrolling to a non-focusable
+   * overflow box. MEASURED at a 674px section (the builder canvas's own width,
+   * and every phone and tablet): three quotes at 84% = 252% of the box, so two of
+   * the three were unreachable without a pointer, with the scrollbar hidden so
+   * nothing said they were there.
+   *
+   * Two siblings in this tree already solved this and neither could be reused
+   * directly: `MapSection`'s `.descent__track` is a scroller at EVERY width, so
+   * an unconditional `tabindex` is free there; `InviteSection`'s
+   * `.invite__scroller` is a `role="region"` named by its table caption, which
+   * this list has no caption for. So this takes `MapSection`'s bare-`tabindex`
+   * shape (a landmark with no name would be noise beside the section's own `h2`)
+   * and narrows it to the case that can actually scroll.
+   *
+   * THE COST, STATED: at a container WIDER than 48rem these two compositions are
+   * a plain grid with nothing to scroll, and the element is still a tab stop. A
+   * container query cannot set an attribute, and gating on a measured
+   * `scrollWidth > clientWidth` would need JS — which would leave the barrier in
+   * place for the SSR and no-JS render, where the CSS scroller still applies.
+   * A spare tab stop is the smaller harm, and `> 1` keeps it off the single-quote
+   * case that never overflows.
+   */
+  const scrollable = $derived(
+    (composition === 'grid' || composition === 'wall') && shown.length > 1
+  );
+
+  /**
    * `accent: text` and `accent: edge` resolve `--jp-accent-fill` to
    * `transparent`, so a filled plate has nothing to paint and its paired ink
    * (`--jp-accent-on-fill`) would sit on the section background instead — which
@@ -174,6 +211,56 @@
    * — a creator who asks for no motion should not get a scrolling ticker.
    */
   const motion = $derived(design?.motion === 'none' ? 'none' : 'on');
+
+  /**
+   * THE MARQUEE'S PAUSE CONTROL — WCAG 2.2.2, and the mechanism this file already
+   * claimed to have.
+   *
+   * The ticker is `animation: proof-marquee … linear infinite` (15.6s–42s per
+   * cycle depending on the `motion` axis), it starts on its own, and the only
+   * declared way to stop it was
+   * `.proof__marquee:hover, .proof__marquee:focus-within`. `:focus-within` CANNOT
+   * MATCH: there is not one focusable node inside the strip — the quotes are
+   * `<figure>`/`<blockquote>`/`<figcaption>` and the clone track is
+   * `aria-hidden`. So the comment beside those selectors was wrong about half its
+   * own claim ("a pointer or keyboard user landing anywhere in the strip"), and
+   * the real coverage was pointer-only: no keyboard user and no touch user had
+   * any mechanism at all, on content that moves for more than five seconds.
+   *
+   * A REAL BUTTON, not a `tabindex` on the strip, and it costs no new copy:
+   * `marquee_pause` / `marquee_resume` already exist in `messages/en.json`
+   * ("Pause the moving row" / "Resume the moving row") for
+   * `components/pricing/ContentMarquee.svelte`, which is the house pattern for
+   * exactly this control — same keys, same `PauseIcon`/`PlayIcon` pair, same
+   * absolutely-positioned pill. Reusing it keeps one answer to "how does a moving
+   * row stop" instead of two.
+   *
+   * IT RENDERS ONLY WHEN THE TICKER IS REALLY MOVING (`ticking`), because a
+   * button that pauses nothing is a dead-end affordance — the class of defect
+   * this whole sweep is looking for. The ticker exists only inside
+   * `@media (prefers-reduced-motion: no-preference)` and only at
+   * `data-motion='on'`, so both predicates are read here too, and `mounted` keeps
+   * the SSR/no-JS render byte-identical to what it serves today (no JS ⇒ no
+   * animation control ⇒ no control offered).
+   */
+  let mounted = $state(false);
+  let reduced = $state(false);
+  let paused = $state(false);
+
+  onMount(() => {
+    mounted = true;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reduced = mql.matches;
+    const onChange = (e: MediaQueryListEvent) => {
+      reduced = e.matches;
+    };
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  });
+
+  const ticking = $derived(
+    composition === 'marquee' && motion === 'on' && mounted && !reduced
+  );
 
   /**
    * `--jp-reveal-stagger` is calibrated for ~5 block beats, and the shared
@@ -257,53 +344,84 @@
       {/if}
 
       {#if composition === 'marquee'}
-        <!-- Two tracks so the loop is seamless. The clone is `aria-hidden` and
-             removed entirely under reduced motion, so assistive tech and
-             reduced-motion users never meet duplicated quotes. -->
-        <div class="proof__marquee">
-          <ul class="proof__track">
-            {#each shown as t, i (t.id)}
-              <li class="proof__item">
-                <figure class="proof__figure">
-                  <blockquote class="proof__quote" {...itemAttrs('q', i)}>
-                    {t.quote}
-                  </blockquote>
-                  <figcaption class="proof__cite">
-                    <span class="proof__avatar" aria-hidden="true">
-                      {initial(t.authorName)}
-                    </span>
-                    <span class="proof__id">
-                      <span class="proof__author">{t.authorName}</span>
-                      {#if t.authorContext}
-                        <span class="proof__context">{t.authorContext}</span>
-                      {/if}
-                    </span>
-                  </figcaption>
-                </figure>
-              </li>
-            {/each}
-          </ul>
-          <ul class="proof__track proof__track--clone" aria-hidden="true">
-            {#each shown as t (t.id)}
-              <li class="proof__item">
-                <figure class="proof__figure">
-                  <blockquote class="proof__quote">{t.quote}</blockquote>
-                  <figcaption class="proof__cite">
-                    <span class="proof__avatar">{initial(t.authorName)}</span>
-                    <span class="proof__id">
-                      <span class="proof__author">{t.authorName}</span>
-                      {#if t.authorContext}
-                        <span class="proof__context">{t.authorContext}</span>
-                      {/if}
-                    </span>
-                  </figcaption>
-                </figure>
-              </li>
-            {/each}
-          </ul>
+        <!-- THE WRAPPER EXISTS FOR THE CONTROL, and only for it. The edge fade is
+             a `mask-image` on `.proof__marquee`, and a mask applies to every
+             descendant — a pause pill inside the strip would be faded out by the
+             very gradient that implies continuation. So the strip keeps the mask
+             and the clipping, and the button is its SIBLING inside a positioning
+             context. `components/pricing/ContentMarquee.svelte` splits it the same
+             way (`.marquee__window` + `.marquee__pause`) for the same reason. -->
+        <div class="proof__ticker">
+          <!-- Two tracks so the loop is seamless. The clone is `aria-hidden` and
+               removed entirely under reduced motion, so assistive tech and
+               reduced-motion users never meet duplicated quotes. -->
+          <div class="proof__marquee" data-paused={paused ? 'true' : undefined}>
+            <ul class="proof__track">
+              {#each shown as t, i (t.id)}
+                <li class="proof__item">
+                  <figure class="proof__figure">
+                    <blockquote class="proof__quote" {...itemAttrs('q', i)}>
+                      {t.quote}
+                    </blockquote>
+                    <figcaption class="proof__cite">
+                      <span class="proof__avatar" aria-hidden="true">
+                        {initial(t.authorName)}
+                      </span>
+                      <span class="proof__id">
+                        <span class="proof__author">{t.authorName}</span>
+                        {#if t.authorContext}
+                          <span class="proof__context">{t.authorContext}</span>
+                        {/if}
+                      </span>
+                    </figcaption>
+                  </figure>
+                </li>
+              {/each}
+            </ul>
+            <ul class="proof__track proof__track--clone" aria-hidden="true">
+              {#each shown as t (t.id)}
+                <li class="proof__item">
+                  <figure class="proof__figure">
+                    <blockquote class="proof__quote">{t.quote}</blockquote>
+                    <figcaption class="proof__cite">
+                      <span class="proof__avatar">{initial(t.authorName)}</span>
+                      <span class="proof__id">
+                        <span class="proof__author">{t.authorName}</span>
+                        {#if t.authorContext}
+                          <span class="proof__context">{t.authorContext}</span>
+                        {/if}
+                      </span>
+                    </figcaption>
+                  </figure>
+                </li>
+              {/each}
+            </ul>
+          </div>
+          <!-- THE PAUSE CONTROL (WCAG 2.2.2) — see `ticking` in the script for
+               why it is a real button rather than a `tabindex` on the strip, and
+               why it renders only while the ticker is actually running. -->
+          {#if ticking}
+            <button
+              type="button"
+              class="proof__pause"
+              onclick={() => (paused = !paused)}
+              aria-label={paused ? m.marquee_resume() : m.marquee_pause()}
+            >
+              {#if paused}
+                <PlayIcon size={16} />
+              {:else}
+                <PauseIcon size={16} />
+              {/if}
+            </button>
+          {/if}
         </div>
       {:else}
-        <ul class="proof__grid">
+        <!-- `tabindex` ONLY on the two compositions the mobile container query
+             turns into a scroller, and only with something to scroll to — see
+             `scrollable` in the script. `undefined` removes the attribute, so the
+             other four compositions and the single-quote case emit no tab stop. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <ul class="proof__grid" tabindex={scrollable ? 0 : undefined}>
           {#each shown as t, i (t.id)}
             <li class="proof__item jp-reveal" data-jp-step={step(i)}>
               <figure class="proof__figure">
@@ -448,6 +566,17 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* THE RING FOR THE KEYBOARD-SCROLLABLE CASE (see `scrollable` in the script).
+     `edge: none` and `edge: soft` strip borders from this section; they must never
+     strip a focus ring (contract R14), so this reads `--color-focus` directly
+     rather than any edge token. `outline-offset` is negative because the row
+     bleeds to the section edges at the width where it scrolls — a positive offset
+     would draw the ring outside the section's own padding. */
+  .proof__grid:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: calc(var(--space-0-5) * -1);
   }
 
   .proof__item {
@@ -796,6 +925,13 @@
      1 of the extracted CSS, nowhere near the comment that caused it. Measured
      here twice. `HeroSection.svelte:18` currently carries ONE such spelling, so
      it compiles — it is one prose edit away from the same 20 minutes. */
+  /* The positioning context for `.proof__pause`. Bare — the clipping, the flex
+     row and the edge mask all stay on `.proof__marquee` inside the
+     no-preference query, so nothing here can fade or clip the control. */
+  .proof__ticker {
+    position: relative;
+  }
+
   .proof__marquee {
     display: block;
   }
@@ -865,13 +1001,72 @@
       width: 20rem;
     }
 
-    /* PAUSE ON HOVER AND FOCUS (WCAG 2.2.2): continuous motion lasting more than
-       five seconds needs a mechanism to stop it, and a pointer or keyboard user
-       landing anywhere in the strip is the cheapest honest one. */
+    /* PAUSE (WCAG 2.2.2). Continuous motion lasting more than five seconds needs
+       a mechanism to stop it, and the THIRD selector is the only one that is a
+       mechanism for every input mode.
+
+       CORRECTION TO THIS RULE'S OWN COMMENT. It used to read "a pointer or
+       keyboard user landing anywhere in the strip is the cheapest honest one",
+       and that was half false: `:focus-within` can never match, because nothing
+       inside the strip is focusable (the quotes are
+       `<figure>`/`<blockquote>`/`<figcaption>`; the clone track is
+       `aria-hidden`). Coverage was pointer-only — no keyboard user and no touch
+       user could stop it. `:hover` and `:focus-within` are KEPT because they are
+       free and correct where they apply; `[data-paused]` is the mechanism that
+       actually discharges 2.2.2, driven by `.proof__pause`. */
     .proof__marquee:hover .proof__track,
-    .proof__marquee:focus-within .proof__track {
+    .proof__marquee:focus-within .proof__track,
+    .proof__marquee[data-paused='true'] .proof__track {
       animation-play-state: paused;
     }
+  }
+
+  /* THE PAUSE PILL, outside the reduced-motion query on purpose: the BUTTON is
+     gated in markup on `ticking`, so if it is in the DOM at all it has an
+     animation to stop, and its own appearance must not depend on a media query.
+
+     Positioned against `.proof__ticker`, NOT against the strip: the edge fade is
+     a `mask-image` on `.proof__marquee`, a mask applies to every descendant, and
+     the pill sits within the 2.5rem fade zone at the trailing edge — inside the
+     strip it would be faded to near-transparent by the gradient. So the wrapper
+     owns the positioning context and the strip owns the mask. It also lands inside
+     the section's padded column while the strip bleeds past it, which reads better
+     than a pill hanging over the bleed. */
+  .proof__pause {
+    position: absolute;
+    inset-block-start: var(--space-3);
+    inset-inline-end: var(--space-3);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-10);
+    height: var(--space-10);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: var(--transition-colors), var(--transition-shadow);
+  }
+
+  .proof__pause:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  /* `edge: none` and `edge: soft` remove borders from this section; they must
+     never remove a focus ring (contract R14). */
+  .proof__pause:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  /* `IconBase` paints `fill: none; stroke: currentColor`, which renders the pause
+     bars as two hairlines at 16px. Solid reads as a glyph — the same correction
+     `ContentMarquee` makes. */
+  .proof__pause :global(svg) {
+    fill: currentColor;
+    stroke: none;
   }
 
   @keyframes proof-marquee {

@@ -514,6 +514,27 @@
         // can mark it stale; without this the client reuses its cached load data
         // and the live page keeps showing pre-save content until a hard reload.
         refresh: () => invalidate('cache:versions'),
+        // And the STUDIO's own reads, which that `invalidate` does NOT touch:
+        // `invalidate(resource)` re-runs `load` functions only. SvelteKit re-runs
+        // remote queries from an invalidation pass exclusively behind its internal
+        // `force_invalidation` flag, and only `invalidateAll()` / `refreshAll()`
+        // set it — so Save toasted success while the canvas went on drawing the
+        // PRE-SAVE price and the PRE-SAVE media until a hard reload.
+        //
+        // These are exactly the two queries this save writes, and the two the
+        // canvas is deliberately fed INSTEAD of the draft's own offer/media bags
+        // (see `offerQuery`'s "AUTHORITATIVE, never the page's own offer bag"
+        // note). That is what makes their staleness dangerous rather than merely
+        // untidy: they render a plausible OLDER number, so the builder quietly
+        // contradicts the page it just published instead of showing a gap.
+        //
+        // Scoped, not `invalidateAll()`: the creator waits on these round trips,
+        // and the route's other three queries answer nothing any leg here wrote.
+        refreshQueries: ({ offer, media }) =>
+          Promise.all([
+            offer ? offerQuery?.refresh() : undefined,
+            media ? sellPreviewQuery?.refresh() : undefined,
+          ]),
       });
 
       if (result.outcome === 'failed') {

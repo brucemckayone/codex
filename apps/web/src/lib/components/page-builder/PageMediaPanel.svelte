@@ -281,11 +281,25 @@
             sellMedia.pageId ?? ''
           )}
         />
+        <!-- `tabindex="-1"` COMPLETES the pattern this form already chose, and
+             it is placed AFTER the spread so it wins.
+
+             The comment above states the design: "the file input stays visually
+             hidden and the styled button opens it". The input is hidden with the
+             1px clip, which keeps it FOCUSABLE — so a keyboard user reached
+             three unnamed file inputs in this panel (cover, hero image,
+             signature) before ever reaching the buttons that name them. The
+             `<button>` is the control and carries the name
+             (Upload / Replace / Uploading…); the input is the mechanism. Not
+             `aria-hidden` and not `display: none`: it is a real form control
+             that has to submit, and Safari will not submit a `display: none`
+             file input's selection reliably. -->
         <input
           bind:this={fileInput}
           class="cover__file"
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneyCoverForm.fields.cover.as('file')}
+          tabindex="-1"
           onchange={(event) => event.currentTarget.form?.requestSubmit()}
         />
         <button
@@ -384,6 +398,7 @@
           class="cover__file"
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneyHeroImageForm.fields.image.as('file')}
+          tabindex="-1"
           onchange={(event) => event.currentTarget.form?.requestSubmit()}
         />
         <button
@@ -484,6 +499,7 @@
           class="cover__file"
           accept="image/png,image/jpeg,image/webp,image/gif"
           {...uploadJourneySignatureImageForm.fields.image.as('file')}
+          tabindex="-1"
           onchange={(event) => event.currentTarget.form?.requestSubmit()}
         />
         <button
@@ -521,8 +537,21 @@
     </p>
 
     {#each SLOTS as entry (entry.slot)}
-      <div class="panel__field">
-        <span class="panel__label">{entry.label()}</span>
+      {@const slotLabelId = `jm-${entry.slot}`}
+      <!--
+        `role="group"` + `aria-labelledby`: `MediaPicker` renders a combobox input
+        plus a clear button (plus a preview button once something is chosen), so a
+        `<label>` wrapping it would label none of them — and Melt's own
+        `aria-labelledby` on the input points at a `$label` element the picker never
+        renders, so it DANGLES and the widget's name falls through to the shared
+        placeholder "Select media...". Every slot in `SLOTS` named identically is
+        not a name — and the count is deliberately not written out here, because a
+        stated number goes stale the first time a slot is added.
+        The full fix is a label prop on `MediaPicker` (handed off); a named group is
+        what this panel can do, and the section inspector does the same.
+      -->
+      <div class="panel__field" role="group" aria-labelledby={slotLabelId}>
+        <span class="panel__label" id={slotLabelId}>{entry.label()}</span>
         <!--
           `optionsFor`, not `options`: the three STILL slots offer video only.
           An audio item has `thumbnailKey: null` by construction, so offering one
@@ -531,10 +560,20 @@
           lives in the store so this panel and the section inspectors cannot
           disagree; the server re-checks it regardless.
         -->
+        <!-- Same reasoning as the section inspector's picker: the wrapper's
+             `role="group"` names the FIELD, while Melt's dangling
+             `aria-labelledby` left the TRIGGER falling through to the shared
+             "Select media…" placeholder — four slots, one name between them.
+             `entry.label()` is the visible label, so they cannot drift.
+             `disabled` until the library has loaded: `setSlot` is otherwise
+             unguarded and `save()` no-ops on an unloaded store, so a pick made
+             during the read is silently discarded. -->
         <MediaPicker
           mediaItems={sellMedia.optionsFor(entry.slot)}
           value={sellMedia.slot(entry.slot)}
           name={`journey-media-${entry.slot}`}
+          ariaLabel={entry.label()}
+          disabled={!sellMedia.loaded}
           showLibraryLink
           onchange={(mediaItemId) => sellMedia.setSlot(entry.slot, mediaItemId)}
         />

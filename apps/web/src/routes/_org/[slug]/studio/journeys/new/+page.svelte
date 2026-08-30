@@ -11,6 +11,7 @@
   import * as m from '$paraglide/messages';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { createJourney } from '$lib/remote/journeys.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
 
   const { data } = $props();
 
@@ -52,8 +53,29 @@
       const next = pageType === 'course' ? 'curriculum' : 'page';
       await goto(`/studio/journeys/${id}/${next}`);
     } catch (err) {
+      /*
+        THROUGH `queryErrorMessage`, and the `instanceof Error` test it replaces
+        was dead code for every failure this command can actually produce.
+
+        SvelteKit rejects a remote call with `HttpError`, and `HttpError` does NOT
+        extend `Error` (`@sveltejs/kit/src/exports/internal/index.js` — a plain
+        class holding `{ status, body: { message } }`). So `err instanceof Error`
+        was FALSE for every `error(status, message)` the create path raises, and
+        the creator always got the generic fallback instead of the reason:
+        `createJourney`'s own "Journeys can only be created within an
+        organization", and every 4xx the worker forwards — a slug space
+        exhausted, a title the save schema refuses, a 403 for an org the session
+        does not manage. The one shape it DID catch (a network `TypeError`) is
+        the one with nothing useful to say.
+
+        `queryErrorMessage` reads `.body.message` first, falls back to a
+        top-level `.message`, and returns the fallback for anything else — so all
+        three rejection shapes land on the most specific text available
+        (Codex-xo3bl).
+      */
       toast.error(
-        err instanceof Error ? err.message : m.studio_journey_new_toast_failed()
+        queryErrorMessage(err, m.studio_journey_new_toast_failed()) ??
+          m.studio_journey_new_toast_failed()
       );
       submitting = false;
     }

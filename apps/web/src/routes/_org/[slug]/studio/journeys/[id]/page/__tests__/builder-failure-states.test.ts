@@ -230,6 +230,43 @@ describe('builder — the component owns no write of its own', () => {
   });
 });
 
+/**
+ * THE POST-SAVE RE-READ, component half.
+ *
+ * `saveBuilderDraft` decides WHICH reads a save moved and asks for them
+ * (`builder-save.test.ts` drives the value across a save and proves it moves).
+ * Only this file can see whether the component actually HANDS IT the two
+ * queries — an orchestrator whose `refreshQueries` is never passed is a silent
+ * no-op, and the pre-fix behaviour it restores is invisible: a "Page saved"
+ * toast over a canvas still drawing the previous price.
+ */
+describe('builder — Save re-reads the studio, not only the public loads', () => {
+  it('passes refreshQueries, because invalidate() re-runs loads only', () => {
+    const body = code(functionBody(ROUTE, 'async function handleSave'));
+    // `invalidate('cache:versions')` stays — it is what the PUBLIC sales load
+    // depends on — but it re-runs no remote query, so it cannot be the only one.
+    expect(body).toContain("invalidate('cache:versions')");
+    expect(body).toMatch(/refreshQueries:/);
+  });
+
+  it('re-reads the two authoritative queries the canvas renders', () => {
+    const body = code(functionBody(ROUTE, 'async function handleSave'));
+    // The pricing read and the sell-media read: the two the canvas is fed INSTEAD
+    // of the draft's own bags, so the two whose staleness is a plausible lie.
+    expect(body).toMatch(/offerQuery\?\.refresh\(\)/);
+    expect(body).toMatch(/sellPreviewQuery\?\.refresh\(\)/);
+  });
+
+  it('gates each re-read on the scope, and never reaches for invalidateAll', () => {
+    const body = code(functionBody(ROUTE, 'async function handleSave'));
+    // Unconditional refreshes would spend a round trip the creator is waiting on
+    // for data the save did not touch; `invalidateAll()` would spend every load's.
+    expect(body).toMatch(/offer \? offerQuery/);
+    expect(body).toMatch(/media \? sellPreviewQuery/);
+    expect(body).not.toContain('invalidateAll(');
+  });
+});
+
 describe('portals index — a failed list read is not "No portals yet"', () => {
   it('derives the error through queryErrorMessage', () => {
     expect(INDEX_CODE).toMatch(/queryErrorMessage\(\s*journeysQuery\.error/);

@@ -23,11 +23,29 @@
     onadd: (type: string) => void;
     /** Close the picker without adding. */
     onclose?: () => void;
+    /**
+     * Take focus on mount.
+     *
+     * OFF by default, and the default is the interesting half. In the rail the
+     * picker is a DISCLOSURE: it opens below the "Add section" button it is next
+     * to, so the natural next Tab already reaches it and moving focus would take
+     * it away from a creator who only wanted to look. In the CANVAS it is a
+     * floating popover rendered at the very end of the component, hundreds of tab
+     * stops from the toolbar button that opened it — there, not taking focus means
+     * the control is effectively keyboard-unreachable. Same component, opposite
+     * correct answer, so it is the caller's call.
+     */
+    focusOnMount?: boolean;
   }
 
-  const { onadd, onclose }: Props = $props();
+  const { onadd, onclose, focusOnMount = false }: Props = $props();
 
   let query = $state('');
+  let searchInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    if (focusOnMount) searchInput?.focus();
+  });
 
   const matches = $derived<readonly SectionDefinition[]>(
     listSectionDefinitions().filter((def) => sectionMatchesQuery(def, query))
@@ -45,6 +63,7 @@
   <div class="add-picker__search">
     <SearchIcon size={15} />
     <input
+      bind:this={searchInput}
       type="text"
       class="add-picker__input"
       placeholder={m.studio_builder_add_section_search_placeholder()}

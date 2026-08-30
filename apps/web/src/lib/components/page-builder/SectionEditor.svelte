@@ -27,6 +27,8 @@
     findSectionDefinition,
     resolveDesign,
     resolveVariant,
+    SECTION_DESIGN_AXES,
+    type SectionDesignAxis,
     variantsForType,
   } from '$lib/page-builder';
   import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
@@ -57,23 +59,11 @@
   const SectionGlyph = $derived(sectionIcon(section.type));
   const definition = $derived(findSectionDefinition(section.type));
 
-  /**
-   * The axis gate for a field, or null when it is not gated / not currently held.
-   *
-   * A field declaring `disabledWhenAxis` is one whose CONTENT choice a DESIGN axis
-   * can overrule — today only the hero's `mediaMode` under `media: none`. Rather
-   * than let the author pick something with no effect, the control goes disabled
-   * and the returned `reason` is shown in place of its hint.
-   *
-   * `section.design` is a bag of axis→value strings; the cast is to index it by a
-   * declared axis name without widening anything to `any`.
-   */
-  const axisGate = (field: SectionFieldDef) => {
-    const gate = field.disabledWhenAxis;
-    if (!gate) return null;
-    const axes = section.design as Record<string, string | undefined> | undefined;
-    return axes?.[gate.axis] === gate.value ? gate : null;
-  };
+  /** Is this name one of the nine declared axes? Narrows a gate's `string` key. */
+  function isDesignAxis(name: string): name is SectionDesignAxis {
+    return (SECTION_DESIGN_AXES as readonly string[]).includes(name);
+  }
+
   /**
    * ALL EIGHT DECLARED CONTROL KINDS ARE NOW BUILT (`Codex-28ifd` closed).
    *
@@ -95,6 +85,12 @@
    */
   const fields = $derived(fieldsForSectionType(section.type));
 
+  /**
+   * Does this type field a sell-media picker? Drives the read-failure notice
+   * below — a section with no media control must not be told about a media read.
+   */
+  const hasMediaField = $derived(fields.some((f) => f.control === 'media'));
+
   const variants = $derived(variantsForType(section.type));
   const currentVariant = $derived(resolveVariant(section));
 
@@ -111,11 +107,61 @@
   const effectiveDesign = $derived(resolveDesign(section, pendingPage));
   /** Page → default only: what it would render as if it overrode nothing. */
   const inheritedDesign = $derived(resolveDesign(null, pendingPage));
+  /**
+   * The axis gate for a field, or null when it is not gated / not currently held.
+   *
+   * A field declaring `disabledWhenAxis` is one whose CONTENT choice a DESIGN axis
+   * can overrule — today only the hero's `mediaMode` under `media: none`. Rather
+   * than let the author pick something with no effect, the control goes disabled
+   * and the returned `reason` is shown in place of its hint.
+   *
+   * IT READS THE **EFFECTIVE** AXIS, not `section.design`, and the difference is
+   * the whole point. Axis resolution is section → page → default, and a section
+   * overrides nothing until a creator deliberately says so — so INHERITED is the
+   * normal case, not the edge case. Reading the section's own bag alone meant the
+   * gate only fired for a creator who had already set `media: none` on this one
+   * section, while the page-level look that sets it for EVERY section left the
+   * control live: the `Plain Facts` preset carries `media: 'none'`, so choosing it
+   * removed the hero's media plate and left "What the media does" enabled, with
+   * its ordinary hint on screen and every option a no-op. That is the exact shape
+   * — a control that accepts the press and does nothing — that three rounds of
+   * this effort were spent removing.
+   *
+   * `effectiveDesign` is the SAME `resolveDesign` call the renderer makes, so the
+   * value the gate tests cannot drift from the value the section renders with; a
+   * second, local resolution eventually would.
+   *
+   * `disabledWhenAxis.axis` is declared as a plain `string`, so it is NARROWED
+   * against the runtime axis list rather than cast: a gate naming something that
+   * is not one of the nine axes can then never silently resolve to `undefined`
+   * and read as "not gated" — it is a declaration bug, and the narrowing is where
+   * it stops.
+   */
+  const axisGate = (field: SectionFieldDef) => {
+    const gate = field.disabledWhenAxis;
+    if (!gate) return null;
+    if (!isDesignAxis(gate.axis)) return null;
+    return effectiveDesign[gate.axis] === gate.value ? gate : null;
+  };
+
   /** `media` is inert on 6 of 11 types — hidden there rather than shown dead. */
   const designAxes = $derived(axesForSectionType(section.type));
   const overriddenCount = $derived(
     designAxes.filter((axis) => section.design?.[axis] !== undefined).length
   );
+
+  /**
+   * A document-unique id for a field's visible label, so a MANY-CONTROL field can
+   * point `aria-labelledby` at it.
+   *
+   * Scoped by the SECTION id as well as the key: the inspector renders one
+   * section at a time today, but an id that collided would silently give two
+   * groups the same name — which is the failure this exists to fix, arriving from
+   * the other direction. Non-id characters are folded out because a section id is
+   * generated, not curated.
+   */
+  const fieldLabelId = (key: string): string =>
+    `sf-${`${section.id}-${key}`.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 
   /** Read a prop as a string for a control `value` (non-strings coerce to ''). */
   function valueOf(key: string): string {
@@ -264,6 +310,32 @@
 
   <div class="section-editor__fields">
     <p class="section-editor__group-label">{m.studio_builder_inspector_content()}</p>
+    <!--
+      THE READ FAILURE IS SAID OUT LOUD HERE TOO, and the omission it replaces is
+      the one this feature has already been caught by once.
+
+      `sellMedia.loadError` was populated by both of `open()`'s reads and rendered
+      only in `PageMediaPanel`. The SAME store feeds the `media` control in every
+      section inspector — six of them across hero / introVideo / reel / guide — and
+      those rendered nothing at all, so a failed media-library read was
+      indistinguishable from "you have no ready media": an empty picker, no
+      message, and a creator who concludes their library is empty. That is
+      precisely the shape the panel's own comment describes fixing on its side,
+      left unfixed on this one.
+
+      Gated on `hasMediaField`, so a prose section is never told about a media read
+      it does not make. Same `role="alert"`, same error-then-loading pair as the
+      panel, deliberately: two surfaces reporting one fact should say it the same
+      way.
+    -->
+    {#if hasMediaField}
+      {#if sellMedia.loadError}
+        <p class="section-editor__warn" role="alert">{sellMedia.loadError}</p>
+      {:else if sellMedia.loading}
+        <p class="section-editor__hint" role="status">{m.studio_builder_media_loading()}</p>
+      {/if}
+    {/if}
+
     {#each fields as field (field.key)}
       <!--
         Hoist the narrowed slot BEFORE the handler closure: Svelte 5 does not
@@ -272,12 +344,54 @@
       -->
       {#if field.control === 'media' && field.mediaSlot}
         {@const slot = field.mediaSlot}
-        <div class="section-editor__field">
-          <span class="section-editor__field-label">{field.label}</span>
+        {@const labelId = fieldLabelId(field.key)}
+        <!--
+          `role="group"` + `aria-labelledby`, NOT a `<label>`: the picker renders
+          a combobox input, a clear button and (once something is chosen) a
+          preview button, and a label wrapping more than one control labels none
+          of them.
+
+          IT IS ALSO NOT THE WHOLE FIX, stated plainly rather than left to be
+          discovered. Melt's combobox puts its own `aria-labelledby` on the input,
+          pointing at a `$label` element `MediaPicker` never renders — so the
+          reference DANGLES and the widget's own accessible name falls through to
+          the placeholder "Select media...", identical for all six pickers. Three
+          of them sit stacked in the guide inspector (Portrait / Video /
+          Signature), so a screen-reader user got the same name three times with
+          nothing to tell them apart. A named group is announced on entry and is
+          the fix available inside this directory; naming the widget itself needs
+          a label prop on `MediaPicker`, which lives in `components/studio` and is
+          handed off.
+        -->
+        <div class="section-editor__field" role="group" aria-labelledby={labelId}>
+          <span class="section-editor__field-label" id={labelId}>{field.label}</span>
+          <!--
+            `optionsFor(slot)`, NOT `options` — and the store's own doc comment is
+            the one this line was breaking: "Every surface with a sell-media
+            picker calls THIS rather than reading `options` directly, so the panel
+            and the per-section inspector cannot drift into offering different
+            lists for the same slot." The inspector was the surface that had
+            drifted. `heroMediaId`, `guidePortraitMediaId` and `signatureMediaId`
+            accept VIDEO only, because an audio item has `thumbnailKey: null` by
+            construction and can resolve to no still at all — so the three still
+            slots were offering a creator items that could only ever render as
+            nothing: picked, saved clean, no error, section unchanged.
+          -->
+          <!-- `ariaLabel` names the widget ITSELF. The `role="group"` wrapper around
+               this field already gives a screen reader the field name on entry, but
+               Melt puts `aria-labelledby` on the trigger pointing at a `label`
+               element MediaPicker never renders, so the trigger's OWN name fell
+               through to the shared placeholder — three stacked pickers in the guide
+               inspector all announced as "Select media…". `field.label` is the same
+               string the visible label shows, so the two cannot drift.
+               `disabled` while the library is still loading: a pick made then is
+               dropped, not persisted, because the store gates its save on `loaded`. -->
           <MediaPicker
-            mediaItems={sellMedia.options}
+            mediaItems={sellMedia.optionsFor(slot)}
             value={sellMedia.slot(slot)}
             name={`section-media-${slot}`}
+            ariaLabel={field.label}
+            disabled={!sellMedia.loaded}
             showLibraryLink
             onchange={(mediaItemId) => sellMedia.setSlot(slot, mediaItemId)}
           />
@@ -292,8 +406,9 @@
           plain heading and each row labels its own cells.
         -->
         {@const arrayField = field}
-        <div class="section-editor__field">
-          <span class="section-editor__field-label">{field.label}</span>
+        {@const labelId = fieldLabelId(field.key)}
+        <div class="section-editor__field" role="group" aria-labelledby={labelId}>
+          <span class="section-editor__field-label" id={labelId}>{field.label}</span>
           <ArrayField
             field={arrayField}
             value={section.props[arrayField.key]}
@@ -576,6 +691,20 @@
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
     line-height: var(--leading-snug);
+  }
+
+  /* The media read-failure notice. Same surface and same tokens as
+     `PageMediaPanel`'s `.panel__warn`, because it reports the same fact from the
+     same store — two treatments for one failure would read as two failures. */
+  .section-editor__warn {
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-md);
+    background-color: var(--color-warning-50);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-warning-700);
   }
 
   .section-editor__foot {

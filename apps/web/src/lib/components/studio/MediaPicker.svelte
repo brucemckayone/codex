@@ -50,6 +50,33 @@
     onchange?: (mediaItemId: string | null) => void;
     name?: string;
     showLibraryLink?: boolean;
+    /**
+     * Accessible name for the picker's trigger.
+     *
+     * Melt's combobox puts `aria-labelledby` on the trigger pointing at its own
+     * `label` element — and this component destructures `label` from
+     * `createCombobox` and NEVER RENDERS IT, so that reference DANGLES. A dangling
+     * `aria-labelledby` computes to an empty name, so the accessible name fell
+     * through to the placeholder and every picker announced identically as
+     * "Select media…". The journey builder's guide inspector stacks THREE of them
+     * (portrait, video, signature), so all three were the same control to a screen
+     * reader.
+     *
+     * Passing this sets `aria-label` AND clears the dangling `aria-labelledby`, so
+     * the name is stated outright rather than depending on the accessible-name
+     * algorithm falling through a broken reference.
+     */
+    ariaLabel?: string;
+    /**
+     * Disable the trigger.
+     *
+     * A picker whose options have not loaded is otherwise still pickable, and such
+     * a pick is DROPPED rather than persisted — the sell-media store gates its save
+     * on its own `loaded` flag. A control that accepts a choice and discards it is
+     * the dead-end shape, so the caller that knows the load state has to be able to
+     * say so.
+     */
+    disabled?: boolean;
   }
 
   const {
@@ -58,6 +85,8 @@
     onchange,
     name = 'mediaItemId',
     showLibraryLink = false,
+    ariaLabel,
+    disabled = false,
   }: Props = $props();
 
   // ── Melt UI Combobox ────────────────────────────────────────────────
@@ -144,6 +173,9 @@
         use:input
         type="button"
         class="trigger-preview"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : $input['aria-labelledby']}
+        {disabled}
       >
         <span class="trigger-icon" aria-hidden="true">
           {#if selectedItem.mediaType === 'video'}
@@ -185,6 +217,9 @@
       use:input
       class="picker-trigger picker-input"
       placeholder={m.media_picker_placeholder()}
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabel ? undefined : $input['aria-labelledby']}
+      {disabled}
     />
   {/if}
 

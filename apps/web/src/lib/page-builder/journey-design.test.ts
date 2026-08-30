@@ -2086,3 +2086,270 @@ describe('--jp-heading collapses on a mid-luminance ink (recorded)', () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9. THE PRACTICE-CARD FLOOR — the one mechanism in this branch that neither
+//    jsdom nor a horizontal-overflow check can see
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * WHY A CSS-MECHANISM CHECK, AND WHY HERE.
+ *
+ * `MapSection`'s practice pool overflowed at a 390px viewport: the uppercase
+ * type label inside `.descent__card-top` painted 41px past the card's own edge,
+ * over the border. Nothing else in this branch's gate could see it.
+ *
+ *   * jsdom has no layout and no container queries, so the section's own
+ *     component test renders both cards at width 0 and asserts nothing about
+ *     either. The `@container (max-width: 45rem)` rule that CAUSES the squeeze
+ *     is not even evaluated.
+ *   * `document.documentElement.scrollWidth` stayed equal to `clientWidth` at
+ *     all three measured widths, because the spill is INSIDE a section that
+ *     does not itself overflow the page. A page-level horizontal-overflow probe
+ *     — the usual guard for this bug class — is blind to it by construction.
+ *   * A visual snapshot would have caught it, but the repo's journey snapshots
+ *     capture blank sections (the reveal never fires in a headless full-page
+ *     shot), so they did not.
+ *
+ * That leaves the declarations themselves, which is what this file already does
+ * for colour: parse the CSS, model the mechanism it declares, and license the
+ * model by reproducing numbers measured in a real browser. The model below
+ * reproduces FOUR live measurements to the pixel across both arms, which is why
+ * the assertions that follow it mean something.
+ *
+ * This is the only per-section Svelte `<style>` block this file reads. The
+ * stylesheet-integrity sweep at the top deliberately excludes them (the Svelte
+ * compiler fails the build on a malformed comment), and that exclusion still
+ * holds — nothing here re-litigates it.
+ */
+const MAP_SVELTE = read('render/sections/MapSection.svelte');
+const MAP_STYLE = MAP_SVELTE.slice(
+  MAP_SVELTE.indexOf('<style>') + '<style>'.length,
+  MAP_SVELTE.lastIndexOf('</style>')
+);
+const MAP_RULES = parseRules(MAP_STYLE);
+
+/** The at-rule preludes the practice pool's width chain passes through. */
+const NARROW_AT = '@container (max-width: 45rem)';
+const ONE_UP_AT = '@container (max-width: 24rem)';
+
+/** Rules whose selector LIST contains `sel` exactly — grouped rules included. */
+const mapRulesFor = (sel: string, at = ''): Rule[] =>
+  MAP_RULES.filter(
+    (r) => r.at === at && r.selector.split(',').some((s) => s.trim() === sel)
+  );
+
+/** The winning declaration of `prop` on `sel` within `at` — later wins. */
+const mapDecl = (sel: string, prop: string, at = ''): string | undefined => {
+  const hits = mapRulesFor(sel, at)
+    .map((r) => r.declarations[prop])
+    .filter((v): v is string => v !== undefined);
+  return hits.at(-1);
+};
+
+/** The first `<n>rem` length in a value, in rem. */
+const remIn = (value: string | undefined): number => {
+  const m = value === undefined ? null : /(-?[\d.]+)rem/.exec(value);
+  return m ? Number(m[1]) : Number.NaN;
+};
+
+// ── the layout model ───────────────────────────────────────────────────────
+//
+// Two equal flex items in a wrapping row. Everything below is arithmetic the
+// CSS states outright: there is no line-breaking heuristic here, because with
+// two items of equal basis a wrap happens exactly when the pair plus the gap
+// cannot fit, and `min-width` is the only thing that stops the shrink.
+
+const REM = 16; // `rootFont` measured 16px on every seeded org
+const SPACE_UNIT = 4; // `--space-unit` = 0.25rem * `--brand-density-scale: 1`
+const BORDER = 1; // `--border-width`, the floor `max()` in the card rule
+
+interface Arm {
+  /** `.descent__practices` content-box width. */
+  rowWidth: number;
+  /** `--jp-rhythm`, the section's own multiplier on gap AND padding. */
+  rhythm: number;
+  /** `flex-basis`, in rem — 11 at base, 8.25 under the 45rem container. */
+  basisRem: number;
+  /** `min-width`'s rem term, or `null` for the arm that has no `min-width`. */
+  floorRem: number | null;
+}
+
+interface Arranged {
+  twoUp: boolean;
+  /** `.descent__card`'s `clientWidth` — border excluded, padding included. */
+  cardClientWidth: number;
+  /** `.descent__card-top`'s box: the card's content width. */
+  labelBox: number;
+}
+
+function arrange({ rowWidth, rhythm, basisRem, floorRem }: Arm): Arranged {
+  const gap = 3 * SPACE_UNIT * rhythm; // `--space-3` * `--jp-rhythm`
+  const pad = 4 * SPACE_UNIT * rhythm; // `--space-4` * `--jp-rhythm`
+  const basis = basisRem * REM;
+  // `min(100%, 11rem)`: the `100%` term resolves against the flex container's
+  // own content box, so a row NARROWER than the floor yields the row. That term
+  // is what stops a single card overflowing a container tighter than 11rem.
+  const floor = floorRem === null ? 0 : Math.min(rowWidth, floorRem * REM);
+  const perItem = Math.max(basis, floor);
+  const twoUp = 2 * perItem + gap <= rowWidth;
+  const outer = twoUp ? (rowWidth - gap) / 2 : rowWidth;
+  return {
+    twoUp,
+    cardClientWidth: outer - 2 * BORDER,
+    labelBox: outer - 2 * BORDER - 2 * pad,
+  };
+}
+
+/**
+ * THE LABEL'S MIN-CONTENT, and it is measured rather than derived.
+ *
+ * `.descent__card-top` is a flex row: a 14px glyph, 6px gap, the practice type
+ * at `--text-xs` upper-cased at `--tracking-wider`, then an 8px gap and a 14px
+ * lock. Its `scrollWidth` read 131px on of-blood-and-bones/bone-deep at a 390
+ * viewport with "REFLECTION" as the longest type in the pool. Content-dependent
+ * by nature — a longer type string raises it — so it is a recorded floor to
+ * clear, not a formula. The `min-width` fix is deliberately indifferent to it:
+ * it states the card's own minimum instead of tracking the label's.
+ */
+const LABEL_MIN_CONTENT = 131;
+
+/** `--jp-rhythm`'s declared values, read from the axis stylesheet. */
+const RHYTHMS = [
+  ...new Set(declarationsOf(DESIGN, '--jp-rhythm').map(Number)),
+].sort((a, b) => a - b);
+
+/** The section's rhythm on the page every number below was measured on. */
+const MEASURED_RHYTHM = 1.25;
+/** `.descent__practices` clientWidth at a 390px viewport, measured. */
+const MEASURED_ROW = 279;
+
+describe('the practice-card floor — .descent__card min-width (F4)', () => {
+  it('the model reproduces the live browser, in BOTH arms', () => {
+    // MEASURED on of-blood-and-bones/bone-deep AND studio-alpha/bone-deep, 390
+    // viewport, reveals forced in, via getComputedStyle + clientWidth readback:
+    //   --jp-rhythm 1.25 · gap 15px · padding 20px · border 1px
+    //   flex-basis 132px (the 45rem container override, section CQ width 390)
+    //   .descent__practices clientWidth 279
+    //
+    // BEFORE (no min-width): .descent__card scrollWidth 151 / clientWidth 130,
+    //   .descent__card-top 131 / 90 — a 41px spill, both cards on one line.
+    // AFTER  (min-width live): .descent__card 279 wide / clientWidth 277,
+    //   .descent__card-top 237 / 237 — zero spill, card tops 1664 and 1768,
+    //   i.e. one card per line.
+    const before = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 8.25,
+      floorRem: null,
+    });
+    expect(before.twoUp).toBe(true);
+    expect(before.cardClientWidth).toBe(130); // live: 130
+    expect(before.labelBox).toBe(90); // live: 90
+
+    const after = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 11,
+      floorRem: 11,
+    });
+    expect(after.twoUp).toBe(false);
+    expect(after.cardClientWidth).toBe(277); // live: 277
+    expect(after.labelBox).toBe(237); // live: 237
+  });
+
+  it('THE DEFECT — without the floor the label does not fit its own card', () => {
+    // The control arm, and the reason this test is not vacuous: delete the
+    // `min-width` declaration and this is what the page goes back to. The
+    // margin was ONE PIXEL of slack in the wrong direction — 2 x 132 + 15 = 279
+    // against a 279px row — which is why it survived review.
+    const control = arrange({
+      rowWidth: MEASURED_ROW,
+      rhythm: MEASURED_RHYTHM,
+      basisRem: 8.25,
+      floorRem: null,
+    });
+    expect(control.labelBox).toBeLessThan(LABEL_MIN_CONTENT);
+    expect(LABEL_MIN_CONTENT - control.labelBox).toBe(41); // the live spill
+  });
+
+  it('the floor clears the label at every rhythm and every narrow width', () => {
+    // The claim the fix makes, and the reason it is a constraint rather than a
+    // fourth breakpoint: `min-width` holds at every axis bag and every width,
+    // with no number to keep in step. Swept over `--jp-rhythm`'s four declared
+    // values x every row width from a 320px viewport up.
+    expect(RHYTHMS).toEqual([0.75, 1, 1.25, 1.6]);
+    const failures: string[] = [];
+    for (const rhythm of RHYTHMS) {
+      for (let rowWidth = 209; rowWidth <= 320; rowWidth += 1) {
+        const got = arrange({ rowWidth, rhythm, basisRem: 8.25, floorRem: 11 });
+        if (got.labelBox < LABEL_MIN_CONTENT)
+          failures.push(`${rowWidth}px @ rhythm ${rhythm}: ${got.labelBox}`);
+      }
+    }
+    expect(failures).toEqual([]);
+
+    // THE LIMIT, STATED. The floor cannot help below the width at which the row
+    // itself is too narrow for the label plus its padding: at the widest rhythm
+    // a single full-row card needs rowWidth >= 131 + 51.2 + 2 = 184.2px. A 320px
+    // viewport gives a 209px row (the 390 viewport's 279 less the same chrome),
+    // so the nearest real device clears it by ~25px. Below ~185px of row no
+    // `min-width` can fix this and the label itself would have to wrap.
+    const atLimit = arrange({
+      rowWidth: 184,
+      rhythm: 1.6,
+      basisRem: 8.25,
+      floorRem: 11,
+    });
+    expect(atLimit.labelBox).toBeLessThan(LABEL_MIN_CONTENT);
+  });
+
+  it('and does NOT collapse the two-up design where two cards fit', () => {
+    // The regression the fix could plausibly have caused: forcing one-up
+    // everywhere. At the 45rem container boundary the row measures ~609px, so
+    // the pair still shares a line with room to spare.
+    const wide = arrange({
+      rowWidth: 609,
+      rhythm: 1,
+      basisRem: 11,
+      floorRem: 11,
+    });
+    expect(wide.twoUp).toBe(true);
+    expect(Math.round(wide.cardClientWidth)).toBe(297);
+    expect(wide.labelBox).toBeGreaterThan(LABEL_MIN_CONTENT);
+  });
+
+  it('the declarations the model reads are the ones in the stylesheet', () => {
+    // The string half. If any of these five moves, the numbers above stop
+    // describing the file and this fails rather than going quietly stale.
+    expect(mapDecl('.descent__card', 'min-width')).toBe('min(100%, 11rem)');
+    expect(mapDecl('.descent__card', 'flex')).toBe('1 1 11rem');
+    expect(mapDecl('.descent__card', 'padding')).toBe(
+      'calc(var(--space-4) * var(--jp-rhythm))'
+    );
+    expect(mapDecl('.descent__practices', 'gap')).toBe(
+      'calc(var(--space-3) * var(--jp-rhythm))'
+    );
+    // The narrow-container basis is the CONTROL the A/B held constant: both arms
+    // ran at 8.25rem and varied only `min-width`. Change it and re-measure.
+    expect(remIn(mapDecl('.descent__card', 'flex', NARROW_AT))).toBe(8.25);
+
+    // The 24rem rule still exists, and is still NOT what saves a 390 viewport:
+    // 24rem is 384px, and 390px is the width of every iPhone from the 12 to the
+    // 15. It missed by six pixels, which is the whole reason for the floor.
+    expect(mapDecl('.descent__card', 'flex-basis', ONE_UP_AT)).toBe('100%');
+    expect(24 * REM).toBeLessThan(390);
+
+    // Nothing else re-declares either property on this element — no later rule
+    // (`.descent--enhanced`, reduced motion) can unset the floor.
+    const touching = MAP_RULES.filter(
+      (r) =>
+        /\.descent__card(?![-\w])/.test(r.selector) &&
+        ('min-width' in r.declarations || 'flex' in r.declarations)
+    );
+    expect(touching.map((r) => `${r.at}|${r.selector}`).sort()).toEqual([
+      '@container (max-width: 45rem)|.descent__card',
+      '|.descent__card', // `at` is '' at top level
+    ]);
+  });
+});

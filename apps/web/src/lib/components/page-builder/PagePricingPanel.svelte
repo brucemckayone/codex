@@ -45,6 +45,35 @@
   // save cannot withdraw a live plan the panel never managed to see.
   const locked = $derived(isCoursePage && !monetisation.loaded);
 
+  /**
+   * A course-TYPED portal with no course row behind it — the one locked state
+   * this panel had no explanation for.
+   *
+   * `locked` has three causes and only two of them spoke. A failed read shows
+   * `monetisation.loadError`; an in-flight read shows the loading line. The third
+   * is silent: the route opens the store with
+   * `monetisation.open(draft.subjectType === 'course' ? draft.subjectId : null)`,
+   * and `open(null)` returns immediately leaving `loaded` false, `loading` false
+   * and `loadError` null — for ever. `isCoursePage` reads `subjectType` ALONE, so
+   * such a page is locked: four disabled controls (both prices, the subscription
+   * switch, every tier button) and not one word about why. The route itself
+   * treats this as a real state two lines earlier —
+   * `hasCourse: draft.subjectType === 'course' && !!draft.subjectId` guards the
+   * sell-media read on BOTH halves — so the asymmetry is between two adjacent
+   * calls, not a hypothetical.
+   *
+   * READ FROM THE DRAFT, NOT FROM THE STORE'S FLAGS, deliberately: `subjectId` is
+   * a fact the panel already holds, so the note cannot flash during the tick
+   * between mount and `open()` the way a `!loaded && !loading` test would.
+   *
+   * The existing `{#if !isCoursePage}` notes are NOT reused for this: they say
+   * "Only a course journey can be…", which a creator looking at a page whose type
+   * IS course would rightly read as wrong.
+   */
+  const courseMissing = $derived(
+    isCoursePage && !pageBuilder.pending?.subjectId
+  );
+
   const poundsOf = (cents: number | null | undefined): string =>
     cents == null ? '' : (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
@@ -120,7 +149,16 @@
     {m.studio_builder_pricing_callout_before()} <b>{m.studio_builder_pricing_callout_offer()}</b> {m.studio_builder_pricing_callout_after()}
   </p>
 
-  {#if monetisation.loadError}
+  <!--
+    THE THREE CAUSES OF `locked`, ALL THREE NOW STATED. Ordered by what a creator
+    can do about it: a missing course is a fact about the page (nothing to wait
+    for), a failed read is retryable by reloading, an in-flight read resolves on
+    its own. `role="status"` for the first — nothing has failed, the panel simply
+    has nothing to price.
+  -->
+  {#if courseMissing}
+    <p class="panel__warn" role="status">{m.studio_builder_pricing_no_course()}</p>
+  {:else if monetisation.loadError}
     <p class="panel__warn" role="alert">{monetisation.loadError}</p>
   {:else if monetisation.loading}
     <p class="panel__callout" role="status">{m.studio_builder_pricing_loading()}</p>

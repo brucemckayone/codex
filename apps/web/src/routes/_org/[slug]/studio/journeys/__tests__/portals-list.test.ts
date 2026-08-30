@@ -359,6 +359,32 @@ describe('portals list — lifecycle row actions', () => {
     expect(codeOnly()).not.toMatch(/toast\.error\(/);
   });
 
+  it('makes NO count claim while the read has failed', () => {
+    /*
+      An error must never fall through to a statement about the data. `items`
+      falls to `[]` on a rejection as well as before one (`.current` is
+      `undefined` in both states — Codex-xo3bl) and `loading` goes false, so the
+      header announced "0 pages" through `aria-live` directly above the "We could
+      not load your portals" alert: a screen reader heard both, in that order,
+      and they contradict each other. Same defect the items/empty pair already
+      fixes, one element higher up.
+
+      Asserted as the ORDER of the three arms rather than as "contains
+      loadError", because an arm added AFTER the count would never be reached.
+    */
+    const count = codeOnly().match(
+      /<p class="journeys__count"[\s\S]*?<\/p>/
+    )?.[0];
+    expect(count).toBeTruthy();
+    const arms = [
+      (count as string).indexOf('loading'),
+      (count as string).indexOf('loadError'),
+      (count as string).indexOf('items.length'),
+    ];
+    expect(arms.every((i) => i >= 0)).toBe(true);
+    expect(arms).toEqual([...arms].sort((a, b) => a - b));
+  });
+
   it('stays a LIST of rows and token-only — no card grid, no hardcoded colours', () => {
     // The prototype (docs/design/course-journeys/prototype/studio-journeys.html)
     // is a row list, and the studio shell owns the column width.

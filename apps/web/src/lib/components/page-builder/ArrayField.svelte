@@ -21,11 +21,23 @@
 
   ── RECOVERING WHAT THE BROKEN CONTROL CAPTURED ────────────────────────────
   A stored STRING on an array key is not treated as absent. The old text box
-  persisted real authored copy into these keys — `studio-alpha/bone-deep` still
-  holds `facts: "20 years teaching — somatics and grief work"` as a bare string,
-  invisible on the published page — so a string is read as a ONE-ROW array and
-  shown in the first input. The creator sees their words, in a control that can
-  now save them in a shape the renderer reads.
+  persisted real authored copy into these keys, so a string is read as a ONE-ROW
+  array and shown in the first input. The creator sees their words, in a control
+  that can now save them in a shape the renderer reads.
+
+  THE PAGE THIS USED TO NAME NO LONGER HAS THE ROW, and the correction matters
+  more than the example: this comment cited `studio-alpha/bone-deep` as still
+  holding `facts: "20 years teaching — somatics and grief work"` as a bare string.
+  Checked against the dev database during the field-inventory sweep: no `facts`
+  key exists on any of the seven pages, and no `guide` section does either — every
+  one of the 126 stored prop values is a `string` on one of nine keys
+  (accent, bg, button, eyebrow, heading, headline, note, risk, sub). The fixture
+  set was reseeded (see the round's ORCHESTRATOR-FINDINGS O6/O16), which took the
+  cited row with it. The ARGUMENT is untouched — a stored string must not be read
+  as empty, or a creator "filling in the blank" overwrites real content — and the
+  tolerant read below is still the right shape. Only the evidence went stale, and
+  a stale citation in a justification comment is how a correct rule gets deleted
+  by someone who checks the citation and finds nothing.
 
   The alternative (treat a non-array as empty) would render an empty control over
   real stored content, and a creator "filling in the blank" would overwrite it.
@@ -103,6 +115,18 @@
   });
 
   const atCap = $derived(rows.length >= cap);
+
+  /**
+   * A document-unique id for a nested group's label, keyed by ROW as well as by
+   * field: a repeater holds many rows and each row renders its own nested list,
+   * so a key-only id would repeat and give every row's group the same name.
+   *
+   * `field.key` is included because two repeaters can be open in one inspector
+   * only in theory today — but an id collision is silent, and this is the file
+   * that recursion runs through.
+   */
+  const cellLabelId = (rowIndex: number, key: string): string =>
+    `af-${`${field.key}-${rowIndex}-${key}`.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 
   /** Read one cell for an input `value` — never `undefined`, never a non-string. */
   function cellOf(row: unknown, key?: string): string {
@@ -192,9 +216,14 @@
             {#if sub.control === 'list'}
               <!-- A `<div>`, not a `<label>`: a nested list renders MANY inputs,
                    and a label wrapping more than one control labels none of them.
-                   The group gets a plain heading and each row labels itself. -->
-              <div class="af__cell">
-                <span class="af__cell-label">{sub.label}</span>
+                   Each row labels itself; the heading names the GROUP, and it says
+                   so with `role="group"` + `aria-labelledby` rather than leaving
+                   the heading as decoration. Without that the only thing announced
+                   was "Add bullet" — a button whose own name never says which way
+                   in it belongs to, in a repeater that can hold six of them. -->
+              {@const subLabelId = cellLabelId(rowIndex, sub.key)}
+              <div class="af__cell" role="group" aria-labelledby={subLabelId}>
+                <span class="af__cell-label" id={subLabelId}>{sub.label}</span>
                 <ArrayField
                   field={sub}
                   value={rawCellOf(row, sub.key)}

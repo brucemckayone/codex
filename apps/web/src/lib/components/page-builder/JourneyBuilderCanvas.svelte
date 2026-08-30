@@ -405,6 +405,24 @@
   // In-canvas "add after this block" floating picker.
   let addAfterId = $state<string | null>(null);
   let addPos = $state<{ x: number; y: number }>({ x: 0, y: 0 });
+  /**
+   * The toolbar button the popover was opened from, so focus can go back to it.
+   *
+   * WHY IT IS KEPT AT ALL. This popover is `position: fixed` beside the block's
+   * toolbar but rendered as the LAST child of the component, after the whole
+   * scrolling stage. So the tab order and the visual order disagree completely:
+   * a creator who reached "Add a section after this" with the keyboard, pressed
+   * it, and then pressed Tab landed on whatever follows the canvas — never in the
+   * picker that had just appeared under their cursor. The picker was therefore
+   * mouse-only in practice, on the surface whose keyboard path was deliberately
+   * built out (see `onBlockKeydown`). Moving focus IN closes that; putting it BACK
+   * is the other half, because a popover that dumps focus at the top of the
+   * document on Escape is its own trap.
+   *
+   * Not `$state` — nothing renders from it, and a plain binding avoids a
+   * pointless reactive read inside the two handlers that use it.
+   */
+  let addAnchorEl: HTMLElement | null = null;
 
   function openAdd(afterId: string, anchor: HTMLElement): void {
     const r = anchor.getBoundingClientRect();
@@ -412,12 +430,29 @@
       x: Math.min(r.left, window.innerWidth - 288),
       y: Math.min(r.bottom + 6, window.innerHeight - 360),
     };
+    addAnchorEl = anchor;
     addAfterId = afterId;
+  }
+
+  /**
+   * Close the popover and return focus to the button that opened it.
+   *
+   * `isConnected` is checked because ADDING a section re-keys the `{#each}`, so
+   * the anchor button this was opened from can be gone by the time we come to
+   * focus it. A `focus()` on a detached node silently moves focus to `<body>`,
+   * which is the trap this function exists to avoid — so it is skipped rather
+   * than attempted.
+   */
+  function closeAdd(): void {
+    addAfterId = null;
+    const anchor = addAnchorEl;
+    addAnchorEl = null;
+    if (anchor?.isConnected) anchor.focus();
   }
 
   function onAdd(type: string): void {
     if (addAfterId) pageBuilder.addSection(type, addAfterId);
-    addAfterId = null;
+    closeAdd();
   }
 
   function onEditProp(id: string, key: string, value: string): void {
@@ -678,13 +713,16 @@
       style="left: {addPos.x}px; top: {addPos.y}px;"
       onmousedown={stop}
     >
-      <AddSectionPicker onadd={onAdd} onclose={() => (addAfterId = null)} />
+      <!-- `focusOnMount`, unlike the rail's copy of this picker: see the prop's
+           own note. Here the popover is the component's last child, so without it
+           the keyboard never reaches the thing the button just opened. -->
+      <AddSectionPicker onadd={onAdd} onclose={closeAdd} focusOnMount />
     </div>
     <button
       type="button"
       class="jbc-addpop__scrim"
       aria-label={m.studio_builder_canvas_close_picker()}
-      onclick={() => (addAfterId = null)}
+      onclick={closeAdd}
     ></button>
   {/if}
 </div>

@@ -511,8 +511,22 @@
   <header class="journeys__bar">
     <div class="journeys__heading">
       <h1 class="journeys__title">Portals</h1>
+      <!--
+        A COUNT IS A CLAIM ABOUT THE DATA, so a failed read has none to make.
+        `items` falls to `[]` on a rejection as well as before one (`.current` is
+        `undefined` in both states — Codex-xo3bl), and `loading` goes false, so
+        this announced "0 pages" through `aria-live` directly above the "We could
+        not load your portals" alert. A screen reader heard both, in that order,
+        and they contradict each other. Same defect the items/empty pair below
+        already fixes — an error must never fall through to a statement about the
+        data — one element higher up and one round later.
+      -->
       <p class="journeys__count" aria-live="polite">
-        {loading ? 'Loading…' : `${items.length} ${items.length === 1 ? 'page' : 'pages'}`}
+        {loading
+          ? 'Loading…'
+          : loadError
+            ? ''
+            : `${items.length} ${items.length === 1 ? 'page' : 'pages'}`}
       </p>
     </div>
 
