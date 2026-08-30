@@ -20,6 +20,7 @@ import {
   seededSections,
   variantsForType,
 } from './section-catalog';
+import { SECTION_DESIGN_BY_TYPE } from './section-design-defaults';
 
 const EXPECTED_ORDER = [
   'hero',
@@ -181,6 +182,87 @@ describe('variants', () => {
     const s = createSection('retreat-x', () => 'sec-z');
     expect(s.variant).toBeUndefined();
     expect(s.props).toEqual({});
+    // …and no rhythm, because the renderer skips the type entirely.
+    expect(s.design).toBeUndefined();
+  });
+
+  // ── The RHYTHM a new section arrives with ──────────────────────────────────
+  //
+  // Measured before this change: every section of every published page emitted
+  // BYTE-IDENTICAL axis values, and zero of the 28 stored sections carried a
+  // `design` key. The mechanism was complete — store writer, inspector control,
+  // schema and renderer all present since F-B2 — and nothing ever wrote the
+  // exception `setSectionDesignAxis`'s own comment asks for. So the fix is the
+  // DEFAULT, and this is where it enters the model.
+
+  it('createSection writes the type’s rhythm bag', () => {
+    const faq = createSection('faq', () => 'sec-faq');
+    expect(faq.design).toBeDefined();
+    // The axes where FAQ differs from the axis defaults, and only those.
+    expect(faq.design).toEqual({
+      density: 'compact',
+      align: 'start',
+      type: 'restrained',
+      accent: 'none',
+      motion: 'fade',
+    });
+  });
+
+  it('createSection writes NO key the section would inherit anyway', () => {
+    // The page look IS the hero's rhythm, so the hero is not an exception to it
+    // and must store nothing: absence is how "inherited" is represented, and the
+    // inspector paints its "Inherited" pill from exactly that absence.
+    const hero = createSection(
+      'hero',
+      () => 'sec-hero',
+      SECTION_DESIGN_BY_TYPE.hero
+    );
+    expect(hero.design).toBeUndefined();
+  });
+
+  it('createSection stores only the axes that differ from the page look', () => {
+    // The look every seeded page actually carries (measured live).
+    const pageLook = {
+      width: 'narrow',
+      density: 'airy',
+      surface: 'media',
+      edge: 'none',
+      align: 'center',
+      type: 'monumental',
+      accent: 'glow',
+      motion: 'drift',
+      media: 'bleed',
+    } as const;
+    const hero = createSection('hero', () => 'sec-hero', pageLook);
+    // Against that look the hero differs on two axes only — and those two are
+    // what stop it reading like the sections beneath it.
+    expect(hero.design).toEqual({ width: 'full', density: 'vast' });
+  });
+
+  it('createSection never writes `media` on a type that resolves none', () => {
+    // Only Hero / IntroVideo / Reel / Guide read the `--jp-media-*` family.
+    // `Codex-wqxv4`: a stored value that cannot change what renders is a
+    // decorative control, and this programme has paid for one already.
+    for (const type of [
+      'ache',
+      'turn',
+      'map',
+      'feel',
+      'proof',
+      'faq',
+      'invite',
+    ]) {
+      const section = createSection(type, () => `sec-${type}`);
+      expect(section.design, type).toBeDefined();
+      expect(section.design?.media, type).toBeUndefined();
+    }
+  });
+
+  it('createSection returns a bag no other section shares by reference', () => {
+    const a = createSection('faq', () => 'a');
+    const b = createSection('faq', () => 'b');
+    expect(a.design).not.toBe(b.design);
+    expect(a.design).not.toBe(SECTION_DESIGN_BY_TYPE.faq);
   });
 });
 
@@ -211,6 +293,33 @@ describe('createDefaultSections', () => {
   it('mints unique ids by default (crypto.randomUUID)', () => {
     const ids = createDefaultSections().map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('gives a brand-new page a RHYTHM, not one setting repeated eleven times', () => {
+    // This is the assertion form of the defect. Before the change every section
+    // of every published page emitted the same nine values; the page read flat
+    // because nothing varied. A default set must now vary.
+    const sections = createDefaultSections(() => crypto.randomUUID());
+    const densities = new Set(sections.map((s) => s.design?.density));
+    const surfaces = new Set(sections.map((s) => s.design?.surface));
+    expect(densities.size).toBeGreaterThanOrEqual(3);
+    expect(surfaces.size).toBeGreaterThanOrEqual(4);
+    // Every section carries a bag of its own — none is left to inherit the flat
+    // page look wholesale.
+    expect(sections.every((s) => s.design !== undefined)).toBe(true);
+  });
+
+  it('forwards the page look, so a default set stores exceptions only', () => {
+    const sections = createDefaultSections(
+      () => crypto.randomUUID(),
+      SECTION_DESIGN_BY_TYPE.hero
+    );
+    const hero = sections.find((s) => s.type === 'hero');
+    const faq = sections.find((s) => s.type === 'faq');
+    // The hero matches that look exactly, so it is not an exception to it…
+    expect(hero?.design).toBeUndefined();
+    // …and the FAQ still is.
+    expect(faq?.design?.density).toBe('compact');
   });
 });
 

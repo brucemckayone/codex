@@ -3,7 +3,8 @@
  *
  * The pending-draft spine for the six media slots the sales page's `hero` /
  * `introVideo` / `reel` / `guide` sections resolve their primary content from,
- * plus the still cover. Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
+ * plus the two UPLOADED stills — the card cover and, since A32 (Codex-490z7), the
+ * hero image. Sibling to `page-builder-store.svelte.ts`: the route OWNS the lifecycle
  * (`open()` on load → edit via the panel or a section inspector → `save()` →
  * `close()` on destroy), and every surface that can set media reads and writes
  * THIS store, so the media panel and the per-section pickers can never disagree
@@ -23,6 +24,7 @@
 
 import {
   deleteJourneyCover,
+  deleteJourneyHeroImage,
   getJourneySellMedia,
   updateJourneySellMedia,
 } from '$lib/remote/journeys.remote';
@@ -55,6 +57,40 @@ export interface SellMediaOption {
   fileSizeBytes?: number | null;
 }
 
+/**
+ * Which media TYPES each slot can hold — the single source of truth for the P3
+ * still-slot guard, so the panel and every section inspector filter identically.
+ *
+ * THE DEFECT THIS CLOSES. Three of the six slots draw a FRAME rather than play a
+ * stream, and an AUDIO item has no frame BY CONSTRUCTION: `@codex/transcoding`
+ * `paths.ts` returns `thumbnailKey: null` for any non-video, and the ready-row
+ * CHECK asks only for a `waveformKey`. So the service's `toStill` could only ever
+ * resolve an audio item to null. A creator picked an audio track for "Hero image"
+ * (it was offered, with an "Audio" badge), saved, got NO error, and the hero kept
+ * drawing its synthetic plate with nothing anywhere saying why.
+ *
+ * The three CLIP slots stay permissive on purpose: `reel`'s `waveform`
+ * composition is audio-first, so tightening them would break a shipped
+ * composition. Tightening the stills is the fix; tightening everything is a
+ * regression.
+ *
+ * This is the UI half only. The write path re-checks server-side
+ * (`CourseJourneyService.updateJourneySellMedia` → `assertMediaItemsInOrg`), and
+ * that — not this — is the boundary.
+ */
+export const SLOT_ACCEPTS: Readonly<
+  Record<JourneySellMediaSlot, readonly string[]>
+> = {
+  // Stills — a frame is required.
+  heroMediaId: ['video'],
+  guidePortraitMediaId: ['video'],
+  signatureMediaId: ['video'],
+  // Clips — a stream is played; audio is legitimate (reel · waveform).
+  introVideoMediaId: ['video', 'audio'],
+  previewVideoMediaId: ['video', 'audio'],
+  guideVideoMediaId: ['video', 'audio'],
+};
+
 /** The six slots, all independently clearable. `null` = empty. */
 export type SellMediaSlots = Record<JourneySellMediaSlot, string | null>;
 
@@ -76,10 +112,21 @@ class SellMediaStore {
   #saved = $state<SellMediaSlots>({ ...EMPTY_SLOTS });
   /** Resolved cover CDN URL, or null when there is none. */
   #coverImageUrl = $state<string | null>(null);
+  /**
+   * Resolved UPLOADED hero-image CDN URL, or null when none is uploaded
+   * (Codex-490z7, A32).
+   *
+   * The UPLOAD only — never A32's fallback chain. If this held the hero video's
+   * poster frame too, the panel could not tell "the creator uploaded an image"
+   * from "a video happens to have a frame", and it would offer a Remove that
+   * removes nothing.
+   */
+  #heroImageUrl = $state<string | null>(null);
   /** The org's ready media items, for the pickers. */
   #options = $state<SellMediaOption[]>([]);
   #loading = $state(false);
   #coverBusy = $state(false);
+  #heroImageBusy = $state(false);
   /**
    * Why the last {@link open} could not read the attached media, if it could not.
    *
@@ -118,6 +165,10 @@ class SellMediaStore {
   get coverImageUrl(): string | null {
     return this.#coverImageUrl;
   }
+  /** The UPLOADED hero image's URL, or null — see {@link #heroImageUrl}. */
+  get heroImageUrl(): string | null {
+    return this.#heroImageUrl;
+  }
   get options(): SellMediaOption[] {
     return this.#options;
   }
@@ -126,6 +177,10 @@ class SellMediaStore {
   }
   get coverBusy(): boolean {
     return this.#coverBusy;
+  }
+  /** True while the hero image is being cleared (the upload owns its own form). */
+  get heroImageBusy(): boolean {
+    return this.#heroImageBusy;
   }
   /**
    * A creator-readable reason the media could not be read, or `null`.
@@ -157,6 +212,20 @@ class SellMediaStore {
   /** Read one slot's pending value (what a picker renders as selected). */
   slot(slot: JourneySellMediaSlot): string | null {
     return this.#pending[slot];
+  }
+
+  /**
+   * The picker options this slot may actually hold — see {@link SLOT_ACCEPTS}.
+   *
+   * Every surface with a sell-media picker calls THIS rather than reading
+   * `options` directly, so the panel and the per-section inspector cannot drift
+   * into offering different lists for the same slot. That drift is the same
+   * two-sources-of-truth problem this whole store exists to prevent.
+   */
+  optionsFor(slot: JourneySellMediaSlot): SellMediaOption[] {
+    const accepts = SLOT_ACCEPTS[slot];
+    if (!accepts) return this.#options;
+    return this.#options.filter((option) => accepts.includes(option.mediaType));
   }
 
   /**
@@ -220,6 +289,10 @@ class SellMediaStore {
         this.#pending = { ...slots };
         this.#saved = { ...slots };
         this.#coverImageUrl = media.coverImageUrl;
+        // `?? null` because `heroImageUrl` is OPTIONAL-additive on the wire: a
+        // worker deployment predating A32 omits the key entirely, and `undefined`
+        // must read as "no uploaded hero", never leak into the DOM as a src.
+        this.#heroImageUrl = media.heroImageUrl ?? null;
       }
 
       this.#options = (library?.items ?? []).map((item) => ({
@@ -274,7 +347,11 @@ class SellMediaStore {
     };
     this.#pending = { ...slots };
     this.#saved = { ...slots };
+    // The write path does not touch either uploaded still, but the service echoes
+    // both resolved from the row it just wrote — so this is a refresh, not a
+    // clobber. `?? null` for the same optional-additive reason as `open()`.
     this.#coverImageUrl = persisted.coverImageUrl;
+    this.#heroImageUrl = persisted.heroImageUrl ?? null;
   }
 
   /**
@@ -306,15 +383,47 @@ class SellMediaStore {
     }
   }
 
+  /**
+   * Record a hero image the PANEL has just uploaded (Codex-490z7, A32).
+   *
+   * Same split as {@link applyCoverUrl}, and for the same reason: a `File` cannot
+   * cross a `command()` boundary (devalue cannot serialize one), so the multipart
+   * `<form>` lives in the component and the store owns the resolved URL.
+   */
+  applyHeroImageUrl(url: string | null): void {
+    this.#heroImageUrl = url;
+  }
+
+  /**
+   * Clear the UPLOADED hero image.
+   *
+   * This does NOT blank the hero: A32's chain then falls through to
+   * `heroMediaId`'s poster frame and only then to the section's synthetic plate.
+   * So the panel must not describe this as "remove the hero".
+   */
+  async clearHeroImage(): Promise<void> {
+    const pageId = this.#pageId;
+    if (!pageId) return;
+    this.#heroImageBusy = true;
+    try {
+      await deleteJourneyHeroImage({ pageId });
+      this.#heroImageUrl = null;
+    } finally {
+      this.#heroImageBusy = false;
+    }
+  }
+
   /** Reset to the closed state (the route calls this on destroy). */
   close(): void {
     this.#pageId = null;
     this.#pending = { ...EMPTY_SLOTS };
     this.#saved = { ...EMPTY_SLOTS };
     this.#coverImageUrl = null;
+    this.#heroImageUrl = null;
     this.#options = [];
     this.#loading = false;
     this.#coverBusy = false;
+    this.#heroImageBusy = false;
     this.#loadError = null;
     this.#loaded = false;
   }

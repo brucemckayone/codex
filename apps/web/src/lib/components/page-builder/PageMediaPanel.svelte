@@ -7,6 +7,15 @@
     • the still COVER — the poster the journey card renders. `courses` had three
       VIDEO refs and no poster column at all, which is why `JourneyCard` was
       typographic-only; this uploads to the new `courses.cover_image_key`.
+    • the still HERO IMAGE (Codex-490z7, amendment A32) — an UPLOADED image, to
+      `courses.hero_image_key`. The "Hero film" slot below it (`heroMediaId`) is a
+      `media_items` ref, and that table is CHECK-constrained to
+      ('video','audio'), so the "hero image" a creator could pick there was
+      really a VIDEO's auto-generated poster frame: someone with a photograph and
+      no film had nothing to put in the loudest section of their own sales page.
+      The two coexist as A32's chain — uploaded ?? the film's frame ?? the
+      section's synthetic gradient — so clearing the upload degrades rather than
+      blanks, which is why the toast says so.
     • the three sell VIDEOS + the guide PORTRAIT — `courses.introVideoMediaId`,
       `previewVideoMediaId`, `guideVideoMediaId` and `guide.portraitMediaId`. All
       four were READ-ONLY codebase-wide before this, so the `introVideo`, `reel`
@@ -16,9 +25,18 @@
   `media` control). Both surfaces read and write the ONE `sellMedia` store, so the
   panel and the inspectors can never disagree about what is pending.
 
-  Cover upload/clear apply IMMEDIATELY (a multipart upload has a different failure
-  mode from a JSON patch, and the creator needs the resolved URL back to see what
-  they picked). The media slots are pending until Save, like page copy.
+  THE THREE STILL SLOTS OFFER VIDEO ONLY, via `sellMedia.optionsFor(slot)`. An
+  audio item has no frame by construction — the transcoder writes
+  `thumbnailKey: null` for anything that is not a video — so picking one for a
+  still used to save cleanly, show no error, and leave the section drawing its
+  fallback. The store owns the accept-list so the per-section inspector cannot
+  offer a different one, and the server re-checks it, because a picker is not a
+  boundary.
+
+  Cover and hero-image upload/clear apply IMMEDIATELY (a multipart upload has a
+  different failure mode from a JSON patch, and the creator needs the resolved URL
+  back to see what they picked). The media slots are pending until Save, like page
+  copy.
 -->
 <script lang="ts">
   import { MAX_IMAGE_SIZE_BYTES } from '@codex/validation';
@@ -27,7 +45,10 @@
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
-  import { uploadJourneyCoverForm } from '$lib/remote/journeys.remote';
+  import {
+    uploadJourneyCoverForm,
+    uploadJourneyHeroImageForm,
+  } from '$lib/remote/journeys.remote';
 
   const MAX_COVER_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
 
@@ -79,6 +100,8 @@
   ];
 
   let fileInput = $state<HTMLInputElement | null>(null);
+  /** Own ref — two independent upload forms, so two independent file inputs. */
+  let heroFileInput = $state<HTMLInputElement | null>(null);
 
   /**
    * Busy while EITHER the cover form is in flight or the store is clearing.
@@ -91,6 +114,11 @@
     !!uploadJourneyCoverForm.pending || sellMedia.coverBusy
   );
 
+  /** The same split for the hero image — its own form, its own busy state. */
+  const heroImageBusy = $derived(
+    !!uploadJourneyHeroImageForm.pending || sellMedia.heroImageBusy
+  );
+
   async function onClearCover(): Promise<void> {
     try {
       await sellMedia.clearCover();
@@ -98,6 +126,21 @@
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : m.studio_builder_media_toast_cover_remove_failed()
+      );
+    }
+  }
+
+  async function onClearHeroImage(): Promise<void> {
+    try {
+      await sellMedia.clearHeroImage();
+      // Says what actually happens next: A32's chain falls through to the hero
+      // film's frame, so this is a step DOWN the chain, not "the hero is empty".
+      toast.success(m.studio_builder_media_toast_hero_image_removed());
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : m.studio_builder_media_toast_hero_image_remove_failed()
       );
     }
   }
@@ -205,6 +248,104 @@
     </div>
   </section>
 
+  <!-- ── Hero image (Codex-490z7 · A32) ────────────────────────────────── -->
+  <section class="panel__group">
+    <h3 class="panel__group-title">{m.studio_builder_media_hero_image()}</h3>
+    <p class="panel__hint">
+      {m.studio_builder_media_hero_image_hint()}
+    </p>
+
+    <div class="cover">
+      <div class="cover__frame cover__frame--hero">
+        {#if sellMedia.heroImageUrl}
+          <img
+            class="cover__img"
+            src={sellMedia.heroImageUrl}
+            alt={m.studio_builder_media_hero_image_alt()}
+          />
+        {:else}
+          <span class="cover__empty">{m.studio_builder_media_hero_image_none()}</span>
+        {/if}
+      </div>
+
+      <!--
+        A second real multipart <form>, deliberately identical to the cover's
+        above. `File` cannot be an argument to a `command()` — devalue cannot
+        serialize it, and the call throws in the BROWSER before reaching the
+        network — so an upload has to be a `form()` submission. See
+        `uploadJourneyHeroImageForm`.
+      -->
+      <form
+        class="cover__actions"
+        enctype="multipart/form-data"
+        {...uploadJourneyHeroImageForm.enhance(async ({ form, submit }) => {
+          try {
+            await submit();
+            const result = uploadJourneyHeroImageForm.result;
+            if (result?.outcome === 'uploaded') {
+              sellMedia.applyHeroImageUrl(result.heroImageUrl);
+              toast.success(m.studio_builder_media_toast_hero_image_updated());
+            } else {
+              // The server's own message (an unsupported format, most commonly),
+              // never a generic failure — a creator can only fix what they see.
+              toast.error(
+                result?.message ??
+                  m.studio_builder_media_toast_hero_image_upload_failed()
+              );
+            }
+          } catch (err) {
+            toast.error(
+              err instanceof Error
+                ? err.message
+                : m.studio_builder_media_toast_hero_image_upload_failed()
+            );
+          } finally {
+            // Reset so re-picking the SAME file fires `change` again — without
+            // this a failed upload cannot be retried with the identical file.
+            form.reset();
+          }
+        })}
+      >
+        <input
+          {...uploadJourneyHeroImageForm.fields.pageId.as(
+            'hidden',
+            sellMedia.pageId ?? ''
+          )}
+        />
+        <input
+          bind:this={heroFileInput}
+          class="cover__file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          {...uploadJourneyHeroImageForm.fields.image.as('file')}
+          onchange={(event) => event.currentTarget.form?.requestSubmit()}
+        />
+        <button
+          type="button"
+          class="cover__btn"
+          disabled={heroImageBusy || !sellMedia.pageId}
+          onclick={() => heroFileInput?.click()}
+        >
+          {heroImageBusy
+            ? m.studio_builder_media_uploading()
+            : sellMedia.heroImageUrl
+              ? m.studio_builder_media_replace()
+              : m.studio_builder_media_upload()}
+        </button>
+        {#if sellMedia.heroImageUrl}
+          <button
+            type="button"
+            class="cover__btn cover__btn--quiet"
+            disabled={heroImageBusy}
+            onclick={onClearHeroImage}
+          >
+            {m.studio_builder_media_remove()}
+          </button>
+        {/if}
+        <span class="panel__hint">{m.studio_builder_media_formats({ mb: MAX_COVER_MB })}</span>
+      </form>
+    </div>
+  </section>
+
   <!-- ── Sell media ────────────────────────────────────────────────────── -->
   <section class="panel__group">
     <h3 class="panel__group-title">{m.studio_builder_media_slots_title()}</h3>
@@ -215,8 +356,16 @@
     {#each SLOTS as entry (entry.slot)}
       <div class="panel__field">
         <span class="panel__label">{entry.label()}</span>
+        <!--
+          `optionsFor`, not `options`: the three STILL slots offer video only.
+          An audio item has `thumbnailKey: null` by construction, so offering one
+          here let a creator pick something that could only ever resolve to
+          nothing — saved clean, no error, section unchanged. The accept-list
+          lives in the store so this panel and the section inspectors cannot
+          disagree; the server re-checks it regardless.
+        -->
         <MediaPicker
-          mediaItems={sellMedia.options}
+          mediaItems={sellMedia.optionsFor(entry.slot)}
           value={sellMedia.slot(entry.slot)}
           name={`journey-media-${entry.slot}`}
           showLibraryLink
@@ -317,6 +466,16 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
     background-color: var(--color-surface-secondary);
+  }
+
+  /*
+    The hero preview is WIDER than the cover's 16/9 because the hero paints
+    edge to edge — 21/9 is the aspect the `bleed` media axis gives a full-bleed
+    hero, so the frame previews the crop the page will actually take rather than
+    a card-shaped one the hero never uses.
+  */
+  .cover__frame--hero {
+    aspect-ratio: 21 / 9;
   }
 
   .cover__img {

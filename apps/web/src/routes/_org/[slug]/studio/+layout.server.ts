@@ -3,7 +3,9 @@
  *
  * Uses parent org data (avoids redundant getOrganization call).
  * Loads user's membership role and organizations for the studio switcher.
- * Redirects to login if not authenticated.
+ * Redirects to login if not authenticated, PRESERVING the requested path so a
+ * bookmarked deep link (a builder URL, say) survives the sign-in — see
+ * {@link _safeStudioRedirect}.
  * Redirects to home if not a privileged member.
  */
 import { redirect } from '@sveltejs/kit';
@@ -14,6 +16,49 @@ import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveMembershipWithRetry } from '$lib/server/membership-retry';
 import type { LayoutServerLoad } from './$types';
 
+/**
+ * The `redirect=` value handed to the login page — the path the visitor actually
+ * asked for, or `/studio` when that path cannot be safely handed back.
+ *
+ * WHY THIS EXISTS. The guard used to redirect to a hard-coded
+ * `/login?redirect=/studio`, so requesting `/studio/journeys/<id>/page` while
+ * signed out cost the deep link: after signing in you landed on the studio
+ * dashboard and had to navigate back. Every creator who bookmarks a builder URL,
+ * and every agent driving that surface, paid for it.
+ *
+ * WHY IT VALIDATES SOMETHING IT BUILT ITSELF. The target is assembled from
+ * `url.pathname` + `url.search`, so it is same-origin and path-only BY
+ * CONSTRUCTION — but `pathname` is attacker-influenced, and a request for
+ * `//evil.example/x` on this host parses to the pathname `//evil.example/x`,
+ * which a browser reads as a PROTOCOL-RELATIVE URL. Handing that to a login page
+ * that redirects to it is an open redirect, and an open redirect on the sign-in
+ * path is a credential-phishing primitive. So the shape is re-checked here rather
+ * than trusted: a leading `/` followed by a character that is neither `/` nor
+ * `\` (some browsers treat `/\host` as protocol-relative too). Nothing else is
+ * allowed — no absolute URL, no scheme, no host.
+ *
+ * The login action applies its own `startsWith('/') && !startsWith('//')` check
+ * before it redirects. That is defence in depth, deliberately duplicated: this
+ * function must be correct on its own, because it is what puts the value into a
+ * URL in the first place.
+ *
+ * THE SEARCH STRING IS KEPT. The builder's own "View live" uses `?preview=1`, and
+ * a future builder deep link may carry state; dropping the query would send the
+ * creator back to a different page than the one they asked for.
+ *
+ * Exported with a `_` prefix because SvelteKit rejects any other name on a
+ * `+layout.server` module (`validate_layout_server_exports`) — the same idiom
+ * `_org/[slug]/+layout.server.ts` uses for `_resetMissingOrgSlugCache`.
+ */
+export function _safeStudioRedirect(url: URL): string {
+  const target = `${url.pathname}${url.search}`;
+  // A single regex, and each part of it earns its place: `^\/` a path, `[^/\\]`
+  // not protocol-relative in any browser's reading of it, and no `i` flag or
+  // alternation that could be widened by accident.
+  if (!/^\/[^/\\]/.test(target)) return '/studio';
+  return target;
+}
+
 export const load: LayoutServerLoad = async ({
   locals,
   parent,
@@ -21,10 +66,16 @@ export const load: LayoutServerLoad = async ({
   platform,
   cookies,
   setHeaders,
+  url,
 }) => {
-  // Auth gate: must be logged in
+  // Auth gate: must be logged in. The requested path is preserved so signing in
+  // returns the creator to the page they asked for, not to the studio dashboard
+  // — see `_safeStudioRedirect` for why the target is validated and encoded.
   if (!locals.user) {
-    redirect(302, '/login?redirect=/studio');
+    redirect(
+      302,
+      `/login?redirect=${encodeURIComponent(_safeStudioRedirect(url))}`
+    );
   }
 
   // Studio is always user-specific — prevent public caching

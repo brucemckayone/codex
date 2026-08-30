@@ -233,14 +233,16 @@ export interface JourneyCardView {
 /**
  * The journey's SELL MEDIA — the six media refs the sales page's `hero` /
  * `introVideo` / `reel` / `guide` sections resolve their primary content from,
- * plus the still cover (Codex-eqh0z). FE mirror of `@codex/shared-types`
+ * plus the TWO uploaded stills: the card cover (Codex-eqh0z) and the hero image
+ * (Codex-490z7, amendment A32). FE mirror of `@codex/shared-types`
  * `JourneySellMedia`.
  *
- * Every id is a `media_items` ref; the cover is NOT (`media_items` is
- * CHECK-constrained to video/audio, so a still image cannot live there) — it
- * arrives already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
+ * Every id is a `media_items` ref; neither uploaded still is (`media_items` is
+ * CHECK-constrained to video/audio, so a still image cannot live there) — both
+ * arrive already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
  * contract amendment A27 (Codex-wqxv4); each resolves publicly to the picked
- * item's thumbnail, the same way the guide portrait does.
+ * item's thumbnail, the same way the guide portrait does — which is exactly why
+ * A32 had to add a real uploaded hero BESIDE `heroMediaId` rather than reuse it.
  */
 export interface JourneySellMedia {
   courseId: string;
@@ -251,6 +253,18 @@ export interface JourneySellMedia {
   heroMediaId: string | null;
   signatureMediaId: string | null;
   coverImageUrl: string | null;
+  /**
+   * The UPLOADED hero image's CDN URL (`courses.heroImageKey` → `lg.webp`), or
+   * null when none is uploaded (A32).
+   *
+   * The UPLOAD ONLY — never A32's public fallback chain. The builder panel's
+   * Replace / Remove act on the uploaded file, so a value here that could also be
+   * a hero video's poster frame would offer a Remove that removes nothing.
+   *
+   * OPTIONAL-additive: a worker deployment predating A32 omits the key entirely,
+   * so every reader treats `undefined` as "no uploaded hero" (`?? null`).
+   */
+  heroImageUrl?: string | null;
 }
 
 /** One org tier the pricing panel offers as a way into the course. */

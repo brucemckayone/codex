@@ -40,6 +40,11 @@ import type {
   SectionDesign,
   SectionProps,
 } from '@codex/shared-types';
+// The per-type RHYTHM table. The dependency is ONE-DIRECTIONAL: that file imports
+// only types, never this module, so `createSection` can reach it with no cycle and
+// the house rhythm stays a diff in ONE table rather than logic threaded through
+// this catalogue.
+import { sectionDesignForType } from './section-design-defaults';
 
 // ── Variant definition ───────────────────────────────────────────────────────
 
@@ -1159,13 +1164,28 @@ export function firstSectionMatch(query: string): SectionDefinition | null {
  * variant + a clone of its default copy so the section renders populated the
  * moment it is added (the prototype's `DEFAULTS` behaviour). An unknown type
  * yields an empty, variant-less section (the renderer skips it).
+ *
+ * AND WITH A RHYTHM. A new section also arrives carrying the house per-type axis
+ * bag from {@link SECTION_DESIGN_BY_TYPE} — every axis where that type's rhythm
+ * differs from what the section would otherwise inherit, and nothing else. That
+ * is the whole of the fix for a page whose every section emitted byte-identical
+ * axis values; see `section-design-defaults.ts` for the measurement and the
+ * reasoning. It is a DEFAULT the creator can clear per axis in the inspector,
+ * never a lock — and no stored page is touched, because this runs at creation.
+ *
+ * `pageDesign` is the page's own look (`pending.design`), and passing it is what
+ * keeps the stored bag HONEST: an axis whose rhythm value equals the inherited
+ * value is dropped, so the inspector's "Inherited" pill still tells the truth.
+ * Omit it only where there is no page context (an unknown type, or a caller
+ * building a section outside a draft).
  */
 export function createSection(
   type: string,
-  makeId: () => string = () => crypto.randomUUID()
+  makeId: () => string = () => crypto.randomUUID(),
+  pageDesign?: SectionDesign | null
 ): PageSection {
   const def = findSectionDefinition(type);
-  return {
+  const section: PageSection = {
     id: makeId(),
     type,
     enabled: true,
@@ -1173,6 +1193,18 @@ export function createSection(
     name: def?.label,
     props: def ? structuredClone(def.defaultProps) : {},
   };
+  // The baseline is the RESOLVED look — page bag, then any retired-variant axes,
+  // then the axis defaults — computed by the one resolver the renderer uses, so
+  // "redundant" here means exactly what "Inherited" means in the inspector.
+  const inherited = resolveDesign(
+    { type, variant: section.variant },
+    { design: pageDesign ?? undefined }
+  );
+  const design = sectionDesignForType(type, inherited);
+  // Assigned only when non-empty: absence is how "inherited" is represented, and
+  // a `design: {}` would round-trip through the save as a key that says nothing.
+  if (design) section.design = design;
+  return section;
 }
 
 /**
@@ -1183,11 +1215,19 @@ export function createSection(
  *
  * `makeId` is injectable so tests get deterministic ids; it defaults to
  * `crypto.randomUUID` (available in the SvelteKit + Node runtimes).
+ *
+ * `pageDesign` is forwarded to {@link createSection}, so a default set arrives
+ * with the house rhythm already on it — which is the amendment-A21 requirement
+ * that page creation write an EXPLICIT design rather than relying on implicit
+ * axis defaults, satisfied per section instead of once per page.
  */
 export function createDefaultSections(
-  makeId: () => string = () => crypto.randomUUID()
+  makeId: () => string = () => crypto.randomUUID(),
+  pageDesign?: SectionDesign | null
 ): PageSection[] {
-  return SECTION_CATALOG.map((def) => createSection(def.type, makeId));
+  return SECTION_CATALOG.map((def) =>
+    createSection(def.type, makeId, pageDesign)
+  );
 }
 
 // ── Unauthored (seed) copy detection ─────────────────────────────────────────

@@ -1518,6 +1518,54 @@ export function createServerApi(
           )}/cover?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'DELETE' }
         ),
+
+      /**
+       * Upload the course's HERO image (Codex-490z7 / contract A32).
+       *
+       * A sibling of `uploadJourneyCover` above, and deliberately not folded
+       * into it: the two write different columns (`heroImageKey` vs
+       * `coverImageKey`), land under different R2 prefixes, and the worker
+       * declares a different multipart field for each.
+       *
+       * `fieldName: 'image'` MUST match the worker's `files` key
+       * (`workers/content-api/src/routes/journeys.ts`, the `hero-image` route),
+       * and `fallbackFilename` MUST be present — a plain re-forward of a `File`
+       * from web to worker LOSES the filename in workerd and the worker 400s,
+       * which is a production-only failure. That is what
+       * `forwardMultipartUpload` exists to prevent.
+       */
+      uploadJourneyHeroImage: (
+        organizationId: string,
+        pageId: string,
+        file: File
+      ): Promise<{ heroImageUrl: string }> =>
+        forwardMultipartUpload<{ heroImageUrl: string }>({
+          url: `${serverApiUrl(
+            platform,
+            'access'
+          )}/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/hero-image?organizationId=${encodeURIComponent(organizationId)}`,
+          fieldName: 'image',
+          file,
+          fallbackFilename: 'hero',
+          sessionCookie,
+          failureMessage: 'Hero image upload failed',
+        }),
+
+      /**
+       * Clear the course's hero image. The hero then falls back down A32's
+       * chain — the hero video's poster frame, then the synthetic plate — so
+       * clearing this is not the same as having no hero.
+       */
+      deleteJourneyHeroImage: (organizationId: string, pageId: string) =>
+        request<void>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/hero-image?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'DELETE' }
+        ),
     },
 
     /**

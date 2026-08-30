@@ -803,23 +803,22 @@ app.patch(
       query: journeyOrgQuerySchema,
       body: updateJourneySellMediaBodySchema,
     },
-    handler: async (ctx): Promise<JourneySellMedia> => {
-      const persisted = await ctx.services.courseJourney.updateJourneySellMedia(
+    handler: async (ctx): Promise<JourneySellMedia> =>
+      // The write path does not touch the two UPLOADED stills (the cover and,
+      // since A32, the hero image), but their keys come back on the same
+      // `.returning()` row — so the base goes IN and the service resolves them.
+      //
+      // This replaces a second, full `getJourneySellMedia` read that existed
+      // purely to recover `coverImageUrl` from the hard `null` the service used
+      // to echo. One round-trip instead of two, and — the reason for the change —
+      // the hero image would otherwise have needed the identical compensation
+      // added here a second time.
+      ctx.services.courseJourney.updateJourneySellMedia(
         ctx.organizationId,
         ctx.input.params.pageId,
-        ctx.input.body
-      );
-      // The write path does not touch the cover, so re-read the stored key
-      // through the env-owned base rather than reporting `null` and making the
-      // panel appear to have lost the cover it still has.
-      const { coverImageUrl } =
-        await ctx.services.courseJourney.getJourneySellMedia(
-          ctx.organizationId,
-          ctx.input.params.pageId,
-          ctx.env.R2_PUBLIC_URL_BASE
-        );
-      return { ...persisted, coverImageUrl };
-    },
+        ctx.input.body,
+        ctx.env.R2_PUBLIC_URL_BASE
+      ),
   })
 );
 
@@ -982,6 +981,140 @@ app.delete(
     successStatus: 204,
     handler: async (ctx): Promise<null> => {
       await ctx.services.courseJourney.setCourseCoverImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        null
+      );
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/hero-image?organizationId=
+ *
+ * Upload (or replace) the journey's HERO IMAGE — the still the sales page's
+ * loudest section paints (Codex-490z7, contract amendment A32).
+ *
+ * Content-Type: multipart/form-data. Form field: `image` (file).
+ *
+ * WHY A SECOND STILL ENDPOINT rather than a slot on the cover route: the two
+ * stills are different sizes with different jobs (the cover serves a card at
+ * `md`, the hero paints edge to edge at `lg`) and they clear independently. A
+ * `?slot=` discriminator on one route would make the response shape conditional
+ * and give both a single cache-bump story they do not share.
+ *
+ * Modelled verbatim on the cover route above, including the ORDERING that matters:
+ * the page is resolved (and org-scoped) BEFORE R2 is written, so an out-of-org or
+ * non-course page 404s and can never seed an orphaned object. The hero is NOT a
+ * `media_items` ref — that table is CHECK-constrained to ('video','audio'), which
+ * is precisely why this endpoint had to exist for a creator to use a photograph.
+ * Keys are deterministic per course, so a re-upload overwrites in place.
+ * @returns {{ heroImageUrl: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/hero-image',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      image: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ heroImageUrl: string }> => {
+      // Resolve (and org-scope) the subject course FIRST — a foreign or
+      // non-course page must 404 before any R2 object exists.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed = await ctx.services.imageProcessing.processCourseHero(
+        courseId,
+        new File([ctx.files.image.buffer], ctx.files.image.name, {
+          type: ctx.files.image.type,
+        })
+      );
+
+      // The org-aware service owns the DB write (same split as the cover).
+      await ctx.services.courseJourney.setCourseHeroImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        processed.heroImageKey
+      );
+
+      // BELT AND BRACES, and stated honestly rather than copied from the cover.
+      // I checked what the org journeys version actually keys: only the two
+      // CACHED list reads (`getCachedPublishedCourses` :134,
+      // `getCachedPublishedJourneys` :477). The hero image reaches a visitor
+      // through `/courses/:courseId/sell-preview`, which is an UNCACHED read, and
+      // no card carries a hero today — so unlike the cover, this bump changes
+      // nothing a creator can currently see.
+      //
+      // It stays for two reasons: the two still-image endpoints must not diverge
+      // in their cache story for a reader to have to work out which one bumps,
+      // and the moment a card does render a hero the omission would be a stale
+      // rail with no obvious cause. The cost is one KV write on an
+      // org-manager-only, rate-limited route.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+
+      return { heroImageUrl: processed.url };
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId/hero-image?organizationId=
+ *
+ * Clear the journey's uploaded hero image.
+ *
+ * This does NOT leave the hero blank — it drops the page back to A32's next link,
+ * `courses.heroMediaId`'s poster frame, and then to the section's synthetic
+ * plate. That graceful degradation is why the uploaded image is its own column
+ * rather than a replacement for the media ref.
+ *
+ * Clears the DB key only; the R2 variants are left in place. Keys are
+ * deterministic per course id, so a later re-upload overwrites them rather than
+ * accumulating orphans, and the objects are unreachable in the meantime (no
+ * client is ever handed a raw key).
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId/hero-image',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setCourseHeroImageKey(
         ctx.organizationId,
         ctx.input.params.pageId,
         null

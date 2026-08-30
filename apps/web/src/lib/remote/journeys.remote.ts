@@ -888,6 +888,92 @@ export const deleteJourneyCover = command(
 );
 
 /**
+ * Upload (or replace) the journey's HERO IMAGE (Codex-490z7, amendment A32).
+ *
+ * A DELIBERATE CLONE of {@link uploadJourneyCoverForm} above, down to the string
+ * discriminant. Read that comment first — every rule it states applies here
+ * unchanged, and two of them are why this feature did not already exist:
+ *
+ *   1. `form()`, NEVER `command()`. A `command()`'s arguments serialize through
+ *      devalue, which cannot represent a `File`; the call throws "Cannot stringify
+ *      arbitrary non-POJOs" in the BROWSER, before any request is made. That was
+ *      the uploadJourneyCover bug fixed in b6433fc1, and it is not worth
+ *      re-learning.
+ *   2. The server hop MUST go through `forwardMultipartUpload` (which
+ *      `api.access.uploadJourneyHeroImage` does). A plain re-forward of a File
+ *      from web to worker STRIPS THE FILENAME in workerd, so the part arrives as
+ *      a string field and the worker 400s — invisible locally, reproducing only
+ *      in production.
+ *
+ * WHY THIS IS NOT the existing hero picker. `heroMediaId` is a `media_items` ref,
+ * and that table is CHECK-constrained to ('video','audio') — so the "hero image"
+ * a creator picked there was really a VIDEO's auto-generated poster frame. A
+ * creator who owned a photograph and no film had nothing to put in the loudest
+ * section of their own sales page. This writes `courses.heroImageKey`, the first
+ * link in A32's chain (uploaded ?? poster ?? synthetic plate), so the two coexist
+ * and clearing the upload degrades to the poster rather than to nothing.
+ *
+ * The field is named `image`, not `hero`: the worker's `files` key is `image`, and
+ * matching the wire name keeps the two halves of the path greppable as one.
+ */
+export const uploadJourneyHeroImageForm = form(
+  z.object({
+    pageId: z.string().uuid(),
+    image: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `The hero image must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, image }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      return {
+        outcome: 'failed' as const,
+        message: 'A hero image can only be set within an organization',
+      };
+    }
+    try {
+      const { heroImageUrl } = await ctx.api.access.uploadJourneyHeroImage(
+        ctx.orgId,
+        pageId,
+        image
+      );
+      return { outcome: 'uploaded' as const, heroImageUrl };
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        return { outcome: 'failed' as const, message: err.message };
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Clear the journey's uploaded hero image.
+ *
+ * NOT the same as "the hero has no image": clearing drops back to A32's next
+ * link, the hero video's poster frame, and only then to the synthetic plate.
+ */
+export const deleteJourneyHeroImage = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A hero image can only be cleared within an organization');
+    }
+    await ctx.api.access.deleteJourneyHeroImage(ctx.orgId, pageId);
+  }
+);
+
+/**
  * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2). Resolves the sell-page envelope
  * for ANY status (drafts included) so the builder iframe can render an
  * unpublished draft. Management-gated by the worker (`requireOrgManagement`); the

@@ -352,11 +352,22 @@ function toggleSection(id: string): void {
  * (the add-picker/canvas "add after this" affordance), else appends. Returns the
  * new section's id so the caller can scroll/focus it. The renderer skips unknown
  * types, so `type` is a plain string (matches the contract).
+ *
+ * THE PAGE'S OWN LOOK IS PASSED IN, and that is what gives a page RHYTHM. The
+ * catalogue writes the new section a per-type axis bag
+ * (`section-design-defaults.ts`), minus every axis the page already sets to the
+ * same value — so the stored `design` holds only real exceptions and the
+ * inspector's "Inherited" pills stay truthful. `$state.snapshot` because
+ * `pending.design` is a rune proxy and the comparison must read plain values.
  */
 function addSection(type: string, afterId?: string): string {
   if (!state.pending) return '';
   snapshot();
-  const section = createSection(type, makeId);
+  const section = createSection(
+    type,
+    makeId,
+    $state.snapshot(state.pending.design) ?? null
+  );
   const from = afterId ? indexOf(afterId) : -1;
   const at = from >= 0 ? from + 1 : state.pending.sections.length;
   state.pending.sections.splice(at, 0, section);

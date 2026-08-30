@@ -178,6 +178,26 @@ export const courses = pgTable(
     // overwrites in place, so replacing a cover never orphans an object.
     coverImageKey: varchar('cover_image_key', { length: 500 }),
 
+    // Still-image HERO — an UPLOADED image, the same shape as `coverImageKey`
+    // above and for the same reason (Codex-490z7, contract amendment A32).
+    //
+    // NOT a `media_items` ref: that table is CHECK-constrained to
+    // ('video','audio'), which is the entire reason this gap existed. `heroMediaId`
+    // below can only ever name a VIDEO, so the "hero image" a creator picked there
+    // was really that video's auto-generated poster frame — a creator who owned a
+    // photograph and no film had no way to put it in the loudest section of their
+    // own sales page.
+    //
+    // A32's fallback chain, resolved by `getCourseSellPreview`:
+    //   heroImageKey (this) ?? heroMediaId's poster frame ?? the synthetic plate.
+    // Uploaded outranks derived — an explicit choice beats a by-product.
+    //
+    // `ImageProcessingService.processCourseHero` writes {sm,md,lg}.webp under this
+    // base key and the hero serves `lg` (it paints full-bleed, where the cover's
+    // `md` serves a card). Deterministic per course id ⇒ a re-upload overwrites in
+    // place, so replacing a hero never orphans an object.
+    heroImageKey: varchar('hero_image_key', { length: 500 }),
+
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(
       () => mediaItems.id,

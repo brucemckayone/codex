@@ -127,6 +127,30 @@ function resolveCourseCoverUrl(
 }
 
 /**
+ * Resolve a stored `courses.heroImageKey` to its public CDN URL (Codex-490z7,
+ * contract amendment A32).
+ *
+ * Same raw-key → CDN-URL convention as {@link resolveCourseCoverUrl}, with ONE
+ * difference: the hero serves the **lg** variant, not `md`. A cover fills a card;
+ * a hero paints edge to edge, and handing a 400px image to a full-bleed section
+ * is visibly soft. `ImageProcessingService.processCourseHero` writes {sm,md,lg}
+ * under the base key and returns the `lg` URL for exactly this reason.
+ *
+ * Returns null when there is no uploaded hero OR no configured base, so a client
+ * never receives a raw R2 key and never a half-formed URL. A null hero is a
+ * legitimate state — A32's chain then falls through to `heroMediaId`'s poster
+ * frame and finally to the section's synthetic plate.
+ */
+function resolveCourseHeroUrl(
+  heroImageKey: string | null | undefined,
+  r2PublicUrlBase: string | undefined
+): string | null {
+  return heroImageKey && r2PublicUrlBase
+    ? `${r2PublicUrlBase}/${heroImageKey}/lg.webp`
+    : null;
+}
+
+/**
  * Summarise the member-library journey-card rollup from the SAME curriculum +
  * completion shapes the dashboard uses (`practice_completions ⋈ stage_practices`,
  * SPEC §11). Flattens the curriculum in course order (stage → practice
@@ -599,6 +623,9 @@ export class CourseJourneyService extends BaseService {
           // portrait below), so they select and write like the three videos.
           heroMediaId: courses.heroMediaId,
           signatureMediaId: courses.signatureMediaId,
+          // A32 (Codex-490z7): the UPLOADED hero still. An R2 key, not a media
+          // ref — see the column comment for why `media_items` cannot hold one.
+          heroImageKey: courses.heroImageKey,
           // The portrait ref lives INSIDE the `guide` jsonb bag, not in a column
           // of its own — `updateJourneySellMedia` read-then-merges it there.
           guide: courses.guide,
@@ -682,12 +709,30 @@ export class CourseJourneyService extends BaseService {
         // them, so the guide section could never show a portrait or a clip.
         guidePortraitUrl: toStill(guidePortraitMediaId),
         guideClip: toClip(courseRow.guideVideoMediaId),
-        // Contract amendment A27 (Codex-wqxv4): the hero image and the guide's
-        // signature. Both go through `toStill` for the reason its own comment
+        // Contract amendment A27 (Codex-wqxv4) + A32 (Codex-490z7): the hero
+        // image, resolved down A32's FALLBACK CHAIN, uploaded first:
+        //
+        //   heroImageKey (an uploaded JPEG/PNG/WebP)
+        //     ?? heroMediaId's poster frame (a video's `thumbnailKey`)
+        //       ?? the section's synthetic plate (absence, resolved in the render)
+        //
+        // ORDERED, not merely additive, and the order is the whole point. An
+        // uploaded image is an explicit creator choice; a poster frame is a
+        // by-product of transcoding. When both exist the choice must win, or a
+        // creator who uploads a hero over a course that already has a hero video
+        // sees nothing change and has no way to tell why.
+        //
+        // `toStill` stays for the second link for the reason its own comment
         // gives — `media_items` is video/audio-only, so the still a creator picks
-        // is the item's `thumbnailKey`. `hero.full-bleed` / `hero.poster` /
-        // `guide.letter` are named after media that, until now, no column held.
-        heroImageUrl: toStill(courseRow.heroMediaId),
+        // THERE is the item's `thumbnailKey`. That is exactly the limitation A32
+        // exists to lift, not to replace: `hero.full-bleed` / `hero.poster` still
+        // work for a video-only journey.
+        //
+        // The seam above this is unchanged: a section consumes `heroImageUrl`
+        // without knowing which link produced it.
+        heroImageUrl:
+          resolveCourseHeroUrl(courseRow.heroImageKey, r2PublicUrlBase) ??
+          toStill(courseRow.heroMediaId),
         // The SAME item, resolved both ways: `toStill` for the modes that only
         // draw it, `toClip` for the modes that play it. Before this the manifest
         // was thrown away here, so a creator's hero video could only ever appear
@@ -2076,7 +2121,15 @@ export class CourseJourneyService extends BaseService {
 
   /**
    * Read the journey's SELL MEDIA — the four `media_items` refs the sales page's
-   * `introVideo` / `reel` / `guide` sections resolve, plus the still cover URL.
+   * `introVideo` / `reel` / `guide` sections resolve, plus the two UPLOADED still
+   * URLs (the card cover and, since A32, the hero image).
+   *
+   * `heroImageUrl` here is the UPLOADED hero only — deliberately NOT A32's public
+   * fallback chain. The panel needs to know whether an upload EXISTS, because
+   * that is what its Replace / Remove affordances act on; resolving the chain
+   * here would make a video's poster frame indistinguishable from an uploaded
+   * file and offer the creator a "Remove" that removes nothing. The public read
+   * ({@link getCourseSellPreview}) owns the chain.
    *
    * Org-scoped through {@link resolveCourseIdForPage} (a foreign, missing, or
    * non-course page 404s), then re-scoped on the course row itself as
@@ -2102,6 +2155,7 @@ export class CourseJourneyService extends BaseService {
           signatureMediaId: courses.signatureMediaId,
           guide: courses.guide,
           coverImageKey: courses.coverImageKey,
+          heroImageKey: courses.heroImageKey,
         })
         .from(courses)
         .where(
@@ -2129,6 +2183,7 @@ export class CourseJourneyService extends BaseService {
           row.coverImageKey,
           r2PublicUrlBase
         ),
+        heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
       };
     } catch (error) {
       this.handleError(error, 'getJourneySellMedia');
@@ -2148,6 +2203,16 @@ export class CourseJourneyService extends BaseService {
    * throws `ForbiddenError` and NOTHING is written — `media_items` carries no
    * `organization_id`, so creator-membership is the org boundary, and the FK
    * alone would happily accept another org's media.
+   *
+   * TYPE — the same pre-transaction pass also refuses a non-video item in a
+   * STILL slot (see {@link assertMediaItemsInOrg}'s `stillSlots` argument). Three
+   * of the six slots draw a frame rather than play a stream, and an AUDIO item has
+   * `thumbnailKey = null` BY CONSTRUCTION, so accepting one wrote a value that
+   * `toStill` could only ever resolve to null: the write returned 200, the panel
+   * marked itself clean, and the hero kept drawing its synthetic plate with
+   * nothing anywhere saying why. The UI filters its pickers too, but the UI is
+   * not the boundary — a section inspector, a replayed request or a future picker
+   * would each have to re-derive the rule.
    *
    * `guide.portraitMediaId` lives inside the `guide` jsonb, so it is merged into
    * the existing bag rather than replacing it — writing a bare
@@ -2169,7 +2234,25 @@ export class CourseJourneyService extends BaseService {
       heroMediaId: string | null;
       /** A27 (Codex-wqxv4) — the guide's signature mark. */
       signatureMediaId: string | null;
-    }
+    },
+    /**
+     * Env-owned CDN base, supplied by the route exactly as
+     * {@link getJourneySellMedia} takes it.
+     *
+     * It is here so the echoed shape can resolve the two UPLOADED still URLs
+     * ITSELF. This method used to return `coverImageUrl: null` unconditionally —
+     * "rather than inventing a base URL", which was the right instinct with no
+     * base in scope — and the ROUTE compensated by issuing a second, full
+     * `getJourneySellMedia` read purely to recover that one field. So the bug was
+     * never user-visible; the cost was a compensation the next still had to
+     * remember. A32's hero image is that next still, and it would have needed the
+     * same patch in the same place. Taking the base makes the echo true at the
+     * source and lets the route drop the extra round-trip.
+     *
+     * Omitted ⇒ both URLs resolve to null, which is the old behaviour, so an
+     * older caller is unaffected.
+     */
+    r2PublicUrlBase?: string
   ): Promise<JourneySellMedia> {
     try {
       const courseId = await this.resolveCourseIdForPage(
@@ -2179,14 +2262,27 @@ export class CourseJourneyService extends BaseService {
 
       // Validate the ids BEFORE opening the transaction — a rejected write must
       // leave no trace, and a ForbiddenError here is cheaper than a rollback.
-      await this.assertMediaItemsInOrg(organizationId, [
-        input.introVideoMediaId,
-        input.previewVideoMediaId,
-        input.guideVideoMediaId,
-        input.guidePortraitMediaId,
-        input.heroMediaId,
-        input.signatureMediaId,
-      ]);
+      //
+      // `stillSlots` names the three slots that DRAW a frame rather than play a
+      // stream. The three clip slots are deliberately absent from it: `reel`'s
+      // `waveform` composition is audio-first, so tightening those would break a
+      // shipped composition.
+      await this.assertMediaItemsInOrg(
+        organizationId,
+        [
+          input.introVideoMediaId,
+          input.previewVideoMediaId,
+          input.guideVideoMediaId,
+          input.guidePortraitMediaId,
+          input.heroMediaId,
+          input.signatureMediaId,
+        ],
+        [
+          { label: 'Hero image', mediaId: input.heroMediaId },
+          { label: 'Guide portrait', mediaId: input.guidePortraitMediaId },
+          { label: 'Guide signature', mediaId: input.signatureMediaId },
+        ]
+      );
 
       return await this.txDb.transaction(async (tx) => {
         const [existing] = await tx
@@ -2243,6 +2339,7 @@ export class CourseJourneyService extends BaseService {
             signatureMediaId: courses.signatureMediaId,
             guide: courses.guide,
             coverImageKey: courses.coverImageKey,
+            heroImageKey: courses.heroImageKey,
           });
 
         // Zero rows ⇒ the course was soft-deleted between the resolve and the
@@ -2261,9 +2358,21 @@ export class CourseJourneyService extends BaseService {
           guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
           heroMediaId: row.heroMediaId,
           signatureMediaId: row.signatureMediaId,
-          // The cover is written by its own multipart endpoint; echo the stored
-          // key unresolved-to-null here rather than inventing a base URL.
-          coverImageUrl: null,
+          // The cover and the hero image are written by their own multipart
+          // endpoints, but their STORED keys come back on this same `.returning()`
+          // row — so resolving them here costs nothing and makes the echo true.
+          //
+          // This used to be a hard `coverImageUrl: null` ("rather than inventing a
+          // base URL"), and the route compensated with a whole second
+          // `getJourneySellMedia` read to recover the one field. That worked, but
+          // it put the correction one layer away from the cause, where the NEXT
+          // still to be added has to notice and repeat it. See the
+          // `r2PublicUrlBase` parameter doc.
+          coverImageUrl: resolveCourseCoverUrl(
+            row.coverImageKey,
+            r2PublicUrlBase
+          ),
+          heroImageUrl: resolveCourseHeroUrl(row.heroImageKey, r2PublicUrlBase),
         };
       });
     } catch (error) {
@@ -2318,6 +2427,63 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * Persist (or clear) the subject course's HERO IMAGE R2 key, org-scoped
+   * (Codex-490z7, contract amendment A32).
+   *
+   * The DB half of the hero-image upload, and a deliberate sibling of
+   * {@link setCourseCoverImageKey}: `ImageProcessingService.processCourseHero`
+   * owns the R2 variants and returns the base key, this owns the scoped write.
+   * Same split, same reason — no scope logic in the image layer.
+   *
+   * Pass `null` to clear. The R2 objects are left in place: keys are
+   * deterministic per course, so a later re-upload overwrites them rather than
+   * accumulating orphans, and no client is ever handed a raw key so the
+   * unreferenced variants are unreachable in the meantime.
+   *
+   * Clearing does NOT leave the hero empty — it drops the page back to A32's next
+   * link, `heroMediaId`'s poster frame, and then to the synthetic plate. That is
+   * why this is a separate column from `heroMediaId` rather than a replacement
+   * for it.
+   *
+   * @returns the persisted key (null when cleared).
+   */
+  async setCourseHeroImageKey(
+    organizationId: string,
+    pageId: string,
+    heroImageKey: string | null
+  ): Promise<{ courseId: string; heroImageKey: string | null }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const updated = await this.db
+        .update(courses)
+        .set({ heroImageKey })
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does), exactly as
+        // `setCourseCoverImageKey` documents.
+        .returning();
+
+      const [row] = updated;
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, heroImageKey: row.heroImageKey };
+    } catch (error) {
+      this.handleError(error, 'setCourseHeroImageKey');
+    }
+  }
+
+  /**
    * Guard: every non-null media id exists, is non-deleted, and belongs to a
    * creator with an ACTIVE membership in `organizationId`. Throws
    * `ForbiddenError` naming the offending id otherwise.
@@ -2331,16 +2497,32 @@ export class CourseJourneyService extends BaseService {
    *
    * Nulls are skipped (clearing a slot needs no ownership) and duplicates are
    * de-duplicated, so one id used in two slots costs one row.
+   *
+   * SECOND JOB — `stillSlots` (P3, Codex-490z7's sibling defect). The same rows
+   * already carry `mediaType`, so the slots that draw a FRAME rather than play a
+   * stream are type-checked here rather than in a second query. An AUDIO item has
+   * `thumbnailKey = null` by construction (`@codex/transcoding` `paths.ts` returns
+   * null for any non-video, and the ready-row CHECK asks only for a `waveformKey`),
+   * so `getCourseSellPreview`'s `toStill` can only ever resolve one to null: the
+   * write succeeded, the panel went clean, and the hero silently kept its
+   * synthetic plate. Refusing it here is the only place that cannot be bypassed —
+   * the panel, the section inspector and any future picker all funnel through this
+   * one write.
+   *
+   * `ValidationError`, not `ForbiddenError`: the item IS the caller's, it is
+   * simply the wrong KIND for that slot, and the message has to say which slot or
+   * a creator with six pickers cannot act on it.
    */
   private async assertMediaItemsInOrg(
     organizationId: string,
-    mediaIds: readonly (string | null)[]
+    mediaIds: readonly (string | null)[],
+    stillSlots: readonly { label: string; mediaId: string | null }[] = []
   ): Promise<void> {
     const wanted = [...new Set(mediaIds.filter((id): id is string => !!id))];
     if (wanted.length === 0) return;
 
     const rows = await this.db
-      .selectDistinct({ id: mediaItems.id })
+      .selectDistinct({ id: mediaItems.id, mediaType: mediaItems.mediaType })
       .from(mediaItems)
       .innerJoin(
         organizationMemberships,
@@ -2361,6 +2543,20 @@ export class CourseJourneyService extends BaseService {
       throw new ForbiddenError('Media item does not belong to this space', {
         mediaItemId: rejected,
       });
+    }
+
+    // Ownership first, THEN type: a foreign id must not be told what kind of
+    // item it is, and the ownership error is the more specific fact.
+    const typeById = new Map(rows.map((r) => [r.id, r.mediaType]));
+    for (const slot of stillSlots) {
+      if (!slot.mediaId) continue;
+      const mediaType = typeById.get(slot.mediaId);
+      if (mediaType && mediaType !== 'video') {
+        throw new ValidationError(
+          `${slot.label} needs a video — a ${mediaType} item has no frame to show.`,
+          { mediaItemId: slot.mediaId, mediaType }
+        );
+      }
     }
   }
 

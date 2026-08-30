@@ -495,9 +495,31 @@
    * EDITOR a click on one should select the block, not leave the page. The canvas
    * intercepts the click; this is the backstop for the paths it cannot — a
    * keyboard activation, a programmatic `goto`, a composition that forgets to
-   * call `preventDefault`. It cancels UNCONDITIONALLY, dirty or clean: a clean
-   * draft got no prompt at all, so the author simply lost their place. "View
-   * live ↗" is the way out to the real page, and it opens a new tab.
+   * call `preventDefault`. A clean draft got no prompt at all before this guard
+   * existed, so the author simply lost their place. "View live ↗" is the way out
+   * to the real page, and it opens a new tab.
+   *
+   * (3a) AND IT KNOWS ABOUT FULL-WIDTH PREVIEW, because two correct changes were
+   * composing into a wrong result. `JourneyBuilderCanvas.onBlockClick` cancels a
+   * CTA click in EDITABLE mode and deliberately exempts preview
+   * (`editable === false`) — "there the author has explicitly asked to see the
+   * page behave, and the links are the page". This backstop then cancelled
+   * unconditionally, so NEITHER mode navigated and the canvas's exemption was
+   * dead in the browser: test-proven on one side, inert on the other.
+   *
+   * The resolution keeps BOTH intents, and the ordering of the predicate is the
+   * whole of it — `!previewMode || isDirty`:
+   *   · EDITING (`!previewMode`): cancel, exactly as before. A click on a price
+   *     card is an edit gesture, not a navigation.
+   *   · FULL-WIDTH PREVIEW, CLEAN: let it through. This is the deliberate act the
+   *     canvas exempts, and there is no unsaved work to protect.
+   *   · FULL-WIDTH PREVIEW, DIRTY: still cancel. Losing unsaved work is worse
+   *     than a blocked click, and this is the one case where the toast's second
+   *     sentence is not merely accurate but the precise instruction — "View live"
+   *     SAVES FIRST and refuses to open on a failed save (see `handleViewLive`),
+   *     so it is the way to reach the real page without dropping the draft.
+   * `previewMode` is the "Full width" toggle, not a separate route, so the guard
+   * stays local state rather than anything the URL carries.
    *
    * (4) THE CONFIRM COPY IS NOT LOCALISED YET, for the same reason the status
    * select's aria-label is not: `__tests__/builder-failure-states.test.ts:180`
@@ -526,9 +548,14 @@
 
   beforeNavigate((navigation) => {
     if (isPublicJourneySurface(navigation.to?.url)) {
-      navigation.cancel();
-      toast.info(m.studio_builder_toast_ctas_inert());
-      return;
+      // Editing, or unsaved work in preview — see (3) and (3a) above.
+      if (!previewMode || isDirty) {
+        navigation.cancel();
+        toast.info(m.studio_builder_toast_ctas_inert());
+        return;
+      }
+      // Preview mode with a clean draft: the links ARE the page. Fall through so
+      // the ordinary dirty checks below see it too (they are no-ops when clean).
     }
     if (!isDirty) return;
     if (navigation.type === 'leave') {

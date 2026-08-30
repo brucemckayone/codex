@@ -12583,7 +12583,7 @@ export const studio_builder_brand_only_this_page = () => `only this page`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_hero = () => `Hero image`
+export const studio_builder_media_slot_hero = () => `Hero film`
 
 
 /**
@@ -12591,7 +12591,7 @@ export const studio_builder_media_slot_hero = () => `Hero image`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_hero_hint = () => `The image the hero shows. Its still frame is used.`
+export const studio_builder_media_slot_hero_hint = () => `A clip the hero can play. With no hero image uploaded above, its still frame stands in as the hero image. Video only — an audio item has no frame.`
 
 
 /**
@@ -12639,7 +12639,7 @@ export const studio_builder_media_slot_guide_portrait = () => `Guide portrait`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_guide_portrait_hint = () => `The still shown beside the guide’s bio.`
+export const studio_builder_media_slot_guide_portrait_hint = () => `The still shown beside the guide’s bio. Unset leaves the monogram. Video only — its frame is what shows.`
 
 
 /**
@@ -12671,7 +12671,7 @@ export const studio_builder_media_slot_signature = () => `Guide signature`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slot_signature_hint = () => `The sign-off mark at the foot of the guide’s letter. Optional.`
+export const studio_builder_media_slot_signature_hint = () => `The sign-off mark at the foot of the guide’s letter. Unset leaves the letter unsigned. Video only — its frame is what shows.`
 
 
 /**
@@ -12727,7 +12727,71 @@ export const studio_builder_media_slots_title = () => `Videos & portrait`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_media_slots_hint = () => `Picked from your media library, so they reuse the same transcoding as the rest of your content. Only ready items are offered — an item still transcoding has nothing to play yet. Saved with the page.`
+export const studio_builder_media_slots_hint = () => `Picked from your media library, so they reuse the same transcoding as the rest of your content. Only ready items are offered — an item still transcoding has nothing to play yet. A slot that shows a still offers video only, because an audio item has no frame. Saved with the page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_hero_image = () => `Hero image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_hero_image_hint = () => `The still the hero paints, edge to edge. Unset → the hero film’s frame stands in, and with neither the hero draws its own gradient.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_hero_image_alt = () => `Journey hero image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_hero_image_none = () => `No hero image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_hero_image_updated = () => `Hero image updated`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_hero_image_upload_failed = () => `Hero image upload failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_hero_image_removed = () => `Hero image removed — the hero film’s frame stands in`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_media_toast_hero_image_remove_failed = () => `Could not remove the hero image`
 
 
 /**

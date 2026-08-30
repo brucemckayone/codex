@@ -285,6 +285,122 @@ describe('pageBuilder — design axes (F-B2)', () => {
   });
 });
 
+// ── A page gets its RHYTHM as sections are added ─────────────────────────────
+//
+// The store is where the page look and the section factory meet, and it is the
+// only place that can strip a redundant key: `section-design-defaults.ts` knows
+// the house rhythm and `section-catalog.ts` knows how to resolve an inherited
+// value, but only `addSection` knows what THIS page inherits.
+describe('pageBuilder — a new section arrives with a rhythm', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    let n = 0;
+    pageBuilder.setIdFactory(() => `new-${++n}`);
+  });
+
+  it('addSection stores the type’s rhythm on a page with no look of its own', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.addSection('faq');
+    const faq = pageBuilder.sections.at(-1);
+    expect(faq?.design).toEqual({
+      density: 'compact',
+      align: 'start',
+      type: 'restrained',
+      accent: 'none',
+      motion: 'fade',
+    });
+  });
+
+  it('addSection writes ONLY the axes the page look does not already set', () => {
+    // The look every seeded page carries, measured live before this change.
+    pageBuilder.open(
+      PAGE_ID,
+      makeSaved({
+        design: {
+          width: 'narrow',
+          density: 'airy',
+          surface: 'media',
+          edge: 'none',
+          align: 'center',
+          type: 'monumental',
+          accent: 'glow',
+          motion: 'drift',
+          media: 'bleed',
+        },
+      })
+    );
+    pageBuilder.addSection('hero');
+    expect(pageBuilder.sections.at(-1)?.design).toEqual({
+      width: 'full',
+      density: 'vast',
+    });
+    // And the FAQ is an exception on eight axes against that same look, which is
+    // the whole point: the page finally varies.
+    pageBuilder.addSection('faq');
+    const faq = pageBuilder.sections.at(-1);
+    expect(Object.keys(faq?.design ?? {}).length).toBeGreaterThanOrEqual(7);
+    expect(faq?.design?.media).toBeUndefined();
+  });
+
+  it('two added sections do not read as one design — the defect, inverted', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.addSection('hero');
+    pageBuilder.addSection('faq');
+    const [hero, faq] = pageBuilder.sections.slice(-2);
+    expect(JSON.stringify(hero.design)).not.toBe(JSON.stringify(faq.design));
+    expect(hero.design?.density).toBe('vast');
+    expect(faq.design?.density).toBe('compact');
+  });
+
+  it('the creator can still clear every axis back to inherited', () => {
+    // The rhythm is a DEFAULT, never a lock: the inspector's clear must empty the
+    // bag completely, so the section falls back to the page look.
+    pageBuilder.open(PAGE_ID, makeSaved());
+    const id = pageBuilder.addSection('faq');
+    const axes = Object.keys(
+      pageBuilder.sections.at(-1)?.design ?? {}
+    ) as (keyof NonNullable<PageSection['design']>)[];
+    expect(axes.length).toBeGreaterThan(0);
+    for (const axis of axes) {
+      pageBuilder.setSectionDesignAxis(id, axis, undefined);
+    }
+    const cleared = pageBuilder.sections.find((s) => s.id === id);
+    expect(cleared?.design).toBeUndefined();
+    expect(JSON.stringify(cleared)).not.toContain('design');
+  });
+
+  it('an unknown/widened type still stores no design key', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.addSection('retreat-schedule');
+    const added = pageBuilder.sections.at(-1);
+    expect(added?.type).toBe('retreat-schedule');
+    expect(added?.design).toBeUndefined();
+  });
+
+  it('does NOT retro-fit a rhythm onto the sections the page already stored', () => {
+    // Creation only. The seven published pages must render byte-identically, and
+    // `open()` is the path every one of them takes.
+    pageBuilder.open(PAGE_ID, makeSaved());
+    expect(pageBuilder.sections.map((s) => s.design)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(pageBuilder.isDirty).toBe(false);
+  });
+
+  it('duplicateSection carries the source’s rhythm, not the type’s', () => {
+    // A duplicate is a copy of a section the creator may have already tuned; the
+    // table must not overwrite their choices on the way through.
+    pageBuilder.open(PAGE_ID, makeSaved());
+    const faqId = pageBuilder.addSection('faq');
+    pageBuilder.setSectionDesignAxis(faqId, 'density', 'vast');
+    const copyId = pageBuilder.duplicateSection(faqId);
+    const copy = pageBuilder.sections.find((s) => s.id === copyId);
+    expect(copy?.design?.density).toBe('vast');
+  });
+});
+
 describe('pageBuilder — revert paths', () => {
   beforeEach(() => {
     pageBuilder.close();

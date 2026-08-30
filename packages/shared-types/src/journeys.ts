@@ -940,6 +940,23 @@ export interface JourneySellMedia {
   signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
+  /**
+   * UPLOADED hero-image CDN URL (`courses.heroImageKey` → `lg.webp`), or null
+   * when the creator has uploaded no hero image (Codex-490z7, A32).
+   *
+   * `lg`, not `md` like the cover: a cover fills a card, a hero paints edge to
+   * edge.
+   *
+   * This is the UPLOAD ONLY — deliberately NOT A32's public fallback chain. The
+   * builder panel's Replace / Remove affordances act on the uploaded file, so if
+   * this resolved a video's poster frame too, the panel would offer a "Remove"
+   * that removes nothing. `CourseSellPreview.heroImageUrl` owns the chain.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): a worker
+   * deployment predating A32 simply omits the key, and the panel renders its
+   * empty state rather than crashing on a missing field.
+   */
+  heroImageUrl?: string | null;
 }
 
 /**
@@ -1020,14 +1037,25 @@ export interface CourseSellPreview {
    */
   guideClip?: CourseSellPreviewClip | null;
   /**
-   * The HERO still — a public CDN URL resolved from the thumbnail of
-   * `courses.heroMediaId` (contract amendment A27, Codex-wqxv4).
+   * The HERO still — a public CDN URL, resolved down A32's FALLBACK CHAIN
+   * (contract amendments A27 · Codex-wqxv4, and A32 · Codex-490z7):
    *
-   * Resolved by `toStill`, NOT `toClip`: `media_items` is CHECK-constrained to
-   * ('video','audio'), so the still a creator picks for a hero is the chosen
-   * item's `thumbnailKey`. This is what makes the `media` design axis
-   * (`bleed`/`frame`/`mask`/`inset`) mean something on the hero — before it,
-   * every hero composition had only a synthetic gradient plate to draw.
+   *   `courses.heroImageKey` (an uploaded image, `lg.webp`)
+   *     ?? `courses.heroMediaId`'s poster frame (that item's `thumbnailKey`)
+   *       ?? nothing — the section draws its synthetic plate
+   *
+   * ORDERED, not merely additive. An uploaded image is an explicit creator
+   * choice; a poster frame is a by-product of transcoding, so the choice wins.
+   *
+   * THIS FIELD IS THE SEAM, and it is why A32 needed no change above this line: a
+   * section consumes `heroImageUrl` without knowing which link produced it. The
+   * second link exists because `media_items` is CHECK-constrained to
+   * ('video','audio') — so before A32 the only "hero image" reachable was a
+   * video's poster, which is exactly the gap A32 closes without removing.
+   *
+   * This is what makes the `media` design axis (`bleed`/`frame`/`mask`/`inset`)
+   * mean something on the hero — before A27, every hero composition had only a
+   * synthetic gradient plate to draw.
    *
    * OPTIONAL-additive (like {@link CourseSellPreview.guidePortraitUrl}): an older
    * worker deployment omits it and the hero falls back to its synthetic plate.

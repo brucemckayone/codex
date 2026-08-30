@@ -317,6 +317,88 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Process and store a COURSE (journey) HERO image — the still the sales page's
+   * loudest section paints (Codex-490z7, contract amendment A32).
+   *
+   * WHY THIS EXISTS AT ALL. `courses.heroMediaId` is a `media_items` ref, and
+   * that table is CHECK-constrained to ('video','audio'), so the "hero image" a
+   * creator picked there was really the auto-generated POSTER FRAME of a video.
+   * A creator who owned a photograph and no film could not put it in their own
+   * hero. A32's chain is therefore `heroImageKey ?? heroMediaId's poster ??
+   * synthetic plate`, and this method produces the first link.
+   *
+   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg
+   * WebP → R2 pipeline, same "the caller owns the DB write" split
+   * (`CourseJourneyService.setCourseHeroImageKey` persists the returned key
+   * org-scoped, so no scope logic is duplicated in the image layer), and the same
+   * `courses/{id}/…` namespace so both stills a course owns live together.
+   *
+   * TWO deliberate differences from the cover, both about SIZE:
+   *   • The returned `url` is the **lg** variant, not `md`. A cover fills a card;
+   *     a hero paints edge to edge, and handing back the 400px variant would show
+   *     the creator a soft preview of the image the page will not use.
+   *   • `lg` is 800px wide (`VARIANT_WIDTHS`), which is the widest this pipeline
+   *     produces. On a 1440px viewport a full-bleed hero upscales it. That is a
+   *     known limit of the shared variant ladder, NOT of this key: the ladder is
+   *     the same one every other still in the product rides, and widening it
+   *     would re-encode every existing image. Recorded here so the next reader
+   *     does not mistake the softness for a bug in the hero path.
+   *
+   * Keys are namespaced by `courseId` (`courses/{id}/hero/{size}.webp`) and are
+   * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
+   * hero never orphans an R2 object — the same property the cover relies on.
+   *
+   * @param courseId - Owning course (keys are namespaced under it)
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `heroImageKey` to address a specific variant.
+   */
+  async processCourseHero(
+    courseId: string,
+    file: File
+  ): Promise<{
+    heroImageKey: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
+    //
+    // `allowSvg: false` matches every other variant-ladder caller and is not an
+    // oversight: `processImageVariants` decodes through Photon, which cannot
+    // rasterise SVG, so an SVG here would fail in the Wasm decoder rather than at
+    // the boundary. The one path that DOES accept SVG (`processOrgLogo`) stores
+    // the sanitized markup verbatim instead of producing variants.
+    const { buffer } = await validateImageFile(file, false);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const heroImageKey = `courses/${courseId}/hero`;
+    const keys: VariantKeys = {
+      sm: `${heroImageKey}/sm.webp`,
+      md: `${heroImageKey}/md.webp`,
+      lg: `${heroImageKey}/lg.webp`,
+    };
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Course hero',
+    });
+
+    return {
+      heroImageKey,
+      // The lg variant — the hero serves `${key}/lg.webp`, so the
+      // immediately-usable URL matches what renders (see the doc comment).
+      url: `${this.r2PublicUrlBase}/${keys.lg}`,
+      size: variants.lg.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
    * Process and store user avatar
    * Uploads to R2 and updates user record
    */

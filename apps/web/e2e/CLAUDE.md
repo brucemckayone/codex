@@ -62,12 +62,14 @@ When you receive a Set-Cookie from `/api/test/fast-signin` or `/api/auth/sign-in
 
 ```
 apps/web/e2e/helpers/
-├── auth-cookies.ts      Cookie alias + Set-Cookie parsers (the heart of e2e auth)
-├── seed-auth.ts         Login as a pre-seeded user via fast-signin
-├── spa-nav.ts           expectClickNavigates() for ssr=false routes
-├── studio.ts            registerSharedStudioUser, navigateToStudio, injectOrgCookies
-├── subscription.ts      Seeded creator login, fresh-owner-with-rate-bypass, Stripe cleanup
-└── agreements.ts        Owner ↔ creator topology helpers (revenue-share specs)
+├── auth-cookies.ts        Cookie alias + Set-Cookie parsers (the heart of e2e auth)
+├── seed-auth.ts           Login as a pre-seeded user via fast-signin
+├── spa-nav.ts             expectClickNavigates() for ssr=false routes
+├── studio.ts              registerSharedStudioUser, navigateToStudio, injectOrgCookies
+├── subscription.ts        Seeded creator login, fresh-owner-with-rate-bypass, Stripe cleanup
+├── agreements.ts          Owner ↔ creator topology helpers (revenue-share specs)
+├── journeys.ts            Journey/portal fixtures + the four measurement traps
+└── journey-fingerprint.ts Canvas-vs-published arrangement fingerprint
 ```
 
 ### Choosing an auth helper
@@ -82,6 +84,34 @@ apps/web/e2e/helpers/
 | `createOwnerAndCreator` (agreements.ts) | Two-actor negotiation tests | Two `createOrgMember` calls | Slowest, two users |
 
 **Rule of thumb**: prefer seed-user helpers (idempotency burden, but fast). Use fresh-org helpers when the test mutates state in ways that would corrupt the next run.
+
+---
+
+## Journeys / portals (the sales surface + the builder canvas)
+
+`e2e/journeys/` covers the public sell page, its head tags, and the studio
+builder canvas's fidelity to what it publishes. **Read `helpers/journeys.ts`'s
+header before writing anything on this surface** — it documents four traps that
+each cost an agent a wrong conclusion, and encodes each as a helper:
+
+| Trap | What it does to you | Helper |
+|---|---|---|
+| Scroll reveals | 29 of 37 text leaves sit at opacity 0 until scrolled, so a `fullPage` screenshot is blank and geometry reads wrong. The repo's own `--project=visual` journey snapshots are blank for exactly this reason. | `forceRevealsIn()` |
+| Entitlement redirect | An entitled viewer — the org owner always is one — is redirected off `/journeys/<slug>` to `/dashboard`, and `?preview=1` bypasses the redirect but still resolves the CTA against the CREATOR's entitlement. Measure a visitor SIGNED OUT. | `expectSellPageRendered()` |
+| Soft 404 | A load-thrown 404 here returns **HTTP 200** (Codex-nqop3, upstream SvelteKit). The status code is not evidence; assert the rendered sections. | `expectSellPageRendered()` |
+| Async canvas | The builder fires seven remote reads; the two the canvas renders from land at ~10.6s and ~12.6s. A DOM-stability wait converges in the GAP and measures a half-loaded canvas — which makes a parity assertion PASS while broken. | `settleBuilderCanvas()` |
+
+Two more rules specific to this surface:
+
+- **Compare the canvas and the published page at the SAME inline size.** `.jp-sec`
+  carries `container-type: inline-size`, so the journey CSS's 19 `@container`
+  rules resolve against ITS width. Use `matchInlineSize()`, and read
+  `offsetWidth` — never `getBoundingClientRect().width`: the canvas renders at a
+  real 1440 and is `transform: scale()`d, so the same element reports 1440
+  (layout, what the query uses) and ~676 (painted).
+- **Sign in with `signInAsSeededUser()`**, not the form. The journey fixtures span
+  three orgs with three different owners, and `fast-signin` is exempt from the
+  5-per-15-min credential limiter that gates `/api/auth/sign-in/email`.
 
 ---
 

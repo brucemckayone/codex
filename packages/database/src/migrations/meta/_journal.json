@@ -645,6 +645,13 @@
       "when": 1788043675779,
       "tag": "0091_invite_price_and_offcatalogue_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1788057028581,
+      "tag": "0092_courses_hero_image_key",
+      "breakpoints": true
     }
   ]
 }
