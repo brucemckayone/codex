@@ -2,20 +2,133 @@
  * Server-side hooks for session validation and security
  *
  * Runs on every request to:
- * 1. Generate request ID for tracing
- * 2. Validate session with Auth Worker
- * 3. Apply security headers
- * 4. Handle global errors
+ * 1. Terminate junk reserved hosts (cdn*, preview, …) with a cached 404
+ * 2. Serve public CDN assets that the wildcard route shadows off R2
+ * 3. Generate request ID for tracing and validate session with Auth Worker
+ * 4. Apply security headers
+ * 5. Handle global errors
  */
 
-import { COOKIES } from '@codex/constants';
+import { APP_SUBDOMAINS, CACHE_PRESETS, COOKIES } from '@codex/constants';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
 import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
-import { tryServeCdnAsset } from '$lib/server/cdn-proxy';
+import { isPublicCdnHost, tryServeCdnAsset } from '$lib/server/cdn-proxy';
+import { getSubdomainContext } from '$lib/utils/subdomain';
+
+/**
+ * Is this hostname a frontend alias of THIS worker? `codex` and `creators`
+ * (plus their `-staging` / preview variants) are reserved, but they sit on
+ * dedicated (non-wildcard) routes in `apps/web/wrangler.jsonc` that point at
+ * this same worker — the reroute hook serves them real pages. The junk-host
+ * filter below must never intercept them.
+ */
+function isAppFrontendHost(hostname: string): boolean {
+  const firstLabel = hostname.split('.')[0];
+  return APP_SUBDOMAINS.some(
+    (app) => firstLabel === app || firstLabel.startsWith(`${app}-`)
+  );
+}
+
+/**
+ * Reserved labels this worker serves real pages for — the exhaust list that
+ * keeps the junk filter below off live product surface. Every entry is a
+ * verified-live hostname, not a hypothetical:
+ * - `app` / `platform` — the platform frontends (the "Platform frontends"
+ *   group in `STATIC_RESERVED_SUBDOMAINS`). `app` is additionally whitelisted
+ *   as a PRODUCTION checkout-redirect domain (`ALLOWED_REDIRECT_DOMAINS` in
+ *   packages/validation/src/schemas/purchase.ts): Stripe sends paying
+ *   customers back to `app.*` success URLs, so a day-cached constant 404
+ *   here would break a live payment flow.
+ * - `staging` — the staging apex (staging.revelations.studio).
+ * - `local` — the Cloudflare tunnel apex (local.revelations.studio).
+ */
+const SERVED_RESERVED_SUBDOMAINS = new Set([
+  'app',
+  'platform',
+  'staging',
+  'local',
+]);
+
+/**
+ * Pure decision for the junk-host hook: should this hostname be terminated
+ * with a bare 404 before any SvelteKit work happens?
+ *
+ * True ONLY for reserved infrastructure subdomains that nothing in this app
+ * serves — scanner traffic to `cdn`, `cdn-dev`, `cdn-resources*`, `cdn-media*`,
+ * `preview`, `api`, … which otherwise burns a full SSR pass (session
+ * validation, reroute, rendered 404 page) on the account's most expensive
+ * worker. Everything else keeps its exact current path:
+ * - apex / www / unknown hosts → platform context, never reserved;
+ * - `creators` → creator context, never reserved;
+ * - organization slugs (incl. unknown ones — they NEED the DB resolution to
+ *   produce the normal org 404 page, never 404 them here);
+ * - public CDN hosts `cdn-assets*` / `cdn-platform*` → served from R2 by
+ *   cdnAssetHook, which runs right after this hook;
+ * - frontend aliases of this worker (`codex*`, `creators*`) → dedicated
+ *   routes above;
+ * - the reserved labels this worker actually serves →
+ *   SERVED_RESERVED_SUBDOMAINS.
+ */
+export function shouldShortCircuitHost(hostname: string): boolean {
+  const context = getSubdomainContext(hostname);
+  if (context.type !== 'reserved') return false;
+  if (isPublicCdnHost(hostname)) return false;
+  if (isAppFrontendHost(hostname)) return false;
+  return !SERVED_RESERVED_SUBDOMAINS.has(context.subdomain);
+}
+
+/**
+ * Junk-host short-circuit hook (measured 2026-08-31).
+ *
+ * Requests to reserved-but-unmatched subdomains used to fall through the whole
+ * pipeline and render a full 404 page — 406 of 599 cdn* requests/24h were
+ * 404s. This hook answers them at the edge with a constant 404 and a day-long
+ * edge cache window, so repeat probes never re-invoke the worker.
+ *
+ * `cdn-resources*` / `cdn-media*` landing here is the private-bucket security
+ * control WORKING (see cdn-proxy.ts header) — same 404 verdict, now cheap.
+ * Do not try to serve them.
+ *
+ * Like cdnAssetHook, this response deliberately carries no session validation
+ * and no app security headers: there is no user, no page, and the body is a
+ * constant.
+ */
+export const junkHostHook: Handle = async ({ event, resolve }) => {
+  if (!shouldShortCircuitHost(event.url.hostname)) return resolve(event);
+
+  const response = new Response('Not Found', {
+    status: 404,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      // `CACHE_PRESETS.asset` — the existing public window (24h edge), the
+      // same preset cdnAssetHook's responses carry. A hand-written
+      // `public, max-age=86400, s-maxage=86400` is off-vocabulary and fails
+      // check-data-access-contract (RULE 3, no waivers by design).
+      'cache-control': CACHE_PRESETS.asset,
+    },
+  });
+
+  // Best-effort edge-cache write so repeat probes are answered without
+  // re-invoking the worker. The Cache API is GET-only and absent in some
+  // runtimes (vitest/jsdom), and a cache failure must NEVER break the 404.
+  // Awaited, not waitUntil: workerd cancels un-awaited promises the moment
+  // the response returns (Codex-e32xz).
+  if (event.request.method === 'GET' && typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open('junk-host-404');
+      await cache.put(event.request, response.clone());
+    } catch {
+      // Swallowed on purpose — the response below is already correct; only
+      // the cache write is lost.
+    }
+  }
+
+  return response;
+};
 
 /**
  * Public CDN asset hook (WP-2 · Codex-fc5oh.2)
@@ -25,9 +138,9 @@ import { tryServeCdnAsset } from '$lib/server/cdn-proxy';
  * This hook serves those public assets straight from the bound R2 bucket so
  * thumbnails/logos/branding resolve instead of 500ing in SvelteKit.
  *
- * Runs FIRST in the sequence and short-circuits — a public asset must never
- * trigger session validation or carry app security headers. See cdn-proxy.ts
- * for why only the public buckets are handled here.
+ * Runs right after the junk-host filter and short-circuits — a public asset
+ * must never trigger session validation or carry app security headers. See
+ * cdn-proxy.ts for why only the public buckets are handled here.
  */
 const cdnAssetHook: Handle = async ({ event, resolve }) => {
   const response = await tryServeCdnAsset(event);
@@ -155,8 +268,13 @@ const cdnRewriteHook: Handle = async ({ event, resolve }) => {
 
 /**
  * Combine hooks in sequence
+ *
+ * junkHostHook MUST stay first: it is the cheap terminator for reserved-junk
+ * hosts, and it defers (returns resolve(...)) for exactly the hosts the hooks
+ * behind it serve — cdnAssetHook's public CDN hosts above all.
  */
 export const handle = sequence(
+  junkHostHook,
   cdnAssetHook,
   sessionHook,
   securityHook,
