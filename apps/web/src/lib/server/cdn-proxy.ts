@@ -98,6 +98,19 @@ function resolveCdnBinding(hostname: string): CdnBinding | null {
 }
 
 /**
+ * Whether a hostname is one of the PUBLIC CDN hosts this module serves
+ * (`cdn-assets*` / `cdn-platform*`, any env suffix).
+ *
+ * The junk-host hook in `hooks.server.ts` consults this so those hosts keep
+ * flowing into `tryServeCdnAsset` — they carry real assets (measured 163 x
+ * HTTP 200/day) — while every OTHER reserved subdomain short-circuits to a
+ * cheap 404. Pure hostname question; no bindings, no security change.
+ */
+export function isPublicCdnHost(hostname: string): boolean {
+  return resolveCdnBinding(hostname) !== null;
+}
+
+/**
  * The ONLY media-bucket keys this public host may serve: the 30-second preview
  * clip's own directory, `{creatorId}/hls/{mediaId}/preview/…`
  * (`getHlsPreviewKey`, packages/transcoding/src/paths.ts:150-152).
