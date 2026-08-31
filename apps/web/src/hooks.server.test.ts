@@ -10,16 +10,19 @@
  *   - everything real keeps its current path: apex/www/creators, org slugs
  *     (unknown ones included — they need DB resolution), the public CDN hosts
  *     cdn-assets and cdn-platform with any env suffix (cdnAssetHook serves
- *     them; it runs right AFTER junkHostHook, so deferring here IS the
- *     ordering contract), the frontend aliases codex and creators with any
- *     suffix, and the staging/tunnel apexes;
+ *     them; it runs right after junkHostHook in the sequence), the frontend
+ *     aliases codex and creators with any suffix, the platform frontends app
+ *     and platform, and the staging/tunnel apexes;
  *   - the 404 is a constant edge-cacheable body, written into the Cache API
- *     on GET, and a cache failure never breaks the response.
+ *     on GET, and a cache failure never breaks the response;
+ *   - the assembled `handle` sequence terminates junk hosts before any
+ *     session work and carries real traffic through to the router.
  *
  * The census at the bottom is the durable form: it derives the expectation
  * for EVERY reserved subdomain, so a new reserved-hostname axis fails here
  * until its junk-or-served status is decided explicitly.
  */
+
 import {
   APP_SUBDOMAINS,
   CACHE_PRESETS,
@@ -28,9 +31,38 @@ import {
   RESERVED_SUBDOMAINS,
   TRANSIENT_HOST_SUFFIXES,
 } from '@codex/constants';
+import type { Handle } from '@sveltejs/kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isPublicCdnHost } from '$lib/server/cdn-proxy';
-import { junkHostHook, shouldShortCircuitHost } from './hooks.server';
+import { handle, junkHostHook, shouldShortCircuitHost } from './hooks.server';
+
+// The real `sequence()` enters SvelteKit's per-request tracing store, which
+// only exists inside a live request — `handle` cannot be driven from vitest
+// directly. This mock reimplements its documented chaining (each hook's
+// `resolve` is the next hook; the last resolves the input's own resolve),
+// which is all the ordering tests need: the hooks arrive in the exact
+// argument order of `sequence(...)` in hooks.server.ts, so reordering or
+// deleting one there fails these tests.
+vi.mock('@sveltejs/kit/hooks', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@sveltejs/kit/hooks')>();
+  const sequence =
+    (...hooks: Handle[]) =>
+    async (input: Parameters<Handle>[0]): Promise<Response> => {
+      // `resolve` receives the EVENT (plus optional resolve options), exactly
+      // as SvelteKit's own sequence passes it — hooks call `resolve(event)`.
+      type Chained = (
+        event: Parameters<Handle>[0]['event']
+      ) => Promise<Response>;
+      let next: Chained = input.resolve as unknown as Chained;
+      for (let i = hooks.length - 1; i >= 0; i -= 1) {
+        const downstream = next;
+        const hook = hooks[i];
+        next = async (event) => await hook({ event, resolve: downstream });
+      }
+      return next(input.event);
+    };
+  return { ...actual, sequence };
+});
 
 /** Minimal hook input: url + request + a resolve that stands in for the whole
  * rest of the chain (cdnAssetHook, sessionHook, securityHook, cdnRewriteHook). */
@@ -43,6 +75,27 @@ function makeHookEvent(opts: { host: string; method?: string }) {
     resolve,
   } as unknown as Parameters<typeof junkHostHook>[0];
   return { input, resolve, request };
+}
+
+/** Minimal input for driving the real `handle` sequence end to end: the
+ * resolve stand-in for the router plus the event pieces sessionHook and
+ * securityHook touch (cookies.get returning undefined skips the auth call). */
+function makeSequenceInput(opts: { host: string }) {
+  const url = new URL(`https://${opts.host}/some/probe/path`);
+  const event = {
+    url,
+    request: new Request(url),
+    cookies: { get: vi.fn(() => undefined) },
+    // Loosely typed: the assertions below read locals.requestId, which only
+    // exists once the real sessionHook has run.
+    locals: {} as Record<string, unknown>,
+  };
+  const resolve = vi.fn(async () => new Response('rendered page'));
+  const input = {
+    event,
+    resolve,
+  } as unknown as Parameters<typeof handle>[0];
+  return { input, resolve, event };
 }
 
 /** Stub the global Cache API (`typeof caches` guard in the hook reads it). */
@@ -76,6 +129,8 @@ describe('shouldShortCircuitHost — the exact measured hosts', () => {
     ['revelations.studio', false],
     ['www.revelations.studio', false],
     ['some-real-org.revelations.studio', false],
+    ['app.revelations.studio', false],
+    ['platform.revelations.studio', false],
   ];
 
   it.each(cases)('%s → %s', (hostname, expected) => {
@@ -104,6 +159,13 @@ describe('shouldShortCircuitHost — the exact measured hosts', () => {
     expect(shouldShortCircuitHost('creators-staging.revelations.studio')).toBe(
       false
     );
+    // …the platform frontends, which render platform pages today (verified
+    // 2026-08-31: app./platform. → 200 text/html). `app` is also a
+    // PRODUCTION checkout-redirect domain (ALLOWED_REDIRECT_DOMAINS in
+    // packages/validation/src/schemas/purchase.ts) — a cached 404 there
+    // strands paying customers returning from Stripe.
+    expect(shouldShortCircuitHost('app.revelations.studio')).toBe(false);
+    expect(shouldShortCircuitHost('platform.revelations.studio')).toBe(false);
     // …and the recognized apex aliases that render platform pages today.
     expect(shouldShortCircuitHost('staging.revelations.studio')).toBe(false);
     expect(shouldShortCircuitHost('local.revelations.studio')).toBe(false);
@@ -113,8 +175,10 @@ describe('shouldShortCircuitHost — the exact measured hosts', () => {
   it('censuses EVERY reserved subdomain: junk unless something serves it', () => {
     // The exempted labels, derived from the same axes that generate them —
     // `assets`/`platform` mirror PUBLIC_CDN_BINDINGS in cdn-proxy.ts (the
-    // public buckets); `www`/`dev` never reach the reserved branch at all
-    // (www maps to platform, dev is its own apex in parseHost).
+    // public buckets); `app`/`platform` are the platform frontends this
+    // worker serves (see SERVED_RESERVED_SUBDOMAINS in hooks.server.ts);
+    // `www`/`dev` never reach the reserved branch at all (www maps to
+    // platform, dev is its own apex in parseHost).
     const exempted = new Set([
       ...(['assets', 'platform'] as const).flatMap((type) =>
         CDN_HOST_SUFFIXES.map((suffix) => `cdn-${type}${suffix}`)
@@ -124,6 +188,8 @@ describe('shouldShortCircuitHost — the exact measured hosts', () => {
           (suffix) => `${app}${suffix}`
         )
       ),
+      'app',
+      'platform',
       'staging',
       'local',
       'www',
@@ -190,17 +256,24 @@ describe('junkHostHook', () => {
   });
 
   it('still returns the 404 when there is no Cache API at all', async () => {
-    // No vi.stubGlobal('caches') — jsdom has none; the typeof guard must hold.
+    // No vi.stubGlobal('caches') — jsdom has none. This pins the outcome
+    // (404 without a cache write), not WHICH of the two guards — the typeof
+    // check or the swallowing try/catch — carried it: removing either one
+    // alone keeps this green, and that is acceptable because both exist for
+    // this same outcome.
     const { input } = makeHookEvent({ host: 'preview.revelations.studio' });
     const response = await junkHostHook(input);
     expect(response.status).toBe(404);
   });
 
-  it('skips the cache write for non-GET requests (Cache API is GET-only)', async () => {
+  it.each([
+    'POST',
+    'HEAD',
+  ])('skips the cache write for %s (Cache API is GET-only)', async (method) => {
     const { put } = stubCaches();
     const { input } = makeHookEvent({
       host: 'cdn-dev.revelations.studio',
-      method: 'POST',
+      method,
     });
 
     const response = await junkHostHook(input);
@@ -217,6 +290,8 @@ describe('junkHostHook', () => {
       'some-real-org.revelations.studio',
       'unknown-org-slug.revelations.studio',
       'codex.revelations.studio',
+      'app.revelations.studio',
+      'platform.revelations.studio',
       'staging.revelations.studio',
     ];
     for (const host of hosts) {
@@ -248,5 +323,47 @@ describe('junkHostHook', () => {
       expect(await response.text(), host).toBe('rendered page');
       expect(resolve, host).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe('handle — the assembled sequence', () => {
+  // The unit tests above drive junkHostHook alone; these drive the real
+  // `handle` export so the ORDER is pinned, not just the deferral. `resolve`
+  // stands in for the router, so "resolve never ran" means not one hook
+  // behind junkHostHook (cdn assets, session validation, security, rewrite)
+  // spent anything on the request.
+
+  it('terminates a junk host before the router — no session work, cached 404', async () => {
+    const { put } = stubCaches();
+    const { input, resolve, event } = makeSequenceInput({
+      host: 'cdn-resources-dev.revelations.studio',
+    });
+
+    const response = await handle(input);
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not Found');
+    // Ordering contract. `resolve` (the router) never running is only half
+    // of it: sessionHook runs BEFORE the router, so the cheap-termination
+    // claim is that it never ran either — observable as locals.requestId,
+    // the first thing sessionHook writes. If junkHostHook moved behind
+    // sessionHook, requestId would be set and this fails.
+    expect(resolve).not.toHaveBeenCalled();
+    expect(event.locals.requestId).toBeUndefined();
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries real traffic through every hook to the router', async () => {
+    stubCaches();
+    const { input, resolve, event } = makeSequenceInput({
+      host: 'app.revelations.studio',
+    });
+
+    const response = await handle(input);
+
+    expect(await response.text()).toBe('rendered page');
+    expect(resolve).toHaveBeenCalledTimes(1);
+    // The full chain really ran — sessionHook stamped the request ID.
+    expect(event.locals.requestId).toEqual(expect.any(String));
   });
 });

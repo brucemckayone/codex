@@ -2,10 +2,11 @@
  * Server-side hooks for session validation and security
  *
  * Runs on every request to:
- * 1. Generate request ID for tracing
- * 2. Validate session with Auth Worker
- * 3. Apply security headers
- * 4. Handle global errors
+ * 1. Terminate junk reserved hosts (cdn*, preview, …) with a cached 404
+ * 2. Serve public CDN assets that the wildcard route shadows off R2
+ * 3. Generate request ID for tracing and validate session with Auth Worker
+ * 4. Apply security headers
+ * 5. Handle global errors
  */
 
 import { APP_SUBDOMAINS, CACHE_PRESETS, COOKIES } from '@codex/constants';
@@ -33,6 +34,26 @@ function isAppFrontendHost(hostname: string): boolean {
 }
 
 /**
+ * Reserved labels this worker serves real pages for — the exhaust list that
+ * keeps the junk filter below off live product surface. Every entry is a
+ * verified-live hostname, not a hypothetical:
+ * - `app` / `platform` — the platform frontends (the "Platform frontends"
+ *   group in `STATIC_RESERVED_SUBDOMAINS`). `app` is additionally whitelisted
+ *   as a PRODUCTION checkout-redirect domain (`ALLOWED_REDIRECT_DOMAINS` in
+ *   packages/validation/src/schemas/purchase.ts): Stripe sends paying
+ *   customers back to `app.*` success URLs, so a day-cached constant 404
+ *   here would break a live payment flow.
+ * - `staging` — the staging apex (staging.revelations.studio).
+ * - `local` — the Cloudflare tunnel apex (local.revelations.studio).
+ */
+const SERVED_RESERVED_SUBDOMAINS = new Set([
+  'app',
+  'platform',
+  'staging',
+  'local',
+]);
+
+/**
  * Pure decision for the junk-host hook: should this hostname be terminated
  * with a bare 404 before any SvelteKit work happens?
  *
@@ -48,18 +69,16 @@ function isAppFrontendHost(hostname: string): boolean {
  * - public CDN hosts `cdn-assets*` / `cdn-platform*` → served from R2 by
  *   cdnAssetHook, which runs right after this hook;
  * - frontend aliases of this worker (`codex*`, `creators*`) → dedicated
- *   routes above; the staging apex (`staging`) and the tunnel apex (`local`)
- *   render platform pages today and stay untouched.
+ *   routes above;
+ * - the reserved labels this worker actually serves →
+ *   SERVED_RESERVED_SUBDOMAINS.
  */
 export function shouldShortCircuitHost(hostname: string): boolean {
   const context = getSubdomainContext(hostname);
   if (context.type !== 'reserved') return false;
   if (isPublicCdnHost(hostname)) return false;
   if (isAppFrontendHost(hostname)) return false;
-  if (context.subdomain === 'staging' || context.subdomain === 'local') {
-    return false;
-  }
-  return true;
+  return !SERVED_RESERVED_SUBDOMAINS.has(context.subdomain);
 }
 
 /**
@@ -119,9 +138,9 @@ export const junkHostHook: Handle = async ({ event, resolve }) => {
  * This hook serves those public assets straight from the bound R2 bucket so
  * thumbnails/logos/branding resolve instead of 500ing in SvelteKit.
  *
- * Runs FIRST in the sequence and short-circuits — a public asset must never
- * trigger session validation or carry app security headers. See cdn-proxy.ts
- * for why only the public buckets are handled here.
+ * Runs right after the junk-host filter and short-circuits — a public asset
+ * must never trigger session validation or carry app security headers. See
+ * cdn-proxy.ts for why only the public buckets are handled here.
  */
 const cdnAssetHook: Handle = async ({ event, resolve }) => {
   const response = await tryServeCdnAsset(event);
