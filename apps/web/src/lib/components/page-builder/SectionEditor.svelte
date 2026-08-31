@@ -163,6 +163,14 @@
   const fieldLabelId = (key: string): string =>
     `sf-${`${section.id}-${key}`.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
 
+  /**
+   * The id of the CONTROL itself, for `label[for]` and `aria-describedby`.
+   * Distinct from `fieldLabelId`, which names the label element of a `role="group"`
+   * field — a field takes exactly one branch, so they could not collide, but a
+   * single id doing both jobs reads as a bug the first time someone greps for it.
+   */
+  const fieldControlId = (key: string): string => `${fieldLabelId(key)}-control`;
+
   /** Read a prop as a string for a control `value` (non-strings coerce to ''). */
   function valueOf(key: string): string {
     const v = section.props[key];
@@ -423,6 +431,26 @@
           {/if}
         </div>
       {:else if field.control === 'toggle'}
+        <!--
+          UNREACHABLE TODAY, AND LEFT THAT WAY DELIBERATELY. The catalogue declares
+          exactly one `control: 'toggle'` — `invite.offers[].best` — and it is
+          NESTED in `itemFields`, so `ArrayField` renders it and this branch does
+          not. It stays as the seam the coverage assertion in
+          `section-editor-controls.svelte.test.ts` requires (a declared kind with
+          no branch falls through to the catch-all text input and starts corrupting
+          the shape it names).
+
+          IF YOU ADD A TOP-LEVEL TOGGLE, port the `{:else}` branch's shape below
+          first: this `<label>` wraps the control AND the hint, so the hint is
+          folded into the checkbox's accessible name. That was the defect measured
+          and fixed for every reachable field.
+
+          AND YOU WILL BE TOLD, rather than trusted to read this. A guard in
+          `section-editor-field-description.svelte.test.ts` asserts the catalogue
+          declares no top-level toggle; it fails on the very commit that makes this
+          branch reachable and names the port in its message. A comment asking for
+          care is a convention — this one has a shape behind it.
+        -->
         <label class="section-editor__field section-editor__field--inline">
           <input
             type="checkbox"
@@ -437,31 +465,58 @@
         </label>
       {:else}
       {@const gate = axisGate(field)}
-      <label class="section-editor__field">
-        <span class="section-editor__field-label">{field.label}</span>
+      {@const controlId = fieldControlId(field.key)}
+      <!-- The reason REPLACES the hint: a hint about what the control does is
+           noise while the control cannot do it. -->
+      {@const hintText = gate ? gate.reason : field.hint}
+      <!--
+        A `<div>` with an explicit `label[for]`, NOT a `<label>` wrapping the lot.
+
+        MEASURED, live, before this change: because the hint sat INSIDE the
+        wrapping label, every word of it was folded into the control's ACCESSIBLE
+        NAME. "Accent ending" announced as "Accent ending Set in italic accent at
+        the end of the headline. Leave blank for none." — and `aria-describedby`
+        was null on all twelve fields. A hint is a DESCRIPTION, not a name, so it
+        moves out of the label and onto `aria-describedby`.
+
+        This is not a downgrade from implicit association: `field-inventory-sweep`
+        resolves an accessible name by `label[for]` FIRST and only then falls back
+        to a wrapping label, so the explicit form is the one it prefers.
+      -->
+      <div
+        class="section-editor__field"
+        data-hint={hintText ? (gate ? 'pinned' : 'reveal') : 'none'}
+      >
+        <label class="section-editor__field-label" for={controlId}>{field.label}</label>
         {#if field.control === 'textarea'}
           <textarea
+            id={controlId}
             class="section-editor__input section-editor__input--area"
             rows="3"
             placeholder={field.placeholder}
             value={valueOf(field.key)}
             disabled={Boolean(gate)}
+            aria-describedby={hintText ? `${controlId}-hint` : undefined}
             oninput={(e) => onInput(field.key, e)}
           ></textarea>
         {:else if field.control === 'number'}
           <input
+            id={controlId}
             type="number"
             class="section-editor__input"
             placeholder={field.placeholder}
             value={numberOf(field.key)}
             disabled={Boolean(gate)}
+            aria-describedby={hintText ? `${controlId}-hint` : undefined}
             oninput={(e) => onNumber(field.key, e)}
           />
         {:else if field.control === 'select'}
           <select
+            id={controlId}
             class="section-editor__input"
             value={valueOf(field.key)}
             disabled={Boolean(gate)}
+            aria-describedby={hintText ? `${controlId}-hint` : undefined}
             onchange={(e) => onInput(field.key, e)}
           >
             {#each field.options ?? [] as opt (opt.value)}
@@ -470,22 +525,20 @@
           </select>
         {:else}
           <input
+            id={controlId}
             type="text"
             class="section-editor__input"
             placeholder={field.placeholder}
             value={valueOf(field.key)}
             disabled={Boolean(gate)}
+            aria-describedby={hintText ? `${controlId}-hint` : undefined}
             oninput={(e) => onInput(field.key, e)}
           />
         {/if}
-        {#if gate}
-          <!-- The reason REPLACES the hint: a hint about what the control does is
-               noise while the control cannot do it. -->
-          <span class="section-editor__hint">{gate.reason}</span>
-        {:else if field.hint}
-          <span class="section-editor__hint">{field.hint}</span>
+        {#if hintText}
+          <p class="section-editor__hint" id={`${controlId}-hint`}>{hintText}</p>
         {/if}
-      </label>
+      </div>
       {/if}
     {/each}
   </div>
@@ -640,10 +693,12 @@
   .section-editor__fields {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
   .section-editor__field {
+    /* Anchors the revealed hint below the row (see `[data-hint='reveal']`). */
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -695,6 +750,47 @@
     color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
+
+  /*
+    A CONTENT field's hint is revealed on hover or focus rather than held in flow.
+    Scoped by `[data-hint='reveal']` AND a direct-child selector on purpose:
+    `.section-editor__hint` is shared by five call sites, two of which must never
+    hide — the DESIGN group's one-line explanation of inheritance, and the media
+    library's `role="status"` / `role="alert"` read-out. A bare
+    `.section-editor__hint` rule here would silence a load failure.
+
+    `opacity`, NOT `display: none` or `visibility: hidden`: the hint is the target
+    of the control's `aria-describedby`, and those two remove a node from the
+    accessibility tree — which would unwire the description with no visual symptom.
+  */
+  .section-editor__field[data-hint='reveal'] > .section-editor__hint {
+    position: absolute;
+    inset-inline: 0;
+    top: 100%;
+    z-index: var(--z-tooltip);
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-surface-secondary);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+
+  /* Hover AND focus-within: hover alone is unreachable by keyboard and by touch. */
+  .section-editor__field[data-hint='reveal']:hover > .section-editor__hint,
+  .section-editor__field[data-hint='reveal']:focus-within > .section-editor__hint {
+    opacity: 1;
+  }
+
+  /*
+    `data-hint='pinned'` is the axis-gated case and stays in flow, deliberately.
+    A gated control is `disabled`, so it is NOT focusable and touch offers no
+    hover — a revealed reason would be the one thing neither a keyboard nor a
+    touch user could reach. `variant-picker.svelte.test.ts` documents this exact
+    trap for the descoped composition card; this is the same rule for fields.
+  */
 
   /* The media read-failure notice. Same surface and same tokens as
      `PageMediaPanel`'s `.panel__warn`, because it reports the same fact from the
