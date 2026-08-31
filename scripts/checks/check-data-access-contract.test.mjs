@@ -1023,6 +1023,32 @@ test('RULE 6 CATCHES the whole family — bare tokens, lower case, precision par
   );
 });
 
+test('RULE 6 CATCHES the type-argument spelling sql<T>` — the dominant tag form in service code', () => {
+  // organization-service.ts and its siblings tag templates as `sql<number>`...
+  // not `sql`...`, so a matcher that demands the backtick immediately after
+  // `sql` never judges that spelling: the probe `sql<Date>`x > NOW()`` scanned
+  // as ZERO templates and ZERO violations — the exact banned predicate
+  // certified clean. templatesFound is asserted FIRST because 0 is the
+  // fingerprint of the blind spot: it is what hid the miss from the
+  // fail-closed tripwire.
+  writeFixture(
+    `${WORKER_SRC}/generic-tag.ts`,
+    [
+      'export const active = sql<Date>`x > NOW()`;',
+      'export const ids = sql<string[]>`SELECT id FROM t`;',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.equal(
+    templatesFound,
+    2,
+    'both type-argumented tags were recognised as subjects, clean one included'
+  );
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].token, 'NOW(');
+  assert.equal(violations[0].line, 1);
+});
+
 // ===========================================================================
 // RULE 6 — NEAR-MISSES THAT MUST PASS
 // ===========================================================================

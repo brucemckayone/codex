@@ -1170,11 +1170,22 @@ export const NON_DETERMINISTIC_TIME_RE =
 
 /**
  * A `sql` identifier (bare, `db.sql`, `this.sql` — any member chain ending in
- * `sql`) immediately tagging a backtick template. This is the ONLY thing rule
- * 6 judges: every other template literal in the tree — KV keys, log lines,
- * i18n messages — is not SQL and is never scanned.
+ * `sql`) immediately tagging a backtick template, with an optional type
+ * argument (`sql<number>`...``) — the spelling most of this repo's predicates
+ * are tagged with. A matcher that demands the backtick right after `sql`
+ * judges that spelling not at all: the probe `sql<Date>`x > NOW()`` scanned
+ * as ZERO templates and ZERO violations, certifying the exact banned
+ * predicate clean. The type-argument body excludes `>` (single-level generics
+ * only — every generic tag in the tree is one level) and the backtick (so it
+ * cannot bridge into a template). This is the ONLY thing rule 6 judges: every
+ * other template literal in the tree — KV keys, log lines, i18n messages — is
+ * not SQL and is never scanned. Known limit: an IMPORT ALIAS renames the
+ * identifier and escapes the matcher entirely (`sql as sqlOperator`, in
+ * test-utils today); no aliased template in the scanned roots carries a time
+ * token, so the limit is latent — and invisible to the zero-template tripwire,
+ * which plain `sql` tags keep above zero.
  */
-const SQL_TAG_RE = /\bsql\s*(?=`)/g;
+const SQL_TAG_RE = /\bsql(?:\s*<[^`>]*>)?\s*(?=`)/g;
 
 /**
  * The STATIC chunks of the template that opens at `backtick`, plus the index

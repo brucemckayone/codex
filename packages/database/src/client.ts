@@ -218,8 +218,12 @@ export const dbWs = createDbWsProxy();
  * This factory creates a fresh Pool instance that MUST be closed before the request completes.
  *
  * @param env - Environment variables containing DATABASE_URL
- * @param connectionStringOverride - Optional connection string that replaces the
- *   env-derived URL (e.g. a Hyperdrive binding's `connectionString`)
+ * @param connectionStringOverride - Connection string that REPLACES the
+ *   env-derived URL. The intended caller passes a Hyperdrive binding's
+ *   `connectionString` (Codex-s1i7h) — the Neon driver consumes it exactly
+ *   like a database URL, so connecting through Hyperdrive is a URL swap and
+ *   not a client-construction change. Undefined for every caller today, so
+ *   URL resolution is unchanged.
  * @returns Object with db client and cleanup function
  *
  * @example
@@ -243,14 +247,6 @@ export const dbWs = createDbWsProxy();
  */
 export function createPerRequestDbClient(
   env: DbEnvVars,
-  /**
-   * Connection string that REPLACES the env-derived URL. The intended caller
-   * passes `env.HYPERDRIVE?.connectionString` (Codex-s1i7h): a Hyperdrive
-   * binding exposes a connection string the Neon driver consumes exactly like
-   * a database URL, so connecting through Hyperdrive is a URL swap and not a
-   * client-construction change. Undefined for every caller today — resolution
-   * then behaves exactly as before.
-   */
   connectionStringOverride?: string
 ): {
   db: ReturnType<typeof drizzleWs<typeof schema>>;
