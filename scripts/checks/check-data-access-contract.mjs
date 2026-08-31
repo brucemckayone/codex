@@ -10,7 +10,7 @@
  * job, needs no database, and fails the build on drift.
  *
  * ============================================================================
- * THE FIVE CHECKS, AND WHERE EACH ONE LIVES
+ * THE SIX CHECKS, AND WHERE EACH ONE LIVES
  * ============================================================================
  *
  *  1. Every `procedure()` route resolves a cache policy.
@@ -35,6 +35,11 @@
  *  5. Every search input uses the shared Zod builder.  <-- IMPLEMENTED HERE (rule 5)
  *     Landed with WP6, which created the builder this rule requires. Rule 5 sees
  *     DECLARATIONS only; the sibling limit is stated in its own section below.
+ *  6. No non-deterministic time function inside a `sql` template.  <-- IMPLEMENTED HERE (rule 6)
+ *     Deferred from this gate's own WP9 design note until the thing it polices
+ *     existed — Hyperdrive is wired by the inert driver swap it lands with
+ *     (Codex-s1i7h, WP5). Enforcing a pattern before its shape is settled
+ *     freezes a draft; the rule arrives with the swap, satisfiable from day one.
  *
  * ============================================================================
  * RULE 3 — NO HAND-WRITTEN `Cache-Control`
@@ -301,6 +306,69 @@
  * quietly stops having anything to check and reads green forever.
  *
  * ============================================================================
+ * RULE 6 — NO NON-DETERMINISTIC TIME FUNCTION INSIDE A `sql` TEMPLATE
+ * ============================================================================
+ *
+ * Hyperdrive decides whether a query may be cached by TEXT-MATCHING it for
+ * non-deterministic function names. It does not parse SQL to do so, and
+ * Cloudflare's changelog notes that even a MENTION inside a SQL COMMENT marks
+ * the whole query uncacheable. So a predicate like
+ * `AND currentPeriodEnd > NOW()` costs more than a clock discrepancy: it
+ * silently opts the query out of the cache Hyperdrive exists to provide, and
+ * nothing on the wire says so — the query runs, returns, and is never cached,
+ * with no failure signal anywhere. `packages/access/src/services/
+ * content-access/library.ts` — the library read path, the query that most
+ * wants caching — carried exactly that predicate, and was the ONLY site in the
+ * scanned roots that did. Its repair (binding `const asOf = new Date()` and
+ * interpolating it) is the pattern this rule now requires; the rule exists so
+ * the predicate cannot quietly come back.
+ *
+ * THE FORBIDDEN FAMILY, exactly as Hyperdrive names it: `NOW(` — with the
+ * paren, because bare `now` is an English word and this rule does not police
+ * prose — plus the bare tokens `CURRENT_TIMESTAMP`, `CURRENT_DATE` and
+ * `LOCALTIMESTAMP`. Postgres folds unquoted identifiers to lowercase, so
+ * `now()` IS `NOW()` and the matcher is case-insensitive for that reason, not
+ * for convenience. `LOCALTIME` — the same clock family — is deliberately NOT
+ * in the set: the rule forbids exactly the four names the docs give, and
+ * widening it is a one-token edit plus its test case, not a redesign.
+ *
+ * WHAT IS INSIDE THE TEMPLATE AND WHAT IS NOT. This is the whole precision of
+ * the rule, and each side is pinned by a fixture in the self-test:
+ *
+ *   - The STATIC text between the backticks is the subject — including SQL
+ *     comments. `-- NOW()` and `*&#47; NOW() *&#47;` are bytes of the query
+ *     Cloudflare text-matches like any other, so a mention there fails the
+ *     build even though it is "only a comment". That is not pedantry: the
+ *     comment spelling is the one an author is most sure is harmless.
+ *   - A `${...}` interpolation body is JAVASCRIPT. It is compiled away before
+ *     the query exists — `${asOf}` becomes a bind parameter — so interpolation
+ *     bodies are skipped: the bound Date this rule demands, and even a TS
+ *     comment inside the interpolation, never reach SQL. A NESTED `sql`
+ *     template inside an interpolation (`sql`t NOT IN (${sql.join(...)})`` is
+ *     a real shape in library.ts) is judged by its own tag, so skipping the
+ *     enclosing body loses nothing.
+ *   - TypeScript `//` and `*&#47; ... *&#47;` comments OUTSIDE the template are
+ *     blanked by the tokenizer before this rule runs. Two real files carry
+ *     `now()` in exactly that position (admin's analytics-service.ts documents
+ *     `effectiveUntil IS NULL OR > now()`; purchase-service.ts documents
+ *     `disputedAt = now()`), and both must pass: prose that documents the
+ *     function may never be a violation of the rule against it, or the gate
+ *     documents itself out of force.
+ *
+ * AND `.defaultNow()` IS NOT A SUBJECT, THOUGH IT LOOKS LIKE ONE. The Drizzle
+ * schema files call `timestamp(...).defaultNow()` on most timestamped tables.
+ * That is a column DEFAULT declared in DDL and applied server-side at INSERT:
+ * the statement text Drizzle sends contains no function name at all, no `sql`
+ * template is involved, and nothing opts out of anything. It is stated here
+ * because it is the first thing a reader greps for and the grep looks alarming.
+ *
+ * FAILS CLOSED ON ZERO TEMPLATES, for the same reason rule 5 fails closed on
+ * zero declarations: if `SQL_TAG_RE` goes stale — the `sql` import renamed, the
+ * predicates moved out of the scanned roots — a rule with no subject reads
+ * green forever. `main()` exits 1 when `templatesFound` is 0, and the self-test
+ * pins the same state.
+ *
+ * ============================================================================
  * TECHNIQUE
  * ============================================================================
  *
@@ -338,7 +406,7 @@
  *     entirely would be missed. Every KV binding in this repo is `*_KV` or
  *     `kv`, and `HonoEnv` is where that convention is declared.
  *
- * The three collectors are exported so the accompanying `node --test` suite can
+ * The four collectors are exported so the accompanying `node --test` suite can
  * point them at fixture trees; `main()` runs only as the CLI entrypoint.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -1081,6 +1149,192 @@ export function formatSearchBuilderGuidance() {
 }
 
 // ---------------------------------------------------------------------------
+// RULE 6 — no non-deterministic time function inside a `sql` template
+// ---------------------------------------------------------------------------
+
+/**
+ * The non-deterministic time family Hyperdrive text-matches a query for.
+ *
+ * `NOW` requires its paren so the English word in prose is not a function
+ * call; the other three are valid SQL bare, so they need no paren and get a
+ * trailing boundary so a longer identifier containing them is not half-matched.
+ * Case-insensitive because Postgres folds unquoted identifiers — `now()` and
+ * `NOW()` are the same function, and Hyperdrive text-matches whatever spelling
+ * reaches it. There is deliberately NO trailing boundary after `NOW\s*\(`:
+ * `(` is a non-word character, so a boundary after it exists only when the
+ * next character is a word character — `NOW(x)` — and would fail to match the
+ * ordinary `NOW()` and `NOW( )`.
+ */
+export const NON_DETERMINISTIC_TIME_RE =
+  /\b(?:NOW\s*\(|CURRENT_TIMESTAMP\b|CURRENT_DATE\b|LOCALTIMESTAMP\b)/i;
+
+/**
+ * A `sql` identifier (bare, `db.sql`, `this.sql` — any member chain ending in
+ * `sql`) immediately tagging a backtick template. This is the ONLY thing rule
+ * 6 judges: every other template literal in the tree — KV keys, log lines,
+ * i18n messages — is not SQL and is never scanned.
+ */
+const SQL_TAG_RE = /\bsql\s*(?=`)/g;
+
+/**
+ * The STATIC chunks of the template that opens at `backtick`, plus the index
+ * of its closing backtick — or null if the template never closes.
+ *
+ * Static means: text that reaches Postgres verbatim. `${...}` bodies are
+ * JavaScript — compiled away, `${asOf}` becomes a bind parameter — so they are
+ * skipped; see the header for why that is the rule's precision and not a hole.
+ * Nested templates inside an interpolation are consumed here so their
+ * backticks cannot end the OUTER template early, and each is judged on its own
+ * by its own `SQL_TAG_RE` match.
+ *
+ * A small lexer rather than an indexOf for the closing backtick, because the
+ * real tree nests: `sql`t NOT IN (${sql.join(ids.map((id) => sql`${id}`),
+ * sql`, `)})`` (library.ts) is three templates deep inside one predicate.
+ *
+ * @param {string} code comment-blanked source (string/template bodies intact)
+ * @param {number} backtick index of the opening backtick
+ * @returns {{ chunks: {text: string, index: number}[], end: number } | null}
+ */
+export function sqlTemplateChunks(code, backtick) {
+  const chunks = [];
+  let chunkStart = backtick + 1;
+  let i = backtick + 1;
+  let depth = 0; // > 0 = inside a ${...} interpolation
+
+  while (i < code.length) {
+    const ch = code[i];
+
+    if (depth === 0) {
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === '`') {
+        chunks.push({ text: code.slice(chunkStart, i), index: chunkStart });
+        return { chunks, end: i };
+      }
+      if (ch === '$' && code[i + 1] === '{') {
+        chunks.push({ text: code.slice(chunkStart, i), index: chunkStart });
+        depth = 1;
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    // Inside an interpolation: JavaScript. Track only what can end the
+    // interpolation early or swallow one of its braces — nested braces,
+    // string literals, and nested templates.
+    if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) chunkStart = i + 1;
+    } else if (ch === '`') {
+      const nested = sqlTemplateChunks(code, i);
+      if (!nested) return null;
+      i = nested.end;
+    } else if (ch === "'" || ch === '"') {
+      const quote = ch;
+      i += 1;
+      while (i < code.length && code[i] !== quote && code[i] !== '\n') {
+        if (code[i] === '\\') i += 1;
+        i += 1;
+      }
+      if (code[i] !== quote) return null; // unterminated string: do not guess
+    }
+    i += 1;
+  }
+  return null; // unterminated template
+}
+
+/**
+ * @returns {{ violations: {file:string,line:number,token:string,text:string}[], filesScanned: number, templatesFound: number }}
+ *   `templatesFound` counts every `sql` template the rule judged, nested ones
+ *   included. It is the rule's proof that it still has a subject; `main()`
+ *   fails closed when it is 0, for the same reason rule 5 fails closed on zero
+ *   declarations.
+ */
+export function collectNonDeterministicSqlViolations({
+  roots = defaultRoots(),
+  cwd = REPO_ROOT,
+} = {}) {
+  const violations = [];
+  let filesScanned = 0;
+  let templatesFound = 0;
+
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const file of walk(root)) {
+      filesScanned += 1;
+      const source = readFileSync(file, 'utf8');
+      const { code } = tokenize(source, {
+        stripHtmlComments: file.endsWith('.svelte'),
+      });
+
+      for (const tag of code.matchAll(SQL_TAG_RE)) {
+        const template = sqlTemplateChunks(code, tag.index + tag[0].length);
+        if (!template) continue;
+        templatesFound += 1;
+
+        for (const chunk of template.chunks) {
+          const hit = NON_DETERMINISTIC_TIME_RE.exec(chunk.text);
+          if (!hit) continue;
+          // The source line the token sits on, quoted verbatim so a report is
+          // recognisable on sight — the same obligation rule 3's printed value
+          // carries.
+          const lineStart = chunk.text.lastIndexOf('\n', hit.index - 1) + 1;
+          const lineEnd = chunk.text.indexOf('\n', hit.index);
+          violations.push({
+            file: toPosix(relative(cwd, file)),
+            line: lineAt(source, chunk.index + hit.index),
+            token: hit[0],
+            text: chunk.text
+              .slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+              .trim(),
+          });
+          break; // one report per template: the first hit names the defect
+        }
+      }
+    }
+  }
+
+  return { violations, filesScanned, templatesFound };
+}
+
+/**
+ * The repair an author reads out of a rule-6 failure.
+ *
+ * States the MECHANISM (text-match, SQL comments included) because the
+ * tempting non-repair — "it is only a comment" — is exactly the spelling that
+ * keeps the query uncacheable. States the semantic trade of the correct repair
+ * (worker clock, once per request, vs the database clock per statement)
+ * because a future predicate where that trade is NOT immaterial must be raised
+ * as a finding, not copied from this message. Same obligation as rule 3's
+ * preset menu and rule 5's guidance: the message carries the decision.
+ */
+export function formatNonDeterministicSqlGuidance() {
+  return [
+    '  Bind the instant as a parameter and let the driver interpolate it, so the',
+    '  query text is identical on every request and Hyperdrive can cache it:',
+    '',
+    '    const asOf = new Date();',
+    '    sql`... AND ${table.periodEnd} > ${asOf}`',
+    '',
+    '  WHY A PARAMETER AND NOT NOW(): Hyperdrive decides cacheability by TEXT-MATCHING',
+    '  the query for non-deterministic function names. It does not parse SQL, so a',
+    "  mention inside a SQL COMMENT ('-- NOW()') marks the whole query uncacheable",
+    '  too — delete the comment along with the call. The trade you are making:',
+    '  Postgres evaluates NOW() per statement from the database clock; the parameter',
+    "  is evaluated once per request from the worker's. Immaterial for period and",
+    '  window predicates (they run in days). If a future predicate genuinely needs the',
+    '  statement clock or sub-second agreement, that is a finding to raise — not a',
+    '  case to exempt. This gate has no waiver list by design.',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -1089,6 +1343,7 @@ function main() {
   const cache = collectCacheControlViolations({ roots });
   const kv = collectFloatingKvWriteViolations({ roots });
   const search = collectSearchBuilderViolations({ roots });
+  const clock = collectNonDeterministicSqlViolations({ roots });
 
   // Fail closed on an empty scan. A broken root path would otherwise read as
   // green with 0 files — the exact blind spot that lets a newly added gate
@@ -1097,7 +1352,8 @@ function main() {
   if (
     cache.filesScanned === 0 ||
     kv.filesScanned === 0 ||
-    search.filesScanned === 0
+    search.filesScanned === 0 ||
+    clock.filesScanned === 0
   ) {
     console.error(
       'Data-access contract gate scanned 0 files — scan roots are misconfigured. Failing closed.'
@@ -1116,6 +1372,21 @@ function main() {
         'nothing. Twelve existed when it was written. Either every search facet is gone, or\n' +
         "the rule's field-name family no longer matches what they are called, or the scan\n" +
         'roots moved. Failing closed: fix SEARCH_FIELD_NAMES in\n' +
+        'scripts/checks/check-data-access-contract.mjs, do not delete the rule.\n'
+    );
+    process.exit(1);
+  }
+
+  // Rule 6's version of the same blind spot: the files are there, but no `sql`
+  // template is recognised in any of them. Every database predicate in this
+  // repo is written with one, so zero means SQL_TAG_RE has gone stale and the
+  // rule is reading green while checking nothing.
+  if (clock.templatesFound === 0) {
+    console.error(
+      '\nRULE 6 — the gate found ZERO `sql` tagged templates in the whole tree, so it\n' +
+        'checked nothing. Every database predicate in this repo is written with one.\n' +
+        'Either the `sql` import was renamed, or the predicates moved out of the\n' +
+        'scanned roots. Failing closed: fix SQL_TAG_RE in\n' +
         'scripts/checks/check-data-access-contract.mjs, do not delete the rule.\n'
     );
     process.exit(1);
@@ -1188,12 +1459,24 @@ function main() {
     );
   }
 
+  if (clock.violations.length > 0) {
+    failed = true;
+    console.error(
+      '\nRULE 6 — a non-deterministic time function inside a `sql` template:\n'
+    );
+    for (const v of clock.violations) {
+      console.error(`  ${v.file}:${v.line}: ${v.token}  |  ${v.text}`);
+    }
+    console.error('\n' + formatNonDeterministicSqlGuidance());
+  }
+
   if (failed) {
     const total =
       shared.length +
       offVocab.length +
       kv.violations.length +
-      search.violations.length;
+      search.violations.length +
+      clock.violations.length;
     console.error(
       `\n${total} data-access contract violation(s). See scripts/checks/check-data-access-contract.mjs for the rules.\n`
     );
@@ -1201,9 +1484,10 @@ function main() {
   }
 
   console.log(
-    `OK: no hand-written Cache-Control, no floating KV write, and all ` +
-      `${search.declarationsFound} declared search input(s) built by ${SEARCH_BUILDER}() ` +
-      `in ${cache.filesScanned} source file(s) across ${roots.length} ` +
+    `OK: no hand-written Cache-Control, no floating KV write, all ` +
+      `${search.declarationsFound} declared search input(s) built by ${SEARCH_BUILDER}(), ` +
+      `and no non-deterministic time function in ${clock.templatesFound} \`sql\` ` +
+      `template(s), in ${cache.filesScanned} source file(s) across ${roots.length} ` +
       `package/worker/app src root(s).`
   );
 }

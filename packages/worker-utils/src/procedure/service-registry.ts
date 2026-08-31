@@ -242,7 +242,19 @@ export function createServiceRegistry(
    */
   function getSharedDb() {
     if (!_sharedDbClient) {
-      _sharedDbClient = createPerRequestDbClient(env);
+      // Hyperdrive-inert swap (Codex-s1i7h): when a HYPERDRIVE binding exists,
+      // its connection string is the URL the shared per-request client is built
+      // from — same factory, same driver semantics, only the origin of the URL
+      // changes. INERT today: no wrangler config declares HYPERDRIVE, so the
+      // override is undefined and the factory resolves DATABASE_URL exactly as
+      // before, byte for byte. The connection string is threaded through the
+      // factory (not constructed here) so client construction stays in one
+      // place; wiring the binding into wrangler config is then a config-only
+      // change on the day a Hyperdrive config exists.
+      _sharedDbClient = createPerRequestDbClient(
+        env,
+        env.HYPERDRIVE?.connectionString
+      );
       cleanupFns.push(_sharedDbClient.cleanup);
     }
     return _sharedDbClient.db;
