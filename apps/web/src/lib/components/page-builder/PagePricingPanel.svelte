@@ -31,6 +31,7 @@
   course/content policy (SPEC §6.1) — this panel owns what the journey COSTS.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
@@ -43,6 +44,35 @@
   // the store reports `loaded: false` rather than an empty draft precisely so a
   // save cannot withdraw a live plan the panel never managed to see.
   const locked = $derived(isCoursePage && !monetisation.loaded);
+
+  /**
+   * A course-TYPED portal with no course row behind it — the one locked state
+   * this panel had no explanation for.
+   *
+   * `locked` has three causes and only two of them spoke. A failed read shows
+   * `monetisation.loadError`; an in-flight read shows the loading line. The third
+   * is silent: the route opens the store with
+   * `monetisation.open(draft.subjectType === 'course' ? draft.subjectId : null)`,
+   * and `open(null)` returns immediately leaving `loaded` false, `loading` false
+   * and `loadError` null — for ever. `isCoursePage` reads `subjectType` ALONE, so
+   * such a page is locked: four disabled controls (both prices, the subscription
+   * switch, every tier button) and not one word about why. The route itself
+   * treats this as a real state two lines earlier —
+   * `hasCourse: draft.subjectType === 'course' && !!draft.subjectId` guards the
+   * sell-media read on BOTH halves — so the asymmetry is between two adjacent
+   * calls, not a hypothetical.
+   *
+   * READ FROM THE DRAFT, NOT FROM THE STORE'S FLAGS, deliberately: `subjectId` is
+   * a fact the panel already holds, so the note cannot flash during the tick
+   * between mount and `open()` the way a `!loaded && !loading` test would.
+   *
+   * The existing `{#if !isCoursePage}` notes are NOT reused for this: they say
+   * "Only a course journey can be…", which a creator looking at a page whose type
+   * IS course would rightly read as wrong.
+   */
+  const courseMissing = $derived(
+    isCoursePage && !pageBuilder.pending?.subjectId
+  );
 
   const poundsOf = (cents: number | null | undefined): string =>
     cents == null ? '' : (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
@@ -88,66 +118,78 @@
   const problems = $derived.by<string[]>(() => {
     const out: string[] = [];
     if (draft.subscriptionEnabled) {
-      if (draft.priceMonthlyCents == null) out.push('Set a monthly price for the course subscription.');
-      if (draft.priceAnnualCents == null) out.push('Set an annual price for the course subscription.');
+      if (draft.priceMonthlyCents == null)
+        out.push(m.studio_builder_pricing_problem_monthly_required());
+      if (draft.priceAnnualCents == null)
+        out.push(m.studio_builder_pricing_problem_annual_required());
       if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < 100)
-        out.push('The monthly price must be at least £1.00.');
+        out.push(m.studio_builder_pricing_problem_monthly_min());
       if (draft.priceAnnualCents != null && draft.priceAnnualCents < 100)
-        out.push('The annual price must be at least £1.00.');
+        out.push(m.studio_builder_pricing_problem_annual_min());
       if (
         draft.priceMonthlyCents != null &&
         draft.priceAnnualCents != null &&
         draft.priceAnnualCents > draft.priceMonthlyCents * 12
       )
-        out.push('The annual price must be no more than 12× the monthly price.');
+        out.push(m.studio_builder_pricing_problem_annual_cap());
     }
     if (offer.oneOffEnabled && offer.oneOffPriceCents == null)
-      out.push('Set a price for the one-off purchase.');
+      out.push(m.studio_builder_pricing_problem_oneoff_required());
     return out;
   });
 </script>
 
 <div class="panel">
   <header class="panel__head">
-    <h2 class="panel__title">Access &amp; pricing</h2>
-    <p class="panel__sub">The journey’s offer · one source of truth</p>
+    <h2 class="panel__title">{m.studio_builder_pricing_title()}</h2>
+    <p class="panel__sub">{m.studio_builder_pricing_sub()}</p>
   </header>
 
   <p class="panel__callout">
-    This is the <b>journey’s offer</b> — set once here, shown on the sales page and honoured
-    wherever the course appears.
+    {m.studio_builder_pricing_callout_before()} <b>{m.studio_builder_pricing_callout_offer()}</b> {m.studio_builder_pricing_callout_after()}
   </p>
 
-  {#if monetisation.loadError}
+  <!--
+    THE THREE CAUSES OF `locked`, ALL THREE NOW STATED. Ordered by what a creator
+    can do about it: a missing course is a fact about the page (nothing to wait
+    for), a failed read is retryable by reloading, an in-flight read resolves on
+    its own. `role="status"` for the first — nothing has failed, the panel simply
+    has nothing to price.
+  -->
+  {#if courseMissing}
+    <p class="panel__warn" role="status">{m.studio_builder_pricing_no_course()}</p>
+  {:else if monetisation.loadError}
     <p class="panel__warn" role="alert">{monetisation.loadError}</p>
   {:else if monetisation.loading}
-    <p class="panel__callout" role="status">Reading this journey’s current pricing…</p>
+    <p class="panel__callout" role="status">{m.studio_builder_pricing_loading()}</p>
   {/if}
 
-  <p class="panel__group">Ways in · turn on any combination</p>
+  <p class="panel__group">{m.studio_builder_pricing_ways_in()}</p>
 
   <!-- ── Membership tiers: an exact SET, so a picker rather than a toggle ──── -->
   <div class="way way--stacked" class:way--on={draft.tierIds.length > 0}>
     <div class="way__row">
       <span class="way__copy">
-        Membership tiers
+        {m.studio_builder_pricing_tiers()}
         <small>
           {#if draft.tierIds.length > 0}
-            {draft.tierIds.length} of {tierOptions.length} include this journey
+            {m.studio_builder_pricing_tiers_count({
+              count: draft.tierIds.length,
+              total: tierOptions.length,
+            })}
           {:else}
-            pick which tiers include this journey
+            {m.studio_builder_pricing_tiers_pick()}
           {/if}
         </small>
       </span>
-      <span class="way__price">included</span>
+      <span class="way__price">{m.studio_builder_pricing_included()}</span>
     </div>
 
     {#if !isCoursePage}
-      <p class="way__note">Only a course journey can be included in a membership tier.</p>
+      <p class="way__note">{m.studio_builder_pricing_tiers_course_only()}</p>
     {:else if tierOptions.length === 0 && monetisation.loaded}
       <p class="way__note">
-        This space has no membership tiers yet — create one in Studio → Monetisation, then choose
-        it here.
+        {m.studio_builder_pricing_tiers_none()}
       </p>
     {:else}
       <ul class="tiers">
@@ -164,7 +206,7 @@
             >
               <span class="tier__box" aria-hidden="true"></span>
               <span class="tier__name">{tier.name}</span>
-              <span class="tier__price">£{poundsOf(tier.priceMonthly)}/mo</span>
+              <span class="tier__price">{m.studio_builder_pricing_tier_price({ price: poundsOf(tier.priceMonthly) })}</span>
             </button>
           </li>
         {/each}
@@ -179,23 +221,23 @@
         type="button"
         class="way__sw"
         aria-pressed={draft.subscriptionEnabled}
-        aria-label="Toggle course subscription"
+        aria-label={m.studio_builder_pricing_subscription_toggle()}
         disabled={locked || !isCoursePage}
         onclick={() => monetisation.setSubscriptionEnabled(!draft.subscriptionEnabled)}
       ></button>
-      <span class="way__copy">Course subscription<small>a gentler monthly entry</small></span>
+      <span class="way__copy">{m.studio_builder_pricing_subscription()}<small>{m.studio_builder_pricing_subscription_note()}</small></span>
     </div>
 
     {#if !isCoursePage}
-      <p class="way__note">Only a course journey can be sold as a subscription.</p>
+      <p class="way__note">{m.studio_builder_pricing_subscription_course_only()}</p>
     {:else}
       <div class="way__fields">
         <label class="field">
-          <span class="field__label">Monthly</span>
+          <span class="field__label">{m.studio_builder_pricing_monthly()}</span>
           <span class="field__input">
             £<input
               inputmode="decimal"
-              aria-label="Monthly course subscription price in pounds"
+              aria-label={m.studio_builder_pricing_monthly_aria()}
               disabled={locked}
               value={shown('monthly')}
               oninput={(e) => setPounds('monthly', e.currentTarget.value)}
@@ -204,11 +246,11 @@
           </span>
         </label>
         <label class="field">
-          <span class="field__label">Annual</span>
+          <span class="field__label">{m.studio_builder_pricing_annual()}</span>
           <span class="field__input">
             £<input
               inputmode="decimal"
-              aria-label="Annual course subscription price in pounds"
+              aria-label={m.studio_builder_pricing_annual_aria()}
               disabled={locked}
               value={shown('annual')}
               oninput={(e) => setPounds('annual', e.currentTarget.value)}
@@ -218,9 +260,8 @@
         </label>
       </div>
       <p class="way__note">
-        Both prices are needed — Stripe bills against a monthly and an annual price. A subscription
-        pays out to this space, so it needs a
-        <a href="/studio/monetisation">connected payout account</a>.
+        {m.studio_builder_pricing_stripe_note()}
+        <a href="/studio/monetisation">{m.studio_builder_pricing_payout_link()}</a>.
       </p>
     {/if}
   </div>
@@ -231,15 +272,15 @@
       type="button"
       class="way__sw"
       aria-pressed={!!offer.oneOffEnabled}
-      aria-label="Toggle one-off purchase"
+      aria-label={m.studio_builder_pricing_oneoff_toggle()}
       onclick={() => pageBuilder.updateOffer({ oneOffEnabled: !offer.oneOffEnabled })}
     ></button>
-    <span class="way__copy">One-off purchase<small>buy outright</small></span>
+    <span class="way__copy">{m.studio_builder_pricing_oneoff()}<small>{m.studio_builder_pricing_oneoff_note()}</small></span>
     <span class="way__price">
       £<input
         class="way__input"
         inputmode="decimal"
-        aria-label="One-off purchase price in pounds"
+        aria-label={m.studio_builder_pricing_oneoff_aria()}
         value={shown('oneOff')}
         oninput={(e) => setPounds('oneOff', e.currentTarget.value)}
         onblur={() => commitPounds('oneOff')}
@@ -257,18 +298,16 @@
 
   {#if offer.oneOffEnabled && !isCoursePage}
     <p class="panel__warn" role="status">
-      Only a course journey can be sold as a one-off purchase.
+      {m.studio_builder_pricing_oneoff_course_only()}
     </p>
   {/if}
 
   <p class="panel__callout">
-    <b>Membership</b> unlocks every journey — the buyer should feel it’s more than this one course.
+    <b>{m.studio_builder_pricing_membership_word()}</b> {m.studio_builder_pricing_membership_note()}
   </p>
 
   <p class="panel__callout">
-    Pricing saves with the page’s <b>Save</b>. The tier and subscription choices become real
-    access rules, and the one-off price becomes the course’s real price — so the checkout can
-    take all three.
+    {m.studio_builder_pricing_save_note_before()} <b>{m.studio_builder_save()}</b>. {m.studio_builder_pricing_save_note_after()}
   </p>
 </div>
 
@@ -294,10 +333,25 @@
     color: var(--color-text);
   }
 
+  /* NO `--color-text-muted` in this panel, deliberately, and the guard in
+     `page-builder/journey-palette.test.ts` now enforces it (Codex-6nb7i).
+     Measured on the studio panel surface by canvas readback: muted at
+     `--text-xs` is 2.52:1 light / 3.19:1 dark, under the 4.5 floor, and 13px is
+     not WCAG "large text". This is a COMMERCE panel — the strings that were
+     muted included a real field label ("Monthly"/"Annual"), a tier's price, the
+     tier picker's only state read-out ("{n} of {m} include this journey") and
+     the callout that explains what Save does to a price. None of those is
+     decoration. `.way__sw::after` moved too: it is the toggle's only off-state
+     indicator, so WCAG 1.4.11's 3:1 non-text floor applies to it.
+     NOTE the ratio is a function of the ORG's brand background, not a constant:
+     under `[data-org-brand]`, `--color-text-muted` derives from `--brand-bg`
+     (tokens/org-brand.css) while `--color-text-secondary` mixes back from
+     `--color-text` — which is what makes the swap safe on every brand rather
+     than lucky on one. */
   .panel__sub {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__group {
@@ -306,7 +360,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__callout {
@@ -317,7 +371,7 @@
     background-color: var(--color-surface-secondary);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .panel__callout b {
@@ -390,7 +444,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background-color: var(--color-text-muted);
+    background-color: var(--color-text-secondary);
     transition: transform var(--duration-fast) var(--ease-default), background-color var(--duration-fast) var(--ease-default);
   }
 
@@ -417,7 +471,7 @@
   }
 
   .way__copy small {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     font-size: var(--text-xs);
   }
 
@@ -434,7 +488,7 @@
     margin: 0;
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .way__note a {
@@ -455,7 +509,7 @@
 
   .field__label {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .field__input {
@@ -563,7 +617,7 @@
 
   .tier__price {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     white-space: nowrap;
   }
 </style>

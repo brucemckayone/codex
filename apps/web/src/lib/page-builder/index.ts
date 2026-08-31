@@ -97,6 +97,14 @@ export {
   type SectionDefinition,
   type SectionDesignAxis,
   type SectionVariant,
+  type SeededSection,
   sectionMatchesQuery,
+  // The unauthored-copy check (Codex-maf0y), with its `SeededSection` row above.
+  // Re-exported HERE and not only from `section-catalog` because its one intended
+  // consumer is the studio PUBLISH path, which imports this barrel: while it was
+  // absent from here, the only file in the repo that reached it was its own unit
+  // test, and a pure advisory function nothing calls is indistinguishable from an
+  // unfinished one — its docstring described a confirm that did not exist.
+  seededSections,
   variantsForType,
 } from './section-catalog';

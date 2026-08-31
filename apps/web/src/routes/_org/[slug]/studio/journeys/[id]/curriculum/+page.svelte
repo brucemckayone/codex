@@ -15,6 +15,7 @@
   (which carries server ids for newly-added stages).
 -->
 <script lang="ts">
+  import { beforeNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import type { CurriculumContentOption, EditorCurriculum, JourneyContentType } from '$lib/page-builder';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -34,6 +35,7 @@
     listCurriculumContentOptions,
     saveCourseCurriculum,
   } from '$lib/remote/journeys.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
 
   const { data } = $props();
 
@@ -63,6 +65,25 @@
   }
 
   const curriculumQuery = $derived(getCourseCurriculum({ pageId }));
+
+  /**
+   * WHY the curriculum read failed — the SERVER's sentence, not a guess.
+   *
+   * The error ARM already existed and worked (it tests the raw `.error` object
+   * for truthiness, which is sound — unlike the `.error?.message` trap this
+   * codebase documents at `query-result.ts`). What it printed was a hardcoded
+   * disjunction, "it may not exist, or you may not have access", on a read that
+   * fails for several distinguishable reasons: a non-UUID `[id]` segment, a page
+   * that resolves to no subject course, a page in another org (404), a session
+   * that no longer manages this org (403), and a plain worker outage. Guessing
+   * two of five in a sentence a creator cannot act on is worse than saying which
+   * one it was, and the text is already on the wire.
+   *
+   * The guidance is KEPT as a second line — a 404 here most often means the URL
+   * carries the COURSE id rather than the portal page id, which the message
+   * alone does not say.
+   */
+  const loadError = $derived(queryErrorMessage(curriculumQuery.error));
 
   let stages = $state<LocalStage[]>([]);
   let loadedForPage = $state<string | null>(null);
@@ -183,6 +204,23 @@
 
   const pickerQuery = $derived(pickerOpen ? listCurriculumContentOptions({}) : null);
   const pickerLoading = $derived(pickerQuery?.loading ?? false);
+  /**
+   * WHY the picker's options read failed, if it did.
+   *
+   * Without this the failure rendered as the picker's EMPTY state — "No content
+   * matches. Publish or upload content, then link it here." — because `.current`
+   * is `undefined` after a rejection as well as in flight (Codex-xo3bl), so
+   * `pickerOptions` fell to `[]` and `pickerLoading` went false. A creator with a
+   * full library was told to go and make some content, and the instruction was
+   * the one thing they could not act on. Exactly the defect the portals INDEX
+   * carried until its own error arm landed; this dialog is the same shape.
+   */
+  const pickerError = $derived(
+    queryErrorMessage(
+      pickerQuery?.error,
+      'Could not load your library. Please try again.'
+    )
+  );
   const pickerTargetStage = $derived(
     pickerStageKey ? (stages.find((s) => s.key === pickerStageKey) ?? null) : null
   );
@@ -271,12 +309,67 @@
       loadedForPage = pageId;
       await curriculumQuery.refresh?.();
       toast.success('Curriculum saved');
-    } catch {
-      toast.error('Could not save the curriculum — please try again');
+    } catch (err) {
+      /*
+        THE SERVER'S OWN SENTENCE. This was a bare `catch {}` — no binding, so
+        the reason was discarded before anything could read it — under a fixed
+        "please try again", which is advice for a transient failure and wrong for
+        every failure this write actually produces.
+
+        What was being thrown away: "A practice can only appear once per stage"
+        (the save schema's own refine), the space guard's refusal for a content
+        row that belongs to another org, a 404 for a page that no longer resolves
+        here, and the 400 for a stage name that has gone empty. Every one of them
+        names a specific thing on screen for the creator to change, and "try
+        again" re-sends the identical body for the identical refusal.
+
+        Read through `queryErrorMessage`, never `err.message`: SvelteKit rejects
+        with `HttpError`, which does not extend `Error` and carries its text at
+        `.body.message` (Codex-xo3bl).
+
+        The draft stays dirty and Save stays available, so a genuinely transient
+        failure is still one press from a retry.
+      */
+      toast.error(
+        queryErrorMessage(err, 'Could not save the curriculum — please try again') ??
+          'Could not save the curriculum — please try again'
+      );
     } finally {
       saving = false;
     }
   }
+
+  /**
+   * THE UNSAVED-WORK GUARD, which this editor did not have.
+   *
+   * Every edit here lives in local `$state` only — `stages` is seeded once from
+   * the read and then mutated in place, and nothing persists until Save. So
+   * adding three stages, filling them from the picker and then clicking either
+   * link in this page's OWN header ("Portals", "Edit sales page") discarded the
+   * lot with no prompt, while the Save button sat lit beside them. `dirty` was
+   * already tracked and already gating Save; only the guard was missing.
+   *
+   * MODELLED ON THE BUILDER'S (`journeys/[id]/page/+page.svelte`), including the
+   * part that is easy to get wrong: `type === 'leave'` (a tab close or a reload)
+   * gets `cancel()` with NO `confirm()`, because browsers suppress a dialog
+   * during unload — `confirm()` returns false immediately and it is `cancel()`
+   * that raises the browser's own "Leave site?" prompt. Calling both asks the
+   * creator twice, once through a dialog they never see.
+   *
+   * The copy says "curriculum changes" rather than the builder's "changes"
+   * because this surface holds one resource, and naming it is what tells a
+   * creator with both editors open which one is about to lose work.
+   */
+  beforeNavigate((navigation) => {
+    if (!dirty) return;
+    if (navigation.type === 'leave') {
+      navigation.cancel();
+      return;
+    }
+    if (!confirm('You have unsaved curriculum changes. Discard?')) {
+      navigation.cancel();
+    }
+  });
 </script>
 
 <svelte:head>
@@ -319,10 +412,31 @@
       <div class="ce__skeleton"></div>
       <div class="ce__skeleton"></div>
     </div>
-  {:else if curriculumQuery.error}
-    <p class="ce__error" role="alert">
-      This curriculum could not be loaded. It may not exist, or you may not have access.
-    </p>
+  {:else if loadError}
+    <!--
+      The server's reason first, then the guidance — and a way back out, which
+      this arm did not have. The whole editor is behind it, so with no link a
+      creator who landed here from a bookmark had only the browser's own
+      controls.
+    -->
+    <div class="ce__error" role="alert">
+      <p class="ce__error-title">This curriculum could not be loaded</p>
+      <p class="ce__error-body">{loadError}</p>
+      <p class="ce__error-hint">
+        This URL takes the PORTAL page id, not the course id — open the portal from
+        All portals and use “Curriculum”.
+      </p>
+      <div class="ce__error-acts">
+        <button
+          type="button"
+          class="ce__error-btn"
+          onclick={() => curriculumQuery.refresh?.()}
+        >
+          Try again
+        </button>
+        <a class="ce__link" href="/studio/journeys">All portals</a>
+      </div>
+    </div>
   {:else}
     <div class="ce__shell">
       <!-- ── Structure column ── -->
@@ -626,6 +740,16 @@
     <Dialog.Body>
       {#if pickerLoading}
         <p class="picker__state">Loading your library…</p>
+      {:else if pickerError}
+        <!--
+          ABOVE the empty arm, and that order is the whole fix: an unanswered
+          question must never fall through to a claim about the data. "No content
+          matches. Publish or upload content" is an instruction a creator with a
+          full library cannot act on.
+        -->
+        <p class="picker__state picker__state--error" role="alert">
+          {pickerError}
+        </p>
       {:else if pickerOptions.length === 0}
         <p class="picker__state">
           No content matches. Publish or upload content, then link it here.
@@ -776,13 +900,72 @@
       animation: none;
     }
   }
+  /*
+    The FAILED-READ block. Keeps the card the single `<p>` version already had —
+    same border, radius and surface — and only gains a heading, the server's
+    sentence, the id-class hint and the two acts. Token-only: this editor sits
+    inside the studio shell and inherits the org brand.
+  */
   .ce__error {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
     padding: var(--space-4);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);
     color: var(--color-text-secondary);
     font-size: var(--text-sm);
+  }
+
+  .ce__error-title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    color: var(--color-text);
+  }
+
+  .ce__error-body {
+    margin: 0;
+    max-width: 60ch;
+    color: var(--color-text);
+    line-height: var(--leading-relaxed);
+  }
+
+  .ce__error-hint {
+    margin: 0;
+    max-width: 60ch;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+    line-height: var(--leading-relaxed);
+  }
+
+  .ce__error-acts {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-1);
+  }
+
+  .ce__error-btn {
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full);
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .ce__error-btn:hover {
+    background-color: var(--color-surface-secondary);
+  }
+
+  .ce__error-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
   }
 
   /* ── Two-pane shell ── */
@@ -1313,6 +1496,16 @@
     text-align: center;
     font-size: var(--text-sm);
     color: var(--color-text-muted);
+  }
+  /*
+    A failure reads at full text weight, not at the muted weight the empty and
+    loading states share — those are statements about the data, this is a
+    statement about the request. No red: the dialog has one job left (close it
+    and retry), and colouring the only line in it as an alarm is louder than the
+    situation.
+  */
+  .picker__state--error {
+    color: var(--color-text);
   }
   .picker__list {
     list-style: none;

@@ -6,7 +6,7 @@
  * the procedure() function to handle all errors uniformly via mapErrorToResponse().
  */
 
-import { AUTH_ROLES, ERROR_CODES } from '@codex/constants';
+import { AUTH_ROLES, CACHE_PRESETS, ERROR_CODES } from '@codex/constants';
 import type { ObservabilityClient } from '@codex/observability';
 import type { RateLimitPresetName } from '@codex/security';
 import {
@@ -160,6 +160,56 @@ export function enforceIPWhitelist(
       clientIP,
     });
   }
+}
+
+// ============================================================================
+// Cache-Control
+// ============================================================================
+
+/**
+ * Resolve `policy.cache` to the header value `procedure()` emits.
+ *
+ * Same shape as the `rateLimit` fallback in `enforcePolicyInline` below:
+ * omitted means the SAFE preset, not "unset". `'private'` keeps the body in the
+ * requesting viewer's own browser and out of every shared cache, which is the
+ * only default that cannot leak — so a route opts IN to sharing, never out of
+ * it.
+ *
+ * Applied by `procedure()` (and both upload procedures) on the SUCCESS path
+ * only. Error responses keep the header-less behaviour they have today: a 429
+ * or 403 must not inherit a route's 60s shared-cache window, or a rate limit
+ * becomes a self-inflicted outage at the edge.
+ */
+export function resolveCacheControl(policy: ProcedurePolicy): string {
+  return CACHE_PRESETS[policy.cache ?? 'private'];
+}
+
+/**
+ * Wrap this request's `waitUntil` for CACHE WRITES (see `ctx.cacheWrite`).
+ *
+ * Threaded into `org-helpers`' two write-through caches from here, where the
+ * Hono context is in scope — those helpers take `env`, not a context, so
+ * neither could reach a `waitUntil` on its own, and both fired their `kv.put`
+ * bare.
+ *
+ * THE PARAMETER ON THOSE HELPERS IS REQUIRED, NOT OPTIONAL — see the note on
+ * `org-helpers.extractOrganizationFromSubdomain`. The optional-and-guarded shape
+ * this comment used to recommend (mirroring `fee-config-service.ts`) was a silent
+ * opt-out of the fix: two production callers passed nothing, `cacheWrite?.(write)`
+ * was a no-op, and neither the typecheck nor the contract gate reported it. This
+ * function still guards internally, because a hand-mocked test context legitimately
+ * has no `executionCtx` — but a CALLER can no longer omit the argument.
+ */
+function cacheWriteFor(c: Context<HonoEnv>): (p: Promise<unknown>) => void {
+  return (promise) => {
+    try {
+      c.executionCtx.waitUntil(promise);
+    } catch {
+      // No ExecutionContext on this context object. The promise is already
+      // running and already has its own rejection handler; only the
+      // survive-the-response guarantee is lost.
+    }
+  };
 }
 
 // ============================================================================
@@ -423,7 +473,8 @@ async function resolveOrganizationId(
   const subdomainOrg = await extractOrganizationFromSubdomain(
     hostname,
     c.env,
-    obs
+    obs,
+    cacheWriteFor(c)
   );
   if (subdomainOrg) {
     return { organizationId: subdomainOrg, skipMembershipCheck: false };
@@ -465,7 +516,8 @@ async function enforceOrganizationAccess(
     organizationId,
     user.id,
     c.env,
-    obs
+    obs,
+    cacheWriteFor(c)
   );
 
   if (!membership) {

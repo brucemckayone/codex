@@ -41,6 +41,22 @@ export {
   fieldString,
   SECTION_PROP_ALIASES,
 } from './coerce';
+/**
+ * THE STUDIO CANVAS'S INLINE-EDIT SEAM, built once for all eleven sections (F38).
+ *
+ * `editFieldLabel` / `editFieldName` are exported for a round-trip guard: the
+ * accessible names restate the editor's own field labels, and this module cannot
+ * import `components/page-builder/section-fields.ts` to derive them — that is the
+ * banned direction under the CE-4 boundary. The EDITOR side may import this tree,
+ * so a test in `components/page-builder/section-fields.test.ts` can pin the two
+ * vocabularies together. See the handoff.
+ */
+export {
+  type EditFieldCommit,
+  editFieldAttrs,
+  editFieldLabel,
+  editFieldName,
+} from './editable';
 export { default as JourneyRenderer } from './JourneyRenderer.svelte';
 /**
  * ONE section's wrapper + component invocation. Exported for the studio canvas,
@@ -51,12 +67,30 @@ export { default as JourneyRenderer } from './JourneyRenderer.svelte';
 export { default as SectionFrame } from './SectionFrame.svelte';
 export { default as SectionRenderer } from './SectionRenderer.svelte';
 export {
+  /**
+   * WHICH section may borrow the course title. Exported for the studio canvas,
+   * which owns its own section loop and must therefore resolve the claim the way
+   * `SectionRenderer` does and pass the result to each `SectionFrame` — otherwise
+   * its sections self-hide a heading the published page shows. It does not do that
+   * yet; see the handoff.
+   */
+  claimTitleFallback,
+  type PageShapeIssue,
   type RenderableSection,
   resolveSectionComponent,
   SECTION_COMPONENTS,
   type SectionComponent,
   type SectionComponentProps,
   selectRenderableSections,
+  /**
+   * A page's SECTION COMPOSITION, validated. Exported for the studio's publish
+   * action, which blocks on the `error` severities — it currently reaches this
+   * function by importing `render/section-registry` directly, because the export
+   * was not here when it was written, and should be pointed at this barrel. Read
+   * {@link PageShapeIssue.severity} first: it records which halves of the
+   * enforcement are wired and which are not.
+   */
+  validatePageShape,
 } from './section-registry';
 
 export type {

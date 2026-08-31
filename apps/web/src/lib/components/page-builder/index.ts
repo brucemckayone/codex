@@ -28,7 +28,6 @@ export {
 } from './design-vocabulary';
 // Canvas (INLINE WYSIWYG render of the section components + block toolbar).
 export { default as JourneyBuilderCanvas } from './JourneyBuilderCanvas.svelte';
-export { default as JourneyCanvasToolbar } from './JourneyCanvasToolbar.svelte';
 export { default as JourneyPreviewFrame } from './JourneyPreviewFrame.svelte';
 export {
   JOURNEY_PREVIEW_DEVICES,

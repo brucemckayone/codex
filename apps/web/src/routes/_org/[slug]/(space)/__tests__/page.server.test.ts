@@ -62,12 +62,20 @@ vi.mock('$lib/remote/journeys.remote', () => ({
   listPublishedJourneys: listPublishedJourneysMock,
 }));
 
-vi.mock('$lib/server/cache', () => ({
-  CACHE_HEADERS: {
-    PRIVATE: { 'cache-control': 'private, no-cache' },
-    DYNAMIC_PUBLIC: { 'cache-control': 'public, max-age=60' },
-  },
-}));
+// Derived from the real shared presets rather than hand-typed. Every one of
+// these stubs used to carry a FAKE value ('public, max-age=60' when the real
+// preset said 300s), so neither removing a preset nor changing one could fail
+// this test. `@codex/constants` has zero imports, so pulling it into the mock
+// factory is safe here.
+vi.mock('$lib/server/cache', async () => {
+  const { CACHE_PRESETS } = await import('@codex/constants');
+  return {
+    CACHE_HEADERS: {
+      PRIVATE: { 'Cache-Control': CACHE_PRESETS.private },
+      DYNAMIC_PUBLIC: { 'Cache-Control': CACHE_PRESETS.public },
+    },
+  };
+});
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 type LoadInput = Parameters<typeof import('../+page.server').load>[0];
@@ -190,7 +198,7 @@ describe('org landing +page.server.ts — load shape', () => {
     expect(callOrder).toEqual(['getPublicContent', 'setHeaders']);
     expect(input.setHeaders).toHaveBeenCalledWith(
       expect.objectContaining({
-        'cache-control': expect.stringContaining('private'),
+        'Cache-Control': expect.stringContaining('private'),
       })
     );
   });

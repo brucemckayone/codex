@@ -1,14 +1,26 @@
 <!--
   @component DraftPreviewBanner
 
-  Marks a journey sales page that is being served as a MANAGEMENT PREVIEW rather
-  than as the live page (Codex-xzwl5).
+  Says, on the page itself, that this journey sales page is NOT being served the
+  way a visitor gets it. Two facts, either or both:
 
-  The public load falls back to the management-gated `getCoursePagePreview` when
-  no PUBLISHED page matches the slug, so an org manager sees an apparently normal
-  sales page for an unpublished draft — and only a manager ever does (a
-  non-manager gets a 404). Nothing said so, and the creator reported not knowing
-  which they were looking at. This says so, in the one place they are looking.
+    1. THE PAGE IS NOT LIVE (Codex-xzwl5). The public load falls back to the
+       management-gated `getCoursePagePreview` when no PUBLISHED page matches the
+       slug, so an org manager sees an apparently normal sales page for an
+       unpublished draft — and only a manager ever does (a non-manager gets a
+       404). Nothing said so, and the creator reported not knowing which they
+       were looking at.
+    2. THE VIEWER'S OWN ACCESS HAS BEEN SET ASIDE (O17). Under `?preview` the
+       route resolves the CTA as if the viewer were anonymous, so a creator can
+       finally see the button that takes the money instead of "Go to your
+       dashboard". That is a real difference between this render and what the
+       viewer would otherwise get, and the page has to admit it — a preview that
+       silently lies in the other direction is the defect being fixed, not a fix.
+
+  ONE COMPONENT, NOT TWO. The two facts co-occur (a creator previewing a draft
+  they are entitled to is in both states at once), they belong in the same
+  sentence, and they want the same sticky bar. A second banner would stack two
+  of these on one page.
 
   Sticky rather than fixed so it never covers the page's own content, and
   `role="status"` so it is announced without stealing focus. Colours follow the
@@ -16,8 +28,14 @@
   bar, not a rounded box), which is why this is its own component.
 
   @prop status       The page's stored status — 'draft' / 'archived' read
-                     differently to a creator ("not published yet" vs "taken down").
-  @prop builderHref  Root-relative link back to this journey's builder, when known.
+                     differently to a creator ("not published yet" vs "taken
+                     down"), and 'published' means fact 2 is the whole reason
+                     this bar is here.
+  @prop builderHref  Root-relative link back to this journey's builder, when the
+                     caller can PROVE the viewer manages this org. Never a guess:
+                     see the call site in the public route.
+  @prop asVisitor    Fact 2 — the CTA on this render was resolved anonymously
+                     even though this viewer has access.
 -->
 <script lang="ts">
   import type { PageStatus } from '@codex/shared-types';
@@ -25,21 +43,51 @@
   interface Props {
     status: PageStatus;
     builderHref?: string | null;
+    asVisitor?: boolean;
   }
 
-  const { status, builderHref = null }: Props = $props();
+  const { status, builderHref = null, asVisitor = false }: Props = $props();
 
   const label = $derived(
-    status === 'archived' ? 'Archived — not visible' : 'Draft — not published'
-  );
-  const detail = $derived(
     status === 'archived'
-      ? 'This journey has been taken down. Only people who can manage this space can see this page.'
-      : 'Only people who can manage this space can see this page. Publish it to make it public.'
+      ? 'Archived — not visible'
+      : status === 'published'
+        ? 'Preview — as a visitor sees it'
+        : 'Draft — not published'
+  );
+
+  /*
+    TWO SENTENCES FROM TWO INDEPENDENT FACTS, joined into one line rather than
+    stacked as two paragraphs — a creator reads a bar, not a list. The status
+    sentence comes first because it is about the PAGE; the visitor sentence
+    second because it is about THIS RENDER of it.
+
+    Register follows the builder's own panel copy (O22): say what is true, then
+    say what it means for the thing the creator is about to do. Never "Enter a
+    title".
+  */
+  const detail = $derived(
+    [
+      status === 'archived'
+        ? 'This journey has been taken down. Only people who can manage this space can see this page.'
+        : status === 'draft'
+          ? 'Only people who can manage this space can see this page. Publish it to make it public.'
+          : 'This is the live page, opened as a preview.',
+      asVisitor
+        ? 'You already have access, so its buttons are showing the way in a visitor is offered rather than sending you to your dashboard. Your own access is unchanged.'
+        : null,
+    ]
+      .filter((sentence) => sentence !== null)
+      .join(' ')
   );
 </script>
 
-<aside class="draft-banner" role="status" data-status={status}>
+<aside
+  class="draft-banner"
+  role="status"
+  data-status={status}
+  data-as-visitor={asVisitor ? '' : undefined}
+>
   <span class="draft-banner__pill">{label}</span>
   <p class="draft-banner__detail">{detail}</p>
   {#if builderHref}

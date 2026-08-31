@@ -16,6 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
+import { deriveOfferPaths } from '$lib/page-builder/offer-paths';
 import type { SellPreview } from '$lib/page-builder/render';
 import { CACHE_HEADERS } from '$lib/server/cache';
 
@@ -198,6 +199,169 @@ describe('journey sales +page.server load', () => {
     // anonymous visitor is exactly who the prices are for.
     expect(offerMock).toHaveBeenCalledTimes(1);
     expect(data.offer?.paths).toEqual(['purchase']);
+  });
+
+  /**
+   * THE LOAD-LEVEL GUARD FOR `purchasable` (WP-1's handoff, WP-G's file).
+   *
+   * `JourneyRenderer` derives `purchasable` as
+   * `offer === null ? true : deriveOfferPaths(offer, course).length > 0`, and
+   * that flag decides whether the hero CTA and the floating pill exist at all.
+   * Every assertion above stops at the ENVELOPE — `data.offer.paths` is
+   * `['purchase']` — which is one derivation short of the thing that matters: a
+   * `paths` entry with no matching `purchase`/`subscription`/`tiers` payload
+   * enumerates to ZERO paths, so the load could return a perfectly well-shaped
+   * offer and still strip the buy button off a purchasable page.
+   *
+   * So this runs the REAL derivation the renderer runs, over what the load
+   * actually returned. `deriveOfferPaths` is deliberately called exactly as
+   * `JourneyRenderer` calls it — without the authored `invite` decorations,
+   * which may rename a path but never create one.
+   */
+  it('returns an offer the renderer can derive at least one real path from', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    const paths = deriveOfferPaths(data.offer, MOCK_COURSE_PAGE.course);
+    expect(paths.length).toBeGreaterThan(0);
+    // And the price the renderer will show comes from the OFFER (2499), not the
+    // course row (4900) — the two disagree in this fixture on purpose.
+    expect(paths[0]).toMatchObject({ id: 'purchase', priceCents: 2499 });
+    // The predicate itself, spelled out, so the guard reads as what it defends.
+    expect(data.offer === null ? true : paths.length > 0).toBe(true);
+  });
+
+  it('a well-shaped offer whose paths back NOTHING derives to zero (the trap)', async () => {
+    // The negative control for the case above, and the reason asserting
+    // `data.offer.paths` is not enough: `paths: ['purchase']` with
+    // `purchase: null` is a legal envelope that enumerates to nothing, and the
+    // renderer would correctly suppress every CTA. If a future load ever
+    // returned this shape for a priced course, the test above is what catches
+    // it — this one proves that test is not vacuous.
+    offerMock.mockResolvedValueOnce({
+      ...MOCK_OFFER,
+      paths: ['purchase'],
+      purchase: null,
+    } satisfies CourseOffer);
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.offer?.paths).toEqual(['purchase']);
+    expect(deriveOfferPaths(data.offer, MOCK_COURSE_PAGE.course)).toHaveLength(
+      0
+    );
+  });
+
+  // ── pageMeta: the tags the ROOT LAYOUT renders on this page's behalf (O32) ──
+  // `routes/+layout.svelte` emitted `description` + `og:type` unconditionally
+  // and `<svelte:head>` dedupes only `<title>`, so a page that set its own got
+  // TWO tags — root first. A parser takes the FIRST value of a repeated Open
+  // Graph property, so the page's `og:type="product"` was dead and every journey
+  // snippet was shadowed by the platform tagline. The root now renders one of
+  // each FROM THIS BAG, which is why the description is derived here and not in
+  // `+page.svelte`.
+  describe('pageMeta', () => {
+    it('declares the product vertical for the root layout to render', async () => {
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.pageMeta.ogType).toBe('product');
+    });
+
+    it('prefers the authored seo description', async () => {
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: { ...MOCK_COURSE_PAGE.page, seo: { description: 'Slow work.' } },
+        course: { ...MOCK_COURSE_PAGE.course, lede: 'The lede beneath it.' },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.pageMeta.description).toBe('Slow work.');
+    });
+
+    it('falls back to the lede when the seo description is CLEARED to ""', async () => {
+      // The case a naive `??` gets wrong: the key is PRESENT, so `??` keeps `''`
+      // and the page ships `<meta name="description" content="">`. A creator must
+      // be able to undo their own override.
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: { ...MOCK_COURSE_PAGE.page, seo: { description: '' } },
+        course: {
+          ...MOCK_COURSE_PAGE.course,
+          lede: 'The lede that must come back.',
+        },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.pageMeta.description).toBe('The lede that must come back.');
+    });
+
+    it('extracts plain text from a TipTap lede', async () => {
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        course: {
+          ...MOCK_COURSE_PAGE.course,
+          lede: JSON.stringify({
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: 'Close to the bone.' }],
+              },
+            ],
+          }),
+        },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      // A raw TipTap document in a meta description is worse than none — it is
+      // JSON in a search snippet.
+      expect(data.pageMeta.description).toBe('Close to the bone.');
+    });
+
+    it('falls back when a lede is STRUCTURALLY present but has no text', async () => {
+      // The gap the previous shape (`course.lede ? extractPlainText(...) : …`)
+      // left open: an empty TipTap doc is a truthy string, so it took the first
+      // branch and `extractPlainText` returned '' — an empty description, from a
+      // course that has a perfectly good title.
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        course: {
+          ...MOCK_COURSE_PAGE.course,
+          lede: JSON.stringify({ type: 'doc', content: [] }),
+        },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.pageMeta.description).toBe('Rootwork — a guided course.');
+    });
+
+    it('falls back to the course title when there is no lede at all', async () => {
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork'); // MOCK fixture has lede: null
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.pageMeta.description).toBe('Rootwork — a guided course.');
+    });
   });
 
   it('awaits the course page and returns it for first paint / SEO', async () => {

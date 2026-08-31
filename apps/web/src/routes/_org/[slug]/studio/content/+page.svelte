@@ -23,6 +23,7 @@
   import * as m from '$paraglide/messages';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
+  import { gateSearchQuery } from '@codex/validation';
   import { listContent } from '$lib/remote/content.remote';
   import type { ContentWithRelations } from '$lib/types';
   import Pagination from '$lib/components/ui/Pagination/Pagination.svelte';
@@ -50,8 +51,18 @@
       Math.max(1, parseInt(page.url.searchParams.get('limit') || '20', 10) || 20)
     )
   );
+  // The client-side search floor (Codex-k618q). Below
+  // SEARCH_MIN_QUERY_LENGTH `gateSearchQuery` returns null, so the spread at
+  // `...(urlSearch && { search: urlSearch })` omits the arg and `listContent`
+  // never asks the database for a pattern pg_trgm cannot index — a 1-2
+  // character keystroke would otherwise cost a full table scan.
+  //
+  // Gated HERE (where the query arg is built) rather than in `navigateWith`
+  // on purpose: the URL keeps mirroring the input, so the `$effect` below
+  // can't reset the box out from under someone editing down to two letters.
+  // It also means a hand-typed `?search=Bo` behaves exactly like typing it.
   const urlSearch = $derived(
-    page.url.searchParams.get('search')?.trim() || undefined
+    gateSearchQuery(page.url.searchParams.get('search')) ?? undefined
   );
   const urlStatus = $derived.by<StatusFilter>(() => {
     const raw = page.url.searchParams.get('status');

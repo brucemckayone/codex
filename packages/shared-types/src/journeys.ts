@@ -209,9 +209,15 @@ export interface PageBuilderState {
   subjectId: string | null;
   brandOverrides: BrandTokenOverrides | null;
   /**
-   * Page-level SEO / share metadata (optional; unset → derive from `title`).
-   * Additive WP-5 editor field — the SEO builder mode writes it; the public page
-   * head reads it. Backs `landing_pages.seo` jsonb.
+   * Page-level SEO / share metadata (optional; unset → derive from `title` and
+   * the course lede). The builder's SEO panel writes it, `saveJourneyPage`
+   * persists it, and the public sales page reads it in `<svelte:head>` from the
+   * AWAITED envelope — never from a streamed promise, because the head is
+   * flushed long before one settles. Backs the `landing_pages.seo` jsonb column
+   * added in migration 0090 (Codex-2j8nq).
+   *
+   * ABSENT means "the client said nothing about SEO" and the service leaves the
+   * stored bag alone; an EMPTY STRING is how a creator clears an override.
    */
   seo?: PageSeo;
   /**
@@ -731,6 +737,21 @@ export interface JourneyCourseView {
   priceCents: number | null;
   stageCount: number;
   practiceCount: number;
+  /**
+   * Public CDN URL for the course cover, or null when there is no cover (or no
+   * configured URL base). Never a raw R2 key.
+   *
+   * THIS IS THE SELL PAGE'S SHARE IMAGE. It is the only image the page can put
+   * in `<svelte:head>`: the hero's still arrives on the STREAMED `sellPreview`
+   * promise, which the head has structurally already flushed past, so before
+   * this field every share of a journey rendered as a bare text card. The `md`
+   * (400px) variant, the same one {@link JourneyCardView.coverImageUrl} serves,
+   * so one column has one resolved meaning everywhere.
+   *
+   * OPTIONAL-additive (like `CourseSellPreview.guidePortraitUrl`): an older
+   * worker deployment simply omits it and the head emits no `og:image`.
+   */
+  coverImageUrl?: string | null;
 }
 
 /** One testimonial rendered by the `proof` section. */
@@ -782,6 +803,23 @@ export interface JourneyListItem {
    */
   featured: boolean;
   updatedAt: string;
+  /**
+   * Public CDN URL for the subject course's cover (`courses.coverImageKey` →
+   * `md.webp`), or null when there is no cover, no configured URL base, or the
+   * page has no subject course. Never a raw R2 key.
+   *
+   * The SAME variant {@link JourneyCardView.coverImageUrl} serves, deliberately:
+   * the studio row's thumbnail exists so a creator can tell their portals apart
+   * AND check the image the public card renders, so the two must resolve one
+   * column to one meaning. A studio-only variant would preview something the
+   * product never shows.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): the web app
+   * and the workers deploy separately, so a worker predating this field omits the
+   * key and the studio row renders its typographic fallback tile rather than a
+   * broken `<img>`. Readers therefore treat `undefined` as "no cover" (`?? null`).
+   */
+  coverImageUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -919,6 +957,40 @@ export interface JourneySellMedia {
   signatureMediaId: string | null;
   /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
   coverImageUrl: string | null;
+  /**
+   * UPLOADED hero-image CDN URL (`courses.heroImageKey` → `lg.webp`), or null
+   * when the creator has uploaded no hero image (Codex-490z7, A32).
+   *
+   * `lg`, not `md` like the cover: a cover fills a card, a hero paints edge to
+   * edge.
+   *
+   * This is the UPLOAD ONLY — deliberately NOT A32's public fallback chain. The
+   * builder panel's Replace / Remove affordances act on the uploaded file, so if
+   * this resolved a video's poster frame too, the panel would offer a "Remove"
+   * that removes nothing. `CourseSellPreview.heroImageUrl` owns the chain.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): a worker
+   * deployment predating A32 simply omits the key, and the panel renders its
+   * empty state rather than crashing on a missing field.
+   */
+  heroImageUrl?: string | null;
+  /**
+   * UPLOADED signature-image CDN URL (`courses.signatureImageKey` → `md.webp`),
+   * or null when the creator has uploaded no signature (Codex-wqxv4's named-slot
+   * half).
+   *
+   * `md`, not `lg` like the hero and not `sm`: the letter paints the mark at a
+   * height derived from the heading size, so a wide signature lands around
+   * 200–400 CSS px — see `ImageProcessingService.processCourseSignature`.
+   *
+   * The UPLOAD ONLY, for the identical reason as {@link heroImageUrl}: the
+   * panel's Replace / Remove act on the uploaded file, so a value that could also
+   * be a video's poster frame would offer a Remove that removes nothing.
+   * `CourseSellPreview.signatureUrl` owns the chain.
+   *
+   * OPTIONAL-additive, same deployment-skew reason as the two above.
+   */
+  signatureImageUrl?: string | null;
 }
 
 /**
@@ -999,14 +1071,25 @@ export interface CourseSellPreview {
    */
   guideClip?: CourseSellPreviewClip | null;
   /**
-   * The HERO still — a public CDN URL resolved from the thumbnail of
-   * `courses.heroMediaId` (contract amendment A27, Codex-wqxv4).
+   * The HERO still — a public CDN URL, resolved down A32's FALLBACK CHAIN
+   * (contract amendments A27 · Codex-wqxv4, and A32 · Codex-490z7):
    *
-   * Resolved by `toStill`, NOT `toClip`: `media_items` is CHECK-constrained to
-   * ('video','audio'), so the still a creator picks for a hero is the chosen
-   * item's `thumbnailKey`. This is what makes the `media` design axis
-   * (`bleed`/`frame`/`mask`/`inset`) mean something on the hero — before it,
-   * every hero composition had only a synthetic gradient plate to draw.
+   *   `courses.heroImageKey` (an uploaded image, `lg.webp`)
+   *     ?? `courses.heroMediaId`'s poster frame (that item's `thumbnailKey`)
+   *       ?? nothing — the section draws its synthetic plate
+   *
+   * ORDERED, not merely additive. An uploaded image is an explicit creator
+   * choice; a poster frame is a by-product of transcoding, so the choice wins.
+   *
+   * THIS FIELD IS THE SEAM, and it is why A32 needed no change above this line: a
+   * section consumes `heroImageUrl` without knowing which link produced it. The
+   * second link exists because `media_items` is CHECK-constrained to
+   * ('video','audio') — so before A32 the only "hero image" reachable was a
+   * video's poster, which is exactly the gap A32 closes without removing.
+   *
+   * This is what makes the `media` design axis (`bleed`/`frame`/`mask`/`inset`)
+   * mean something on the hero — before A27, every hero composition had only a
+   * synthetic gradient plate to draw.
    *
    * OPTIONAL-additive (like {@link CourseSellPreview.guidePortraitUrl}): an older
    * worker deployment omits it and the hero falls back to its synthetic plate.
@@ -1032,9 +1115,21 @@ export interface CourseSellPreview {
    */
   heroClip?: CourseSellPreviewClip | null;
   /**
-   * The guide's SIGNATURE mark — a public CDN URL resolved from the thumbnail of
-   * `courses.signatureMediaId` (A27). `guide.letter` signs off with it; null
-   * leaves the letter unsigned. Same `toStill` resolution as the portrait.
+   * The guide's SIGNATURE mark — a public CDN URL, or null when there is none,
+   * which leaves `guide.letter` signed with the typeset name alone.
+   *
+   * Resolved down an ORDERED chain, uploaded first, exactly as {@link
+   * heroImageUrl} is (Codex-wqxv4's named-slot half):
+   *
+   *   signatureImageKey (an uploaded PNG/JPEG/WebP, `md.webp`)
+   *     ?? signatureMediaId's poster frame (a video's `thumbnailKey`, A27)
+   *       ?? nothing
+   *
+   * The uploaded link had to exist for this field to be usable at all, not merely
+   * to be better: `media_items` is CHECK-constrained to ('video','audio'), so the
+   * only signature A27 could express was a frame of a FILM of a signature. The
+   * media ref stays as the second link rather than being replaced, so a journey
+   * that already picked one does not lose its mark.
    */
   signatureUrl?: string | null;
 }

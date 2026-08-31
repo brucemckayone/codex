@@ -47,8 +47,6 @@ import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
   getCachedPublishedJourneys,
-  isPublicPortalRead,
-  PUBLIC_JOURNEYS_CACHE_CONTROL,
 } from './journeys-cache';
 
 /**
@@ -76,21 +74,43 @@ import {
 const app = new Hono<HonoEnv>();
 
 /**
- * CDN `Cache-Control` for the PUBLIC portal reads only (Codex-72k55).
+ * CDN `Cache-Control` ON THIS ROUTER IS PER-ROUTE (`policy.cache`), and there is
+ * deliberately no `app.use('*')` left.
  *
- * Registered on `'*'` but gated by an exact-path ALLOW-LIST rather than a path
- * pattern, because this router mixes public reads with `auth: 'required'`
- * (`/enrolled`, `/user/enrollments`), entitlement-gated reads
- * (`/courses/:courseId/dashboard`) and `requireOrgManagement` studio routes.
- * `public.ts` can safely blanket its whole router; this one cannot. See
- * `isPublicPortalRead` for why the allow-list is not a wildcard.
+ * WHAT WAS HERE, AND WHY IT WENT. A wildcard middleware set
+ * `public, max-age=60, s-maxage=60` after `await next()`, but only when
+ * `c.req.path` matched a hand-maintained set of two exact pathnames
+ * (`isPublicPortalRead` / `PUBLIC_PORTAL_READ_PATHS` in `journeys-cache.ts`).
+ * The allow-list existed because this router mixes fully public portal reads
+ * with `auth: 'required'` shelves (`/enrolled`, `/user/enrollments`),
+ * entitlement-gated reads (`/courses/:courseId/dashboard`) and
+ * `requireOrgManagement` studio writes on ONE Hono app — a `'/courses/*'`
+ * pattern would have marked the `canEnterCourse`-gated dashboard publicly
+ * cacheable, and shared caches key on URL and NEVER on Cookie.
+ *
+ * A path allow-list is a second, parallel description of each route's security
+ * posture, kept in a different file from the route. It failed closed, which is
+ * the right default, but "failed closed" also means every genuinely public read
+ * added later silently lost its CDN window until someone remembered to edit the
+ * set — and the set had to be spelled with the mount prefix (`/api/journeys/…`)
+ * baked in, so it broke if the router were ever mounted elsewhere.
+ * `policy.cache` puts the answer on the route, next to its `auth` level, where
+ * a reviewer reads both at once; `procedure()` emits it centrally and defaults
+ * anything undeclared to `private` (`resolveCacheControl`), so the fail-closed
+ * property is now a property of the framework rather than of this file.
+ *
+ * THE 60s IS STILL BOUNDED BY THE INVALIDATION MECHANISM. `CACHE_PRESETS.public`
+ * is 60s because a publish stales the KV layer through one version bump
+ * (`bumpOrgJourneysVersion`) and no such event can reach a CDN — an HTTP cache
+ * only expires on the clock, so a shared window is a window during which a
+ * publish is invisible.
+ *
+ * `auth: 'optional'` IS NOT ENOUGH TO EARN `cache: 'public'` — the type rule
+ * demands `variesBySession: false` alongside it, because `optional` covers both
+ * routes that ignore the session (the portal reads below) and routes that branch
+ * on it, and no type can tell them apart. Only the two reads that carried the
+ * public header before this change assert it; see each route.
  */
-app.use('*', async (c, next) => {
-  await next();
-  if (isPublicPortalRead(c.req.path)) {
-    c.header('Cache-Control', PUBLIC_JOURNEYS_CACHE_CONTROL);
-  }
-});
 
 /**
  * GET /api/journeys/courses?organizationId=
@@ -103,8 +123,13 @@ app.use('*', async (c, next) => {
  *
  * Cache: KV cache-aside under `COLLECTION_ORG_JOURNEYS(orgId)` (Codex-72k55),
  * the same version key the landing rails use, so one portal write stales this
- * rail and those together. CDN header set per-route — see
- * `PUBLIC_JOURNEYS_CACHE_CONTROL` for why this router cannot use `app.use('*')`.
+ * rail and those together. CDN: `cache: 'public'` + `variesBySession: false`.
+ * The assertion is safe to make here and was verified against the handler, not
+ * inferred from the docstring: the handler's only inputs are the validated
+ * `organizationId` query param and `ctx.env.R2_PUBLIC_URL_BASE`. It never reads
+ * `ctx.user` or `ctx.session`, and `listPublishedCourses` takes no user
+ * argument, so no session-derived value can reach the body. This route carried
+ * the same header via the deleted allow-list.
  * @returns {CourseCardSummary[]}
  */
 app.get(
@@ -113,6 +138,8 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'public',
+      variesBySession: false,
     },
     input: {
       query: listPublishedCoursesQuerySchema,
@@ -147,6 +174,17 @@ app.get(
  * `auth: 'optional'` — returns only PUBLISHED-course public chrome, so it serves
  * both the member flow and public landings; no user data leaks. Returns `null`
  * when no such course exists.
+ *
+ * Cache: `private`, DELIBERATELY NOT `public`, and the reason is a scope
+ * boundary rather than a doubt about the body. The handler was read: its inputs
+ * are the two validated query params and nothing else, so `variesBySession:
+ * false` would be a TRUE assertion and `public` would be safe. But this route
+ * was NOT in the deleted CDN allow-list, so it has never been shared-cached;
+ * turning it on is a new caching decision with its own invalidation question
+ * (there is no KV cache-aside layer behind it — the 60s CDN window would be its
+ * only cache and its only staleness), and that decision belongs to whoever owns
+ * the CDN budget, not to a vocabulary migration. Declared rather than omitted so
+ * the choice is visible as a choice.
  * @returns {JourneyCourseSummary | null}
  */
 app.get(
@@ -155,6 +193,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       query: courseBySlugQuerySchema,
@@ -176,6 +215,12 @@ app.get(
  * anonymous visitor the same as an owner — mirroring the by-slug / sales-page
  * reads (HARDENING §E course-sell row). Returns `{ courses: [] }` when the item
  * belongs to no published course.
+ *
+ * Cache: `private` — session-invariant (the handler forwards only the validated
+ * `contentId` param; `getContentCourses` takes no user), so `public` would be
+ * safe, but this route was never in the deleted CDN allow-list. See
+ * `/courses/by-slug` above for the full reasoning; widening is a separate,
+ * owner-visible decision.
  * @returns {ContentCourseLinks}
  */
 app.get(
@@ -184,6 +229,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       params: contentCoursesParamsSchema,
@@ -205,6 +251,13 @@ app.get(
  * passed as `organizationId` (the slug is org-scoped, mirroring `by-slug`).
  * Returns `null` when no published page/course matches (→ the load 404s). The
  * streamed sell-preview media is a separate read (`sell-preview` below).
+ *
+ * Cache: `private` — session-invariant (inputs are the two validated query
+ * params plus the env-owned CDN base; `getCoursePage` takes no user), so `public`
+ * would be safe, but this route was never in the deleted CDN allow-list. See
+ * `/courses/by-slug` above. This is the highest-value widening candidate on the
+ * router — it is the awaited shell of the public sales page — which is exactly
+ * why it should be turned on deliberately rather than as a side effect.
  * @returns {JourneyCoursePage | null}
  */
 app.get(
@@ -213,6 +266,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       // Same `{ organizationId, slug }` shape as the course by-slug read — here
@@ -221,7 +275,14 @@ app.get(
     },
     handler: async (ctx): Promise<JourneyCoursePage | null> => {
       const { organizationId, slug } = ctx.input.query;
-      return ctx.services.courseJourney.getCoursePage(organizationId, slug);
+      // The URL base is env-owned, so the ROUTE supplies it and the service
+      // resolves `courses.coverImageKey` → the page's `og:image` (the sell
+      // page's only share image; the hero still is on the STREAMED read).
+      return ctx.services.courseJourney.getCoursePage(
+        organizationId,
+        slug,
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
@@ -240,6 +301,11 @@ app.get(
  * by the route (env-owned) and resolved inside the service. Returns `null` when
  * the course is not published/non-deleted; a clip is `null` when its media has
  * no transcoded preview.
+ *
+ * Cache: `private` — session-invariant (the validated `courseId` param plus the
+ * env-owned CDN base; the clip URLs are PUBLIC preview paths, never signed, so
+ * they carry no per-user credential either), so `public` would be safe, but this
+ * route was never in the deleted CDN allow-list. See `/courses/by-slug` above.
  * @returns {CourseSellPreview | null}
  */
 app.get(
@@ -248,6 +314,7 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'private',
     },
     input: {
       params: courseParamsSchema,
@@ -441,6 +508,15 @@ app.post(
  * take separate data slots under the shared org version key — the landing page
  * reads this endpoint TWICE per render (featured picks + the full rail), so the
  * two must not collide.
+ *
+ * CDN: `cache: 'public'` + `variesBySession: false`, verified against the
+ * handler rather than the docstring — the inputs are the validated
+ * `organizationId` / `featured` / `limit` query params and the env-owned CDN
+ * base, `ctx.user` and `ctx.session` are never touched, and
+ * `listPublishedJourneys` takes no user argument. `featured` and `limit` ride the
+ * QUERY STRING, which a shared cache keys on, so the two rails cannot serve each
+ * other's rows at the edge either. This route carried the same header via the
+ * deleted allow-list.
  * @returns {JourneyCardView[]}
  */
 app.get(
@@ -449,6 +525,8 @@ app.get(
     policy: {
       auth: 'optional',
       rateLimit: 'api', // 100 req/min
+      cache: 'public',
+      variesBySession: false,
     },
     input: {
       query: listPublishedJourneysQuerySchema,
@@ -526,7 +604,7 @@ app.get(
 /**
  * GET /api/journeys/studio/journeys?organizationId=&status=
  * The studio index — the org's journeys/pages, newest-edited first, optional
- * status filter, with `live` course rollups.
+ * status filter, with `live` course rollups and each row's resolved cover URL.
  * @returns {JourneyListItem[]}
  */
 app.get(
@@ -543,7 +621,13 @@ app.get(
     handler: async (ctx): Promise<JourneyListItem[]> => {
       return ctx.services.courseJourney.listJourneysForOrg(
         ctx.organizationId,
-        ctx.input.query.status
+        ctx.input.query.status,
+        // The CDN base is ENV-OWNED, so the route supplies it and the service
+        // resolves — the same split every sibling cover/media read uses. Omit it
+        // and every `coverImageUrl` comes back null and the studio rows render
+        // their typographic fallback tile, which is exactly what this list did
+        // before the field existed: the thumbnail is additive, never required.
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })
@@ -606,7 +690,8 @@ app.get(
     handler: async (ctx): Promise<JourneyCoursePage | null> => {
       return ctx.services.courseJourney.getCoursePagePreview(
         ctx.organizationId,
-        ctx.input.query.slug
+        ctx.input.query.slug,
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })
@@ -680,6 +765,101 @@ app.put(
         ctx.obs
       );
       return null;
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId?organizationId=
+ *
+ * SOFT-DELETE a portal's landing page (`deleted_at`) — the studio list's Delete.
+ * Nothing else is touched: the subject course, its curriculum, every purchase and
+ * every completion survive, and clearing `deleted_at` restores the page.
+ *
+ * REFUSED (409) WHILE THE PAGE IS PUBLISHED, deliberately. `courses.status` is
+ * written ONLY by `cascadeCourseFromPage`, reachable only through the page save,
+ * so deleting a live page would leave the course published with no sales page —
+ * still on /explore, still resolvable by slug, still on the enrolled shelves,
+ * while `/journeys/:slug` 404'd. The service refuses and names the next step;
+ * "unpublish, then delete" is a real path because the list's Unpublish goes
+ * through that cascade.
+ *
+ * No `bumpOrgJourneysVersion`: the delete is refused unless the page is already
+ * draft or archived, and every cached public read is filtered on
+ * `status = 'published'`, so the row this removes was not in any of them.
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.deleteJourneyPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/duplicate?organizationId=
+ *
+ * Duplicate the portal's SALES PAGE as a new draft — one `landing_pages` row.
+ * NOT the course: the copy carries the source's `subjectType`/`subjectId`, so a
+ * duplicated course portal is a second sales page in front of the SAME course
+ * (a shape `cascadeCourseFromPage` and `listPublishedJourneys` already handle).
+ * Every section gets a fresh id, `design`/`brandOverrides`/`seo` come across, and
+ * `offer` does NOT — money is set deliberately, never inherited by a copy.
+ *
+ * No body. The title and slug are DERIVED server-side (`"<title> (copy)"`, then a
+ * verified-free org-unique slug), because the org slug-space spans
+ * `landing_pages` AND `courses` and only the service can check both inside the
+ * insert's transaction. A client-supplied slug would be a second, racier arbiter.
+ *
+ * `rateLimit: 'api'` rather than `strict`: this is a cheap authoring gesture, and
+ * a creator laying out variants of a page makes several in one sitting. It
+ * creates a DRAFT, so nothing public changes and there is no cache to bump.
+ *
+ * `successStatus: 201` — a POST that CREATES a resource, per the envelope
+ * contract in CLAUDE.md. The sibling `POST /studio/journeys` predates that rule
+ * and still answers 200; it is left alone rather than changed underneath its
+ * callers, so the divergence is recorded here rather than propagated.
+ *
+ * The 4-segment path cannot collide with the 3-segment `:pageId` route.
+ * @returns {{ id: string; slug: string; title: string }} 201
+ */
+app.post(
+  '/studio/journeys/:pageId/duplicate',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 201,
+    handler: async (
+      ctx
+    ): Promise<{ id: string; slug: string; title: string }> => {
+      return ctx.services.courseJourney.duplicateJourneyPage(
+        ctx.organizationId,
+        ctx.user.id,
+        ctx.input.params.pageId
+      );
     },
   })
 );
@@ -795,23 +975,22 @@ app.patch(
       query: journeyOrgQuerySchema,
       body: updateJourneySellMediaBodySchema,
     },
-    handler: async (ctx): Promise<JourneySellMedia> => {
-      const persisted = await ctx.services.courseJourney.updateJourneySellMedia(
+    handler: async (ctx): Promise<JourneySellMedia> =>
+      // The write path does not touch the two UPLOADED stills (the cover and,
+      // since A32, the hero image), but their keys come back on the same
+      // `.returning()` row — so the base goes IN and the service resolves them.
+      //
+      // This replaces a second, full `getJourneySellMedia` read that existed
+      // purely to recover `coverImageUrl` from the hard `null` the service used
+      // to echo. One round-trip instead of two, and — the reason for the change —
+      // the hero image would otherwise have needed the identical compensation
+      // added here a second time.
+      ctx.services.courseJourney.updateJourneySellMedia(
         ctx.organizationId,
         ctx.input.params.pageId,
-        ctx.input.body
-      );
-      // The write path does not touch the cover, so re-read the stored key
-      // through the env-owned base rather than reporting `null` and making the
-      // panel appear to have lost the cover it still has.
-      const { coverImageUrl } =
-        await ctx.services.courseJourney.getJourneySellMedia(
-          ctx.organizationId,
-          ctx.input.params.pageId,
-          ctx.env.R2_PUBLIC_URL_BASE
-        );
-      return { ...persisted, coverImageUrl };
-    },
+        ctx.input.body,
+        ctx.env.R2_PUBLIC_URL_BASE
+      ),
   })
 );
 
@@ -983,6 +1162,248 @@ app.delete(
         ctx.executionCtx,
         ctx.organizationId,
         ctx.obs
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/hero-image?organizationId=
+ *
+ * Upload (or replace) the journey's HERO IMAGE — the still the sales page's
+ * loudest section paints (Codex-490z7, contract amendment A32).
+ *
+ * Content-Type: multipart/form-data. Form field: `image` (file).
+ *
+ * WHY A SECOND STILL ENDPOINT rather than a slot on the cover route: the two
+ * stills are different sizes with different jobs (the cover serves a card at
+ * `md`, the hero paints edge to edge at `lg`) and they clear independently. A
+ * `?slot=` discriminator on one route would make the response shape conditional
+ * and give both a single cache-bump story they do not share.
+ *
+ * Modelled verbatim on the cover route above, including the ORDERING that matters:
+ * the page is resolved (and org-scoped) BEFORE R2 is written, so an out-of-org or
+ * non-course page 404s and can never seed an orphaned object. The hero is NOT a
+ * `media_items` ref — that table is CHECK-constrained to ('video','audio'), which
+ * is precisely why this endpoint had to exist for a creator to use a photograph.
+ * Keys are deterministic per course, so a re-upload overwrites in place.
+ * @returns {{ heroImageUrl: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/hero-image',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      image: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ heroImageUrl: string }> => {
+      // Resolve (and org-scope) the subject course FIRST — a foreign or
+      // non-course page must 404 before any R2 object exists.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed = await ctx.services.imageProcessing.processCourseHero(
+        courseId,
+        new File([ctx.files.image.buffer], ctx.files.image.name, {
+          type: ctx.files.image.type,
+        })
+      );
+
+      // The org-aware service owns the DB write (same split as the cover).
+      await ctx.services.courseJourney.setCourseHeroImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        processed.heroImageKey
+      );
+
+      // BELT AND BRACES, and stated honestly rather than copied from the cover.
+      // I checked what the org journeys version actually keys: only the two
+      // CACHED list reads (`getCachedPublishedCourses` :134,
+      // `getCachedPublishedJourneys` :477). The hero image reaches a visitor
+      // through `/courses/:courseId/sell-preview`, which is an UNCACHED read, and
+      // no card carries a hero today — so unlike the cover, this bump changes
+      // nothing a creator can currently see.
+      //
+      // It stays for two reasons: the two still-image endpoints must not diverge
+      // in their cache story for a reader to have to work out which one bumps,
+      // and the moment a card does render a hero the omission would be a stale
+      // rail with no obvious cause. The cost is one KV write on an
+      // org-manager-only, rate-limited route.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+
+      return { heroImageUrl: processed.url };
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId/hero-image?organizationId=
+ *
+ * Clear the journey's uploaded hero image.
+ *
+ * This does NOT leave the hero blank — it drops the page back to A32's next link,
+ * `courses.heroMediaId`'s poster frame, and then to the section's synthetic
+ * plate. That graceful degradation is why the uploaded image is its own column
+ * rather than a replacement for the media ref.
+ *
+ * Clears the DB key only; the R2 variants are left in place. Keys are
+ * deterministic per course id, so a later re-upload overwrites them rather than
+ * accumulating orphans, and the objects are unreachable in the meantime (no
+ * client is ever handed a raw key).
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId/hero-image',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setCourseHeroImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        null
+      );
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/signature-image?organizationId=
+ *
+ * Upload the course's SIGNATURE image — the third still-image slot, and the one
+ * `guide.letter` needs to render what its name describes (Codex-wqxv4 option A,
+ * contract A32). Deliberately identical in shape to the `hero-image` pair above
+ * and to `cover`: `media_items` is CHECK-constrained to ('video','audio'), so a
+ * still cannot live there, which is why all three of these are R2-key columns
+ * rather than media refs.
+ *
+ * The page is resolved (and org-scoped) BEFORE R2 is written, so an out-of-org id
+ * can never seed an orphaned object.
+ * @returns {{ signatureImageUrl: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/signature-image',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      image: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ signatureImageUrl: string }> => {
+      // Resolve (and org-scope) the subject course FIRST — a foreign or
+      // non-course page must 404 before any R2 object exists.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed =
+        await ctx.services.imageProcessing.processCourseSignature(
+          courseId,
+          new File([ctx.files.image.buffer], ctx.files.image.name, {
+            type: ctx.files.image.type,
+          })
+        );
+
+      await ctx.services.courseJourney.setCourseSignatureImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        processed.signatureImageKey
+      );
+
+      // NO `bumpOrgJourneysVersion` HERE, and that is a decision rather than an
+      // omission. The org journeys version keys only the two CACHED list reads,
+      // and a signature reaches a visitor solely through
+      // `/courses/:courseId/sell-preview`, which is UNCACHED. The hero route
+      // above bumps it as belt-and-braces because a card may one day carry a
+      // hero; a signature is a guide-section mark and will never be on a card,
+      // so a KV write per upload would buy nothing. If a card ever renders one,
+      // add the bump here and delete this comment.
+      return { signatureImageUrl: processed.url };
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId/signature-image?organizationId=
+ *
+ * Clear the course's uploaded signature.
+ *
+ * As with the hero, this does NOT leave the slot blank: it drops back to A32's
+ * next link (`courses.signatureMediaId`'s poster still) and then to whatever the
+ * guide composition draws without one. That degradation is why the uploaded image
+ * is its own column rather than a replacement for the media ref.
+ *
+ * Clears the DB key only; the R2 variants are left in place. The key is
+ * deterministic per course id, so a later re-upload overwrites them rather than
+ * accumulating orphans, and the objects are unreachable in the meantime (no
+ * client is ever handed a raw key).
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId/signature-image',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setCourseSignatureImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        null
       );
       return null;
     },

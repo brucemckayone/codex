@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex data architecture — the decision</title>
+<style>
+:root{
+  --bg:#fbfaf8; --surface:#fff; --surface-2:#f4f2ee; --line:#e2ded6;
+  --text:#1c1a17; --text-2:#5c554c; --text-3:#8b8378;
+  --accent:#7a4a1e; --accent-bg:#fdf6ee;
+  --bad:#9a2f2f; --bad-bg:#fdf1f0; --good:#2f6b40; --good-bg:#f0f7f2; --mid:#7a5c14; --mid-bg:#fdf8ea;
+  --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif; --max:74rem;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141311; --surface:#1c1b18; --surface-2:#232120; --line:#332f2b;
+  --text:#eae6e0; --text-2:#aaa39a; --text-3:#7d766c;
+  --accent:#d9a76a; --accent-bg:#251d14;
+  --bad:#e08c86; --bad-bg:#2a1a19; --good:#8fc9a2; --good-bg:#172217; --mid:#d8bd72; --mid-bg:#241f13;
+}}
+:root[data-theme="dark"]{
+  --bg:#141311; --surface:#1c1b18; --surface-2:#232120; --line:#332f2b;
+  --text:#eae6e0; --text-2:#aaa39a; --text-3:#7d766c;
+  --accent:#d9a76a; --accent-bg:#251d14;
+  --bad:#e08c86; --bad-bg:#2a1a19; --good:#8fc9a2; --good-bg:#172217; --mid:#d8bd72; --mid-bg:#241f13;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.62 var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 1.2rem 6rem}
+.wrap{max-width:var(--max);margin:0 auto}
+header.mast{padding:3.4rem 0 1.6rem;border-bottom:2px solid var(--text);margin-bottom:2.4rem}
+h1{font:600 2.05rem/1.16 var(--serif);margin:0 0 .5rem;letter-spacing:-.018em}
+.sub{color:var(--text-2);font-size:.95rem;max-width:56rem;margin:0}
+.meta{margin-top:1rem;font:500 .72rem/1.5 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.07em}
+h2{font:600 1.28rem/1.25 var(--serif);margin:3.2rem 0 .3rem;padding-top:1.4rem;border-top:1px solid var(--line);
+  letter-spacing:-.01em}
+h2 .n{font:600 .74rem/1 var(--mono);color:var(--accent);display:block;margin-bottom:.5rem;letter-spacing:.1em}
+h3{font:600 1.02rem/1.3 var(--sans);margin:2rem 0 .4rem}
+p{margin:.55rem 0;max-width:62rem}
+.lede{font-size:1rem;color:var(--text-2);max-width:60rem}
+code{font:.855em/1.4 var(--mono);background:var(--surface-2);padding:.1em .34em;border-radius:3px;
+  border:1px solid var(--line);word-break:break-word}
+strong{font-weight:640;color:var(--text)}
+em{font-style:italic}
+a{color:var(--accent)}
+.tw{overflow-x:auto;margin:1rem 0;border:1px solid var(--line);border-radius:7px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.875rem;min-width:36rem}
+th{text-align:left;font:600 .7rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.06em;
+  color:var(--text-3);padding:.7rem .85rem;border-bottom:1px solid var(--line);background:var(--surface-2);
+  vertical-align:bottom;white-space:nowrap}
+td{padding:.72rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.num{font:600 .95rem/1.3 var(--mono);color:var(--accent);width:2.2rem;text-align:center;white-space:nowrap}
+td.k{font:500 .8rem/1.4 var(--mono);white-space:nowrap;color:var(--text-2)}
+.bad{color:var(--bad)} .good{color:var(--good)} .mid{color:var(--mid)}
+td.bad{background:var(--bad-bg)} td.good{background:var(--good-bg)} td.mid{background:var(--mid-bg)}
+.tiny{font-size:.815rem;color:var(--text-2);display:block;margin-top:.28rem;line-height:1.5}
+.box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:0 7px 7px 0;padding:1.05rem 1.2rem;margin:1.4rem 0}
+.box.warn{border-left-color:var(--bad)}
+.box.ok{border-left-color:var(--good)}
+.box h4{font:600 .72rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);
+  margin:0 0 .5rem}
+.box p:last-child{margin-bottom:0}
+.answer{background:var(--accent-bg);border:1px solid var(--line);border-radius:8px;padding:1.5rem 1.6rem;margin:0 0 2rem}
+.answer ol{margin:0;padding-left:1.5rem}
+.answer li{margin:.5rem 0;font-size:.97rem}
+.answer li::marker{font:600 .9rem var(--mono);color:var(--accent)}
+ul.tight{margin:.5rem 0;padding-left:1.3rem}
+ul.tight li{margin:.28rem 0}
+pre{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:.9rem 1rem;
+  overflow-x:auto;font:.815rem/1.55 var(--mono);margin:.9rem 0;max-width:100%}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem 1rem;font-size:.87rem;margin:.8rem 0}
+.kv dt{font:500 .8rem/1.55 var(--mono);color:var(--text-3);white-space:nowrap}
+.kv dd{margin:0}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.85rem;color:var(--text-2)}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:1rem 1.2rem;margin:0 0 2.6rem;
+  font-size:.88rem}
+.toc a{display:inline-block;margin-right:1.1rem;text-decoration:none;color:var(--text-2)}
+.toc a:hover{color:var(--accent)}
+.toc a b{color:var(--accent);font:600 .74rem var(--mono);margin-right:.3rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <h1>Should Codex move reads to D1?</h1>
+  <p class="sub">A decision document. The problems that prompted the question, what actually causes them, and the changes that fix them — <strong>three that matter</strong>, none of which is D1.<br><span style="font-size:.9em"><strong>Why most of this is not about D1:</strong> that answer is stable — no amount of growth makes a static binding dynamic or a nullable column a tenant key. <em>Everything else here gets worse with traffic you are about to have.</em></span></p>
+  <p class="meta">2026-08-30 · verified against <code>origin/dev</code> · <a href="./architecture.html">diagrams</a> · <a href="./plan.html">plan</a> · <a href="./reference.html">evidence</a></p>
+</header>
+
+<div class="answer">
+  <ol>
+    <li><strong>No D1, no per-tenant Durable Objects, no separate read plane.</strong> Two facts settle it:
+    <strong>D1 bindings are static</strong> — there is no runtime addressing — and <strong>a Durable Object is a
+    single instance in a single location.</strong> Neither is something a bigger plan changes.
+    <em>And the two constraints you framed the question around both dissolve: the 10&#8202;GB limit never comes up (the catalogue is 36.6&#8202;MB), and <strong>sharding was never the risk — the schema has no key to shard on.</strong></em> <span class="tiny"><code>content.organizationId</code> is nullable and <code>mediaItems</code> has no organisation column at all, so “design to avoid sharding” was designing around a constraint that does not exist in that form. <strong>Multi-org queries are not something to preserve through a migration; they are what a migration would have cost you.</strong> The model is read from the schema in §2.</span></li>
+
+    <li><strong>Your instinct about cost was right, and for a sharper reason than a per-query price.</strong>
+    Neon bills <em>time awake</em>, not queries — and <strong>the free monthly compute allowance is only <strong>0.55–0.60×</strong> what one minimum-size instance costs to stay awake for a month.</strong> <span class="tiny">(100 CU-hours published, 110 as the quota CI cited, against 182.5 for 0.25 CU × 730 h — <em>the range is immaterial; being under 1.0 is the point</em>)</span> The plan is
+    built for a database that sleeps. <strong>You have consumed all of it with one test user</strong>, because
+    anything touching the database more often than its idle timeout stops it sleeping — and <strong>every request for a real page currently does</strong>, paying a Neon round trip just to resolve its slug. <em>The invoice is £0 only because you have not launched.</em> <span class="tiny"><strong>And do not count on the quota resetting to clear the CI block:</strong> the usage counter decomposes into the recorded 89.4/10.6 production/CI split <em>to eight seconds</em> and its value scales with the project's age, both signatures of a lifetime figure — though Neon's published pricing says the free allowance is monthly. <strong>§5 reading 3 argues both and names the one command that settles it.</strong></span></li>
+
+    <li><strong>So the fix is to stop waking it, and that is not a datastore choice.</strong> Four round trips
+    do not need to happen: a driver setting, a missing argument, a missing header, and an unset config key.
+    <strong>D1 would inherit every one of them.</strong> <em>The single biggest lever is the missing header — it lets Cloudflare's CDN answer anonymous and bot traffic without waking Neon at all.</em> <strong>And the diagnosis is confirmed by Neon's own counters: this period recorded <em>zero</em> bytes written.</strong> <span class="tiny">The workload is reads, and all three changes reduce reads reaching the database. None of them touches a write path — which is also why none of them can lose data.</span> <strong>The target state is drawn in one table: <a href="#arch">the architecture</a> — two layers change, both plumbing, and the largest row in it is what is <em>not</em> there.</strong></li>
+  </ol>
+</div>
+
+<nav class="toc">
+  <a href="#problems"><b>1</b> The problems</a>
+  <a href="#whynot"><b>2</b> Why not D1</a>
+  <a href="#arch"><b>▸</b> The architecture</a>
+  <a href="#fixes"><b>3</b> The fixes</a>
+  <a href="#order"><b>▸</b> The order, in one place</a>
+  <a href="#decide"><b>4</b> What you decide</a>
+  <a href="#unknown"><b>5</b> What is still unknown</a>
+</nav>
+
+<h2 id="problems"><span class="n">SECTION 1</span> The problems</h2>
+
+<p class="lede">Seven, in two kinds. <strong>Four are round trips that did not need to happen</strong>
+— independent defects with the same shape, which is why one datastore choice cannot fix them and another cannot
+cause them. <strong>Three are ceilings you are pressed against, and at least one you have already reached.</strong> <strong>Where the figures come from — four sources, and the weakest is worth knowing.</strong><span class="tiny"> <strong>1 · A live Neon API read on 2026-08-30:</strong> 0.25 min CU, scale-to-zero, 38.3 hours awake a month, <code>logical_size</code> 36.6&#8202;MB, <code>written_data_bytes</code> 0, the archive state, <code>cpu_used_sec</code> 396,646. <strong>2 · Code on <code>origin/dev</code>, grepped the same day:</strong> 48 tables, 199 <code>procedure()</code> sites, 5 public routes of 13 in organizations.ts, 6 files doing fire-and-forget writes of which 5 thread <code>waitUntil</code>, 21 awaits, 12 search declarations, 11 <code>wrangler.jsonc</code> files, and every file and line number quoted. <strong>3 · Cloudflare and Neon documentation, read 2026-08-30:</strong> every platform limit — KV's caps, Hyperdrive's query caching and 100,000/day, D1's 500&#8202;MB and 50 queries, the Durable Object row limits, <code>pg_trgm</code>. <strong>4 · Beads, measured under load on 2026-08-26 and now four days old — the weakest source here:</strong> ~31 statements per render, 81&#8202;ms each, the resulting ~2.5&#8202;s, the 17% 504 rate, ~1,800 KV writes in a day, and the 0% cache hit rate. <em>Take that fourth group as orders of magnitude rather than numbers, and re-measure before quoting any of it back. My own record on bead-sourced claims in this investigation was 0 for 7 — every one that described a live defect turned out to be already fixed. <strong>And re-measuring them costs nothing extra, because it is the same reading fix 3 needs anyway:</strong> p50 and p95 for one logged-out landing render, the statement count for that render, and the 504 rate. <em>Take it once before you start and once after fix 3, and the before-figures replace all six of group 4 with something four days fresher and attributable to your own run.</em></em></span></p>
+
+<h3>Four round trips that did not need to happen</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Problem</th><th>Evidence</th><th>What it costs</th></tr></thead>
+  <tbody>
+<tr>
+      <td class="num">1</td>
+      <td><strong>One HTTPS round trip per SQL statement.</strong> The <code>neon-http</code> driver opens a
+      fresh connection for every statement — no pooling, no reuse.
+      <span class="tiny">Constructed in two adjacent expressions:
+      <code>packages/database/src/client.ts:103-104</code> and <code>:138-139</code>. <strong>The 81 ms is not distance:</strong> same-region round-trip time is ~5–10 ms, so most of each statement is <strong>HTTP and TLS setup</strong>, paid again every time. <em>Which is why a connection pool does not optimise this cost — it removes it (§3, fix 3).</em></span></td>
+      <td class="k">~31 statements ×<br>81 ms each<br><span class="tiny">measured 2026-08-26</span></td>
+      <td class="bad"><strong>~2.5 s of pure network per landing render</strong>, a <strong>17% 504 rate</strong>, <span class="tiny">(the 504 rate measured under load 2026-08-26, <code>Codex-kgrdp.23</code> — <strong>the one significant figure on this page that comes from a bead rather than from code or a live API</strong>, and four days old. Take it as the order of magnitude, not the number.)</span>
+      and <strong>89% of the Neon compute quota</strong> — the compute stays awake for the whole 2.5 s.
+      <span class="tiny">It is also what makes problem 4 unavoidable — the quota bills compute <em>time</em>, and this is what keeps the compute awake. <strong>And it multiplies problem 6 by ~31:</strong> a distant user pays the transatlantic hop once per statement, not once per page.</span></td>
+    </tr>
+<tr>
+      <td class="num">2</td>
+      <td><strong>The org cache never populates.</strong> Two write-throughs call
+      <code>kv.put(...)</code> without passing it to <code>waitUntil</code>, so the worker returns and the
+      platform cancels the pending write.
+      <span class="tiny"><code>worker-utils/src/procedure/org-helpers.ts:195</code> and <code>:280</code> —
+      zero <code>waitUntil</code> anywhere in that file.</span></td>
+      <td class="k">0% hit rate<br><span class="tiny">proven, Codex-e32xz</span></td>
+      <td class="bad">Every request re-resolves the org slug against Neon. <strong>This is the 1.87
+      queries-per-subrequest multiplier</strong> — fixing it alone raises the free-plan ceiling from ~3,200 to
+      5,000–5,500 renders/day.
+      <span class="tiny">The correct pattern is 90 lines away in <code>cache/src/helpers/invalidate.ts:73</code>,
+      and <code>cache/src/types.ts:52</code> documents this exact trap.</span></td>
+    </tr>
+<tr>
+      <td class="num">3</td>
+      <td><strong>Public read endpoints send no <code>Cache-Control</code>.</strong> organization-api has
+      <strong>zero</strong> cache-header references across 5 public routes.</td>
+      <td class="k">0 of 5 routes<br><span class="tiny">checked on origin/dev</span></td>
+      <td class="bad">Cloudflare's CDN cannot serve a single cached response, so <em>every</em> anonymous
+      visitor reaches a worker and a database — for content that changes daily at most.</td>
+    </tr>
+<tr>
+      <td class="num">6</td>
+      <td><strong>Every read from outside western Europe crosses the Atlantic.</strong> Neon is single-region
+      <code>aws-eu-west-2</code>, and worker placement is not configured.
+      <span class="tiny"><code>placement</code> is unset in all 11 <code>wrangler.jsonc</code> files.</span></td>
+      <td class="k">unset ×11</td>
+      <td class="mid">A distant user pays <strong>31 transatlantic round trips</strong> instead of one.
+      <span class="tiny">Every latency figure in this document is a <em>European</em> measurement — see §5.</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <h4>Why grouping them this way matters</h4>
+  <p>None of those four is a schema problem, a scaling problem, or a database-choice problem — they are a driver
+  setting, a missing argument, a missing header and an unset config key. <strong>D1 would inherit every one of
+  them.</strong> That is the whole reason the answer to your question is “no”: <em>moving the data would not
+  address a single one of the four things actually costing you time.</em></p>
+</div>
+
+<h3>Three ceilings you are pressed against</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Problem</th><th>Evidence</th><th>What it costs</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="num">4</td>
+      <td><strong>The free compute allowance is spent — at roughly one user.</strong> Neon charges for
+      <em>time awake</em>, and the allowance is <strong>110 CU-hours</strong> against <strong>182.5</strong>
+      for one minimum instance staying awake a month.
+      <span class="tiny"><strong>So the free plan is 0.55–0.60× an always-awake database: it is built on the assumption yours sleeps.</strong> Read live 2026-08-30 — 0.25 min CU, scale-to-zero on, awake
+      <strong>38.3 hours a month (5.2%)</strong> for one test user plus bots. <strong>And be precise about which
+      bot traffic, because half of it is already handled:</strong> probes of <em>nonexistent</em> subdomains are
+      absorbed by an isolate-local negative cache (<code>org-helpers.ts</code>, 30&#8202;s TTL, FIFO-bounded at
+      500), whose own comment records the measured effect — <em>“10 req/s against one hostname drops from 300
+      Neon queries to 1”</em> — and it is deliberately kept out of KV so a port scan cannot exhaust the write
+      budget. <strong>What is not handled is a request for a <em>real</em> page:</strong> it pays the slug→id
+      lookup against Neon every time (problem 2 — the cache write is cancelled) plus its own ~31 statements.
+      <em>So what holds the database awake is anonymous page renders, crawlers and humans alike — not subdomain
+      probing.</em></span></td>
+      <td class="k">110 allowed<br>182.5 always-on<br><span class="tiny">38.3 h awake/month</span></td>
+      <td class="bad"><strong>Every PR is red at “Create Neon branch”</strong> — 59 test files need a database.
+      <strong>But the number that should worry you is not the overage, it is the denominator:</strong> you are at
+      the ceiling with <em>one</em> user. Real traffic does not scale this linearly — it pushes awake time toward
+      100%, <strong>19× today</strong>, against a plan that already cannot afford always-on.
+      <span class="tiny">89.4% of consumption is production, 10.6% CI — so this is not a test-infrastructure
+      problem you can economise away. <em>And see §5 reading 3: whether that allowance is monthly or the grant
+      to date is unresolved, and it is an 11× difference in headroom.</em> <strong>One more reading from the same object supports the diagnosis, and it is the cleanest corroboration in this document:</strong> <code>written_data_bytes</code> is <strong>0</strong> while <code>logical_size</code> is 36.6&#8202;MB and <code>data_transfer_bytes</code> is 59&#8202;MB. <em>Data exists, so that counter cannot be lifetime — it is period-scoped, and it says this period's workload is <strong>read-only</strong>. Which is precisely what fixes 1–3 address: every one of them reduces reads reaching the database, and none of them touches a write path.</em> <strong>It also shows why reading 3 is a real question and not pedantry:</strong> on this one object, <code>written_data_bytes</code> is clearly period-scoped while <code>cpu_used_sec</code> equals the branch's lifetime compute. <em>Mixed periods on one response is exactly how a figure acquires the wrong denominator.</em></span></td>
+    </tr>
+    <tr>
+      <td class="num">5</td>
+      <td><strong>KV's write budget is account-wide and tiny.</strong> 1,000 writes/day on the free plan,
+      shared by <em>every</em> worker including dev.</td>
+      <td class="k">1,000/day<br><span class="tiny">puts + deletes together</span></td>
+      <td class="mid">One misbehaving worker silently zeroes caching platform-wide. Bot traffic already burned
+      ~1,800 writes in a day.
+      <span class="tiny">Reads are 100,000/day; deletes and list requests have their own separate
+      1,000/day caps.</span></td>
+    </tr>
+    <tr>
+      <td class="num">7</td>
+      <td><strong>The database archives between visits.</strong> And it came back while this row was being written: Neon archives a branch older than 14 days that has <em>not been accessed for 24 hours</em>. The <code>production</code> branch went <code>archived</code> at <strong>05:46 UTC on
+      2026-08-30</strong> and was <code>ready</code> again by <strong>10:52</strong> — restored automatically,
+      almost certainly by the API call that read it.
+      <span class="tiny"><strong>The transience is the point.</strong> A state that a single read flips is not a status; it is evidence of a cycle — and it is why this row does not claim the database <em>is</em> archived. <em>What the cycle establishes is durable: to archive at all, the database must have had no callers
+      for a full day.</em></span></td>
+      <td class="k">archived 05:46<br>ready 10:52<br><span class="tiny">2026-08-30</span></td>
+      <td class="mid"><strong>This is a traffic measurement you did not have to ask for.</strong> The branch
+      archived because nothing reached the database for 24 hours — consistent with “one test user”, and it means
+      <strong>the 5.2% awake figure is not a low steady load. It is bursts separated by silence.</strong>
+      <span class="tiny"><strong>Which changes the forecast:</strong> the allowance was consumed by bursts, not
+      by background load, so launch traffic does not scale 5.2% up a little — <em>it removes the silence</em>,
+      and the destination is continuous. <strong>Also practical:</strong> the first request after a quiet period
+      pays an unarchive restore before anything else, so latency measured then is not comparable to the ~2.5 s
+      figure in problem 1.</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="whynot"><span class="n">SECTION 2</span> Why not D1 — and why the 10&#8202;GB limit never comes up</h2>
+
+<p class="lede">You asked specifically about the 10&#8202;GB per-database limit and designing to avoid sharding.
+<strong>That constraint never binds.</strong> The whole catalogue is <strong>36.6&#8202;MB</strong> against
+500&#8202;MB on D1's free plan — thirteen times over, and 10&#8202;GB on the paid one is not in sight.
+<em>The design fails on how you address a tenant's database, long before how much fits in it.</em></p>
+
+<div class="box">
+  <h4>The tenancy model, since you asked for it — read from the schema, not from docs</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Relation</th><th>How it is stored</th><th>What it implies</th></tr></thead>
+    <tbody>
+      <tr><td class="k">person → org<br><span class="tiny">twice</span></td>
+        <td><code>organizationMemberships</code> (<code>organizationId</code> + <code>userId</code>) and
+        <code>organizationFollowers</code> (same pair). <span class="tiny">Note
+        <code>organizationMemberships</code> lives in <code>schema/content.ts</code>, not
+        <code>organizations.ts</code> — a file-wide grep for <code>organizationId</code> misleads.</span></td>
+        <td class="bad"><strong>Many-to-many, twice over.</strong> A person belongs to orgs <em>and</em> follows
+        others, so any one library view spans an arbitrary set of tenants. <em>This is the relation that makes a
+        database-per-tenant expensive rather than merely awkward.</em></td></tr>
+      <tr><td class="k">content → owner</td>
+        <td><code>content.creatorId</code> is <strong>not null</strong>;
+        <code>content.organizationId</code> is <strong>nullable</strong> and references
+        <code>organizations.id</code>.</td>
+        <td class="bad"><strong>The creator is the owner; the org is optional.</strong> Personal-studio content
+        has no organisation at all. <em>So the tenant key you would partition on is absent on exactly the rows
+        people most expect to be isolated.</em></td></tr>
+      <tr><td class="k">media → owner</td>
+        <td><code>mediaItems.creatorId</code> only — <strong>no <code>organizationId</code> at any point</strong>.</td>
+        <td class="bad">Media is creator-scoped, full stop. <em>A per-org store would have to invent an
+        ownership relation that the schema does not have.</em></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="tiny" style="margin-bottom:0"><strong>And the direct answer to “keep multi-org content queries
+  available”: they stay available because nothing moves.</strong> Every cross-tenant query — a library spanning
+  followed orgs, a creator's work across their studios, an admin view over all of it — remains a single SQL
+  statement against one database, with foreign keys and a transaction boundary. <em>That is not a benefit this
+  document engineers; it is the thing a read plane would have taken away, and the reason “avoid sharding” turned
+  out to be the wrong thing to design for. Sharding was never the risk — the schema has no key to shard
+  on.</em></p>
+</div>
+
+<h3>Two reasons settle it</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Reason</th><th>Why it is decisive</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>D1 bindings are static.</strong> There is no runtime addressing — you declare one binding per
+      database in configuration, at deploy time.</td>
+      <td class="bad">This kills <em>per-tenant D1</em> outright. The only shape that works is N declared
+      bindings: one config entry plus a redeploy to onboard anybody, against a ~5,000-binding ceiling.
+      <strong>That is a fixed roster, not a multi-tenant architecture.</strong>
+      <span class="tiny">workerd issue #3564 — one reply since February 2025.</span></td>
+    </tr>
+    <tr>
+      <td><strong>A Durable Object is one instance in one location.</strong> It cannot be replicated.</td>
+      <td class="bad">This kills the <em>per-tenant Durable Object</em> alternative. A distant reader still
+      crosses the network to reach that one instance — <strong>so you reintroduce exactly the round trip the
+      whole exercise exists to remove.</strong></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Between them those two rule out both versions of the proposal</strong> — a database per org, and a
+Durable Object per org. Everything below is corroboration; you do not need it to reach the answer.</p>
+
+<h3>Four more, if you want them</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Kind</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td class="k">schema</td>
+      <td><strong><code>content.organizationId</code> is nullable</strong> — personal-studio content has no org.
+      You can partition by org; you cannot partition <em>usefully</em>, because the rows people most want
+      isolated are the ones with no key.</td></tr>
+    <tr><td class="k">schema</td>
+      <td><strong>User↔org is many-to-many <em>twice</em></strong> — memberships and follows. One library page
+      spans arbitrarily many orgs, so a per-org database fans a single render across many, against a
+      6-simultaneous-connection cap.</td></tr>
+    <tr><td class="k">SQLite</td>
+      <td><strong>100 bound parameters.</strong> <code>access/…/library.ts:586-589</code> inlines one parameter
+      per management org; past 100 orgs the query stops working. <em>A limit of SQLite itself — true on every
+      plan, and identical for SQLite-backed Durable Objects.</em></td></tr>
+    <tr><td class="k">SQLite</td>
+      <td><strong>50-byte <code>LIKE</code>/<code>GLOB</code> pattern cap.</strong> Of the <strong>12</strong> <code>search: z.string()</code> declarations in the codebase, the <strong>8</strong> in <code>packages/validation/src</code> <strong>permit a pattern longer than that cap</strong> — a five-fold overshoot at 255 characters. <em>FTS5 could be made to work — the point is that it is a
+      rewrite, and fix 4's <code>pg_trgm</code> makes the rewrite unnecessary.</em></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <h4>Why none of this is a budget question</h4>
+  <p>Only one objection anywhere in the case against D1 is about a plan limit — free-tier D1 being 500&#8202;MB
+  with 50 queries per invocation. <strong>Every other reason holds on any paid plan</strong>, because static
+  bindings, a nullable column, a many-to-many relationship and SQLite's own parser limits are not things money
+  changes. <em>Someone who wanted D1 could buy past the plan limit and still meet all six of the others.</em></p>
+</div>
+
+<div class="box ok" id="arch">
+  <h4>The architecture, then — since that is what you asked for</h4>
+  <p class="tiny" style="margin-top:0">Everything above says what <em>not</em> to build. This is the target
+  state after the fixes in §3, and <strong>most of it is what you already have</strong> — which is the point.</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Layer</th><th>What it is</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td class="k">system of record</td>
+        <td><strong>Neon Postgres. All 48 domain tables, one region</strong> (<code>aws-eu-west-2</code>).
+        Transactions, foreign keys and financial data stay exactly where they are.</td>
+        <td class="good">none</td></tr>
+      <tr><td class="k">connection</td>
+        <td><strong>Hyperdrive in front of Neon, two configurations</strong> — one with query caching
+        (60&#8202;s + 15&#8202;s stale-while-revalidate), one <code>--caching-disabled</code> for auth,
+        sessions, permissions, billing and any read after a write.</td>
+        <td class="mid">fix 3</td></tr>
+      <tr><td class="k">driver</td>
+        <td><code>node-postgres</code> over Hyperdrive's connection string, built in the same two expressions in <code>packages/database/src/client.ts</code> that build <code>neon-http</code> today. <strong>Two connection paths, not one.</strong> Workers reach Neon through Hyperdrive; <strong>migrations and test setup keep the direct connection</strong>, because they run in Node rather than a worker and have no reason to pool through the edge. <em>Which is also why fix 4's migration is untouched by the swap, and why <code>db-commands.ts</code> and <code>test-utils/database.ts</code> appear in the file list as “off the request path”.</em> <strong>Drizzle is what makes this cheap, and you were right to say so.</strong><span class="tiny"> Both adapters take the identical shape — <code>drizzle({ client, schema })</code> — so the swap is an import and a constructor:<br><code>import { drizzle } from 'drizzle-orm/neon-http'</code> → <code>'drizzle-orm/node-postgres'</code><br><code>const c = neon(dbUrl)</code> → <code>const c = new Pool({ connectionString: env.HYPERDRIVE.connectionString })</code><br><em>Everything above <code>client.ts</code> — every <code>db.query.*</code>, every <code>db.select()</code>, every <code>db.transaction()</code>, all 48 tables' worth — is untouched, because it was written against Drizzle and never against a driver. <strong>Without that boundary this would be a rewrite rather than a swap; 32 files import these clients and not one names a driver.</strong></em></span></td>
+        <td class="mid">fix 3</td></tr>
+      <tr><td class="k">read caching<br><span class="tiny">three tiers, outermost first</span></td>
+        <td><strong>1 · Cloudflare's CDN</strong> on public read endpoints (<code>s-maxage=60</code>) — the only
+        tier that answers without waking anything.<br>
+        <strong>2 · KV via <code>VersionedCache</code></strong> for org config, branding, user profile and the
+        slug→id lookup, invalidated on write.<br>
+        <strong>3 · Hyperdrive's query cache</strong> for repeat identical reads that reach the pool.</td>
+        <td class="mid">fixes 1–3<br><span class="tiny">tier 2 exists; it just never populates</span></td></tr>
+      <tr><td class="k">search</td>
+        <td><strong>Postgres <code>pg_trgm</code>, GIN index, gated client-side at ≥3 characters.</strong> Not
+        FTS5, not a search service — mid-word matching in the database that already holds the rows.</td>
+        <td class="mid">fix 4</td></tr>
+      <tr><td class="k">coordination</td>
+        <td><strong>Two Durable Objects, both already deployed:</strong> <code>RateLimitDO</code>
+        (<code>packages/security/src/rate-limit-do.ts</code>, keyed on the email being tried, 5 attempts per
+        15 minutes) and <code>OrphanedFileCleanupDO</code> (alarm-driven, in media-api). <em>Coordination is
+        what a Durable Object is for. Reads are not.</em></td>
+        <td class="good">none</td></tr>
+      <tr><td class="k">placement</td>
+        <td>Workers pinned to the database region <em>if</em> §5's traffic reading justifies it — one line per
+        config, and the same nine workers that hold the Hyperdrive binding.</td>
+        <td class="mid">fix 5, conditional</td></tr>
+      <tr><td class="k">not in it</td>
+        <td class="bad"><strong>No D1. No per-tenant Durable Object. No read replica, no projection, no second
+        datastore, no sharding, no dual writes, no consistency window to reason about.</strong>
+        <em>And so no change to the 59 test files, which is the largest saving on this page.</em></td>
+        <td class="good">—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="tiny" style="margin-bottom:0"><strong>Read the “Change” column as the answer to your original
+  question.</strong> Two layers change and both are plumbing: a connection pool, and a driver behind an
+  interface nothing else names. <em>The data model, the transaction boundaries, the multi-tenant query paths and
+  the test infrastructure are all untouched — which is why this can be done incrementally, and why none of it
+  can lose data.</em></p>
+</div>
+
+<h2 id="fixes"><span class="n">SECTION 3</span> The fixes</h2>
+
+<p class="lede"><strong>Three changes fix problems 1–4, and they are ordered by effect on the thing that is actually breaking — how often the database is woken.</strong> A fourth closes the search question. Two more are conditional and may never be worth doing. None is architectural, and <strong>four of the six have a working precedent in this repo</strong> — you are not designing anything new. <strong>Two bounded sweeps of <code>origin/dev</code> are worth stating up front, because they change what these fixes are:</strong> of the eight workers, only two have public routes at all, and content-api carries <strong>13</strong> cache-header references to organization-api's <strong>zero</strong>; of the six files doing fire-and-forget writes, <strong>five</strong> thread <code>waitUntil</code> correctly. <em>So this is not a platform that fails to cache, nor a team unaware of the <code>waitUntil</code> trap — it is <strong>two specific files that missed a pattern applied correctly everywhere else</strong>. Both defect classes are closed by fixes 1 and 2; there is no third instance waiting to be found.</em> <strong>But “precedent” is not “paste”, and each size below was revised after opening the file that hosts the change.</strong> <span class="tiny">Two of my four original estimates were wrong, both optimistic, and both for the same reason: I had sized the logic and forgotten the plumbing. <em>Fix 2's <code>waitUntil</code> is not in scope where the write happens; fix 3's Hyperdrive binding does not exist in any worker yet. Neither is visible when you look at the defect — which is why the sizes here are stated per file rather than per idea.</em></span></p>
+
+<h3>Do these three</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Change</th><th>Fixes</th><th>Size</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="num">1</td>
+      <td><strong>Add <code>Cache-Control</code> to organization-api's public routes.</strong> One Hono middleware. <strong>First because it is the only change that stops a request reaching the database at all</strong> — Cloudflare's CDN answers it at the edge. <em>The other two make each wake cheaper; this one prevents the wake — a cached response costs zero worker invocations and zero queries, where fix 2 removes one query from a request that still happens. Given that anonymous page renders are what hold the database awake (problem 4), that is the difference that matters.</em>
+      <span class="tiny"><strong>Copy it:</strong> <code>content-api/src/routes/public.ts:69</code> already does
+      this, <em>and</em> <code>routes/__tests__/journeys-routes.test.ts</code> already tests it with a negative
+      control. That test mocks <code>@codex/database</code>, so it needs no database branch — <strong>And it is one of two items you can write and verify today, while CI is red</strong> (fix 2 is the other) — convenient, but not why it is first.</span></td>
+      <td class="k">3</td>
+      <td class="good">1 file<br>+ its test</td>
+    </tr>
+    <tr>
+      <td class="num">2</td>
+      <td><strong>Pass the two <code>kv.put</code> calls to <code>waitUntil</code>.</strong>
+      <code>org-helpers.ts:195</code> and <code>:280</code>. <strong>This is the change that stops a real page render waking Neon.</strong> <span class="tiny">Every request for a live org currently pays a database round trip just to turn its slug into an id, because the write-through that would cache it is cancelled before it lands. <strong>And it can be written and checked today, like fix 1 — but the test that exists cannot detect it.</strong> <code>worker-utils/src/procedure/__tests__/org-slug-cache.test.ts</code> mocks <code>@codex/database</code>, so it needs no branch, and it looks thorough: a cached hit that never touches Neon, a write-through on a miss, a lowercased hostname, a fall-through when the KV read throws. <strong>Its key assertion is <code>expect(kv.put).toHaveBeenCalledWith(…)</code> — which is true whether or not <code>waitUntil</code> wraps the call, so the suite is green right now, with the bug.</strong> <em>A mock records the call synchronously; only the real runtime cancels pending I/O.</em> <strong>And it is not two lines — I said that before checking the file, and the file says otherwise.</strong> <code>waitUntil</code> is unreachable from where the writes happen: <code>extractOrganizationFromSubdomain(hostname, env, obs?)</code> and <code>checkOrganizationMembership(orgId, userId, env, obs?)</code> <strong>never receive an <code>executionCtx</code></strong> — the string does not appear in that file. <em>So the real change is an optional <code>waitUntil?: (p: Promise&lt;unknown&gt;) =&gt; void</code> on both signatures, threaded from <code>procedure/helpers.ts:423</code> and <code>:464</code> where the Hono context <em>is</em> in scope, then used at the two write sites — <strong>about six edits across two files.</strong> The other two callers of <code>checkOrganizationMembership</code> (content-api's <code>categories.ts:73</code>, identity-api's <code>membership.ts:44</code>) can pass nothing and keep today's behaviour, since the parameter is optional.</em> <strong>And the shape to copy already exists — including the optional-parameter approach.</strong> <span class="tiny"><code>packages/purchase/src/services/fee-config-service.ts:647-653</code> does exactly this:<br><code>private invalidateAsync(id) { if (!this.cache) return; const p = this.cache.invalidate(id).catch(() =&gt; {}); if (this.waitUntil) { this.waitUntil(p); } }</code><br><em>An optional <code>waitUntil</code> threaded in as a dependency and guarded before use — so callers that cannot supply one keep working. <code>service-registry.ts:853</code> does the same thing with an explicit <code>if (executionCtx)</code> / else branch and a comment explaining the fallback.</em> <strong>And a sweep of every fire-and-forget write on <code>origin/dev</code> found this defect in exactly one file:</strong> six files use <code>.catch(() =&gt; {})</code>, and five of them wrap or thread <code>waitUntil</code> correctly. <code>org-helpers.ts</code> is the only one with zero. <em>So fix 2 is the whole of this defect class, not a sample of it.</em></span> <strong>Use <code>waitUntil</code> here, not <code>ctx.background()</code>:</strong> <code>procedure.ts:121</code> records that <code>waitUntil</code> is unsafe for background <em>DB</em> access because cleanup ends the pool — <em>a KV write has no pool, and <code>cache/src/helpers/invalidate.ts:73</code> is the precedent.</em> <em>Plus one assertion — that <code>executionCtx.waitUntil</code> received the promise — and ideally an effect-level test under <code>vitest-pool-workers</code> where a later read must hit. <strong>Until that assertion exists, a passing test here is not evidence.</strong></em> <span class="tiny"><em>The equivalent problem for <em>nonexistent</em> subdomains was already solved — an isolate-local negative cache, 300 Neon queries down to 1 (problem 4). <strong>This is the same defect on the path that actually carries traffic</strong>, and the hard case being solved while the easy one was not is what a missing enforcement point looks like from outside.</em></span></span>
+      <span class="tiny">Wrap in a closure, don't pass a bare method reference —
+      <code>cache/src/types.ts:52</code> says why, and <code>cache/src/helpers/invalidate.ts:73</code> shows the
+      shape. <strong>Expect a brief burst of 429s:</strong> KV allows one write per second <em>per key</em>, and
+      a hot slug key currently misses on every request, so concurrent writes race until the first lands. 429s
+      persisting beyond a second for one slug is the real defect.</span></td>
+      <td class="k">2</td>
+      <td class="mid">~6 edits<br>2 files<br><span class="tiny">+1 assertion</span></td>
+    </tr>
+    <tr>
+      <td class="num">3</td>
+      <td><strong>Swap <code>neon-http</code> for Hyperdrive + <code>node-postgres</code>.</strong> The big one,
+      and smaller than it sounds: <strong>driver construction is two adjacent expressions in
+      <code>client.ts</code></strong>. <strong>Dozens of files import those clients and not one of them names a driver</strong> — the count depends on which client you mean (20 for <code>dbHttp</code>, 27 for <code>createDbClient</code>, 46 for both, 80 including <code>dbWs</code>), and the argument holds at every scope, so <code>verify-actions.mjs</code> derives it instead of stating one. <em>Two files mention <code>drizzle-orm/neon-http</code> in comments and must be updated with the swap, or the codebase will document a driver it no longer uses.</em>
+      <span class="tiny">Nine files change once you count Vite externals, comments, <code>package.json</code>'s <code>wait-on tcp:4444</code> and the proxy port constant. <strong>But that figure predates checking the deployment surface, and it understates the work: no worker has a <code>hyperdrive</code> binding today, and nine units import <code>@codex/database</code></strong> — the eight API workers plus <code>apps/web</code>. <em>Each needs a binding block in its <code>wrangler.jsonc</code>, pointing at one shared Hyperdrive config; and the workers that read auth, sessions, permissions or billing state need a <em>second</em> binding for the cache-disabled config (realistically auth, organization-api, ecom-api, identity-api). <strong>So the honest scope is: two expressions in <code>client.ts</code>, ~7 config and comment files, 9 binding declarations, and 4 more for the cache-disabled config.</strong> Still no schema change and no query rewritten — but it is a deployment change across every worker, not an edit to one package.</em> <strong>Copy the
+      shape from <code>client.ts:166</code> and <code>:258</code></strong> — they already construct
+      <code>new Pool({ connectionString })</code> with an error handler, ~90 lines from the sites that change.
+      <strong>Gated on the $5 Workers decision (§4)</strong> — free-plan Hyperdrive <em>fails</em> past 100,000
+      queries/day, and read the three behaviours below before starting. <strong>Two extra lines belong in this change, not after it:</strong> a second <code>--caching-disabled</code> config for auth and post-write reads, and rebinding <code>library.ts:706</code>'s <code>NOW()</code> as <code>$1</code> — <em>without the second one, the hottest query on the platform is the one query Hyperdrive refuses to cache.</em></span></td>
+      <td class="k">1, 4</td>
+      <td class="mid">2 expressions<br>~20 files<br><span class="tiny">incl. 13 bindings</span></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Then this one</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Change</th><th>Fixes</th><th>Size</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="num">4</td>
+      <td><strong>Enable <code>pg_trgm</code> and add a minimum search length.</strong>
+      <code>CREATE EXTENSION IF NOT EXISTS pg_trgm</code> plus a GIN index. <span class="tiny"><strong>Both are compatible with this repo's migration runner, and that is worth checking rather than assuming.</strong> <code>packages/database/scripts/migrate-direct.ts:111</code> executes each migration as <code>client.query(migration.sql)</code> — <em>the whole file as one statement</em> — and PostgreSQL wraps a multi-statement simple query in an <strong>implicit transaction</strong>. <code>CREATE EXTENSION</code> and a plain <code>CREATE INDEX</code> are fine there; <strong><code>CREATE INDEX CONCURRENTLY</code> is not possible with this runner at all</strong>, because it cannot run inside a transaction. <em>Which is fine today only because the catalogue is 36.6&#8202;MB — a non-concurrent index takes an exclusive lock for milliseconds at that size. Worth remembering as a constraint that grows teeth: this runner cannot build an index without locking the table.</em> <strong>And the privilege question is settled:</strong> <code>CREATE EXTENSION</code> fails with <em>“permission denied”</em> on Neon databases created by direct SQL, but this project reports <code>creation_source: console</code>, so it has the rights.</span>
+      <span class="tiny">This is what removes the last capability only D1 had — mid-word matching — so it is the
+      change that makes §2's search argument permanent rather than provisional. <strong>Ten of the 12</strong> <code>search: z.string()</code> declarations set <em>no minimum</em> length, and the other two set <code>.min(1)</code> — which rejects only the empty string, <strong>so all twelve still let a one-character query scan everything</strong>. <em>The threshold that matters is three: a trigram is three characters, so <code>pg_trgm</code> cannot use its index below that. But gate it in the client rather than as a server-side <code>.min(3)</code> — a server minimum turns legal 1–2 character searches into 400s (reference.html §05.4).</em> <span class="tiny">Both <code>.min(1)</code> declarations are written <code>z.string().trim().min(1)</code>, which is why a literal grep for <code>z.string().min</code> reported zero and an earlier revision of this sentence said “all 12”. <em>§2's <strong>8</strong> counts something else again — the <code>packages/validation/src</code> declarations permitting a 255-character pattern. <code>verify-actions.mjs</code> prints all three side by side.</em></span></span></td>
+      <td class="k">1</td>
+      <td class="mid">1 migration<br>+ 12 schemas</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <h4>The one thing not on this list, and why it is not — recurrence</h4>
+  <p class="tiny" style="margin-top:0"><strong>Both defect classes above are closed by fixes 1 and 2. Nothing
+  prevents them coming back.</strong> The reference document carries a seventh action for that — make the
+  omission <em>unconstructable</em> rather than merely documented, by splitting the cache-write type so a caller
+  cannot build one without supplying a <code>waitUntil</code>. It touches
+  <strong>40 construction sites across 24 production files</strong> (85 across 34 counting tests).</p>
+  <p class="tiny"><strong>Left off deliberately, and the reasoning is worth having:</strong> it fixes no current
+  bug, and it is larger than every fix above it. <em>But it is the only item that addresses why these two
+  defects existed at all.</em> The negative cache for unknown subdomains was built carefully, bounded, and
+  documented — while the same write on the path carrying all the traffic went unwrapped, and its test passes
+  either way. <strong>Five of six files thread <code>waitUntil</code> correctly, which means the pattern is
+  understood and simply not enforced.</strong></p>
+  <p class="tiny" style="margin-bottom:0"><strong>So: not now, but do not lose it.</strong> The cheap version is
+  a lint rule or a required parameter on one type; the thorough version is the type split. <em>Either way it
+  belongs after fixes 1–3, when you know what the corrected shape looks like — enforcing a pattern before you
+  have settled it is how a convention becomes a constraint you fight.</em></p>
+</div>
+
+<h3>These two only if</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Change</th><th>Only worth doing if…</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="num">5</td>
+      <td><strong>Set <code>"placement": { "region": "aws:eu-west-2" }</code></strong> in the workers that talk
+      to the database. One line each. <strong>Unset in all 11 <code>wrangler.jsonc</code> files, and relevant to <strong>9</strong> of them</strong> — the eight API workers plus <code>apps/web</code>. <span class="tiny"><code>workers/dev-cdn</code> is a local Miniflare R2 proxy and <code>infrastructure/wrangler</code> is bootstrap; neither talks to Neon, so neither wants pinning to a database region. <em>Same 9 as fix 3's binding count — they are the same set, which is not a coincidence: both answer “which workers reach the database?”</em></span></td>
+      <td class="mid"><strong>…§5's traffic reading shows meaningful non-European traffic.</strong> Cloudflare
+      documents the condition exactly: placement does <em>not</em> help a worker making one query per request —
+      it helps when there are many, and this one makes ~31. <em>For purely European traffic it changes nothing
+      and may make edge-served work marginally worse.</em></td>
+    </tr>
+    <tr>
+      <td class="num">6</td>
+      <td><strong>Parallelise the access-check ladder.</strong> <code>access-decision.ts</code> has <strong>13</strong> awaited access checks across its
+      branch ladders and <strong>one</strong> <code>Promise.all</code> (of two) at <code>:288</code>. <span class="tiny">Scope stated because the file holds 21 <code>await</code>s in total: four are inside the helper definitions and three sit outside the decision function. The decomposition checks out: <strong>21 − 4 − 3 = 14 awaits inside the decision function, of which one is the <code>Promise.all</code> covering two checks — so 13 individual awaited checks plus it.</strong> Re-verified against <code>origin/dev</code> on 2026-08-30: 21 <code>await</code>s and one <code>Promise.all</code> in that file. <em>An earlier revision of this row said “9 sequential awaits”, which matches no scope of anything in it — the guard that now catches such a figure is <code>check-summary.mjs</code>, which requires every number here to appear in <code>reference.html</code> as well.</em><em>That exemption is a real hole in the checker, and this is what falls through it.</em></span></td>
+      <td class="mid"><strong>…probably never, and certainly not before fix 3.</strong> The sequential checks
+      short-circuit, so parallelising trades “sometimes one query” for “always four” — someone already made that
+      trade for the pair where it pays and declined it for the rest. <em>Once fix 3 lands, round trips are cheap
+      and the remaining gain is small.</em></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box ok">
+  <h4>What fix 3 should buy you — and why the 81 ms is the interesting number</h4>
+  <p><strong>Same-region network round-trip time is ~5–10 ms.</strong> So the 81 ms per statement is
+  <em>not</em> distance — it is <strong>HTTP and TLS setup, paid fresh for every statement</strong>, because
+  <code>neon-http</code> opens a new connection each time. That is exactly what a connection pool removes.</p>
+  <p><strong>The floor is therefore set by RTT, not by 81 ms</strong> — and query caching removes eligible
+  repeat reads from the database entirely. <em>I am deliberately not quoting a post-fix total: it depends on how
+  many of the ~31 statements are cacheable, and that has not been measured. Measure it rather than predict
+  it.</em></p>
+  <p><strong>What to record before and after</strong>, so the change is attributable: p50 and p95 for one
+  logged-out landing render, the statement count for that render, and the 504 rate. <em>The same-region figure
+  is the control — if it does not move, the cost was never handshake and something else is going on.</em></p>
+</div>
+
+<div class="box ok">
+  <h4>Fix 1, in full — the pattern already in the repo</h4>
+  <p class="tiny" style="margin-top:0">Quoted from <code>workers/content-api/src/routes/public.ts:67-70</code>
+  so you do not have to go and find it. <strong>The comment above it in that file is worth reading too: the
+  60&#8202;s window is a deliberate choice, not a default.</strong></p>
+  <pre>app.use('*', async (c, next) =&gt; {
+  await next();
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=60');
+});</pre>
+  <p class="tiny"><strong>Three lines, mounted before the routes.</strong> The existing comment explains the
+  reasoning to inherit: <em>“set to 60&#8202;s (<code>s-maxage=60</code> for CDN) so edge drift stays bounded
+  now that the KV layer has working event-driven invalidation. A longer window would let CDN-cached responses
+  serve stale content up to <code>max-age</code> after publish, defeating the invalidation.”</em></p>
+  <p class="tiny" style="margin-bottom:0"><strong>Two things to get right when copying it into
+  organization-api.</strong> First, <code>app.use('*', …)</code> applies to <em>every</em> route on that router —
+  content-api can do that because its <code>public.ts</code> holds only public routes. <strong>And this too is the whole of its defect class — a sweep of all eight workers on <code>origin/dev</code> found only two with public routes at all:</strong> content-api has 3 and <strong>13</strong> cache-header references; organization-api has 5 and <strong>zero</strong>. <span class="tiny">The other six declare no <code>auth: 'none'</code> route, so there is nothing to cache and nothing to fix. <em>And <code>apps/web</code>'s SSR layer already has its own discipline — <code>lib/server/cache.ts</code> exports a <code>CACHE_HEADERS</code> table with deliberate presets (<code>max-age=0, s-maxage=300, stale-while-revalidate=3600</code> for pages that are personalised for signed-in visitors but cacheable for anonymous ones), applied across dozens of <code>+page.server.ts</code> files. So the gap is one worker, not a platform-wide habit.</em></span> <strong>It is not the same, and this is the one thing to get right today:</strong> <code>organization-api/src/routes/organizations.ts</code> holds <strong>13</strong> <code>procedure()</code> routes of which only <strong>5</strong> are <code>auth: 'none'</code>. <strong>A blanket <code>app.use('*')</code> there would stamp <code>Cache-Control: public</code> on eight authenticated responses — a data-exposure bug, not a caching bug.</strong> <em>So scope the middleware to the five public paths, or mount it on a sub-router that holds only those. content-api can use the wildcard because its <code>public.ts</code> is public-only; that is a property of the file, not of the pattern.</em>
+  Second, the negative control already exists in content-api's test — <code>expect(res.headers.get(
+  'Cache-Control') ?? '').not.toContain('public')</code> on an authenticated route. <em>Copy that assertion
+  too; it is the one that would catch the mistake above.</em></p>
+</div>
+
+<div class="box">
+  <h4>Fix 3's setup, which is not guessable — from Cloudflare's own Neon page</h4>
+  <p class="tiny" style="margin-top:0">Two steps before any binding works, and both are easy to get wrong in a
+  way that appears to succeed.</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Step</th><th>Do this</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td class="k">1 · role</td>
+        <td>In the Neon console, <strong>Roles → New Role</strong>, named e.g. <code>hyperdrive-user</code>, and
+        <strong>copy the password immediately</strong> — Neon will not show it again.</td>
+        <td class="mid">Cloudflare's instruction is a <em>dedicated</em> role, not the application's existing
+        credentials. <span class="tiny">Worth following: it makes Hyperdrive's traffic separable in Neon's
+        logs, and revocable without rotating what the workers use for anything else.</span></td></tr>
+      <tr><td class="k">2 · string</td>
+        <td>In Connection Details, choose <code>psql</code> and <strong>uncheck “connection pooling”</strong>.
+        Use that string — the one <em>without</em> <code>-pooler</code> in the hostname.</td>
+        <td class="bad"><strong>This is the trap.</strong> Neon offers a pooled endpoint and a direct one, and
+        <strong>Hyperdrive is itself the pooler</strong> — giving it the pooled string pools twice, with two
+        layers holding connections and neither aware of the other.
+        <span class="tiny"><em>It will appear to work.</em> That is what makes it worth stating: the failure is
+        not a connection error but unpredictable behaviour under load, and it is invisible in
+        <code>wrangler dev</code>, which does not run pooling at all.</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="tiny" style="margin-bottom:0"><strong>Then, twice</strong> — once cached, once not:<br>
+  <code>npx wrangler hyperdrive create codex-db --connection-string="postgres://hyperdrive-user:…"</code><br>
+  <code>npx wrangler hyperdrive create codex-db-fresh --connection-string="…" --caching-disabled</code><br>
+  <em>Both against the same database. Account for the total origin connections across the two — Neon allows
+  839 at this project's CU bounds, so this is comfortable, but it is not free.</em>
+  <strong>And Neon's own example repository records the same constraint this document reaches independently:
+  Hyperdrive works under <code>wrangler deploy</code> and only under the <code>--remote</code> form of
+  <code>wrangler dev</code>.</strong></p>
+</div>
+
+<div class="box">
+  <h4>Fix 3's file list — derived, not listed here</h4>
+  <p class="tiny" style="margin-top:0"><strong>Run <code>node verify-actions.mjs</code> for it.</strong> It reads
+  <code>origin/dev</code> and prints every file that names a driver, classified: the construction site, code,
+  dependency declarations, and the two that are comments only. <em>A table here would be a copy that can go
+  stale; the tool cannot.</em> <strong>Two facts from that list are worth stating anyway, because a reader would
+  not think to look for them:</strong></p>
+  <ul class="tight">
+    <li><strong>Two of the nine are comments, and they will go stale silently.</strong>
+    <code>access/…/course-journey-service.ts</code> and
+    <code>worker-utils/src/procedure/org-helpers.ts</code> both explain the current cost by naming
+    <code>drizzle-orm/neon-http</code> and its one-round-trip-per-statement behaviour. <em>Leave them and the
+    codebase documents a driver it no longer uses.</em></li>
+    <li><strong>The local Neon HTTP proxy is load-bearing in a way no import search finds.</strong> The root
+    <code>package.json</code> has <code>wait-on tcp:4444</code> and <code>@codex/constants</code> has
+    <code>PROXY_PORT</code>. <strong>Remove the proxy without them and <code>pnpm dev</code> hangs
+    forever</strong> — because a startup gate is a dependency and not an import.</li>
+  </ul>
+  <p class="tiny" style="margin-bottom:0"><strong>Plus the bindings, which are the larger half:</strong> nine
+  <code>wrangler.jsonc</code> files need a <code>hyperdrive</code> block, four of those a second one for the
+  cache-disabled config. <strong>All nine are worker-runtime, checked rather than assumed</strong> — no
+  <code>node:</code> import and no WebSocket polyfill in any of them, while the two Node-side scripts carry
+  <code>neonConfig.webSocketConstructor = ws</code>. <em>The verifier prints that partition too.</em></p>
+</div>
+
+<h3>Three behaviours to know before starting fix 3 — all invisible locally</h3>
+
+<p class="lede">Every hazard in this change shares one property: <strong>the environment convenient to test in omits exactly the machinery whose behaviour is the risk.</strong> <span class="tiny">Query caching, the read-after-write window, and the double-pooling trap above are all absent under <code>wrangler dev</code> — so a green local suite is not weak evidence here, it is <em>no</em> evidence. <em>This is the same shape as fix 2, where a mock records a call and only the real runtime cancels it. Both defects live in what the platform does after your code returns, which is the one thing a local harness cannot simulate.</em></span></p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Behaviour</th><th>What to do</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Hyperdrive caches read queries by default</strong> — 60 s <code>max_age</code> plus 15 s
+    <code>stale_while_revalidate</code>, so the real staleness window is <strong>75 s</strong>, and there is
+    <strong>no purge on write</strong>.</td>
+    <td>Create a second, cache-disabled config and route auth, sessions, permissions, billing and post-write
+    reads through it:<br>
+    <code>wrangler hyperdrive create &lt;name&gt; --connection-string=… --caching-disabled</code><br>
+    <span class="tiny">It still gets pooling. Account for total origin connections across both configs — Neon
+    allows 839 here, so this is comfortable. Diagnose staleness via the <code>cacheStatus</code> metric:
+    <code>hit</code> / <code>miss</code> / <code>disabled</code> / <code>uncacheable</code>.</span></td></tr>
+    <tr><td><strong>Since 2026-02-23 Hyperdrive refuses to cache queries containing PostgreSQL
+    <code>STABLE</code> functions</strong> — <code>NOW()</code>, <code>CURRENT_TIMESTAMP</code>,
+    <code>CURRENT_DATE</code> — matched as <em>text</em>, so even the name in a comment counts.</td>
+    <td>This codebase trips it in exactly one place:
+    <code>access/src/services/content-access/library.ts:706</code>. It is the library read path — the hottest
+    query here and so the one that most wants caching. <strong>One-line fix:</strong> compute the timestamp in
+    the worker and bind it as <code>$1</code>.</td></tr>
+    <tr><td><strong>Neither pooling nor query caching runs under <code>wrangler dev</code>.</strong></td>
+    <td>A green local run is not evidence for fix 3. Verify with <code>--remote</code> or in a deployed
+    environment. <em>The read-after-write bug this could introduce cannot appear locally, because the cache is
+    not there.</em></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box" id="order">
+  <h4>The order, in one place</h4>
+  <p class="tiny" style="margin-top:0"><strong>Six steps, of which only two are code you would start today.</strong> Two are readings, one is a purchase, and the last is a guard. <em>That is a truer picture of the work than a list of six fixes, because it shows where the waiting is and what the waiting is for.</em> <span class="tiny">Assembled here because the ordering is currently spread across fix 3's gate, §4's plan rows and §5's readings — <strong>nothing below is a new claim.</strong></span></p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>When</th><th>Do</th><th>Why then</th></tr></thead>
+    <tbody>
+      <tr><td class="k">now<br><span class="tiny">CI still red</span></td>
+        <td><strong>Fixes 1 and 2.</strong> The <code>Cache-Control</code> middleware — <strong>mounted on the five public paths, not <code>'*'</code></strong> — and <code>waitUntil</code> threaded through to the two <code>kv.put</code> calls, plus the assertion its suite lacks. <span class="tiny"><strong>Not an afternoon between them:</strong> fix 1 is one file and its test, fix 2 is about six edits across two files because the parameter has to be threaded. <em>Small — but see fix 2 for why it is six edits rather than the two lines it looks like.</em></span></td>
+        <td class="good">Both test files mock <code>@codex/database</code>, so neither needs a Neon branch.
+        <em>These are also the two biggest levers on wake frequency.</em></td></tr>
+      <tr><td class="k">2026-09-01</td>
+        <td><strong>Read <code>cpu_used_sec</code> again</strong> (§5 reading 3) — and see whether CI goes green.</td>
+        <td class="mid"><strong>Near zero ⇒ monthly, and CI recovers by itself. Still near 396,646 ⇒ the counter is monotonic and CI stays red until you pay.</strong> <em>§5's arithmetic already points to the second, so treat a green CI as the pleasant surprise rather than the plan.</em></td></tr>
+      <tr><td class="k">then</td>
+        <td><strong>Buy Workers Paid ($5), then land fix 3</strong> — including the second
+        <code>--caching-disabled</code> config and the <code>library.ts:706</code> rebind.</td>
+        <td class="mid">Free-plan Hyperdrive fails past 100,000 queries/day. <em>Verify with
+        <code>--remote</code>: neither pooling nor query caching runs under <code>wrangler dev</code>.</em></td></tr>
+      <tr><td class="k">then</td>
+        <td><strong>Fix 4</strong> — <code>pg_trgm</code> and a search minimum.</td>
+        <td class="good">Needs a working database, so it waits for the reset either way. <em>Closes §2's search
+        argument permanently.</em></td></tr>
+      <tr><td class="k">after</td>
+        <td><strong>Re-read the awake hours, then choose a Neon plan.</strong> Take §5 readings 1 and 2 with the
+        same <code>account:read</code> token while you are there.</td>
+        <td class="mid">So the plan is chosen against the fixed system's numbers rather than today's.
+        <em>Reading 1 also decides whether fix 5 (placement) is worth doing at all.</em></td></tr>
+          <tr><td class="k">later</td>
+        <td><strong>Make the omission unconstructable</strong> — a lint rule, a required parameter, or the type
+        split. Not a fix; a guard against these two defects returning.</td>
+        <td class="good">Deliberately last. <em>It encodes the corrected shape, so it has to follow fix 3 rather
+        than precede it — enforcing a pattern you have not settled is how a convention becomes a constraint you
+        fight.</em> <span class="tiny">Five of six files already thread <code>waitUntil</code> correctly: the
+        pattern is understood, just not enforced.</span></td></tr>
+</tbody>
+  </table>
+  </div>
+</div>
+
+<h2 id="decide"><span class="n">SECTION 4</span> What you actually decide</h2>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Question</th><th>Recommendation</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Pay Neon?</strong></td>
+    <td class="mid"><strong>Not yet — but not because it is fine</strong></td>
+    <td><strong>Wait the two days to see what the reset does — then budget to pay anyway.</strong> <em>Whichever way that goes, you cannot stay on free compute once you launch: the free monthly allowance is 0.55–0.60× what an always-awake minimum instance costs, and real traffic keeps a database awake.</em><span class="tiny"><strong>Why not simply “wait for the reset”, which an earlier version of this row said:</strong> <code>quota_reset_at</code> is 2026-09-01, but <code>cpu_used_sec</code> looks like a <em>lifetime</em> counter — it decomposes into the recorded 89.4/10.6 production/CI split to eight seconds, and its value scales with the project's age. <strong>If the quota is evaluated against that counter, the comparison keeps failing after the reset and CI stays red until you pay.</strong> <em>Against that: Neon publishes the free allowance as 100 CU-hours per project per <em>month</em>, and this project uses 9.9 — on which reading the CI failure is Neon comparing a lifetime counter to a monthly limit. §5 reading 3 argues both and names the one command that settles it.</em> <strong>The asymmetry is what decides the advice:</strong> $19 for a month you may not need, against a pipeline you did not plan around. <strong>And the cost of the two days' wait:</strong> nothing database-touching can be verified — 59 test files, three workflows, and fix 4's own <code>CREATE EXTENSION</code> check. <em>Fixes 1 and 2 can both be written and confirmed meanwhile; both of their test files mock <code>@codex/database</code>.</em> <strong>Then:</strong> land fixes 1–3, re-read the awake hours, and choose a plan against the fixed system's number rather than today's.</span></td></tr>
+    <tr><td><strong>Pay $5 for Workers Paid?</strong></td>
+    <td class="mid"><strong>Yes — it gates fix 3</strong></td>
+    <td>Free-plan Hyperdrive caps at <strong>100,000 queries/day</strong>, which at ~31 statements per render is
+    roughly <strong>3,200 renders</strong>. It also lifts the KV write cap behind problem 5, from 1,000/day to
+    1M/month. <span class="tiny">Two config comments in the repo confirm this account is on the free plan.
+    <strong>This is the Workers plan, not a Neon plan — they are unrelated, and neither helps the other.</strong></span></td></tr>
+    <tr><td><strong>Any schema changes?</strong></td>
+    <td class="good"><strong>None</strong></td>
+    <td>All 48 domain tables stay in Neon. No table splits, no projections, no consistency windows, no dual
+    writes. <em>Fix 4 adds an extension and an index; nothing moves.</em></td></tr>
+    <tr><td><strong>Anything for the test infrastructure?</strong></td>
+    <td class="good"><strong>Nothing structural</strong></td>
+    <td>Because nothing moves to a second datastore, the existing Neon-branch-per-run model keeps working unchanged. <strong>And fix 3 does not touch it either:</strong> <code>test-utils/src/database.ts</code> runs in Node, so it <em>keeps the direct Neon connection</em> and never goes through Hyperdrive. <span class="tiny"><strong>That is not an assumption — the file says so itself:</strong> it sets <code>neonConfig.webSocketConstructor = ws</code> under the comment <em>“required for @neondatabase/serverless in Node.js v21 and earlier”</em>. <strong>You only polyfill a WebSocket in Node; a worker has one.</strong> <code>db-commands.ts</code> does the same and imports <code>node:child_process</code> besides.</span> <em>The two changes that look most likely to disturb the test suite — a new datastore and a new driver — turn out to disturb none of it.</em> <em>This is the largest hidden saving in rejecting the read plane — a two-store split would have needed every one of those 59 files to seed and clean two databases, and to decide which store each assertion belongs to.</em><span class="tiny"><strong>But each fix has a different testing story, and they are worth knowing before you start:</strong><br><strong>Fix 1</strong> — the test already exists in content-api and can be copied, <em>including its negative control</em> (<code>not.toContain('public')</code> on an authenticated route), which is the assertion that catches the mount hazard. It mocks <code>@codex/database</code>, so it runs with CI red.<br><strong>Fix 2</strong> — the test file exists and mocks the database, but <strong>cannot currently fail on this bug</strong>: <code>expect(kv.put).toHaveBeenCalledWith(…)</code> is true either way. Needs an assertion that <code>waitUntil</code> received the promise, and ideally an effect-level test under <code>vitest-pool-workers</code> where a later read must hit. <em>A mock records a call; only the runtime cancels it.</em><br><strong>Fix 3</strong> — <strong>cannot be tested locally at all.</strong> Neither pooling nor query caching runs under <code>wrangler dev</code>, so a green local suite is not evidence; the read-after-write bug it can introduce is invisible where the cache is absent. Needs <code>--remote</code> or a deployed environment.<br><strong>Fix 4</strong> — needs a live database for its own <code>CREATE EXTENSION</code>, so it waits for the quota reset regardless.<br><em>The pattern across all four: <strong>the environment that is convenient to test in is the one that cannot reproduce the failure.</strong> That is true of fix 2 (mocks) and fix 3 (<code>wrangler dev</code>) for exactly the same reason.</em></span></td></tr>
+      <tr><td><strong>What can these changes break?</strong></td>
+    <td class="good"><strong>Staleness and latency — not data</strong></td>
+    <td>All three touch how reads are <em>served</em>, never how writes happen: a response header, an argument
+    to <code>waitUntil</code>, and which driver opens the connection. <strong>Neon's counters record zero bytes
+    written this period, so there is no write path in play to get wrong.</strong>
+    <span class="tiny"><strong>The realistic failure modes, in order of likelihood:</strong> a public page shows
+    content up to 60&#8202;s old (fix 1 — choose the <code>max-age</code> deliberately); a stale read after a
+    write, which is why fix 3 needs a second <code>--caching-disabled</code> Hyperdrive config for auth,
+    sessions, permissions and billing; and a burst of KV 429s in the first second after fix 2, which is expected
+    rather than a fault. <em>Each is reversible by reverting one line. None can corrupt a row.</em></span></td></tr>
+    <tr><td><strong>And if you do nothing?</strong></td>
+    <td class="bad"><strong>It gets worse on its own</strong></td>
+    <td>Not "stays as it is". <strong>Every one of these costs scales with traffic, and you have almost none
+    yet.</strong> The database is awake 5.2% of the time for one test user; each new visitor adds ~31 statements
+    and holds the compute awake through all of them. <em>The allowance is already spent at this volume.</em>
+    <span class="tiny"><strong>What breaks first, in order:</strong> the compute allowance again, within days of
+    real traffic rather than months; then p95 on public pages, because 31 sequential round trips at 81&#8202;ms
+    do not degrade gracefully — they hit the 504 you already see 17% of the time under load; then the KV write
+    budget, since the org cache still writes on every request and never lands.
+    <em><strong>The one thing that does not get worse is the D1 question</strong> — see the masthead for why. Which is exactly why this document is short about it and long about everything else.</em></span></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="unknown"><span class="n">SECTION 5</span> What is still unknown</h2>
+
+<p class="lede">Three readings. <strong>The first two need one credential</strong> between them — a Cloudflare token
+with <code>account:read</code>. The <code>wrangler</code> OAuth token carries only <code>user (read)</code>,
+which is why neither is answered here.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>#</th><th>Reading</th><th>What it changes</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td>
+    <td><strong>Where do requests come from?</strong> The colo distribution in the Workers logs.</td>
+    <td><strong>If a material share is outside western Europe, problem 6 is bigger than problem 1</strong>, and
+    fix 5 becomes worth doing. If traffic is overwhelmingly European, fix 5 can be dropped and this closes
+    permanently. <em>Every latency number in this document assumes European traffic.</em></td></tr>
+    <tr><td class="num">2</td>
+    <td><strong>How many KV writes per day, actually?</strong> The budget rollups are already being written —
+    <code>kv-budget.ts</code> has been wired at <code>worker-factory.ts:254</code> all along.</td>
+    <td>If writes are no longer near 1,000/day, the KV half of the $5 decision's justification disappears and it becomes
+    a pure Hyperdrive decision. <em>This is a log query, not a project.</em></td></tr>
+    <tr><td class="num">3</td>
+    <td><strong>Is the compute allowance monthly, or the free grant to date?</strong> Neon's API reports
+    <code>cpu_used_sec: 396646</code> with <code>quota_reset_at: 2026-09-01</code>, and CI's failure cited
+    396,646 against 396,000. <strong>But 396,646&#8202;s is 110 CU-hours, while the production branch's
+    <em>lifetime</em> compute is 98.5 CU-hours over ten months</strong> — so the counter looks cumulative, not
+    monthly. <span class="tiny">The two readings cannot both be right, and the API does not say which. <strong><strong>Two lines of evidence point opposite ways, and the honest answer is that this is not settled — so plan for the worse one and take the reading that ends it.</strong> <strong>Pointing to a lifetime counter:</strong> </strong> <code>cpu_used_sec</code> 396,646 minus the production branch's <em>lifetime</em> <code>compute_time_seconds</code> 354,610 leaves <strong>42,036&#8202;s — exactly the 10.6% deleted-CI share</strong>, matching the recorded 89.4/10.6 split to <strong>eight seconds</strong>. That is a decomposition of <em>lifetime</em> figures, not monthly ones. And 396,646&#8202;s is <strong>9.9× a plausible monthly total</strong> (9.9 CU-hours of production plus its CI share) on a project that is <strong>about ten months old</strong> — the factor is the age, which is the signature of a counter that never resets. <em>That is the case for reading it as a grant-to-date at 100% consumed.  <strong>Pointing the other way — and this is why the question is open rather than closed:</strong> Neon's published pricing for 2026, including its own FAQ, says the free plan includes <strong>100 CU-hours per project per <em>month</em></strong> — <em>“enough to run a 0.25 CU compute for about 400 hours”</em> — doubled from 50 in October 2025. <strong>At 9.9 CU-hours a month that would be ~10% consumed, not 100%.</strong> And the quota CI cited, 396,000&#8202;s, is <strong>110 CU-hours: 1.10× the published monthly figure and not obviously a lifetime grant either.</strong> <em>The reconciliation that fits both: <code>cpu_used_sec</code> is a lifetime <strong>reporting</strong> field — which is what the eight-second decomposition actually demonstrates — while the enforced quota is monthly. On that reading the CI failure compared a lifetime counter to a monthly limit, which would be Neon's bug, not your usage.</em> <strong>What settles it costs one command after 2026-09-01:</strong> read <code>cpu_used_sec</code> again. Near zero ⇒ monthly, and CI recovers by itself. Still near 396,646 ⇒ the counter is monotonic and you pay. <em>Until then: assume you pay, because the cost of being wrong that way is $19 and the cost of being wrong the other way is a blocked pipeline you did not plan around.</em></em></span></td>
+    <td class="mid"><strong>It is an 11× difference in headroom.</strong> If the allowance is monthly you are
+    using ~9% of it and the plan decision can wait for real traffic. If it is the grant to date, you are at 100%
+    and every month of launch traffic needs a paid plan.
+    <span class="tiny"><strong>How to settle it:</strong> after the 2026-09-01 reset, read
+    <code>cpu_used_sec</code> again. A number near zero means monthly; a number still near 396,646 means
+    cumulative. <em>One command, and it costs nothing but two days' patience —
+    <code>npx neonctl projects list --org-id &lt;org&gt; --output json</code>.</em>
+    <strong>Nothing else in this document depends on the answer:</strong> the fixes reduce awake time either
+    way, and the <strong>0.55–0.60×</strong> structural point (100–110 allowed vs 182.5 for an always-awake instance) holds on the
+    monthly reading — which is the <em>favourable</em> one.</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box ok">
+  <h4>How to check any of this yourself</h4>
+  <p><strong>Two commands, and the second is a free traffic gauge you can re-run any time.</strong></p>
+  <pre>npx neonctl branches get production --project-id quiet-smoke-77773357 \
+  --org-id org-polished-butterfly-23621812 --output json
+
+# read three fields:
+#   current_state      archived => no caller for 24 h. NOTE: reading it can
+#                      unarchive it — the state flips on access, so treat it as
+#                      a sample, not a status. Ours went archived 05:46, ready 10:52.
+#   compute_time_seconds / active_time_seconds  => CU-hours and hours awake
+#   quota_reset_at     with cpu_used_sec, settles §5 reading 3</pre>
+  <p class="tiny" style="margin-top:.5rem"><strong>Why <code>current_state</code> is worth watching after the
+  fixes land.</strong> Neon archives a branch only when it is older than 14 days <em>and</em> untouched for 24
+  hours, so the field is a coarse but honest traffic signal that costs nothing to read. <strong>Read it repeatedly rather than once — a single read can unarchive the branch, so any one answer is a sample.</strong> <em>Archiving more often after fixes 1–3 means they are working — requests are being served without waking the database. Never
+  archiving once traffic arrives tells you the awake time has gone continuous, which is the case the free
+  allowance cannot fund.</em></p>
+  <pre>cd docs/design/data-architecture
+node verify-actions.mjs     # ~15s. Asks origin/dev which fixes are still open, re-checks
+                            # §2's four corroborating reasons, and DERIVES every figure
+                            # on this page that a grep can reach, including:
+                            #
+                            #   8 public read endpoints of 199 procedure() sites, located
+                            #   48 domain tables (49 pgTable less 1 test fixture)
+                            #   importers by scope: 20 / 46 / 80, and whether any names a driver
+                            #   fix 3's work list, classified: construction site, code,
+                            #     dependency declarations, and 2 comments that go stale
+                            #   fix 1's exact header to copy, read out of content-api
+                            #   the 1 query Hyperdrive will refuse to cache, with its line
+                            #   search minimums: 2 of 12, both .min(1), 0 at the >=3 a
+                            #     trigram index needs
+                            #   placement: unset in every wrangler.jsonc
+                            #   the access ladder in all three of its scopes (13 / 9 / 21)
+                            #   whether this repo's migration runner can even build the
+                            #     index fix 4 needs (it can — but never CONCURRENTLY)
+                            #
+                            # and two SWEEPs, which are the strongest check here because they
+                            # test whether a claim is EXHAUSTIVE rather than merely true:
+                            #
+                            #   "exactly one worker has public routes and no cache header"
+                            #     -> 2 of 8 workers have public routes; content-api has 3
+                            #        with 13 cache refs, organization-api 5 with 0. HOLDS.
+                            #   "exactly one file swallows a KV write"
+                            #     -> 6 files use .catch(() => {}); 5 thread waitUntil.
+                            #        The one that does not is org-helpers.ts. HOLDS.</pre>
+  <p class="tiny" style="margin-top:.6rem"><strong>It can check all four of §2's corroborating reasons and neither of the two decisive ones</strong> — because static bindings and single-instance Durable Objects are facts about Cloudflare, not facts about this repo, so no grep can confirm or refute them. <em>The script prints <code>N/A</code> for those two rather than passing them silently.</em> It also states its own baseline, and prints <code>VOID</code> rather than a verdict when it cannot read a file — so “I could not look” never reads as “the problem is gone”.</p>
+</div>
+
+<footer>
+  <p><strong>Where the evidence is.</strong> <a href="./reference.html">reference.html</a> is the working reference —
+  every figure with its source, the rejected read-plane design worked out in full, the retracted
+  recommendations and why, and the reasoning behind each number here. <em>This page is the decision; that one
+  is the audit trail.</em></p>
+  <p class="tiny">Six earlier recommendations were retracted as already-done during this investigation. The
+  reference document records each one — worth knowing before anyone re-files them.</p>
+</footer>
+
+</div>
+</body>
+</html>

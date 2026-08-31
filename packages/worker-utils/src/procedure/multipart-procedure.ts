@@ -40,8 +40,9 @@ import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import { detectImageMimeType } from '@codex/validation';
 import type { Context } from 'hono';
-import { validateInput } from './helpers';
+import { resolveCacheControl, validateInput } from './helpers';
 import type {
+  CachePolicyRule,
   InputSchema,
   ProcedureContext,
   ProcedurePolicy,
@@ -127,8 +128,11 @@ export interface MultipartProcedureConfig<
   TFiles extends FileSchema | undefined = undefined,
   TOutput = unknown,
 > {
-  /** Security policy configuration */
-  policy?: TPolicy;
+  /**
+   * Security policy configuration. Intersected with `CachePolicyRule` so an
+   * illegal `cache` / `auth` pairing is a type error — see `types.ts`.
+   */
+  policy?: TPolicy & CachePolicyRule<TPolicy>;
   /** Input validation schemas (for URL params/query) */
   input?: TInput;
   /** File field configurations */
@@ -245,6 +249,9 @@ export function multipartProcedure<
       };
 
       const result = await handler(ctx);
+      // Declared cache preset, applied centrally — see procedure.ts Step 6 for
+      // why only the success path carries it.
+      c.header('Cache-Control', resolveCacheControl(policy));
       return sendUploadResponse(c, result, successStatus);
     } catch (error) {
       const { statusCode, response } = mapErrorToResponse(error, { obs });

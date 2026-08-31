@@ -11,6 +11,7 @@
   flows to the live preview via the store's pending draft.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { findSectionDefinition } from '$lib/page-builder';
   import {
@@ -22,6 +23,9 @@
     TrashIcon,
   } from '$lib/components/ui/Icon';
   import AddSectionPicker from './AddSectionPicker.svelte';
+  import { SECTION_GRIP_ICON, sectionIcon } from './section-icons';
+
+  const GripIcon = SECTION_GRIP_ICON;
 
   const sections = $derived(pageBuilder.sections);
   let picking = $state(false);
@@ -32,10 +36,6 @@
 
   function labelFor(type: string): string {
     return findSectionDefinition(type)?.label ?? type;
-  }
-
-  function glyphFor(type: string): string {
-    return findSectionDefinition(type)?.icon ?? '◌';
   }
 
   function onAdd(type: string): void {
@@ -73,7 +73,7 @@
 
 <div class="section-list">
   <div class="section-list__head">
-    <h2 class="section-list__title">Sections</h2>
+    <h2 class="section-list__title">{m.studio_builder_sections()}</h2>
     <button
       type="button"
       class="section-list__add"
@@ -81,7 +81,7 @@
       onclick={() => (picking = !picking)}
     >
       <PlusIcon size={15} />
-      Add
+      {m.studio_builder_sections_add()}
     </button>
   </div>
 
@@ -95,6 +95,10 @@
     <ol class="section-list__rows" role="list">
       {#each sections as section, i (section.id)}
         {@const selected = pageBuilder.selectedSectionId === section.id}
+        <!-- A design-system icon, not the catalogue's glyph string — the same 17
+             real SVG icons this rail already draws. `IconBase` marks it
+             aria-hidden, so the row is announced as "Hero", not "◇ Hero". -->
+        {@const Icon = sectionIcon(section.type)}
         <li
           class="section-list__row"
           class:section-list__row--selected={selected}
@@ -108,15 +112,15 @@
           <span
             class="section-list__grip"
             draggable="true"
-            title="Drag to reorder"
+            title={m.studio_builder_sections_grip()}
             aria-hidden="true"
             ondragstart={(e) => onDragStart(e, section.id)}
-          >⠿</span>
+          ><GripIcon size={14} /></span>
           <div class="section-list__reorder">
             <button
               type="button"
               class="section-list__icon-btn"
-              aria-label="Move {labelFor(section.type)} up"
+              aria-label={m.studio_builder_section_move_up({ section: labelFor(section.type) })}
               disabled={i === 0}
               onclick={() => pageBuilder.moveSection(section.id, -1)}
             >
@@ -125,7 +129,7 @@
             <button
               type="button"
               class="section-list__icon-btn"
-              aria-label="Move {labelFor(section.type)} down"
+              aria-label={m.studio_builder_section_move_down({ section: labelFor(section.type) })}
               disabled={i === sections.length - 1}
               onclick={() => pageBuilder.moveSection(section.id, 1)}
             >
@@ -136,11 +140,11 @@
           <button
             type="button"
             class="section-list__select"
-            class:section-list__select--disabled={!section.enabled}
+            class:section-list__select--hidden={!section.enabled}
             aria-pressed={selected}
             onclick={() => pageBuilder.selectSection(section.id)}
           >
-            <span class="section-list__glyph" aria-hidden="true">{glyphFor(section.type)}</span>
+            <span class="section-list__glyph"><Icon size={15} /></span>
             <span class="section-list__label">{labelFor(section.type)}</span>
           </button>
 
@@ -150,9 +154,9 @@
               class="section-list__icon-btn"
               aria-pressed={section.enabled}
               aria-label={section.enabled
-                ? `Hide ${labelFor(section.type)}`
-                : `Show ${labelFor(section.type)}`}
-              title={section.enabled ? 'Hide section' : 'Show section'}
+                ? m.studio_builder_section_hide({ section: labelFor(section.type) })
+                : m.studio_builder_section_show({ section: labelFor(section.type) })}
+              title={section.enabled ? m.studio_builder_section_hide_title() : m.studio_builder_section_show_title()}
               onclick={() => pageBuilder.toggleSection(section.id)}
             >
               {#if section.enabled}
@@ -164,8 +168,8 @@
             <button
               type="button"
               class="section-list__icon-btn section-list__icon-btn--danger"
-              aria-label="Remove {labelFor(section.type)}"
-              title="Remove section"
+              aria-label={m.studio_builder_section_remove({ section: labelFor(section.type) })}
+              title={m.studio_builder_section_remove_title()}
               onclick={() => pageBuilder.removeSection(section.id)}
             >
               <TrashIcon size={15} />
@@ -175,7 +179,7 @@
       {/each}
     </ol>
   {:else}
-    <p class="section-list__empty">No sections yet. Add one to begin building the page.</p>
+    <p class="section-list__empty">{m.studio_builder_sections_empty()}</p>
   {/if}
 </div>
 
@@ -273,8 +277,9 @@
     justify-content: center;
     width: var(--space-4);
     flex-shrink: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    /* The drag affordance. It is the only thing that says a row can be
+       reordered, so WCAG 1.4.11's 3:1 non-text floor applies (Codex-6nb7i). */
+    color: var(--color-text-secondary);
     line-height: 1;
     cursor: grab;
   }
@@ -309,8 +314,16 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
-  .section-list__select--disabled {
-    color: var(--color-text-muted);
+  /* `--hidden`, NOT `--disabled`, and the rename is half the fix. The class is
+     `class:`-toggled on `!section.enabled` on a button that stays fully ENABLED
+     and clickable — selecting a hidden section is how a creator un-hides it. The
+     old name made the muted ink look like WCAG 1.4.3's inactive-control
+     exemption when nothing here is inactive, so a hidden section's own NAME sat
+     at 2.52:1 light / 3.19:1 dark while remaining interactive (Codex-6nb7i).
+     The hidden state is carried by the row's own eye icon and by opacity, not by
+     making the label hard to read. */
+  .section-list__select--hidden {
+    color: var(--color-text-secondary);
   }
 
   .section-list__glyph {
@@ -321,7 +334,6 @@
     height: var(--space-6);
     flex-shrink: 0;
     color: var(--color-text-secondary);
-    font-size: var(--text-sm);
   }
 
   .section-list__label {
@@ -351,7 +363,11 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: none;
-    color: var(--color-text-muted);
+    /* These buttons have NO text — they are the 14-15px Chevron / Eye / EyeOff /
+       Trash glyphs, including the destructive Remove — so the glyph IS the
+       control and WCAG 1.4.11's 3:1 non-text floor applies. `:disabled` below
+       keeps its own dimming, which is the one state 1.4.3 exempts. */
+    color: var(--color-text-secondary);
     cursor: pointer;
     transition: var(--transition-colors);
   }
@@ -376,11 +392,13 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
+  /* "No sections yet. Add one to begin building the page." — the only text on
+     screen when it shows, and an instruction. Never decoration. */
   .section-list__empty {
     margin: 0;
     padding: var(--space-3);
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-normal);
   }
 </style>

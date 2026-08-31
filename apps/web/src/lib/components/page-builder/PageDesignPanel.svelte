@@ -23,6 +23,7 @@
   preset would otherwise read those three as broken.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import {
     findSectionDefinition,
     resolveDesign,
@@ -64,24 +65,23 @@
 {#if pending}
   <div class="panel">
     <header class="panel__head">
-      <h2 class="panel__title">Look</h2>
-      <p class="panel__sub">Page-level</p>
+      <h2 class="panel__title">{m.studio_builder_look_title()}</h2>
+      <p class="panel__sub">{m.studio_builder_panel_page_level()}</p>
     </header>
 
     <p class="panel__note">
-      Every section inherits these settings. Any section can override them one at a
-      time in its own Design group.
+      {m.studio_builder_look_note()}
     </p>
 
     <div class="panel__current">
-      <span class="panel__current-label">This page</span>
+      <span class="panel__current-label">{m.studio_builder_look_this_page()}</span>
       <!--
         Always NEUTRAL. The selected preset CARD already carries the state (its
         `aria-pressed` + interactive border), so a coloured chip here would be a
         second signal for the same fact — and the only brand-accent badge variant
         resolves to the warning colour, which "this is your look" is not.
       -->
-      <Badge>{current ? current.name : 'Custom'}</Badge>
+      <Badge>{current ? current.name : m.studio_builder_look_custom()}</Badge>
     </div>
 
     <div class="panel__presets">
@@ -100,7 +100,7 @@
     </div>
 
     <div class="panel__summary">
-      <p class="panel__label">What a section inherits</p>
+      <p class="panel__label">{m.studio_builder_look_inherits()}</p>
       <dl class="axes">
         {#each SECTION_DESIGN_AXES as axis (axis)}
           {@const value = resolved[axis]}
@@ -109,7 +109,7 @@
             <dd>
               {AXIS_VALUE_LABELS[axis][value] ?? value}
               {#if !pending.design?.[axis]}
-                <span class="axes__fallback">· default</span>
+                <span class="axes__fallback">{m.studio_builder_look_default()}</span>
               {/if}
             </dd>
           </div>
@@ -120,8 +120,8 @@
     {#if overriding.length > 0}
       <p class="panel__note">
         {overriding.length === 1
-          ? '1 section sets its own values and will not follow a preset:'
-          : `${overriding.length} sections set their own values and will not follow a preset:`}
+          ? m.studio_builder_look_overriding_one()
+          : m.studio_builder_look_overriding({ count: overriding.length })}
         <b>{overriding.join(', ')}</b>
       </p>
     {/if}

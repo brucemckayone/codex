@@ -17,7 +17,7 @@
   (`AcheSectionProps` is copy only), so claiming nine would have meant inventing a
   consumer (contract A50).
 
-  ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
+  ── SEVEN COMPOSITIONS ─────────────────────────────────────────────────────
   `column` (default) · `statement` · `paired` · `list` · `quote` · `checklist`.
   `column` absorbs the retired prose `centered` + `wide` (they were `align` +
   `width`); `paired` is the retired `twocol`. All three are ported from the since-deleted
@@ -31,10 +31,15 @@
   this programme removes. Every heading here is `--jp-heading-size` via
   `.jp-sec__heading--sub`, never `--jp-display` (contract A36).
 
-  ── THE PINNED SCROLLJACK IS RETIRED ───────────────────────────────────────
+  ── THE PINNED SCROLLJACK: RETIRED, THEN RESTORED AS A COMPOSITION ─────────
   This section used to render a two-viewport pinned reveal that advanced one
-  "beat" at a time. It is gone, deliberately, and this is a behaviour change on
-  the golden page — see the WT-1 report. The reasons, in order of weight:
+  "beat" at a time. It was removed, and it is now BACK as the `descent`
+  composition — see the block by `isDescent` in the script for how it works.
+
+  THE REMOVAL WAS THE WRONG CONCLUSION FROM FOUR CORRECT OBSERVATIONS, and the
+  record matters because the effect is one the owner asked for repeatedly and it
+  was deleted as a defect. Each objection below is answered by making it a
+  COMPOSITION with an AUTHORED source, not by dropping the effect:
 
    1. It was TRIGGERED BY A FIDELITY BUG. `beats[]` was synthesised as
       `[heading, body]` and `beats.length > 1` armed the pin, so filling both
@@ -48,8 +53,13 @@
       it added one viewport of empty scroll per beat (the golden page carries two
       ache sections, so roughly six viewports).
 
-  The section keeps its cinematic register through the atmosphere layer (gated on
-  `surface: media` via `--jp-sec-atmos`) and the `motion` axis's reveal.
+  So: the four observations were right about the ACCIDENTAL implementation and
+  wrong about the capability. `descent` keeps the effect, chosen on purpose, fed
+  by the authored `points` array, invisible to anyone who does not pick it.
+
+  Every OTHER composition keeps its cinematic register through the atmosphere
+  layer (gated on `surface: media` via `--jp-sec-atmos`) and the `motion` axis's
+  reveal, exactly as before — nothing else in this file changed.
 
   ── TWO RENDERINGS, PROGRESSIVELY ENHANCED ─────────────────────────────────
   • BASELINE (SSR, no-JS, reduced-motion): the full composition, every word
@@ -61,6 +71,7 @@
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { aliasKeys, asStringArray, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
+  import { editFieldAttrs } from '../editable';
   import type { AcheSectionProps, JourneySalesContext } from '../types';
   import type { ResolvedSectionDesign, SectionProps } from '$lib/page-builder';
   import type { HTMLAttributes } from 'svelte/elements';
@@ -135,6 +146,7 @@
     'list',
     'quote',
     'checklist',
+    'descent',
   ];
   const composition = $derived(
     COMPOSITIONS.includes(variant) ? variant : 'column'
@@ -159,6 +171,114 @@
    * and must never promote or demote a heading LEVEL (research §5.1).
    */
   const quoted = $derived(composition === 'quote' ? 'yes' : 'no');
+
+  /**
+   * ── THE DESCENT: A PINNED, FULL-VIEWPORT SEQUENCE ────────────────────────
+   *
+   * `descent` gives each point the whole screen and brings the next one in as the
+   * reader scrolls. A tall `track` provides the scroll distance; the `stage`
+   * inside it is `position: sticky` at `top: 0` with `height: 100dvh`, so it
+   * holds still while the track passes — the page scrolls, the stage does not
+   * move, and the active beat advances. That is the effect: it takes over the
+   * screen, one ache at a time.
+   *
+   * WHY IT IS A COMPOSITION AND NOT A MOTION LEVEL. This behaviour existed
+   * before and was removed for four stated reasons, and every one of them was an
+   * argument for giving it a proper home rather than deleting it:
+   *   · it armed itself off `[heading, body]`, so writing two paragraphs
+   *     accidentally turned one into a headline AND started a scrolljack. Now the
+   *     beats are the AUTHORED `points` array — a real source, chosen on purpose.
+   *   · it was not selectable, escapable or visible in the variant picker. Now it
+   *     is one of seven compositions in the picker.
+   *   · no `motion` value could express it. Correct — a pinned stage is
+   *     ARRANGEMENT, which is what compositions carry; `motion` still only tunes
+   *     the reveal timing inside it.
+   *   · it was a hijack with no opt-out. A composition IS the opt-out: a creator
+   *     who does not choose `descent` never meets it.
+   *
+   * THREE RENDERINGS, and only the first hijacks anything:
+   *   · ENHANCED (browser, motion welcome, published page): the pinned stage.
+   *   · BASELINE (SSR, no-JS, `prefers-reduced-motion`): every beat stacked and
+   *     legible, in order, nothing hidden and no scroll distance added. The
+   *     server emits this, so the page is complete before JS arrives.
+   *   · CANVAS (`editable`): the stacked form plus a line saying what it does
+   *     when published. The builder canvas is a short, scaled viewport with its
+   *     own scroller — pinning inside it would fight that scroller and hide the
+   *     creator's own text, so the canvas shows the beats it is asking them to
+   *     write. This is why `enhanced` requires `!editable`.
+   */
+  const isDescent = $derived(composition === 'descent' && points.length > 0);
+
+  let mounted = $state(false);
+  let reduced = $state(false);
+  let trackEl = $state<HTMLElement | null>(null);
+  let activeIndex = $state(0);
+
+  $effect(() => {
+    mounted = true;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reduced = mql.matches;
+    const onChange = (event: MediaQueryListEvent) => {
+      reduced = event.matches;
+    };
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  });
+
+  /**
+   * The pin needs at least TWO beats to sequence between — with one there is
+   * nothing to advance to, and a single-beat descent would add a viewport of
+   * empty scroll for no gain, which was a fair criticism of the old version.
+   */
+  const enhanced = $derived(
+    isDescent && mounted && !reduced && !editable && points.length > 1
+  );
+
+  /**
+   * Map the track's progress through the viewport onto an active beat index.
+   * `-getBoundingClientRect().top` is how far the track has passed the top of the
+   * viewport; the usable distance is its height less one screen, because the last
+   * screen is the stage still being held. rAF-throttled, listener passive.
+   */
+  $effect(() => {
+    if (!enhanced || !trackEl) return;
+    const track = trackEl;
+    const count = points.length;
+    let ticking = false;
+
+    const update = () => {
+      ticking = false;
+      const total = track.offsetHeight - window.innerHeight;
+      if (total <= 0) {
+        activeIndex = 0;
+        return;
+      }
+      const scrolled = Math.min(
+        Math.max(-track.getBoundingClientRect().top, 0),
+        total
+      );
+      activeIndex = Math.min(
+        Math.max(Math.floor((scrolled / total) * count), 0),
+        count - 1
+      );
+    };
+
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  });
 
   /**
    * A point may carry an optional gloss after an en/em dash
@@ -207,25 +327,22 @@
   const step = (i: number): string => String(Math.min(i + 1, 5));
 
   /**
-   * The inline-edit seam for the studio canvas, as a spreadable attribute bag.
-   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having
-   * no seam at all.
+   * The studio canvas's inline-edit seam for one field, as a spreadable attribute
+   * bag: `contenteditable`, spellcheck ON, `role="textbox"`, an accessible name
+   * saying which field this is, and a paste that arrives as PLAIN TEXT.
    *
-   * DELIBERATELY NOT the deleted `render-edit/EditableText.svelte`: it renders an EMPTY
-   * element and fills `textContent` from a Svelte action, and actions do not run
-   * during SSR — so the public page would serve `<h2></h2>` and paint the text in
-   * only after hydration. Here the text is a real child node.
+   * Built in ONE place (`../editable`) rather than here. It used to be eleven
+   * byte-identical copies, which is exactly how the same three defects — no
+   * spellcheck, no `onpaste`, no role or name — reached all eleven sections at once
+   * and stayed there. That module's header carries the full reasoning, including
+   * why this is an ATTRIBUTE BAG and not a Svelte action (actions do not run during
+   * SSR, so the text has to be a real child node, not something filled in later).
+   *
+   * Empty when `editable` is false, so PUBLIC markup is byte-identical to having no
+   * seam at all.
    */
   const editAttrs = (key: string): HTMLAttributes<HTMLElement> =>
-    editable
-      ? {
-          contenteditable: 'true',
-          spellcheck: 'false',
-          'data-field': key,
-          oninput: (e) =>
-            onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-        }
-      : {};
+    editFieldAttrs('ache', key, editable, onEdit);
 </script>
 
 {#snippet eyebrow()}
@@ -260,7 +377,84 @@
   {/if}
 {/snippet}
 
-{#if hasContent}
+{#if hasContent && isDescent}
+  <!-- ── THE DESCENT ─────────────────────────────────────────────────────────
+       The track supplies the scroll distance; the stage is sticky inside it and
+       holds the screen while the track passes. `--beat-count` sizes the track in
+       CSS rather than here, so the same markup serves all three renderings and
+       only a class changes.
+
+       `data-ache="descent"` matches every other composition's hook, so the axis
+       CSS and any `[data-ache]` selector keep working unchanged.
+  -->
+  <div
+    class="ache ache--descent"
+    class:ache--enhanced={enhanced}
+    data-ache="descent"
+    style="--beat-count: {points.length}"
+  >
+    <div class="ache__track" bind:this={trackEl}>
+      <div class="ache__stage">
+        <div class="ache__atmos" aria-hidden="true">
+          <div class="ache__aura"></div>
+          <div class="ache__vignette"></div>
+        </div>
+
+        <div class="ache__frame">
+          {#if p.eyebrow}
+            <p class="ache__chapter" {...editAttrs('kicker')}>{p.eyebrow}</p>
+          {/if}
+          {#if p.heading}
+            <h2
+              class="jp-sec__heading jp-sec__heading--sub ache__descent-heading"
+              {...editAttrs('heading')}
+            >
+              {p.heading}
+            </h2>
+          {/if}
+
+          <!-- ONE list, three renderings. Enhanced stacks the beats absolutely and
+               shows one at a time; baseline and canvas leave them in flow, every
+               word legible and in order. A screen reader always gets the ordered
+               list, because the enhancement is presentational — `aria-hidden` goes
+               on the progress dots, never on a beat. -->
+          <ol class="ache__beats">
+            {#each rows as row, i (i)}
+              <li
+                class="ache__beat"
+                class:is-active={enhanced && i === activeIndex}
+                class:is-past={enhanced && i < activeIndex}
+              >
+                <span class="ache__beat-lead">{row.lead}</span>
+                {#if row.gloss}
+                  <span class="ache__beat-gloss">{row.gloss}</span>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+
+          {#if enhanced}
+            <div class="ache__progress" aria-hidden="true">
+              {#each points as _, i (i)}
+                <span class="ache__seg" class:is-on={i <= activeIndex}></span>
+              {/each}
+            </div>
+          {/if}
+
+          {#if editable}
+            <!-- The canvas cannot show a page-length pin inside a short scaled
+                 viewport, so it says what will happen instead of pretending. -->
+            <p class="ache__descent-note">
+              {points.length === 1
+                ? 'Descent · add a second point and each will take the full screen as the reader scrolls'
+                : `Descent · ${points.length} full screens, one per point, arriving as the reader scrolls`}
+            </p>
+          {/if}
+        </div>
+      </div>
+    </div>
+  </div>
+{:else if hasContent}
   <div class="ache" data-ache={composition}>
     <!-- The cinematic atmosphere. ONE `--jp-sec-atmos` gate on this wrapper
          rather than one per layer (pilot lesson 3): the aura's opacity is
@@ -614,4 +808,176 @@
       grid-template-columns: 1fr;
     }
   }
+
+  /* ── THE DESCENT ──────────────────────────────────────────────────────────
+     Three renderings from one markup tree, and ONLY `.ache--enhanced` pins.
+
+     BASELINE / CANVAS (no `--enhanced`): the track and stage are ordinary boxes,
+     the beats sit in flow as an ordered list, and the section adds NO scroll
+     distance. This is what the server emits and what a reduced-motion reader or
+     a no-JS reader gets — complete, legible, in order.
+
+     ENHANCED: the track becomes `(beats + 1) x 100dvh` of scroll and the stage
+     sticks to the top for the whole of it, so the screen is held while the page
+     moves under it. The beats stack absolutely in the stage's centre and only the
+     active one is opaque. `dvh` not `vh` so a mobile URL bar collapsing does not
+     shift the pin mid-sequence. */
+  .ache--descent .ache__track {
+    position: relative;
+  }
+
+  .ache--descent .ache__stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding-block: var(--space-16);
+    padding-inline: var(--space-5);
+    overflow: clip;
+  }
+
+  .ache--descent .ache__frame {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: var(--container-text);
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .ache--descent .ache__chapter {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+    letter-spacing: var(--tracking-wider);
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .ache--descent .ache__descent-heading {
+    margin: 0 0 var(--space-8);
+  }
+
+  .ache__beats {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-6);
+  }
+
+  .ache__beat {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .ache__beat-lead {
+    font-family: var(--font-heading);
+    font-size: var(--jp-heading-size);
+    line-height: var(--leading-snug);
+    color: var(--color-text);
+    text-wrap: balance;
+  }
+
+  .ache__beat-gloss {
+    font-size: var(--text-lg);
+    line-height: var(--leading-normal);
+    color: var(--color-text-secondary);
+    text-wrap: pretty;
+  }
+
+  /* The canvas's honest label. Not an error state — it describes what publishing
+     will do, because the canvas cannot show a page-length pin in a short frame. */
+  .ache__descent-note {
+    margin: var(--space-8) 0 0;
+    font-size: var(--text-sm);
+    letter-spacing: var(--tracking-wide);
+    color: var(--color-text-muted);
+  }
+
+  /* ── ENHANCED ONLY ─────────────────────────────────────────────────────── */
+  .ache--descent.ache--enhanced .ache__track {
+    height: calc((var(--beat-count) + 1) * 100dvh);
+  }
+
+  .ache--descent.ache--enhanced .ache__stage {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+  }
+
+  .ache--descent.ache--enhanced .ache__beats {
+    position: relative;
+    display: block;
+    min-height: clamp(220px, 40vh, 360px);
+  }
+
+  /* Every beat occupies the same centred slot; only the active one is visible.
+     `translate` + `opacity` only — both compositor-friendly, so a long sequence
+     does not thrash layout on scroll. */
+  .ache--descent.ache--enhanced .ache__beat {
+    position: absolute;
+    inset-inline: 0;
+    top: 50%;
+    translate: 0 calc(-50% + var(--space-6));
+    opacity: 0;
+    transition:
+      opacity var(--duration-slow) var(--ease-out),
+      translate var(--duration-slow) var(--ease-out);
+  }
+
+  .ache--descent.ache--enhanced .ache__beat.is-active {
+    opacity: 1;
+    translate: 0 -50%;
+  }
+
+  /* A beat already read lifts slightly as it leaves, so the sequence reads as a
+     descent rather than a crossfade in place. */
+  .ache--descent.ache--enhanced .ache__beat.is-past {
+    translate: 0 calc(-50% - var(--space-6));
+  }
+
+  .ache__progress {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: center;
+    margin-top: var(--space-10);
+  }
+
+  .ache__seg {
+    width: var(--space-8);
+    height: 2px;
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--color-text) 18%, transparent);
+    transition: background var(--duration-normal) var(--ease-out);
+  }
+
+  .ache__seg.is-on {
+    background: var(--color-brand-primary);
+  }
+
+  /* The pin is motion. Reduced-motion never reaches `.ache--enhanced` (the flag
+     is computed in JS), and this is the belt-and-braces half: even if the class
+     were forced on, the sequence collapses back to a legible stack. */
+  @media (prefers-reduced-motion: reduce) {
+    .ache--descent.ache--enhanced .ache__track {
+      height: auto;
+    }
+
+    .ache--descent.ache--enhanced .ache__stage {
+      position: relative;
+      height: auto;
+    }
+
+    .ache--descent.ache--enhanced .ache__beats {
+      display: grid;
+      min-height: 0;
+    }
+
+    .ache--descent.ache--enhanced .ache__beat {
+      position: static;
+      opacity: 1;
+      translate: none;
+      transition: none;
+    }
+  }
+
 </style>

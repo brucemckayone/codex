@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "signature_image_key" varchar(500);

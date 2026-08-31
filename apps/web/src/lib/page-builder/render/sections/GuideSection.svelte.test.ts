@@ -95,6 +95,7 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };
@@ -103,6 +104,7 @@ function context(
 /** A resolved sell-preview carrying only the fields a `guide` section reads. */
 function preview(fields: Partial<SellPreview>): JourneySalesContext {
   return context({
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview>({
       intro: null,
       reel: null,

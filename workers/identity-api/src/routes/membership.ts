@@ -41,11 +41,24 @@ app.get(
     handler: async (ctx): Promise<MembershipLookupResponse> => {
       const { orgId, userId } = ctx.input.params;
 
+      // Argument 5 is `ctx.cacheWrite`, and it is not optional in practice.
+      // On a miss `checkOrganizationMembership` writes its
+      // `membership:{orgId}:{userId}` KV entry as the last thing it does, and a
+      // Worker cancels every unawaited promise the moment the response is
+      // returned — so with the argument omitted that `kv.put` is routinely
+      // killed before KV sees it, the next lookup misses again, and a cache
+      // whose whole purpose is to remove a ~46ms Neon round trip removes none
+      // of them. `helpers.ts` threads the same handle for the `procedure()`
+      // policy path (Codex-345hg); this route is the OTHER caller, and the one
+      // where a miss is genuinely a miss: it resolves an ARBITRARY `userId` on
+      // a worker-to-worker hop, not the caller's own, so nothing upstream has
+      // already warmed the entry.
       const membership = await checkOrganizationMembership(
         orgId,
         userId,
         ctx.env,
-        ctx.obs
+        ctx.obs,
+        ctx.cacheWrite
       );
 
       if (!membership) {

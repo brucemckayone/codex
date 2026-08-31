@@ -5,6 +5,7 @@ import {
   type UpdatePlaybackProgressResponse,
   verifyHlsToken,
 } from '@codex/access';
+import { CACHE_PRESETS } from '@codex/constants';
 import {
   combineSubjects,
   type RateLimitSubjectResolver,
@@ -30,12 +31,23 @@ const app = new Hono<HonoEnv>();
 
 /**
  * Headers for every proxied playlist response (RFC 8216 §4 content type).
- * `private, no-store` because the body embeds short-lived presigned URLs / a
- * per-user token — it must never be cached by shared caches.
+ *
+ * `CACHE_PRESETS.fresh` (= `private, no-store`) because the body embeds
+ * short-lived presigned URLs and a per-user HLS token: a copy on ANY disk —
+ * a shared cache's or the viewer's own browser's — outlives the credential
+ * inside it. Not merely per-viewer, per-REQUEST.
+ *
+ * NAMED RATHER THAN SPELLED OUT. These two routes are plain Hono handlers, not
+ * `procedure()` calls, so they cannot declare `policy.cache` and must set the
+ * header themselves. Using the preset is what keeps the value on the same
+ * dial as every other response in the platform: the string is unchanged
+ * (byte-identical to the literal this replaced), but the reasoning above now
+ * sits beside the five siblings it is being chosen over, and a central change
+ * to what `fresh` means reaches here instead of stopping at a local literal.
  */
 const HLS_PLAYLIST_HEADERS = {
   'Content-Type': 'application/vnd.apple.mpegurl',
-  'Cache-Control': 'private, no-store',
+  'Cache-Control': CACHE_PRESETS.fresh,
 } as const;
 
 /**

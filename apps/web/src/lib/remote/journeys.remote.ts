@@ -16,6 +16,8 @@
 
 import {
   createJourneyBodySchema,
+  createSearchQuerySchema,
+  journeyPageStatusSchema,
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
@@ -30,6 +32,7 @@ import { command, form, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import type {
+  CourseOffer,
   CurriculumContentOption,
   EditorCurriculum,
   EnrolledJourneyCard,
@@ -109,8 +112,18 @@ const markCompleteSchema = z.object({
  * a media's genuine 100% finish (`auto`). Auth-gated: completion belongs to a
  * signed-in member.
  *
- * The actual DB write is Round-D (mocked in the seam today); the command
- * contract, auth gate, and validation are real.
+ * THE WRITE IS REAL. This docstring used to say "the actual DB write is Round-D
+ * (mocked in the seam today)", and that stopped being true when the seam was
+ * wired: `persistPracticeCompletion` (`server/journeys/round-d-seam.ts:152`) now
+ * calls `api.access.persistCompletion(input)`, and the seam's own header records
+ * the change ("The functions below now call the real `createServerApi(...).access.*`
+ * routes (added in Round-D Phase 1)"). A stale "this is mocked" is worse than no
+ * comment: it invites a reader to treat a live member write as a stub.
+ *
+ * SELF-SCOPED, and that is the whole authorisation story: `contentId` is the only
+ * input, the worker derives the user from the FORWARDED SESSION (the seam's
+ * `_userId` parameter is vestigial and unused), and the row is unique per
+ * (user, content) — so no caller can record a completion for anyone else.
  */
 export const markPracticeCompleted = command(
   markCompleteSchema,
@@ -131,6 +144,8 @@ export const markPracticeCompleted = command(
 // empty shelf). Both resolve the org from the request host, mirroring
 // `getCoursePage`; on a non-org host they return []. Streamed callers add a
 // `.catch(() => [])` at the load (apps/web CLAUDE.md "Shell + Stream").
+//
+// ONE OF THE TWO HAS NO CONSUMER — see `listEnrolledJourneys` below.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const discoverJourneysSchema = z
@@ -191,9 +206,34 @@ export const listPublishedJourneys = query(
 );
 
 /**
- * The session user's ENROLLED journeys in the current org (library "Your
- * journeys" shelf + continue rail). Self-scoped: the worker derives `userId`
- * from the forwarded session, so guests get []; a non-org host also returns [].
+ * The session user's ENROLLED journeys in the current org. Self-scoped: the
+ * worker derives `userId` from the forwarded session, so guests get []; a
+ * non-org host also returns [].
+ *
+ * ── NOTHING CALLS THIS. Read the next paragraph before wiring anything to it. ──
+ *
+ * This docstring used to claim the read served the library "Your journeys" shelf
+ * + continue rail. That shelf EXISTS and does not come from here: it is served
+ * by `access.listEnrolledCourses` (`EnrolledCourseSummary`), awaited in
+ * `_org/[slug]/(space)/library/+page.server.ts`, and the continue rail is
+ * derived client-side from the same payload. Grepped repo-wide: the only
+ * remaining reference to this query outside its own definition is
+ * `api.ts`'s `access.listEnrolledJourneys` — the client method it calls, i.e.
+ * the layer BELOW it, not a consumer.
+ *
+ * So this is a DUPLICATE READ PATH, not a feature waiting for a button: the
+ * full stack behind it is built and covered (`GET /api/journeys/enrolled` with
+ * `auth: 'required'`, `CourseJourneyService.listEnrolledJourneys`, and five
+ * integration cases in `course-discovery.integration.test.ts`), and the surface
+ * it was built for was shipped against the other seam.
+ *
+ * WHICH MATTERS BECAUSE THE TWO SHAPES DIFFER: this one answers
+ * {@link EnrolledJourneyCard} — a discovery CARD (pageId, courseSlug,
+ * priceCents, featured, coverImageUrl) plus a progress rollup — where
+ * `EnrolledCourseSummary` answers the shelf's own shape. A continue rail that
+ * wanted the card fields would legitimately reach for this. Whether to keep it
+ * for that or delete both halves is the owner's call; what must not happen again
+ * is a reader inferring from this comment that the shelf reads it.
  */
 export const listEnrolledJourneys = query(
   async (): Promise<EnrolledJourneyCard[]> => {
@@ -240,6 +280,56 @@ async function resolveStudioOrg(): Promise<{
   return { api, orgId: (org as { id: string }).id };
 }
 
+/**
+ * Forward a SERVICE 4xx to the client as a 4xx carrying its own text; let 5xx
+ * propagate untouched.
+ *
+ * WHY THIS EXISTS AS A HELPER RATHER THAN A COMMENT. Seven of these remotes
+ * already carry this block inline, each with its own justification (see
+ * {@link updateJourneyOffer}, which states it best: "A bare throw would surface
+ * only a generic failure, which is how an unsellable offer could look like a
+ * mystery instead of a fixable mistake"). The remotes that did NOT carry it were
+ * not exempt — they were simply written without inheriting the rule, and the
+ * omission is INVISIBLE IN DEV, which is why it survived.
+ *
+ * THE MECHANISM, measured live 2026-08-30 on the local stack, signed in as an org
+ * owner. A bare `throw` of an `ApiError` is not an `HttpError`, so SvelteKit
+ * treats it as an unexpected server error: it runs `handleError`
+ * (`hooks.server.ts:170`) and sends whatever that returns. And `handleError`
+ * branches on `dev`:
+ *
+ *     if (dev) return { message: error.message, … }        // the REAL text
+ *     return { message: 'An unexpected error occurred', … } // production
+ *
+ * So in dev a bare throw looks fine, and in production every one of these
+ * failures reads "An unexpected error occurred" — with a 500 status, which also
+ * logs a creator's typo as a server fault.
+ *
+ * MEASURED, the same denial through both paths (studio-beta host, a session that
+ * manages a different org):
+ *     setJourneyStatus   (has the block)  -> 403 "You are not a member of this organization"
+ *     listJourneyRevenue (had no block)   -> 500 "You are not a member of this organization"
+ * and on the primary write path, saving a page with a slug another page already
+ * holds:
+ *     saveJourneyPage    (had no block)   -> 500 'The slug "bone-deep" is already in use'
+ * The text in that last one is a three-second fix a creator can act on, and it is
+ * exactly what production replaces with "An unexpected error occurred".
+ *
+ * 5xx IS NOT FORWARDED, deliberately and for the same reason every inline copy of
+ * this block says so: it may carry internals (a raw SQL string was the observed
+ * case), so it stays an unexpected error and `handleError` sanitises it.
+ */
+async function withServiceErrors<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+      error(err.status, err.message);
+    }
+    throw err;
+  }
+}
+
 const listJourneysSchema = z.object({
   organizationId: z.string().uuid(),
   status: z.enum(['draft', 'published', 'archived']).optional(),
@@ -257,7 +347,14 @@ export const listJourneys = query(
   async ({ status }): Promise<JourneyListItem[]> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) return [];
-    return ctx.api.access.listJourneys(ctx.orgId, status);
+    // Through {@link withServiceErrors} so a 403 ("You are not a member of this
+    // organization") reaches the list's own error panel as that sentence. The
+    // panel already reads it correctly (`queryErrorMessage`, and it sits ABOVE
+    // the empty state so a failure never renders as "No portals yet") — it was
+    // the remote that flattened every refusal to a production-generic 500.
+    return withServiceErrors(() =>
+      ctx.api.access.listJourneys(ctx.orgId, status)
+    );
   }
 );
 
@@ -279,7 +376,9 @@ export const listJourneyRevenue = query(
   async (): Promise<Record<string, number>> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) return {};
-    return ctx.api.access.listJourneyRevenue(ctx.orgId, '30d');
+    return withServiceErrors(() =>
+      ctx.api.access.listJourneyRevenue(ctx.orgId, '30d')
+    );
   }
 );
 
@@ -302,7 +401,14 @@ export const getJourneyForBuilder = query(
   async ({ id }): Promise<JourneyPageRecord | null> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) return null;
-    return ctx.api.access.getJourneyForBuilder(ctx.orgId, id);
+    // `null` for a foreign/missing page is UNCHANGED — the worker answers that as
+    // a resolved value, not a throw, so the builder's not-found arm still fires.
+    // What changes is a real REFUSAL (a 403 off an org this session does not
+    // manage): it now reaches the builder's error panel as its own sentence
+    // instead of production's "An unexpected error occurred".
+    return withServiceErrors(() =>
+      ctx.api.access.getJourneyForBuilder(ctx.orgId, id)
+    );
   }
 );
 
@@ -317,7 +423,15 @@ export const createJourney = command(
     if (!ctx) {
       error(400, 'Journeys can only be created within an organization');
     }
-    return ctx.api.access.createJourney(ctx.orgId, input);
+    // The create form's own catch already reads `.body.message`, and its comment
+    // names the failures it expects to render — "a slug space exhausted, a title
+    // the save schema refuses, a 403 for an org the session does not manage".
+    // None of them arrived: without this each was a 500 whose text production
+    // replaces with "An unexpected error occurred", so the call site's generic
+    // fallback was the only copy a creator ever saw.
+    return withServiceErrors(() =>
+      ctx.api.access.createJourney(ctx.orgId, input)
+    );
   }
 );
 
@@ -329,7 +443,16 @@ export const saveJourneyPage = command(
     if (!ctx) {
       error(400, 'Journeys can only be saved within an organization');
     }
-    await ctx.api.access.saveJourneyPage(ctx.orgId, record);
+    // THE BUILDER'S PRIMARY WRITE, and the sharpest case for
+    // {@link withServiceErrors}. MEASURED live: saving a page whose slug another
+    // page in the org already holds answered `500` with
+    // 'The slug "bone-deep" is already in use' — true text a creator can act on in
+    // three seconds, and text production replaces with "An unexpected error
+    // occurred". `saveBuilderDraft` puts whatever arrives straight into the toast
+    // (`stage: 'page'`), so the honest sentence was one forward away.
+    await withServiceErrors(() =>
+      ctx.api.access.saveJourneyPage(ctx.orgId, record)
+    );
   }
 );
 
@@ -414,6 +537,190 @@ export const setJourneyFeatured = command(
   }
 );
 
+/**
+ * Move a portal between draft / published / archived FROM THE STUDIO LIST, so a
+ * creator can take a page down without opening the builder (Codex-c3lky — the
+ * owner's own words: "portals home is basic as fuck, there is no way to unpublish
+ * from there").
+ *
+ * READ-THEN-WRITE, and the round-trip is deliberate rather than lazy.
+ *
+ * There is no status-only endpoint: `PUT :pageId` is the ONLY writer of
+ * `landing_pages.status`, and its body is `.strict()` — id + pageType + slug +
+ * title + status + subjectType + subjectId + brandOverrides + sections, of which
+ * `JourneyListItem` carries only four. The list therefore CANNOT construct that
+ * body from what it has rendered; something has to load the persisted record
+ * first, and doing it here costs the client one call instead of two.
+ *
+ * A dedicated `PATCH :pageId/status` would save a hop, but it would also be a
+ * SECOND writer of that column, and the cascade is the whole reason this bead
+ * carried a blocker (Codex-xzwl5). `saveJourneyPage` keeps the subject course in
+ * lockstep through `cascadeCourseFromPage`, and `courses.status` — which is the
+ * only gate on /explore, the public by-slug read, the sell preview AND the
+ * enrolled shelves — is written NOWHERE else in the codebase. Routing the list's
+ * writes through the same path makes the cascade true by CONSTRUCTION instead of
+ * by a duplicated guard that can drift out of step. Verified live before this
+ * command existed: builder -> Draft -> Save left BOTH `landing_pages.status` and
+ * `courses.status` at 'draft', and the public sell page then rendered the 404 page
+ * with zero `[data-section-type]` while its published sibling rendered its
+ * sections.
+ *
+ * The body is assembled KEY BY KEY, never spread. The loaded record also carries
+ * `offer` (pricing's own route — {@link updateJourneyOffer}), `organizationId` and
+ * `publishedAt` (server-owned), and under `.strict()` any of those three would
+ * 400 the save. `design` and `seo` are forwarded ONLY when present: the service
+ * reads an absent key as "leave the stored bag alone", never as "clear it".
+ *
+ * `status` is a plain required enum, NOT nullable — `command()` infers a
+ * `.nullable()` field as OPTIONAL, so an intended value would travel as a missing
+ * key (the trap {@link updateJourneyOffer} documents above).
+ *
+ * A no-op when the stored status already matches: re-issuing the same state must
+ * not rewrite the row, bump `updated_at`, or re-run the cascade.
+ */
+export const setJourneyStatus = command(
+  z.object({
+    pageId: z.string().uuid(),
+    status: journeyPageStatusSchema,
+  }),
+  async ({ pageId, status }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be published within an organization');
+    }
+    try {
+      const record = await ctx.api.access.getJourneyForBuilder(
+        ctx.orgId,
+        pageId
+      );
+      // Org-scoped by the worker, so `null` is "foreign or gone" — never a silent
+      // cross-org write. 404 rather than a generic failure so the list can say
+      // something true after, say, a delete in another tab.
+      if (!record) {
+        error(404, 'That portal could not be found.');
+      }
+      if (record.status === status) return;
+
+      const body = {
+        id: record.id,
+        pageType: record.pageType,
+        slug: record.slug,
+        title: record.title,
+        status,
+        subjectType: record.subjectType,
+        subjectId: record.subjectId,
+        brandOverrides: record.brandOverrides,
+        sections: record.sections,
+        ...(record.design ? { design: record.design } : {}),
+        ...(record.seo ? { seo: record.seo } : {}),
+      };
+      await ctx.api.access.saveJourneyPage(ctx.orgId, body);
+    } catch (err) {
+      // Forward 4xx text (a slug that no longer passes the save schema, a 409 from
+      // the org slug-space, "not found" for a foreign page) so the list can render
+      // a sentence a creator can act on; 5xx propagates untouched because it may
+      // carry internals. A SvelteKit `HttpError` from the `error()` calls above is
+      // not an `ApiError`, so it falls through to the rethrow unchanged.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * DUPLICATE a portal from the studio list — the copy a creator makes when a page
+ * they have already shaped is the starting point for the next one (Codex-c3lky).
+ *
+ * IT DUPLICATES THE SALES PAGE, NOT THE COURSE, and the caller MUST say so.
+ * "Duplicate portal" reads as "duplicate the whole journey", and it is not: the
+ * copy carries the source's `subjectType`/`subjectId`, so a duplicated course
+ * portal is a SECOND sales page in front of the SAME course — one curriculum, one
+ * set of stages, one enrolment list, shown through two pages. That shape is
+ * already supported (`cascadeCourseFromPage` only takes a course down when no
+ * OTHER published page sells it; `listPublishedJourneys` dedupes by course), and
+ * the alternatives are worse: a fresh empty course would invent a second
+ * curriculum nobody asked for, and a subject-less copy would be UNVIEWABLE
+ * because the public sell read returns null for a page whose subject is not a
+ * course. So the honest fix is copy that names it, not a different write.
+ *
+ * `offer` is NOT copied — money is set deliberately, never inherited. Sections
+ * are re-keyed with fresh ids (the builder's selection and history model keys on
+ * section id). `status` is draft. All of that is the SERVICE's contract, not this
+ * command's: see `CourseJourneyService.duplicateJourneyPage`.
+ *
+ * The title and slug are derived SERVER-SIDE. The org slug-space spans
+ * `landing_pages` AND `courses`, so only the service can pick a free one inside
+ * the insert's own transaction — a slug chosen here would be a second, racier
+ * arbiter, and "-copy" cannot be assumed free.
+ *
+ * Returns the new page's id/slug/title so the list can name what it made and
+ * offer a link straight to its builder.
+ */
+export const duplicateJourney = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<{ id: string; slug: string; title: string }> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be duplicated within an organization');
+    }
+    try {
+      return await ctx.api.access.duplicateJourney(ctx.orgId, pageId);
+    } catch (err) {
+      // Forward 4xx text — "not found" for a page in another org, and the
+      // service's own 409 when 1000 slug candidates are exhausted, which is
+      // user-actionable ("try a different title"). 5xx propagates untouched
+      // because it may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * SOFT-DELETE a portal from the studio list — `landing_pages.deleted_at`, never a
+ * row removal (Codex-c3lky).
+ *
+ * A PUBLISHED PORTAL IS REFUSED with a 409 the list renders as a sentence, and
+ * that is the product decision rather than a gap. `courses.status` is written
+ * ONLY by the page save's `cascadeCourseFromPage`, so deleting a live page would
+ * leave its course published with nothing selling it — still on /explore, still
+ * resolvable by slug, still on the enrolled shelves — while `/journeys/:slug`
+ * 404'd. A blocked action that names the next step is a better product than a
+ * destructive one with a warning, and the next step exists: {@link
+ * setJourneyStatus}'s Unpublish runs through that same cascade.
+ *
+ * ONE column on ONE row. The subject course, its curriculum, every purchase and
+ * every recorded completion survive; the course is deliberately not cascaded
+ * because a course can be fronted by more than one page (see {@link
+ * duplicateJourney}) and retiring a body of work plus a payment history as a side
+ * effect of removing a sales page is not something a creator can undo from the
+ * studio.
+ */
+export const deleteJourney = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A portal can only be deleted within an organization');
+    }
+    try {
+      await ctx.api.access.deleteJourney(ctx.orgId, pageId);
+    } catch (err) {
+      // The 409 ("Unpublish this portal before deleting it …") is the whole point
+      // of forwarding 4xx text: it is the one message the creator must read to
+      // know what to do next. 5xx propagates untouched — it may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Course MONETISATION — the authoritative subscription plan + tier-access write
 // (Codex-2pryk.2.4.2).
@@ -487,6 +794,53 @@ export const getCourseMonetisation = query(
     const ctx = await resolveStudioOrg();
     if (!ctx) return null;
     return readCourseMonetisation(ctx, courseId);
+  }
+);
+
+const courseOfferSchema = z.object({ courseId: z.string().uuid() });
+
+/**
+ * The course's AUTHORITATIVE offer, WHOLE — for the builder canvas to render
+ * from (Codex-4wun2).
+ *
+ * WHY A SECOND READ BESIDE `getCourseMonetisation`, which calls the same
+ * endpoint: that one projects the offer down to a {@link JourneyMonetisation} for
+ * the Pricing PANEL — no `purchase.priceCents`, no `paths` — because a picker
+ * needs the current selection and the selectable options, not the presentation.
+ * The canvas mounts the PUBLIC `invite` section, and that section prices itself
+ * from a whole {@link CourseOffer} (`deriveOfferPaths(context.offer, …)`), which
+ * returns `[]` for anything less. Projecting once for the panel and once for the
+ * canvas out of one read would couple two consumers with different shapes; two
+ * queries over one idempotent GET is the cheaper coupling.
+ *
+ * AUTHORITATIVE-ONLY, deliberately (SPEC §7). The canvas could have assembled a
+ * preview offer out of the builder's unsaved pricing draft — which would show
+ * unsaved edits — and that is exactly the fallback the pricing invariant forbids:
+ * `landing_pages.offer` is presentation, no authoritative read consults it, and a
+ * canvas priced from it teaches the author a number the checkout will not charge.
+ * The cost is that a pricing edit shows in the canvas only after Save; the panel
+ * itself is where an unsaved price is visible.
+ *
+ * `null` off a non-org host or on a failed read, mirroring the public sales
+ * load's own `.catch(() => null)`: a pricing hiccup must cost the author their
+ * prices, never their canvas. The sections' documented degradation for a null
+ * offer is a PRICE-LESS CTA, never authored numbers.
+ *
+ * NOT A NEW EXPOSURE. `GET /courses/:id/offer` is already public with optional
+ * auth (the anonymous sell page and the checkout both read it), so this adds no
+ * reachable data; `resolveStudioOrg` is here for consistency with the sibling
+ * studio reads and to return `null` off a non-org host. `entitled` on the
+ * returned bag reflects the CREATOR's session, and that is harmless because
+ * nothing rendering-side reads it: `builderSalesContext` forces `enrolled: false`
+ * and `entitled` appears nowhere in `offer-paths.ts`, so the paths and prices a
+ * creator sees are exactly the ones an anonymous visitor sees.
+ */
+export const getCourseOffer = query(
+  courseOfferSchema,
+  async ({ courseId }): Promise<CourseOffer | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.courses.offer(courseId).catch(() => null);
   }
 );
 
@@ -619,7 +973,9 @@ export const getJourneySellMedia = query(
   async ({ pageId }): Promise<JourneySellMedia | null> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) return null;
-    return ctx.api.access.getJourneySellMedia(ctx.orgId, pageId);
+    return withServiceErrors(() =>
+      ctx.api.access.getJourneySellMedia(ctx.orgId, pageId)
+    );
   }
 );
 
@@ -742,7 +1098,183 @@ export const deleteJourneyCover = command(
     if (!ctx) {
       error(400, 'Journey covers can only be cleared within an organization');
     }
-    await ctx.api.access.deleteJourneyCover(ctx.orgId, pageId);
+    // Its upload TWIN already returns the service's own message (a `form()`
+    // reports failure as a value, which never passes through `handleError`), so
+    // without this the same refusal read differently depending on which of the two
+    // buttons the creator pressed.
+    await withServiceErrors(() =>
+      ctx.api.access.deleteJourneyCover(ctx.orgId, pageId)
+    );
+  }
+);
+
+/**
+ * Upload (or replace) the journey's HERO IMAGE (Codex-490z7, amendment A32).
+ *
+ * A DELIBERATE CLONE of {@link uploadJourneyCoverForm} above, down to the string
+ * discriminant. Read that comment first — every rule it states applies here
+ * unchanged, and two of them are why this feature did not already exist:
+ *
+ *   1. `form()`, NEVER `command()`. A `command()`'s arguments serialize through
+ *      devalue, which cannot represent a `File`; the call throws "Cannot stringify
+ *      arbitrary non-POJOs" in the BROWSER, before any request is made. That was
+ *      the uploadJourneyCover bug fixed in b6433fc1, and it is not worth
+ *      re-learning.
+ *   2. The server hop MUST go through `forwardMultipartUpload` (which
+ *      `api.access.uploadJourneyHeroImage` does). A plain re-forward of a File
+ *      from web to worker STRIPS THE FILENAME in workerd, so the part arrives as
+ *      a string field and the worker 400s — invisible locally, reproducing only
+ *      in production.
+ *
+ * WHY THIS IS NOT the existing hero picker. `heroMediaId` is a `media_items` ref,
+ * and that table is CHECK-constrained to ('video','audio') — so the "hero image"
+ * a creator picked there was really a VIDEO's auto-generated poster frame. A
+ * creator who owned a photograph and no film had nothing to put in the loudest
+ * section of their own sales page. This writes `courses.heroImageKey`, the first
+ * link in A32's chain (uploaded ?? poster ?? synthetic plate), so the two coexist
+ * and clearing the upload degrades to the poster rather than to nothing.
+ *
+ * The field is named `image`, not `hero`: the worker's `files` key is `image`, and
+ * matching the wire name keeps the two halves of the path greppable as one.
+ */
+export const uploadJourneyHeroImageForm = form(
+  z.object({
+    pageId: z.string().uuid(),
+    image: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `The hero image must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, image }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      return {
+        outcome: 'failed' as const,
+        message: 'A hero image can only be set within an organization',
+      };
+    }
+    try {
+      const { heroImageUrl } = await ctx.api.access.uploadJourneyHeroImage(
+        ctx.orgId,
+        pageId,
+        image
+      );
+      return { outcome: 'uploaded' as const, heroImageUrl };
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        return { outcome: 'failed' as const, message: err.message };
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Clear the journey's uploaded hero image.
+ *
+ * NOT the same as "the hero has no image": clearing drops back to A32's next
+ * link, the hero video's poster frame, and only then to the synthetic plate.
+ */
+export const deleteJourneyHeroImage = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A hero image can only be cleared within an organization');
+    }
+    await withServiceErrors(() =>
+      ctx.api.access.deleteJourneyHeroImage(ctx.orgId, pageId)
+    );
+  }
+);
+
+/**
+ * Upload the course's SIGNATURE image — the mark `guide.letter` signs off with
+ * (Codex-wqxv4 option A, contract A32).
+ *
+ * BOTH CONSTRAINTS ON THE HERO FORM ABOVE APPLY HERE UNCHANGED, and for the same
+ * reasons — see that doc comment rather than re-deriving them:
+ *   1. `form()`, NEVER `command()` — devalue cannot represent a `File`, and the
+ *      call throws in the BROWSER before any request is made.
+ *   2. The server hop goes through `forwardMultipartUpload` (which
+ *      `api.access.uploadJourneySignatureImage` does), because a plain re-forward
+ *      strips the filename in workerd and 400s only in production.
+ *
+ * WHY IT IS ITS OWN COLUMN rather than a `media_items` ref: identical to the hero.
+ * `signatureMediaId` points at a table CHECK-constrained to ('video','audio'), so
+ * the "signature" a creator could pick there was a VIDEO's poster frame — which is
+ * not a thing anyone signs a letter with. This writes
+ * `courses.signatureImageKey`, the first link in A32's chain, so the two coexist
+ * and clearing the upload degrades to the ref rather than to nothing.
+ *
+ * The field is named `image` to match the worker's `files` key, as the hero does.
+ */
+export const uploadJourneySignatureImageForm = form(
+  z.object({
+    pageId: z.string().uuid(),
+    image: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `The signature must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, image }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      return {
+        outcome: 'failed' as const,
+        message: 'A signature can only be set within an organization',
+      };
+    }
+    try {
+      const { signatureImageUrl } =
+        await ctx.api.access.uploadJourneySignatureImage(
+          ctx.orgId,
+          pageId,
+          image
+        );
+      return { outcome: 'uploaded' as const, signatureImageUrl };
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        return { outcome: 'failed' as const, message: err.message };
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Clear the course's uploaded signature.
+ *
+ * NOT the same as "the guide has no signature": clearing drops back to A32's next
+ * link, the signature media ref's poster still, and only then to whatever the
+ * composition draws without one.
+ */
+export const deleteJourneySignatureImage = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'A signature can only be cleared within an organization');
+    }
+    await withServiceErrors(() =>
+      ctx.api.access.deleteJourneySignatureImage(ctx.orgId, pageId)
+    );
   }
 );
 
@@ -796,13 +1328,15 @@ export const getCourseCurriculum = query(
   async ({ pageId }): Promise<EditorCurriculum | null> => {
     const ctx = await resolveStudioOrg();
     if (!ctx) return null;
-    return ctx.api.access.getCourseCurriculum(ctx.orgId, pageId);
+    return withServiceErrors(() =>
+      ctx.api.access.getCourseCurriculum(ctx.orgId, pageId)
+    );
   }
 );
 
 const listCurriculumContentSchema = z.object({
   contentType: z.enum(['video', 'audio', 'written']).optional(),
-  search: z.string().trim().max(200).optional(),
+  search: createSearchQuerySchema(200),
 });
 
 /**
@@ -823,7 +1357,7 @@ export const listCurriculumContentOptions = query(
     params.set('limit', '100');
     if (contentType) params.set('contentType', contentType);
     if (search) params.set('search', search);
-    const res = await ctx.api.content.list(params);
+    const res = await withServiceErrors(() => ctx.api.content.list(params));
     return (res?.items ?? []).map((c) => ({
       contentId: c.id,
       title: c.title,
@@ -857,16 +1391,22 @@ export const saveCourseCurriculum = command(
     if (!ctx) {
       error(400, 'Curriculum can only be saved within an organization');
     }
+    // The editor's save toast reads `.body.message`; the space guard's refusal
+    // ("that content is not in this space") is the one sentence that explains a
+    // rejected practice, and it only survives the trip through
+    // {@link withServiceErrors}.
     // `command()` infers the schema's `.nullable()` fields as OPTIONAL (dropping
     // `null`), so normalise `id`/`gloss` back to `T | null` for the api client —
     // an absent/undefined `id` is a new stage the server will assign.
-    return ctx.api.access.saveCourseCurriculum(ctx.orgId, pageId, {
-      stages: stages.map((s) => ({
-        id: s.id ?? null,
-        name: s.name,
-        gloss: s.gloss ?? null,
-        practices: s.practices,
-      })),
-    });
+    return withServiceErrors(() =>
+      ctx.api.access.saveCourseCurriculum(ctx.orgId, pageId, {
+        stages: stages.map((s) => ({
+          id: s.id ?? null,
+          name: s.name,
+          gloss: s.gloss ?? null,
+          practices: s.practices,
+        })),
+      })
+    );
   }
 );

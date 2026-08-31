@@ -99,11 +99,16 @@ function buildApp() {
   return app;
 }
 
-async function dispatch(path: string): Promise<Response> {
+async function dispatch(
+  path: string,
+  envOverrides?: Record<string, unknown>
+): Promise<Response> {
   const ec = createExecutionContext();
   const res = await buildApp().fetch(
     new Request(`http://content-api.test${path}`),
-    testEnv,
+    envOverrides
+      ? ({ ...testEnv, ...envOverrides } as unknown as typeof env)
+      : testEnv,
     ec
   );
   // Drains the cache write the handler registered on `waitUntil`. In workerd
@@ -225,5 +230,170 @@ describe('GET /api/content/public/categories — cache write survives', () => {
     expect(await first.json()).toEqual(expected);
     expect(await second.json()).toEqual(expected);
     expect(categorySpies.listPublicForOrg).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Codex-1g5lh.13 — thumbnailUrl and hlsPreviewUrl come from DIFFERENT buckets
+//
+// `resolveR2Urls` builds both fields in one function, and before this change it
+// built both from `R2_PUBLIC_URL_BASE` — the ASSETS host. But `hlsPreviewKey`
+// is a MEDIA-bucket key, so the assets host had no object to serve and every
+// public HLS preview 404'd on its manifest in production while its poster
+// loaded fine. These cases pin the split, in both directions: the preview may
+// move to a media-preview host, and the thumbnail may NOT follow it there.
+//
+// `/discover` is used for the split assertions on purpose — it is the one
+// uncached branch, so no KV slot can carry a URL built under a different env.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MEDIA_PREVIEW_BASE = 'https://cdn-media-preview.test';
+const THUMB_KEY = 'creator-1/media-thumbnails/media-1/md.webp';
+const PREVIEW_KEY = 'creator-1/hls/media-1/preview/preview.m3u8';
+
+/** A row with BOTH kinds of key, which is what a transcoded video really has. */
+const ROWS_WITH_MEDIA = {
+  items: [
+    {
+      id: '4d000000-0000-4000-8000-0000000000a1',
+      title: 'Bone Deep',
+      slug: 'bone-deep',
+      contentType: 'video',
+      mediaItem: {
+        id: '4d000000-0000-4000-8000-0000000000b1',
+        thumbnailKey: THUMB_KEY,
+        hlsPreviewKey: PREVIEW_KEY,
+      },
+    },
+  ],
+  pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+};
+
+type MediaUrls = { thumbnailUrl: string | null; hlsPreviewUrl: string | null };
+
+async function firstMediaItem(
+  path: string,
+  envOverrides?: Record<string, unknown>
+): Promise<MediaUrls> {
+  const res = await dispatch(path, envOverrides);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as {
+    items: { mediaItem: MediaUrls }[];
+  };
+  const [first] = body.items;
+  if (!first) throw new Error(`no items returned from ${path}`);
+  return first.mediaItem;
+}
+
+describe('resolveR2Urls — the assets host and the preview host are separate', () => {
+  beforeEach(() => {
+    contentSpies.listPublic.mockResolvedValue(ROWS_WITH_MEDIA);
+  });
+
+  it('DEFAULT (no media base set): both resolve on the assets host', async () => {
+    // This is what production runs. It is only correct because apps/web's
+    // cdn-proxy now serves the `{creatorId}/hls/{mediaId}/preview/` prefix from
+    // a read-only media binding — so the assets host answers for previews.
+    const media = await firstMediaItem('/api/content/public/discover');
+
+    expect(media.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
+    expect(media.hlsPreviewUrl).toBe(`${R2_PUBLIC_URL_BASE}/${PREVIEW_KEY}`);
+  });
+
+  it('with R2_PUBLIC_MEDIA_URL_BASE set, the PREVIEW moves and the THUMBNAIL does not', async () => {
+    const media = await firstMediaItem('/api/content/public/discover', {
+      R2_PUBLIC_MEDIA_URL_BASE: MEDIA_PREVIEW_BASE,
+    });
+
+    // The preview follows the media base…
+    expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
+    // …and the thumbnail stays on the assets host. THE TRAP: both fields are
+    // built in one function, so a fix that threads the new base through
+    // wholesale sends every thumbnail to a bucket that does not hold it.
+    expect(media.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
+    expect(media.thumbnailUrl).not.toContain(MEDIA_PREVIEW_BASE);
+  });
+
+  it('the org-scoped list splits the bases the same way', async () => {
+    const media = await firstMediaItem(
+      `/api/content/public?orgId=${ORG_ID}&limit=1`,
+      { R2_PUBLIC_MEDIA_URL_BASE: MEDIA_PREVIEW_BASE }
+    );
+
+    expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
+    expect(media.thumbnailUrl).toBe(`${R2_PUBLIC_URL_BASE}/${THUMB_KEY}`);
+  });
+
+  it('no base at all yields nulls, never a raw R2 key on the wire', async () => {
+    const media = await firstMediaItem('/api/content/public/discover', {
+      R2_PUBLIC_URL_BASE: undefined,
+    });
+
+    expect(media.thumbnailUrl).toBeNull();
+    expect(media.hlsPreviewUrl).toBeNull();
+  });
+
+  it('a media base with no assets base still never invents a thumbnail host', async () => {
+    // Guards the inverse mistake: the fallback runs assets → media, not the
+    // other way round, so an unset assets base must not borrow the media one.
+    const media = await firstMediaItem('/api/content/public/discover', {
+      R2_PUBLIC_URL_BASE: undefined,
+      R2_PUBLIC_MEDIA_URL_BASE: MEDIA_PREVIEW_BASE,
+    });
+
+    expect(media.thumbnailUrl).toBeNull();
+    expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
+  });
+});
+
+/**
+ * `Cache-Control` on this router (Codex-1j5fw · WP3).
+ *
+ * WHY THIS BLOCK IS NEW. Until WP3 the header on all three routes came from an
+ * `app.use('*')` at the top of `public.ts`, and NOTHING asserted it — this file
+ * covered the envelope and the R2 bases, `public-cache.test.ts` covered the KV
+ * keys, and neither read a header. So deleting that middleware in favour of
+ * `policy: { cache: 'public' }` was a change to the highest-traffic public
+ * surface on the platform with no test standing under it. These cases are that
+ * test, and they pin the EXACT string: the mistake this vocabulary exists to
+ * prevent is an `s-maxage` widening, and only a whole-string assertion sees one.
+ */
+describe('Cache-Control — declared per route, not by a wildcard middleware', () => {
+  const PUBLIC_60 = 'public, max-age=60, s-maxage=60';
+
+  it.each([
+    ['GET /', `/api/content/public?orgId=${ORG_ID}`],
+    ['GET /categories', `/api/content/public/categories?orgId=${ORG_ID}`],
+    ['GET /discover', '/api/content/public/discover'],
+  ])('%s carries the 60s shared-cache header', async (_name, path) => {
+    const res = await dispatch(path);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it('the header is identical on a cache HIT and a cache MISS', async () => {
+    // The middleware ran after `await next()` and so could not tell the two
+    // apart. `procedure()` emits from the policy, which also cannot — asserted
+    // because a preset resolved inside the cached fetcher instead of on the
+    // policy WOULD differ, and the difference would be invisible on first read.
+    const miss = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+    const hit = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1); // proves it hit
+    expect(miss.headers.get('Cache-Control')).toBe(PUBLIC_60);
+    expect(hit.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it('NO s-maxage on a validation FAILURE — a 400 must not be edge-cached', async () => {
+    // `procedure()` emits the preset on the SUCCESS path only, deliberately: a
+    // shared cache holding a 400 (or a 429) for 60s turns one malformed request
+    // into a 60-second outage for that URL. Asserted here because these are the
+    // only routes on the platform whose success preset is shared-cacheable AND
+    // whose input is fully attacker-controlled.
+    const res = await dispatch('/api/content/public/categories?orgId=nope');
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('Cache-Control') ?? '').not.toContain('s-maxage');
   });
 });

@@ -284,12 +284,36 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(parsed.design?.motion).toBeUndefined();
   });
 
-  it('still rejects a key this endpoint cannot honour (`.strict()` holds)', () => {
-    // The guard that made `design` worth adding properly: `seo` has no column, so
-    // it must 400 rather than be accepted and discarded.
+  it('accepts a page seo bag and round-trips it', () => {
+    // `seo` used to be the example of a key with no column, and this test
+    // asserted it must 400. Migration 0090 added `landing_pages.seo` jsonb, the
+    // service writes it and the builder's SEO panel is enabled again, so the
+    // correct assertion inverted.
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      seo: { title: 'Meta', description: 'Slow work, close to the bone.' },
+    });
+    expect(parsed.seo?.title).toBe('Meta');
+    expect(parsed.seo?.description).toBe('Slow work, close to the bone.');
+  });
+
+  it('keeps an EMPTY seo string, because that is a creator clearing the field', () => {
+    // A `.min(1)` anywhere on this bag would make a cleared meta description
+    // unsaveable — the field would appear to revert instead of clearing. This is
+    // the regression that assertion exists to catch.
     expect(
-      saveJourneyPageBodySchema.safeParse({ ...BODY, seo: { title: 'x' } })
-        .success
+      saveJourneyPageBodySchema.parse({ ...BODY, seo: { description: '' } }).seo
+        ?.description
+    ).toBe('');
+  });
+
+  it('still rejects a key this endpoint cannot honour (`.strict()` holds)', () => {
+    // Re-stated against a key that is still not this body's to set:
+    // `landing_pages.featured` is a real column, owned by the studio index's
+    // feature toggle rather than by the page-copy save. If this ever goes red,
+    // the tempting wrong repair is to weaken `.strict()` — do not.
+    expect(
+      saveJourneyPageBodySchema.safeParse({ ...BODY, featured: true }).success
     ).toBe(false);
   });
 

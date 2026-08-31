@@ -118,6 +118,21 @@ export interface JourneyCourseView {
   priceCents: number | null;
   stageCount: number;
   practiceCount: number;
+  /**
+   * Public CDN URL for the course cover, or null when there is no cover (or no
+   * configured URL base). Never a raw R2 key.
+   *
+   * THIS IS THE SELL PAGE'S SHARE IMAGE. It is the only image the page can put
+   * in `<svelte:head>`: the hero's still arrives on the STREAMED `sellPreview`
+   * promise, which the head has structurally already flushed past, so before
+   * this field every share of a journey rendered as a bare text card. The `md`
+   * (400px) variant, the same one {@link JourneyCardView.coverImageUrl} serves,
+   * so one column has one resolved meaning everywhere.
+   *
+   * OPTIONAL-additive (like `CourseSellPreview.guidePortraitUrl`): an older
+   * worker deployment simply omits it and the head emits no `og:image`.
+   */
+  coverImageUrl?: string | null;
 }
 
 export interface JourneyTestimonialView {
@@ -179,6 +194,35 @@ export interface JourneyListItem {
    */
   featured: boolean;
   updatedAt: string;
+  /**
+   * Public CDN URL for the subject course's cover (`courses.coverImageKey` →
+   * `md.webp`), or null when there is no cover, no configured CDN base, or the
+   * page has no subject course. Never a raw R2 key.
+   *
+   * The SAME variant {@link JourneyCardView.coverImageUrl} serves, deliberately:
+   * the studio row's thumbnail is there so a creator can tell their portals apart
+   * AND check the image a visitor will see, so the two must resolve one column to
+   * one meaning. A studio-only variant would preview something the product never
+   * renders.
+   *
+   * OPTIONAL-additive (like {@link JourneySellMedia.heroImageUrl}): apps/web and
+   * the workers deploy separately, so a worker predating this field omits the key
+   * and the row renders its typographic fallback tile rather than a broken
+   * `<img>`. Readers therefore treat `undefined` as "no cover" (`?? null`).
+   *
+   * ── THIS TYPE HAS A TWIN, AND THE TWIN IS NOT CHECKED BY THE COMPILER ────────
+   * `@codex/shared-types` `JourneyListItem` is the shape the content-api actually
+   * serialises; this is the FE-frozen mirror the studio consumes, and nothing in
+   * the build makes them agree (a BE package cannot import an apps/web `$lib`
+   * type, which is why the pair exists — see the file header). A field added to
+   * one and forgotten on the other is silent: the worker sends it and the FE
+   * cannot see it, or the FE renders a key that never arrives.
+   *
+   * `studio/journeys/__tests__/journey-list-item-parity.test.ts` asserts
+   * bidirectional assignability between the two under `pnpm typecheck`, so a
+   * one-sided addition now fails the gate instead of shipping.
+   */
+  coverImageUrl?: string | null;
 }
 
 /**
@@ -218,14 +262,16 @@ export interface JourneyCardView {
 /**
  * The journey's SELL MEDIA — the six media refs the sales page's `hero` /
  * `introVideo` / `reel` / `guide` sections resolve their primary content from,
- * plus the still cover (Codex-eqh0z). FE mirror of `@codex/shared-types`
+ * plus the TWO uploaded stills: the card cover (Codex-eqh0z) and the hero image
+ * (Codex-490z7, amendment A32). FE mirror of `@codex/shared-types`
  * `JourneySellMedia`.
  *
- * Every id is a `media_items` ref; the cover is NOT (`media_items` is
- * CHECK-constrained to video/audio, so a still image cannot live there) — it
- * arrives already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
+ * Every id is a `media_items` ref; neither uploaded still is (`media_items` is
+ * CHECK-constrained to video/audio, so a still image cannot live there) — both
+ * arrive already resolved to a CDN URL. `heroMediaId` / `signatureMediaId` are
  * contract amendment A27 (Codex-wqxv4); each resolves publicly to the picked
- * item's thumbnail, the same way the guide portrait does.
+ * item's thumbnail, the same way the guide portrait does — which is exactly why
+ * A32 had to add a real uploaded hero BESIDE `heroMediaId` rather than reuse it.
  */
 export interface JourneySellMedia {
   courseId: string;
@@ -236,6 +282,40 @@ export interface JourneySellMedia {
   heroMediaId: string | null;
   signatureMediaId: string | null;
   coverImageUrl: string | null;
+  /**
+   * The UPLOADED hero image's CDN URL (`courses.heroImageKey` → `lg.webp`), or
+   * null when none is uploaded (A32).
+   *
+   * The UPLOAD ONLY — never A32's public fallback chain. The builder panel's
+   * Replace / Remove act on the uploaded file, so a value here that could also be
+   * a hero video's poster frame would offer a Remove that removes nothing.
+   *
+   * OPTIONAL-additive: a worker deployment predating A32 omits the key entirely,
+   * so every reader treats `undefined` as "no uploaded hero" (`?? null`).
+   */
+  heroImageUrl?: string | null;
+  /**
+   * The UPLOADED signature-image CDN URL (`courses.signatureImageKey` → `md.webp`),
+   * or null when the creator has uploaded none — `guide.letter`'s sign-off mark.
+   *
+   * Same contract as `heroImageUrl` above and for the same reasons: the UPLOAD
+   * ONLY, never A32's public fallback chain, because the panel's Replace / Remove
+   * act on the uploaded file and a value that could also be a media ref's poster
+   * frame would offer a Remove that removes nothing.
+   *
+   * OPTIONAL-additive, and this one was OBSERVED rather than merely anticipated:
+   * the running worker fleet omits BOTH this key and `heroImageUrl` outright, so a
+   * reader must treat `undefined` as "none" — not as null.
+   *
+   * ADDED because its absence was a real compile error rather than a theoretical
+   * gap: the sell-media store's save-echo could not read
+   * `persisted.signatureImageUrl` (TS2339) while the shared-types twin already
+   * declared it. That is precisely the drift this interface's own header warns
+   * about — the twin is not checked by the compiler — and it is why the store also
+   * carries a narrow local bridge type. That bridge is optional-only by design, so
+   * it stays correct rather than becoming wrong now this field exists.
+   */
+  signatureImageUrl?: string | null;
 }
 
 /** One org tier the pricing panel offers as a way into the course. */

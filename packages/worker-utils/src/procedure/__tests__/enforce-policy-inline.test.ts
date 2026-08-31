@@ -31,11 +31,16 @@ vi.mock('../../auth-middleware', () => ({
 
 // `./org-helpers` and `@codex/security` and `@codex/database` are dynamic
 // imports inside `enforcePolicyInline`. vi.mock intercepts those too.
-vi.mock('../org-helpers', () => ({
+// `importOriginal` rather than a closed factory: `membershipCacheKey` must be
+// the REAL builder, because a hand-written `membership:${orgId}:${userId}` here
+// keeps passing if the production key format changes — the drift that let
+// `invalidateMembershipCache` bump a key nobody read for three months
+// (Codex-rxjwp). It also survives the module gaining an export, unlike the
+// closed form (see the @codex/security note below for what that costs).
+vi.mock('../org-helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../org-helpers')>()),
   extractOrganizationFromSubdomain: vi.fn(),
   checkOrganizationMembership: vi.fn(),
-  membershipCacheKey: (orgId: string, userId: string) =>
-    `membership:${orgId}:${userId}`,
 }));
 
 // `enforcePolicyInline` now also pulls the rate limiter out of @codex/security,

@@ -190,6 +190,45 @@
     calc(var(--space-14) * var(--jp-rhythm))
   );
   --jp-sec-gap: calc(var(--space-6) * var(--jp-rhythm));
+
+  /* ── THE STAGE HEIGHT BASIS ──────────────────────────────────────────────
+     1% of the viewport a viewport-tall section should size itself against.
+     A section writes `calc(100 * var(--jp-stage-vh))` where it would otherwise
+     write `100svh`.
+
+     WHY THE INDIRECTION. `svh` resolves against the BROWSER viewport and cannot
+     be told not to, and `cqh` — the obvious alternative — "silently falls back
+     to the small viewport under inline-size containment", which is exactly what
+     `.jp-sec` declares (the reasoning is recorded at
+     `InviteSection.svelte:775`, and it is why `svh` was chosen there). So
+     inside the builder's fixed-width device frame a `100svh` hero was as tall
+     as the STUDIO WINDOW: measured at device=mobile, 373 × 900 — aspect 0.414,
+     where a real 390 × 844 phone gives 0.462. The canvas could not preview the
+     aspect of ANY full-height section, which is four of the hero's six
+     compositions plus the invite's stage card.
+
+     `--jp-device-vh` is the seam the canvas sets (`JourneyBuilderCanvas`'s fit
+     box sets it per device, and leaves it unset on desktop where the studio
+     window really is a desktop viewport). Nothing sets it on the public page,
+     so this resolves to `1svh` there and PUBLISHED OUTPUT IS BYTE-IDENTICAL.
+
+     The fallback lives INSIDE the `var()` rather than as a plain `1svh`
+     declaration, because `--jp-device-vh` arrives by INHERITANCE from an
+     ancestor of `.jp-sec`: a bare `--jp-stage-vh: 1svh` on `.jp-sec` would
+     shadow the ancestor's contribution and the override could never win. Same
+     resolution trap the `--jp-body-size` note above documents, inverted.
+
+     THE TWO CONSUMERS ARE NOT YET SWITCHED OVER, so do not delete this as an
+     unused property. `HeroSection.svelte:701` and `InviteSection.svelte:779`
+     still write `min-height: min(100svh, calc(80svh * var(--jp-rhythm)))`; each
+     becomes `min(calc(100 * var(--jp-stage-vh)), calc(80 * var(--jp-stage-vh) *
+     var(--jp-rhythm)))`. Those files belong to the sections work package, so the
+     change is handed off rather than made here. Verified live meanwhile that the
+     seam RESOLVES: in the builder at device=mobile the hero's own computed
+     `--jp-stage-vh` reads `8.44px` (390x844) and at device=tablet `11.12px`
+     (834x1112), while the public page reads `1svh`. `journey-design.test.ts`
+     guards the shape. */
+  --jp-stage-vh: var(--jp-device-vh, 1svh);
 }
 
 /* ═══════════════════ 1 · width ════════════════════════════════════════════

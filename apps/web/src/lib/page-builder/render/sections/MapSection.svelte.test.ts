@@ -97,6 +97,9 @@ function context(
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
     offer: null,
+    // Required since the field stopped meaning "undefined is true". This section
+    // has no conversion affordance, so the value only has to be stated.
+    purchasable: true,
     sellPreview: Promise.resolve<SellPreview | null>(null),
     ...overrides,
   };
@@ -111,6 +114,12 @@ function render(props: {
   design?: ResolvedSectionDesign;
   editable?: boolean;
   onEdit?: (key: string, value: string) => void;
+  /**
+   * What the PAGE has decided this section may use for its heading. Absent is the
+   * real default for four of the five fallback-capable sections on any page — only
+   * one of them claims the course title (`claimTitleFallback`).
+   */
+  titleFallback?: string;
 }) {
   component = mount(MapSection, {
     target: document.body,
@@ -121,6 +130,7 @@ function render(props: {
       design: props.design ?? CANDLELIT,
       editable: props.editable,
       onEdit: props.onEdit,
+      titleFallback: props.titleFallback,
     },
   });
   flushSync();
@@ -387,14 +397,33 @@ describe('MapSection — the read boundary', () => {
     ).toBe('The renderer foot');
   });
 
-  it('falls back to the course’s OWN title, never to invented prose', () => {
+  it('falls back to the course title WHEN THE PAGE HAS CLAIMED IT HERE', () => {
     // `Codex-i9pzs`: this used to be the hardcoded "Everything you'll walk." —
     // one org's editorial voice compiled into every org's sell page.
-    render({ config: {} });
+    render({ config: {}, titleFallback: 'The course title' });
 
     const h2 = document.body.querySelector('.descent__title');
     expect(h2?.textContent?.trim()).toBe('The course title');
     expect(document.body.textContent).not.toContain("Everything you'll walk");
+  });
+
+  /*
+   * THE AGGREGATE DEFECT, at this section's end of it, and the one place a comment
+   * had to be overruled rather than extended. The file previously stated that this
+   * heading "is NOT allowed to self-hide" because the outline is h1 → h2 → h3 — a
+   * real concern, defending a heading whose only content was the course title that
+   * four other sections were ALSO printing. A skipped heading level is valid HTML
+   * and advisory; `<h2>Bone Deep</h2>` four times is not.
+   */
+  it('does NOT print the course title when the page claimed it elsewhere', () => {
+    render({ config: {} });
+    expect(document.body.querySelector('.descent__title')).toBeNull();
+    expect(document.body.textContent).not.toContain('The course title');
+    // The stages themselves are unaffected — the section still has its subject.
+    expect(
+      document.body.querySelectorAll('.descent__gate-name, .descent__row-name')
+        .length
+    ).toBeGreaterThan(0);
   });
 
   it('self-hides the closing note when the creator wrote none', () => {
@@ -409,7 +438,7 @@ describe('MapSection — accessibility contracts', () => {
     // Research §5.1: `type` is visual scale only. `monumental` must not promote a
     // heading level, and `restrained` must not demote one.
     const outline = (design: ResolvedSectionDesign) => {
-      render({ variant: 'spine', design });
+      render({ variant: 'spine', design, titleFallback: 'The course title' });
       const tags = [...document.body.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(
         (h) => h.tagName
       );
@@ -422,6 +451,9 @@ describe('MapSection — accessibility contracts', () => {
 
     expect(monumental).toEqual(restrained);
     // h2 (section) → h3 (stage) → h4 (practice): three levels, no skips.
+    // The `titleFallback` is what makes the `h2` exist at all now — a section that
+    // did not claim the course title has no heading of its own to promote or demote,
+    // which is the point of this assertion's `render` call carrying one.
     expect(monumental[0]).toBe('H2');
     expect(monumental.filter((t) => t === 'H3')).toHaveLength(3);
     expect(monumental.filter((t) => t === 'H4')).toHaveLength(3);

@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Implementation plan — the data-access contract</title>
+<style>
+:root{
+  --bg:#fbfaf8; --surface:#fff; --surface-2:#f4f2ee; --line:#ddd8ce; --line-2:#c9c2b6;
+  --text:#1b1917; --text-2:#5a544b; --text-3:#8b8378;
+  --accent:#7a4a1e; --accent-soft:#fdf3e8;
+  --bad:#9a2f2f; --bad-soft:#fdf0ef; --good:#2f6b40; --good-soft:#eef6f0;
+  --mid:#7a5c14; --mid-soft:#fdf8ea; --cool:#2f5b7a; --cool-soft:#eef4f8;
+  --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#131211; --surface:#1b1a18; --surface-2:#232120; --line:#332f2b; --line-2:#48423c;
+  --text:#eae6e0; --text-2:#a9a29a; --text-3:#7c756c;
+  --accent:#d9a76a; --accent-soft:#241c13;
+  --bad:#e2908a; --bad-soft:#2a1a19; --good:#93c9a4; --good-soft:#162117;
+  --mid:#d8bd72; --mid-soft:#231e12; --cool:#87b4d4; --cool-soft:#151f27;
+}}
+:root[data-theme="dark"]{
+  --bg:#131211; --surface:#1b1a18; --surface-2:#232120; --line:#332f2b; --line-2:#48423c;
+  --text:#eae6e0; --text-2:#a9a29a; --text-3:#7c756c;
+  --accent:#d9a76a; --accent-soft:#241c13;
+  --bad:#e2908a; --bad-soft:#2a1a19; --good:#93c9a4; --good-soft:#162117;
+  --mid:#d8bd72; --mid-soft:#231e12; --cool:#87b4d4; --cool-soft:#151f27;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15.5px/1.6 var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 1.2rem 6rem}
+.wrap{max-width:72rem;margin:0 auto}
+header.mast{padding:3.2rem 0 1.5rem;border-bottom:2px solid var(--text);margin-bottom:2rem}
+h1{font:600 2rem/1.15 var(--serif);margin:0 0 .55rem;letter-spacing:-.018em}
+.sub{color:var(--text-2);font-size:.97rem;max-width:54rem;margin:0}
+.meta{margin-top:.9rem;font:500 .7rem/1.5 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.08em}
+h2{font:600 1.5rem/1.2 var(--serif);margin:3.4rem 0 .4rem;padding-top:1.5rem;border-top:1px solid var(--line);letter-spacing:-.012em}
+h2 .n{display:block;font:600 .7rem/1 var(--mono);color:var(--accent);letter-spacing:.12em;margin-bottom:.6rem}
+h3{font:600 1.05rem/1.3 var(--sans);margin:2.2rem 0 .4rem}
+h4{font:600 .95rem/1.3 var(--sans);margin:1.5rem 0 .3rem}
+p{margin:.6rem 0;max-width:60rem}
+.lede{font-size:1rem;color:var(--text-2)}
+code{font:.86em/1.4 var(--mono);background:var(--surface-2);padding:.1em .34em;border-radius:3px;border:1px solid var(--line);word-break:break-word}
+strong{font-weight:640;color:var(--text)}
+a{color:var(--accent)}
+figure{margin:1.5rem 0 1.3rem;padding:0}
+.fig{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:1rem;overflow-x:auto}
+.fig svg{display:block;width:100%;height:auto;min-width:34rem}
+figcaption{font-size:.85rem;color:var(--text-2);margin-top:.7rem;line-height:1.55}
+figcaption b{color:var(--text);font-weight:640}
+svg text{font-family:var(--sans);fill:var(--text)}
+svg .lbl{font-size:12px;font-weight:600}
+svg .sm{font-size:10.5px;fill:var(--text-2);font-family:var(--mono)}
+svg .box{fill:var(--surface-2);stroke:var(--line-2);stroke-width:1}
+svg .box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.2}
+svg .box-good{fill:var(--good-soft);stroke:var(--good);stroke-width:1.2}
+svg .box-cool{fill:var(--cool-soft);stroke:var(--cool);stroke-width:1.2}
+svg .arw{stroke:var(--text-3);stroke-width:1.4;fill:none}
+svg .arw-bad{stroke:var(--bad);stroke-width:1.5;fill:none}
+svg .arw-good{stroke:var(--good);stroke-width:1.5;fill:none}
+svg .dash{stroke-dasharray:4 3}
+.tw{overflow-x:auto;margin:1.1rem 0;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.885rem;min-width:33rem}
+th{text-align:left;font:600 .69rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);padding:.7rem .85rem;border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+td{padding:.72rem .85rem;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.k{font:500 .8rem/1.45 var(--mono);white-space:nowrap;color:var(--text-2)}
+td.wp{font:600 .95rem/1.3 var(--mono);color:var(--accent);white-space:nowrap;width:3.4rem}
+td.bad{background:var(--bad-soft)} td.good{background:var(--good-soft)} td.mid{background:var(--mid-soft)} td.cool{background:var(--cool-soft)}
+.tiny{font-size:.82rem;color:var(--text-2);display:block;margin-top:.3rem;line-height:1.55}
+.box{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:1rem 1.15rem;margin:1.4rem 0}
+.box.warn{border-left-color:var(--bad)} .box.ok{border-left-color:var(--good)}
+.box h4{font:600 .7rem/1.3 var(--mono);text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin:0 0 .5rem}
+.box p:last-child{margin-bottom:0}
+pre{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:.85rem 1rem;overflow-x:auto;font:.82rem/1.55 var(--mono);margin:.85rem 0;max-width:100%}
+ul.tight{margin:.5rem 0;padding-left:1.3rem} ul.tight li{margin:.3rem 0}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.15rem;margin:0 0 2.4rem;font-size:.9rem}
+.toc a{display:inline-block;margin-right:1.1rem;text-decoration:none;color:var(--text-2)}
+.toc a:hover{color:var(--accent)}
+.toc a b{color:var(--accent);font:600 .72rem var(--mono);margin-right:.35rem}
+footer{margin-top:3.4rem;padding-top:1.3rem;border-top:1px solid var(--line);font-size:.87rem;color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+  <h1>Implementation plan — a data-access contract, then the fixes as instances of it</h1>
+  <p class="sub">The six changes in <a href="./index.html">the decision</a> are point repairs. This plan makes
+  them consequences of a rule that applies to every worker, every route and both access layers — so the next one
+  is correct by construction rather than by review.</p>
+  <p class="meta">2026-08-30 · reads live against <code>origin/dev</code> · <a href="./architecture.html">diagrams</a> · <a href="./reference.html">evidence</a></p>
+</header>
+
+<nav class="toc">
+  <a href="#why"><b>1</b> Why a contract, not six fixes</a>
+  <a href="#contract"><b>2</b> The contract</a>
+  <a href="#enforce"><b>3</b> Where it is enforced</a>
+  <a href="#wps"><b>4</b> Work packages</a>
+  <a href="#gate"><b>5</b> The gate that stops drift</a>
+</nav>
+
+<h2 id="why"><span class="n">SECTION 1</span>Why a contract, not six fixes</h2>
+
+<p class="lede">The diagnosis found organization-api missing a cache header. <strong>The reason it was missing is
+more interesting than the omission: there was no rule to violate.</strong></p>
+
+<h3>There are two data-access layers, and they do not share a vocabulary</h3>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 8 900 296" role="img" aria-label="Two access layers with separate and incompatible caching vocabularies">
+  <rect class="box-cool" x="30" y="30" width="380" height="120" rx="7"/>
+  <text class="lbl" x="220" y="54" text-anchor="middle">Layer 1 · Workers</text>
+  <text class="sm" x="220" y="74" text-anchor="middle">199 procedure() sites · 27 files · 8 workers</text>
+  <text class="sm" x="220" y="92" text-anchor="middle">policy declares: auth · roles · rateLimit</text>
+  <text class="sm" x="220" y="112" text-anchor="middle" style="fill:var(--bad)">policy does NOT declare: cache</text>
+  <text class="sm" x="220" y="132" text-anchor="middle" style="fill:var(--bad)">→ set by hand, or not at all</text>
+
+  <rect class="box-cool" x="490" y="30" width="380" height="120" rx="7"/>
+  <text class="lbl" x="680" y="54" text-anchor="middle">Layer 2 · apps/web (SvelteKit)</text>
+  <text class="sm" x="680" y="74" text-anchor="middle">remote functions + page.server loads</text>
+  <text class="sm" x="680" y="92" text-anchor="middle">CACHE_HEADERS — 4 named presets, 29 users</text>
+  <text class="sm" x="680" y="112" text-anchor="middle" style="fill:var(--mid)">a real vocabulary — but local to apps/web</text>
+  <text class="sm" x="680" y="132" text-anchor="middle" style="fill:var(--bad)">23 files still call setHeaders by hand</text>
+
+  <path class="arw-bad dash" d="M410 90 H486"/>
+  <text class="sm" x="448" y="82" text-anchor="middle" style="fill:var(--bad)">cannot</text>
+  <text class="sm" x="448" y="106" text-anchor="middle" style="fill:var(--bad)">import</text>
+
+  <rect class="box-bad" x="30" y="188" width="840" height="96" rx="7"/>
+  <text class="lbl" x="450" y="212" text-anchor="middle">The consequence, measured on origin/dev</text>
+  <text class="sm" x="52" y="234">· CACHE_HEADERS lives in apps/web/src/lib/server/cache.ts — a worker cannot reach it</text>
+  <text class="sm" x="52" y="252">· the two layers disagree on the same kind of content: s-maxage=300 in one, 60 in the other</text>
+  <text class="sm" x="52" y="270">· 8 public worker routes: 3 have a header, 5 have none — and nothing said they should</text>
+</svg>
+</div>
+<figcaption><b>This is the fragmentation, located.</b> It is not that anyone was careless — apps/web has the
+better-developed convention, with four named presets and twenty-nine adopters. <b>It is that the convention
+cannot cross the layer boundary</b>, so the worker side grew without one, and the two halves drifted five-fold
+apart on the same question.</figcaption>
+</figure>
+
+<div class="box warn">
+  <h4>The pattern this repeats, and why enforcement is the answer</h4>
+  <p>The same shape appeared three times in the diagnosis. <strong>Five of six files thread
+  <code>waitUntil</code> correctly and one does not. Content-api sets cache headers in thirteen places and
+  organization-api in none. The negative cache for unknown subdomains was built carefully, bounded, and
+  documented — while the identical write on the path carrying all the traffic went unwrapped.</strong></p>
+  <p><em>In every case the knowledge existed in the codebase and did not reach the next file.</em>
+  <strong>A convention that lives in a comment, a docstring or one team member's habit reaches exactly as far as
+  the last person who read it.</strong> The fix is not more documentation — it is to make the declaration
+  mandatory at a point every route already passes through.</p>
+</div>
+
+<h2 id="contract"><span class="n">SECTION 2</span>The contract</h2>
+
+<p class="lede"><strong>One question decides everything else: who is allowed to see this response?</strong> Answer
+it in a declaration, and the cache policy, the database binding and the write-through behaviour all follow.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>You declare</th><th>Cache policy</th><th>DB binding</th><th>Write-through</th><th>Examples</th></tr></thead>
+  <tbody>
+    <tr><td class="k"><strong>public</strong><br><span class="tiny">anonymous, same for everyone</span></td>
+      <td class="good"><code>s-maxage</code> at the edge, from a named preset. <strong>Never</strong>
+      hand-written.</td>
+      <td class="good">Hyperdrive <strong>cached</strong></td>
+      <td class="good">KV write-through, <code>waitUntil</code> threaded by the framework</td>
+      <td class="k">org branding<br>public content lists<br>creator profiles</td></tr>
+    <tr><td class="k"><strong>per-viewer</strong><br><span class="tiny">shaped by who is asking</span></td>
+      <td class="mid"><code>max-age=0, s-maxage=…</code> — cacheable for anonymous, revalidated for signed-in.
+      <em>This is the case apps/web already models well.</em></td>
+      <td class="good">Hyperdrive <strong>cached</strong></td>
+      <td class="good">KV, keyed by viewer</td>
+      <td class="k">a library view<br>continue-watching</td></tr>
+    <tr><td class="k"><strong>private</strong><br><span class="tiny">authenticated, not shareable</span></td>
+      <td class="bad"><code>private, no-cache</code>. <strong>A <code>public</code> directive here is a
+      data-exposure bug, not a caching bug.</strong></td>
+      <td class="bad">Hyperdrive <strong>cache-disabled</strong></td>
+      <td class="bad">none — or keyed so it cannot be served to another viewer</td>
+      <td class="k">membership checks<br>billing state<br>studio dashboards</td></tr>
+    <tr><td class="k"><strong>fresh</strong><br><span class="tiny">correctness depends on it</span></td>
+      <td class="bad"><code>no-store</code></td>
+      <td class="bad">Hyperdrive <strong>cache-disabled</strong> — mandatory</td>
+      <td class="bad">none</td>
+      <td class="k">auth &amp; sessions<br>permissions<br>any read after a write</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <h4>The two properties that make this a contract rather than a table</h4>
+  <p><strong>1 · The default is the safest cell, not the most useful one.</strong> Declaring nothing must yield
+  <em>private</em> — the same way <code>procedure()</code> already defaults <code>auth</code> to
+  <code>'required'</code> and <code>rateLimit</code> to <code>'api'</code>. <em>A forgotten declaration then
+  costs a cache hit, never a leak.</em></p>
+  <p><strong>2 · One vocabulary, both layers.</strong> The presets move to <code>@codex/constants</code> so a
+  worker and a SvelteKit load can name the same thing. <em>Today they cannot, which is why one says 300 seconds
+  and the other 60 for arguably the same content — and neither is wrong, because there was nothing to be wrong
+  about.</em></p>
+</div>
+
+<h2 id="enforce"><span class="n">SECTION 3</span>Where it is enforced</h2>
+
+<p class="lede"><strong>The enforcement point already exists and 199 routes already pass through it.</strong>
+<code>procedure()</code> declares auth, roles, org membership and rate limiting. Caching is the missing member of
+that set, not a new mechanism.</p>
+
+<h3>What the declaration looks like</h3>
+
+<pre>// today — caching is invisible, and nothing notices
+procedure({
+  policy: { auth: 'none' },
+  input:  { query: publicContentSchema },
+}, async (ctx) =&gt; { … })
+
+// with the contract — one line, and three things follow from it
+procedure({
+  policy: { auth: 'none', cache: 'public' },   // ← the whole declaration
+  input:  { query: publicContentSchema },
+}, async (ctx) =&gt; { … })
+//   ⇒ procedure() sets Cache-Control from the named preset
+//   ⇒ ctx.db is the CACHED Hyperdrive client
+//   ⇒ ctx.cacheWrite() threads waitUntil for you — the org-helpers defect
+//      becomes unconstructable rather than merely fixed</pre>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Rule</th><th>Enforced how</th><th>What it makes impossible</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Every route declares a cache policy.</strong></td>
+      <td class="k">a required field on<br><code>ProcedurePolicy</code>,<br>defaulting to <em>private</em></td>
+      <td class="good">A public route silently uncached — the organization-api defect. <em>It cannot recur
+      because the field cannot be absent.</em></td></tr>
+    <tr><td><strong>An authenticated route cannot be publicly cached.</strong></td>
+      <td class="k">a type-level pairing:<br><code>auth</code> ≠ <code>'none'</code> excludes<br><code>cache: 'public'</code></td>
+      <td class="good">The <code>app.use('*')</code> hazard — stamping <code>public</code> on eight
+      authenticated responses. <strong>A typecheck failure, not a review catch.</strong></td></tr>
+    <tr><td><strong>A cache write always outlives the response.</strong></td>
+      <td class="k"><code>ctx.cacheWrite()</code> on<br>the procedure context,<br>which owns
+      <code>executionCtx</code></td>
+      <td class="good">A cancelled <code>kv.put</code>. <em>The caller never touches
+      <code>waitUntil</code>, so it cannot be forgotten.</em></td></tr>
+    <tr><td><strong>Fresh reads get the uncached binding.</strong></td>
+      <td class="k">derived from the declaration<br>when <code>ctx.db</code> is built</td>
+      <td class="good">A stale read after a write. <em>Which binding to use stops being a per-call-site
+      judgement.</em></td></tr>
+    <tr><td><strong>Search inputs declare a minimum length.</strong></td>
+      <td class="k">a shared Zod builder in<br><code>@codex/validation</code></td>
+      <td class="good">A one-character query scanning every row — and, after
+      <code>pg_trgm</code>, a query below the three characters a trigram index needs.</td></tr>
+    <tr><td><strong>apps/web names the same presets.</strong></td>
+      <td class="k">the table moves to<br><code>@codex/constants</code>;<br>a lint rule replaces bare
+      <code>setHeaders</code></td>
+      <td class="good">Two layers disagreeing five-fold on the same content, and 23 files bypassing the
+      vocabulary that exists.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box ok">
+  <h4>Why this is the right place, in the codebase's own terms</h4>
+  <p><strong><code>procedure()</code> is already the answer to this question for three other concerns.</strong>
+  Auth is not a convention developers remember — it is <code>policy.auth</code>, defaulting to
+  <code>'required'</code>. Rate limiting is not a habit — it is <code>policy.rateLimit</code>, defaulting to
+  <code>'api'</code>. <em>Both default to the safe value, both are declared at the route, both are applied by one
+  piece of machinery.</em></p>
+  <p><strong>Caching is the same kind of concern and is currently handled the other way</strong> — by a
+  middleware in one worker, by hand in ten files, and not at all in five routes. <em>Adding it to the policy is
+  not a new pattern; it is finishing an existing one.</em></p>
+</div>
+
+<h2 id="wps"><span class="n">SECTION 4</span>Work packages</h2>
+
+<p class="lede">Eight packages. <strong>The first three build the contract; the point fixes from the decision
+then fall out of it as instances rather than as separate work.</strong> Ordered so nothing is enforced before its
+shape is settled.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>WP</th><th>What</th><th>Why here</th><th>Verifies by</th></tr></thead>
+  <tbody>
+    <tr><td class="wp">1</td>
+      <td><strong>Define the vocabulary in <code>@codex/constants</code>.</strong> <code>CACHE_PRESETS</code> +
+      <code>CachePresetName</code>, structurally identical to the existing
+      <code>RATE_LIMIT_PRESETS</code> at <code>limits.ts:147</code>. Four presets, matching the contract's four
+      rows.
+      <span class="tiny">Reconcile the numbers while doing it: apps/web's <code>DYNAMIC_PUBLIC</code> is
+      <code>s-maxage=300</code>, content-api's public middleware is 60. <strong>Pick per preset, deliberately,
+      and record why</strong> — content-api's comment already argues for 60 s on the grounds that a longer
+      window outlives KV's event-driven invalidation.</span></td>
+      <td class="k">nothing else can<br>be shared until<br>the names exist</td>
+      <td class="good">typecheck; no behaviour change yet</td></tr>
+
+    <tr><td class="wp">2</td>
+      <td><strong>Add <code>cache</code> to <code>ProcedurePolicy</code> and apply it in
+      <code>procedure()</code>.</strong> Default <em>private</em>. Type-level exclusion so
+      <code>auth</code> ≠ <code>'none'</code> cannot pair with <code>cache: 'public'</code>.
+      <span class="tiny">Model it on <code>helpers.ts:522-528</code>, where <code>auth</code> and
+      <code>rateLimit</code> already resolve to safe defaults. <strong>No route changes in this WP</strong> —
+      every existing site inherits <em>private</em>, which is what they effectively have today.</span></td>
+      <td class="k">the enforcement<br>point, before any<br>route relies on it</td>
+      <td class="good">existing suites unchanged; a new test asserts the default and the exclusion</td></tr>
+
+    <tr><td class="wp">3</td>
+      <td><strong>Declare the 8 public routes.</strong> 3 in content-api, 5 in organization-api. Delete
+      content-api's hand-rolled middleware — <code>procedure()</code> now does it.
+      <span class="tiny"><strong>This is where the decision's fix 1 lands, and it lands differently:</strong> not
+      "add a header to organization-api" but "declare what these routes are". <em>Scoping stops being a hazard —
+      there is no <code>app.use('*')</code> to mis-mount, so the 5-of-13 trap cannot happen.</em> Copy
+      content-api's negative-control test, which asserts an authenticated route does <em>not</em> say
+      <code>public</code>.</span></td>
+      <td class="k">first behaviour<br>change, and the<br>biggest single win</td>
+      <td class="good"><strong>runs with CI red</strong> — the tests mock <code>@codex/database</code></td></tr>
+
+    <tr><td class="wp">4</td>
+      <td><strong><code>ctx.cacheWrite()</code>, and route the two <code>org-helpers</code> writes through
+      it.</strong> The procedure context owns <code>executionCtx</code>; the helper takes a promise and threads
+      <code>waitUntil</code> once, centrally.
+      <span class="tiny">The decision's fix 2, made structural. <strong>Precedent to copy:</strong>
+      <code>fee-config-service.ts:647</code> already takes an optional <code>waitUntil</code> and guards it.
+      <em>Add the assertion its current suite lacks — <code>expect(kv.put).toHaveBeenCalledWith(…)</code> passes
+      with the bug, because a mock records the call and only the runtime cancels it.</em></span></td>
+      <td class="k">removes the whole<br>defect class, not<br>the two instances</td>
+      <td class="good">runs with CI red; effect-level test under <code>vitest-pool-workers</code></td></tr>
+
+    <tr><td class="wp">5</td>
+      <td><strong>Hyperdrive, with binding selection derived from the declaration.</strong> Two configs — cached
+      and <code>--caching-disabled</code> — nine <code>wrangler.jsonc</code> bindings, four of them doubled.
+      <code>ctx.db</code> resolves to the right one from <code>policy.cache</code>.
+      <span class="tiny">The decision's fix 3, plus the part that matters systemically: <strong>which binding to
+      use stops being a judgement at 199 call sites.</strong> Needs a dedicated Neon role and the
+      <strong>unpooled</strong> connection string — Hyperdrive is itself the pooler. <em>Verify with
+      <code>--remote</code>: neither pooling nor query caching runs under <code>wrangler dev</code>, so a green
+      local suite is no evidence here.</em> Gated on $5 Workers Paid.</span></td>
+      <td class="k">after the shape is<br>settled, so the<br>derivation is stable</td>
+      <td class="mid"><code>wrangler dev --remote</code> or a deployment; <code>cacheStatus</code> metric</td></tr>
+
+    <tr><td class="wp">6</td>
+      <td><strong><code>pg_trgm</code>, and a shared search-input builder.</strong> The extension and a GIN
+      index; then a single Zod builder in <code>@codex/validation</code> that every search input uses, carrying
+      the length floor.
+      <span class="tiny">Twelve <code>search: z.string()</code> declarations today; two set
+      <code>.min(1)</code>, none the three characters a trigram index needs. <strong>Gate at three in the client,
+      not with a server-side <code>.min(3)</code></strong> — a server minimum turns legal short searches into
+      400s. <em><code>CREATE INDEX CONCURRENTLY</code> is impossible with this repo's migration runner, which
+      sends each file as one <code>client.query()</code>; a plain index is fine at 36.6&#8202;MB.</em></span></td>
+      <td class="k">needs a live DB,<br>so it waits for the<br>quota either way</td>
+      <td class="mid">migration + a query-plan check that the index is used</td></tr>
+
+    <tr><td class="wp">7</td>
+      <td><strong>Bring apps/web onto the shared vocabulary.</strong> Re-point <code>CACHE_HEADERS</code> at
+      <code>@codex/constants</code>, then replace the 23 files calling <code>setHeaders</code> directly.
+      <span class="tiny"><strong>The layer that already had a convention is the one this fixes</strong> — 29
+      files use the table and 23 bypass it. <em>Note SvelteKit's own rule while doing it: headers set once, and a
+      parent must not set <code>Cache-Control</code> if a child will.</em></span></td>
+      <td class="k">after the names<br>exist and the worker<br>side proves them</td>
+      <td class="good">typecheck + the existing page-server suites</td></tr>
+
+    <tr><td class="wp">8</td>
+      <td><strong><code>placement</code>, conditional.</strong> One line in each of nine configs — <em>only if
+      the traffic reading shows meaningful non-European traffic.</em>
+      <span class="tiny">Currently unset in all eleven <code>wrangler.jsonc</code> files, and relevant to the
+      nine that are worker-runtime. <strong>Do not do this speculatively:</strong> for European traffic it
+      changes nothing and may make edge-served work marginally worse.</span></td>
+      <td class="k">gated on a reading,<br>not on the other WPs</td>
+      <td class="mid">p50/p95 by colo, before and after</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <h4>What is deliberately not a work package</h4>
+  <p><strong>Parallelising the access-check ladder.</strong> <code>access-decision.ts</code> has 13 awaited
+  checks and one <code>Promise.all</code> — and the sequential ones <em>short-circuit</em>, so parallelising
+  trades "sometimes one query" for "always four". <em>Someone already made that trade for the pair where it
+  pays and declined it for the rest. It is worth even less once WP5 lands and round trips are cheap.</em></p>
+  <p><strong>Anything that moves data.</strong> No second datastore, no projection, no read replica, no
+  sharding. <em>Which is also why the 59 test files that need a database need no structural change — and why
+  none of these packages can lose data: all eight touch how reads are served, and Neon's counters record zero
+  bytes written this period.</em></p>
+</div>
+
+<h2 id="gate"><span class="n">SECTION 5</span>The gate that stops drift</h2>
+
+<p class="lede">A contract that is not checked is a convention, and <strong>this investigation found three
+conventions that did not survive contact with the next file.</strong> One of those was documented in the very
+file that then violated it.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Check</th><th>Fails when</th><th>Where it runs</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Every <code>procedure()</code> declares a cache policy.</strong></td>
+      <td class="k">the field is absent<br>on any of ~199 sites</td>
+      <td class="good">typecheck — <em>it is a required field, so this is free</em></td></tr>
+    <tr><td><strong>No authenticated route is publicly cacheable.</strong></td>
+      <td class="k"><code>auth</code> ≠ <code>'none'</code><br>with <code>cache: 'public'</code></td>
+      <td class="good">typecheck — the pairing is excluded at the type level</td></tr>
+    <tr><td><strong>No hand-written <code>Cache-Control</code> anywhere.</strong></td>
+      <td class="k">a string literal with<br><code>max-age</code> outside<br>the presets file</td>
+      <td class="mid">a lint rule, or a grep in the static-analysis job</td></tr>
+    <tr><td><strong>No bare <code>kv.put</code> outside <code>ctx.cacheWrite()</code>.</strong></td>
+      <td class="k">a <code>.put(</code> on a KV<br>namespace in a request path</td>
+      <td class="mid">lint rule. <em>Five of six files already comply; this stops the sixth recurring</em></td></tr>
+    <tr><td><strong>Every search input uses the shared builder.</strong></td>
+      <td class="k">a bare <code>search: z.string()</code></td>
+      <td class="mid">lint rule</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box ok">
+  <h4>How this changes the answer to “how do I add a route?”</h4>
+  <p><strong>Today:</strong> read the surrounding file, notice whether it sets cache headers, guess whether
+  yours should, and hope the reviewer knows. <em>That is how five public routes ended up with no header while
+  three in another worker had thirteen references to one.</em></p>
+  <p><strong>After:</strong> answer one question — <em>who may see this response?</em> — and declare it. The
+  cache policy, the database binding and the write-through behaviour follow from that single word, and the wrong
+  combinations do not compile.</p>
+  <p class="tiny" style="margin-bottom:0"><strong>The test of whether this worked is not that the six defects are
+  fixed.</strong> It is that a year from now a new worker with public routes is cached correctly by someone who
+  never read this document. <em>That is the difference between a plan and a system.</em></p>
+</div>
+
+<footer>
+  <p><strong>Sequence.</strong> WP1–2 are additive and change no behaviour. <strong>WP3 and WP4 can be written
+  and verified today, while CI is red</strong> — both of their test files mock <code>@codex/database</code>.
+  WP5 waits on the $5 decision and a deployment; WP6 on a working database; WP7 follows WP1; WP8 on the traffic
+  reading. <em>The checks in §5 land with the WP that makes each one satisfiable, not at the end.</em></p>
+  <p class="tiny" style="margin-top:.6rem">Every figure here reads live against <code>origin/dev</code> — run
+  <code>node verify-actions.mjs</code> in this directory to re-derive them. The one exception is the 17% 504
+  rate, measured 2026-08-26 and labelled where it appears in <a href="./index.html">the decision</a>.</p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -6,6 +6,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { createSearchQuerySchema } from '../shared/search-schema';
 
 /**
  * Category (topic taxonomy) Validation Schemas
@@ -99,7 +100,7 @@ export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
  */
 export const categoryQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  search: z.string().max(255).optional(),
+  search: createSearchQuerySchema(255),
 });
 
 export type CategoryQueryInput = z.infer<typeof categoryQuerySchema>;

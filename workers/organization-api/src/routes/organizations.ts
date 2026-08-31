@@ -166,12 +166,18 @@ app.get(
  * Returns only public branding fields: { logoUrl, primaryColorHex }
  * Returns: PublicBrandingResponse (200)
  * Security: No auth required, rate limited
+ * Cache: `public` — org branding tokens, keyed entirely by the `:slug` in the
+ * path. `auth: 'none'` means no session is even resolved, so the body cannot
+ * differ between viewers. This route is NOT KV cache-aside (it calls
+ * `fetchPublicOrgInfo` directly), so the 60s CDN window is its only cache; the
+ * `/info` route below serves the same data through KV on a 30-minute TTL, which
+ * is the window this 60s one has to stay inside.
  * @returns {PublicBrandingResponse}
  */
 app.get(
   '/public/:slug',
   procedure({
-    policy: { auth: 'none' },
+    policy: { auth: 'none', cache: 'public' },
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx): Promise<PublicBrandingResponse> => {
       // Use fetchPublicOrgInfo — ctx.services.settings requires org context
@@ -336,13 +342,19 @@ async function fetchPublicOrgInfo(
  * GET /api/organizations/public/:slug/info
  * Public org info endpoint - no auth required
  *
- * Returns org identity + branding for the org layout (works without cookies).
+ * Returns org identity + branding for the org layout (works without cookies) —
+ * "works without cookies" is the same fact `cache: 'public'` states to a CDN.
  * Cached in KV for 30 minutes; invalidated on branding/settings updates.
+ *
+ * Cache: `public`. This is the read every org page's layout makes, so it is the
+ * single highest-volume beneficiary of a shared cache on the platform, and the
+ * 60s CDN window sits well inside the 30-minute KV TTL it fronts — a branding
+ * write bumps the KV version immediately and the edge catches up within 60s.
  */
 app.get(
   '/public/:slug/info',
   procedure({
-    policy: { auth: 'none' },
+    policy: { auth: 'none', cache: 'public' },
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx) => {
       const slug = ctx.input.params.slug;
@@ -386,11 +398,14 @@ app.get(
  *
  * Returns: OrganizationPublicStatsResponse (200)
  * Security: No auth required, API rate limited
+ * Cache: `public` — aggregate counts over PUBLISHED content, no viewer input
+ * beyond the `:slug`. The docstring already called it "lightweight, cacheable";
+ * before this change nothing on the wire said so.
  */
 app.get(
   '/public/:slug/stats',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: { params: z.object({ slug: createSlugSchema(255) }) },
     handler: async (ctx) => {
       const slug = ctx.input.params.slug;
@@ -429,11 +444,16 @@ app.get(
  *
  * Returns: PaginatedListResponse<{ name, username, avatarUrl, bio, socialLinks, role, joinedAt, contentCount, latestContent }> (200)
  * Security: No auth required, API rate limited
+ * Cache: `public` — the published creator roster. `page` and `limit` ride the
+ * QUERY STRING, which a shared cache keys on, so two pages cannot collide at the
+ * edge (the same reason the KV data slot carries `:page:limit`). No emails or
+ * internal user IDs are in the projection, which is what makes a shared copy
+ * safe as well as identical.
  */
 app.get(
   '/public/:slug/creators',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: {
       params: z.object({ slug: createSlugSchema(255) }),
       query: z
@@ -486,11 +506,14 @@ app.get(
  *
  * Returns: PaginatedListResponse<{ name, avatarUrl, role, joinedAt }> (200)
  * Security: No auth required, API rate limited
+ * Cache: `public` — the same shape as `/creators`, with `page`/`limit`/`role`
+ * all in the query string. NOT KV-cached (unlike `/creators`), so the 60s CDN
+ * window is this route's only cache; a membership change is visible within it.
  */
 app.get(
   '/public/:slug/members',
   procedure({
-    policy: { auth: 'none', rateLimit: 'api' },
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
     input: {
       params: z.object({ slug: createSlugSchema(255) }),
       query: z
@@ -582,7 +605,8 @@ app.patch(
 
         // The `slug -> organization id` cache read by
         // extractOrganizationFromSubdomain on every org-scoped request is
-        // stored WITHOUT a TTL, so a rename must delete both keys or the old
+        // stored with a 24h `expirationTtl` (a backstop, not a plan), so a rename
+        // must delete both keys or the old
         // subdomain keeps resolving and the new one is never populated
         // (Codex-kgrdp.23 defect 1).
         const slugIdKv = ctx.env.CACHE_KV;
@@ -662,7 +686,8 @@ app.delete(
         if (ctx.env.CACHE_KV) {
           const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
           invalidations.push(cache.invalidate(org.slug));
-          // Drop the TTL-less `slug -> id` entry too, so the freed hostname
+          // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too
+          // long to rely on here — so the freed hostname
           // stops resolving from cache (Codex-kgrdp.23 defect 1).
           invalidations.push(
             invalidateOrgSlugCacheEntry(ctx.env.CACHE_KV, org.slug)

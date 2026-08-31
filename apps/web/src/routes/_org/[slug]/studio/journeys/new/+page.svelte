@@ -8,8 +8,10 @@
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import * as m from '$paraglide/messages';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import { createJourney } from '$lib/remote/journeys.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
 
   const { data } = $props();
 
@@ -21,9 +23,23 @@
 
   const canSubmit = $derived(title.trim().length > 0 && !submitting);
 
-  const PAGE_TYPES: readonly { id: NewPageType; label: string; hint: string }[] = [
-    { id: 'course', label: 'Course', hint: 'A guided journey with stages, practices and a sales page.' },
-    { id: 'landing', label: 'Landing page', hint: 'A standalone marketing page with no curriculum.' },
+  // Lazy label + hint: this table is module-scope, so a message read here would
+  // resolve before the request's language tag is set. Called at render instead.
+  const PAGE_TYPES: readonly {
+    id: NewPageType;
+    label: () => string;
+    hint: () => string;
+  }[] = [
+    {
+      id: 'course',
+      label: () => m.studio_journey_new_type_course(),
+      hint: () => m.studio_journey_new_type_course_hint(),
+    },
+    {
+      id: 'landing',
+      label: () => m.studio_journey_new_type_landing(),
+      hint: () => m.studio_journey_new_type_landing_hint(),
+    },
   ];
 
   async function handleSubmit(event: SubmitEvent): Promise<void> {
@@ -32,45 +48,68 @@
     submitting = true;
     try {
       const { id } = await createJourney({ title: title.trim(), pageType });
-      toast.success('Journey created');
+      toast.success(m.studio_journey_new_toast_created());
       // Courses go to the curriculum first; landing pages straight to the builder.
       const next = pageType === 'course' ? 'curriculum' : 'page';
       await goto(`/studio/journeys/${id}/${next}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create journey');
+      /*
+        THROUGH `queryErrorMessage`, and the `instanceof Error` test it replaces
+        was dead code for every failure this command can actually produce.
+
+        SvelteKit rejects a remote call with `HttpError`, and `HttpError` does NOT
+        extend `Error` (`@sveltejs/kit/src/exports/internal/index.js` — a plain
+        class holding `{ status, body: { message } }`). So `err instanceof Error`
+        was FALSE for every `error(status, message)` the create path raises, and
+        the creator always got the generic fallback instead of the reason:
+        `createJourney`'s own "Journeys can only be created within an
+        organization", and every 4xx the worker forwards — a slug space
+        exhausted, a title the save schema refuses, a 403 for an org the session
+        does not manage. The one shape it DID catch (a network `TypeError`) is
+        the one with nothing useful to say.
+
+        `queryErrorMessage` reads `.body.message` first, falls back to a
+        top-level `.message`, and returns the fallback for anything else — so all
+        three rejection shapes land on the most specific text available
+        (Codex-xo3bl).
+      */
+      toast.error(
+        queryErrorMessage(err, m.studio_journey_new_toast_failed()) ??
+          m.studio_journey_new_toast_failed()
+      );
       submitting = false;
     }
   }
 </script>
 
 <svelte:head>
-  <title>New portal | {data.org.name}</title>
+  <title>{m.studio_journey_new_title()} | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="new-journey">
-  <nav class="new-journey__crumbs" aria-label="Breadcrumb">
-    <a href="/studio/journeys">Portals</a>
+  <nav class="new-journey__crumbs" aria-label={m.studio_journey_new_breadcrumb()}>
+    <a href="/studio/journeys">{m.studio_journey_new_portals()}</a>
     <span aria-hidden="true">/</span>
-    <span aria-current="page">New</span>
+    <span aria-current="page">{m.studio_journey_new_crumb()}</span>
   </nav>
 
-  <h1 class="new-journey__title">Create a portal</h1>
+  <h1 class="new-journey__title">{m.studio_journey_new_heading()}</h1>
 
   <form class="new-journey__form" onsubmit={handleSubmit}>
     <label class="new-journey__field">
-      <span class="new-journey__label">Title</span>
+      <span class="new-journey__label">{m.studio_journey_new_title_label()}</span>
       <input
         type="text"
         class="new-journey__input"
-        placeholder="e.g. Stillness — a 6-week descent"
+        placeholder={m.studio_journey_new_title_placeholder()}
         bind:value={title}
         autocomplete="off"
       />
     </label>
 
     <fieldset class="new-journey__field new-journey__types">
-      <legend class="new-journey__label">Type</legend>
+      <legend class="new-journey__label">{m.studio_journey_new_type_label()}</legend>
       {#each PAGE_TYPES as t (t.id)}
         <label class="new-journey__type" class:new-journey__type--active={pageType === t.id}>
           <input
@@ -80,16 +119,16 @@
             checked={pageType === t.id}
             onchange={() => (pageType = t.id)}
           />
-          <span class="new-journey__type-label">{t.label}</span>
-          <span class="new-journey__type-hint">{t.hint}</span>
+          <span class="new-journey__type-label">{t.label()}</span>
+          <span class="new-journey__type-hint">{t.hint()}</span>
         </label>
       {/each}
     </fieldset>
 
     <div class="new-journey__actions">
-      <a href="/studio/journeys" class="new-journey__btn new-journey__btn--ghost">Cancel</a>
+      <a href="/studio/journeys" class="new-journey__btn new-journey__btn--ghost">{m.studio_journey_new_cancel()}</a>
       <button type="submit" class="new-journey__btn new-journey__btn--primary" disabled={!canSubmit}>
-        {submitting ? 'Creating…' : 'Create & continue'}
+        {submitting ? m.studio_journey_new_submitting() : m.studio_journey_new_submit()}
       </button>
     </div>
   </form>

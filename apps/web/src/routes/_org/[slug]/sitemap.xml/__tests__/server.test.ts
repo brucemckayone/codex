@@ -5,6 +5,8 @@
  *  - HTTP shape (404 on missing org, 200 + XML on valid org, cache headers)
  *  - Static URLs always emitted (/, /explore, /creators) when org exists
  *  - Content items enumerated from createServerApi().content.getPublicContent
+ *  - Published JOURNEY sell pages enumerated from
+ *    createServerApi().access.listPublishedJourneys, ranked above content
  *  - lastmod sourced from publishedAt then updatedAt
  *  - MAX_SITEMAP_URLS cap enforced (500 — 3 static + 497 content)
  *  - Pagination terminates on short batch
@@ -15,15 +17,24 @@
  * locks in the structural contract).
  */
 
+import { CACHE_PRESETS } from '@codex/constants';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetPublicInfo = vi.fn();
 const mockGetPublicContent = vi.fn();
+const mockListPublishedJourneys = vi.fn();
 
+// `access` was ADDED to this factory when journey sell pages entered the sitemap.
+// It is not optional politeness: a vi.mock factory is CLOSED, so the moment the
+// route reached for `api.access.listPublishedJourneys` every one of the 19 cases
+// below would have died on "Cannot read properties of undefined" — and the runner
+// names only the first. Any future api namespace the route consumes must be added
+// here in the same change.
 vi.mock('$lib/server/api', () => ({
   createServerApi: () => ({
     org: { getPublicInfo: mockGetPublicInfo },
     content: { getPublicContent: mockGetPublicContent },
+    access: { listPublishedJourneys: mockListPublishedJourneys },
   }),
 }));
 
@@ -45,6 +56,9 @@ const ORG_ID = 'org-abc-123';
 describe('org sitemap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default to NO journeys, so every pre-existing case keeps asserting exactly
+    // what it asserted before this feature existed. Cases that care opt in.
+    mockListPublishedJourneys.mockResolvedValue([]);
   });
 
   describe('org resolution', () => {
@@ -110,18 +124,21 @@ describe('org sitemap', () => {
       );
     });
 
-    it('sets Cache-Control to public + 30min max-age + 1d SWR', async () => {
+    it('sets Cache-Control to CACHE_PRESETS.static, byte for byte', async () => {
+      // WAS `max-age=1800, s-maxage=1800` — 30 minutes, half the platform
+      // sitemap's window, on the stated grounds that "org content churns
+      // faster". Both values already carried `stale-while-revalidate=86400`,
+      // so the observable staleness bound moved by 2% while the origin render
+      // count doubled; the route now takes the one shared preset. Asserted
+      // against the preset, not against re-typed directives, so the window is
+      // argued for in exactly one place.
       const response = await GET(
         makeEvent({
           origin: 'https://yoga-studio.revelations.studio/sitemap.xml',
           slug: 'yoga-studio',
         })
       );
-      const cacheControl = response.headers.get('cache-control') ?? '';
-      expect(cacheControl).toContain('public');
-      expect(cacheControl).toContain('max-age=1800');
-      expect(cacheControl).toContain('s-maxage=1800');
-      expect(cacheControl).toContain('stale-while-revalidate=86400');
+      expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.static);
     });
   });
 
@@ -381,5 +398,89 @@ describe('org sitemap', () => {
       const urlEntries = body.match(/<url>/g) ?? [];
       expect(urlEntries.length).toBe(3);
     });
+  });
+});
+
+describe('org sitemap — published journey sell pages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPublicInfo.mockResolvedValue({ id: ORG_ID });
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockListPublishedJourneys.mockResolvedValue([]);
+  });
+
+  async function body(): Promise<string> {
+    const response = await GET(
+      makeEvent({
+        origin: 'https://obab.revelations.studio/sitemap.xml',
+        slug: 'obab',
+      })
+    );
+    return await response.text();
+  }
+
+  it('emits one <url> per published journey, at the LANDING-PAGE slug', async () => {
+    // `slug` on JourneyCardView is the landing-page slug, which is what
+    // `/journeys/:slug` resolves. `courseSlug` is a DIFFERENT key-space that
+    // drifts, and a link built from it resolves to nothing — the same defect the
+    // renderer's checkout URL had. This asserts we used the right one.
+    mockListPublishedJourneys.mockResolvedValue([
+      { slug: 'bone-deep', courseSlug: 'a-different-course-slug' },
+    ]);
+    const xml = await body();
+    expect(xml).toContain(
+      '<loc>https://obab.revelations.studio/journeys/bone-deep</loc>'
+    );
+    expect(xml).not.toContain('a-different-course-slug');
+  });
+
+  it('ranks a journey ABOVE a content item', async () => {
+    mockListPublishedJourneys.mockResolvedValue([{ slug: 'bone-deep' }]);
+    mockGetPublicContent.mockResolvedValue({ items: [{ slug: 'a-practice' }] });
+    const xml = await body();
+    const journeyAt = xml.indexOf('/journeys/bone-deep');
+    const contentAt = xml.indexOf('/content/a-practice');
+    expect(journeyAt).toBeGreaterThan(-1);
+    expect(contentAt).toBeGreaterThan(-1);
+    // Emitted first AND weighted higher — a sell page is the landing target a
+    // crawler should reach before the practices behind it.
+    expect(journeyAt).toBeLessThan(contentAt);
+    expect(xml).toContain('<priority>0.8</priority>');
+  });
+
+  it('emits NO <lastmod> for a journey, because the projection has no date', async () => {
+    // Inventing one (e.g. "now") would tell a crawler the page changed on every
+    // fetch, which is worse than telling it nothing. If JourneyCardView ever
+    // gains a real date, this assertion is the thing to revisit deliberately.
+    mockListPublishedJourneys.mockResolvedValue([{ slug: 'bone-deep' }]);
+    const xml = await body();
+    const entry = xml.slice(
+      xml.indexOf('/journeys/bone-deep') - 200,
+      xml.indexOf('/journeys/bone-deep') + 200
+    );
+    expect(entry).not.toContain('<lastmod>');
+  });
+
+  it('degrades to omitting journeys when the read fails, rather than 500ing', async () => {
+    // A sitemap missing a section is recoverable; one that 500s is not indexed at
+    // all. Same reasoning as the content loop's own catch.
+    mockListPublishedJourneys.mockRejectedValue(new Error('worker down'));
+    mockGetPublicContent.mockResolvedValue({ items: [{ slug: 'a-practice' }] });
+    const response = await GET(
+      makeEvent({
+        origin: 'https://obab.revelations.studio/sitemap.xml',
+        slug: 'obab',
+      })
+    );
+    expect(response.status).toBe(200);
+    const xml = await response.text();
+    expect(xml).toContain('/content/a-practice');
+    expect(xml).not.toContain('/journeys/');
+  });
+
+  it('escapes XML reserved characters in a journey slug', async () => {
+    mockListPublishedJourneys.mockResolvedValue([{ slug: 'a&b' }]);
+    const xml = await body();
+    expect(xml).toContain('/journeys/a&amp;b');
   });
 });

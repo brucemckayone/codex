@@ -9,23 +9,43 @@
   same way.
 -->
 <script lang="ts">
+  import * as m from '$paraglide/messages';
   import {
     listSectionDefinitions,
     sectionMatchesQuery,
     type SectionDefinition,
   } from '$lib/page-builder';
   import { SearchIcon } from '$lib/components/ui/Icon';
+  import { sectionIcon } from './section-icons';
 
   interface Props {
     /** Add a section of this type to the page. */
     onadd: (type: string) => void;
     /** Close the picker without adding. */
     onclose?: () => void;
+    /**
+     * Take focus on mount.
+     *
+     * OFF by default, and the default is the interesting half. In the rail the
+     * picker is a DISCLOSURE: it opens below the "Add section" button it is next
+     * to, so the natural next Tab already reaches it and moving focus would take
+     * it away from a creator who only wanted to look. In the CANVAS it is a
+     * floating popover rendered at the very end of the component, hundreds of tab
+     * stops from the toolbar button that opened it — there, not taking focus means
+     * the control is effectively keyboard-unreachable. Same component, opposite
+     * correct answer, so it is the caller's call.
+     */
+    focusOnMount?: boolean;
   }
 
-  const { onadd, onclose }: Props = $props();
+  const { onadd, onclose, focusOnMount = false }: Props = $props();
 
   let query = $state('');
+  let searchInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    if (focusOnMount) searchInput?.focus();
+  });
 
   const matches = $derived<readonly SectionDefinition[]>(
     listSectionDefinitions().filter((def) => sectionMatchesQuery(def, query))
@@ -39,14 +59,15 @@
   }
 </script>
 
-<div class="add-picker" role="group" aria-label="Add a section">
+<div class="add-picker" role="group" aria-label={m.studio_builder_add_section()}>
   <div class="add-picker__search">
     <SearchIcon size={15} />
     <input
+      bind:this={searchInput}
       type="text"
       class="add-picker__input"
-      placeholder="Search sections…"
-      aria-label="Search sections"
+      placeholder={m.studio_builder_add_section_search_placeholder()}
+      aria-label={m.studio_builder_add_section_search()}
       bind:value={query}
       onkeydown={onKeydown}
     />
@@ -55,9 +76,12 @@
   {#if matches.length > 0}
     <ul class="add-picker__list" role="list">
       {#each matches as def (def.type)}
+        <!-- A design-system icon, not the catalogue's glyph string. `IconBase`
+             marks it aria-hidden, so the row is named by its label alone. -->
+        {@const Icon = sectionIcon(def.type)}
         <li>
           <button type="button" class="add-picker__item" onclick={() => onadd(def.type)}>
-            <span class="add-picker__glyph" aria-hidden="true">{def.icon}</span>
+            <span class="add-picker__glyph"><Icon size={16} /></span>
             <span class="add-picker__text">
               <span class="add-picker__label">{def.label}</span>
               <span class="add-picker__summary">{def.summary}</span>
@@ -67,7 +91,7 @@
       {/each}
     </ul>
   {:else}
-    <p class="add-picker__empty">No sections match “{query}”.</p>
+    <p class="add-picker__empty">{m.studio_builder_add_section_no_match({ query })}</p>
   {/if}
 </div>
 
@@ -90,7 +114,9 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
     background-color: var(--color-surface-secondary);
-    color: var(--color-text-muted);
+    /* Paints the search glyph, which is the only thing marking this box as a
+       search field — WCAG 1.4.11's 3:1 non-text floor, not decoration. */
+    color: var(--color-text-secondary);
   }
 
   .add-picker__input {
@@ -107,6 +133,11 @@
     outline: none;
   }
 
+  /* The ONE muted string this file keeps, and the guard in
+     `components/page-builder/panel-contrast.test.ts` allow-lists `::placeholder`
+     for exactly this reason: placeholder text must read as ABSENT so a creator
+     can tell an empty field from a filled one. Mirrors
+     `SectionEditor.svelte`'s note on the same exemption. */
   .add-picker__input::placeholder {
     color: var(--color-text-muted);
   }
@@ -153,7 +184,6 @@
     height: var(--space-6);
     flex-shrink: 0;
     color: var(--color-text-secondary);
-    font-size: var(--text-sm);
   }
 
   .add-picker__text {
@@ -169,16 +199,23 @@
     color: var(--color-text);
   }
 
+  /* The one-line description that distinguishes one catalogue entry from
+     another — "A montage of moments / practices from inside the journey." It is
+     what a creator reads to CHOOSE, so it cannot be the weakest ink on the
+     panel: muted measures 2.52:1 light / 3.19:1 dark at `--text-xs` against a
+     4.5 floor, secondary 7.81 / 10.21 (Codex-6nb7i). */
   .add-picker__summary {
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     line-height: var(--leading-snug);
   }
 
+  /* The no-results state. An empty-state message is the only text on screen
+     when it shows, so it is never decoration. */
   .add-picker__empty {
     margin: 0;
     padding: var(--space-2);
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 </style>

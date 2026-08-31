@@ -317,6 +317,180 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Process and store a COURSE (journey) HERO image — the still the sales page's
+   * loudest section paints (Codex-490z7, contract amendment A32).
+   *
+   * WHY THIS EXISTS AT ALL. `courses.heroMediaId` is a `media_items` ref, and
+   * that table is CHECK-constrained to ('video','audio'), so the "hero image" a
+   * creator picked there was really the auto-generated POSTER FRAME of a video.
+   * A creator who owned a photograph and no film could not put it in their own
+   * hero. A32's chain is therefore `heroImageKey ?? heroMediaId's poster ??
+   * synthetic plate`, and this method produces the first link.
+   *
+   * Deliberately the same shape as {@link processCourseCover} — same sm/md/lg
+   * WebP → R2 pipeline, same "the caller owns the DB write" split
+   * (`CourseJourneyService.setCourseHeroImageKey` persists the returned key
+   * org-scoped, so no scope logic is duplicated in the image layer), and the same
+   * `courses/{id}/…` namespace so both stills a course owns live together.
+   *
+   * TWO deliberate differences from the cover, both about SIZE:
+   *   • The returned `url` is the **lg** variant, not `md`. A cover fills a card;
+   *     a hero paints edge to edge, and handing back the 400px variant would show
+   *     the creator a soft preview of the image the page will not use.
+   *   • `lg` is 800px wide (`VARIANT_WIDTHS`), which is the widest this pipeline
+   *     produces. On a 1440px viewport a full-bleed hero upscales it. That is a
+   *     known limit of the shared variant ladder, NOT of this key: the ladder is
+   *     the same one every other still in the product rides, and widening it
+   *     would re-encode every existing image. Recorded here so the next reader
+   *     does not mistake the softness for a bug in the hero path.
+   *
+   * Keys are namespaced by `courseId` (`courses/{id}/hero/{size}.webp`) and are
+   * therefore deterministic: re-uploading OVERWRITES in place, so replacing a
+   * hero never orphans an R2 object — the same property the cover relies on.
+   *
+   * @param courseId - Owning course (keys are namespaced under it)
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `heroImageKey` to address a specific variant.
+   */
+  async processCourseHero(
+    courseId: string,
+    file: File
+  ): Promise<{
+    heroImageKey: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
+    //
+    // `allowSvg: false` matches every other variant-ladder caller and is not an
+    // oversight: `processImageVariants` decodes through Photon, which cannot
+    // rasterise SVG, so an SVG here would fail in the Wasm decoder rather than at
+    // the boundary. The one path that DOES accept SVG (`processOrgLogo`) stores
+    // the sanitized markup verbatim instead of producing variants.
+    const { buffer } = await validateImageFile(file, false);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const heroImageKey = `courses/${courseId}/hero`;
+    const keys: VariantKeys = {
+      sm: `${heroImageKey}/sm.webp`,
+      md: `${heroImageKey}/md.webp`,
+      lg: `${heroImageKey}/lg.webp`,
+    };
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Course hero',
+    });
+
+    return {
+      heroImageKey,
+      // The lg variant — the hero serves `${key}/lg.webp`, so the
+      // immediately-usable URL matches what renders (see the doc comment).
+      url: `${this.r2PublicUrlBase}/${keys.lg}`,
+      size: variants.lg.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
+   * Process and store a COURSE (journey) SIGNATURE image — the guide's sign-off
+   * mark that `guide.letter` closes with (Codex-wqxv4's named-slot half).
+   *
+   * WHY THIS EXISTS AT ALL, and it is the sharpest case of the three stills.
+   * `courses.signatureMediaId` is a `media_items` ref, and that table is
+   * CHECK-constrained to ('video','audio'), so the "signature" a creator could
+   * pick there was the auto-generated POSTER FRAME of a video. A signature is a
+   * scan of ink — nobody films one — so unlike the hero (where a film's frame is
+   * at least a plausible still) that slot could never hold the thing it named.
+   * The `letter` composition has described signing off with the guide's mark
+   * since it shipped, and rendered typeset text alone.
+   *
+   * Deliberately the same shape as {@link processCourseHero} and
+   * {@link processCourseCover} — same sm/md/lg WebP → R2 pipeline, same "the
+   * caller owns the DB write" split (`CourseJourneyService.
+   * setCourseSignatureImageKey` persists the returned key org-scoped), and the
+   * same `courses/{id}/…` namespace so every still a course owns lives together.
+   *
+   * ONE deliberate difference, and it is about SIZE in the opposite direction
+   * from the hero: the returned `url` is the **md** (400px) variant. A signature
+   * is a small inline mark — `GuideSection`'s `.guide__sig` is sized by HEIGHT
+   * (`calc(var(--jp-heading-size) * 1.6)`, so roughly 50–100px depending on the
+   * `type` axis) with `width: auto`, which puts a typically-wide mark somewhere
+   * around 200–400 CSS px. `md` covers that at 1x and most of it at 2x; `sm`
+   * (200px) would be soft on any retina display, and `lg` would ship 800px for a
+   * mark that is never painted that wide.
+   *
+   * A NOTE ON TRANSPARENCY, because it decides what a creator should upload: the
+   * variant ladder encodes WebP, which keeps an alpha channel, so a PNG of ink on
+   * transparency survives the round trip and sits on the letter's own background.
+   * A JPEG cannot carry alpha and will arrive as ink on a white rectangle — that
+   * is a property of the source file, not of this pipeline, so the panel's hint
+   * says so rather than this method trying to key out a background.
+   *
+   * Keys are namespaced by `courseId` (`courses/{id}/signature/{size}.webp`) and
+   * are therefore deterministic: re-uploading OVERWRITES in place, so replacing a
+   * signature never orphans an R2 object.
+   *
+   * @param courseId - Owning course (keys are namespaced under it)
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `signatureImageKey` to address a specific variant.
+   */
+  async processCourseSignature(
+    courseId: string,
+    file: File
+  ): Promise<{
+    signatureImageKey: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
+    //
+    // `allowSvg: false` matches every other variant-ladder caller, and here it
+    // costs something real worth naming: a signature is exactly the kind of mark
+    // that is often an SVG. It still cannot come through this path, because
+    // `processImageVariants` decodes via Photon, which cannot rasterise SVG — an
+    // SVG would fail inside the Wasm decoder rather than at this boundary. The
+    // one path that DOES accept SVG (`processOrgLogo`) stores the sanitized
+    // markup verbatim instead of producing variants, and that is the shape a
+    // future vector signature would have to take.
+    const { buffer } = await validateImageFile(file, false);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const signatureImageKey = `courses/${courseId}/signature`;
+    const keys: VariantKeys = {
+      sm: `${signatureImageKey}/sm.webp`,
+      md: `${signatureImageKey}/md.webp`,
+      lg: `${signatureImageKey}/lg.webp`,
+    };
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Course signature',
+    });
+
+    return {
+      signatureImageKey,
+      // The md variant — the letter serves `${key}/md.webp`, so the
+      // immediately-usable URL matches what renders (see the doc comment).
+      url: `${this.r2PublicUrlBase}/${keys.md}`,
+      size: variants.md.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
    * Process and store user avatar
    * Uploads to R2 and updates user record
    */

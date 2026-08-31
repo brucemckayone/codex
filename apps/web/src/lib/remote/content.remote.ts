@@ -10,7 +10,11 @@
  * - Typed error handling
  */
 
-import { checkContentSlugSchema, contentQuerySchema } from '@codex/validation';
+import {
+  checkContentSlugSchema,
+  contentQuerySchema,
+  createSearchQuerySchema,
+} from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -162,7 +166,7 @@ const publicContentQueryParamsSchema = z.object({
     .max(120)
     .regex(/^[\p{L}\p{N}-]+$/u)
     .optional(),
-  search: z.string().max(255).optional(),
+  search: createSearchQuerySchema(255),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
   creatorId: z.string().uuid().optional(),
   featured: z.boolean().optional(),

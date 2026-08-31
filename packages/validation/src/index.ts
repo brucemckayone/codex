@@ -47,5 +47,7 @@ export * from './schemas/subscription';
 export * from './schemas/transcoding';
 // Shared schemas (pagination, etc)
 export * from './shared/pagination-schema';
+// Free-text search: the one builder + the client-side length floor (Codex-k618q)
+export * from './shared/search-schema';
 // Text extraction utilities (TipTap JSON → plain text)
 export * from './text';

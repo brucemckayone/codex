@@ -194,6 +194,42 @@
     }
   }
 
+  /* ── Full-bleed OPT-IN ─────────────────────────────────────────────
+     A studio route asks for the shell's edges by putting
+     `data-studio-fullbleed` on its own root element. Today exactly one does:
+     the journey page builder, which is a `100dvh` three-pane workspace. Inside
+     the padded column above it overflowed its own container by twice the
+     padding — measured at a 1440x900 viewport, document scrollHeight 948
+     against clientHeight 900, so the bottom of all three panes sat below the
+     fold and the studio grew a scrollbar for a surface that is meant to fill
+     the window exactly.
+
+     IT IS AN OPT-IN AND MUST STAY ONE. The rule above is the one place the
+     studio content width is decided ("NO exceptions any more") and every other
+     studio page depends on it; a route that does not carry the attribute is
+     not matched by `:has(> …)` and is byte-identical to before. Keyed on the
+     attribute rather than on `page.url.pathname` so the shell needs no list of
+     which routes are full-bleed, and on a DIRECT child so a nested element
+     cannot claim the shell's edges by accident.
+
+     IT IS ONLY ABOUT THE EDGES, deliberately. Handing the route a
+     `minmax(0, 1fr)` grid row as well — so it could say `height: 100%` and stop
+     naming a viewport unit at all — was tried and reverted: `.org-main` above this
+     shell is a plain block with auto height, so `.studio-layout` has a
+     `min-height` and no definite height, its `1fr` row sizes to CONTENT, and a
+     `height: 100%` child asks a circular question. Measured at a 900px viewport,
+     the builder grew to 3532px and every pane lost its internal scroll. Making
+     `100%` meaningful means giving `.org-main` a definite height, which is a
+     different file and a wider blast radius than this opt-in deserves.
+
+     `overflow-x: clip` is deliberately inherited, not reverted: a full-bleed
+     route still must not give the studio a horizontal scrollbar. Its own chrome
+     wraps instead — see the builder's `.jb__top` and `.jb__modes`. */
+  .studio-layout__main:has(> :global([data-studio-fullbleed])) {
+    padding: 0;
+    max-width: none;
+  }
+
   /* ── Mobile-only top bar ───────────────────────────────────────── */
   .studio-topbar {
     display: flex;

@@ -12,6 +12,12 @@
   studio builder renders this component inside a preview iframe, where it stays
   parked off-screen and inert so it never covers the builder chrome or fights
   its own scroll. Under reduced motion it snaps in without the slide.
+
+  IT YIELDS TO THE REAL OFFER. Two conditions, not one: past the fold AND the
+  page's own conversion section is not on screen. The pill's whole justification
+  is being a stand-in for a CTA the reader cannot currently see, so it has no
+  business covering the offer itself — see `shown` below for what it was doing
+  before.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -24,11 +30,46 @@
     label: string;
     /** CTA button text. */
     ctaText: string;
+    /**
+     * The element the pill must not cover, as a selector. Default: the `invite`
+     * section — the page's actual conversion moment.
+     *
+     * A SELECTOR rather than a bound element because the pill is a LATER SIBLING
+     * of `SectionRenderer`'s whole output: it has no reference to any section, and
+     * threading one up through the section loop would put presentation state into
+     * the render context for one consumer. Pass `''` to opt out entirely.
+     */
+    hideWhenVisible?: string;
   }
 
-  const { href, label, ctaText }: Props = $props();
+  const {
+    href,
+    label,
+    ctaText,
+    hideWhenVisible = '[data-section-type="invite"]',
+  }: Props = $props();
 
-  let shown = $state(false);
+  /** Past the first viewport — the reader has left the hero's own CTA behind. */
+  let pastFold = $state(false);
+  /** The real offer is on screen, so the stand-in stands down. */
+  let yielding = $state(false);
+
+  /*
+    `shown` was `window.scrollY > window.innerHeight * 0.5` and NOTHING ever
+    unset it, so the pill stayed up for the entire remainder of the page —
+    including the very bottom, where the `invite` section lives. It is
+    `position: fixed; bottom: var(--space-5); z-index: var(--z-fixed)` and paints
+    above every section, which produced two real collisions:
+
+      1. on a phone it sat over the bottom of the invite offers grid and its
+         `CtaLink`s — the page's actual conversion controls;
+      2. the `invite: sticky` composition pins its own action bar at
+         `position: sticky; bottom: var(--space-4); z-index: 2`, inside `.jp-sec`'s
+         ISOLATED stacking context — so it loses to the pill regardless of the
+         `2`, and the reader gets two overlapping bottom-anchored "join"
+         affordances about 4px apart.
+  */
+  const shown = $derived(pastFold && !yielding);
 
   onMount(() => {
     // Real top-level visitors only. In the studio builder's preview iframe
@@ -38,7 +79,7 @@
     let ticking = false;
     const update = () => {
       ticking = false;
-      shown = window.scrollY > window.innerHeight * 0.5;
+      pastFold = window.scrollY > window.innerHeight * 0.5;
     };
     const onScroll = () => {
       if (!ticking) {
@@ -49,7 +90,34 @@
 
     window.addEventListener('scroll', onScroll, { passive: true });
     update();
-    return () => window.removeEventListener('scroll', onScroll);
+
+    // Guarded exactly as `reveal.ts` guards its own observer: no
+    // IntersectionObserver (or no such element on the page — a journey with no
+    // `invite` section) falls back to the fold test alone, which is today's
+    // behaviour rather than a permanently hidden pill.
+    let observer: IntersectionObserver | undefined;
+    const target = hideWhenVisible
+      ? document.querySelector(hideWhenVisible)
+      : null;
+    if (target && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) yielding = entry.isIntersecting;
+        },
+        // Threshold 0 with a POSITIVE bottom margin, which grows the root
+        // DOWNWARD: the pill retreats just before the offer scrolls into view
+        // rather than after it, so the two are never on screen together even for
+        // one frame. A negative bottom margin would do the opposite — delay the
+        // yield until the offer was already partly under the pill.
+        { threshold: 0, rootMargin: '0px 0px 12% 0px' }
+      );
+      observer.observe(target);
+    }
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      observer?.disconnect();
+    };
   });
 </script>
 

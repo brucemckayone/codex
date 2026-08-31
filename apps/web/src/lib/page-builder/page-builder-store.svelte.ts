@@ -124,10 +124,24 @@ function indexOf(id: string): number {
   return state.pending?.sections.findIndex((s) => s.id === id) ?? -1;
 }
 
-// ── Undo / redo (section-model history) ───────────────────────────────────────
+// ── Undo / redo (whole-draft history) ────────────────────────────────────────
 // snapshot() captures `pending` BEFORE a discrete action; snapshotEdit() coalesces
 // a burst of typing into ONE step (mirrors the prototype's snap()/snapEdit()).
-// Scoped to the section model — the same scope the prototype's history covers.
+//
+// SCOPE: EVERY mutator takes a step. It used to be "scoped to the section model —
+// the same scope the prototype's history covers", and that scope was a data-loss
+// bug rather than a limitation, because undo replaces the WHOLE `pending` object
+// (see {@link undo}) while only SOME mutators recorded one. So the page title, the
+// status select, the brand overrides, the SEO bag and the one-off price were not
+// undoable AND were silently reverted to stale values by an undo aimed at a
+// section: the snapshot a section edit took carried the OLD title and price, and
+// restoring it took back edits the author had made since, with nothing on screen
+// to say so. A history that is narrower than what it restores can only destroy.
+//
+// If a future mutator is added, it takes a snapshot too — `snapshotEdit()` when
+// its call site is keystroke-driven (`oninput`), `snapshot()` for a discrete
+// action. When in doubt use `snapshotEdit()`: over-coalescing costs granularity,
+// under-recording costs the author their work.
 
 const history = $state<{ undo: PageBuilderState[]; redo: PageBuilderState[] }>({
   undo: [],
@@ -135,33 +149,63 @@ const history = $state<{ undo: PageBuilderState[]; redo: PageBuilderState[] }>({
 });
 const MAX_HISTORY = 80;
 let burstTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * WHICH field the open typing burst belongs to.
+ *
+ * A burst used to be global: any `snapshotEdit()` within 600ms of any other
+ * folded into the same step. That was harmless while only section props used it,
+ * and destructive the moment page-level edits did — typing a title and then
+ * setting a price two seconds later became ONE step, so a single undo aimed at
+ * the price also took back the rename. Which is the very failure this history is
+ * being widened to prevent, reintroduced through the coalescing window instead of
+ * through a missing snapshot.
+ *
+ * So a burst coalesces only while consecutive edits target the SAME field. A
+ * different field, or any discrete action, seals it.
+ */
+let burstKey: string | null = null;
+
+/** Close any open typing burst, so the next edit starts its own step. */
+function sealBurst(): void {
+  if (burstTimer) clearTimeout(burstTimer);
+  burstTimer = null;
+  burstKey = null;
+}
 
 function clearHistory(): void {
   history.undo = [];
   history.redo = [];
-  if (burstTimer) {
-    clearTimeout(burstTimer);
-    burstTimer = null;
-  }
+  sealBurst();
 }
 
 /** Capture the pre-mutation `pending` as one undo step (a discrete action). */
 function snapshot(): void {
   if (!state.pending) return;
+  // A discrete action ends whatever was being typed: without this, an edit
+  // arriving within 600ms AFTER it would find the burst still open and fold
+  // itself into the discrete step.
+  sealBurst();
   history.undo.push(clone(state.pending));
   if (history.undo.length > MAX_HISTORY) history.undo.shift();
   history.redo = [];
 }
 
-/** Capture once per typing burst — coalesces keystrokes into a single step. */
-function snapshotEdit(): void {
-  if (burstTimer) {
+/**
+ * Capture once per typing burst — coalesces consecutive keystrokes ON ONE FIELD
+ * into a single step. `key` identifies that field; edits under different keys are
+ * separate steps however close together they arrive.
+ */
+function snapshotEdit(key: string): void {
+  if (burstTimer && burstKey === key) {
     clearTimeout(burstTimer);
   } else {
+    // `snapshot()` seals the previous burst for us.
     snapshot();
   }
+  burstKey = key;
   burstTimer = setTimeout(() => {
     burstTimer = null;
+    burstKey = null;
   }, 600);
 }
 
@@ -177,10 +221,7 @@ function ensureSelection(): void {
 function undo(): void {
   if (!state.pending || history.undo.length === 0) return;
   // Seal any in-flight typing burst so it is its own step before walking back.
-  if (burstTimer) {
-    clearTimeout(burstTimer);
-    burstTimer = null;
-  }
+  sealBurst();
   history.redo.push(clone(state.pending));
   const prev = history.undo.pop();
   if (prev) state.pending = prev;
@@ -256,12 +297,25 @@ function selectSection(id: string | null): void {
   state.selectedSectionId = id;
 }
 
-/** Set a top-level page-meta field (title / slug / status / subjectId / …). */
+/**
+ * Set a top-level page-meta field (title / slug / status / subjectId / …).
+ *
+ * UNDOABLE, and `snapshotEdit` rather than `snapshot` because the two call sites
+ * that matter are keystroke-driven — the top bar's title input and the SEO
+ * panel's slug input both fire on `oninput`, so a per-keystroke step would fill
+ * the 80-step history with one sentence and evict every real edit behind it.
+ *
+ * A no-op write is dropped before the snapshot: `handlePublish` re-writes the
+ * same status when it rolls back a failed publish, and a step that changes
+ * nothing is a step the author has to press undo twice to get past.
+ */
 function updateMeta<K extends keyof PageBuilderState>(
   field: K,
   value: PageBuilderState[K]
 ): void {
   if (!state.pending) return;
+  if (state.pending[field] === value) return;
+  snapshotEdit(`meta:${String(field)}`);
   state.pending[field] = value;
 }
 
@@ -269,19 +323,38 @@ function updateMeta<K extends keyof PageBuilderState>(
 function setSectionProps(id: string, props: SectionProps): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
-  snapshotEdit();
+  snapshotEdit(`props:${id}`);
   state.pending.sections[i].props = props;
 }
 
-/** Set a single key within a section's props bag (the config editor's per-field write). */
+/**
+ * Set a single key within a section's props bag (the config editor's per-field write).
+ *
+ * `undefined` DELETES THE KEY rather than storing it, mirroring
+ * {@link updateBrandOverrides} — which already documents the reason: a key holding
+ * `undefined` SURVIVES `structuredClone` while it does NOT survive
+ * `JSON.stringify`. Spreading it in leaves three consumers disagreeing about the
+ * same draft:
+ *   · `getSavePayload()` ships the phantom key,
+ *   · the `isDirty` diff and the crash-recovery snapshot (a `structuredClone`) keep it,
+ *   · and the jsonb column silently drops it on the way in.
+ * So a creator who clears a field could save a draft whose stored shape differs
+ * from the one the builder believes it holds, and absence is the only
+ * round-trip-stable way to say "this field has no value" — which is what the
+ * store's own contract says.
+ *
+ * Reached today only by the number field's cleared-box path
+ * (`feel.previewDuration`), so the live impact is bounded; this closes the shape
+ * rather than waiting for a second caller to widen it.
+ */
 function setSectionProp(id: string, key: string, value: unknown): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
-  snapshotEdit();
-  state.pending.sections[i].props = {
-    ...state.pending.sections[i].props,
-    [key]: value,
-  };
+  snapshotEdit(`prop:${id}:${key}`);
+  const next: SectionProps = { ...state.pending.sections[i].props };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  state.pending.sections[i].props = next;
 }
 
 /** Flip a section on/off (§4.1 toggleable). */
@@ -298,11 +371,22 @@ function toggleSection(id: string): void {
  * (the add-picker/canvas "add after this" affordance), else appends. Returns the
  * new section's id so the caller can scroll/focus it. The renderer skips unknown
  * types, so `type` is a plain string (matches the contract).
+ *
+ * THE PAGE'S OWN LOOK IS PASSED IN, and that is what gives a page RHYTHM. The
+ * catalogue writes the new section a per-type axis bag
+ * (`section-design-defaults.ts`), minus every axis the page already sets to the
+ * same value — so the stored `design` holds only real exceptions and the
+ * inspector's "Inherited" pills stay truthful. `$state.snapshot` because
+ * `pending.design` is a rune proxy and the comparison must read plain values.
  */
 function addSection(type: string, afterId?: string): string {
   if (!state.pending) return '';
   snapshot();
-  const section = createSection(type, makeId);
+  const section = createSection(
+    type,
+    makeId,
+    $state.snapshot(state.pending.design) ?? null
+  );
   const from = afterId ? indexOf(afterId) : -1;
   const at = from >= 0 ? from + 1 : state.pending.sections.length;
   state.pending.sections.splice(at, 0, section);
@@ -423,34 +507,103 @@ function moveSection(id: string, direction: -1 | 1): void {
   [list[i], list[target]] = [list[target], list[i]];
 }
 
-/** Merge a partial brand-override patch into `pending.brandOverrides`. */
+/**
+ * True when every key in `patch` already holds that value — a write that would
+ * change nothing.
+ *
+ * Dropped before the snapshot because these three mergers are all driven by
+ * `oninput` on controls that echo: `<input type="color">` fires continuously
+ * while the picker is dragged (including on the value it already has), and the
+ * Melt-based pickers re-emit their value on mount. Recording those would both
+ * flood the history and, worse, mark a pristine draft dirty — the sell-media
+ * store guards its own setter for exactly this reason.
+ */
+function patchIsNoop(current: unknown, patch: object): boolean {
+  // `unknown` in, cast once: the three bags are INTERFACES, and TS gives an
+  // interface no implicit index signature, so a `Record<string, unknown>`
+  // parameter would not accept them without a cast at every call site.
+  const base = (current ?? {}) as Record<string, unknown>;
+  return Object.entries(patch).every(([key, value]) => base[key] === value);
+}
+
+/**
+ * Merge a partial brand-override patch into `pending.brandOverrides`.
+ *
+ * CLEARING A KEY DELETES IT, and drops the whole bag to `null` once nothing is
+ * left — the same "absence means inherited" representation
+ * {@link setSectionDesignAxis} documents, and for the same reason: it is the only
+ * round-trip-stable shape.
+ *
+ * The merge used to write `{ primaryColor: undefined }` for a clear, and that key
+ * SURVIVES `structuredClone` (so `getSavePayload()` shipped a phantom key the
+ * `.strict()` save body has no business receiving) while it does NOT survive
+ * `JSON.stringify` (so the `isDirty` diff and the sessionStorage crash-recovery
+ * snapshot each saw a different draft from the one the save sent). Concretely: an
+ * override turned on and back off left `brandOverrides` as an object where the
+ * baseline held `null`, so the draft read as DIRTY with nothing to persist —
+ * `Save` lit up and a navigation prompted over an empty change. Deleting the key
+ * makes the three views of the draft agree again.
+ */
 function updateBrandOverrides(
   patch: NonNullable<PageBuilderState['brandOverrides']>
 ): void {
   if (!state.pending) return;
-  state.pending.brandOverrides = {
+  if (patchIsNoop(state.pending.brandOverrides, patch)) return;
+  snapshotEdit(`brand:${Object.keys(patch).join(',')}`);
+  const next: Record<string, unknown> = {
     ...(state.pending.brandOverrides ?? {}),
-    ...patch,
   };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  state.pending.brandOverrides =
+    Object.keys(next).length === 0
+      ? null
+      : (next as NonNullable<PageBuilderState['brandOverrides']>);
 }
 
 /**
- * Merge a partial SEO patch into `pending.seo` (SEO builder mode).
+ * Merge a partial SEO patch into `pending.seo` (the SEO panel's write).
  *
- * CURRENTLY NO CONSUMER — `landing_pages` has no `seo` column and the `.strict()`
- * save schema has no `seo` key, so `PageSeoPanel` disables those fields rather than
- * accept keystrokes the save would discard. Kept as the seam persistence will wire
- * back into (NOT dead code): re-enabling the panel needs a migration + save-schema
- * field + service write, at which point this is the store-side write again.
+ * PERSISTED as of Codex-2j8nq: migration 0090 added `landing_pages.seo` jsonb,
+ * `pageSeoSchema` declares the key on the `.strict()` save body, and
+ * `saveJourneyPage` writes it. Before that this had no consumer and
+ * `PageSeoPanel` disabled its two fields rather than accept keystrokes the save
+ * would discard under a "Page saved" toast.
+ *
+ * A MERGE, not a replace, so the panel can write `title` and `description`
+ * independently. Clearing a field is the EMPTY STRING (which persists), never
+ * deleting the key — the public head falls back with `||`, so an empty override
+ * resumes deriving from the page title / course lede, while an ABSENT `seo` is
+ * what the service reads as "leave the stored bag alone".
+ *
+ * UNDOABLE via `snapshotEdit` — both panel fields write on `oninput`.
  */
 function updateSeo(patch: Partial<PageSeo>): void {
   if (!state.pending) return;
+  if (patchIsNoop(state.pending.seo, patch)) return;
+  snapshotEdit(`seo:${Object.keys(patch).join(',')}`);
   state.pending.seo = { ...(state.pending.seo ?? {}), ...patch };
 }
 
-/** Merge a partial offer patch into `pending.offer` (Pricing builder mode). */
+/**
+ * Merge a partial offer patch into `pending.offer` (Pricing builder mode).
+ *
+ * UNDOABLE via `snapshotEdit`: the one-off PRICE field writes on `oninput`
+ * (`PagePricingPanel`'s `setPounds`), so a per-keystroke step would spend the
+ * whole history on one number. The one-off TOGGLE beside it is discrete and gets
+ * its own step unless it lands inside 600ms of typing a price — which is the
+ * cheaper error of the two, since coalescing loses granularity while
+ * under-recording loses the price itself.
+ *
+ * `syncOffer` calls this with the bag the server just persisted, immediately
+ * before `markSaved()` clears the history, so the post-save write costs nothing.
+ */
 function updateOffer(patch: Partial<PageOffer>): void {
   if (!state.pending) return;
+  if (patchIsNoop(state.pending.offer, patch)) return;
+  snapshotEdit(`offer:${Object.keys(patch).join(',')}`);
   state.pending.offer = { ...(state.pending.offer ?? {}), ...patch };
 }
 
