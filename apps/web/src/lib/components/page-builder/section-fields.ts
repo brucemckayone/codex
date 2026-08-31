@@ -341,7 +341,7 @@ export const SECTION_FIELDS: Readonly<
   ache: [
     ...PROSE_FIELDS,
     pointsField(
-      'One per row. Used by the List and Checklist layouts; ignored by the others.'
+      'One per row — these ARE the aches. The Descent layout gives each one the whole screen, arriving as the reader scrolls; List and Checklist show them as rows. The other layouts ignore them.'
     ),
   ],
   turn: [
