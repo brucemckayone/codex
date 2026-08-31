@@ -9,6 +9,7 @@
  * thin re-export / adapter layer so existing callers don't change imports.
  */
 
+import { isReservedSubdomain as isReservedSubdomainInConstants } from '@codex/constants';
 import {
   buildContentUrl as buildContentUrlInner,
   buildCreatorsUrl as buildCreatorsUrlInner,
@@ -17,7 +18,6 @@ import {
   buildPlatformUrl as buildPlatformUrlInner,
   parseHost,
 } from '@codex/urls';
-import { RESERVED_SUBDOMAINS } from '$lib/constants';
 
 /**
  * Extract subdomain from hostname. Returns `null` on the bare apex,
@@ -30,12 +30,13 @@ export function extractSubdomain(hostname: string): string | null {
 }
 
 /**
- * Check if a subdomain is reserved (cannot be an org slug). Unchanged
- * from historical behaviour — reads from `@codex/constants.RESERVED_SUBDOMAINS_SET`
- * via the apps/web re-export at `$lib/constants`.
+ * Check if a subdomain is reserved (cannot be an org slug). Delegates to
+ * `@codex/constants.isReservedSubdomain` — list membership plus the
+ * structural `cdn-` prefix rule — so apps/web and the constants package can
+ * never disagree on what counts as an infrastructure hostname.
  */
 export function isReservedSubdomain(subdomain: string): boolean {
-  return RESERVED_SUBDOMAINS.has(subdomain.toLowerCase());
+  return isReservedSubdomainInConstants(subdomain);
 }
 
 type SubdomainContext =
@@ -63,7 +64,8 @@ export const buildJourneyUrl = buildJourneyUrlInner;
  * - `{ type: 'platform' }` on apex, www, or unrecognised host (parseHost env=null)
  * - `{ type: 'creators' }` on the creators subdomain
  * - `{ type: 'reserved', subdomain }` on infrastructure subdomains
- *   (api, auth, content-api, etc — see RESERVED_SUBDOMAINS)
+ *   (api, auth, content-api, etc — see `RESERVED_SUBDOMAINS` in
+ *   `@codex/constants`)
  * - `{ type: 'organization', slug }` otherwise
  */
 export function getSubdomainContext(hostname: string): SubdomainContext {
