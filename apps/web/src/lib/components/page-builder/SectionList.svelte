@@ -3,12 +3,31 @@
 
   The ordered section list for the journey builder rail (Codex-2pryk.3.3 · WP-5).
   Each row selects a section for editing, toggles it on/off (§4.1), reorders it
-  up/down, or removes it. An "Add section" control reveals the catalogue picker.
-  Reorder uses accessible up/down buttons (not pointer-only drag) so it works
-  with a keyboard and screen reader.
+  up/down, or removes it. Reorder uses accessible up/down buttons (not
+  pointer-only drag) so it works with a keyboard and screen reader.
 
   Drives the module-singleton `pageBuilder` store directly — every mutation
   flows to the live preview via the store's pending draft.
+
+  ── "ADD" IS A MODE SWITCH, NOT A DISCLOSURE ──────────────────────────────
+  The add-section catalogue used to open as a bordered card WEDGED IN above the
+  rows: the list you were adding to slid 468px down the rail to make room for the
+  thing you were choosing from, and the catalogue got a 320px scroll box inside
+  the rail's own scroll box for its 1036px of content. Measured on a 950px
+  viewport, 3 of 11 section types were visible.
+
+  Now `picking` REPLACES this component's content with `AddSectionPicker` and
+  reports the switch up through `onpickingchange` so the route can widen the rail
+  column while it is open. Nothing is displaced because nothing else is rendered,
+  and the catalogue gets a grid instead of a column of 209px rows.
+
+  The two consequences of a replacement, both handled below:
+  · The "Add" button UNMOUNTS while the panel is open, so it cannot carry
+    `aria-expanded` — a control that is not in the DOM cannot describe the state
+    of what replaced it. It is a plain button.
+  · Focus has to be caught on the way out. The picker takes focus on mount; on
+    the way back the button that opened it no longer exists at the moment
+    `picking` flips, so it is re-focused once it remounts.
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -27,8 +46,34 @@
 
   const GripIcon = SECTION_GRIP_ICON;
 
+  interface Props {
+    /**
+     * The catalogue panel opened or closed.
+     *
+     * OPTIONAL because this component is mounted bare in tests and reads fine
+     * standalone — without a listener the panel still takes the rail over, it
+     * just does not widen it. The route (`studio/journeys/[id]/page`) is the one
+     * caller that can widen the column, since the shell grid lives there, and it
+     * is the only production mount site.
+     */
+    onpickingchange?: (picking: boolean) => void;
+  }
+
+  const { onpickingchange }: Props = $props();
+
   const sections = $derived(pageBuilder.sections);
   let picking = $state(false);
+  let addButton = $state<HTMLButtonElement | null>(null);
+  /**
+   * Whether focus is owed to the "Add" button on the next render.
+   *
+   * The button is UNMOUNTED while the panel is open, so it cannot be focused at
+   * the moment the panel closes — the node does not exist yet. Set the debt when
+   * closing, pay it in the effect once `bind:this` has repopulated. Only on an
+   * explicit close, never after ADDING a section: adding selects the new section
+   * and the creator's attention belongs in the inspector, not back on a button.
+   */
+  let refocusAdd = $state(false);
 
   // Pointer drag-reorder (keyboard reorder stays on the up/down buttons).
   let draggingId = $state<string | null>(null);
@@ -38,10 +83,26 @@
     return findSectionDefinition(type)?.label ?? type;
   }
 
+  function setPicking(next: boolean): void {
+    picking = next;
+    onpickingchange?.(next);
+  }
+
   function onAdd(type: string): void {
     pageBuilder.addSection(type);
-    picking = false;
+    setPicking(false);
   }
+
+  function closePicker(): void {
+    refocusAdd = true;
+    setPicking(false);
+  }
+
+  $effect(() => {
+    if (!refocusAdd) return;
+    addButton?.focus();
+    refocusAdd = false;
+  });
 
   function onDragStart(event: DragEvent, id: string): void {
     draggingId = id;
@@ -72,24 +133,33 @@
 </script>
 
 <div class="section-list">
+  {#if picking}
+    <!--
+      REPLACEMENT, not disclosure: while the panel is open it IS this rail
+      column — no head, no rows, nothing displaced behind it — and the route
+      widens the column for it via `onpickingchange`. `onclose` is
+      `closePicker`, not a bare flip, because the close owes focus back to the
+      Add button that did not exist at the moment the close happened.
+    -->
+    <AddSectionPicker onadd={onAdd} onclose={closePicker} />
+  {:else}
   <div class="section-list__head">
     <h2 class="section-list__title">{m.studio_builder_sections()}</h2>
+    <!--
+      A plain button, deliberately WITHOUT `aria-expanded`: while the panel is
+      open this button does not exist, and a control that is unmounted cannot
+      describe the state of what replaced it.
+    -->
     <button
       type="button"
       class="section-list__add"
-      aria-expanded={picking}
-      onclick={() => (picking = !picking)}
+      bind:this={addButton}
+      onclick={() => setPicking(true)}
     >
       <PlusIcon size={15} />
       {m.studio_builder_sections_add()}
     </button>
   </div>
-
-  {#if picking}
-    <div class="section-list__picker">
-      <AddSectionPicker onadd={onAdd} onclose={() => (picking = false)} />
-    </div>
-  {/if}
 
   {#if sections.length > 0}
     <ol class="section-list__rows" role="list">
@@ -181,6 +251,7 @@
   {:else}
     <p class="section-list__empty">{m.studio_builder_sections_empty()}</p>
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -231,9 +302,6 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
-  .section-list__picker {
-    padding-bottom: var(--space-1);
-  }
 
   .section-list__rows {
     list-style: none;

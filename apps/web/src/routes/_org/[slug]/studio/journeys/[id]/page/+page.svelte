@@ -296,6 +296,18 @@
   let mode = $state<BuilderMode>('design');
   let device = $state<'desktop' | 'tablet' | 'mobile'>('desktop');
   let railCollapsed = $state(false);
+
+  /**
+   * Is the section rail currently showing the ADD panel rather than the list?
+   *
+   * `SectionList` owns the flip (its Add button opens it, its Back button closes
+   * it) and reports it up here for ONE reason: the panel replaces the rail's
+   * content, and a catalogue of section types needs more than the 260px the list
+   * needs. The route owns the column width, so the route has to be told. Without
+   * this the panel renders correctly and cramped — which is the half of the
+   * complaint ("give more space to it") that a replacement alone does not fix.
+   */
+  let picking = $state(false);
   let previewMode = $state(false);
   let saving = $state(false);
 
@@ -885,6 +897,7 @@
     data-mode={mode}
     class:jb--preview={previewMode}
     class:jb--rail-collapsed={railCollapsed}
+    class:jb--picking={picking}
   >
     <!-- ── top bar ── -->
     <header class="jb__top">
@@ -1036,7 +1049,7 @@
     <div class="jb__shell">
       {#if mode === 'design'}
         <aside class="jb__outline">
-          <SectionList />
+          <SectionList onpickingchange={(next) => (picking = next)} />
         </aside>
       {:else}
         <aside class="jb__settings">
@@ -1485,6 +1498,21 @@
 
   .jb--rail-collapsed[data-mode='design'] .jb__shell {
     grid-template-columns: 0 minmax(0, 1fr) 360px;
+  }
+
+  /*
+    The add panel needs a wider first column than the list does: it lays section
+    types out in a grid, and the picker's own sizing is chosen against this width
+    (3 columns fit at 420px, 4 do not). Instant, not transitioned — nothing else in
+    this shell animates its columns, and a width tween here would drag the canvas
+    with it on every open.
+
+    Ordered AFTER `--rail-collapsed` deliberately: a collapsed rail has no Add
+    button to press, so the two cannot both apply, and if that ever changes
+    collapsed should win over widened rather than fight it.
+  */
+  .jb--picking[data-mode='design'] .jb__shell {
+    grid-template-columns: 420px minmax(0, 1fr) 360px;
   }
 
   .jb--preview .jb__shell {
