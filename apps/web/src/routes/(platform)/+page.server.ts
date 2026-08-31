@@ -10,8 +10,10 @@
  * Sign In link instead of the user's avatar trigger.
  *
  * The previous `DYNAMIC_PUBLIC_REVALIDATE` preset (`public, max-age=0,
- * s-maxage=300`) fixed the BROWSER-cache half of this bug (max-age=0
- * forces browser revalidation) but left the SHARED-cache half open.
+ * s-maxage=300, stale-while-revalidate=3600` — the SWR is part of the
+ * value, and it made the shared window worse, not better) fixed the
+ * BROWSER-cache half of this bug (max-age=0 forces browser
+ * revalidation) but left the SHARED-cache half open.
  * CI surfaces it deterministically because miniflare's CF cache
  * emulation honours `s-maxage` for HTML by URL key alone.
  *

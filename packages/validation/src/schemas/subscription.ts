@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { createSearchQuerySchema } from '../shared/search-schema';
 import { checkoutRedirectUrlSchema } from './purchase';
 
 /**
@@ -171,7 +172,7 @@ export const listSubscribersQuerySchema = paginationSchema.extend({
   // the "Show cancelled" view. Ignored if `status` is explicitly set.
   includeCancelled: z.coerce.boolean().optional(),
   // Free-text search across user name / email — case-insensitive ILIKE.
-  search: z.string().trim().min(1).max(120).optional(),
+  search: createSearchQuerySchema(120),
 });
 
 /**

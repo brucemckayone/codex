@@ -17,6 +17,7 @@
  * locks in the structural contract).
  */
 
+import { CACHE_PRESETS } from '@codex/constants';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetPublicInfo = vi.fn();
@@ -123,18 +124,21 @@ describe('org sitemap', () => {
       );
     });
 
-    it('sets Cache-Control to public + 30min max-age + 1d SWR', async () => {
+    it('sets Cache-Control to CACHE_PRESETS.static, byte for byte', async () => {
+      // WAS `max-age=1800, s-maxage=1800` — 30 minutes, half the platform
+      // sitemap's window, on the stated grounds that "org content churns
+      // faster". Both values already carried `stale-while-revalidate=86400`,
+      // so the observable staleness bound moved by 2% while the origin render
+      // count doubled; the route now takes the one shared preset. Asserted
+      // against the preset, not against re-typed directives, so the window is
+      // argued for in exactly one place.
       const response = await GET(
         makeEvent({
           origin: 'https://yoga-studio.revelations.studio/sitemap.xml',
           slug: 'yoga-studio',
         })
       );
-      const cacheControl = response.headers.get('cache-control') ?? '';
-      expect(cacheControl).toContain('public');
-      expect(cacheControl).toContain('max-age=1800');
-      expect(cacheControl).toContain('s-maxage=1800');
-      expect(cacheControl).toContain('stale-while-revalidate=86400');
+      expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.static);
     });
   });
 

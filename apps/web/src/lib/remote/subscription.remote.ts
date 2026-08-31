@@ -10,6 +10,7 @@
  */
 
 import {
+  createSearchQuerySchema,
   payoutSourceFilterEnum,
   payoutStatusFilterEnum,
 } from '@codex/validation';
@@ -405,7 +406,7 @@ const listSubscribersQueryArgsSchema = z.object({
   tierId: z.string().uuid().optional(),
   status: z.string().optional(),
   includeCancelled: z.coerce.boolean().optional(),
-  search: z.string().trim().min(1).max(120).optional(),
+  search: createSearchQuerySchema(120),
 });
 
 /**

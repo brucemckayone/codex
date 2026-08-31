@@ -58,6 +58,7 @@ export type {
 export { multipartProcedure } from './multipart-procedure';
 // org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
 // Re-exported here for direct use by route handlers.
+export type { CacheWrite } from './org-helpers';
 export {
   checkOrganizationMembership,
   invalidateOrgSlugCacheEntry,
@@ -75,6 +76,9 @@ export { createServiceRegistry } from './service-registry';
 // Type exports
 export type {
   AuthLevel,
+  CachePolicyRule,
+  CachePolicyViolation,
+  CachePresetForAuth,
   InferInput,
   InputSchema,
   ProcedureConfig,

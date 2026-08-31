@@ -227,27 +227,55 @@ The org layout uses `invalidate('cache:org-versions')` (separate from platform's
 
 ### HTTP Cache Headers
 
-From `$lib/server/cache.ts`:
+**The values do not live in apps/web.** They live in `CACHE_PRESETS`
+(`packages/constants/src/limits.ts`), one paragraph of reasoning each, because a
+Worker has to be able to declare the same vocabulary and cannot import
+`$lib/server/cache.ts`. `CACHE_HEADERS` is only a `setHeaders()`-shaped view of
+that object, and `src/lib/server/cache.test.ts` asserts the pairing byte for
+byte. **Never re-type a `Cache-Control` string** — the CI gate
+`scripts/checks/check-data-access-contract.mjs` fails the build on a
+hand-written one, and it has no waivers by design. If you need a window the
+vocabulary does not have, add a preset with its reasoning.
 
 ```typescript
 import { CACHE_HEADERS } from '$lib/server/cache';
-setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);   // Public catalogue pages: 5 min
-setHeaders(CACHE_HEADERS.STATIC_PUBLIC);    // Static pages: 1 hour
-setHeaders(CACHE_HEADERS.PRIVATE);          // Auth pages: no-cache (default for studio)
+setHeaders(CACHE_HEADERS.PRIVATE);          // the answer for almost every page here
+setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);   // body IDENTICAL for every viewer
+setHeaders(CACHE_HEADERS.PER_VIEWER);       // body MAY differ per viewer
 ```
 
-**Rule (MANDATORY):** `setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC)`,
-`STATIC_PUBLIC`, and `DYNAMIC_PUBLIC_REVALIDATE` MUST be called only AFTER
-every `await` that could throw has succeeded. SvelteKit applies any headers
-set on the load function to error responses too — so `setHeaders(...)`
-followed by a thrown `error(404)` or rejected `await` causes the 4xx/5xx
-response to inherit `Cache-Control: public, max-age=300`, and CDNs cache the
-**error page** for every subsequent visitor for `max-age` seconds (cache
-poisoning).
+| `CACHE_HEADERS` | preset | emits | use when |
+|---|---|---|---|
+| `DYNAMIC_PUBLIC` | `public` | `public, max-age=60, s-maxage=60` | every viewer gets the same bytes |
+| `STATIC_PUBLIC` | `static` | 1h browser + 1h CDN + 1d SWR | **crawlers only** — no human reads it |
+| `PER_VIEWER` | `per-viewer` | `public, max-age=0, no-cache` | may differ per viewer; a shared cache may store but MUST revalidate |
+| `PRIVATE` | `private` | `private, no-cache` | the viewer's own browser only |
+| `FRESH` | `fresh` | `private, no-store` | per-REQUEST bodies (embeds a short-lived credential) |
 
-`CACHE_HEADERS.PRIVATE` is safe to call anywhere — `private, no-cache` is
-exactly what we want for error responses, so eagerly setting it has no
-poisoning risk.
+`CACHE_PRESETS.asset` (`public, max-age=3600, s-maxage=86400`) has no
+`CACHE_HEADERS` entry: its only apps/web consumer is `$lib/server/cdn-proxy.ts`,
+which writes onto a `Headers` instance rather than through `setHeaders()`.
+
+**`STATIC_PUBLIC` is not "static pages".** Its window outlives every
+invalidation path this platform has — a publish is invisible for up to an hour,
+and the `stale-while-revalidate=86400` day has no purge path. It is licensed by
+its READERS, not by a shorter number: the two `sitemap.xml` routes, read by
+crawlers on their own multi-hour cadence, name `CACHE_PRESETS.static` directly.
+Never put it on a page a human loads.
+
+**Rule (MANDATORY):** any preset whose value begins `public` —
+`DYNAMIC_PUBLIC`, `STATIC_PUBLIC`, `PER_VIEWER` — MUST be set only AFTER every
+`await` that could throw has succeeded. SvelteKit applies headers set in a load
+to error responses too, so `setHeaders(...)` followed by a thrown `error(404)`
+or a rejected `await` hands the 4xx/5xx body the preset's own window: 60s of CDN
+storage for `DYNAMIC_PUBLIC`, and an hour plus a day of SWR for `STATIC_PUBLIC`.
+Every subsequent visitor is served the error page (cache poisoning).
+
+`CACHE_HEADERS.PRIVATE` and `.FRESH` are safe to set anywhere, including before
+an await that can throw — `private, no-cache` is exactly what an error response
+should carry. Nothing in apps/web sets a default `Cache-Control`, so a load that
+sets nothing emits none of ours; that is why nearly every load here calls
+`PRIVATE` explicitly rather than relying on absence.
 
 Correct pattern:
 
@@ -255,7 +283,7 @@ Correct pattern:
 export const load: PageServerLoad = async ({ setHeaders, ... }) => {
   const data = await thingThatCanThrow();
   // Awaits BEFORE setHeaders. If they throw, the error response inherits
-  // the default no-cache headers — never `public, max-age=...`.
+  // no Cache-Control of ours — never a `public` window.
   setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
   return { data };
 };
@@ -266,6 +294,65 @@ hoist the chosen preset into a `successCacheHeaders` const and call
 `setHeaders(successCacheHeaders)` immediately before each `return`. See
 `apps/web/src/routes/_org/[slug]/(space)/content/[contentSlug]/+page.server.ts`
 for the canonical pattern.
+
+### Why `DYNAMIC_PUBLIC_REVALIDATE` was DELETED, not renamed
+
+It was `public, max-age=0, s-maxage=300, stale-while-revalidate=3600`, and it
+was added in good faith to fix exactly this bug — the name says "revalidate".
+It fixed half of it.
+
+`max-age=0` binds the BROWSER. `s-maxage=300` binds a SHARED cache, and it does
+not say "revalidate" — it says "this body is fresh for 300 seconds, serve it to
+anyone who asks for this URL". **Shared caches key on URL and NEVER on Cookie.**
+So an anonymous render stored during one visit was handed to the next
+authenticated visitor: the platform landing page showed a Sign In link to a
+signed-in user, and the `stale-while-revalidate=3600` extended that by an hour
+with no purge path. CI reproduced it deterministically on 2026-05-28 —
+miniflare's CF cache emulation honours `s-maxage` for HTML by URL key alone.
+The record is at the top of `src/routes/(platform)/+page.server.ts`.
+
+It was deleted rather than renamed because **the value has no safe form.** A
+name cannot make a shared window per-viewer; the only fix is to stop declaring
+one. Its replacement is `PER_VIEWER`, which drops `s-maxage` entirely and leans
+on `no-cache`: RFC 9111 lets a shared cache STORE a `no-cache` body but forbids
+serving it to another request without revalidating at the origin, so an
+anonymous burst is still absorbed as 304s while a signed-in viewer always gets
+their own body. If you are unsure whether a page varies by viewer, use
+`PRIVATE`.
+
+**Never write an `s-maxage` onto a response that can vary by viewer.** That is
+the whole rule, and it is a reproduced leak in this repo, not a theory. Guards:
+`cache.test.ts` here, `cache-presets.test.ts` in `@codex/constants`, and the
+drift gate for any hand-written string.
+
+### `variesBySession`, and the auth-to-preset table (Workers)
+
+Worker routes declare `policy.cache` on `procedure()` and the TYPE SYSTEM
+rejects the illegal pairings — `auth: 'required'` with `cache: 'public'` does
+not compile (`CachePolicyRule`, `packages/worker-utils/src/procedure/types.ts`).
+Undeclared resolves to `private`, so saying nothing is safe.
+
+| `policy.auth` | may declare |
+|---|---|
+| `'none'` | any preset |
+| `'optional'` | `per-viewer` \| `private` \| `fresh` — plus `public`, ONLY with `variesBySession: false` |
+| `'required'` / `'worker'` / `'platform_owner'` | `private` \| `fresh` |
+
+`variesBySession: false` is the carve-out, and it is a claim you are making out
+loud: *this body ignores the session*. `auth: 'optional'` covers two kinds of
+route and no type can tell them apart — some ignore the session entirely (a
+fully public portal read), others branch on it, and publicly caching the second
+kind leaks one member's data to the next visitor. The dangerous reading is
+therefore the default. Only the literal `false` counts; `true` and a widened
+`boolean` both read as "not asserted". The carve-out grants `public` alone — not
+`static` or `asset`, whose far longer windows are for `auth: 'none'` bodies.
+
+**apps/web has no such guard.** `setHeaders()` takes any object, so nothing
+stops a load from putting `DYNAMIC_PUBLIC` on an auth-varying page. Apply the
+table by hand: if the response can differ for a signed-in viewer, it is
+`PER_VIEWER` at most and `PRIVATE` in practice — the org and platform layouts
+inject the signed-in user into the SSR shell, which is why every auth-varying
+page in the app is `PRIVATE` today.
 
 ---
 
@@ -544,7 +631,7 @@ import * as m from '$paraglide/messages';
 |---|---|
 | `src/hooks.server.ts` | Session validation, security headers, CDN rewrite |
 | `src/lib/server/api.ts` | `createServerApi` — all backend calls |
-| `src/lib/server/cache.ts` | `CACHE_HEADERS` presets + `invalidateCache()` |
+| `src/lib/server/cache.ts` | `CACHE_HEADERS` — the `setHeaders()` view of `CACHE_PRESETS` (`@codex/constants`), which is where the values live — + `invalidateCache()` |
 | `src/lib/server/errors.ts` | `ApiError` class |
 | `src/lib/collections/index.ts` | Barrel — collections, hydration, live query |
 | `src/lib/collections/hydration.ts` | `hydrateIfNeeded`, `invalidateCollection`, `isCollectionHydrated` |

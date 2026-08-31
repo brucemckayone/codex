@@ -5,6 +5,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { createSearchQuerySchema } from '../shared/search-schema';
 import { hlsVariantPathSchema, hlsVariantSchema } from './transcoding';
 
 /**
@@ -123,7 +124,7 @@ export const listUserLibrarySchema = paginationSchema.extend({
     ])
     .optional()
     .default('all'),
-  search: z.string().max(200).optional().default(''),
+  search: createSearchQuerySchema(200).default(''),
 });
 
 // Type exports

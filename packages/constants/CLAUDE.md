@@ -89,6 +89,68 @@ RATE_LIMIT_PRESETS   // { AUTH, STRICT, STREAMING, API, WEBHOOK, WEB }
 // AUTH: 5/15min, STRICT: 20/min, STREAMING: 60/min, API: 100/min, WEB: 300/min, WEBHOOK: 1000/min
 ```
 
+## Cache Presets
+
+The ONE caching vocabulary for both data-access layers. Workers name a preset on
+the `procedure()` policy; `apps/web` names the same one via `CACHE_HEADERS`. It
+lives here, and imports nothing, precisely so a Worker can reach it — the previous
+table lived in `apps/web/src/lib/server/cache.ts`, which imports
+`@cloudflare/workers-types`, so no worker could.
+
+```ts
+CACHE_PRESETS   // { public, static, asset, per-viewer, private, fresh }
+type CachePresetName
+```
+
+Presets are named by **who may store the body**, not by window length. The test an
+author applies is viewer-INVARIANCE: *would two different viewers get the same
+bytes?*
+
+| preset | for |
+|---|---|
+| `public` | body identical for every viewer (60s — see below) |
+| `static` | crawler-read documents; staleness not user-visible. The only preset carrying `stale-while-revalidate` |
+| `asset` | content-addressed media; the key changes when the bytes do, so a stored copy can only be superseded, never stale |
+| `per-viewer` | may differ per viewer; a shared cache may STORE but must revalidate before reuse |
+| `private` | the viewer's own browser only. **The default when nothing is declared** |
+| `fresh` | stored nowhere, by anyone (per-REQUEST bodies — presigned URLs, per-user tokens) |
+
+Which auth level may declare which is enforced in the TYPE system by
+`@codex/worker-utils`, not here:
+
+```
+auth 'none'                                   -> any preset
+auth 'optional'                               -> per-viewer | private | fresh
+                                              -> public ONLY with variesBySession: false
+auth 'required' | 'worker' | 'platform_owner' -> private | fresh
+```
+
+`variesBySession: false` is an ASSERTION about the handler, not a hint:
+`auth: 'optional'` covers routes that ignore the session (safely shared-cacheable)
+and routes that branch on it (publicly caching those hands one member's data to the
+next visitor). No type can tell them apart, so the author states it — and the
+dangerous reading is the default.
+
+**Why `public` is only 60s.** Freshness here is event-driven: a publish bumps one
+KV version and every `VersionedCache` entry for that org stales at once. No such
+event can reach a CDN, so a shared window is a window during which a publish is
+INVISIBLE, and it must not outlive the mechanism meant to make the publish visible.
+That argument does not generalise, which is why `static` and `asset` may hold longer
+windows.
+
+**Why `per-viewer` has no `s-maxage`, and must never gain one.** `apps/web`'s
+deleted `DYNAMIC_PUBLIC_REVALIDATE` was `public, max-age=0, s-maxage=300,
+stale-while-revalidate=3600`. `max-age=0` fixes only the BROWSER half; `s-maxage`
+still lets the edge hand one viewer's stored render to the next, because shared
+caches key on URL and NEVER on Cookie. CI reproduced it on 2026-05-28. `no-cache` is
+what makes `per-viewer` safe: RFC 9111 lets a shared cache store the body but
+forbids serving it to anyone else without revalidating at origin.
+
+Enforced by `scripts/checks/check-data-access-contract.mjs` in the static-analysis
+job, which has NO waiver list by design. If a response genuinely needs a window the
+vocabulary lacks, ADD A PRESET here with its reasoning — do not hand-write the
+value at the call site.
+
 ## MIME Types & Headers
 
 ```ts
@@ -149,6 +211,8 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - **MUST** use `getServiceUrl(service, env)` — NEVER hardcode URLs or port numbers
 - **MUST** use `RESERVED_SUBDOMAINS_SET` for org slug validation
 - **MUST** use `getCookieConfig(env)` for cookie configuration
+- **MUST** name a `CACHE_PRESETS` preset for any `Cache-Control` — NEVER hand-write the value; add a preset here instead
+- **NEVER** put an `s-maxage` on a preset whose body can vary by viewer
 - **NEVER** add side effects to this package — it must be pure constants/functions
 
 ## Reference Files
@@ -156,7 +220,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
 - `packages/constants/src/env.ts` — `getServiceUrl`, `isDev`, `validateServiceUrl`, `INFRA_KEYS`
 - `packages/constants/src/cookies.ts` — `getCookieConfig`, `COOKIES`
-- `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`
+- `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`
 - `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
 - `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`
 - `packages/constants/src/mime.ts` — `MIME_TYPES`, `HEADERS`, `SUPPORTED_*_MIME_TYPES`

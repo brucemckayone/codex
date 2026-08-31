@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { contentStatusEnum } from '../content/content-schemas';
 import { isoDateSchema, userIdSchema, uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { createSearchQuerySchema } from '../shared/search-schema';
 
 /**
  * Admin Dashboard Validation Schemas
@@ -321,7 +322,7 @@ export type AdminContentIdParams = z.infer<typeof adminContentIdParamsSchema>;
  * Extends standard pagination with search and content filter
  */
 export const adminCustomerListQuerySchema = paginationSchema.extend({
-  search: z.string().trim().max(200).optional(),
+  search: createSearchQuerySchema(200),
   contentId: uuidSchema.optional(),
   joinedWithin: z.coerce.number().int().positive().optional(),
   minSpendCents: z.coerce.number().int().nonnegative().optional(),

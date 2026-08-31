@@ -345,3 +345,55 @@ describe('resolveR2Urls — the assets host and the preview host are separate', 
     expect(media.hlsPreviewUrl).toBe(`${MEDIA_PREVIEW_BASE}/${PREVIEW_KEY}`);
   });
 });
+
+/**
+ * `Cache-Control` on this router (Codex-1j5fw · WP3).
+ *
+ * WHY THIS BLOCK IS NEW. Until WP3 the header on all three routes came from an
+ * `app.use('*')` at the top of `public.ts`, and NOTHING asserted it — this file
+ * covered the envelope and the R2 bases, `public-cache.test.ts` covered the KV
+ * keys, and neither read a header. So deleting that middleware in favour of
+ * `policy: { cache: 'public' }` was a change to the highest-traffic public
+ * surface on the platform with no test standing under it. These cases are that
+ * test, and they pin the EXACT string: the mistake this vocabulary exists to
+ * prevent is an `s-maxage` widening, and only a whole-string assertion sees one.
+ */
+describe('Cache-Control — declared per route, not by a wildcard middleware', () => {
+  const PUBLIC_60 = 'public, max-age=60, s-maxage=60';
+
+  it.each([
+    ['GET /', `/api/content/public?orgId=${ORG_ID}`],
+    ['GET /categories', `/api/content/public/categories?orgId=${ORG_ID}`],
+    ['GET /discover', '/api/content/public/discover'],
+  ])('%s carries the 60s shared-cache header', async (_name, path) => {
+    const res = await dispatch(path);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it('the header is identical on a cache HIT and a cache MISS', async () => {
+    // The middleware ran after `await next()` and so could not tell the two
+    // apart. `procedure()` emits from the policy, which also cannot — asserted
+    // because a preset resolved inside the cached fetcher instead of on the
+    // policy WOULD differ, and the difference would be invisible on first read.
+    const miss = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+    const hit = await dispatch(`/api/content/public?orgId=${ORG_ID}`);
+
+    expect(contentSpies.listPublic).toHaveBeenCalledTimes(1); // proves it hit
+    expect(miss.headers.get('Cache-Control')).toBe(PUBLIC_60);
+    expect(hit.headers.get('Cache-Control')).toBe(PUBLIC_60);
+  });
+
+  it('NO s-maxage on a validation FAILURE — a 400 must not be edge-cached', async () => {
+    // `procedure()` emits the preset on the SUCCESS path only, deliberately: a
+    // shared cache holding a 400 (or a 429) for 60s turns one malformed request
+    // into a 60-second outage for that URL. Asserted here because these are the
+    // only routes on the platform whose success preset is shared-cacheable AND
+    // whose input is fully attacker-controlled.
+    const res = await dispatch('/api/content/public/categories?orgId=nope');
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get('Cache-Control') ?? '').not.toContain('s-maxage');
+  });
+});

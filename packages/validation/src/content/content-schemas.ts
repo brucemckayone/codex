@@ -17,6 +17,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { createSearchQuerySchema } from '../shared/search-schema';
 
 /**
  * Content Management Validation Schemas
@@ -580,7 +581,7 @@ export const contentQuerySchema = paginationSchema.extend({
   creatorId: uuidSchema.optional(),
 
   // Search
-  search: z.string().max(255).optional(),
+  search: createSearchQuerySchema(255),
 
   // Sorting
   sortBy: z
@@ -656,7 +657,7 @@ export const publicContentQuerySchema = paginationSchema
       .max(120)
       .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug')
       .optional(),
-    search: z.string().max(255).optional(),
+    search: createSearchQuerySchema(255),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
     creatorId: uuidSchema.optional(),
     // Creator-flagged featured filter — true returns only featured items,
@@ -688,7 +689,7 @@ export type PublicContentQueryInput = z.infer<typeof publicContentQuerySchema>;
 export const discoverContentQuerySchema = paginationSchema
   .extend({
     contentType: contentTypeEnum.optional(),
-    search: z.string().max(255).optional(),
+    search: createSearchQuerySchema(255),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
   })
   .transform((data) => ({
@@ -725,7 +726,7 @@ export type CheckContentSlugInput = z.infer<typeof checkContentSlugSchema>;
  * Extends pagination with organization-specific filters and sorting
  */
 export const organizationQuerySchema = paginationSchema.extend({
-  search: z.string().max(255).optional(),
+  search: createSearchQuerySchema(255),
   sortBy: z.enum(['createdAt', 'name']).default('createdAt'),
   sortOrder: sortOrderEnum.default('desc'),
 });

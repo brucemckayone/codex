@@ -21,7 +21,11 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 
 ### Public Content (`/api/content/public`)
 
-No authentication required. Responses include `Cache-Control: public, max-age=300`.
+No authentication required. Each route DECLARES its preset on the policy
+(`cache: 'public'`) and `procedure()` emits it — `public, max-age=60, s-maxage=60`.
+The 60s bound is the KV invalidation window; see `CACHE_PRESETS` in
+`@codex/constants`. Never set `Cache-Control` by hand here — the static-analysis
+gate rejects it.
 
 | Method | Path | Policy | Notes |
 |---|---|---|---|

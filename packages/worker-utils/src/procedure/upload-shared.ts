@@ -125,6 +125,17 @@ export function buildBaseProcedureContext<
 } {
   return {
     background,
+    // KV-write escape hatch. `waitUntil` and NOT the `background` tracker
+    // above: the tracker exists to hold off `pool.end()` for background
+    // DATABASE work, and a cache write has no pool to lose — routing it
+    // through the tracker would only delay this request's own cleanup behind
+    // it. See ProcedureContext.cacheWrite.
+    cacheWrite: (promise) => {
+      // Best-effort by definition, and an unhandled rejection inside
+      // waitUntil() is noise the caller cannot catch, so swallow here rather
+      // than asking every caller to remember `.catch()`.
+      c.executionCtx.waitUntil(promise.catch(() => {}));
+    },
     user: c.get('user') as ProcedureContext<TPolicy, TInput>['user'],
     session: c.get('session') as ProcedureContext<TPolicy, TInput>['session'],
     input: validatedInput as ProcedureContext<TPolicy, TInput>['input'],
