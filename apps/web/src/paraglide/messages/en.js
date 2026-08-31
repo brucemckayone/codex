@@ -12267,35 +12267,11 @@ export const studio_builder_axis_desc_inherited = (params) => `Inherited from th
 
 
 /**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_overridden = () => `Overridden`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_inherited = () => `Inherited`
-
-
-/**
  * @param {{ source: NonNullable<unknown>, axis: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_axis_use_source_title = (params) => `Use the ${params.source} for ${params.axis}`
-
-
-/**
- * @param {{ source: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_use_source = (params) => `Use ${params.source}`
 
 
 /**

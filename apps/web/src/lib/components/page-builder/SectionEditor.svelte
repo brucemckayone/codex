@@ -634,7 +634,7 @@
   .section-editor__axes {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-1);
   }
 
   .section-editor__fields {
