@@ -12143,6 +12143,30 @@ export const studio_builder_add_section_no_match = (params) => `No sections matc
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_back = () => `Back to sections`
+
+
+/**
+ * @param {{ total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_total = (params) => `Showing all ${params.total} section types`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_filtered = (params) => `Showing ${params.count} of ${params.total} section types`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_sections = () => `Sections`
 
 
