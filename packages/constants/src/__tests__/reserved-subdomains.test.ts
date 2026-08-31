@@ -363,26 +363,34 @@ describe('isReservedSubdomain covers the R2 infrastructure config', () => {
     'gi'
   );
 
+  /** Adds the first DNS label of every `<label>.revelations.studio` host in `text`. */
+  function collectLabels(text: string, labels: Set<string>): void {
+    for (const match of text.matchAll(PROD_HOST_IN_ANY_STRING)) {
+      labels.add(match[1].toLowerCase());
+    }
+  }
+
   /**
    * Walks the ENTIRE config — not just the keys known to carry hostnames
    * today — and collects the first DNS label of every
    * `<label>.revelations.studio` host in any string value (bare hosts,
-   * `https://` URL bases, summary table rows). A hostname provisioned under a
-   * new key therefore cannot slip the guard, and the expectation is always
-   * derived from the parsed file, never a hardcoded host list.
+   * `https://` URL bases, summary table rows) or object key. A hostname
+   * provisioned under a new key, or keyed BY its hostname, therefore cannot
+   * slip the guard, and the expectation is always derived from the parsed
+   * file, never a hardcoded host list.
    */
   function provisionedLabels(
     node: unknown,
     labels = new Set<string>()
   ): Set<string> {
     if (typeof node === 'string') {
-      for (const match of node.matchAll(PROD_HOST_IN_ANY_STRING)) {
-        labels.add(match[1].toLowerCase());
-      }
+      collectLabels(node, labels);
     } else if (Array.isArray(node)) {
       for (const item of node) provisionedLabels(item, labels);
     } else if (node !== null && typeof node === 'object') {
-      for (const value of Object.values(node as Record<string, unknown>)) {
+      const record = node as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        collectLabels(key, labels);
         provisionedLabels(value, labels);
       }
     }

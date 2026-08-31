@@ -64,7 +64,8 @@ export const buildJourneyUrl = buildJourneyUrlInner;
  * - `{ type: 'platform' }` on apex, www, or unrecognised host (parseHost env=null)
  * - `{ type: 'creators' }` on the creators subdomain
  * - `{ type: 'reserved', subdomain }` on infrastructure subdomains
- *   (api, auth, content-api, etc — see RESERVED_SUBDOMAINS)
+ *   (api, auth, content-api, etc — see `RESERVED_SUBDOMAINS` in
+ *   `@codex/constants`)
  * - `{ type: 'organization', slug }` otherwise
  */
 export function getSubdomainContext(hostname: string): SubdomainContext {

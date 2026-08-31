@@ -238,13 +238,19 @@ export const RESERVED_SUBDOMAINS_SET = new Set<string>(RESERVED_SUBDOMAINS);
  * ANY label starting with `cdn-` is reserved, whether or not the axes
  * generated it. R2 custom domains follow `cdn-{bucket-type}{-env}`, and the
  * drift this file documents was that family outgrowing a hand-list — a new
- * bucket type must not need a constants edit (and a release) to stop its
- * hostname hitting organization-api as a "slug".
+ * bucket type must not need a constants edit (and a release) before its
+ * hostname stops resolving as an org.
  *
  * Names already on the list answer identically (the Set is checked first);
  * the prefix only widens the answer for unlisted `cdn-*` labels, turning a
- * Neon org lookup into a cheap reserved 404. The prefix is `cdn-` WITH the
- * hyphen — `cdnographic` is a legal slug.
+ * Neon org lookup into a cheap reserved 404 for callers that delegate here.
+ * The prefix is `cdn-` WITH the hyphen — `cdnographic` is a legal slug.
+ *
+ * List-only callers remain and do NOT gain the prefix rule until they
+ * delegate: the org-slug creation gates (`organizationSlugSchema` in
+ * @codex/validation, `isSlugAvailable` in @codex/organization) and
+ * worker-utils' `extractOrganizationFromSubdomain`, which still read
+ * `RESERVED_SUBDOMAINS_SET` directly.
  */
 export function isReservedSubdomain(sub: string): boolean {
   const label = sub.toLowerCase();
