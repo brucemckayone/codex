@@ -78,7 +78,7 @@ jobs:
       - name: Data-access contract gate self-test
         run: node --test scripts/checks/check-data-access-contract.test.mjs
 
-      - name: Data-access contract gate (Cache-Control + KV writes)
+      - name: Data-access contract gate (Cache-Control + KV writes + search inputs)
         run: node scripts/checks/check-data-access-contract.mjs
 
       - name: Generate Paraglide i18n files

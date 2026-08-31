@@ -52,14 +52,33 @@ Derived from the runs above. Use these until better ones exist.
 
 | unit of work | budget | basis |
 |---|---|---|
-| implementation agent (writes code, runs tests, falsifies) | **~190k** | 1.50M / 8 |
-| review lens (read-only, `effort: high`/`max`) | **~120k** | second-round observed |
+| implementation agent (writes code, runs tests, falsifies) | **~230k** | see the correction below |
+| review lens (read-only, `effort: high`/`max`) | **~230k** | same — a thorough lens is not cheaper than an implementer |
 | mechanical agent (`effort: low`, single file) | **~60k** | estimate — refine when measured |
 | **a 6-WP epic with one review round** | **~1.5M** | measured |
 | **the same epic with a fix round + re-review** | **~2.7M** | measured — this exceeded the cap |
 
-**Rule of thumb: `agents × 190k`.** Anything estimating over **1M** gets a
+**Rule of thumb: `agents × 230k`.** Anything estimating over **1M** gets a
 pre-flight check.
+
+### 2.1 First estimate-vs-actual, and it was 22% low
+
+The `agents × 190k` figure above came from one run. It was tested on the next one —
+3 review lenses + 2 implementation agents — and under-predicted:
+
+| | estimate | actual |
+|---|---|---|
+| 5 agents | ~800k | **1,158,957** |
+
+**~232k per agent, not 190k.** Two things the miss teaches:
+
+- **A read-only review lens is not cheaper than an implementer.** I budgeted 120k
+  for a lens because it writes nothing. But a lens that actually falsifies —
+  compiling probes, injecting violations, reverting and checksumming — does as much
+  work as a fix agent. `effort: 'max'` costs what it says.
+- **Round up, and re-measure every run.** The planning figure is now 230k. Record
+  the next estimate-vs-actual here rather than trusting this line; the whole point
+  of the number is that it gets corrected, not believed.
 
 ---
 
@@ -67,7 +86,7 @@ pre-flight check.
 
 ### 3.1 Pre-flight, before launching any workflow
 
-1. **Estimate**: `agents × 190k`. Write the number down.
+1. **Estimate**: `agents × 230k`. Write the number down.
 2. If the estimate exceeds **1M**, run `/usage-credits` and confirm headroom
    *before* launching. Do not launch on the assumption there is room.
 3. **Commit first.** A clean tree before launch means a mid-flight kill leaves a
@@ -85,7 +104,7 @@ target set, a script can decline to start work it cannot finish:
 
 ```js
 // Refuse to spawn an agent we cannot afford to complete.
-const AGENT_COST = 190_000
+const AGENT_COST = 230_000
 for (const item of work) {
   if (budget.total && budget.remaining() < AGENT_COST * 1.5) {
     log(`STOPPING EARLY: ${budget.remaining()} left, need ${AGENT_COST}. ` +
@@ -138,6 +157,13 @@ An aggregate green gate is not evidence. The P0's missing TTL passed `typecheck`
 - [ ] Verify any injection **landed on an executable line** before believing its
       result. A prior attempt patched a symbol inside a *comment* and drew the
       opposite conclusion.
+- [ ] Verify the injection is a shape the check is *supposed* to reject. A second
+      attempt "disproved" a gate tightening with
+      `const w = kv.put(...); cacheWrite?.(w)` — legal by ASSIGNMENT regardless of
+      the tightening, so it exercised nothing. Both failures are the same one the
+      whole epic is about: **a check that returns a verdict without reaching the
+      thing it claims to check.** Ask what the probe would have to look like to
+      fail, before running it.
 - [ ] `git status` — name every unexpected path.
 
 ---
@@ -146,7 +172,7 @@ An aggregate green gate is not evidence. The P0's missing TTL passed `typecheck`
 
 ```
 [ ] Working tree committed (clean revert point)
-[ ] Agent count × 190k written down
+[ ] Agent count × 230k written down
 [ ] If > 1M: /usage-credits checked, headroom confirmed
 [ ] Turn budget set, and the script guards on budget.total && remaining()
 [ ] Review lenses sequential
