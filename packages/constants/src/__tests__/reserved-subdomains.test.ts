@@ -36,6 +36,7 @@ import {
   DEPLOY_HOST_SUFFIXES,
   DOMAINS,
   GENERATED_INFRASTRUCTURE_SUBDOMAINS,
+  isReservedSubdomain,
   R2_BUCKET_TYPES,
   RESERVED_SUBDOMAINS,
   RESERVED_SUBDOMAINS_SET,
@@ -317,6 +318,94 @@ describe('RESERVED_SUBDOMAINS structural invariants', () => {
     // scheme that changed before it shipped. Nothing provisions it, so nothing
     // may reserve it.
     expect(RESERVED_SUBDOMAINS_SET.has('cdn-staging')).toBe(false);
+  });
+});
+
+describe('isReservedSubdomain structural prefix rule', () => {
+  it('reserves any cdn- prefixed label, listed or not', () => {
+    // The rule exists so a future `cdn-{bucket-type}{-env}` hostname cannot
+    // wait for a constants release before it stops resolving as a slug.
+    expect(isReservedSubdomain('cdn-anything')).toBe(true);
+    expect(isReservedSubdomain('cdn-some-future-bucket-preview')).toBe(true);
+  });
+
+  it('reserves the bare cdn host via the list', () => {
+    expect(isReservedSubdomain('cdn')).toBe(true);
+  });
+
+  it('does not reserve ordinary tenant slugs', () => {
+    expect(isReservedSubdomain('myorg')).toBe(false);
+  });
+
+  it('requires the hyphen — cdnographic is a legal slug', () => {
+    // The prefix is `cdn-`, not `cdn`; anything broader would silently claim
+    // real tenant names.
+    expect(isReservedSubdomain('cdnographic')).toBe(false);
+  });
+
+  it('lowercases its input like the Set lookups always did', () => {
+    expect(isReservedSubdomain('CDN-Media-Dev')).toBe(true);
+    expect(isReservedSubdomain('MYORG')).toBe(false);
+  });
+
+  it('agrees with the list — every reserved entry stays reserved', () => {
+    const disagreements = RESERVED_SUBDOMAINS.filter(
+      (entry) => !isReservedSubdomain(entry)
+    );
+    expect(disagreements).toEqual([]);
+  });
+});
+
+describe('isReservedSubdomain covers the R2 infrastructure config', () => {
+  /** First DNS label of any `<label>.revelations.studio` host, anywhere in a string. */
+  const PROD_HOST_IN_ANY_STRING = new RegExp(
+    `([a-z0-9-]+)\\.${DOMAINS.PROD.replace(/\./g, '\\.')}`,
+    'gi'
+  );
+
+  /** Adds the first DNS label of every `<label>.revelations.studio` host in `text`. */
+  function collectLabels(text: string, labels: Set<string>): void {
+    for (const match of text.matchAll(PROD_HOST_IN_ANY_STRING)) {
+      labels.add(match[1].toLowerCase());
+    }
+  }
+
+  /**
+   * Walks the ENTIRE config — not just the keys known to carry hostnames
+   * today — and collects the first DNS label of every
+   * `<label>.revelations.studio` host in any string value (bare hosts,
+   * `https://` URL bases, summary table rows) or object key. A hostname
+   * provisioned under a new key, or keyed BY its hostname, therefore cannot
+   * slip the guard, and the expectation is always derived from the parsed
+   * file, never a hardcoded host list.
+   */
+  function provisionedLabels(
+    node: unknown,
+    labels = new Set<string>()
+  ): Set<string> {
+    if (typeof node === 'string') {
+      collectLabels(node, labels);
+    } else if (Array.isArray(node)) {
+      for (const item of node) provisionedLabels(item, labels);
+    } else if (node !== null && typeof node === 'object') {
+      const record = node as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        collectLabels(key, labels);
+        provisionedLabels(value, labels);
+      }
+    }
+    return labels;
+  }
+
+  it('reserves the first DNS label of every hostname in the config', () => {
+    const labels = provisionedLabels(r2Config());
+    // Sanity: a walk that matched nothing would make the assertion vacuous.
+    expect(labels.size).toBeGreaterThan(10);
+
+    const unreserved = [...labels].filter(
+      (label) => !isReservedSubdomain(label)
+    );
+    expect(unreserved).toEqual([]);
   });
 });
 

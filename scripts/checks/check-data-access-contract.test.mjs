@@ -35,13 +35,16 @@ import {
   classifySearchFieldValue,
   collectCacheControlViolations,
   collectFloatingKvWriteViolations,
+  collectNonDeterministicSqlViolations,
   collectSearchBuilderViolations,
   formatPresetMenu,
   formatSearchBuilderGuidance,
   isCacheControlValue,
   isKvReceiver,
+  NON_DETERMINISTIC_TIME_RE,
   readCachePresets,
   searchValueHead,
+  sqlTemplateChunks,
   tokenize,
 } from './check-data-access-contract.mjs';
 
@@ -80,6 +83,13 @@ function scanKv() {
 
 function scanSearch() {
   return collectSearchBuilderViolations({
+    roots: [join(root, WORKER_SRC)],
+    cwd: root,
+  });
+}
+
+function scanClock() {
+  return collectNonDeterministicSqlViolations({
     roots: [join(root, WORKER_SRC)],
     cwd: root,
   });
@@ -923,5 +933,287 @@ test('RULE 5 against the REAL tree: every declared search input uses the builder
   assert.ok(
     declarationsFound > 0,
     'rule 5 found ZERO search declarations in the real tree, so it is checking nothing — fix SEARCH_FIELD_NAMES or the scan roots, do not delete this test'
+  );
+});
+
+// ===========================================================================
+// RULE 6 — CAUGHT
+// ===========================================================================
+//
+// THE REMOVAL OBLIGATION, STATED. Deleting or weakening rule 6 must make these
+// cases fail, and the FIRST case below is the one that proves it: it asserts
+// exactly one violation carrying file, line and token, so "the collector ran
+// and matched nothing" is a FAILING answer, not a passing one. Weakening the
+// token family to fewer spellings is caught by the unit case over
+// NON_DETERMINISTIC_TIME_RE further down; deleting the rule from the module
+// breaks this suite's import and fails every case in it. The one removal this
+// suite cannot see is dropping the rule's block from main() while keeping the
+// collector — that is caught exactly where rules 3-5's equivalent is caught:
+// by the CLI run in CI, whose behaviour is what the collectors asserted here
+// stand underneath.
+//
+// GROUNDING. Hyperdrive decides cacheability by TEXT-MATCHING the query for
+// non-deterministic function names — no SQL parsing, and a mention in a SQL
+// comment counts. `library.ts` is the library read path: the query that most
+// wants caching, and the ONLY site in the scanned roots that tripped the rule.
+
+test('RULE 6 CATCHES `AND ... > NOW()` inside a sql template — the exact predicate library.ts carried', () => {
+  // Quoted from packages/access/src/services/content-access/library.ts as it
+  // stood before the repair: `AND ${subscriptions.currentPeriodEnd} > NOW())`.
+  // This is the case that proves deletion of the rule is caught — see the
+  // banner above.
+  writeFixture(
+    `${WORKER_SRC}/library.ts`,
+    [
+      'const relationshipPredicate = or(',
+      '  sql`EXISTS (SELECT 1 FROM ${subscriptions}',
+      '                WHERE ${subscriptions.userId} = ${userId}',
+      '                  AND ${subscriptions.status} IN (${ACTIVE}, ${CANCELLING})',
+      '                  AND ${subscriptions.currentPeriodEnd} > NOW())`',
+      ');',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.equal(templatesFound, 1);
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].file, `${WORKER_SRC}/library.ts`);
+  assert.equal(violations[0].line, 5, 'reported where the token sits, which is where the fix goes');
+  assert.equal(violations[0].token, 'NOW(');
+  assert.match(violations[0].text, /> NOW\(\)/);
+});
+
+test('RULE 6 CATCHES `-- NOW()` inside the template — Cloudflare text-matches comments too', () => {
+  // The changelog behaviour the rule is named for. A SQL comment is bytes of
+  // the query like any other, so a mention there marks the whole query
+  // uncacheable — and it is the spelling an author is most sure is harmless.
+  writeFixture(
+    `${WORKER_SRC}/commented-sql.ts`,
+    ['const q = sql`SELECT 1', '  -- NOW()', '  FROM t`;'].join('\n')
+  );
+  const { violations } = scanClock();
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].token, 'NOW(');
+  assert.equal(violations[0].line, 2);
+});
+
+test('RULE 6 CATCHES the whole family — bare tokens, lower case, precision parens, SQL block comments', () => {
+  writeFixture(
+    `${WORKER_SRC}/family.ts`,
+    [
+      'export const a = sql`x > CURRENT_TIMESTAMP`;',
+      'export const b = sql`x > CURRENT_DATE`;',
+      'export const c = sql`x > LOCALTIMESTAMP`;',
+      'export const d = sql`x > now()`;',
+      'export const e = sql`x > CURRENT_TIMESTAMP(3)`;',
+      'export const f = sql`SELECT 1 /* legacy: LOCALTIMESTAMP */ FROM t`;',
+    ].join('\n')
+  );
+  const { violations } = scanClock();
+  assert.deepEqual(
+    violations.map((v) => v.token),
+    [
+      'CURRENT_TIMESTAMP',
+      'CURRENT_DATE',
+      'LOCALTIMESTAMP',
+      'now(',
+      'CURRENT_TIMESTAMP',
+      'LOCALTIMESTAMP',
+    ],
+    'Postgres folds case, so every spelling of the same function must fail — a case-SENSITIVE matcher would miss line 4 and certify the drift'
+  );
+});
+
+test('RULE 6 CATCHES the type-argument spelling sql<T>` — the dominant tag form in service code', () => {
+  // organization-service.ts and its siblings tag templates as `sql<number>`...
+  // not `sql`...`, so a matcher that demands the backtick immediately after
+  // `sql` never judges that spelling: the probe `sql<Date>`x > NOW()`` scanned
+  // as ZERO templates and ZERO violations — the exact banned predicate
+  // certified clean. templatesFound is asserted FIRST because 0 is the
+  // fingerprint of the blind spot: it is what hid the miss from the
+  // fail-closed tripwire.
+  writeFixture(
+    `${WORKER_SRC}/generic-tag.ts`,
+    [
+      'export const active = sql<Date>`x > NOW()`;',
+      'export const ids = sql<string[]>`SELECT id FROM t`;',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.equal(
+    templatesFound,
+    2,
+    'both type-argumented tags were recognised as subjects, clean one included'
+  );
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].token, 'NOW(');
+  assert.equal(violations[0].line, 1);
+});
+
+// ===========================================================================
+// RULE 6 — NEAR-MISSES THAT MUST PASS
+// ===========================================================================
+//
+// Same standing as the other rules: the near-misses are the load-bearing half.
+// The tree is full of `now()` that never reaches SQL — TS comments, JS clock
+// calls, and the bound parameter this rule exists to demand — and a rule that
+// flags any of them fails the build on the very repair it prescribes.
+
+test('RULE 6 PASSES the bound-parameter repair, and the TS comment that explains it', () => {
+  // The exact post-repair shape of library.ts (sibling WP5 lane): the instant
+  // is taken once per request in the worker and reaches Postgres as a bind
+  // parameter, so the query text never varies and stays cacheable. The
+  // `NOW()` left behind is in TypeScript `//` comments — including one that
+  // quotes the old sql`... > NOW()` spelling — and a comment is compiled away
+  // before any query exists.
+  writeFixture(
+    `${WORKER_SRC}/library.ts`,
+    [
+      '  // Postgres would evaluate `NOW()` per statement from the database clock;',
+      "  // this evaluates once per request from the worker's. The old spelling was",
+      '  // sql`... > NOW()`; see the data-access contract gate.',
+      '  const asOf = new Date();',
+      '  const relationshipPredicate = or(',
+      '    sql`EXISTS (SELECT 1 FROM ${subscriptions}',
+      '                  WHERE ${subscriptions.userId} = ${userId}',
+      '                    AND ${subscriptions.currentPeriodEnd} > ${asOf})`',
+      '  );',
+      '  const active = gt(subscriptions.currentPeriodEnd, new Date());',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.deepEqual(violations, []);
+  assert.equal(templatesFound, 1, 'the template was judged, and passed');
+});
+
+test('RULE 6 PASSES `now()` in a TypeScript comment OUTSIDE any template — two real files carry it', () => {
+  // admin's analytics-service.ts documents `effectiveUntil IS NULL OR > now()`
+  // and purchase-service.ts documents `disputedAt = now()`, both in JSDoc.
+  // Prose that documents the function may never be a violation of the rule
+  // against it, or the gate documents itself out of force.
+  writeFixture(
+    `${WORKER_SRC}/analytics-service.ts`,
+    [
+      '/**',
+      ' * Returns one row per ACTIVE creator-organization agreement',
+      ' * (`effectiveUntil IS NULL OR > now()`), annotated with:',
+      ' */',
+      'export const x = 1;',
+      '  // Also documented: disputedAt = now()',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.deepEqual(violations, []);
+  assert.equal(templatesFound, 0, 'no template, no subject — the clock calls in JS are none of this rule\'s business');
+});
+
+test('RULE 6 judges a NESTED sql template on its own tag, and skips interpolation bodies', () => {
+  // Real shape from library.ts: `NOT IN (${sql.join(ids.map((id) =>
+  // sql`${id}`), sql`, `)})`. The outer template's interpolation body is
+  // JavaScript — compiled away, so a nested violation inside it is found by
+  // the NESTED template's own `sql` tag, and the outer template is judged only
+  // on its static text.
+  writeFixture(
+    `${WORKER_SRC}/nested.ts`,
+    [
+      'export const ok = sql`t NOT IN (${sql.join([1, 2], sql`, `)})`;',
+      'export const bad = sql`t NOT IN (${sql`x > now()`})`;',
+    ].join('\n')
+  );
+  const { violations, templatesFound } = scanClock();
+  assert.equal(templatesFound, 4, 'outer + separator on line 1, outer + inner on line 2');
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].token, 'now(');
+  assert.equal(violations[0].line, 2);
+});
+
+test('RULE 6 reports templatesFound === 0 for a tree with no sql template — the state main() fails closed on', () => {
+  writeFixture(
+    `${WORKER_SRC}/plain.ts`,
+    'export const k = `cache-key-${Date.now()}`;\n'
+  );
+  const { violations, filesScanned, templatesFound } = scanClock();
+  assert.deepEqual(violations, []);
+  assert.ok(filesScanned > 0, 'files were scanned...');
+  assert.equal(templatesFound, 0, '...but a plain template literal is not SQL — main() exits 1 on this state');
+});
+
+// ===========================================================================
+// RULE 6 — unit-level predicates and the real-tree subject
+// ===========================================================================
+
+test('NON_DETERMINISTIC_TIME_RE names all four tokens in every spelling, and no prose', () => {
+  for (const sql of [
+    'NOW()',
+    'now(',
+    'Now (',
+    'CURRENT_TIMESTAMP',
+    'current_timestamp',
+    'CURRENT_TIMESTAMP(3)',
+    'CURRENT_DATE',
+    'CURRENT_DATE ()',
+    'LOCALTIMESTAMP',
+  ]) {
+    assert.ok(
+      NON_DETERMINISTIC_TIME_RE.test(sql),
+      `${sql} must be caught — Postgres folds unquoted identifiers, so every spelling is the same function`
+    );
+  }
+  for (const prose of [
+    'as of now',
+    'the NOW habit',
+    'knownow()',
+    'MY_CURRENT_DATE_COLUMN',
+    'LOCALTIMEZONE',
+    'LOCALTIME',
+  ]) {
+    assert.ok(
+      !NON_DETERMINISTIC_TIME_RE.test(prose),
+      `${prose} is not the function`
+    );
+  }
+  // The deliberate narrowing, pinned: LOCALTIME is the same clock family but
+  // is NOT in the set the docs name. If it is ever added, this assertion fails
+  // and forces the widening to be a decision rather than an accident.
+  assert.ok(!NON_DETERMINISTIC_TIME_RE.test('LOCALTIME'));
+});
+
+test('sqlTemplateChunks splits the real library.ts nesting shape into its static text', () => {
+  // library.ts writes `NOT IN (${sql.join(ids.map((id) => sql`${id}`),
+  // sql`, `)})` — three templates deep. The outer template's static text is
+  // `t NOT IN (` and `)`; everything between is interpolation, and the nested
+  // backticks must not end the outer template early.
+  const code =
+    'sql`t NOT IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`';
+  const template = sqlTemplateChunks(code, 3);
+  assert.ok(template);
+  assert.deepEqual(
+    template.chunks.map((c) => c.text),
+    ['t NOT IN (', ')'],
+    'interpolation bodies are skipped, so only the SQL text is judged'
+  );
+  assert.equal(template.end, code.length - 1, 'the closing backtick is the OUTER one');
+  assert.equal(sqlTemplateChunks('sql`never closed', 3), null, 'an unterminated template is skipped, not guessed');
+});
+
+test('RULE 6 against the REAL tree: it still finds `sql` templates to judge (this case reads packages/ workers/ apps/)', () => {
+  // The fixture cases prove the matcher; this one proves it is still POINTED
+  // AT SOMETHING. If the `sql` import is ever renamed or the predicates move
+  // out of the scanned roots, the fixtures stay green and only this case
+  // notices — main() fails closed on the same count.
+  //
+  // VIOLATIONS ARE DELIBERATELY NOT ASSERTED HERE, and the reason is the
+  // landing order of the rule's own epic: at the moment rule 6 landed, the
+  // tree's one offender — packages/access/src/services/content-access/
+  // library.ts:706, `AND currentPeriodEnd > NOW()` — was already repaired on
+  // a sibling lane (commit 938a8c1c) whose branch merges alongside this one,
+  // and the repaired file passes this collector (verified against that
+  // commit's copy of the file: 16 templates, zero violations). Asserting
+  // real-tree cleanliness HERE would have turned this suite red at the exact
+  // base the rule landed on. The durable assertion of the clean tree is the
+  // CLI run in CI, which exits 1 on any violation.
+  const { templatesFound } = collectNonDeterministicSqlViolations();
+  assert.ok(
+    templatesFound > 0,
+    'rule 6 matched ZERO sql templates in the real tree, so it is checking nothing — fix SQL_TAG_RE or the scan roots, do not delete this test'
   );
 });

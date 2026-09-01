@@ -6,7 +6,7 @@
  */
 
 import type { WaitUntilFn } from '@codex/cache';
-import { RESERVED_SUBDOMAINS_SET } from '@codex/constants';
+import { isReservedSubdomain } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
@@ -161,7 +161,7 @@ export function __resetNegativeSlugCache(): void {
  * triggered it (Codex-kgrdp.23).
  *
  * Three tiers, cheapest first:
- *   1. Zero I/O  - infrastructure hostnames rejected from `RESERVED_SUBDOMAINS_SET`.
+ *   1. Zero I/O  - infrastructure hostnames rejected via `isReservedSubdomain`.
  *   2. Zero I/O  - isolate-local negative cache for recently-proven misses.
  *   3. One KV read - write-through cache of `slug -> id`, the same shape as
  *      `checkOrganizationMembership` below. Only real organizations are ever
@@ -212,16 +212,17 @@ export async function extractOrganizationFromSubdomain(
   }
 
   // Infrastructure subdomains are not organizations. Single source of truth:
-  // `@codex/constants` RESERVED_SUBDOMAINS_SET, generated from the files that
-  // actually provision each hostname and pinned by
+  // `@codex/constants` isReservedSubdomain — the generated reserved list plus
+  // the structural `cdn-` prefix rule — pinned by
   // packages/constants/src/__tests__/reserved-subdomains.test.ts.
   //
   // Safe as a hard reject: `organizationSlugSchema`
-  // (packages/validation/src/content/content-schemas.ts:48) refines against
-  // this same set on create AND update, so no organization can hold a
-  // reserved slug. This is the third copy of this list found drifting in
-  // Codex-kgrdp — it must never be hand-maintained again.
-  if (RESERVED_SUBDOMAINS_SET.has(subdomain)) {
+  // (packages/validation/src/content/content-schemas.ts) and `isSlugAvailable`
+  // (@codex/organization) gate creation on this same helper, so no
+  // organization can hold a reserved slug. This is the third copy of this
+  // rule found drifting in Codex-kgrdp — it must never be hand-maintained
+  // again.
+  if (isReservedSubdomain(subdomain)) {
     return null;
   }
 
