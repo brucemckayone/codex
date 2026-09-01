@@ -190,16 +190,17 @@ export class VersionedCache {
    * Park an already-started version-key put on `waitUntil` — the write survives
    * a caller who never awaits the returned promise.
    *
-   * Codex-mhoaz. Eleven production call sites in `@codex/content` and
-   * `@codex/admin` fire `void this.cache?.invalidate(...)` after a successful DB
-   * mutation, deliberately: an invalidation must not add KV latency to a publish
+   * Codex-mhoaz. Production services fire `void this.cache?.invalidate(...)`
+   * after a successful DB mutation — eleven such call sites across
+   * `@codex/content` and `@codex/admin` when this landed, and the count only
+   * grows — deliberately: an invalidation must not add KV latency to a publish
    * response. But `void` in workerd does not mean "later", it means CANCELLED —
    * the request's IoContext is destroyed the moment the response is returned, so
    * a publish could commit to Postgres and never stale the cache, and the stale
    * listing then served until its TTL expired. This is the same defect class as
    * Codex-e32xz on the read path ({@link writeCacheSlot}), on the write path.
    *
-   * The fix belongs HERE rather than at the eleven call sites: each would
+   * The fix belongs HERE rather than at each call site: every one would
    * otherwise need its own `executionCtx` in scope inside a service, and the
    * next call site added would silently reintroduce the bug. Registering the put
    * on the instance's own `waitUntil` is what makes the callers' existing `void`
@@ -579,9 +580,13 @@ export class VersionedCache {
    * lets a caller write back into the instance's counters through the object it
    * was handed.
    *
-   * EXPOSURE ONLY. A caller that wants these numbers logged or shipped must do
-   * that itself, deliberately, at a cadence it chooses — a cache that logged its
-   * own stats would spend request budget on telemetry nobody asked for.
+   * EXPOSURE ONLY, and cache-only. A caller that wants these numbers logged or
+   * shipped must do that itself, deliberately, at a cadence it chooses — a cache
+   * that logged its own stats would spend request budget on telemetry nobody
+   * asked for. These counters also cover THIS instance and nothing else: the
+   * account-wide KV budget picture belongs to `@codex/observability`
+   * (`instrumentKvBindings` / `kvBudgetSnapshot`), which counts at the binding
+   * level across every KV consumer rather than per cache instance.
    *
    * @returns Cache statistics — a frozen snapshot, safe to hold and to hand on
    */

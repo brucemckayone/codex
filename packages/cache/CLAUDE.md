@@ -156,7 +156,7 @@ const cache = new VersionedCache({
 
 ### …and so does invalidate() (Codex-mhoaz)
 
-Same defect class, write path. Eleven service call sites in `@codex/content` and `@codex/admin` fire `void this.cache?.invalidate(...)` after a successful DB mutation — deliberately, so an invalidation adds no KV latency to a publish response. Nobody awaits that promise, so isolate teardown could cancel the version-key put and the publish would commit to Postgres while the stale listing kept serving until its TTL expired.
+Same defect class, write path. Service call sites in `@codex/content` and `@codex/admin` (eleven of them when this landed, and the count only grows) fire `void this.cache?.invalidate(...)` after a successful DB mutation — deliberately, so an invalidation adds no KV latency to a publish response. Nobody awaits that promise, so isolate teardown could cancel the version-key put and the publish would commit to Postgres while the stale listing kept serving until its TTL expired.
 
 `invalidate()` therefore registers its own put on the instance's `waitUntil` **before** awaiting it. That is what makes those `void` calls safe, and it is why the fix lives in the class rather than at the call sites — otherwise every service would need an `executionCtx` in scope, and the next call site added would silently reintroduce the bug. The returned promise still carries the put, so `await cache.invalidate(...)` and `waitUntil(cache.invalidate(...).catch(...))` are both unchanged.
 
@@ -176,7 +176,7 @@ If KV fails (read or write), `get()` calls the fetcher and returns the result �
 - **MUST** use `CacheType` constants — NEVER hand-craft cache key strings
 - **MUST** use fire-and-forget for invalidation in route handlers: `ctx.executionCtx.waitUntil(cache.invalidate(...).catch(() => {}))`
 - **MUST** pass `waitUntil` when the cache is used for a READ (`get`/`getWithResult`) — omitting it means the data slot is never written (Codex-e32xz)
-- **NEVER** remove the `waitUntil` registration inside `invalidate()` as "redundant" — eleven service call sites rely on it to make their `void cache.invalidate(...)` survive isolate teardown (Codex-mhoaz)
+- **NEVER** remove the `waitUntil` registration inside `invalidate()` as "redundant" — every `void cache.invalidate(...)` service call site relies on it to survive isolate teardown (Codex-mhoaz)
 - **NEVER** cache a class instance (e.g. `PaginatedResult`) — JSON round-tripping strips its identity
 - **NEVER** throw from cache operations — degrade gracefully to fetcher
 - **NEVER** cache authorization decisions or prices in persistent cache

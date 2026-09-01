@@ -6,7 +6,7 @@
  *
  *   - READ path (Codex-e32xz): `get()` never awaits its data-slot put, so
  *     without a `waitUntil` the slot is never written — 0% hit rate.
- *   - WRITE path (Codex-mhoaz): eleven production call sites fire `void
+ *   - WRITE path (Codex-mhoaz): production services fire `void
  *     this.cache?.invalidate(...)`, so nobody awaits `invalidate()`'s returned
  *     promise — without a `waitUntil` registration inside `invalidate()` a
  *     publish can commit to Postgres and never stale the cache.
@@ -333,7 +333,7 @@ describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
         waitUntil: (p) => ec.waitUntil(p),
       });
 
-      // EXACTLY what the eleven production call sites in @codex/content and
+      // EXACTLY what the production call sites in @codex/content and
       // @codex/admin do after a successful DB mutation. Nobody awaits this.
       void cache.invalidate('user-1');
 
@@ -437,9 +437,13 @@ describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
   });
 
   describe('without waitUntil (unchanged behaviour)', () => {
-    it('registers nothing and the returned promise still carries the put', async () => {
+    it('attempts no registration and the returned promise still carries the put', async () => {
       const store = createGatedKV({ gateVersionKey: true });
-      const cache = new VersionedCache({ kv: store.kv });
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: store.kv,
+        obs: obs as unknown as ObservabilityClient,
+      });
 
       const pending = cache.invalidate('user-1');
       await Promise.resolve();
@@ -452,6 +456,15 @@ describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
       // `vite dev`, `invalidateUserLibrary` (which parks the whole invalidate()
       // call itself) — are unaffected by the fix.
       expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
+
+      // "Attempts no registration" is the half that IS assertable with no
+      // waitUntil to spy on: registerVersionWrite's `if (!this.waitUntil)`
+      // guard is the only thing stopping it from CALLING an undefined
+      // waitUntil. Drop that guard and the TypeError lands in its own catch,
+      // which warns here — a healthy invalidation reporting a plumbing
+      // failure.
+      expect(obs.warn).not.toHaveBeenCalled();
+      expect(obs.error).not.toHaveBeenCalled();
     });
   });
 });
