@@ -246,11 +246,12 @@ export const RESERVED_SUBDOMAINS_SET = new Set<string>(RESERVED_SUBDOMAINS);
  * Neon org lookup into a cheap reserved 404 for callers that delegate here.
  * The prefix is `cdn-` WITH the hyphen — `cdnographic` is a legal slug.
  *
- * List-only callers remain and do NOT gain the prefix rule until they
- * delegate: the org-slug creation gates (`organizationSlugSchema` in
- * @codex/validation, `isSlugAvailable` in @codex/organization) and
- * worker-utils' `extractOrganizationFromSubdomain`, which still read
- * `RESERVED_SUBDOMAINS_SET` directly.
+ * Every caller that decides routing or slug creation delegates here — the
+ * org-slug creation gates (`organizationSlugSchema` in @codex/validation,
+ * `isSlugAvailable` in @codex/organization) and worker-utils'
+ * `extractOrganizationFromSubdomain`. The exported Set remains for this
+ * helper and the drift tests; reading it directly from a call site re-opens
+ * the cdn-* gap this rule closes.
  */
 export function isReservedSubdomain(sub: string): boolean {
   const label = sub.toLowerCase();

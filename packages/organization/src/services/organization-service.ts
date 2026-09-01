@@ -11,7 +11,7 @@
  * - Slug uniqueness enforced
  */
 
-import { PAGINATION, RESERVED_SUBDOMAINS_SET } from '@codex/constants';
+import { isReservedSubdomain, PAGINATION } from '@codex/constants';
 import {
   isUniqueViolation,
   toIso,
@@ -348,7 +348,7 @@ export class OrganizationService extends BaseService {
     const normalizedSlug = slug.toLowerCase();
 
     // Reject reserved subdomains (cdn, auth, api, etc.)
-    if (RESERVED_SUBDOMAINS_SET.has(normalizedSlug)) {
+    if (isReservedSubdomain(normalizedSlug)) {
       return false;
     }
 
