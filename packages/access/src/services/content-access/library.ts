@@ -695,11 +695,26 @@ export async function listUserLibrary(
   //
   // Volume guard: relationship-bound — if you don't follow / subscribe to
   // any org, both buckets are empty for non-management orgs.
-  // `asOf` is a parameter, not NOW(): the query text stays identical across
-  // requests so Hyperdrive can cache it (data-access contract rule 6). The
-  // worker clock differs from the statement clock by microseconds —
-  // immaterial for a period predicate measured in days.
+  //
+  // THE PERIOD BOUND IS A PARAMETER, NOT `NOW()`, AND THE REASON IS NOT STYLE.
+  // Hyperdrive decides whether a query may be cached by TEXT-MATCHING it for
+  // non-deterministic function names — it does not parse SQL to do so, and
+  // Cloudflare's changelog notes that even a mention inside a SQL COMMENT marks
+  // the whole query uncacheable. This is the library read path, so it is the query
+  // that most wants caching, and it was the ONLY site in packages/ or workers/
+  // that tripped the rule (swept for NOW / CURRENT_TIMESTAMP / CURRENT_DATE /
+  // LOCALTIMESTAMP, in predicates and in SQL comments alike).
+  //
+  // The semantic difference is one clock and sub-second: Postgres would evaluate
+  // `NOW()` per statement from the database's clock, this evaluates once per
+  // request from the worker's. For "is this subscription period still open" that is
+  // immaterial — periods run in days — but it is stated because a future predicate
+  // where it is NOT immaterial must not copy the pattern blindly.
+  //
+  // Correct on the current neon-http driver too, so it does not wait for
+  // Hyperdrive (Codex-s1i7h).
   const asOf = new Date();
+
   const relationshipPredicate = or(
     sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
                 WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
