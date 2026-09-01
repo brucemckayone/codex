@@ -34,6 +34,12 @@
  * Usage (from the monorepo root):
  *   pnpm --filter @codex/database db:seed:portals
  *   pnpm --filter @codex/database db:seed:portals -- --org=of-blood-and-bones
+ *
+ * No `--org` seeds ALL THREE fixture orgs below, not just the first. CI's
+ * E2E Web job runs this once, argumentless, right after `db:seed` (Codex-5ryz3:
+ * the journeys suites hardcode fixtures on every one of the trio, and a default
+ * that stopped after the first org left studio-alpha/studio-beta with no
+ * portals). `--org=<slug>` still seeds exactly one for targeted re-runs.
  */
 
 import { execSync } from 'node:child_process';
@@ -157,13 +163,27 @@ const PORTALS: PortalSpec[] = [
   },
 ];
 
-function parseOrgSlug(): string {
+/**
+ * The orgs the e2e journeys fixtures span — kept in step with
+ * `JOURNEY_FIXTURES` in apps/web/e2e/helpers/journeys.ts. Order matters only
+ * for log readability; each org draws practices from its OWN published
+ * content, so seeding one never starves another.
+ */
+const FIXTURE_ORGS = ['of-blood-and-bones', 'studio-alpha', 'studio-beta'];
+
+function parseOrgSlug(): string | undefined {
   const arg = process.argv.find((a) => a.startsWith('--org='));
-  return arg ? arg.slice('--org='.length) : 'of-blood-and-bones';
+  return arg ? arg.slice('--org='.length) : undefined;
 }
 
 async function main(): Promise<void> {
-  const orgSlug = parseOrgSlug();
+  const orgs = parseOrgSlug() ?? FIXTURE_ORGS;
+  for (const orgSlug of orgs) {
+    await seedOrgPortals(orgSlug);
+  }
+}
+
+async function seedOrgPortals(orgSlug: string): Promise<void> {
   console.log(`\n▸ Seeding portals into "${orgSlug}"\n`);
 
   const org = await dbWs.query.organizations.findFirst({
