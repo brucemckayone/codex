@@ -389,5 +389,66 @@ describe('VersionedCache write budget', () => {
       expect(cache.getStats()).toMatchObject({ reads: 2, writes: 2 });
       expect(kv.writes()).toBe(2);
     });
+
+    it('reports real counter values across miss → set → hit → invalidate', async () => {
+      const kv = createCountingKV();
+      const ec = createExecutionContextSpy();
+      const cache = new VersionedCache({ kv: kv.kv, waitUntil: ec.waitUntil });
+      const fetcher = vi.fn(async () => [{ id: 'from-db' }]);
+
+      // MISS: 1 get, 2 reads (version, then data), 1 write (the data slot).
+      await cache.get('org-1', 'org:tiers', fetcher);
+      await ec.drain();
+      // SET: 1 read (version) + 1 write, straight into the current slot.
+      await cache.set('org-1', 'org:tiers', [{ id: 'fresh' }]);
+      // HIT: 1 get, 2 reads, 0 writes.
+      const hit = await cache.get('org-1', 'org:tiers', fetcher);
+      // INVALIDATE: 1 write, and the only counter nothing else touches.
+      await cache.invalidate('org-1');
+
+      expect(hit).toEqual([{ id: 'fresh' }]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Codex-kgrdp.1 item 4. Every other assertion on getStats() in this repo
+      // is a `toMatchObject` of one or two fields, which is how the surface
+      // could exist without anyone knowing whether the numbers MEANT anything.
+      // Exact values across a full sequence: a getStats() that reported `gets`
+      // where `reads` belongs, or that double-counted the parked data-slot put,
+      // passes a partial match and fails here.
+      expect(cache.getStats()).toEqual({
+        gets: 2,
+        hits: 1,
+        misses: 1,
+        invalidations: 1,
+        reads: 5,
+        writes: 3,
+        hitRate: 0.5,
+      });
+      // The instance's own tally must agree with what the KV mock was actually
+      // asked to do — that is the whole claim the numbers are making.
+      expect(cache.getStats().reads).toBe(kv.reads());
+      expect(cache.getStats().writes).toBe(kv.writes());
+    });
+
+    it('returns a frozen snapshot that cannot write back to the instance', async () => {
+      const kv = createCountingKV();
+      const cache = new VersionedCache({ kv: kv.kv });
+
+      await cache.invalidate('org-1');
+      const stats = cache.getStats();
+
+      expect(stats.invalidations).toBe(1);
+      expect(Object.isFrozen(stats)).toBe(true);
+      expect(() => {
+        (stats as { invalidations: number }).invalidations = 999;
+      }).toThrow(TypeError);
+
+      // A snapshot is detached in TIME as well: holding one must not track later
+      // operations, and holding one must not corrupt them either.
+      await cache.invalidate('org-2');
+
+      expect(stats.invalidations).toBe(1);
+      expect(cache.getStats().invalidations).toBe(2);
+    });
   });
 });

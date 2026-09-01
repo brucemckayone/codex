@@ -23,7 +23,7 @@ Versioned KV cache for Cloudflare Workers. Cache-aside pattern with atomic versi
 | `set<T>(id, type, data, options?)` | `(string, CacheType, T, { ttl? }) => Promise<void>` | Write-through: put a value you already hold into the current slot. 1 read + 1 write |
 | `invalidate(id)` | `(string) => Promise<void>` | Bump version — all cached data for this id becomes stale. The ONLY writer of version keys |
 | `delete(id, type)` | `(string, CacheType) => Promise<void>` | Delete one specific cache entry |
-| `getStats()` | `() => CacheStats` | Hit rate, misses, total requests, and KV `reads` / `writes` |
+| `getStats()` | `() => Readonly<CacheStats>` | Hit rate, misses, total requests, and KV `reads` / `writes` — a frozen snapshot, detached from the instance |
 | `resetStats()` | `() => void` | Reset in-process stats |
 
 ```ts
@@ -152,7 +152,13 @@ const cache = new VersionedCache({
 - Wrap it in a closure. A bare `executionCtx.waitUntil` reference throws "Illegal invocation" in workerd.
 - NOT `ctx.background`: that hook exists so DB work finishes before `procedure()` ends the Postgres pool. A KV put has no pool, and chaining it there would hold a DB connection open for a KV write.
 - Every `VersionedCache` built by the service registry already gets it.
-- Omitting it is still legal (invalidate-only helpers, unit tests) and keeps the old best-effort behaviour — but it means the cache will not hold data in production.
+- Omitting it is still legal (invalidate-only helpers, unit tests) and keeps the old best-effort behaviour — but it means the cache will not hold data in production, and it means the write path below has nothing to park on either.
+
+### …and so does invalidate() (Codex-mhoaz)
+
+Same defect class, write path. Eleven service call sites in `@codex/content` and `@codex/admin` fire `void this.cache?.invalidate(...)` after a successful DB mutation — deliberately, so an invalidation adds no KV latency to a publish response. Nobody awaits that promise, so isolate teardown could cancel the version-key put and the publish would commit to Postgres while the stale listing kept serving until its TTL expired.
+
+`invalidate()` therefore registers its own put on the instance's `waitUntil` **before** awaiting it. That is what makes those `void` calls safe, and it is why the fix lives in the class rather than at the call sites — otherwise every service would need an `executionCtx` in scope, and the next call site added would silently reintroduce the bug. The returned promise still carries the put, so `await cache.invalidate(...)` and `waitUntil(cache.invalidate(...).catch(...))` are both unchanged.
 
 ## Never cache a class instance
 
@@ -170,6 +176,7 @@ If KV fails (read or write), `get()` calls the fetcher and returns the result �
 - **MUST** use `CacheType` constants — NEVER hand-craft cache key strings
 - **MUST** use fire-and-forget for invalidation in route handlers: `ctx.executionCtx.waitUntil(cache.invalidate(...).catch(() => {}))`
 - **MUST** pass `waitUntil` when the cache is used for a READ (`get`/`getWithResult`) — omitting it means the data slot is never written (Codex-e32xz)
+- **NEVER** remove the `waitUntil` registration inside `invalidate()` as "redundant" — eleven service call sites rely on it to make their `void cache.invalidate(...)` survive isolate teardown (Codex-mhoaz)
 - **NEVER** cache a class instance (e.g. `PaginatedResult`) — JSON round-tripping strips its identity
 - **NEVER** throw from cache operations — degrade gracefully to fetcher
 - **NEVER** cache authorization decisions or prices in persistent cache
