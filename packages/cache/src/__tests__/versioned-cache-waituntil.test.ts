@@ -344,8 +344,8 @@ describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
 
       // The put has NOT settled and no one holds the returned promise, so the
       // registration asserted on the next line is the isolate's only reason to
-      // stay alive. Remove `this.registerVersionWrite(write, id)` from
-      // invalidate() and the count is 0 here.
+      // stay alive. Remove the `this.waitUntil(...)` call from
+      // startVersionWrite() and the count is 0 here.
       expect(store.settled.has(VERSION_KEY)).toBe(false);
       expect(ec.count()).toBe(1);
 
@@ -458,7 +458,7 @@ describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
       expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
 
       // "Attempts no registration" is the half that IS assertable with no
-      // waitUntil to spy on: registerVersionWrite's `if (!this.waitUntil)`
+      // waitUntil to spy on: startVersionWrite's `if (!this.waitUntil)`
       // guard is the only thing stopping it from CALLING an undefined
       // waitUntil. Drop that guard and the TypeError lands in its own catch,
       // which warns here — a healthy invalidation reporting a plumbing

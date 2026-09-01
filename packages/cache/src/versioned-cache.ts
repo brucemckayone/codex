@@ -187,8 +187,8 @@ export class VersionedCache {
   }
 
   /**
-   * Park an already-started version-key put on `waitUntil` — the write survives
-   * a caller who never awaits the returned promise.
+   * Start the version-key put and park it on `waitUntil` — the write survives a
+   * caller who never awaits the returned promise.
    *
    * Codex-mhoaz. Production services fire `void this.cache?.invalidate(...)`
    * after a successful DB mutation — eleven such call sites across
@@ -210,14 +210,26 @@ export class VersionedCache {
    * exactly as before — the returned promise still carries the put, which is all
    * an awaiting caller (or `invalidateUserLibrary`, which parks the whole
    * `invalidate()` call itself) ever needed.
+   *
+   * The put is STARTED here rather than passed in, for the same reason
+   * {@link writeCacheSlot} starts its own: ownership of a KV write is only
+   * checkable when the `put` and the `waitUntil` holding it sit in one place.
+   * Hand a put in from elsewhere and rule 4 of
+   * `scripts/checks/check-data-access-contract.mjs` correctly reports a floating
+   * write, because at the `put` site nothing visibly holds it.
    */
-  private registerVersionWrite(write: Promise<unknown>, id: string): void {
-    if (!this.waitUntil) return;
+  private startVersionWrite(
+    versionKey: string,
+    newVersion: string,
+    id: string
+  ): Promise<unknown> {
+    const write = this.kv.put(versionKey, newVersion);
+    if (!this.waitUntil) return write;
 
     try {
       // The task handed to the runtime MUST swallow: `invalidate()`'s own catch
       // logs the failure, and a rejecting waitUntil task is an unhandled
-      // rejection in workerd. The awaited `write` is a separate reference, so
+      // rejection in workerd. The returned `write` is a separate reference, so
       // the caller-visible error path is unaffected.
       this.waitUntil(write.catch(() => {}));
     } catch (err) {
@@ -229,6 +241,8 @@ export class VersionedCache {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    return write;
   }
 
   /**
@@ -467,7 +481,7 @@ export class VersionedCache {
    *
    * The put is registered on the instance's `waitUntil` BEFORE it is awaited, so
    * the runtime holds the isolate open until it settles even when nobody awaits
-   * the returned promise — see {@link registerVersionWrite}.
+   * the returned promise — see {@link startVersionWrite}.
    *
    * @param id - Entity identifier to invalidate
    *
@@ -482,13 +496,11 @@ export class VersionedCache {
 
     try {
       this.stats.writes++;
-      // Start the put, hand it to the runtime, THEN await it. Registering
-      // before the await is the whole fix: a caller doing `void invalidate(id)`
-      // never awaits this promise, so without the registration the put is the
+      // Starts the put and hands it to the runtime BEFORE this await. That
+      // ordering is the whole fix: a caller doing `void invalidate(id)` never
+      // awaits this promise, so without the registration the put is the
       // isolate's only claim on itself and teardown cancels it (Codex-mhoaz).
-      const write = this.kv.put(versionKey, newVersion);
-      this.registerVersionWrite(write, id);
-      await write;
+      await this.startVersionWrite(versionKey, newVersion, id);
 
       this.stats.invalidations++;
       this.obs?.info('Cache invalidated', { id, version: newVersion });
