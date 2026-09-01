@@ -695,6 +695,11 @@ export async function listUserLibrary(
   //
   // Volume guard: relationship-bound — if you don't follow / subscribe to
   // any org, both buckets are empty for non-management orgs.
+  // `asOf` is a parameter, not NOW(): the query text stays identical across
+  // requests so Hyperdrive can cache it (data-access contract rule 6). The
+  // worker clock differs from the statement clock by microseconds —
+  // immaterial for a period predicate measured in days.
+  const asOf = new Date();
   const relationshipPredicate = or(
     sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
                 WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
@@ -703,7 +708,7 @@ export async function listUserLibrary(
                 WHERE ${subscriptions.userId} = ${userId}
                   AND ${subscriptions.organizationId} = ${content.organizationId}
                   AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
-                  AND ${subscriptions.currentPeriodEnd} > NOW())`
+                  AND ${subscriptions.currentPeriodEnd} > ${asOf})`
   );
 
   const buildRelationshipQuery = async (
