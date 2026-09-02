@@ -51,7 +51,10 @@ function warmTierCache(
   orgId: string
 ): void {
   if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV,
+    waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+  });
   ctx.executionCtx.waitUntil(
     (async () => {
       const tiers = await ctx.services.tier.listTiers(orgId);

@@ -330,6 +330,9 @@ async function readOrgVersions(
   try {
     const cache = new VersionedCache({
       kv: platform.env.CACHE_KV as KVNamespace,
+      waitUntil: platform.context
+        ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+        : undefined,
     });
     const orgContentKey = CacheType.COLLECTION_ORG_CONTENT(orgId);
     const libraryKey = userId

@@ -24,6 +24,9 @@ export const load: LayoutServerLoad = async ({
   if (platform?.env?.CACHE_KV) {
     const cache = new VersionedCache({
       kv: platform.env.CACHE_KV as KVNamespace,
+      waitUntil: platform.context
+        ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+        : undefined,
     });
     // User entity version — tracks profile, preferences, and library staleness.
     // org:{orgId} and user:{userId}:library added in Phase 2 platform layout.

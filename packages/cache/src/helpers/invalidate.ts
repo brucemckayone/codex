@@ -68,7 +68,7 @@ export interface InvalidateUserLibraryArgs {
 export function invalidateUserLibrary(args: InvalidateUserLibraryArgs): void {
   const { kv, waitUntil, userId, logger } = args;
   if (!kv || !userId) return;
-  const cache = new VersionedCache({ kv });
+  const cache = new VersionedCache({ kv, waitUntil });
   const key = CacheType.COLLECTION_USER_LIBRARY(userId);
   waitUntil(
     cache.invalidate(key).catch((error: unknown) => {
