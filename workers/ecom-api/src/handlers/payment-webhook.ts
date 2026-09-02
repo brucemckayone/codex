@@ -44,7 +44,15 @@ function invalidateLibrary(
   if (!userId || !c.env.CACHE_KV) return;
 
   const obs = c.get('obs');
-  const cache = new VersionedCache({ kv: c.env.CACHE_KV });
+  // `waitUntil` goes into the CONFIG, not only to `invalidateForUser` below.
+  // The helper's copy sinks the invalidation; only the instance's own copy can
+  // sink a data-slot put from `get`/`getWithResult`. Nothing reads through this
+  // cache today, which is exactly how Codex-03uh3 stayed invisible next door.
+  const cache = new VersionedCache({
+    kv: c.env.CACHE_KV,
+    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+    obs,
+  });
   try {
     invalidateForUser(
       cache,
