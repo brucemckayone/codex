@@ -29,6 +29,14 @@ import type { VersionedCache } from '../versioned-cache';
  * a green-looking change that measures nothing in the only environment whose
  * numbers are in question.
  *
+ * ## This never throws
+ *
+ * Every call site invokes it inline in the request path, so it swallows its own
+ * failures and reports them through `obs` as `cache_stats_failed` instead. A
+ * gauge is not worth a 500. Do not remove that guard to "surface problems" —
+ * the report IS the surfacing, and the caller has no useful way to handle a
+ * telemetry fault mid-request.
+ *
  * ## Volume
  *
  * One line per request that actually touched the cache — requests that touched
@@ -52,18 +60,45 @@ export function logCacheStats(
   obs: ObservabilityClient,
   context: Record<string, unknown> = {}
 ): void {
-  const stats = cache.getStats();
+  try {
+    const stats = cache.getStats();
 
-  // A request that never touched the cache has nothing to say, and a row of
-  // zeroes would still cost a log event and dilute every aggregate computed
-  // over these lines.
-  if (stats.gets === 0 && stats.writes === 0 && stats.invalidations === 0) {
-    return;
+    // A request that never touched the cache has nothing to say, and a row of
+    // zeroes would still cost a log event and dilute every aggregate computed
+    // over these lines.
+    if (stats.gets === 0 && stats.writes === 0 && stats.invalidations === 0) {
+      return;
+    }
+
+    obs.info('cache stats', {
+      signal: 'cache_stats',
+      ...context,
+      ...stats,
+    });
+  } catch (error) {
+    // A BROKEN GAUGE MUST NOT BREAK THE REQUEST IT MEASURES.
+    //
+    // Every call site invokes this INLINE in the request path, not inside
+    // `waitUntil` — `explore/+page.server.ts`, `account/notifications`,
+    // `cached-read.ts`, `service-registry.ts`, `journeys.ts` (x2) and
+    // `public.ts`. So an unguarded throw here fails a page that was otherwise
+    // served correctly, turning telemetry into an outage. That is the same
+    // contract `cacheWrite` carries in `org-helpers.ts`: a cache write must
+    // never be the thing that turns an authorization lookup into a 500.
+    //
+    // Reported rather than swallowed, because a silently dead gauge is the
+    // exact disease this helper was written to cure — `Codex-m59lj` existed
+    // because `VersionedCache.stats` was maintained for months and never
+    // emitted. A gauge that fails must say so.
+    try {
+      obs.error('cache stats emit failed', {
+        signal: 'cache_stats_failed',
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch {
+      // `obs` itself is the failure. There is nothing left to report through,
+      // and rethrowing would defeat the whole point of this catch.
+    }
   }
-
-  obs.info('cache stats', {
-    signal: 'cache_stats',
-    ...context,
-    ...stats,
-  });
 }

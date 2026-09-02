@@ -137,4 +137,55 @@ describe('logCacheStats', () => {
     // that the write allowance is measured against.
     expect(obs.info).toHaveBeenCalledTimes(2);
   });
+
+  // These two cases exist because the unguarded version shipped and CI caught
+  // it: five tests in explore/+page.server.test.ts died with
+  // `TypeError: n.getStats is not a function`, thrown out of `load`. Every
+  // call site invokes this helper INLINE in the request path, so that throw is
+  // a 500 on a page that was otherwise served correctly. A gauge is not worth
+  // an outage.
+  it('does not propagate a getStats fault into the request', () => {
+    const { obs } = createMockObservability();
+    const broken = {
+      getStats: () => {
+        throw new Error('stats unavailable');
+      },
+    };
+
+    expect(() =>
+      logCacheStats(broken, obs as unknown as ObservabilityClient, {
+        cacheType: 'org:config',
+      })
+    ).not.toThrow();
+
+    // Reported, NOT swallowed. A silently dead gauge is the precise disease
+    // this helper was written to cure, so a broken one has to announce itself
+    // or we are back to `stats` being maintained and never seen.
+    expect(obs.error).toHaveBeenCalledWith(
+      'cache stats emit failed',
+      expect.objectContaining({
+        signal: 'cache_stats_failed',
+        cacheType: 'org:config',
+        error: 'stats unavailable',
+      })
+    );
+    expect(obs.info).not.toHaveBeenCalled();
+  });
+
+  it('survives a cache object with no getStats at all', () => {
+    const { obs } = createMockObservability();
+
+    // The exact shape CI hit: a test double that implements `get` and nothing
+    // else. Typed as `Pick<VersionedCache, 'getStats'>`, so only a runtime
+    // type violation reaches here — which is what a hand-written mock is.
+    const notACache = {} as unknown as Parameters<typeof logCacheStats>[0];
+
+    expect(() =>
+      logCacheStats(notACache, obs as unknown as ObservabilityClient)
+    ).not.toThrow();
+    expect(obs.error).toHaveBeenCalledWith(
+      'cache stats emit failed',
+      expect.objectContaining({ signal: 'cache_stats_failed' })
+    );
+  });
 });
