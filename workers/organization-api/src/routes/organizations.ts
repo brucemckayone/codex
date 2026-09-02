@@ -47,6 +47,7 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import {
+  cachedRead,
   invalidateOrgSlugCacheEntry,
   PaginatedResult,
   procedure,
@@ -359,27 +360,22 @@ app.get(
     handler: async (ctx) => {
       const slug = ctx.input.params.slug;
 
-      // Use VersionedCache for KV caching (30 min TTL).
-      // The cache key is the org slug — we don't know the orgId yet.
-      // The fetcher resolves slug → org + branding from DB on cache miss.
-      if (ctx.env.CACHE_KV) {
-        // `waitUntil` is REQUIRED on a read path (Codex-e32xz): the data-slot
-        // put is not awaited, so without it workerd cancels the write when the
-        // response returns and this cache can never hit.
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-        });
-        return cache.get(
-          slug,
-          CacheType.ORG_CONFIG,
-          () => fetchPublicOrgInfo(ctx, slug),
-          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
-        );
-      }
-
-      // Fallback when CACHE_KV is not bound (shouldn't happen in production)
-      return fetchPublicOrgInfo(ctx, slug);
+      // KV cache-aside on the org slug — we don't know the orgId yet, and the
+      // fetcher resolves slug → org + branding from the DB on a miss.
+      //
+      // `cachedRead` owns the `CACHE_KV` check, the `waitUntil` that a read path
+      // REQUIRES (Codex-e32xz — without it workerd cancels the un-awaited
+      // data-slot put and this cache can never hit), the unbound-KV fallback,
+      // and the stats emit. This is the busiest cached read on the platform and
+      // its key is one of the four data slots live in CACHE_KV_PRODUCTION, so
+      // it was also one of the reads the hit ratio could not see.
+      return cachedRead(
+        ctx,
+        slug,
+        CacheType.ORG_CONFIG,
+        () => fetchPublicOrgInfo(ctx, slug),
+        { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+      );
     },
   })
 );
@@ -410,20 +406,13 @@ app.get(
     handler: async (ctx) => {
       const slug = ctx.input.params.slug;
 
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-        });
-        return cache.get(
-          slug,
-          CacheType.ORG_STATS,
-          () => ctx.services.organization.getPublicStats(slug),
-          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
-        );
-      }
-
-      return ctx.services.organization.getPublicStats(slug);
+      return cachedRead(
+        ctx,
+        slug,
+        CacheType.ORG_STATS,
+        () => ctx.services.organization.getPublicStats(slug),
+        { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+      );
     },
   })
 );
@@ -470,21 +459,13 @@ app.get(
       const fetcher = () =>
         ctx.services.organization.getPublicCreators(slug, { page, limit });
 
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-        });
-        const result = await cache.get(
-          slug,
-          `${CacheType.ORG_CREATORS}:${page}:${limit}`,
-          fetcher,
-          { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
-        );
-        return new PaginatedResult(result.items, result.pagination);
-      }
-
-      const result = await fetcher();
+      const result = await cachedRead(
+        ctx,
+        slug,
+        `${CacheType.ORG_CREATORS}:${page}:${limit}`,
+        fetcher,
+        { ttl: CACHE_TTL.ORG_PUBLIC_INFO_SECONDS }
+      );
       return new PaginatedResult(result.items, result.pagination);
     },
   })

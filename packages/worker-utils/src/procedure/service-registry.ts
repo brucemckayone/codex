@@ -20,7 +20,11 @@ import {
   AdminCustomerManagementService,
 } from '@codex/admin';
 import { AgreementService } from '@codex/agreements';
-import { VersionedCache } from '@codex/cache';
+import {
+  logCacheStats,
+  VersionedCache,
+  type VersionedCacheConfig,
+} from '@codex/cache';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 // Service imports
 import {
@@ -204,6 +208,38 @@ export function createServiceRegistry(
     ? (promise: Promise<unknown>) => executionCtx.waitUntil(promise)
     : undefined;
 
+  /**
+   * Every cache this registry builds, so `cleanup()` can emit their stats.
+   *
+   * The registry is the right owner of that emit for the same reason it is the
+   * right owner of `cacheWaitUntil`: it is the ONE place a worker's caches are
+   * constructed, so a single change covers all six services instead of six
+   * call-site edits that the next service would forget to copy.
+   */
+  const trackedCaches: VersionedCache[] = [];
+
+  /**
+   * Build a request-scoped cache and register it for the stats emit.
+   *
+   * All six services took a byte-identical construction before this existed;
+   * routing them through one factory is what makes "the registry emits cache
+   * stats" a property of the registry rather than a habit six getters share.
+   *
+   * `kv` is a PARAMETER rather than read off `env` in here: every call site
+   * sits behind an `env.CACHE_KV` truthiness check, and that narrowing does not
+   * cross a function boundary — reading it inside the factory reintroduces the
+   * `KVNamespace | undefined` the call sites already ruled out.
+   */
+  function buildTrackedCache(kv: VersionedCacheConfig['kv']): VersionedCache {
+    const cache = new VersionedCache({
+      kv,
+      prefix: 'cache',
+      waitUntil: cacheWaitUntil,
+    });
+    trackedCaches.push(cache);
+    return cache;
+  }
+
   // Service instances (created on demand)
   let _content: ContentService | undefined;
   let _categories: CategoriesService | undefined;
@@ -302,13 +338,7 @@ export function createServiceRegistry(
         });
 
         if (env.CACHE_KV) {
-          _content.setCache(
-            new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
-          );
+          _content.setCache(buildTrackedCache(env.CACHE_KV));
         }
       }
       return _content;
@@ -590,11 +620,7 @@ export function createServiceRegistry(
     get feeConfig() {
       if (!_feeConfig) {
         const cache = env.CACHE_KV
-          ? new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
+          ? buildTrackedCache(env.CACHE_KV)
           : undefined;
         const waitUntil = executionCtx
           ? executionCtx.waitUntil.bind(executionCtx)
@@ -742,11 +768,7 @@ export function createServiceRegistry(
         // Mirror of the AccessRevocation wiring on `access` above —
         // same gating shape, same graceful-degrade semantics.
         const cache = env.CACHE_KV
-          ? new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
+          ? buildTrackedCache(env.CACHE_KV)
           : undefined;
         const waitUntil = executionCtx
           ? executionCtx.waitUntil.bind(executionCtx)
@@ -899,13 +921,7 @@ export function createServiceRegistry(
         // ContentService cache-wiring pattern: construct first, then inject
         // the cache only when CACHE_KV is bound (skipped in unit tests).
         if (env.CACHE_KV) {
-          _connectAccount.setCache(
-            new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
-          );
+          _connectAccount.setCache(buildTrackedCache(env.CACHE_KV));
         }
       }
       return _connectAccount;
@@ -1042,13 +1058,7 @@ export function createServiceRegistry(
         });
 
         if (env.CACHE_KV) {
-          _adminContent.setCache(
-            new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
-          );
+          _adminContent.setCache(buildTrackedCache(env.CACHE_KV));
         }
       }
       return _adminContent;
@@ -1166,11 +1176,7 @@ export function createServiceRegistry(
 
         // Create versioned cache if CACHE_KV is available
         const cache = env.CACHE_KV
-          ? new VersionedCache({
-              kv: env.CACHE_KV,
-              prefix: 'cache',
-              waitUntil: cacheWaitUntil,
-            })
+          ? buildTrackedCache(env.CACHE_KV)
           : undefined;
 
         _identity = new IdentityService({
@@ -1186,10 +1192,28 @@ export function createServiceRegistry(
   };
 
   /**
-   * Cleanup all database connections
-   * Called after request processing completes
+   * Cleanup all database connections, and emit each cache's hit/miss stats.
+   *
+   * Callers already run this on `waitUntil` after the response is returned
+   * (see the example above), which is exactly the cadence the stats emit wants:
+   * end of request, off the response path, costing the client nothing.
+   *
+   * The emit is wrapped so a logger fault can never fail a cleanup — the DB
+   * teardown is the load-bearing half of this function and telemetry must not
+   * be able to strand a connection. `logCacheStats` also returns early for a
+   * cache that was never touched, so a request that read nothing logs nothing.
    */
   async function cleanup(): Promise<void> {
+    if (_obs) {
+      for (const cache of trackedCaches) {
+        try {
+          logCacheStats(cache, _obs, organizationId ? { organizationId } : {});
+        } catch {
+          // Telemetry is never worth a stranded DB connection.
+        }
+      }
+    }
+
     await Promise.all(cleanupFns.map((fn) => fn()));
   }
 

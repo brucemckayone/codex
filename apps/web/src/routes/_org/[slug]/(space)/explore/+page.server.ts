@@ -6,8 +6,9 @@
  * via the authenticated content endpoint; unauthenticated users use the public endpoint.
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { CacheType, VersionedCache } from '@codex/cache';
+import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
 import type { CourseCardSummary } from '$lib/journeys/types';
+import { logger } from '$lib/observability';
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
@@ -225,6 +226,7 @@ export const load: PageServerLoad = async ({
         waitUntil: platform.context
           ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
           : undefined,
+        obs: logger,
       });
       // Every param that varies the RESULT must vary the key, or two filter
       // combinations read each other's cached payload.
@@ -245,6 +247,7 @@ export const load: PageServerLoad = async ({
           ),
         { ttl: 180 }
       );
+      logCacheStats(cache, logger, { cacheType: dataType });
     } else {
       contentResult = await fetchAuthContent(
         api,
