@@ -7,6 +7,8 @@
 
 import { dbHttp, schema } from '@codex/database';
 import type { OrgMemberContext, OrgMemberRole } from '@codex/shared-types';
+import { buildServiceUrl } from '@codex/urls';
+import { eq } from 'drizzle-orm';
 import { authFixture } from './auth.fixture';
 
 export interface CreateOrgMemberOptions {
@@ -88,6 +90,41 @@ export const orgFixture = {
       status: 'active',
       invitedBy: registeredUser.user.id, // Self-invited for test
     });
+
+    /*
+     * Can the organization-api WORKER see the org we just wrote (Codex-5ryz3)?
+     *
+     * This fixture writes org + membership straight to the DATABASE with the
+     * runner's own connection, while every page under `<slug>.<host>` resolves
+     * the org through the organization-api worker's connection. When those two
+     * connections disagree (CI once ran the runner on the pooled Neon URL and
+     * the seed on the direct one), fixture orgs 404 on sight — the page renders
+     * "Organization … not found" and every studio spec times out, all while
+     * the same suite passes locally. One logged line reads the row back through
+     * BOTH perspectives:
+     *   db=1 orgApi=200   healthy
+     *   db=1 orgApi=404   write and worker-read disagree — plumbing, not code
+     *   db=0              the insert never landed where the runner reads
+     */
+    {
+      const visible = await dbHttp
+        .select({ id: schema.organizations.id })
+        .from(schema.organizations)
+        .where(eq(schema.organizations.slug, organization.slug))
+        .limit(1);
+      let orgApiStatus = 'unreachable';
+      try {
+        const res = await fetch(
+          `${buildServiceUrl('org', true)}/api/organizations/public/${organization.slug}/info`
+        );
+        orgApiStatus = String(res.status);
+      } catch {
+        // keep 'unreachable' — the worker being down is itself diagnostic
+      }
+      console.log(
+        `[org-fixture] ${organization.slug}: db=${visible.length} orgApi=${orgApiStatus}`
+      );
+    }
 
     return {
       user: {

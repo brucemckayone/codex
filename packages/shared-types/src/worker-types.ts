@@ -48,6 +48,18 @@ export type Bindings = {
   DATABASE_URL_LOCAL_PROXY?: string;
 
   /**
+   * Hyperdrive binding for the Neon connection (Codex-s1i7h).
+   *
+   * OPTIONAL AND INERT TODAY: no wrangler config declares it, so it is
+   * `undefined` in every deployed worker and the database factories resolve
+   * `DATABASE_URL` exactly as before. The day a Hyperdrive config exists, the
+   * shared per-request client accepts its `connectionString` as an override
+   * and connections ride Hyperdrive's pooler — a config-only change, which is
+   * why the binding is declared before any config references it.
+   */
+  HYPERDRIVE?: import('@cloudflare/workers-types').Hyperdrive;
+
+  /**
    * Web application URL for CORS
    */
   WEB_APP_URL?: string;

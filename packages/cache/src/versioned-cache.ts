@@ -74,7 +74,12 @@ import {
   buildVersionedCacheKey,
   buildVersionKey,
 } from './cache-keys';
-import type { CacheOptions, CacheResult, VersionedCacheConfig } from './types';
+import type {
+  CacheOptions,
+  CacheResult,
+  CacheStats,
+  VersionedCacheConfig,
+} from './types';
 
 /**
  * Default TTL for cached data (10 minutes)
@@ -179,6 +184,65 @@ export class VersionedCache {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /**
+   * Start the version-key put and park it on `waitUntil` — the write survives a
+   * caller who never awaits the returned promise.
+   *
+   * Codex-mhoaz. Production services fire `void this.cache?.invalidate(...)`
+   * after a successful DB mutation — eleven such call sites across
+   * `@codex/content` and `@codex/admin` when this landed, and the count only
+   * grows — deliberately: an invalidation must not add KV latency to a publish
+   * response. But `void` in workerd does not mean "later", it means CANCELLED —
+   * the request's IoContext is destroyed the moment the response is returned, so
+   * a publish could commit to Postgres and never stale the cache, and the stale
+   * listing then served until its TTL expired. This is the same defect class as
+   * Codex-e32xz on the read path ({@link writeCacheSlot}), on the write path.
+   *
+   * The fix belongs HERE rather than at each call site: every one would
+   * otherwise need its own `executionCtx` in scope inside a service, and the
+   * next call site added would silently reintroduce the bug. Registering the put
+   * on the instance's own `waitUntil` is what makes the callers' existing `void`
+   * safe, with no change on their side.
+   *
+   * When no `waitUntil` was supplied nothing is registered and behaviour is
+   * exactly as before — the returned promise still carries the put, which is all
+   * an awaiting caller (or `invalidateUserLibrary`, which parks the whole
+   * `invalidate()` call itself) ever needed.
+   *
+   * The put is STARTED here rather than passed in, for the same reason
+   * {@link writeCacheSlot} starts its own: ownership of a KV write is only
+   * checkable when the `put` and the `waitUntil` holding it sit in one place.
+   * Hand a put in from elsewhere and rule 4 of
+   * `scripts/checks/check-data-access-contract.mjs` correctly reports a floating
+   * write, because at the `put` site nothing visibly holds it.
+   */
+  private startVersionWrite(
+    versionKey: string,
+    newVersion: string,
+    id: string
+  ): Promise<unknown> {
+    const write = this.kv.put(versionKey, newVersion);
+    if (!this.waitUntil) return write;
+
+    try {
+      // The task handed to the runtime MUST swallow: `invalidate()`'s own catch
+      // logs the failure, and a rejecting waitUntil task is an unhandled
+      // rejection in workerd. The returned `write` is a separate reference, so
+      // the caller-visible error path is unaffected.
+      this.waitUntil(write.catch(() => {}));
+    } catch (err) {
+      // A caller-supplied waitUntil is foreign code (a stale ExecutionContext,
+      // a Hono context with no executionCtx). It must never turn a successful
+      // mutation's invalidation into a thrown error.
+      this.obs?.warn('Cache invalidation could not be scheduled on waitUntil', {
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    return write;
   }
 
   /**
@@ -413,6 +477,12 @@ export class VersionedCache {
    * mutated, against a 1GB storage allowance. Storage is the abundant resource
    * here; writes are not.
    *
+   * ## `void invalidate(id)` is safe when a waitUntil was supplied (Codex-mhoaz)
+   *
+   * The put is registered on the instance's `waitUntil` BEFORE it is awaited, so
+   * the runtime holds the isolate open until it settles even when nobody awaits
+   * the returned promise — see {@link startVersionWrite}.
+   *
    * @param id - Entity identifier to invalidate
    *
    * @example
@@ -426,7 +496,11 @@ export class VersionedCache {
 
     try {
       this.stats.writes++;
-      await this.kv.put(versionKey, newVersion);
+      // Starts the put and hands it to the runtime BEFORE this await. That
+      // ordering is the whole fix: a caller doing `void invalidate(id)` never
+      // awaits this promise, so without the registration the put is the
+      // isolate's only claim on itself and teardown cancels it (Codex-mhoaz).
+      await this.startVersionWrite(versionKey, newVersion, id);
 
       this.stats.invalidations++;
       this.obs?.info('Cache invalidated', { id, version: newVersion });
@@ -509,11 +583,28 @@ export class VersionedCache {
    * whether the cache is paying for itself. `writes` counts puts AND deletes
    * because both draw on the same 1,000/day bucket.
    *
-   * @returns Cache statistics
+   * Codex-kgrdp.1 (item 4) hardened the surface rather than creating it: the
+   * method was already here, but its return type was inferred from an ad-hoc
+   * object literal, so the exported {@link CacheStats} contract and what callers
+   * actually received could drift apart silently. It is now declared against
+   * that type, and the snapshot is FROZEN: a shallow copy taken at call time,
+   * detached from `this.stats`, so it neither drifts as later operations run nor
+   * lets a caller write back into the instance's counters through the object it
+   * was handed.
+   *
+   * EXPOSURE ONLY, and cache-only. A caller that wants these numbers logged or
+   * shipped must do that itself, deliberately, at a cadence it chooses — a cache
+   * that logged its own stats would spend request budget on telemetry nobody
+   * asked for. These counters also cover THIS instance and nothing else: the
+   * account-wide KV budget picture belongs to `@codex/observability`
+   * (`instrumentKvBindings` / `kvBudgetSnapshot`), which counts at the binding
+   * level across every KV consumer rather than per cache instance.
+   *
+   * @returns Cache statistics — a frozen snapshot, safe to hold and to hand on
    */
-  getStats() {
+  getStats(): Readonly<CacheStats> {
     const { gets, hits, misses, invalidations, reads, writes } = this.stats;
-    return {
+    return Object.freeze({
       gets,
       hits,
       misses,
@@ -521,7 +612,7 @@ export class VersionedCache {
       reads,
       writes,
       hitRate: gets > 0 ? hits / gets : 0,
-    };
+    });
   }
 
   /**

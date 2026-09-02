@@ -1,5 +1,17 @@
 /**
- * VersionedCache data-slot write survival (Codex-e32xz).
+ * VersionedCache KV write survival — data slot (Codex-e32xz) and version key
+ * (Codex-mhoaz). One defect class, both directions: a KV put that nobody awaits
+ * is not "slower" in workerd, it is CANCELLED, and the cache silently does
+ * nothing. The two halves are:
+ *
+ *   - READ path (Codex-e32xz): `get()` never awaits its data-slot put, so
+ *     without a `waitUntil` the slot is never written — 0% hit rate.
+ *   - WRITE path (Codex-mhoaz): production services fire `void
+ *     this.cache?.invalidate(...)`, so nobody awaits `invalidate()`'s returned
+ *     promise — without a `waitUntil` registration inside `invalidate()` a
+ *     publish can commit to Postgres and never stale the cache.
+ *
+ * The Codex-e32xz analysis below applies verbatim to both.
  *
  * WHAT WENT WRONG. `get()`/`getWithResult()` write their data slot WITHOUT
  * awaiting it, so a cache write never delays a response. In workerd an
@@ -51,8 +63,13 @@ const VERSION_KEY = 'cache:version:user-1';
  * `settled` records only writes that actually completed — a put still parked on
  * its deferred is deliberately absent, which is what makes "the response
  * returned before the write finished" assertable.
+ *
+ * `gateVersionKey` extends the same trick to the version key, for the
+ * invalidate path (Codex-mhoaz): `invalidate()` awaits its put, so only a
+ * caller who does NOT await `invalidate()` can observe it in flight — and that
+ * is exactly the caller the bead is about.
  */
-function createGatedKV() {
+function createGatedKV(options: { gateVersionKey?: boolean } = {}) {
   const settled = new Map<string, string>();
   const gates: Array<{ key: string; resolve: () => void }> = [];
 
@@ -63,7 +80,7 @@ function createGatedKV() {
       return type === 'json' ? JSON.parse(value) : value;
     }),
     put: vi.fn(async (key: string, value: string) => {
-      if (key === VERSION_KEY) {
+      if (key === VERSION_KEY && !options.gateVersionKey) {
         settled.set(key, value);
         return;
       }
@@ -82,7 +99,7 @@ function createGatedKV() {
   return {
     kv: kv as unknown as KVNamespace,
     settled,
-    /** Release every parked data-slot put. */
+    /** Release every parked put. */
     releaseWrites: () => {
       for (const gate of gates) gate.resolve();
       gates.length = 0;
@@ -302,6 +319,152 @@ describe('VersionedCache data-slot write (Codex-e32xz)', () => {
           Promise.resolve({ name: 'Ada' })
         )
       ).resolves.toEqual({ name: 'Ada' });
+    });
+  });
+});
+
+describe('VersionedCache invalidate() version-key write (Codex-mhoaz)', () => {
+  describe('with waitUntil supplied', () => {
+    it('lands the version key for a caller that only does `void invalidate(id)`', async () => {
+      const store = createGatedKV({ gateVersionKey: true });
+      const ec = createExecutionContextSpy();
+      const cache = new VersionedCache({
+        kv: store.kv,
+        waitUntil: (p) => ec.waitUntil(p),
+      });
+
+      // EXACTLY what the production call sites in @codex/content and
+      // @codex/admin do after a successful DB mutation. Nobody awaits this.
+      void cache.invalidate('user-1');
+
+      // Drain the microtasks the request handler would have run before
+      // returning its response.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The put has NOT settled and no one holds the returned promise, so the
+      // registration asserted on the next line is the isolate's only reason to
+      // stay alive. Remove the `this.waitUntil(...)` call from
+      // startVersionWrite() and the count is 0 here.
+      expect(store.settled.has(VERSION_KEY)).toBe(false);
+      expect(ec.count()).toBe(1);
+
+      // COMPLETES: releasing the gate and draining the execution context — the
+      // two things the runtime does at end-of-request — is what lands the key.
+      store.releaseWrites();
+      await ec.drain();
+
+      expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
+    });
+
+    it('still awaits the put itself, so an awaiting caller needs no drain', async () => {
+      const store = createGatedKV({ gateVersionKey: true });
+      const ec = createExecutionContextSpy();
+      const cache = new VersionedCache({
+        kv: store.kv,
+        waitUntil: (p) => ec.waitUntil(p),
+      });
+
+      const pending = cache.invalidate('user-1');
+      await Promise.resolve();
+      expect(store.settled.has(VERSION_KEY)).toBe(false);
+
+      store.releaseWrites();
+      await pending;
+
+      // Registering must not have replaced the await: `invalidateUserLibrary`
+      // and every `await cache.invalidate(...)` rely on the returned promise
+      // resolving AFTER the write, not before it.
+      expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
+      expect(cache.getStats().invalidations).toBe(1);
+    });
+
+    it('registers a task that RESOLVES when the KV put rejects', async () => {
+      const failingKV = {
+        get: vi.fn(async () => null),
+        put: vi.fn(async () => {
+          throw new Error('KV write quota exceeded');
+        }),
+        delete: vi.fn(),
+        list: vi.fn(),
+        getWithMetadata: vi.fn(),
+      } as unknown as KVNamespace;
+      const ec = createExecutionContextSpy();
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: failingKV,
+        waitUntil: (p) => ec.waitUntil(p),
+        obs: obs as unknown as ObservabilityClient,
+      });
+
+      await expect(cache.invalidate('user-1')).resolves.toBeUndefined();
+
+      // A rejecting waitUntil task is an unhandled rejection in the runtime, so
+      // the registered copy must swallow — invalidate()'s own catch logs it.
+      const outcomes = await ec.drain();
+      expect(outcomes).toHaveLength(1);
+      expect(outcomes.every((o) => o.status === 'fulfilled')).toBe(true);
+      expect(obs.error).toHaveBeenCalledWith(
+        'Cache invalidation failed',
+        expect.objectContaining({ id: 'user-1' })
+      );
+    });
+
+    it('survives a waitUntil that throws, and still lands the version key', async () => {
+      const store = createGatedKV();
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: store.kv,
+        waitUntil: () => {
+          throw new Error('Illegal invocation');
+        },
+        obs: obs as unknown as ObservabilityClient,
+      });
+
+      await expect(cache.invalidate('user-1')).resolves.toBeUndefined();
+
+      // If the throw escaped into invalidate()'s outer catch, the bump would be
+      // reported as a FAILED invalidation — a healthy cache logging an error and
+      // under-counting the only write it ever makes.
+      expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
+      expect(cache.getStats().invalidations).toBe(1);
+      expect(obs.error).not.toHaveBeenCalled();
+      expect(obs.warn).toHaveBeenCalledWith(
+        'Cache invalidation could not be scheduled on waitUntil',
+        expect.objectContaining({ id: 'user-1' })
+      );
+    });
+  });
+
+  describe('without waitUntil (unchanged behaviour)', () => {
+    it('attempts no registration and the returned promise still carries the put', async () => {
+      const store = createGatedKV({ gateVersionKey: true });
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: store.kv,
+        obs: obs as unknown as ObservabilityClient,
+      });
+
+      const pending = cache.invalidate('user-1');
+      await Promise.resolve();
+      expect(store.settled.has(VERSION_KEY)).toBe(false);
+
+      store.releaseWrites();
+      await pending;
+
+      // The consumers with no ExecutionContext — unit tests, SvelteKit under
+      // `vite dev`, `invalidateUserLibrary` (which parks the whole invalidate()
+      // call itself) — are unaffected by the fix.
+      expect(store.settled.get(VERSION_KEY)).toMatch(/^\d+$/);
+
+      // "Attempts no registration" is the half that IS assertable with no
+      // waitUntil to spy on: startVersionWrite's `if (!this.waitUntil)`
+      // guard is the only thing stopping it from CALLING an undefined
+      // waitUntil. Drop that guard and the TypeError lands in its own catch,
+      // which warns here — a healthy invalidation reporting a plumbing
+      // failure.
+      expect(obs.warn).not.toHaveBeenCalled();
+      expect(obs.error).not.toHaveBeenCalled();
     });
   });
 });

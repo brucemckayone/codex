@@ -218,6 +218,12 @@ export const dbWs = createDbWsProxy();
  * This factory creates a fresh Pool instance that MUST be closed before the request completes.
  *
  * @param env - Environment variables containing DATABASE_URL
+ * @param connectionStringOverride - Connection string that REPLACES the
+ *   env-derived URL. The intended caller passes a Hyperdrive binding's
+ *   `connectionString` (Codex-s1i7h) — the Neon driver consumes it exactly
+ *   like a database URL, so connecting through Hyperdrive is a URL swap and
+ *   not a client-construction change. Undefined for every caller today, so
+ *   URL resolution is unchanged.
  * @returns Object with db client and cleanup function
  *
  * @example
@@ -239,7 +245,10 @@ export const dbWs = createDbWsProxy();
  * ctx.waitUntil(cleanup()); // Cleanup happens after response sent
  * return result;
  */
-export function createPerRequestDbClient(env: DbEnvVars): {
+export function createPerRequestDbClient(
+  env: DbEnvVars,
+  connectionStringOverride?: string
+): {
   db: ReturnType<typeof drizzleWs<typeof schema>>;
   cleanup: () => Promise<void>;
 } {
@@ -247,7 +256,10 @@ export function createPerRequestDbClient(env: DbEnvVars): {
   // This must happen before creating the Pool
   DbEnvConfig.applyNeonConfig(neonConfig, env);
 
-  const dbUrl = DbEnvConfig.getDbUrl(env);
+  // The override is threaded through this factory rather than built at the
+  // call site so the driver semantics (config application, Pool construction,
+  // cleanup) stay in one place — only the ORIGIN of the URL changes.
+  const dbUrl = connectionStringOverride ?? DbEnvConfig.getDbUrl(env);
   if (!dbUrl) {
     throw new Error(
       'DATABASE_URL not configured. Check DB_METHOD and environment variables.'

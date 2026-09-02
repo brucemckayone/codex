@@ -209,11 +209,20 @@ test.describe('content cache invalidation — response headers', () => {
   test('public content endpoint carries Cache-Control: public, max-age=60', async ({
     request,
   }) => {
-    // Any org works — response headers are middleware-level.
-    const anyOrgId = '00000000-0000-0000-0000-000000000001';
+    // The header is procedure-level (`policy: { cache: 'public' }`), so any
+    // SUCCESSFUL public read carries it. Use a seeded org's slug. The old
+    // `00000000-…-0001` placeholder orgId stopped working when the wildcard
+    // Cache-Control middleware was deleted (data-access contract): uuidSchema
+    // rejects version-0 UUIDs with a 400, and error responses carry no
+    // Cache-Control at all — the middleware used to stamp the 400, so this
+    // test "passed" for weeks on a request that never succeeded.
     const response = await request.get(
-      `${CONTENT_API}/api/content/public?orgId=${anyOrgId}&sort=newest&limit=1`
+      `${CONTENT_API}/api/content/public?slug=studio-alpha&sort=newest&limit=1`
     );
+    expect(
+      response.status(),
+      'a non-200 carries no Cache-Control — this test only means anything on a successful read'
+    ).toBe(200);
 
     const cacheControl = response.headers()['cache-control'];
     expect(cacheControl).toBeDefined();
