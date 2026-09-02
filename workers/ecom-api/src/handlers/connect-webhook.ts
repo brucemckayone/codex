@@ -44,8 +44,21 @@ export async function handleConnectWebhook(
     // warm with stale requirements for up to 10 min after a Stripe push.
     // Idempotent on duplicate webhook delivery — `cache.invalidate` is
     // a single KV PUT of a fresh version timestamp.
+    //
+    // `waitUntil` is REQUIRED even though this handler's own use is an
+    // invalidation (Codex-03uh3). `invalidate` is awaited here and worked
+    // without it, but `ConnectAccountService.getStatus` reads through the SAME
+    // instance via `getWithResult`, and that data-slot put is NOT awaited — so
+    // without a sink workerd cancelled it and the studio's status read could
+    // never cache. The bug was invisible precisely because the invalidation
+    // half looked fine.
     const cache = c.env.CACHE_KV
-      ? new VersionedCache({ kv: c.env.CACHE_KV, prefix: 'cache' })
+      ? new VersionedCache({
+          kv: c.env.CACHE_KV,
+          prefix: 'cache',
+          waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+          obs,
+        })
       : undefined;
 
     const service = new ConnectAccountService(

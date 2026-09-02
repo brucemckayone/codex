@@ -185,6 +185,72 @@
  * conforming code.
  *
  * ============================================================================
+ * RULE 7 — EVERY `VersionedCache` CONSTRUCTION PASSES `waitUntil`
+ * ============================================================================
+ *
+ * SCOPE: every `new VersionedCache(...)` in non-test source under the scanned
+ * roots. 26 exist today and all 26 comply.
+ *
+ * THE DEFECT. In workerd the request's I/O context is destroyed the moment the
+ * response is returned, and any promise nothing is holding is CANCELLED — not
+ * awaited, not failed, dropped. `VersionedCache.getWithResult` writes its data
+ * slot WITHOUT awaiting, deliberately: awaiting would put a KV round trip on
+ * the response path, which is the cost the cache exists to remove. So with no
+ * sink the write never lands. That is `Codex-e32xz`: production held 62 version
+ * keys and ZERO data keys — a structural 0% hit rate, in which every request
+ * paid the full DB cost PLUS the KV read cost and got nothing back, and it read
+ * as working because a fire-and-forget write has no failure signal.
+ *
+ * WHY A GATE AND NOT A REVIEW NOTE. Because it recurred. `waitUntil` was added
+ * to `VersionedCacheConfig` as an OPTIONAL field, most sites passed it, and a
+ * field that most sites pass looks decorative to the next author.
+ * `connect-webhook.ts` then shipped without one (`Codex-03uh3`), and
+ * `payment-webhook.ts` and `subscription-webhook.ts` were both one `get` away
+ * from the same silence — they owned a `waitUntil` and handed it to their
+ * invalidation helper, which cannot reach the instance's own read path.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THERE IS NO EXEMPTION FOR AN INVALIDATE-ONLY SITE
+ * ---------------------------------------------------------------------------
+ *
+ * This is the objection the rule attracts, because 14 of the 16 sites swept
+ * when it landed do not presently read through their cache, and a sink they
+ * never use is a field with no effect.
+ *
+ * IT IS STILL NOT EXEMPTABLE, and `connect-webhook` is the proof.  That site
+ * was invalidate-only BY INSPECTION — its own call was an awaited
+ * `invalidate` — and it had the bug anyway, because it handed the instance to
+ * `ConnectAccountService`, whose `getStatus` reads through it via
+ * `getWithResult`, IN ANOTHER FILE. No textual rule can follow that, and
+ * neither can a reviewer reliably. "This site only invalidates" is a property
+ * of today's callers, not of the construction, so it cannot be the basis of an
+ * exemption without making the rule depend on the thing it cannot see.
+ *
+ * The cost is also smaller than it looks: the sink is not inert on an
+ * invalidate-only site. `invalidate` registers its version-key put BEFORE
+ * awaiting it, which is precisely what makes `void cache.invalidate(id)` safe
+ * (`Codex-mhoaz`).
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS RULE DOES NOT DECIDE
+ * ---------------------------------------------------------------------------
+ *
+ * It reads one object literal. It does not know whether the sink is the RIGHT
+ * one, and that distinction is real and has cost a day: for background DB work
+ * a bare `waitUntil` is WRONG, because it races `procedure()`'s own
+ * `waitUntil(cleanup())` calling `pool.end()` and reliably loses — see
+ * `workers/media-api/src/routes/transcoding.ts`, where both the success and
+ * failure writes died every time until they moved to `ctx.background`. A KV put
+ * touches no pool, so there is nothing to race and plain `waitUntil` is correct
+ * HERE. Same promise shape, opposite fix; the resource decides. This rule is
+ * scoped to `VersionedCache` for that reason and must not be generalised into
+ * "background work needs waitUntil".
+ *
+ * A config spread (`{ ...opts }`) is reported rather than assumed good, and a
+ * config passed by name is reported too. Both are undecidable textually, and
+ * the hazard here is a construction that LOOKS fine, so the rule fails closed.
+ *
+ * ============================================================================
  * RULE 5 — EVERY SEARCH INPUT COMES FROM THE SHARED BUILDER
  * ============================================================================
  *
@@ -405,8 +471,13 @@
  *     `env.CACHE_KV`, `env.AUTH_SESSION_KV`). A binding named something else
  *     entirely would be missed. Every KV binding in this repo is `*_KV` or
  *     `kv`, and `HonoEnv` is where that convention is declared.
+ *   - Rule 7 decides on the CONFIG LITERAL at the construction, and nothing
+ *     else. It cannot tell whether a sink handed in is the right one, whether
+ *     it is still live, or whether the instance is ever read from. What it CAN
+ *     decide is whether the decision was made at all, which is exactly the
+ *     thing that was being skipped.
  *
- * The four collectors are exported so the accompanying `node --test` suite can
+ * The five collectors are exported so the accompanying `node --test` suite can
  * point them at fixture trees; `main()` runs only as the CLI entrypoint.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -1346,6 +1417,174 @@ export function formatNonDeterministicSqlGuidance() {
 }
 
 // ---------------------------------------------------------------------------
+// RULE 7 — every VersionedCache construction passes waitUntil
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk from the `{` of a config literal to its matching `}`.
+ *
+ * Brace-matching rather than a regex because the config contains nested
+ * literals and arrow bodies (`waitUntil: (p) => ctx.executionCtx.waitUntil(p)`),
+ * and `[^}]*` would stop at the first inner brace. Runs on TOKENIZED code, so
+ * a brace inside a comment or string cannot unbalance the count.
+ *
+ * @returns {{ body: string, end: number } | null}
+ */
+function captureObjectLiteral(code, openIndex) {
+  let depth = 0;
+  for (let i = openIndex; i < code.length; i += 1) {
+    if (code[i] === '{') depth += 1;
+    else if (code[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return { body: code.slice(openIndex, i + 1), end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * A `waitUntil` property in the config literal, in either spelling.
+ *
+ * The shorthand `{ kv, waitUntil }` must be accepted: `invalidateUserLibrary`
+ * destructures a `waitUntil` from its args and passes it that way, and the
+ * first draft of this rule demanded a colon, so it reported that CORRECT site
+ * as a violation. A gate that flags conforming code gets exemptions bolted onto
+ * it until it means nothing, which is the failure mode this file's "no waiver
+ * list by design" note exists to prevent.
+ *
+ * The leading `(^|[{,\s])` is what keeps a nested reference out: in
+ * `waitUntil: (p) => ctx.executionCtx.waitUntil(p)` the inner occurrence is
+ * preceded by `.`, so only the property matches.
+ */
+const WAIT_UNTIL_KEY_RE = /(^|[{,\s])waitUntil\s*(?::|,|\}|$)/;
+
+/**
+ * A spread inside the config. `{ ...opts }` may or may not carry a sink, and
+ * nothing textual can decide which, so it is reported rather than assumed
+ * good. No call site uses one today; this closes the hole before one does.
+ */
+const CONFIG_SPREAD_RE = /\.\.\./;
+
+/**
+ * @returns {{
+ *   violations: {file:string,line:number,text:string,reason:string}[],
+ *   filesScanned: number,
+ *   constructionsFound: number,
+ * }}
+ */
+export function collectCacheWaitUntilViolations({
+  roots = defaultRoots(),
+  cwd = REPO_ROOT,
+} = {}) {
+  const violations = [];
+  let filesScanned = 0;
+  let constructionsFound = 0;
+
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const file of walk(root)) {
+      filesScanned += 1;
+      const source = readFileSync(file, 'utf8');
+      const { code } = tokenize(source, {
+        stripHtmlComments: file.endsWith('.svelte'),
+      });
+
+      for (const match of code.matchAll(/new\s+VersionedCache\s*\(/g)) {
+        constructionsFound += 1;
+        const line = lineAt(source, match.index);
+        const rest = code.slice(match.index + match[0].length);
+        const brace = rest.search(/\S/);
+
+        // A config built elsewhere and passed by name. Undecidable by grep, so
+        // it fails rather than passing quietly — the whole hazard this rule
+        // addresses is a construction that LOOKS fine.
+        if (brace === -1 || rest[brace] !== '{') {
+          violations.push({
+            file: toPosix(relative(cwd, file)),
+            line,
+            text: 'new VersionedCache(<non-literal>)',
+            reason: 'config is not an inline object literal, so waitUntil cannot be verified',
+          });
+          continue;
+        }
+
+        const literal = captureObjectLiteral(
+          rest,
+          brace
+        );
+        if (!literal) {
+          violations.push({
+            file: toPosix(relative(cwd, file)),
+            line,
+            text: 'new VersionedCache({ ...unterminated )',
+            reason: 'config literal has unbalanced braces',
+          });
+          continue;
+        }
+
+        if (!WAIT_UNTIL_KEY_RE.test(literal.body)) {
+          violations.push({
+            file: toPosix(relative(cwd, file)),
+            line,
+            text: `new VersionedCache(${literal.body.replace(/\s+/g, ' ').slice(0, 60)})`,
+            reason: CONFIG_SPREAD_RE.test(literal.body)
+              ? 'config spreads another object, so waitUntil cannot be verified'
+              : 'no waitUntil in the config',
+          });
+        }
+      }
+    }
+  }
+
+  return { violations, filesScanned, constructionsFound };
+}
+
+/** Guidance printed when RULE 7 fails. */
+function formatCacheWaitUntilGuidance() {
+  return [
+    '  In workerd the request I/O context is destroyed when the response returns, and',
+    '  any promise nothing is holding is CANCELLED — not awaited, not failed, dropped.',
+    '  `VersionedCache.getWithResult` writes its data slot WITHOUT awaiting (awaiting',
+    '  would put a KV round trip on the response path), so with no sink that write',
+    '  never lands. That was Codex-e32xz: production held 62 version keys and ZERO',
+    '  data keys — a structural 0% hit rate, silent, because a fire-and-forget write',
+    '  has no failure signal.',
+    '',
+    '  Pass a sink at construction:',
+    '',
+    '    new VersionedCache({',
+    '      kv: ctx.env.CACHE_KV,',
+    '      waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),',
+    '    })',
+    '',
+    '  In a worker route, prefer `cachedRead(ctx, id, type, fetcher, opts)` from',
+    '  @codex/worker-utils, which owns the sink, the CACHE_KV check, the unbound-KV',
+    '  fallback and the stats emit, so there is no construction left to get wrong.',
+    '',
+    '  WHY THIS HAS NO EXEMPTION FOR AN INVALIDATE-ONLY SITE, which is the objection',
+    '  it will attract. `connect-webhook.ts` was invalidate-only BY INSPECTION and',
+    '  still had the bug: it handed its cache to ConnectAccountService, whose',
+    '  getStatus reads through it via getWithResult, in ANOTHER FILE where no',
+    '  textual rule can follow. "This site only invalidates" is a property of',
+    '  today\'s callers, not of the construction, so it cannot be the basis of an',
+    '  exemption. payment-webhook and subscription-webhook were both one `get` away',
+    '  from the same silence for the same reason.',
+    '',
+    '  A sink on a site that only invalidates costs nothing and is not inert: the',
+    '  version-key put is registered BEFORE it is awaited, which is what makes',
+    '  `void cache.invalidate(id)` safe there (Codex-mhoaz).',
+    '',
+    '  DO NOT reach for `ctx.background(...)` here. That hook exists so DB work',
+    '  finishes before procedure() tears the Postgres pool down, and chaining a KV',
+    '  put onto it pins a connection for the duration of a KV write for no reason.',
+    '  The opposite rule holds for background DB work — see workers/media-api',
+    '  routes/transcoding.ts, where a bare waitUntil loses the race against',
+    '  waitUntil(cleanup()) calling pool.end(). A KV put touches no pool, so there',
+    '  is nothing to race, and plain waitUntil is correct.',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -1355,6 +1594,7 @@ function main() {
   const kv = collectFloatingKvWriteViolations({ roots });
   const search = collectSearchBuilderViolations({ roots });
   const clock = collectNonDeterministicSqlViolations({ roots });
+  const sink = collectCacheWaitUntilViolations({ roots });
 
   // Fail closed on an empty scan. A broken root path would otherwise read as
   // green with 0 files — the exact blind spot that lets a newly added gate
@@ -1364,7 +1604,8 @@ function main() {
     cache.filesScanned === 0 ||
     kv.filesScanned === 0 ||
     search.filesScanned === 0 ||
-    clock.filesScanned === 0
+    clock.filesScanned === 0 ||
+    sink.filesScanned === 0
   ) {
     console.error(
       'Data-access contract gate scanned 0 files — scan roots are misconfigured. Failing closed.'
@@ -1399,6 +1640,23 @@ function main() {
         'Either the `sql` import was renamed, or the predicates moved out of the\n' +
         'scanned roots. Failing closed: fix SQL_TAG_RE in\n' +
         'scripts/checks/check-data-access-contract.mjs, do not delete the rule.\n'
+    );
+    process.exit(1);
+  }
+
+  // Rule 7's version of the same blind spot: the files are there, but no
+  // `new VersionedCache(` is recognised in any of them. Twenty-six existed when
+  // it was written, so zero means the class was renamed, the constructions moved
+  // out of the scanned roots, or they are now built through a factory this
+  // pattern does not see — in which case the rule is reading green while
+  // checking nothing, and the sink it guards is once again unenforced.
+  if (sink.constructionsFound === 0) {
+    console.error(
+      '\nRULE 7 — the gate found ZERO `new VersionedCache(` constructions in the whole\n' +
+        'tree, so it checked nothing. Twenty-six existed when it was written. Either the\n' +
+        'class was renamed, or every construction now goes through a factory, or the scan\n' +
+        'roots moved. Failing closed: point the rule at whatever constructs a cache now,\n' +
+        'do not delete it.\n'
     );
     process.exit(1);
   }
@@ -1481,13 +1739,25 @@ function main() {
     console.error('\n' + formatNonDeterministicSqlGuidance());
   }
 
+  if (sink.violations.length > 0) {
+    failed = true;
+    console.error(
+      '\nRULE 7 — a VersionedCache construction with no waitUntil:\n'
+    );
+    for (const v of sink.violations) {
+      console.error(`  ${v.file}:${v.line}: ${v.reason}  |  ${v.text}`);
+    }
+    console.error('\n' + formatCacheWaitUntilGuidance());
+  }
+
   if (failed) {
     const total =
       shared.length +
       offVocab.length +
       kv.violations.length +
       search.violations.length +
-      clock.violations.length;
+      clock.violations.length +
+      sink.violations.length;
     console.error(
       `\n${total} data-access contract violation(s). See scripts/checks/check-data-access-contract.mjs for the rules.\n`
     );
@@ -1497,9 +1767,10 @@ function main() {
   console.log(
     `OK: no hand-written Cache-Control, no floating KV write, all ` +
       `${search.declarationsFound} declared search input(s) built by ${SEARCH_BUILDER}(), ` +
-      `and no non-deterministic time function in ${clock.templatesFound} \`sql\` ` +
-      `template(s), in ${cache.filesScanned} source file(s) across ${roots.length} ` +
-      `package/worker/app src root(s).`
+      `no non-deterministic time function in ${clock.templatesFound} \`sql\` ` +
+      `template(s), and all ${sink.constructionsFound} VersionedCache ` +
+      `construction(s) passing waitUntil, in ${cache.filesScanned} source file(s) ` +
+      `across ${roots.length} package/worker/app src root(s).`
   );
 }
 

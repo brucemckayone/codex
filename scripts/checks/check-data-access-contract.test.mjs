@@ -34,6 +34,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import {
   classifySearchFieldValue,
   collectCacheControlViolations,
+  collectCacheWaitUntilViolations,
   collectFloatingKvWriteViolations,
   collectNonDeterministicSqlViolations,
   collectSearchBuilderViolations,
@@ -76,6 +77,13 @@ function scanCache(extraRoots = []) {
 
 function scanKv() {
   return collectFloatingKvWriteViolations({
+    roots: [join(root, WORKER_SRC)],
+    cwd: root,
+  });
+}
+
+function scanSink() {
+  return collectCacheWaitUntilViolations({
     roots: [join(root, WORKER_SRC)],
     cwd: root,
   });
@@ -1216,4 +1224,126 @@ test('RULE 6 against the REAL tree: it still finds `sql` templates to judge (thi
     templatesFound > 0,
     'rule 6 matched ZERO sql templates in the real tree, so it is checking nothing — fix SQL_TAG_RE or the scan roots, do not delete this test'
   );
+});
+
+// ===========================================================================
+// RULE 7 — VersionedCache must be constructed with a waitUntil
+// ===========================================================================
+
+test('RULE 7 CATCHES a construction with no waitUntil', () => {
+  writeFixture(
+    `${WORKER_SRC}/routes/organizations.ts`,
+    'const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });\n'
+  );
+  const { violations, constructionsFound } = scanSink();
+  assert.equal(constructionsFound, 1);
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0].line, 1);
+  assert.equal(violations[0].reason, 'no waitUntil in the config');
+});
+
+test('RULE 7 CATCHES the connect-webhook shape: prefix but no sink', () => {
+  // The real defect (Codex-03uh3). Its own use was an awaited invalidate, so
+  // it looked correct; the read happened in ConnectAccountService, another file.
+  writeFixture(
+    `${WORKER_SRC}/handlers/connect-webhook.ts`,
+    'const cache = c.env.CACHE_KV\n' +
+      "  ? new VersionedCache({ kv: c.env.CACHE_KV, prefix: 'cache' })\n" +
+      '  : undefined;\n'
+  );
+  assert.equal(scanSink().violations.length, 1);
+});
+
+test('RULE 7 CATCHES a config passed by name, which it cannot verify', () => {
+  writeFixture(
+    `${WORKER_SRC}/indirect.ts`,
+    'const cache = new VersionedCache(config);\n'
+  );
+  const { violations } = scanSink();
+  assert.equal(violations.length, 1);
+  assert.match(violations[0].reason, /not an inline object literal/);
+});
+
+test('RULE 7 CATCHES a spread config rather than assuming it carries a sink', () => {
+  writeFixture(
+    `${WORKER_SRC}/spread.ts`,
+    'const cache = new VersionedCache({ ...opts, prefix: "cache" });\n'
+  );
+  const { violations } = scanSink();
+  assert.equal(violations.length, 1);
+  assert.match(violations[0].reason, /spreads another object/);
+});
+
+// ===========================================================================
+// RULE 7 — LEGAL SHAPES THAT MUST PASS
+// ===========================================================================
+
+test('RULE 7 PASSES an explicit waitUntil property', () => {
+  writeFixture(
+    `${WORKER_SRC}/ok.ts`,
+    'const cache = new VersionedCache({\n' +
+      '  kv: ctx.env.CACHE_KV,\n' +
+      '  waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),\n' +
+      '});\n'
+  );
+  const { violations, constructionsFound } = scanSink();
+  assert.equal(constructionsFound, 1);
+  assert.deepEqual(violations, []);
+});
+
+test('RULE 7 PASSES the ES6 SHORTHAND `{ kv, waitUntil }`', () => {
+  // The first draft of this rule demanded a colon and flagged this CORRECT
+  // site (packages/cache/src/helpers/invalidate.ts, which destructures a
+  // waitUntil from its args). A gate that fails conforming code earns
+  // exemptions until it means nothing, so the shorthand is pinned here.
+  writeFixture(
+    `${WORKER_SRC}/shorthand.ts`,
+    'const cache = new VersionedCache({ kv, waitUntil });\n'
+  );
+  assert.deepEqual(scanSink().violations, []);
+});
+
+test('RULE 7 PASSES a conditional sink for a possibly-absent execution context', () => {
+  // `platform.context` is absent under `vite dev`, so apps/web spells the sink
+  // this way. `undefined` is a legal value — VersionedCache falls back to
+  // best-effort — and what the rule enforces is that the DECISION is made at
+  // the construction, not that a sink always exists at runtime.
+  writeFixture(
+    `${WORKER_SRC}/conditional.ts`,
+    'const cache = new VersionedCache({\n' +
+      '  kv: platform.env.CACHE_KV,\n' +
+      '  waitUntil: platform.context\n' +
+      '    ? (promise) => platform.context.waitUntil(promise)\n' +
+      '    : undefined,\n' +
+      '});\n'
+  );
+  assert.deepEqual(scanSink().violations, []);
+});
+
+test('RULE 7 does not mistake a nested waitUntil CALL for the property', () => {
+  // `ctx.executionCtx.waitUntil(p)` inside an arrow body is preceded by a dot,
+  // so only a real property can satisfy the rule. Without this, a construction
+  // that merely MENTIONS waitUntil anywhere in its config would pass.
+  writeFixture(
+    `${WORKER_SRC}/nested.ts`,
+    'const cache = new VersionedCache({\n' +
+      '  kv: ctx.env.CACHE_KV,\n' +
+      '  onError: () => ctx.executionCtx.waitUntil(log()),\n' +
+      '});\n'
+  );
+  assert.equal(scanSink().violations.length, 1);
+});
+
+test('RULE 7 ignores a construction inside a comment or a docstring example', () => {
+  writeFixture(
+    `${WORKER_SRC}/documented.ts`,
+    '/**\n' +
+      ' * @example\n' +
+      ' * const cache = new VersionedCache({ kv: env.CACHE_KV });\n' +
+      ' */\n' +
+      'export const NOTHING = 1;\n'
+  );
+  const { violations, constructionsFound } = scanSink();
+  assert.equal(constructionsFound, 0);
+  assert.deepEqual(violations, []);
 });

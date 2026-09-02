@@ -20,7 +20,7 @@ import {
   updateTierSchema,
   uuidSchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { cachedRead, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -51,7 +51,10 @@ function warmTierCache(
   orgId: string
 ): void {
   if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV,
+    waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+  });
   ctx.executionCtx.waitUntil(
     (async () => {
       const tiers = await ctx.services.tier.listTiers(orgId);
@@ -101,19 +104,13 @@ app.get(
     input: { params: orgIdParamSchema },
     handler: async (ctx) => {
       const orgId = ctx.input.params.id;
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-        });
-        return await cache.get(
-          orgId,
-          CacheType.ORG_TIERS,
-          () => ctx.services.tier.listTiers(orgId),
-          { ttl: 86400 }
-        );
-      }
-      return await ctx.services.tier.listTiers(orgId);
+      return await cachedRead(
+        ctx,
+        orgId,
+        CacheType.ORG_TIERS,
+        () => ctx.services.tier.listTiers(orgId),
+        { ttl: 86400 }
+      );
     },
   })
 );

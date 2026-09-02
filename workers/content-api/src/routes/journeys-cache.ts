@@ -147,7 +147,10 @@ export function bumpOrgJourneysVersion(
   obs?: Logger
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: env.CACHE_KV,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  });
   executionCtx.waitUntil(
     cache
       .invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId))

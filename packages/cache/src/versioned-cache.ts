@@ -78,6 +78,7 @@ import type {
   CacheOptions,
   CacheResult,
   CacheStats,
+  CacheTypeStats,
   VersionedCacheConfig,
 } from './types';
 
@@ -100,6 +101,15 @@ type CacheLookup =
   | { hit: false; cacheKey: string | null };
 
 /**
+ * More distinct cache types than this instance will track separately.
+ *
+ * `CacheType` is a fixed enum an order of magnitude smaller than this, so the
+ * cap is unreachable in correct use and exists only to bound the damage from an
+ * unbounded `type` argument.
+ */
+const MAX_TRACKED_TYPES = 64;
+
+/**
  * Versioned Cache Class
  *
  * Implements cache-aside pattern with version-based invalidation.
@@ -120,6 +130,21 @@ export class VersionedCache {
     reads: 0,
     writes: 0,
   };
+
+  /**
+   * Per-type hit/miss counters, keyed by the `type` argument to `get`.
+   *
+   * Capped at {@link MAX_TRACKED_TYPES}. `type` is typed `string`, not the
+   * `CacheType` enum, so a caller CAN pass an unbounded value — and one call
+   * site already keys `id` off a URL slug, which is exactly the mistake in the
+   * adjacent position. Dropping types past the cap loses granularity; growing
+   * the map without bound would leak in every isolate. The aggregate counters
+   * are unaffected either way, so the ratio itself never degrades.
+   */
+  private statsByType = new Map<
+    string,
+    { gets: number; hits: number; misses: number }
+  >();
 
   constructor(config: VersionedCacheConfig) {
     this.kv = config.kv;
@@ -351,16 +376,22 @@ export class VersionedCache {
     const { ttl = DEFAULT_TTL } = options;
 
     this.stats.gets++;
+    // `get` delegates here, so this is the only place a hit or a miss is
+    // decided — per-type counting has exactly one home.
+    const perType = this.typeStatsFor(type);
+    if (perType) perType.gets++;
 
     const lookup = await this.lookup(id, type);
 
     if (lookup.hit) {
       this.stats.hits++;
+      if (perType) perType.hits++;
       this.obs?.debug('Cache hit', { id, type, cacheKey: lookup.cacheKey });
       return { data: lookup.value as T, hit: true };
     }
 
     this.stats.misses++;
+    if (perType) perType.misses++;
     this.obs?.debug('Cache miss', { id, type, cacheKey: lookup.cacheKey });
 
     // The fetcher runs OUTSIDE any catch, deliberately.
@@ -604,6 +635,17 @@ export class VersionedCache {
    */
   getStats(): Readonly<CacheStats> {
     const { gets, hits, misses, invalidations, reads, writes } = this.stats;
+
+    const byType: Record<string, CacheTypeStats> = {};
+    for (const [type, counts] of this.statsByType) {
+      byType[type] = Object.freeze({
+        gets: counts.gets,
+        hits: counts.hits,
+        misses: counts.misses,
+        hitRate: counts.gets > 0 ? counts.hits / counts.gets : 0,
+      });
+    }
+
     return Object.freeze({
       gets,
       hits,
@@ -612,7 +654,26 @@ export class VersionedCache {
       reads,
       writes,
       hitRate: gets > 0 ? hits / gets : 0,
+      byType: Object.freeze(byType),
     });
+  }
+
+  /**
+   * Counters for one cache type, or null once the type cap is reached.
+   *
+   * Null rather than a throwaway object so a caller past the cap costs nothing
+   * per lookup — see {@link MAX_TRACKED_TYPES}.
+   */
+  private typeStatsFor(
+    type: string
+  ): { gets: number; hits: number; misses: number } | null {
+    const existing = this.statsByType.get(type);
+    if (existing) return existing;
+    if (this.statsByType.size >= MAX_TRACKED_TYPES) return null;
+
+    const created = { gets: 0, hits: 0, misses: 0 };
+    this.statsByType.set(type, created);
+    return created;
   }
 
   /**
@@ -629,5 +690,6 @@ export class VersionedCache {
       reads: 0,
       writes: 0,
     };
+    this.statsByType.clear();
   }
 }

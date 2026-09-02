@@ -3,7 +3,7 @@ import {
   createKvBudgetMiddleware,
   instrumentKvBindings,
   isKvQuotaError,
-  KV_FREE_TIER_DAILY_WRITES,
+  KV_PAID_MONTHLY_WRITES,
   kvBudgetSnapshot,
   resetKvBudget,
   withKvBudget,
@@ -129,7 +129,8 @@ describe('write-rate rollup', () => {
     const obs = fakeObs();
     const wrapped = withKvBudget(kv, { obs, binding: 'CACHE_KV' });
 
-    // 25 writes spread over a full day is far below the 1000/day allowance.
+    // 25 writes spread over a full day projects to ~781/month, three orders of
+    // magnitude below the 1,000,000/month Paid allowance.
     for (let i = 0; i < 25; i++) {
       vi.setSystemTime(T0 + (i + 1) * 3_456_000);
       await wrapped.put(`k${i}`, 'v');
@@ -142,35 +143,79 @@ describe('write-rate rollup', () => {
       signal: 'kv_write_budget',
       binding: 'CACHE_KV',
       writes: 25,
-      dailyWriteLimit: KV_FREE_TIER_DAILY_WRITES,
+      monthlyWriteLimit: KV_PAID_MONTHLY_WRITES,
     });
-    expect(metadata?.projectedDailyWrites).toBeLessThan(
-      KV_FREE_TIER_DAILY_WRITES
+    expect(metadata?.projectedMonthlyWrites).toBeLessThan(
+      KV_PAID_MONTHLY_WRITES
     );
   });
 
-  it('escalates to error when this isolate alone outpaces the daily cap', async () => {
+  it('does NOT escalate on a short burst, however fast', async () => {
     const kv = fakeKv();
     const obs = fakeObs();
     const wrapped = withKvBudget(kv, { obs, binding: 'CACHE_KV' });
 
-    // 25 writes in ten seconds projects to ~216,000/day against a cap of 1000.
+    // 25 writes in ten seconds. Naive arithmetic projects ~6,480,000/month —
+    // six times the allowance — but ten seconds is a burst, not a rate, and a
+    // single request invalidating a handful of cache keys produces exactly
+    // this shape. The gauge must stay quiet rather than cry wolf; the only
+    // reason to trust it later is that it does not fire now.
     for (let i = 0; i < 25; i++) {
       vi.setSystemTime(T0 + (i + 1) * 400);
+      await wrapped.put(`k${i}`, 'v');
+    }
+
+    expect(obs.error).not.toHaveBeenCalled();
+    expect(obs.warn).not.toHaveBeenCalled();
+    const metadata = signalOf(obs.info);
+    expect(metadata).toMatchObject({ signal: 'kv_write_budget', writes: 25 });
+    expect(metadata?.projectedMonthlyWrites).toBeNull();
+  });
+
+  it('escalates to error once a sustained rate outpaces the monthly allowance', async () => {
+    const kv = fakeKv();
+    const obs = fakeObs();
+    const wrapped = withKvBudget(kv, { obs, binding: 'CACHE_KV' });
+
+    // 125 writes at one per 2.5s — a 310,000ms window, past the five-minute
+    // floor, projecting ~1,045,000/month against an allowance of 1,000,000.
+    for (let i = 0; i < 125; i++) {
+      vi.setSystemTime(T0 + (i + 1) * 2_500);
       await wrapped.put(`k${i}`, 'v');
     }
 
     const metadata = signalOf(obs.error);
     expect(metadata).toMatchObject({
       signal: 'kv_write_budget',
-      writes: 25,
+      writes: 125,
+      monthlyWriteLimit: KV_PAID_MONTHLY_WRITES,
     });
-    expect(metadata?.projectedDailyWrites).toBeGreaterThan(
-      KV_FREE_TIER_DAILY_WRITES
+    expect(metadata?.projectedMonthlyWrites).toBeGreaterThan(
+      KV_PAID_MONTHLY_WRITES
     );
   });
 
-  it('reports null rather than a nonsense projection on a sub-second window', async () => {
+  it('warns rather than errors while a sustained rate is under the allowance', async () => {
+    const kv = fakeKv();
+    const obs = fakeObs();
+    const wrapped = withKvBudget(kv, { obs, binding: 'CACHE_KV' });
+
+    // 125 writes at one per 3.8s — a 471,200ms window projecting ~688,000/month,
+    // past half the allowance but not past it.
+    for (let i = 0; i < 125; i++) {
+      vi.setSystemTime(T0 + (i + 1) * 3_800);
+      await wrapped.put(`k${i}`, 'v');
+    }
+
+    expect(obs.error).not.toHaveBeenCalled();
+    const metadata = signalOf(obs.warn);
+    expect(metadata).toMatchObject({ signal: 'kv_write_budget' });
+    const projected = metadata?.projectedMonthlyWrites as number;
+    expect(projected).toBeGreaterThan(KV_PAID_MONTHLY_WRITES / 2);
+    expect(projected).toBeLessThan(KV_PAID_MONTHLY_WRITES);
+  });
+
+  it('reports null rather than a nonsense projection on a zero-length window', async () => {
     const kv = fakeKv();
     const obs = fakeObs();
     const wrapped = withKvBudget(kv, { obs, binding: 'CACHE_KV' });
@@ -180,7 +225,7 @@ describe('write-rate rollup', () => {
     }
 
     const metadata = signalOf(obs.info);
-    expect(metadata?.projectedDailyWrites).toBeNull();
+    expect(metadata?.projectedMonthlyWrites).toBeNull();
     expect(metadata?.windowMs).toBe(0);
   });
 
@@ -202,7 +247,10 @@ describe('write-rate rollup', () => {
     }
 
     expect(kvBudgetSnapshot('CACHE_KV')?.writes).toBe(25);
-    expect(signalOf(obs.error)).toMatchObject({ signal: 'kv_write_budget' });
+    // The rollup fires at info: 25 writes over a ten-second window is a burst,
+    // so the projection is withheld and cannot escalate. What this case pins is
+    // that the COUNT survived five separate wrappers, not the level.
+    expect(signalOf(obs.info)).toMatchObject({ signal: 'kv_write_budget' });
   });
 });
 

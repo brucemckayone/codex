@@ -21,11 +21,13 @@ export type {
   WaitUntilFn,
 } from './helpers/invalidate';
 export { invalidateUserLibrary } from './helpers/invalidate';
+export { logCacheStats } from './helpers/log-stats';
 export type {
   CacheEntry,
   CacheOptions,
   CacheResult,
   CacheStats,
+  CacheTypeStats,
   VersionedCacheConfig,
 } from './types';
 export { VersionedCache } from './versioned-cache';

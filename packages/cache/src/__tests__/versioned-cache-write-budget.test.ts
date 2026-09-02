@@ -423,6 +423,13 @@ describe('VersionedCache write budget', () => {
         reads: 5,
         writes: 3,
         hitRate: 0.5,
+        // The per-type split must reconcile with the aggregate, because that
+        // is the whole claim the emitted line makes: one type was read twice
+        // and hit once. A byType that drifted from `gets`/`hits` above would
+        // send an operator hunting the wrong cache.
+        byType: {
+          'org:tiers': { gets: 2, hits: 1, misses: 1, hitRate: 0.5 },
+        },
       });
       // The instance's own tally must agree with what the KV mock was actually
       // asked to do — that is the whole claim the numbers are making.
