@@ -1027,6 +1027,25 @@ jobs:
           echo "::add-mask::$STRIPE_SECRET_KEY"
           pnpm db:seed -- --force
 
+      # The journeys e2e suites (sell-page-head, sell-page-purchase,
+      # canvas-public-parity) hardcode fixtures (bone-deep, tending-the-grief,
+      # ancestral-threads …) that ONLY this INSERT-only script creates —
+      # `db:seed` truncates and seeds orgs/users/content but no portals at
+      # all. Without this step every journeys spec fails with a page-level
+      # 404 ("This portal could not be found") on an org that resolved fine
+      # (Codex-5ryz3: 14 of the 22 red suites on PR #477 were exactly this).
+      # No args = seed the full fixture trio (of-blood-and-bones,
+      # studio-alpha, studio-beta); `--org=<slug>` re-seeds one.
+      - name: Seed portal journey fixtures
+        env:
+          # Same DIRECT url as the seed above — seed-portals.ts drives dbWs
+          # through the same long-lived session shape.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:seed:portals
+
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
         env:
