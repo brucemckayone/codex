@@ -15,6 +15,9 @@ export const load: LayoutServerLoad = async ({ locals, platform, depends }) => {
   if (locals.user && platform?.env?.CACHE_KV) {
     const cache = new VersionedCache({
       kv: platform.env.CACHE_KV as KVNamespace,
+      waitUntil: platform.context
+        ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+        : undefined,
     });
     // Library version — bumped by ecom-api when a purchase completes.
     // Client uses this to detect cross-device purchase staleness on mount.

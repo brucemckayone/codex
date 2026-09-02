@@ -66,7 +66,10 @@ function bumpOrgContentVersion(
   obs?: Logger
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: env.CACHE_KV,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  });
   const db = createDbClient(env);
   executionCtx.waitUntil(
     Promise.all([
@@ -117,7 +120,10 @@ function fanContentInvalidation(
   options: { includeFollowers?: boolean } = {}
 ): void {
   if (!env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: env.CACHE_KV,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  });
   const db = createDbClient(env);
   const waitUntil = executionCtx.waitUntil.bind(executionCtx);
 

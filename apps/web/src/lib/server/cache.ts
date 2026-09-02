@@ -13,6 +13,9 @@ export async function invalidateCache(
   if (!platform?.env?.CACHE_KV) return;
   const cache = new VersionedCache({
     kv: platform.env.CACHE_KV as KVNamespace,
+    waitUntil: platform.context
+      ? (promise: Promise<unknown>) => platform.context.waitUntil(promise)
+      : undefined,
   });
   await cache.invalidate(id);
 }

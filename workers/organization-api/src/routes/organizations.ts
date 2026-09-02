@@ -577,7 +577,10 @@ app.patch(
 
       // Invalidate VersionedCache for public org info (keyed by slug)
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+        });
         const invalidations: Promise<void>[] = [cache.invalidate(updated.slug)];
         // If slug changed, also invalidate the old slug's cache
         if (oldSlug && updated.slug !== oldSlug) {
@@ -665,7 +668,10 @@ app.delete(
       if (org) {
         const invalidations: Promise<unknown>[] = [];
         if (ctx.env.CACHE_KV) {
-          const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+          const cache = new VersionedCache({
+            kv: ctx.env.CACHE_KV,
+            waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+          });
           invalidations.push(cache.invalidate(org.slug));
           // Drop the `slug -> id` entry too — its 24h TTL is a backstop, far too
           // long to rely on here — so the freed hostname

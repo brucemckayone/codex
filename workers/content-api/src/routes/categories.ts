@@ -152,7 +152,10 @@ function invalidateCategories(
   obs: ObservabilityClient | undefined
 ): void {
   if (!env.CACHE_KV) return;
-  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: env.CACHE_KV,
+    waitUntil: (promise) => executionCtx.waitUntil(promise),
+  });
   executionCtx.waitUntil(
     cache
       .invalidate(CacheType.CATEGORIES(space.organizationId, space.creatorId))

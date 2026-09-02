@@ -58,7 +58,7 @@ describe('invalidateUserLibrary', () => {
     expect(tasks).toHaveLength(0);
   });
 
-  it('swallows KV errors and surfaces via logger.warn', async () => {
+  it('stays non-throwing when the KV put fails, and registers both sinks', async () => {
     const baseKv = createMockKVNamespace();
     const failingKv = {
       ...baseKv,
@@ -80,8 +80,23 @@ describe('invalidateUserLibrary', () => {
     });
 
     await Promise.all(tasks);
-    // VersionedCache catches put errors internally — the helper's catch is a
-    // belt-and-suspenders. Either path leaves the helper non-throwing.
-    expect(tasks).toHaveLength(1);
+
+    // TWO registrations, not one, since the cache is now constructed WITH the
+    // sink (RULE 7): `invalidate` parks its own version-key put on `waitUntil`
+    // before awaiting it, and the helper additionally parks the whole
+    // `invalidate()` promise. Both resolve off the same put, so the duplicate
+    // costs nothing but keeping the isolate alive twice over for one write —
+    // and the inner registration is what makes `void cache.invalidate(id)`
+    // safe elsewhere (Codex-mhoaz).
+    expect(tasks).toHaveLength(2);
+
+    // The helper is non-throwing, which is the property that matters here.
+    //
+    // NOT via `logger.warn`, despite what this case used to be called:
+    // `invalidate()` catches its own failure and deliberately does not rethrow
+    // ("invalidation failures are not critical"), so the helper's `.catch` is
+    // unreachable for a put error and `warn` is never called. The logger stays
+    // in the signature for the resolve-then-invalidate helpers that CAN throw.
+    expect(warn).not.toHaveBeenCalled();
   });
 });

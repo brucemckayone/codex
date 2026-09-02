@@ -77,7 +77,10 @@ async function invalidateBrandAndCache(
   //    R14 (denoise iter-011): use shared `invalidateOrgSlugCache` helper
   //    instead of inlining the slug-resolve + invalidate block.
   const db = createDbClient(ctx.env);
-  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV,
+    waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+  });
   await invalidateOrgSlugCache({ db, cache, orgId, logger: obs });
 
   // 2. Fire-and-forget: bump orgId-keyed version for client staleness polling.
@@ -324,7 +327,10 @@ app.put(
 
       // Bump org version for client staleness detection
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+        });
         const orgId = ctx.input.params.id;
         ctx.executionCtx.waitUntil(
           cache.invalidate(orgId).catch((err: unknown) => {
@@ -377,7 +383,10 @@ app.put(
 
       // Bump org version for client staleness detection
       if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cache = new VersionedCache({
+          kv: ctx.env.CACHE_KV,
+          waitUntil: (promise) => ctx.executionCtx.waitUntil(promise),
+        });
         const orgId = ctx.input.params.id;
         ctx.executionCtx.waitUntil(
           cache.invalidate(orgId).catch((err: unknown) => {
