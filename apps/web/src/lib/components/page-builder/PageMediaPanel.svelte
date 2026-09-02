@@ -299,7 +299,7 @@
             disabled={coverBusy}
             onclick={() =>
             onClear(
-              sellMedia.clearCover,
+              () => sellMedia.clearCover(),
               () => m.studio_builder_media_toast_cover_removed(),
               () => m.studio_builder_media_toast_cover_remove_failed()
             )}
@@ -403,7 +403,7 @@
             disabled={heroImageBusy}
             onclick={() =>
             onClear(
-              sellMedia.clearHeroImage,
+              () => sellMedia.clearHeroImage(),
               () => m.studio_builder_media_toast_hero_image_removed(),
               () => m.studio_builder_media_toast_hero_image_remove_failed()
             )}
@@ -509,7 +509,7 @@
             disabled={signatureImageBusy}
             onclick={() =>
             onClear(
-              sellMedia.clearSignatureImage,
+              () => sellMedia.clearSignatureImage(),
               () => m.studio_builder_media_toast_signature_image_removed(),
               () => m.studio_builder_media_toast_signature_image_remove_failed()
             )}
