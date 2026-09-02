@@ -36,8 +36,8 @@
     · block-toolbarred — move ↑/↓, duplicate, add-after, delete (on selection)
 
   The primary editing surface (the user chose inline WYSIWYG over an iframe): every
-  edit mutates the `pageBuilder` store, which the route also streams to the public
-  preview bridge for a separate full-width real-page preview. In `editable={false}`
+  edit mutates the `pageBuilder` store the canvas renders directly; the route's
+  "Full width" preview is this same canvas with editing off. In `editable={false}`
   (Preview mode) the block chrome + contenteditable are off — a clean read-only page.
 -->
 <script lang="ts">

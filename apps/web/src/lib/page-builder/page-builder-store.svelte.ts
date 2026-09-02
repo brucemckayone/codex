@@ -4,12 +4,10 @@
  * The `saved` / `pending` runes spine for the journey/page builder, cloned from
  * `$lib/brand-editor/brand-editor-store.svelte.ts`. The studio builder mutates
  * `pending` (add / reorder / toggle a {@link PageSection}, edit its props, edit
- * page meta + brand overrides); a route `$effect` streams the pending draft to
- * the live-preview iframe over the `codex:page-preview:v1` bridge
- * ({@link ../page-builder/page-preview-bridge}). Inside the framed public page
- * the applier drives THIS store's `pending` (a SEPARATE realm's module
- * instance), so copy / order / toggle edits go live with NO reload — exactly as
- * `brandEditor.applyPreviewVars` does for brand tokens (SPEC §9).
+ * page meta + brand overrides). The builder canvas renders `pending` directly,
+ * so edits are live on the editing surface; the PUBLIC page always renders the
+ * saved row — a draft preview is a server-side read (`draftPreview`), never
+ * this store, and Save is what carries `pending` there.
  *
  * PUBLIC-SAFE PLACEMENT: this lives under `$lib/page-builder` (a CE-4
  * public-lib scan root, `apps/web/scripts/check-brand-editor-boundary.mjs`) so
