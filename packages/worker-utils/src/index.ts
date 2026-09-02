@@ -68,10 +68,12 @@ export {
   type BinaryUploadContext,
   type BinaryUploadProcedureConfig,
   binaryUploadProcedure,
+  type CachedReadContext,
   // Required sink for the org caches' write-through. A direct caller of
   // checkOrganizationMembership / extractOrganizationFromSubdomain needs this
   // type to thread `ctx.cacheWrite` through its own helper signatures.
   type CacheWrite,
+  cachedRead,
   // checkOrganizationMembership is re-exported for convenience.
   // Workers that don't use it will tree-shake it out during bundling.
   checkOrganizationMembership,

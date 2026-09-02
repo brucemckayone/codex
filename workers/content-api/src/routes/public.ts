@@ -8,7 +8,7 @@
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
 import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
@@ -16,7 +16,7 @@ import {
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
 import { uuidSchema, z } from '@codex/validation';
-import { PaginatedResult, procedure } from '@codex/worker-utils';
+import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { resolveCategoryCoverUrl } from './category-cover-url';
 import {
@@ -181,9 +181,18 @@ app.get(
       ) {
         // `waitUntil` is REQUIRED on a read path (Codex-e32xz) — without it the
         // data-slot put is cancelled when the response returns.
+        //
+        // This site keeps its own construction rather than moving to
+        // `cachedRead`: `getCachedPublicContent` takes a CACHE deliberately, so
+        // that its id/type contract can be asserted directly in
+        // public-cache.test.ts, and that contract is the fix for a real
+        // fragmentation bug (see the module comment there). Re-shaping it around
+        // a ctx would rewrite those assertions to prove less. So `obs` is passed
+        // here and the stats emitted after the read instead.
         const cache = new VersionedCache({
           kv: ctx.env.CACHE_KV,
           waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+          obs: ctx.obs,
         });
         const cached = await getCachedPublicContent(
           cache,
@@ -191,6 +200,9 @@ app.get(
           ctx.input.query,
           fetchContent
         );
+        if (ctx.obs) {
+          logCacheStats(cache, ctx.obs, { cacheType: 'public:content' });
+        }
         return new PaginatedResult(cached.items, cached.pagination);
       }
 
@@ -240,20 +252,13 @@ app.get(
         }));
       };
 
-      if (ctx.env.CACHE_KV) {
-        const cache = new VersionedCache({
-          kv: ctx.env.CACHE_KV,
-          waitUntil: (p) => ctx.executionCtx.waitUntil(p),
-        });
-        return cache.get(
-          CacheType.CATEGORIES(orgId),
-          'public:topics',
-          fetchCategories,
-          { ttl: PUBLIC_CATEGORIES_CACHE_TTL }
-        );
-      }
-
-      return fetchCategories();
+      return cachedRead(
+        ctx,
+        CacheType.CATEGORIES(orgId),
+        'public:topics',
+        fetchCategories,
+        { ttl: PUBLIC_CATEGORIES_CACHE_TTL }
+      );
     },
   })
 );

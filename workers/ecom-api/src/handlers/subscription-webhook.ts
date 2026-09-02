@@ -184,7 +184,14 @@ export async function handleSubscriptionWebhook(
     // service owns invalidation. Mirror of the service-registry wiring
     // used by `procedure()` routes.
     const cache = c.env.CACHE_KV
-      ? new VersionedCache({ kv: c.env.CACHE_KV, prefix: 'cache' })
+      ? new VersionedCache({
+          kv: c.env.CACHE_KV,
+          prefix: 'cache',
+          // See payment-webhook: the config's own sink is the only one
+          // VersionedCache's read path can use.
+          waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+          obs,
+        })
       : undefined;
     const waitUntil = c.executionCtx.waitUntil.bind(c.executionCtx);
 

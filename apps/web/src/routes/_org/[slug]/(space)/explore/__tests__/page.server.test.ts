@@ -31,6 +31,22 @@ const {
   // doesn't throw "not a constructor".
   class VersionedCacheMock {
     get = cacheGetMock;
+    // `logCacheStats` is NOT mocked — the factory below spreads `...actual`,
+    // so the real helper runs and calls `getStats()` on the instance the route
+    // constructed. Omitting it threw `getStats is not a function` out of
+    // `load`, which is what caught the missing guard in the helper itself.
+    // Kept as a real stub (not `undefined`) so the emit is genuinely exercised
+    // rather than passing because the helper now swallows the fault.
+    getStats = vi.fn(() => ({
+      gets: 1,
+      hits: 0,
+      misses: 1,
+      invalidations: 0,
+      reads: 1,
+      writes: 1,
+      hitRate: 0,
+      byType: {},
+    }));
   }
   return {
     browseMock: vi.fn(),

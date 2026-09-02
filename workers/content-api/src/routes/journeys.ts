@@ -1,5 +1,5 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
-import { VersionedCache } from '@codex/cache';
+import { logCacheStats, VersionedCache } from '@codex/cache';
 import { ValidationError } from '@codex/service-errors';
 import type {
   ContentCourseLinks,
@@ -161,8 +161,17 @@ app.get(
       const cache = new VersionedCache({
         kv: ctx.env.CACHE_KV,
         waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        obs: ctx.obs,
       });
-      return getCachedPublishedCourses(cache, organizationId, fetchCourses);
+      const courses = await getCachedPublishedCourses(
+        cache,
+        organizationId,
+        fetchCourses
+      );
+      if (ctx.obs) {
+        logCacheStats(cache, ctx.obs, { cacheType: 'journeys:courses' });
+      }
+      return courses;
     },
   })
 );
@@ -548,13 +557,18 @@ app.get(
       const cache = new VersionedCache({
         kv: ctx.env.CACHE_KV,
         waitUntil: (p) => ctx.executionCtx.waitUntil(p),
+        obs: ctx.obs,
       });
-      return getCachedPublishedJourneys(
+      const journeys = await getCachedPublishedJourneys(
         cache,
         organizationId,
         { featured: isFeatured, limit },
         fetchJourneys
       );
+      if (ctx.obs) {
+        logCacheStats(cache, ctx.obs, { cacheType: 'journeys:published' });
+      }
+      return journeys;
     },
   })
 );

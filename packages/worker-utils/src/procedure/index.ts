@@ -35,6 +35,8 @@ export type {
 } from './binary-upload-procedure';
 // Binary upload procedure (raw ArrayBuffer body)
 export { binaryUploadProcedure } from './binary-upload-procedure';
+export type { CachedReadContext } from './cached-read';
+export { cachedRead } from './cached-read';
 export type { OrganizationMembership } from './helpers';
 // Helper exports (for advanced use cases)
 export {

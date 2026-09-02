@@ -3,8 +3,9 @@
  * Fetches preferences from the identity API with cache-backed SSR
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
-import { CacheType, VersionedCache } from '@codex/cache';
+import { CacheType, logCacheStats, VersionedCache } from '@codex/cache';
 import { redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import type { PageServerLoad } from './$types';
 
@@ -32,6 +33,7 @@ export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
     ? new VersionedCache({
         kv: platform.env.CACHE_KV as KVNamespace,
         waitUntil: cacheWaitUntil,
+        obs: logger,
       })
     : null;
 
@@ -48,6 +50,10 @@ export const load: PageServerLoad = async ({ locals, platform, cookies }) => {
         { ttl: 600 }
       );
       preferences = result.data;
+      // Emitted here rather than after the try: a fetcher throw must not be
+      // reported as a cache event, and the catch below turns any failure into
+      // `preferences = null` without distinguishing the cause.
+      logCacheStats(cache, logger, { cacheType: CacheType.USER_PREFERENCES });
     } else {
       const response = await api.account.getNotificationPreferences();
       preferences = response;
