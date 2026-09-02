@@ -77,6 +77,25 @@ export interface CacheResult<T> {
 }
 
 /**
+ * Hit/miss counters for ONE cache type within a {@link CacheStats} snapshot.
+ *
+ * The aggregate `hitRate` cannot say WHICH cached thing is missing, and that is
+ * the only actionable half: an org's branding missing every time is a keying
+ * bug, whereas a rarely-read collection missing is simply cold. Splitting by
+ * type is what turns the ratio from a number into a diagnosis.
+ */
+export interface CacheTypeStats {
+  /** Lookups for this type. */
+  gets: number;
+  /** Lookups for this type served from KV. */
+  hits: number;
+  /** Lookups for this type that fell through to the fetcher. */
+  misses: number;
+  /** Hit rate (0-1) for this type alone. */
+  hitRate: number;
+}
+
+/**
  * Cache statistics for monitoring
  */
 export interface CacheStats {
@@ -89,16 +108,29 @@ export interface CacheStats {
   /** Number of invalidations */
   invalidations: number;
   /**
-   * KV read operations issued. The free tier allows 100,000/day per ACCOUNT.
+   * KV read operations issued. Workers Paid includes 10,000,000/MONTH per
+   * ACCOUNT (the Free plan's figure is 100,000/day, and it fails closed).
    */
   reads: number;
   /**
    * KV mutating operations issued — puts AND deletes, which share one bucket of
-   * 1,000/day per ACCOUNT. This is the scarce resource and therefore the number
-   * to watch: a healthy `hitRate` with a climbing `writes` still means the
-   * cache is losing.
+   * 1,000,000/MONTH per ACCOUNT on Workers Paid. Still the scarcer of the two
+   * by a factor of ten, and therefore the number to watch: a healthy `hitRate`
+   * with a climbing `writes` still means the cache is losing.
+   *
+   * Note this is metered per MONTH and bills past the allowance rather than
+   * failing. On the Free plan the same bucket is 1,000/DAY and exhausting it
+   * makes writes ERROR, which is a different failure in kind — an outage
+   * dressed as a slow app. Do not carry a Free-plan urgency onto a Paid
+   * account, or the reverse.
    */
   writes: number;
   /** Hit rate (0-1) */
   hitRate: number;
+  /**
+   * Per-cache-type breakdown, keyed by the `type` argument passed to
+   * {@link VersionedCache.get}. Present so one emitted line answers "which
+   * cache is missing", not just "how often".
+   */
+  byType: Readonly<Record<string, CacheTypeStats>>;
 }
