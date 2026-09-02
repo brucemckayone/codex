@@ -448,6 +448,8 @@ export {
   isKvQuotaError,
   KV_FREE_TIER_DAILY_READS,
   KV_FREE_TIER_DAILY_WRITES,
+  KV_PAID_MONTHLY_READS,
+  KV_PAID_MONTHLY_WRITES,
   type KvBudgetOptions,
   type KvBudgetSnapshot,
   type KvOpClass,

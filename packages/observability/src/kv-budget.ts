@@ -1,9 +1,16 @@
 /**
  * KV Operation Budget Signal
  *
- * Cloudflare KV on the free tier allows 100,000 reads/day but only 1,000
- * WRITES/day, and both are billed PER ACCOUNT — a dev worker burning the write
- * quota takes production's session cache and rate limiter down with it.
+ * Cloudflare KV on the Workers PAID plan includes 10,000,000 reads and
+ * 1,000,000 WRITES per month, metered PER ACCOUNT and per MONTH — not per day.
+ * That distinction is the whole shape of this module: the Free plan caps writes
+ * at 1,000/DAY and fails CLOSED (further writes error out), whereas Paid bills
+ * past its monthly allowance at $5.00/M writes and $0.50/M reads and never
+ * stops serving. So on Paid, exhaustion is a cost event, not an outage, and the
+ * signal worth alerting on is a monthly TREND rather than a momentary burst.
+ *
+ * This account is on Workers Paid. Defaults here follow that; the Free-plan
+ * constants remain exported for an account that is not.
  *
  * Every KV failure path on this platform swallows its error by design:
  * `VersionedCache` falls back to the fetcher, `createKVSecondaryStorage`
@@ -16,8 +23,8 @@
  * WHAT A WORKER CAN AND CANNOT SEE
  *
  * A Worker cannot read its own account-wide quota counters — there is no
- * binding for that, so any design that reports "X of 1000 writes used today"
- * is lying. What a Worker CAN do is count the operations this code path itself
+ * binding for that, so any design that reports "X of 1,000,000 writes used
+ * this month" is lying. What a Worker CAN do is count the operations this code path itself
  * issues, measure how long it took to issue them, and recognise a
  * quota-shaped error when KV returns one. That gives two honest signals:
  *
@@ -25,11 +32,15 @@
  *     error. This is the moment exhaustion starts, logged at `error` even
  *     though the caller will go on to swallow the failure.
  *  2. `kv_write_budget` — a periodic rollup of this isolate's write rate,
- *     projected to a day and compared against the daily cap. Because the
- *     account total is the SUM across every isolate of every worker, one
+ *     projected to a MONTH and compared against the monthly allowance. Because
+ *     the account total is the SUM across every isolate of every worker, one
  *     isolate's projection is a LOWER BOUND on the account rate: if a single
- *     isolate is already on pace for 40,000 writes/day, the account is far
- *     past 1,000 and no further arithmetic is needed.
+ *     isolate is already on pace for 4,000,000 writes/month, the account is far
+ *     past 1,000,000 and no further arithmetic is needed.
+ *
+ *     A projection is only emitted once the counting window is long enough to
+ *     be a rate rather than a burst — see
+ *     {@link MONTHLY_PROJECTION_MIN_WINDOW_MS}.
  *
  * Both signals go through {@link Logger}, so they land in Workers Logs, which
  * is already enabled for all 10 workers at head_sampling_rate 1. Nothing new
@@ -41,8 +52,8 @@
  * costs no KV operations, no Durable Object operations, no subrequests and no
  * `waitUntil` work — a monitor that consumed the budget it monitors would be
  * self-defeating. Log volume is self-limiting for the same reason it is worth
- * monitoring: rollups fire per N writes, and writes are what the 1,000/day cap
- * bounds.
+ * monitoring: rollups fire per N writes, and writes are what the monthly
+ * allowance bounds.
  *
  * @example One-line adoption — wraps every `*_KV` binding for a whole worker
  * ```typescript
@@ -60,25 +71,53 @@
 
 import type { Logger } from './index';
 
-/** Free-tier daily KV write allowance (put + delete), per ACCOUNT. */
+/**
+ * Free-plan DAILY KV write allowance (put + delete), per ACCOUNT.
+ *
+ * Retained for accounts on the Free plan. NOT the default — this account is on
+ * Workers Paid, and defaulting to a Free cap made the rollup escalate to
+ * `error` permanently against a limit that did not apply.
+ */
 export const KV_FREE_TIER_DAILY_WRITES = 1000;
 
-/** Free-tier daily KV read allowance (get + list), per ACCOUNT. */
+/** Free-plan DAILY KV read allowance (get + list), per ACCOUNT. */
 export const KV_FREE_TIER_DAILY_READS = 100_000;
+
+/** Workers Paid MONTHLY KV write allowance (put + delete), per ACCOUNT. */
+export const KV_PAID_MONTHLY_WRITES = 1_000_000;
+
+/** Workers Paid MONTHLY KV read allowance (get + list), per ACCOUNT. */
+export const KV_PAID_MONTHLY_READS = 10_000_000;
 
 /** Writes counted in one isolate between rollup log lines. */
 const DEFAULT_ROLLUP_EVERY_WRITES = 25;
-
-/**
- * Below this window length a projection is arithmetic noise (25 writes in 40ms
- * projects to 54 million/day), so the rollup reports `null` instead.
- */
-const PROJECTION_MIN_WINDOW_MS = 1000;
 
 /** Guard against an unbounded counter map if a caller passes dynamic names. */
 const MAX_TRACKED_BINDINGS = 32;
 
 const MS_PER_DAY = 86_400_000;
+
+/** A 30-day month — the unit the Paid allowance is metered in. */
+const MS_PER_MONTH = 30 * MS_PER_DAY;
+
+/**
+ * Minimum window before a MONTHLY projection is reported at all.
+ *
+ * Extrapolating a month from a moment is noise in the direction that does the
+ * most damage: 25 writes in two seconds projects to 32 million/month and would
+ * fire `error` on a burst that is actually nothing. A single request that
+ * invalidates a handful of cache keys produces exactly that shape, and this
+ * codebase has route files constructing five caches apiece.
+ *
+ * Five minutes is chosen against what the signal is FOR. On Paid, outpacing the
+ * allowance is a billing trend, and a billing trend does not need sub-minute
+ * detection — so the gauge is allowed to stay quiet until it can be right.
+ * Below this window the projection is null and the escalation cannot fire.
+ *
+ * The urgent signal is unaffected: `kv_quota_exhausted` fires on an actual KV
+ * rejection, immediately, however short the window.
+ */
+const MONTHLY_PROJECTION_MIN_WINDOW_MS = 300_000;
 
 /** Methods that consume the read allowance. */
 const READ_METHODS = new Set(['get', 'getWithMetadata', 'list']);
@@ -121,10 +160,17 @@ export interface KvBudgetSnapshot {
   otherFailures: number;
   /** Age of the counting window in milliseconds. */
   windowMs: number;
-  /** Writes/day this isolate alone is on pace for, or null if the window is too short. */
-  projectedDailyWrites: number | null;
-  /** Reads/day this isolate alone is on pace for, or null if the window is too short. */
-  projectedDailyReads: number | null;
+  /**
+   * Writes/month this isolate alone is on pace for, or null when the window is
+   * shorter than {@link MONTHLY_PROJECTION_MIN_WINDOW_MS}.
+   *
+   * Monthly, not daily, because that is the unit the Paid allowance is metered
+   * in — carrying both units in one log line reproduces in miniature the
+   * four-gauges-four-populations problem this instrumentation exists to end.
+   */
+  projectedMonthlyWrites: number | null;
+  /** Reads/month this isolate alone is on pace for, or null if the window is too short. */
+  projectedMonthlyReads: number | null;
 }
 
 export interface KvBudgetOptions {
@@ -134,8 +180,24 @@ export interface KvBudgetOptions {
   binding: string;
   /** Writes between rollup logs (default 25). */
   rollupEveryWrites?: number;
-  /** Daily write cap to compare projections against (default free tier, 1000). */
-  dailyWriteLimit?: number;
+  /**
+   * Monthly write allowance to compare projections against.
+   *
+   * Defaults to {@link KV_PAID_MONTHLY_WRITES}. On a Free-plan account pass
+   * `KV_FREE_TIER_DAILY_WRITES * 30` — but note the plans differ in KIND, not
+   * just in size: Free fails closed at a daily cap, Paid bills past a monthly
+   * one, so an alert calibrated for one is the wrong alert for the other.
+   */
+  monthlyWriteLimit?: number;
+  /**
+   * Monthly read allowance, emitted alongside for context.
+   *
+   * Defaults to {@link KV_PAID_MONTHLY_READS}. Previously this was hardcoded
+   * into the rollup metadata with no way to override it, so every log line
+   * carried a read allowance that was wrong by two orders of magnitude on this
+   * account.
+   */
+  monthlyReadLimit?: number;
 }
 
 interface BindingCounters {
@@ -188,9 +250,9 @@ function countersFor(binding: string): BindingCounters | null {
   return created;
 }
 
-function project(count: number, windowMs: number): number | null {
-  if (windowMs < PROJECTION_MIN_WINDOW_MS) return null;
-  return Math.round((count / windowMs) * MS_PER_DAY);
+function projectMonthly(count: number, windowMs: number): number | null {
+  if (windowMs < MONTHLY_PROJECTION_MIN_WINDOW_MS) return null;
+  return Math.round((count / windowMs) * MS_PER_MONTH);
 }
 
 function snapshotOf(binding: string, state: BindingCounters): KvBudgetSnapshot {
@@ -205,8 +267,8 @@ function snapshotOf(binding: string, state: BindingCounters): KvBudgetSnapshot {
     quotaFailures: state.quotaFailures,
     otherFailures: state.otherFailures,
     windowMs,
-    projectedDailyWrites: project(state.writes, windowMs),
-    projectedDailyReads: project(state.reads, windowMs),
+    projectedMonthlyWrites: projectMonthly(state.writes, windowMs),
+    projectedMonthlyReads: projectMonthly(state.reads, windowMs),
   };
 }
 
@@ -307,12 +369,12 @@ function logQuotaExhausted(
   binding: string,
   state: BindingCounters,
   method: string,
-  dailyWriteLimit: number
+  monthlyWriteLimit: number
 ): void {
   emit(obs, 'error', 'kv-budget: KV rejected an operation on quota grounds', {
     signal: 'kv_quota_exhausted',
     method,
-    dailyWriteLimit,
+    monthlyWriteLimit,
     ...snapshotOf(binding, state),
   });
 }
@@ -324,26 +386,31 @@ function logQuotaExhausted(
  * one level, so an operator can alert on `warn`+ without also subscribing to
  * healthy traffic:
  *  - `error` — quota errors seen, or this isolate alone is already projecting
- *    past the daily cap
- *  - `warn`  — projecting past half the cap
+ *    past the monthly allowance
+ *  - `warn`  — projecting past half the allowance
  *  - `info`  — routine, and the record that lets the rate be reconstructed
+ *
+ * A null projection (window too short to be a rate) cannot escalate: it falls
+ * through to `info`. That is deliberate — see
+ * {@link MONTHLY_PROJECTION_MIN_WINDOW_MS}.
  */
 function logWriteRollup(
   obs: Logger,
   binding: string,
   state: BindingCounters,
-  dailyWriteLimit: number
+  monthlyWriteLimit: number,
+  monthlyReadLimit: number
 ): void {
   const snapshot = snapshotOf(binding, state);
-  const projected = snapshot.projectedDailyWrites;
+  const projected = snapshot.projectedMonthlyWrites;
 
-  const overBudget = projected !== null && projected > dailyWriteLimit;
-  const nearBudget = projected !== null && projected > dailyWriteLimit / 2;
+  const overBudget = projected !== null && projected > monthlyWriteLimit;
+  const nearBudget = projected !== null && projected > monthlyWriteLimit / 2;
 
   const metadata = {
     signal: 'kv_write_budget',
-    dailyWriteLimit,
-    dailyReadLimit: KV_FREE_TIER_DAILY_READS,
+    monthlyWriteLimit,
+    monthlyReadLimit,
     ...snapshot,
   };
 
@@ -351,7 +418,7 @@ function logWriteRollup(
     emit(
       obs,
       'error',
-      'kv-budget: KV write rate exceeds the daily account allowance',
+      'kv-budget: KV write rate exceeds the monthly account allowance',
       metadata
     );
     return;
@@ -361,7 +428,7 @@ function logWriteRollup(
     emit(
       obs,
       'warn',
-      'kv-budget: KV write rate approaching the daily allowance',
+      'kv-budget: KV write rate approaching the monthly allowance',
       metadata
     );
     return;
@@ -397,7 +464,8 @@ export function withKvBudget<T extends object>(
     obs,
     binding,
     rollupEveryWrites = DEFAULT_ROLLUP_EVERY_WRITES,
-    dailyWriteLimit = KV_FREE_TIER_DAILY_WRITES,
+    monthlyWriteLimit = KV_PAID_MONTHLY_WRITES,
+    monthlyReadLimit = KV_PAID_MONTHLY_READS,
   } = options;
 
   const state = countersFor(binding);
@@ -445,7 +513,13 @@ export function withKvBudget<T extends object>(
           state.writes++;
           if (state.writes - state.writesAtLastRollup >= rollupEveryWrites) {
             state.writesAtLastRollup = state.writes;
-            logWriteRollup(obs, binding, state, dailyWriteLimit);
+            logWriteRollup(
+              obs,
+              binding,
+              state,
+              monthlyWriteLimit,
+              monthlyReadLimit
+            );
           }
         }
 
@@ -454,7 +528,7 @@ export function withKvBudget<T extends object>(
             state.quotaFailures++;
             if (!state.quotaLogged) {
               state.quotaLogged = true;
-              logQuotaExhausted(obs, binding, state, method, dailyWriteLimit);
+              logQuotaExhausted(obs, binding, state, method, monthlyWriteLimit);
             }
           } else {
             state.otherFailures++;
