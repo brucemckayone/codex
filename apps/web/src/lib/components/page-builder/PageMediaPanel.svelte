@@ -146,17 +146,22 @@
    * which command and which messages — and the hero/signature success copy says
    * what actually happens next (A32's chain falls through to the film's frame),
    * so each call site keeps naming its own message.
+   *
+   * The command arrives ALREADY INVOKED-WITH-RECEIVER (`() =>
+   * sellMedia.clearCover()`): a bare `sellMedia.clearCover` detaches `this`
+   * from the class-based store, the write never runs, and neither typecheck nor
+   * a mocked-store test can see it (codex-review SF-001).
    */
   async function onClear(
     clear: () => Promise<void>,
-    removed: () => string,
-    failed: () => string
+    removed: string,
+    failed: string
   ): Promise<void> {
     try {
       await clear();
-      toast.success(removed());
+      toast.success(removed);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : failed());
+      toast.error(err instanceof Error ? err.message : failed);
     }
   }
 </script>
@@ -300,8 +305,8 @@
             onclick={() =>
             onClear(
               () => sellMedia.clearCover(),
-              () => m.studio_builder_media_toast_cover_removed(),
-              () => m.studio_builder_media_toast_cover_remove_failed()
+              m.studio_builder_media_toast_cover_removed(),
+              m.studio_builder_media_toast_cover_remove_failed()
             )}
           >
             {m.studio_builder_media_remove()}
@@ -404,8 +409,8 @@
             onclick={() =>
             onClear(
               () => sellMedia.clearHeroImage(),
-              () => m.studio_builder_media_toast_hero_image_removed(),
-              () => m.studio_builder_media_toast_hero_image_remove_failed()
+              m.studio_builder_media_toast_hero_image_removed(),
+              m.studio_builder_media_toast_hero_image_remove_failed()
             )}
           >
             {m.studio_builder_media_remove()}
@@ -510,8 +515,8 @@
             onclick={() =>
             onClear(
               () => sellMedia.clearSignatureImage(),
-              () => m.studio_builder_media_toast_signature_image_removed(),
-              () => m.studio_builder_media_toast_signature_image_remove_failed()
+              m.studio_builder_media_toast_signature_image_removed(),
+              m.studio_builder_media_toast_signature_image_remove_failed()
             )}
           >
             {m.studio_builder_media_remove()}

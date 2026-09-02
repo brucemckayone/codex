@@ -10,14 +10,14 @@
  * this store, and Save is what carries `pending` there.
  *
  * PUBLIC-SAFE PLACEMENT: this lives under `$lib/page-builder` (a CE-4
- * public-lib scan root, `apps/web/scripts/check-brand-editor-boundary.mjs`) so
- * the framed public journey page (WP-3) can import the applier + read `pending`
- * without pulling heavy editor UI into the public chunk. It therefore uses only
- * runes + sessionStorage and imports NO `$lib/components/*` — mirroring why the
- * brand store lives in `$lib/brand-editor`, not `$lib/components/brand-editor`.
+ * public-lib scan root, `apps/web/scripts/check-brand-editor-boundary.mjs`),
+ * the inert half of the boundary the builder UI must never invert. It
+ * therefore uses only runes + sessionStorage and imports NO
+ * `$lib/components/*` — mirroring why the brand store lives in
+ * `$lib/brand-editor`, not `$lib/components/brand-editor`.
  *
  * Uses $state/$derived/$effect — NOT svelte/store. Module-level $effect needs an
- * explicit `$effect.root()`, wired lazily on first `open`/`applyPreviewState`.
+ * explicit `$effect.root()`, wired lazily on first `open`.
  */
 
 import type {
@@ -89,9 +89,8 @@ function initEffects(): void {
   effectsInitialized = true;
 
   $effect.root(() => {
-    // sessionStorage crash-recovery. Guarded on `pageId`, so a PREVIEW-frame
-    // session (applyPreviewState sets no pageId) never writes — the framed page
-    // and a real editor share this origin's sessionStorage.
+    // sessionStorage crash-recovery. Guarded on `pageId`: a session that has
+    // not opened a page must never write a recovery row.
     $effect(() => {
       if (!browser || !state.pageId || !state.pending) return;
       try {
@@ -628,19 +627,6 @@ function resetSection(id: string): void {
   state.pending.sections[i] = clone(savedSection);
 }
 
-/**
- * Apply an inbound preview snapshot inside the framed public page (driven by the
- * postMessage bridge). Sets `pending` + opens so the framed renderer re-derives
- * its output. Deliberately sets NO `pageId`, so the sessionStorage effect stays
- * inert in a preview frame (mirrors `brandEditor.applyPreviewVars`). Pure applier
- * — it never posts a message, so it cannot echo back to the sender.
- */
-function applyPreviewState(page: PageBuilderState): void {
-  initEffects();
-  state.pending = page;
-  state.isOpen = true;
-}
-
 /** The payload to persist — a plain (non-proxy) deep snapshot of `pending`. */
 function getSavePayload(): PageBuilderState | null {
   return state.pending ? clone(state.pending) : null;
@@ -721,7 +707,6 @@ export const pageBuilder = {
   updateOffer,
   discard,
   resetSection,
-  applyPreviewState,
   getSavePayload,
   markSaved,
 

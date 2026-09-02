@@ -7,7 +7,7 @@
   pointer-only drag) so it works with a keyboard and screen reader.
 
   Drives the module-singleton `pageBuilder` store directly — every mutation
-  flows to the live preview via the store's pending draft.
+  lands in the store's pending draft, which the canvas renders live.
 
   ── "ADD" IS A MODE SWITCH, NOT A DISCLOSURE ──────────────────────────────
   The add-section catalogue used to open as a bordered card WEDGED IN above the

@@ -335,6 +335,17 @@
     railCollapsed = !railCollapsed;
   }
 
+  /**
+   * Switch workspace mode. LEAVING 'design' resets `picking`: the Add panel is
+   * SectionList-local state, and switching tabs unmounts the list without its
+   * `onpickingchange` firing — so the widened rail would outlive the panel it
+   * belongs to and stay wide for the ordinary list after coming back.
+   */
+  function setMode(next: BuilderMode): void {
+    mode = next;
+    if (next !== 'design') picking = false;
+  }
+
   // `label` is a THUNK, not a string: these tables live at module scope, and a
   // message read there would resolve once, before the request's language tag is
   // set. Called at render, each one resolves per request.
@@ -1039,7 +1050,7 @@
          whole block. -->
     <nav class="jb__modes" aria-label={m.studio_builder_mode_label()}>
       {#each MODES as tab (tab.id)}
-        <button type="button" aria-pressed={mode === tab.id} onclick={() => (mode = tab.id)}>
+        <button type="button" aria-pressed={mode === tab.id} onclick={() => setMode(tab.id)}>
           {tab.label()}
         </button>
       {/each}

@@ -532,16 +532,6 @@ describe('pageBuilder — save + preview applier', () => {
       headline: 'edited',
     });
   });
-
-  it('applyPreviewState sets pending + opens WITHOUT a pageId (inert crash-recovery)', () => {
-    const incoming = makeSaved({ title: 'Live preview draft' });
-    pageBuilder.applyPreviewState(incoming);
-
-    expect(pageBuilder.isOpen).toBe(true);
-    expect(pageBuilder.pending?.title).toBe('Live preview draft');
-    // A preview frame must never own a persisted pageId (would pollute storage).
-    expect(pageBuilder.pageId).toBeNull();
-  });
 });
 
 describe('pageBuilder — undo / redo', () => {
