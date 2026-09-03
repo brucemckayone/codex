@@ -4276,7 +4276,11 @@ export class SubscriptionService extends BaseService {
       .where(
         and(
           eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner')
+          eq(organizationMemberships.role, 'owner'),
+          // A removed owner keeps role='owner' with status='inactive', so
+          // without this the org's revenue slice can settle on someone who is
+          // no longer a member.
+          eq(organizationMemberships.status, 'active')
         )
       )
       .limit(1);

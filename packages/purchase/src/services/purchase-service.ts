@@ -1376,7 +1376,12 @@ export class PurchaseService extends BaseService {
       .where(
         and(
           eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner')
+          eq(organizationMemberships.role, 'owner'),
+          // A removed owner keeps role='owner' with status='inactive', and the
+          // pending-payout sweep resolves its destination by payouts.userId
+          // alone — so a removed founder who later onboards Connect would
+          // receive the org fee.
+          eq(organizationMemberships.status, 'active')
         )
       )
       .limit(1);
