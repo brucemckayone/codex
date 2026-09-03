@@ -1,6 +1,7 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
   import {
+    HERO_FX_COLOR_CONTROLS,
     HERO_FX_DEFAULTS,
     HERO_FX_PRESETS,
     HERO_FX_SHARED_CONTROLS,
@@ -26,6 +27,15 @@
     return light;
   });
   const activePreset = $derived(overrides['shader-preset'] ?? 'none');
+
+  // Which palette controls to show. The four colour pickers are pointless
+  // while the shader is matching the brand palette — they would appear live
+  // but change nothing — so they are hidden until the toggle is on.
+  const colorControls = $derived(
+    readBool('shader-use-custom-colors')
+      ? HERO_FX_COLOR_CONTROLS
+      : HERO_FX_COLOR_CONTROLS.filter((c) => c.kind !== 'color')
+  );
 
   /** Read a numeric override, falling back to its default. Handles 0 correctly. */
   function readNum(key: string): number {
@@ -118,6 +128,25 @@
       {/each}
     </section>
 
+    <section class="hero-fx__section">
+      <span class="hero-fx__section-label">Colours</span>
+      <p class="hero-fx__hint">
+        {#if readBool('shader-use-custom-colors')}
+          The shader paints in these colours instead of your brand palette.
+        {:else}
+          The shader paints in your brand colours. Turn this on to give the
+          hero effect its own palette.
+        {/if}
+      </p>
+      {#each colorControls as control (control.key)}
+        <ControlField
+          {control}
+          currentValue={readControlValue(control)}
+          onUpdate={updateOverride}
+        />
+      {/each}
+    </section>
+
     {@const presetControls = HERO_FX_PRESET_CONTROLS[activePreset]}
     {#if presetControls}
       <section class="hero-fx__section">
@@ -153,6 +182,13 @@
     color: var(--color-text-muted);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
+  }
+
+  .hero-fx__hint {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: var(--leading-normal);
   }
 
   /* ── Preset Grid ──────────────────────────────── */

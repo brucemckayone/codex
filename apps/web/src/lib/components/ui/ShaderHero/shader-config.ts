@@ -848,19 +848,44 @@ export function getShaderConfig(
       : null) as ShaderPresetId | null);
   const resolvedPreset = preset ?? DEFAULTS.preset;
 
-  // Read brand colors from the org's CSS custom properties
-  const primary = (style ? readColorVar(style, 'brand-primary') : null) ?? [
-    0.486, 0.227, 0.929,
-  ];
-  const secondary = (style ? readColorVar(style, 'brand-secondary') : null) ?? [
-    0.925, 0.282, 0.6,
-  ];
-  const accent = (style ? readColorVar(style, 'brand-accent') : null) ?? [
-    0.961, 0.62, 0.043,
-  ];
-  const bg = (style ? readColorVar(style, 'brand-bg') : null) ?? [
-    0.059, 0.09, 0.165,
-  ];
+  // Shader palette. By default a shader paints in the org's brand colours, so
+  // the hero matches the site with no configuration. A creator can opt into a
+  // separate shader palette — a teal shader over a purple brand — by enabling
+  // `shader-use-custom-colors` and setting the four `shader-color-*` keys.
+  //
+  // The opt-in toggle is load-bearing rather than decorative: `<input
+  // type="color">` has no empty state, so a picker always reports SOME colour.
+  // Without an explicit flag there would be no way to distinguish "the creator
+  // chose this exact colour" from "the picker defaulted", and every org would
+  // silently inherit the platform default palette the first time this panel
+  // was opened.
+  const useCustomColors =
+    (style ? readBrandVar(style, 'shader-use-custom-colors', isDark) : null) ===
+    '1';
+
+  /**
+   * Resolve one palette slot: custom shader colour when opted in and parseable,
+   * else the org brand colour, else the platform default.
+   *
+   * Falls through on an unparseable custom value rather than failing to black —
+   * a malformed token should degrade to the brand colour, not blank the hero.
+   */
+  const paletteSlot = (
+    slot: 'primary' | 'secondary' | 'accent' | 'bg',
+    fallback: [number, number, number]
+  ): [number, number, number] => {
+    if (useCustomColors && style) {
+      const raw = readBrandVar(style, `shader-color-${slot}`, isDark);
+      const parsed = raw ? parseCssColor(raw) : null;
+      if (parsed) return parsed;
+    }
+    return (style ? readColorVar(style, `brand-${slot}`) : null) ?? fallback;
+  };
+
+  const primary = paletteSlot('primary', [0.486, 0.227, 0.929]);
+  const secondary = paletteSlot('secondary', [0.925, 0.282, 0.6]);
+  const accent = paletteSlot('accent', [0.961, 0.62, 0.043]);
+  const bg = paletteSlot('bg', [0.059, 0.09, 0.165]);
 
   // Read logo URL for SDF-based shader integration
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;

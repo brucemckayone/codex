@@ -1,4 +1,7 @@
-import { SHADER_DEFAULT_PULSE_COLOR } from '$lib/brand-editor/defaults';
+import {
+  SHADER_DEFAULT_PALETTE,
+  SHADER_DEFAULT_PULSE_COLOR,
+} from '$lib/brand-editor/defaults';
 
 // ── Preset definitions ─────────────────────────────────────────────────
 export interface PresetOption {
@@ -83,6 +86,14 @@ export const HERO_FX_DEFAULTS: Record<string, string> = {
   'shader-intensity': '0.65',
   'shader-grain': '0.025',
   'shader-vignette': '0.20',
+  // Shader palette. The default is '0' — match the brand palette — so an org
+  // that never opens this section renders exactly as it did before the keys
+  // existed. The four colours below are only the pickers' opening state.
+  'shader-use-custom-colors': '0',
+  'shader-color-primary': SHADER_DEFAULT_PALETTE.primary,
+  'shader-color-secondary': SHADER_DEFAULT_PALETTE.secondary,
+  'shader-color-accent': SHADER_DEFAULT_PALETTE.accent,
+  'shader-color-bg': SHADER_DEFAULT_PALETTE.bg,
   // Suture
   'shader-curl': '30',
   'shader-dissipation': '0.985',
@@ -424,6 +435,30 @@ export const HERO_FX_SHARED_CONTROLS: SliderControlConfig[] = [
     minLabel: 'None',
     maxLabel: 'Heavy',
   },
+];
+
+/**
+ * Shader palette controls, shown for every active preset.
+ *
+ * Every preset consumes the same four colour slots — `u_brandPrimary`,
+ * `u_brandSecondary`, `u_brandAccent`, `u_bgColor` — so this group is shared
+ * rather than repeated per preset. What each slot *means* varies by preset
+ * (for Waves: wave body, subsurface, foam; for Vapor: near, mid and far depth),
+ * which is why the labels name the slot rather than guessing at a role.
+ *
+ * The toggle comes first and gates the rest: with it off the shader paints in
+ * the org's brand colours, which is the default for every org.
+ */
+export const HERO_FX_COLOR_CONTROLS: ControlConfig[] = [
+  {
+    kind: 'toggle',
+    key: 'shader-use-custom-colors',
+    label: 'Custom shader palette',
+  },
+  { kind: 'color', key: 'shader-color-primary', label: 'Primary' },
+  { kind: 'color', key: 'shader-color-secondary', label: 'Secondary' },
+  { kind: 'color', key: 'shader-color-accent', label: 'Accent' },
+  { kind: 'color', key: 'shader-color-bg', label: 'Background' },
 ];
 
 /**

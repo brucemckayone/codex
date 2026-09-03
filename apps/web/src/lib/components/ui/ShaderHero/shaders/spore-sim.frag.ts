@@ -72,9 +72,9 @@ void main() {
   // Determine if this texel is an agent via spatial hash
   // Use time-varying hash to rotate which texels are active
   float agentHash = hash21(v_uv * 512.0 + floor(uTime * 0.5) * 0.1);
-  bool active = agentHash < 0.30; // ~30% density
+  bool seedsAgent = agentHash < 0.30; // ~30% density
 
-  if (active) {
+  if (seedsAgent) {
     // Convert angles from degrees to radians (normalized 0-1 heading)
     float sa = uSensorAngle / 360.0; // sensor angle as fraction of full turn
     float ra = uRotation / 360.0;    // rotation as fraction of full turn

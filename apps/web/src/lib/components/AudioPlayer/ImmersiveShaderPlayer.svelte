@@ -170,6 +170,11 @@
         trebleSmooth: a.trebleSmooth,
         amplitudeSmooth: a.amplitudeSmooth,
         beatPulse: a.beatPulse,
+        energy: a.energy,
+        flux: a.flux,
+        centroid: a.centroid,
+        beatPhase: a.beatPhase,
+        onsetCount: a.onsetCount,
         active: a.active,
       };
     }

@@ -22,3 +22,24 @@ export const BRAND_DEFAULT_BACKGROUND = '#FFFFFF';
  * where the pulse colour is rendered without an explicit override.
  */
 export const SHADER_DEFAULT_PULSE_COLOR = '#d10000';
+
+/**
+ * Seed palette for the shader colour pickers.
+ *
+ * These are the same four colours `getShaderConfig()` falls back to when an org
+ * has no brand palette at all, expressed as hex — the RGB triples there are
+ * `[0.486, 0.227, 0.929]` etc., which round-trip to exactly these values. They
+ * are only what the pickers *show* before a creator touches them; the shader
+ * itself uses the org's brand colours until `shader-use-custom-colors` is
+ * enabled, so changing these cannot alter how any existing org renders.
+ *
+ * Keep the two in sync: if the fallback triples in `shader-config.ts` change,
+ * change these too, or the pickers will open on a colour the shader would not
+ * actually have used.
+ */
+export const SHADER_DEFAULT_PALETTE = {
+  primary: '#7c3aed',
+  secondary: '#ec4899',
+  accent: '#f59e0b',
+  bg: '#0f172a',
+} as const;

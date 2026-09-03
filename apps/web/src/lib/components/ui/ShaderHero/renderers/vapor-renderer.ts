@@ -1,14 +1,34 @@
 /**
  * Vapor renderer — Volumetric dot noise clouds with ACES tonemapping.
  *
+ * ## Reference implementation
+ *
+ * This is the worked example for wiring a single-pass preset into the shared
+ * audio substrate. The pattern is four lines of integration:
+ *
+ *  1. Spread `AUDIO_UNIFORM_NAMES` into `UNIFORM_NAMES`.
+ *  2. Hold one `createAudioFade()` and one `createDeltaClock()` per renderer.
+ *  3. Resolve once per frame: `const a = audioFade.update(audio, dt)`.
+ *  4. `uploadAudioUniforms(gl, uniforms, a)` after `gl.useProgram`.
+ *
+ * Nothing else is required. In particular there are **no new config keys** —
+ * audio is runtime state, not brand configuration, so `shader-config.ts`,
+ * `css-injection.ts` and the brand editor are untouched.
+ *
  * Single-pass: one program + fullscreen quad, no FBOs.
- * Mouse shifts camera viewing angle, lerped smoothly (0.04 rate).
+ * Mouse shifts camera viewing angle, damped frame-rate-independently.
  * Click creates a brightness pulse. Brand colours map to depth:
  * primary near, secondary mid, accent far.
  * Configurable: density, speed, scale, warmth, glow.
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, VaporConfig } from '../shader-config';
 import { VAPOR_FRAG } from '../shaders/vapor.frag';
 import {
@@ -36,6 +56,7 @@ const UNIFORM_NAMES = [
   'u_intensity',
   'u_grain',
   'u_vignette',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type VaporUniform = (typeof UNIFORM_NAMES)[number];
@@ -52,14 +73,28 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/**
+ * Mouse-follow time constant (seconds) — how long the view takes to mostly
+ * reach the pointer.
+ *
+ * This was `lerped += (target - lerped) * 0.04` applied per *frame*, which
+ * converges twice as fast on a 120Hz display as on 60Hz. `ShaderHero.svelte`
+ * documents fixing exactly that bug for `burstStrength`, but the fix never
+ * reached the renderers. Expressed as a tau and driven by dt, the feel is now
+ * identical at any refresh rate. 0.04/frame at 60fps ≈ tau of 0.4s.
+ */
+const MOUSE_TAU_SEC = 0.4;
+
 export function createVaporRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<VaporUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
 
-  // Internal lerped mouse state for smooth camera movement
+  // Internal damped mouse state for smooth camera movement
   let lerpedMouse = { x: 0.5, y: 0.5 };
-  const MOUSE_LERP = 0.04;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -81,17 +116,21 @@ export function createVaporRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as VaporConfig;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
 
-      // Lerp mouse for smooth camera movement
+      // Frame-rate-independent mouse damping.
       const targetX = mouse.active ? mouse.x : 0.5;
       const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
+      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
+      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -105,7 +144,10 @@ export function createVaporRenderer(): ShaderRenderer {
       // Burst strength (click brightness pulse)
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Brand colors
+      // Brand colors. Left as the configured palette rather than routed
+      // through computeImmersiveColours(): this shader already derives its
+      // whole depth ramp from the three brand stops, so cycling them fights
+      // the depth cue. Audio moves colour here via u_centroid warmth instead.
       const c = cfg.colors;
       gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
       gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
@@ -120,7 +162,15 @@ export function createVaporRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
-      gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
+      // Vignette reads as a frame around a hero, but as a tunnel in fullscreen
+      // immersive mode — so it fades out with the audio ramp rather than being
+      // switched off, which would pop on the first beat.
+      gl.uniform1f(
+        uniforms.u_vignette,
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
+      );
+
+      uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
