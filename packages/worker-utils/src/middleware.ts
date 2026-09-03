@@ -5,7 +5,7 @@
  */
 
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
-import { COOKIES } from '@codex/constants';
+import { COOKIES, ENV_NAMES } from '@codex/constants';
 import { createRequestTimer, ObservabilityClient } from '@codex/observability';
 import {
   type CSP_PRESETS,
@@ -465,8 +465,20 @@ export function createErrorHandler(environment?: string) {
       ...(requestId && { requestId }),
     });
 
-    // Don't expose internal error details in production
-    if (environment === 'production') {
+    // Resolve the environment PER REQUEST, not from the closure. `createWorker()`
+    // runs at module scope, where Cloudflare's `env` does not exist yet, so no
+    // worker can pass `environment` — and none does. A `=== 'production'` test on
+    // that argument is therefore never true, and every deployed worker answered
+    // uncaught errors with `err.message` plus five stack frames.
+    //
+    // Fail CLOSED: only the two local environments get details. `staging` and
+    // `dev` are internet-facing, and an unset or unrecognised value must not
+    // open the detailed branch.
+    const resolved = environment ?? c.env?.ENVIRONMENT;
+    const isLocalEnv =
+      resolved === ENV_NAMES.DEVELOPMENT || resolved === ENV_NAMES.TEST;
+
+    if (!isLocalEnv) {
       return c.json(
         {
           error: {
@@ -478,7 +490,7 @@ export function createErrorHandler(environment?: string) {
       );
     }
 
-    // Development: include error details
+    // Local development and tests: include error details
     return c.json(
       {
         error: {
