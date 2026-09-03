@@ -36,19 +36,13 @@ export const load: PageServerLoad = async ({
   let creatorId: string | null = null;
   let creatorName: string | null = null;
 
-  try {
-    const profileResult = await api.fetch<{
-      data?: {
-        id: string;
-        name: string | null;
-      };
-    }>('identity', `/api/user/public/${encodeURIComponent(username)}`);
-    creatorId = profileResult?.data?.id ?? null;
-    creatorName = profileResult?.data?.name ?? null;
-  } catch {
-    // Profile endpoint may not exist yet - degrade gracefully
-    creatorId = null;
-  }
+  // Note this used to read `profileResult?.data?.id` off a raw `api.fetch`,
+  // i.e. it expected the un-unwrapped procedure envelope. `getPublicProfile`
+  // goes through `request()`, which unwraps `{ data: T }` to `T`, so the
+  // fields are read directly.
+  const profile = await api.account.getPublicProfile(username);
+  creatorId = profile?.id ?? null;
+  creatorName = profile?.name ?? null;
 
   // Fetch creator's published content with filters
   let contentItems: Array<{

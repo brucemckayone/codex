@@ -390,7 +390,7 @@ const org = await api.org.getPublicInfo(slug);
 | Namespace | Worker | Key methods |
 |---|---|---|
 | `api.auth` | auth | `getSession()` |
-| `api.account` | identity | `getProfile()`, `updateProfile()`, `uploadAvatar()` |
+| `api.account` | identity | `getProfile()`, `updateProfile()`, `uploadAvatar()`, `getPublicProfile(username)` — anonymous creator profile; returns `null` on 404 only, rethrows anything else |
 | `api.content` | content | `list()`, `get()`, `create()`, `update()`, `publish()`, `getPublicContent()`, `getDiscoverContent()` |
 | `api.access` | content/access | `getStreamingUrl()`, `getUserLibrary()`, `saveProgress()` |
 | `api.org` | org | `getPublicInfo()`, `getPublicCreators()`, `getMyMembership()`, `getMembers()`, `follow()` |

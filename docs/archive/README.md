@@ -47,7 +47,11 @@ documented 4 workers where the platform runs 9), empty scaffolding, machine
 reports whose findings had already been fixed, and per-iteration proof-test
 logs whose subject no longer exists.
 
-One deletion was **refused**: `docs/commerce-audit/screenshots/` (66 PNGs,
-28.7 MB) is untracked and was never committed, so removing it would have been
-irrecoverable. It is unreferenced and can be deleted by hand if you don't want
-it — that is a call for a human, not a cleanup script.
+One deletion was **withheld from the script**: `docs/commerce-audit/screenshots/`
+(66 PNGs, 29 MB). `git ls-files` returns zero for it and no commit in any branch
+ever touched it, so removing it is irrecoverable — the executor refuses to
+delete what git cannot restore, however unreferenced it is. The owner
+subsequently authorised the deletion, so it is removed by hand rather than by
+the triage run; the file list it held is recorded in the PR discussion. If you
+are reading this because a link into that directory broke, the images are gone
+and are not retrievable from history.

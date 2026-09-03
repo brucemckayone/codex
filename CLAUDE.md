@@ -40,7 +40,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
 | 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |
 | 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
-| 6 | **identity-api** | 42074 | User profiles, preferences, creator onboarding, org membership (user side) | `GET /api/user/profile`, `PATCH /api/user/profile` |
+| 6 | **identity-api** | 42074 | User profiles, preferences, creator onboarding, org membership (user side) | `GET /api/user/profile`, `PATCH /api/user/profile`, `GET /api/user/public/:username` (the worker's only anonymous route) |
 | 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /api/templates`, `POST /internal/send` (worker HMAC) |
 | 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /internal/media/:id/transcode` (worker HMAC), `POST /api/transcoding/webhook` (RunPod HMAC) |
 | 9 | **dev-cdn** | 4100 | Local development CDN proxy (Miniflare R2) | `GET /:key` |
@@ -292,7 +292,7 @@ executionCtx.waitUntil(
 `PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
 instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
-**Currently cached:** User profile (10min), user preferences (10min), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
+**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
 
 ---
 

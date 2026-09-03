@@ -43,6 +43,8 @@ import type {
   SaleListItem,
   SalesStats,
 } from '@codex/purchase';
+// `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
+// no runtime value, so the vite server-only module guard is not tripped.
 import type {
   AllSettingsResponse,
   BrandingSettingsResponse,
@@ -55,6 +57,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PublicBrandingResponse,
+  PublicCreatorProfile,
   SessionData,
   UserData,
 } from '@codex/shared-types';
@@ -577,6 +580,30 @@ export function createServerApi(
        * Get user profile
        */
       getProfile: () => request<UserData>('identity', '/api/user/profile'),
+
+      /**
+       * Public creator profile by username — anonymous, no session needed.
+       *
+       * Returns `null` for an unknown handle instead of throwing, because the
+       * only caller (the `_creators/[username]` loads) renders its own
+       * not-found state and a 404 here is an expected answer, not a fault.
+       * Any OTHER status still throws, so a genuine outage is not silently
+       * rendered as "no such creator" — which is exactly what the previous
+       * bare `try/catch` around `api.fetch` did.
+       */
+      getPublicProfile: async (
+        username: string
+      ): Promise<PublicCreatorProfile | null> => {
+        try {
+          return await request<PublicCreatorProfile>(
+            'identity',
+            `/api/user/public/${encodeURIComponent(username)}`
+          );
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) return null;
+          throw err;
+        }
+      },
 
       /**
        * Update user profile

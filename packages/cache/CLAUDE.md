@@ -58,7 +58,9 @@ ctx.executionCtx.waitUntil(
 ## CacheType Values
 
 ```ts
-CacheType.USER_PROFILE         // 'user:profile'
+CacheType.USER_PROFILE         // 'user:profile'      — CARRIES email; never public
+CacheType.USER_PUBLIC_PROFILE  // 'user:public-profile' — public subset, keyed by USER ID
+CacheType.USERNAME_TO_ID       // 'user:username-to-id' — keyed by username, 1h
 CacheType.USER_PREFERENCES     // 'user:preferences'
 CacheType.ORG_CONFIG           // 'org:config'
 CacheType.ORG_STATS            // 'org:stats:v2'

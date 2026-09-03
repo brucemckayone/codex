@@ -17,6 +17,23 @@ import {
 export const usernameSchema = createSlugSchema(50);
 
 /**
+ * Route params for the PUBLIC creator profile read
+ * (`GET /api/user/public/:username`).
+ *
+ * Validating the slug shape here is what keeps an unauthenticated,
+ * enumerable route from turning arbitrary path input into a DB query: a
+ * non-slug username is rejected by `procedure()` before the handler, so it
+ * never reaches Neon and never occupies a cache slot.
+ *
+ * The param is `username`, NOT `id` — `procedure()`'s org resolver treats a
+ * bare `:id` on an org-scoped route as the organization id, and naming route
+ * slots after what they hold is the habit that avoids that whole class.
+ */
+export const publicProfileParamsSchema = z.object({
+  username: usernameSchema,
+});
+
+/**
  * Bio validation schema
  * - Optional user biography/bio for creator profile
  * - Maximum 500 characters

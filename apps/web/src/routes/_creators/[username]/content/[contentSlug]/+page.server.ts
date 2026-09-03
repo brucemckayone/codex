@@ -46,16 +46,11 @@ export const load: PageServerLoad = async ({
     image: string | null;
   } | null = null;
 
-  try {
-    const profileResult = await api.fetch<{
-      id: string;
-      name: string | null;
-      image: string | null;
-    } | null>('identity', `/api/user/public/${encodeURIComponent(username)}`);
-    creatorProfile = profileResult ?? null;
-  } catch {
-    error(404, 'Creator not found');
-  }
+  // A 404 from the endpoint means no such creator, which IS a 404 here. Any
+  // other failure propagates as a 500 rather than being mislabelled "Creator
+  // not found" — the old blanket catch turned every identity-api error,
+  // including the route not existing at all, into a 404 on a real creator.
+  creatorProfile = await api.account.getPublicProfile(username);
 
   if (!creatorProfile?.id) {
     error(404, 'Creator not found');
