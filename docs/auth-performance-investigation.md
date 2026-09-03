@@ -30,11 +30,11 @@ Full codebase investigation completed 2026-04-16. Five areas investigated, five 
 
 | # | Fix | Sub-doc | Impact | Effort | Dependencies |
 |---|---|---|---|---|---|
-| 1 | **Session KV cache alignment** | [01-session-kv-cache-alignment.md](auth-performance/01-session-kv-cache-alignment.md) | -800ms (KV hits instead of DB) | 2-4h | None |
-| 2 | **Org membership KV cache** | [02-org-membership-kv-cache.md](auth-performance/02-org-membership-kv-cache.md) | -200ms per membership check | 3-4h | None |
-| 3a | **Move `isFollowing` to client** | [03-move-streaming-to-client.md](auth-performance/03-move-streaming-to-client.md) (Move B) | -847ms streaming | 1-2h | None |
-| 3b | **Move `continueWatching` to client** | [03-move-streaming-to-client.md](auth-performance/03-move-streaming-to-client.md) (Move A) | -1,542ms streaming | 2-3h | None |
-| 3c | **Move `subscriptionContext` to client** | [03-move-streaming-to-client.md](auth-performance/03-move-streaming-to-client.md) (Move C) | -567ms streaming | 2-3h | None |
+| 1 | **Session KV cache alignment** | [01-session-kv-cache-alignment.md](archive/auth-performance/01-session-kv-cache-alignment.md) | -800ms (KV hits instead of DB) | 2-4h | None |
+| 2 | **Org membership KV cache** | [02-org-membership-kv-cache.md](archive/auth-performance/02-org-membership-kv-cache.md) | -200ms per membership check | 3-4h | None |
+| 3a | **Move `isFollowing` to client** | [03-move-streaming-to-client.md](archive/auth-performance/03-move-streaming-to-client.md) (Move B) | -847ms streaming | 1-2h | None |
+| 3b | **Move `continueWatching` to client** | [03-move-streaming-to-client.md](archive/auth-performance/03-move-streaming-to-client.md) (Move A) | -1,542ms streaming | 2-3h | None |
+| 3c | **Move `subscriptionContext` to client** | [03-move-streaming-to-client.md](archive/auth-performance/03-move-streaming-to-client.md) (Move C) | -567ms streaming | 2-3h | None |
 
 **All Phase 1 fixes are independent — can be implemented in parallel by different agents.**
 
@@ -42,8 +42,8 @@ Full codebase investigation completed 2026-04-16. Five areas investigated, five 
 
 | # | Fix | Sub-doc | Impact | Effort | Dependencies |
 |---|---|---|---|---|---|
-| 4 | **Trusted internal caller pattern** | [04-trusted-internal-caller.md](auth-performance/04-trusted-internal-caller.md) | Eliminates redundant session validation | 1-2 weeks | Phase 1 measurement |
-| 5 | **Batch org context endpoint** | [05-batch-org-context-endpoint.md](auth-performance/05-batch-org-context-endpoint.md) | 4 calls → 1 | 2-3h | Evaluate after Fix 3 |
+| 4 | **Trusted internal caller pattern** | [04-trusted-internal-caller.md](archive/auth-performance/04-trusted-internal-caller.md) | Eliminates redundant session validation | 1-2 weeks | Phase 1 measurement |
+| 5 | **Batch org context endpoint** | [05-batch-org-context-endpoint.md](archive/auth-performance/05-batch-org-context-endpoint.md) | 4 calls → 1 | 2-3h | Evaluate after Fix 3 |
 
 **Note:** Fix 5 may not be needed if Fix 3 moves enough calls client-side. Evaluate after Phase 1.
 
@@ -227,11 +227,11 @@ curl -s -o /dev/null -w "TTFB: %{time_starttransfer}s\nTotal: %{time_total}s\n" 
 
 | Area | Sub-Doc | Key Files |
 |---|---|---|
-| Session KV | [01-session-kv-cache-alignment.md](auth-performance/01-session-kv-cache-alignment.md) | `packages/security/src/kv-secondary-storage.ts`, `packages/worker-utils/src/auth-middleware.ts:230-233` |
-| Membership | [02-org-membership-kv-cache.md](auth-performance/02-org-membership-kv-cache.md) | `packages/worker-utils/src/procedure/org-helpers.ts:105-147`, `workers/organization-api/src/routes/members.ts`, `workers/identity-api/src/routes/membership.ts` |
-| Streaming | [03-move-streaming-to-client.md](auth-performance/03-move-streaming-to-client.md) | `apps/web/src/routes/_org/[slug]/+layout.server.ts:77-90`, `apps/web/src/routes/_org/[slug]/(space)/+page.server.ts:52-64` |
-| Trusted caller | [04-trusted-internal-caller.md](auth-performance/04-trusted-internal-caller.md) | `packages/worker-utils/src/procedure/helpers.ts:284-326`, `apps/web/src/lib/server/api.ts` |
-| Batch endpoint | [05-batch-org-context-endpoint.md](auth-performance/05-batch-org-context-endpoint.md) | `workers/organization-api/src/routes/` (new), `apps/web/src/routes/_org/[slug]/+layout.server.ts` |
+| Session KV | [01-session-kv-cache-alignment.md](archive/auth-performance/01-session-kv-cache-alignment.md) | `packages/security/src/kv-secondary-storage.ts`, `packages/worker-utils/src/auth-middleware.ts:230-233` |
+| Membership | [02-org-membership-kv-cache.md](archive/auth-performance/02-org-membership-kv-cache.md) | `packages/worker-utils/src/procedure/org-helpers.ts:105-147`, `workers/organization-api/src/routes/members.ts`, `workers/identity-api/src/routes/membership.ts` |
+| Streaming | [03-move-streaming-to-client.md](archive/auth-performance/03-move-streaming-to-client.md) | `apps/web/src/routes/_org/[slug]/+layout.server.ts:77-90`, `apps/web/src/routes/_org/[slug]/(space)/+page.server.ts:52-64` |
+| Trusted caller | [04-trusted-internal-caller.md](archive/auth-performance/04-trusted-internal-caller.md) | `packages/worker-utils/src/procedure/helpers.ts:284-326`, `apps/web/src/lib/server/api.ts` |
+| Batch endpoint | [05-batch-org-context-endpoint.md](archive/auth-performance/05-batch-org-context-endpoint.md) | `workers/organization-api/src/routes/` (new), `apps/web/src/routes/_org/[slug]/+layout.server.ts` |
 
 ### Key Source Files
 

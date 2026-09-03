@@ -98,8 +98,8 @@ npx wrangler kv:namespace create AUTH_SESSION_KV
 ```
 
 **Related Documents**:
-- [Auth TDD](../features/auth/ttd-dphase-1.md) - Session caching implementation
-- [Rate Limiting Strategy](../security/RateLimiting.md) - Uses same KV namespace
+- [Auth TDD](../../docs/archive/design/features/auth/ttd-dphase-1.md) - Session caching implementation
+- [Rate Limiting Strategy](../../docs/archive/design/security/RateLimiting.md) - Uses same KV namespace
 
 ---
 
@@ -128,7 +128,7 @@ interface RateLimitCounter {
 }
 ```
 
-**Rate Limit Targets** (from [RateLimiting.md](../security/RateLimiting.md)):
+**Rate Limit Targets** (from [RateLimiting.md](../../docs/archive/design/security/RateLimiting.md)):
 
 | Endpoint/Action | Limit | Window | Key Pattern |
 |----------------|-------|--------|-------------|
@@ -183,7 +183,7 @@ async function rateLimit(
 ```
 
 **Related Documents**:
-- [Rate Limiting Strategy](../security/RateLimiting.md) - Complete implementation details
+- [Rate Limiting Strategy](../../docs/archive/design/security/RateLimiting.md) - Complete implementation details
 
 ---
 
@@ -305,9 +305,9 @@ async function getTranscodingStatus(mediaId: string): Promise<MediaStatus> {
 - **Manual Purge**: Admin endpoint to clear all cache if needed
 
 **Related Documents**:
-- [Content Management TDD](../features/content-management/ttd-dphase-1.md) - Content caching
-- [Platform Settings TDD](../features/platform-settings/ttd-dphase-1.md) - Settings cache
-- [Media Transcoding TDD](../features/media-transcoding/ttd-dphase-1.md) - Status polling
+- [Content Management TDD](../../docs/archive/design/features/content-management/ttd-dphase-1.md) - Content caching
+- [Platform Settings TDD](../../docs/archive/design/features/platform-settings/ttd-dphase-1.md) - Settings cache
+- [Media Transcoding TDD](../../docs/archive/design/features/media-transcoding/ttd-dphase-1.md) - Status polling
 
 ---
 
@@ -1538,10 +1538,10 @@ async function acquireLock(key: string, ttl: number): Promise<boolean> {
 
 ## Related Documents
 
-- [Auth TDD](../features/auth/ttd-dphase-1.md) - Session caching implementation
-- [Rate Limiting Strategy](../security/RateLimiting.md) - Rate limit counters
-- [Content Management TDD](../features/content-management/ttd-dphase-1.md) - Content caching
-- [Media Transcoding TDD](../features/media-transcoding/ttd-dphase-1.md) - Status polling
+- [Auth TDD](../../docs/archive/design/features/auth/ttd-dphase-1.md) - Session caching implementation
+- [Rate Limiting Strategy](../../docs/archive/design/security/RateLimiting.md) - Rate limit counters
+- [Content Management TDD](../../docs/archive/design/features/content-management/ttd-dphase-1.md) - Content caching
+- [Media Transcoding TDD](../../docs/archive/design/features/media-transcoding/ttd-dphase-1.md) - Status polling
 - [Environment Management](./EnvironmentManagement.md) - Environment setup
 - [Cloudflare Setup](./CloudflareSetup.md) - Overall Cloudflare configuration
 

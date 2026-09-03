@@ -623,10 +623,10 @@ async function migrateToPerCreatorBuckets(creatorId: string) {
 
 ## Related Documents
 
-- **[Content Management PRD](../features/content-management/pdr-phase-1.md)** - Media upload requirements
-- **[Content Management TDD](../features/content-management/ttd-dphase-1.md)** - Media library architecture
-- **[Media Transcoding TDD](../features/media-transcoding/ttd-dphase-1.md)** - HLS transcoding workflow (Phase 2)
-- **[Content Access PRD](../features/content-access/pdr-phase-1.md)** - Signed URL generation for paid content
+- **[Content Management PRD](../../docs/archive/design/features/content-management/pdr-phase-1.md)** - Media upload requirements
+- **[Content Management TDD](../../docs/archive/design/features/content-management/ttd-dphase-1.md)** - Media library architecture
+- **[Media Transcoding TDD](../../docs/archive/design/features/media-transcoding/ttd-dphase-1.md)** - HLS transcoding workflow (Phase 2)
+- **[Content Access PRD](../../docs/archive/design/features/content-access/pdr-phase-1.md)** - Signed URL generation for paid content
 - **[Database Schema](./DatabaseSchema.md)** - `media_items`, `resources`, `resource_attachments` tables
 - **[Infrastructure Plan](./infraplan.md)** - Overall infrastructure architecture
 
