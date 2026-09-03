@@ -367,6 +367,21 @@ export class NotificationsService extends BaseService {
 
         const result = await this.emailProvider.send(message, this.defaultFrom);
 
+        // A provider reports failure by RETURNING, not throwing —
+        // ResendProvider catches everything and yields
+        // `{ success: false, error }`. Without this check the catch below is
+        // dead for every provider-level failure: the send was logged as
+        // successful, never retried, and the caller marked the
+        // email_audit_logs row SUCCESS.
+        //
+        // `skipped` (a user opt-out) also carries success:false and is NOT a
+        // failure, so it must not be turned into a throw.
+        if (!result.success && !result.skipped) {
+          throw new InternalServiceError(
+            result.error ?? 'Email provider reported failure'
+          );
+        }
+
         // Track success metric
         this.obs.info('Email sent successfully', {
           ...context,
