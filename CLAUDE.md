@@ -31,7 +31,7 @@ When working with beads, you MUST have a full understanding of how tasks fit int
 
 ## Workers (Cloudflare)
 
-All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceUrl(service, env)` to resolve URLs. NEVER hardcode port numbers.
+All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServiceUrl(service, envOrIsLocal)` from `@codex/urls` to resolve service URLs. NEVER hardcode port numbers.
 
 | # | Worker | Port | Purpose | Key Endpoints |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceU
 
 ---
 
-## Packages (21 total)
+## Packages (24 total)
 
 ### Foundation (core infrastructure, no business logic)
 | Package | Purpose | Key Exports |
@@ -59,7 +59,8 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceU
 | **@codex/service-errors** | Error handling | `BaseService`, `*Error` classes, `mapErrorToResponse` |
 | **@codex/security** | Auth & protection | `requireAuth`, `rateLimit`, `workerAuth`, `securityHeaders` |
 | **@codex/validation** | Zod schemas | `*Schema`, `sanitizeSvgContent` |
-| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `getServiceUrl`, `isDev`, `getCookieConfig` |
+| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `ENV_NAMES`, `CACHE_PRESETS`, `isDev` |
+| **@codex/urls** | URL builders & host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig` |
 
 ### Services (business logic)
 | Package | Purpose | Key Exports |
@@ -69,8 +70,10 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceU
 | **@codex/identity** | User identity | `IdentityService` |
 | **@codex/access** | Access control, streaming | `ContentAccessService` |
 | **@codex/purchase** | Stripe, purchases | `PurchaseService` |
+| **@codex/subscription** | Tiers, Connect, subscription lifecycle | `TierService`, `SubscriptionService`, `ConnectAccountService` |
+| **@codex/agreements** | Revenue-share agreements | `AgreementService`, `validateProposedShare` |
 | **@codex/notifications** | Email, templates | `NotificationsService`, `TemplateService` |
-| **@codex/admin** | Admin analytics/mgmt | `AnalyticsService` |
+| **@codex/admin** | Admin analytics/mgmt | `AdminAnalyticsService` |
 | **@codex/transcoding** | RunPod transcoding | `TranscodingService` |
 
 ### Utilities
@@ -134,7 +137,7 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 
 ### Ports & URLs
 
-- **MUST** use `getServiceUrl(service, env)` from `@codex/constants` — NEVER hardcode localhost URLs or port numbers
+- **MUST** use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode localhost URLs or port numbers. (There is no `getServiceUrl`; it was renamed when the URL builders moved to `@codex/urls` in WP-3.)
 - **MUST** use `SERVICE_PORTS` from `@codex/constants` as single source of truth for port assignments
 
 ### Currency

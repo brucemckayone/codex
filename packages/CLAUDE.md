@@ -1,6 +1,6 @@
 # Codex Packages
 
-23 packages across 3 layers: Foundation, Service, Utility.
+24 packages across 3 layers: Foundation, Service, Utility.
 
 ## Package Registry
 
@@ -12,7 +12,8 @@
 | **@codex/service-errors** | Error classes, BaseService | `BaseService`, `NotFoundError`, `ForbiddenError`, `ValidationError`, `BusinessLogicError`, `mapErrorToResponse` | [service-errors/CLAUDE.md](service-errors/CLAUDE.md) |
 | **@codex/security** | Auth middleware, rate limiting | `requireAuth`, `optionalAuth`, `workerAuth`, `rateLimit`, `securityHeaders` | [security/CLAUDE.md](security/CLAUDE.md) |
 | **@codex/validation** | Zod schemas, sanitization | `*Schema`, `sanitizeSvgContent`, `validateImageUpload`, `orgSlugSchema` | [validation/CLAUDE.md](validation/CLAUDE.md) |
-| **@codex/constants** | Shared constants, URLs | `SERVICE_PORTS`, `getServiceUrl`, `isDev`, `getCookieConfig`, `RESERVED_SUBDOMAINS`, `CURRENCY`, `FEES` | [constants/CLAUDE.md](constants/CLAUDE.md) |
+| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `ENV_NAMES`, `CACHE_PRESETS`, `isDev`, `RESERVED_SUBDOMAINS`, `CURRENCY`, `FEES` | [constants/CLAUDE.md](constants/CLAUDE.md) |
+| **@codex/urls** | URL builders, host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig`, `cookieDomainFor` | [urls/CLAUDE.md](urls/CLAUDE.md) |
 
 ### Services (business logic — extend BaseService, use Foundation)
 | Package | Purpose | Key Exports | CLAUDE.md |
