@@ -69,10 +69,25 @@ itself. `film`'s `sin(mouseDist * 15.0 - t * 6.0) * u_burstStrength` is
 correct, because `t` sits inside the sine.
 
 A sweep of all 60 sources found exactly one instance, now fixed. Two
-independent detectors (statement-level, different heuristics) agreed on zero
-remaining true positives — but both are blind through a function boundary, so
-a shader that hides the multiply inside a helper would slip past. Check by
-reading when you touch an interaction term.
+independent statement-level detectors, using different heuristics, agreed on
+zero remaining true positives.
+
+**Be careful what that agreement buys.** Their false positives were disjoint —
+one over-flagged when a bounding call was not at the head of the term
+(`caustic`, `glass`, `clouds:227`), the other when a bounding call was nested
+inside a sine (`film`). That disjointness bounds the **precision** risk: the
+classification step is unlikely to be wrong in the same direction twice. It
+says nothing about **recall**, which comes from a different part of the
+predicate — and there the two detectors are *not* independent. They share
+exactly one gap and it is the same gap: neither resolves symbols through a
+function boundary. (The first detector's original false negative was not a
+boundedness failure at all; it was statement segmentation, which is a third
+mechanism again.)
+
+The practical consequence: a third differently-noisy scanner would add nothing
+here. Real confidence about recall needs one that resolves through helpers. So
+**check by reading whenever you touch an interaction term** — a shader that
+hides the multiply inside a helper still slips past everything we have.
 
 ### 1.2 Motion that is GOOD — do not remove it
 
