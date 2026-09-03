@@ -4388,6 +4388,11 @@ export class SubscriptionService extends BaseService {
           payoutType: 'creator_payout_to_owner',
           status: 'failed',
           reason: 'transfer_failed',
+          // Correlation is what makes a row visible to
+          // reverseSubscriptionPayoutsForCharge (selects by stripeChargeId) —
+          // without it a refunded charge can never claw back this obligation.
+          stripeChargeId: chargeId,
+          transferGroup,
         });
       } catch (insertError) {
         this.obs.error(
@@ -4839,6 +4844,11 @@ export class SubscriptionService extends BaseService {
             payoutType: 'organization_fee',
             status: 'failed',
             reason: 'transfer_failed',
+            // See the creator_payout_to_owner failed insert: without the
+            // charge correlation a refund of this charge cannot reverse the
+            // obligation, and the sweep later pays a refunded charge.
+            stripeChargeId: chargeId,
+            transferGroup,
           });
         } catch (insertError) {
           this.obs.error('Failed to record pending payout for org transfer', {
@@ -4872,6 +4882,11 @@ export class SubscriptionService extends BaseService {
             payoutType: 'organization_fee',
             status: 'pending',
             reason: 'connect_not_ready',
+            // Charge correlation: reverseSubscriptionPayoutsForCharge selects
+            // by stripeChargeId, so a pending row without it is invisible to
+            // refund reversal and the sweep pays a refunded charge.
+            stripeChargeId: chargeId,
+            transferGroup,
           });
         } catch (insertError) {
           this.obs.error(
@@ -5026,6 +5041,9 @@ export class SubscriptionService extends BaseService {
             payoutType: 'creator_payout',
             status: 'pending',
             reason: 'min_transfer_floor',
+            // Charge correlation — see the connect_not_ready insert above.
+            stripeChargeId: chargeId,
+            transferGroup,
           });
         } catch (insertError) {
           this.obs.error(
@@ -5109,6 +5127,9 @@ export class SubscriptionService extends BaseService {
               payoutType: 'creator_payout',
               status: 'failed',
               reason: 'transfer_failed',
+              // Charge correlation — see the connect_not_ready insert above.
+              stripeChargeId: chargeId,
+              transferGroup,
             });
           } catch (insertError) {
             this.obs.error(
@@ -5155,6 +5176,9 @@ export class SubscriptionService extends BaseService {
             payoutType: 'creator_payout',
             status: 'pending',
             reason: pendingReason,
+            // Charge correlation — see the connect_not_ready insert above.
+            stripeChargeId: chargeId,
+            transferGroup,
           });
         } catch (insertError) {
           this.obs.error(
