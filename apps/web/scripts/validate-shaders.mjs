@@ -240,9 +240,14 @@ function checkUniformCoverage(preset, sources) {
 
   const code = stripComments(renderer);
 
+  // Require an actual CALL, not a mention. `code.includes('uploadAudioUniforms')`
+  // is satisfied by the IMPORT STATEMENT alone, so a renderer that imports the
+  // helper and never calls it passed as "fully wired" — a false negative found
+  // only because I happened to know the code was incomplete. The spread is
+  // matched with its `...` for the same reason.
   const wiresAudioBlock =
-    code.includes('AUDIO_UNIFORM_NAMES') &&
-    code.includes('uploadAudioUniforms');
+    code.includes('...AUDIO_UNIFORM_NAMES') &&
+    /uploadAudioUniforms\s*\(/.test(code);
 
   // The DECLARED side needs the same comment strip as the renderer side, for
   // the mirror-image reason. `^\s*uniform` anchors to the start of a line, so

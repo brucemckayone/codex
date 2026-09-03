@@ -23,6 +23,12 @@
  *     audio-reactive boosts so the scene doesn't pop.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { EtherConfig, ShaderConfig } from '../shader-config';
@@ -67,12 +73,7 @@ const UNIFORM_NAMES = [
   'u_aberration',
   // Audio-reactive uniforms
   'u_wanderer',
-  'u_bassSmooth',
-  'u_midsSmooth',
-  'u_trebleSmooth',
-  'u_amplitudeSmooth',
-  'u_beatPulse',
-  'u_audioActive',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type EtherUniform = (typeof UNIFORM_NAMES)[number];
@@ -94,6 +95,9 @@ export function createEtherRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<EtherUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const _deltaClock = createDeltaClock();
 
   // Internal lerped mouse state for smooth parallax
   let lerpedMouse = { x: 0.5, y: 0.5 };
@@ -155,16 +159,18 @@ export function createEtherRenderer(): ShaderRenderer {
 
       const cfg = config as EtherConfig;
       const bassSmooth = audio?.bassSmooth ?? 0;
-      const midsSmooth = audio?.midsSmooth ?? 0;
       const trebleSmooth = audio?.trebleSmooth ?? 0;
       const amplitudeSmooth = audio?.amplitudeSmooth ?? 0;
-      const beatPulse = audio?.beatPulse ?? 0;
       const audioActive = audio?.active ?? false;
 
       // Frame-rate-independent dt — used for the wanderer fade.
       const dt =
         lastRenderTime === 0 ? 1 / 60 : Math.min(0.1, time - lastRenderTime);
       lastRenderTime = time;
+      // Resolve through the shared fade so this preset speaks the same audio
+      // vocabulary as every other, and gains the five signals it never had
+      // (energy, flux, centroid, beatPhase, beatSeed).
+      const a = audioFade.update(audio, dt);
 
       // Ease wanderer fade toward 1 (audio playing) or 0 (paused).
       const fadeTarget = audioActive ? 1 : 0;
@@ -183,6 +189,7 @@ export function createEtherRenderer(): ShaderRenderer {
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
+      uploadAudioUniforms(gl, uniforms, a);
       quad.bind(program);
 
       // Time
@@ -237,12 +244,6 @@ export function createEtherRenderer(): ShaderRenderer {
 
       // Audio-reactive uniforms
       gl.uniform2f(uniforms.u_wanderer, wanderer.x, wanderer.y);
-      gl.uniform1f(uniforms.u_bassSmooth, bassSmooth);
-      gl.uniform1f(uniforms.u_midsSmooth, midsSmooth);
-      gl.uniform1f(uniforms.u_trebleSmooth, trebleSmooth);
-      gl.uniform1f(uniforms.u_amplitudeSmooth, amplitudeSmooth);
-      gl.uniform1f(uniforms.u_beatPulse, beatPulse);
-      gl.uniform1f(uniforms.u_audioActive, wandererFade);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
