@@ -3075,6 +3075,21 @@ export class CourseJourneyService extends BaseService {
           );
         const existingIds = new Set(existing.map((s) => s.id));
 
+        // Every content this course gates BEFORE the save, so step 6 can tell
+        // which practices this save orphaned. Snapshotted here rather than
+        // derived from step 4's per-stage removals because a practice also
+        // becomes unreachable when its whole STAGE is dropped, and step 4 only
+        // walks stages present in the input.
+        const preLinkedContentIds =
+          existingIds.size > 0
+            ? (
+                await tx
+                  .select({ contentId: stagePractices.contentId })
+                  .from(stagePractices)
+                  .where(inArray(stagePractices.stageId, [...existingIds]))
+              ).map((r) => r.contentId)
+            : [];
+
         // 1. Soft-delete stages the editor dropped — they leave the partial
         //    unique index, freeing their sort slots.
         const keptIds = new Set(
@@ -3212,6 +3227,65 @@ export class CourseJourneyService extends BaseService {
                 eq(content.isTeamOnly, false)
               )
             );
+        }
+
+        // 6. UNGATE practices this save orphaned (the symmetric half of 5).
+        //
+        // Step 5 has only ever been a one-way door: `courseOnly` was set to
+        // true here and set to false NOWHERE in the codebase. So removing a
+        // practice from a curriculum left the flag set, and
+        // `content-access/access-decision.ts` checks it FIRST and suppresses
+        // EVERY standalone path — while the content is no longer reachable
+        // through the course either, because it is not in the curriculum any
+        // more. The content became permanently unreachable for everyone except
+        // org management, with no UI anywhere to undo it.
+        //
+        // Orphaned means no LIVE link left anywhere — not just in this course.
+        // The same content may be a practice in another stage here or in a
+        // different course, and those links must keep it gated.
+        //
+        // The liveness join is the crux: step 1 SOFT-deletes dropped stages, so
+        // their `stage_practices` rows survive pointing at a dead stage. A bare
+        // existence check on `stage_practices` therefore reports "still linked"
+        // for a stage the editor just removed, and the gate would never lift.
+        // Require the stage AND its course to be non-deleted.
+        //
+        // No standalone-shape filter here (unlike step 5). The flag means
+        // "reachable only via a course"; with no course left, the only correct
+        // value is false whatever the other access flags say.
+        if (preLinkedContentIds.length > 0) {
+          const stillLinked = await tx
+            .select({ contentId: stagePractices.contentId })
+            .from(stagePractices)
+            .innerJoin(
+              courseStages,
+              eq(courseStages.id, stagePractices.stageId)
+            )
+            .innerJoin(courses, eq(courses.id, courseStages.courseId))
+            .where(
+              and(
+                inArray(stagePractices.contentId, preLinkedContentIds),
+                isNull(courseStages.deletedAt),
+                isNull(courses.deletedAt)
+              )
+            );
+          const stillLinkedIds = new Set(stillLinked.map((r) => r.contentId));
+          const orphanedIds = preLinkedContentIds.filter(
+            (id) => !stillLinkedIds.has(id)
+          );
+
+          if (orphanedIds.length > 0) {
+            await tx
+              .update(content)
+              .set({ courseOnly: false })
+              .where(
+                and(
+                  inArray(content.id, orphanedIds),
+                  eq(content.organizationId, organizationId),
+                  eq(content.courseOnly, true)
+                )
+              );
+          }
         }
       });
 

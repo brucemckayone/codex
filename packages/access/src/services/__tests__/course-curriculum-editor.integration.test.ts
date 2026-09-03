@@ -678,6 +678,43 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
       expect((await readPolicy(db, practice)).courseOnly).toBe(true);
     });
 
+    it('UNGATES a practice removed from the curriculum — otherwise it is unreachable forever', async () => {
+      // `courseOnly` used to be a one-way door: set true here, set false
+      // nowhere in the codebase. access-decision.ts checks it FIRST and
+      // suppresses EVERY standalone path, and once the practice is out of the
+      // curriculum it is not reachable through the course either — so the
+      // content was permanently invisible to everyone but org management,
+      // with no UI to undo it.
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+
+      await linkPractices(orgAId, courseId, [practice]);
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+
+      // Save the curriculum again with the practice removed.
+      await linkPractices(orgAId, courseId, []);
+
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
+    });
+
+    it('keeps a removed practice gated while ANOTHER course still links it', async () => {
+      // Orphaned means unlinked from every stage of every course. Clearing on
+      // "removed from this stage" alone would re-expose content that is still
+      // sold inside a different course.
+      const courseA = await createCourse(db, orgAId, creatorId);
+      const courseB = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+
+      await linkPractices(orgAId, courseA, [practice]);
+      await linkPractices(orgAId, courseB, [practice]);
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+
+      // Drop it from course A only — course B still gates it.
+      await linkPractices(orgAId, courseA, []);
+
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+    });
+
     it('leaves an independently PURCHASABLE practice standalone — it has its own paywall, and revoking that would delete a real product', async () => {
       const courseId = await createCourse(db, orgAId, creatorId);
       const practice = await createContent(db, { creatorId, orgId: orgAId });
@@ -804,11 +841,15 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
         stages: [{ id: null, name: 'Arriving', gloss: null, practices: [] }],
       });
 
-      // KNOWN GAP (Codex-0biug scope item): the gate is not lifted on unlink, so
-      // the content is now unreachable by ANY path — gated, but in no course.
-      // Asserting the CURRENT behaviour so the follow-up fix has a failing test
-      // to flip rather than discovering this in production.
-      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+      // The follow-up fix this test was written to await (step 6 of
+      // saveCurriculum) has landed: the gate is lifted once no LIVE stage in
+      // any non-deleted course still links the practice, so the content is
+      // reachable at its standalone URL again instead of being stranded.
+      //
+      // Note this path replaces the stage rather than emptying it — the old
+      // stage is SOFT-deleted, so its stage_practices row survives and only
+      // the liveness join in step 6 sees through it.
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
     });
   });
 });
