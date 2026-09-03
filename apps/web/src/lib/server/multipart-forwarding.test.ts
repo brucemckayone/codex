@@ -34,7 +34,31 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const API_SRC = readFileSync(join(HERE, 'api.ts'), 'utf8');
+const API_SRC_RAW = readFileSync(join(HERE, 'api.ts'), 'utf8');
+
+/**
+ * Strip comments before asserting a line is PRESENT.
+ *
+ * Without this, `toContain('await file.arrayBuffer()')` matches the string
+ * inside `// const bytes = await file.arrayBuffer();` — so the single most
+ * likely way the fix gets disabled, someone commenting it out, leaves this
+ * suite green. That is not hypothetical: commenting out that exact line and
+ * re-running gave 4/4 passed before this was added.
+ *
+ * Only whole-line `//` comments are removed, not mid-line ones, so a `//` in a
+ * URL literal (`https://`) survives untouched. Block comments go entirely,
+ * which is what makes the doc-comment above the helper stop counting as
+ * evidence for the code below it.
+ */
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+}
+
+const API_SRC = stripComments(API_SRC_RAW);
 
 /**
  * The helper's own body legitimately constructs a FormData. Bound the scan to
@@ -96,6 +120,12 @@ describe('api.ts — multipart uploads may only travel via forwardMultipartUploa
   it('keeps the arrayBuffer rebuild and explicit filename inside the helper', () => {
     // Guards the fix itself, so the helper cannot be "simplified" back into
     // the broken shape while every call site still looks correct.
+    //
+    // Asserted against comment-stripped source (see `stripComments`): a
+    // commented-out rebuild is a DISABLED rebuild, and this assertion has to
+    // fail on it. Falsified both ways — commenting out line
+    // `const bytes = await file.arrayBuffer();` turns this red, restoring it
+    // turns it green.
     const start = API_SRC.indexOf('async function forwardMultipartUpload');
     const body = API_SRC.slice(start, start + 1400);
 
