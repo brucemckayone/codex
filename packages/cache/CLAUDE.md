@@ -178,6 +178,7 @@ If KV fails (read or write), `get()` calls the fetcher and returns the result �
 - **MUST** pass `waitUntil` when the cache is used for a READ (`get`/`getWithResult`) — omitting it means the data slot is never written (Codex-e32xz)
 - **NEVER** remove the `waitUntil` registration inside `invalidate()` as "redundant" — every `void cache.invalidate(...)` service call site relies on it to survive isolate teardown (Codex-mhoaz)
 - **NEVER** cache a class instance (e.g. `PaginatedResult`) — JSON round-tripping strips its identity
+- **NEVER** write a null/undefined slot — `lookup()` reads null as "absent", so a stored null misses forever and costs one KV write per read until it expires (`writeCacheSlot` enforces this; do not remove the guard)
 - **NEVER** throw from cache operations — degrade gracefully to fetcher
 - **NEVER** cache authorization decisions or prices in persistent cache
 

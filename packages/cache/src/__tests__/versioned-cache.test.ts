@@ -77,6 +77,29 @@ describe('VersionedCache', () => {
       expect(mockKV.put).toHaveBeenCalledTimes(1);
     });
 
+    it('never writes a null slot — a null fetcher result must not burn a write per read', async () => {
+      // Regression guard. lookup() decides hit-vs-miss with
+      // `cached === null`, so a stored null is indistinguishable from an
+      // absent key: every read would miss, re-run the fetcher, and REWRITE
+      // the null — one KV write per read, forever, on a store whose write
+      // quota (1,000/day, account-wide) is the binding constraint.
+      const fetcher = vi.fn().mockResolvedValue(null);
+
+      const first = await cache.get('user-123', CacheType.USER_PROFILE, fetcher);
+
+      expect(first).toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      // No data slot, no version key — zero puts for a null result.
+      expect(mockKV.put).not.toHaveBeenCalled();
+
+      // And the second read re-runs the fetcher rather than "hitting" the
+      // stored null — there is nothing stored.
+      const second = await cache.get('user-123', CacheType.USER_PROFILE, fetcher);
+      expect(second).toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(mockKV.put).not.toHaveBeenCalled();
+    });
+
     it('should return cached data on subsequent access (cache hit)', async () => {
       const fetcher = vi.fn().mockResolvedValue({ name: 'Test User' });
       const version = '1712345678';
