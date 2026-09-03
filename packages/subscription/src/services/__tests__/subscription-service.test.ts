@@ -60,8 +60,8 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
-import { SubscriptionService } from '../subscription-service';
 import type { FeeConfigService } from '../fee-config-service';
+import { SubscriptionService } from '../subscription-service';
 
 describe('SubscriptionService', () => {
   let db: ReturnType<typeof setupTestDatabase>;

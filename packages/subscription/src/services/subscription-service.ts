@@ -3762,7 +3762,12 @@ export class SubscriptionService extends BaseService {
           minTransferCents: payoutFees.minTransferCents,
         }
       );
-      return { resolved: 0, failed: 0, creatorPaidCents: 0, creatorPaidCount: 0 };
+      return {
+        resolved: 0,
+        failed: 0,
+        creatorPaidCents: 0,
+        creatorPaidCount: 0,
+      };
     }
 
     for (const payout of group) {

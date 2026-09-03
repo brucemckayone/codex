@@ -85,7 +85,11 @@ describe('VersionedCache', () => {
       // quota (1,000/day, account-wide) is the binding constraint.
       const fetcher = vi.fn().mockResolvedValue(null);
 
-      const first = await cache.get('user-123', CacheType.USER_PROFILE, fetcher);
+      const first = await cache.get(
+        'user-123',
+        CacheType.USER_PROFILE,
+        fetcher
+      );
 
       expect(first).toBeNull();
       expect(fetcher).toHaveBeenCalledTimes(1);
@@ -94,7 +98,11 @@ describe('VersionedCache', () => {
 
       // And the second read re-runs the fetcher rather than "hitting" the
       // stored null — there is nothing stored.
-      const second = await cache.get('user-123', CacheType.USER_PROFILE, fetcher);
+      const second = await cache.get(
+        'user-123',
+        CacheType.USER_PROFILE,
+        fetcher
+      );
       expect(second).toBeNull();
       expect(fetcher).toHaveBeenCalledTimes(2);
       expect(mockKV.put).not.toHaveBeenCalled();

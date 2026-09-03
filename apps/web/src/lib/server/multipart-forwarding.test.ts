@@ -51,7 +51,10 @@ function sourceOutsideTheHelper(): string {
   // The helper ends at the first line that closes a top-level function.
   const after = API_SRC.slice(start);
   const endIdx = after.indexOf('\n}\n');
-  expect(endIdx, 'could not find the end of forwardMultipartUpload').toBeGreaterThan(-1);
+  expect(
+    endIdx,
+    'could not find the end of forwardMultipartUpload'
+  ).toBeGreaterThan(-1);
 
   return API_SRC.slice(0, start) + after.slice(endIdx + 3);
 }
@@ -79,7 +82,8 @@ describe('api.ts — multipart uploads may only travel via forwardMultipartUploa
     const outside = sourceOutsideTheHelper();
     // `formData.append(<field>, file)` — the exact broken shape. The helper
     // appends a REBUILT file with an explicit third filename argument.
-    const rawAppends = outside.match(/formData\.append\([^)]*,\s*file\s*\)/g) ?? [];
+    const rawAppends =
+      outside.match(/formData\.append\([^)]*,\s*file\s*\)/g) ?? [];
 
     expect(
       rawAppends,
@@ -99,6 +103,8 @@ describe('api.ts — multipart uploads may only travel via forwardMultipartUploa
     expect(body).toContain('new File(');
     // Third argument to append() is the filename — without it the part is
     // serialised as a plain field.
-    expect(body).toMatch(/formData\.append\(\s*fieldName,\s*forwardFile,\s*forwardFile\.name\s*\)/);
+    expect(body).toMatch(
+      /formData\.append\(\s*fieldName,\s*forwardFile,\s*forwardFile\.name\s*\)/
+    );
   });
 });

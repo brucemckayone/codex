@@ -188,7 +188,9 @@ describe('TranscodingService', () => {
       expect(serialised).not.toContain('sk_live_UPSTREAM');
       expect(serialised).not.toContain('10.4.2.9');
       // The operation and status code ARE safe correlation data.
-      expect((err as { context?: { statusCode?: number } }).context?.statusCode).toBe(502);
+      expect(
+        (err as { context?: { statusCode?: number } }).context?.statusCode
+      ).toBe(502);
     });
 
     it('never puts the transport error message in the error context', async () => {

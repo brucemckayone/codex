@@ -38,7 +38,10 @@ function boomWorker() {
 async function boomBody(environment?: string) {
   const env = environment === undefined ? {} : { ENVIRONMENT: environment };
   const res = await boomWorker().request('/boom', {}, env);
-  return { status: res.status, body: (await res.json()) as Record<string, any> };
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, any>,
+  };
 }
 
 describe('createErrorHandler — deployed environments must not disclose details', () => {
