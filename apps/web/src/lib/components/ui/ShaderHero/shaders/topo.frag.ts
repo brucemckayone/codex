@@ -15,6 +15,8 @@
  *  - Bloom halo on brightest contour lines (elevation-tinted)
  *  - Luminance-aware filmic grain
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const TOPO_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -31,13 +33,20 @@ uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform int u_lineCount;
 uniform float u_lineWidth;
-uniform float u_speed;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by speed. Replaces u_time * u_speed so motion advances with the
+ * music, and so a speed change cannot retroactively rescale accumulated phase.
+ */
+uniform float u_clock;
 uniform float u_scale;
 uniform float u_elevation;
 uniform int u_octaves;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -92,15 +101,29 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
+
+  // Elevation swells with the slow macro envelope. Contour lines are a
+  // DERIVATIVE readout of the height field, so they visibly redistribute as
+  // elevation changes — bands migrate and crowd rather than merely brightening.
+  // Driven by u_energy because a per-note change here would make every line on
+  // screen jitter at once.
+  float elevation = u_elevation * audioLift(u_energy, 0.30);
+
+  // Beats brighten the lines without moving them. On a contour map the lines
+  // ARE the subject, so a transient belongs on their intensity, not geometry.
+  float lineGain = 1.0 + beatHit(1.6) * 0.55;
   vec2 uv = v_uv;
 
   float aspect = u_resolution.x / u_resolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y) * u_scale;
   p += vec2(t * 0.3, t * 0.2);
 
+  // Elevation scales the height field about its midpoint, so the contour
+  // spacing changes rather than the whole map brightening. Audio reaches the
+  // map through elevation (see above), computed from the slow envelope.
   float height = fbm(p);
-  height = clamp(height * 0.5 + 0.5, 0.0, 1.0);
+  height = clamp((height * 0.5 + 0.5 - 0.5) * elevation + 0.5, 0.0, 1.0);
 
   // Mouse hill + burst
   vec2 mouseUV = vec2(u_mouse.x * aspect, u_mouse.y);
@@ -122,15 +145,19 @@ void main() {
   float lineMask = 1.0 - smoothstep(fw * halfWidth, fw * (halfWidth + 1.0), d);
 
   // ── Colour by height (smooth palette) — HDR line emission ──
-  vec3 lineColor = heightColor(height) * 1.8;   // > 1 for ACES rolloff
+  vec3 lineColor = heightColor(height) * 1.8 * lineGain;  // > 1 for ACES rolloff
   // Subtle height-tinted fill between lines (was flat * 0.15)
   vec3 fillColor = mix(u_bgColor * 0.6, heightColor(height) * 0.25, height);
 
   vec3 color = mix(fillColor, lineColor, lineMask);
 
   // ── Bloom halo on brightest lines, tinted by elevation ──
+  // Treble widens the halo. Contour lines are already the highest spatial
+  // frequency on screen, so bright audio content belongs here rather than on
+  // an added noise term.
   vec3 bloomTint = mix(u_brandPrimary, u_brandAccent, height);
-  color += pow(lineMask * height, 2.2) * bloomTint * 0.4;
+  color += pow(lineMask * height, 2.2) * bloomTint
+         * (0.4 + u_treble * u_audioActive * 0.5);
 
   // ── Post-process ───────────────────────────────────────────
   color = aces(color);

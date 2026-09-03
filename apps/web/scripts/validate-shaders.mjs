@@ -102,6 +102,51 @@ const RENDERER_DIR = path.resolve(
 );
 
 /**
+ * Explain a bundle failure in terms of the cause, not the symptom.
+ *
+ * GLSL lives inside a TypeScript template literal, so two characters that are
+ * ordinary in a shader comment are structural in TS:
+ *
+ *   `  terminates the template literal
+ *   ${ starts an interpolation
+ *
+ * Either produces an esbuild parse error at a line that is often nowhere near
+ * the real problem — `Expected ";" but found "elevation"` for a stray backtick
+ * eight lines earlier. That misdirection has cost time three separate times
+ * during this work, so the gate now points at the actual cause.
+ */
+function diagnoseBundleFailure(modPath, message) {
+  if (!/Expected|Unexpected|Unterminated/.test(message)) return '';
+
+  const src = readFileSync(modPath, 'utf8');
+  const lines = src.split('\n');
+  const templateStart = lines.findIndex((l) => /^export const \w+ = `/.test(l));
+  if (templateStart < 0) return '';
+
+  const suspects = [];
+  for (let i = templateStart + 1; i < lines.length - 1; i++) {
+    const line = lines[i];
+    if (line.trimStart().startsWith('`')) continue; // the closing delimiter
+    if (line.includes('`')) suspects.push([i + 1, 'unescaped backtick', line]);
+    // ${ is legitimate for the shared chunks; flag it only inside a comment.
+    if (/^\s*(\/\/|\*|\/\*).*\$\{/.test(line)) {
+      suspects.push([i + 1, 'interpolation inside a comment', line]);
+    }
+  }
+
+  if (suspects.length === 0) return '';
+  return [
+    '',
+    '  LIKELY CAUSE — these lines sit INSIDE the template literal:',
+    ...suspects.map(
+      ([n, why, line]) => `    line ${n}: ${why}\n      ${line.trim()}`
+    ),
+    '  A backtick in a GLSL comment ends the template; write mix(a, b, t)',
+    '  as plain prose rather than in backticks.',
+  ].join('\n');
+}
+
+/**
  * Uniforms every renderer gets through the shared helpers rather than by
  * naming them. A renderer that spreads `AUDIO_UNIFORM_NAMES` and calls
  * `uploadAudioUniforms` covers all of these at once.
@@ -289,6 +334,7 @@ async function main() {
       } catch (err) {
         failures.push(file);
         fail(`\n✖ ${file}\n  could not bundle/import: ${err.message}`);
+        fail(diagnoseBundleFailure(modPath, err.message));
         continue;
       }
 
