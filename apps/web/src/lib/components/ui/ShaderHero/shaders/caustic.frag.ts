@@ -10,7 +10,31 @@
  *  - Bloom-adjacent highlight boost on the hottest convergence lines
  *  - Subtle cool (primary-tinted) background gradient — "underwater" feel
  *  - Luminance-aware film grain
+ *
+ * ## 2026-09 pass: audio, branchless palette, divide guard
+ *
+ * Caustics are converging light, which makes them one of the most natural
+ * audio subjects in the set: everything worth modulating is a LIGHT-side term,
+ * so audio never has to touch geometry and can never introduce a jolt.
+ *
+ * - Shimmer paces on the CPU-integrated musical clock, so the water surface
+ *   moves with the track and stills between phrases.
+ * - Bass drives convergence brightness; beats flash the hottest rays.
+ * - Treble sparkles on convergence lines only, where it reads as light on
+ *   water rather than noise on the screen.
+ * - Timbre slides the palette position, so colour tracks WHAT is playing.
+ *
+ * Two pre-existing defects fixed:
+ *
+ * 1. The header claimed "no per-pixel branching", but causticPalette had two
+ *    `if` returns. Now genuinely branchless — two nested mixes over the same
+ *    smoothstep weights, which is both cheaper and honest.
+ * 2. `causticPattern` divided by `float(u_iterations)`. That comes from a brand
+ *    token, so a 0 produced a divide-by-zero, NaN, and a black frame with no
+ *    error anywhere. Clamped at the division.
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const CAUSTIC_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -26,13 +50,20 @@ uniform vec3 u_brandSecondary;
 uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_scale;
-uniform float u_speed;
 uniform int u_iterations;
+/**
+ * Monotone shimmer clock, integrated on the CPU (see caustic-renderer.ts) and
+ * already scaled by speed. Replaces u_time * u_speed so the caustic pattern
+ * advances with the music rather than at a fixed rate.
+ */
+uniform float u_clock;
 uniform float u_brightness;
 uniform float u_ripple;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // -- Hash for film grain --
 float hash(vec2 p) {
@@ -55,7 +86,9 @@ float causticPattern(vec2 uv, float t) {
     freq *= 2.0;
     p = iterRot * p;
   }
-  return c / float(u_iterations);
+  // u_iterations comes from a brand token, so 0 is reachable — and dividing by
+  // it yields NaN, which renders as a black frame with nothing logged.
+  return c / float(max(u_iterations, 1));
 }
 
 // -- Smooth 4-stop palette: bg → primary → secondary → accent --
@@ -65,9 +98,11 @@ vec3 causticPalette(float t) {
   vec3 c1 = u_brandPrimary;
   vec3 c2 = u_brandSecondary;
   vec3 c3 = u_brandAccent;
-  if (t < 0.333) return mix(c0, c1, smoothstep(0.0, 0.333, t));
-  if (t < 0.666) return mix(c1, c2, smoothstep(0.333, 0.666, t));
-  return mix(c2, c3, smoothstep(0.666, 1.0, t));
+  // Branchless: each mix hands off to the next as its weight saturates, which
+  // reproduces the old three-way branch exactly at the stop boundaries.
+  vec3 c = mix(c0, c1, smoothstep(0.0, 0.333, t));
+  c = mix(c, c2, smoothstep(0.333, 0.666, t));
+  return mix(c, c3, smoothstep(0.666, 1.0, t));
 }
 
 // -- ACES filmic tone map --
@@ -77,7 +112,10 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  // Shimmer advances on the integrated musical clock, never on a positional
+  // crossfade — beatPhase starts at zero while u_time does not, so blending
+  // the two positions would run the caustic warp backwards on audio start.
+  float t = u_clock;
   float aspect = u_resolution.x / u_resolution.y;
 
   vec2 uv = v_uv;
@@ -107,13 +145,29 @@ void main() {
   float cNorm = clamp(c, 0.0, 1.0);
 
   // ── Smooth palette lookup ───────────────────────────────────
-  vec3 color = causticPalette(cNorm);
+  // Timbre slides the sampled position along the ramp, so bright material
+  // pushes the caustics toward the accent stop and dark material back toward
+  // the water body. Colour then tracks what is playing, not how loud it is.
+  vec3 color = causticPalette(clamp(cNorm + audioHueShift(0.18), 0.0, 1.0));
 
   // ── Bloom-adjacent highlight boost on hot convergence rays ──
   // Convergence > 0.75 reads as "focused light" — give it emission >> 1
   // so ACES tone-maps it to a bright core rather than flat white.
-  float hotMask = smoothstep(0.75, 1.0, cNorm);
-  color += mix(u_brandSecondary, u_brandAccent, 0.5) * hotMask * 1.2;
+  //
+  // Beats widen the hot band by lowering its threshold, which reads as the
+  // light focusing rather than as anything moving. A caustic's convergence is
+  // the one place a transient belongs.
+  float hotEdge = 0.75 - beatHit(1.5) * 0.18;
+  float hotMask = smoothstep(hotEdge, 1.0, cNorm);
+  color += mix(u_brandSecondary, u_brandAccent, 0.5) * hotMask
+         * (1.2 + beatHit(1.5) * 0.8);
+
+  // Treble sparkle, confined to convergence lines — off them it would read as
+  // dirt on the screen rather than light on water.
+  float sparkle = hash(gl_FragCoord.xy * 1.9 + fract(u_time * 4.3) * 71.0);
+  sparkle = pow(sparkle, 14.0) * u_treble * u_audioActive;
+  color += sparkle * mix(u_brandAccent, vec3(1.0), 0.65)
+         * smoothstep(0.45, 0.9, cNorm) * 3.0;
 
   // ── Underwater background gradient (cool, primary-tinted) ──
   vec2 vc = v_uv * 2.0 - 1.0;

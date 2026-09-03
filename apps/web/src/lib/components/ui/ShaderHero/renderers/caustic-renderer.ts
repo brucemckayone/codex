@@ -9,6 +9,12 @@
  * Brand colors as uniforms (primary, secondary, accent, bg).
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
@@ -49,13 +55,14 @@ const UNIFORM_NAMES = [
   'u_brandAccent',
   'u_bgColor',
   'u_scale',
-  'u_speed',
   'u_iterations',
   'u_brightness',
   'u_ripple',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type CausticUniform = (typeof UNIFORM_NAMES)[number];
@@ -77,9 +84,31 @@ export function createCausticRenderer(): ShaderRenderer {
     null;
   let quad: ReturnType<typeof createQuad> | null = null;
 
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+  /** Integrated shimmer clock. Monotone — see u_clock in caustic.frag.ts. */
+  let clock = 0;
+  /** Previous beatPhase sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
+
   // Internal lerped mouse state for smooth interaction
   let lerpedMouse = { x: 0.5, y: 0.5 };
-  const MOUSE_LERP = 0.04;
+  /**
+   * Mouse-follow time constant (seconds). Was `* 0.04` applied per FRAME, which
+   * converges twice as fast on a 120Hz display as on 60Hz; 0.04/frame at 60fps
+   * is a tau of roughly 0.4s.
+   */
+  const MOUSE_TAU_SEC = 0.4;
+
+  /** Shimmer rate with no audio, in clock-units/sec — matches the old u_time * u_speed. */
+  const IDLE_CLOCK_RATE = 1.0;
+
+  /**
+   * Cap on the differentiated musical clock. The render loop pauses while the
+   * analyser clamps its own dt, so one frame after a long pause can show a large
+   * phase jump — unclamped that spikes the rate and lurches the pattern once.
+   */
+  const MAX_CLOCK_RATE = 3.0;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -106,15 +135,40 @@ export function createCausticRenderer(): ShaderRenderer {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as unknown as CausticCfg;
-      const amp = audio?.amplitude ?? 0;
-      const bass = audio?.bass ?? 0;
-      const mids = audio?.mids ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+      // Smoothed, not raw — these reach brightness and colour, where a
+      // frame-rate-noisy band reads as flicker.
+      const amp = a.level;
+      const bass = a.bass;
+      const mids = a.mids;
 
-      // Lerp mouse for smooth interaction
+      // Integrate the shimmer clock by blending RATES, never positions:
+      // beatPhase starts at zero while u_time does not, so a positional
+      // crossfade would run the caustic warp backwards on audio start.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
+
+      // Frame-rate-independent mouse damping. Was a per-frame constant, which
+      // converged twice as fast at 120Hz as at 60Hz.
       const targetX = mouse.active ? mouse.x : 0.5;
       const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
+      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
+      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -128,9 +182,9 @@ export function createCausticRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength);
 
       // Immersive colour cycling (shared utility)
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      const colours = a.silent
+        ? cfg.colors
+        : computeImmersiveColours(time, cfg.colors, amp);
 
       gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
       gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
@@ -139,10 +193,7 @@ export function createCausticRenderer(): ShaderRenderer {
 
       // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
-      gl.uniform1f(
-        uniforms.u_speed,
-        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
-      );
+      gl.uniform1f(uniforms.u_clock, clock);
       gl.uniform1i(
         uniforms.u_iterations,
         Math.round(cfg.iterations ?? DEFAULTS.iterations)
@@ -157,10 +208,14 @@ export function createCausticRenderer(): ShaderRenderer {
       );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      // Faded by the audio ramp rather than switched, so entering immersive
+      // mode is a glide instead of the frame popping away on the first beat.
       gl.uniform1f(
         uniforms.u_vignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
+
+      uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -172,6 +227,10 @@ export function createCausticRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
+      // The integrated clock is state — rewind it so reset() starts fresh
+      // rather than resuming the shimmer mid-phase.
+      clock = 0;
+      prevBeatPhase = -1;
       // No simulation state to reset for single-pass presets.
       lerpedMouse = { x: 0.5, y: 0.5 };
     },
