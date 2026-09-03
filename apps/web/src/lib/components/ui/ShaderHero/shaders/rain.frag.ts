@@ -13,6 +13,8 @@
  * BigWings "Heartfelt" layered-grid drop technique preserved — that part
  * is well-constructed and doesn't need fixing.
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const RAIN_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -34,6 +36,14 @@ uniform float u_blur;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by this preset's rate setting. Replaces wall-clock time so motion
+ * advances with the music and cannot run backwards.
+ */
+uniform float u_clock;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -85,7 +95,9 @@ vec3 rainLayer(vec2 uv, float gridScale, float t) {
   vec2 fc = fract(st) - 0.5;
   float h = hash(id);
   float h2 = hash(id + vec2(127.1, 311.7));
-  if (h > u_density) return vec3(0.0);
+  // Slow envelope thickens the shower. Density gates whether a cell holds a
+  // drop at all, so a per-note change would make drops flicker in and out.
+  if (h > u_density * audioLift(u_energy, 0.30)) return vec3(0.0);
 
   float wobble = sin(t * u_speed + h * 6.28) * 0.3;
   float dropY = fract(-t * u_speed * (0.5 + h * 0.5) + h2) * 2.0 - 1.0;
@@ -113,7 +125,7 @@ vec3 rainLayer(vec2 uv, float gridScale, float t) {
 }
 
 void main() {
-  float t = u_time;
+  float t = u_clock;  // integrated musical clock, monotone by construction
   vec2 uv = v_uv;
 
   vec3 layer1 = rainLayer(uv, 8.0, t);
@@ -142,7 +154,9 @@ void main() {
     totalNormal += burstDir * splash * 0.3;
   }
 
-  vec2 refractedUv = uv + totalNormal * u_refraction;
+  // Beats deepen refraction briefly — the glass appears to flex. A
+  // light-path term, so nothing about the drop layout moves.
+  vec2 refractedUv = uv + totalNormal * u_refraction * (1.0 + beatHit(1.6) * 0.5);
   refractedUv = clamp(refractedUv, 0.0, 1.0);
   vec3 refractedBg = backgroundScene(refractedUv, u_blur);
   vec3 plainBg = backgroundScene(uv, u_blur);

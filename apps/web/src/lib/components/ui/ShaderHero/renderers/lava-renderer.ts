@@ -9,6 +9,12 @@
  * Brand colors as uniforms (primary, secondary, accent, bg).
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LavaConfig, ShaderConfig } from '../shader-config';
@@ -34,12 +40,13 @@ const UNIFORM_NAMES = [
   'u_crackScale',
   'u_crackWidth',
   'u_glow',
-  'u_speed',
+  'u_clock',
   'u_crust',
   'u_heat',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type LavaUniform = (typeof UNIFORM_NAMES)[number];
@@ -57,10 +64,28 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/** Pacing rate with no audio, in clock-units/sec — matches the old u_time * u_speed. */
+const IDLE_CLOCK_RATE = 1.0;
+
+/**
+ * Cap on the differentiated musical clock. The render loop pauses (hidden tab,
+ * preset switch) while the analyser clamps its own dt rather than freezing, so
+ * one frame after a long pause can show a large phase jump. Unclamped, that
+ * spikes the rate and produces exactly one visible lurch.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createLavaRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<LavaUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+  /** Integrated pacing clock. Monotone — see u_clock in the fragment shader. */
+  let clock = 0;
+  /** Previous beatPhase sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   // Internal lerped mouse state for smooth interaction
   let lerpedMouse = { x: 0.5, y: 0.5 };
@@ -92,6 +117,28 @@ export function createLavaRenderer(): ShaderRenderer {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as LavaConfig;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+
+      // Integrate the pacing clock by blending RATES, never positions.
+      // beatPhase starts at zero while u_time does not, so a positional
+      // crossfade sweeps the clock backwards the moment audio starts.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
+
       const amp = audio?.amplitude ?? 0;
       const bass = audio?.bass ?? 0;
 
@@ -132,10 +179,6 @@ export function createLavaRenderer(): ShaderRenderer {
         cfg.crackWidth ?? DEFAULTS.crackWidth
       );
       gl.uniform1f(uniforms.u_glow, (cfg.glow ?? DEFAULTS.glow) + bass * 0.1);
-      gl.uniform1f(
-        uniforms.u_speed,
-        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
-      );
       gl.uniform1f(uniforms.u_crust, cfg.crust ?? DEFAULTS.crust);
       gl.uniform1f(uniforms.u_heat, cfg.heat ?? DEFAULTS.heat);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
@@ -146,6 +189,9 @@ export function createLavaRenderer(): ShaderRenderer {
       );
 
       // Draw to screen (no FBO)
+      gl.uniform1f(uniforms.u_clock, clock);
+      uploadAudioUniforms(gl, uniforms, a);
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
     },
@@ -155,6 +201,10 @@ export function createLavaRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
+      // The integrated clock is state — rewind so reset() starts fresh
+      // rather than resuming motion mid-phase.
+      clock = 0;
+      prevBeatPhase = -1;
       // Reset lerped mouse to center on preset change/reset.
       lerpedMouse = { x: 0.5, y: 0.5 };
     },

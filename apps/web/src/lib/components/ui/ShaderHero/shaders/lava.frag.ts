@@ -12,6 +12,8 @@
  *    the noise peaks, giving crust depth instead of flat primary*surfaceNoise
  *  - Luminance-aware filmic grain (more in shadow crust, clean in crack glow)
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const LAVA_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -29,12 +31,19 @@ uniform vec3 u_bgColor;
 uniform float u_crackScale;
 uniform float u_crackWidth;
 uniform float u_glow;
-uniform float u_speed;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by speed. Replaces u_time * u_speed so motion advances with the
+ * music, and so a speed change cannot retroactively rescale accumulated phase.
+ */
+uniform float u_clock;
 uniform float u_crust;
 uniform float u_heat;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // -- Voronoi seed hash --
 vec2 hash2(vec2 p) {
@@ -85,7 +94,7 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
   vec2 uv = gl_FragCoord.xy / u_resolution;
   vec2 st = uv * u_crackScale;
 
@@ -134,7 +143,10 @@ void main() {
 
   // ── Crack glow ─────────────────────────────────────────────
   float crackMask = exp(-edgeDist / effectiveCrackWidth);
-  float glowMask = crackMask * u_glow;
+  // Bass feeds the crack glow and beats flare it. Cracks are emissive, so
+  // audio lands entirely on light — the crust geometry never moves.
+  float glowMask = crackMask * u_glow * audioLift(u_bass, 0.5)
+                 * (1.0 + beatHit(1.5) * 0.7);
 
   // ── Crust texture: value-noise FBM ─────────────────────────
   vec2 noiseUv = uv * 8.0 + t * 0.3;
@@ -151,7 +163,10 @@ void main() {
 
   // Combine: crust base + emissive cracks with > 1.0 emission for ACES
   vec3 color = crustColor * (1.0 - crackMask * 0.75);
-  color += crackColor * glowMask * u_heat * 2.5;   // > 1.0 drives HDR
+  // Heat rises with the slow envelope: a busier passage reads as a hotter
+  // flow, over a phrase rather than per note.
+  float heat = u_heat * audioLift(u_energy, 0.35);
+  color += crackColor * glowMask * heat * 2.5;   // > 1.0 drives HDR
 
   // Mouse hover: add hot halo
   color += u_brandAccent * mouseInfluence * 0.6 * u_heat;
