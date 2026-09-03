@@ -127,6 +127,31 @@ const AUDIO_UNIFORMS = new Set([
 const IGNORED_UNIFORMS = new Set(['gl_DepthRange']);
 
 /**
+ * Remove comments from TS or GLSL source before any textual presence test.
+ *
+ * Both directions of the coverage check need this, and both were wrong before
+ * it existed:
+ *  - the RENDERER side counted a uniform named in a comment as wired,
+ *    including a commented-OUT upload call — the likeliest way real wiring
+ *    gets disabled, so the check was blind to its own worst case;
+ *  - the SHADER side counted a block-commented declaration as declared,
+ *    because `^\s*uniform` matches the inner line of a `/* ... *\/` block.
+ *
+ * Block comments go FIRST: a `//` inside a block comment must not be treated
+ * as a line comment and truncate the strip early.
+ *
+ * The `[^:]` guard on the line-comment pattern keeps `https://` intact, and
+ * replacing with `$1` rather than `''` preserves the character before the
+ * `//` — otherwise a trailing comment eats the `;` or `}` that precedes it,
+ * which would break any assertion matching a statement terminator.
+ */
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
  * Check that every uniform a shader DECLARES is actually reachable from its
  * renderer.
  *
@@ -168,22 +193,22 @@ function checkUniformCoverage(preset, sources) {
     return { skipped: true };
   }
 
-  // Strip comments before testing. A textual `includes` would otherwise count
-  // a uniform named only in a comment as wired — including a commented-OUT
-  // upload call, which is the most likely way real wiring gets disabled. Found
-  // by falsifying this very check: commenting out life's uDropGain upload left
-  // the gate green.
-  const code = renderer
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const code = stripComments(renderer);
 
   const wiresAudioBlock =
     code.includes('AUDIO_UNIFORM_NAMES') &&
     code.includes('uploadAudioUniforms');
 
+  // The DECLARED side needs the same comment strip as the renderer side, for
+  // the mirror-image reason. `^\s*uniform` anchors to the start of a line, so
+  // a line-commented declaration is safely skipped — but a BLOCK-commented one
+  // written across several lines puts a bare `uniform float u_x;` at the start
+  // of its own line, which matches. That would report a uniform nobody
+  // declares as unwired: a false positive rather than a miss, so it fails
+  // noisily rather than silently, but it is still wrong.
   const declared = new Set();
   for (const source of sources) {
-    for (const m of source.matchAll(
+    for (const m of stripComments(source).matchAll(
       /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)/gm
     )) {
       declared.add(m[1]);
