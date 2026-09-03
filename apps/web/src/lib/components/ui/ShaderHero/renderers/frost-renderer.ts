@@ -11,6 +11,14 @@
  * and growth front glow on newly frozen edges.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  type ResolvedAudio,
+  SILENT_AUDIO,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
@@ -70,6 +78,7 @@ const SIM_UNIFORM_NAMES = [
   'uMouse',
   'uMouseActive',
   'uSeedPos',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 /** Display uniform names. */
@@ -84,6 +93,7 @@ const DISPLAY_UNIFORM_NAMES = [
   'uVignette',
   'uGlow',
   'uTime',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DEFAULTS = {
@@ -112,6 +122,10 @@ export function createFrostRenderer(): ShaderRenderer {
   > | null = null;
 
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  /** Last onset acted on, so a beat nucleates exactly one crystal. */
+  let lastOnsetSeen = -1;
   let simBuf: DoubleFBO | null = null;
 
   /** Timestamp (seconds) of last ambient seed. */
@@ -131,7 +145,8 @@ export function createFrostRenderer(): ShaderRenderer {
     mouseOn: boolean,
     seedX: number,
     seedY: number,
-    cfg: FrostCfg
+    cfg: FrostCfg,
+    audio: ResolvedAudio
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
@@ -154,6 +169,10 @@ export function createFrostRenderer(): ShaderRenderer {
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform2f(simU.uSeedPos, seedX, seedY);
+
+    // The sim pass reads u_energy through growthNow(), so the block must be
+    // uploaded here as well as on the display pass — uniforms are per-program.
+    uploadAudioUniforms(gl, simU, audio);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
@@ -201,7 +220,6 @@ export function createFrostRenderer(): ShaderRenderer {
         return;
 
       const cfg = config as unknown as FrostCfg;
-      const amp = audio?.amplitude ?? 0;
 
       // Frame-rate-independent dt for the sim shader. Clamped to 0.1s to
       // match the ShaderHero RAF loop's clamp and avoid a single huge step
@@ -211,6 +229,11 @@ export function createFrostRenderer(): ShaderRenderer {
       const dt =
         lastRenderTime < 0 ? 1 / 60 : Math.min(time - lastRenderTime, 0.1);
       lastRenderTime = time;
+
+      // Frost already had a correct frame-rate-independent dt, so the audio
+      // fade reuses it rather than introducing a second clock.
+      const a = audioFade.update(audio, dt);
+      const amp = a.level;
 
       // ── Ambient seed (every 5-10s) ──────────────────────────
       let seedX = -10.0;
@@ -222,7 +245,19 @@ export function createFrostRenderer(): ShaderRenderer {
         seedY = 0.15 + Math.random() * 0.7;
       }
 
+      // ── Beat seed ───────────────────────────────────────────
+      // One nucleation per detected onset. Keyed on onsetCount rather than a
+      // beatPulse threshold, which would fire on every frame of its ~400ms
+      // decay and carpet the pane with crystals instead of seeding it.
+      // Position comes from beatSeed, so consecutive beats walk the pane.
+      if (!a.silent && a.onsetCount !== lastOnsetSeen) {
+        lastOnsetSeen = a.onsetCount;
+        seedX = 0.15 + a.beatSeed * 0.7;
+        seedY = 0.15 + ((a.beatSeed * 7.31) % 1.0) * 0.7;
+      }
+
       // ── Click seed ──────────────────────────────────────────
+      // Last, so a deliberate click always wins over an ambient or beat seed.
       if (mouse.burstStrength > 0) {
         seedX = mouse.x;
         seedY = mouse.y;
@@ -242,11 +277,12 @@ export function createFrostRenderer(): ShaderRenderer {
         mouse.active,
         seedX,
         seedY,
-        cfg
+        cfg,
+        a
       );
 
       // ── Substep 2: coast (no input, no seed) ────────────────
-      stepSim(gl, time, dt, -10.0, -10.0, false, -10.0, -10.0, cfg);
+      stepSim(gl, time, dt, -10.0, -10.0, false, -10.0, -10.0, cfg, a);
 
       // ── Display pass ────────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -258,9 +294,9 @@ export function createFrostRenderer(): ShaderRenderer {
       gl.uniform1i(displayU.uState, 0);
 
       // Immersive colour cycling when audio is active
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      const colours = a.silent
+        ? cfg.colors
+        : computeImmersiveColours(time, cfg.colors, amp);
 
       gl.uniform3fv(displayU.uColorPrimary, colours.primary);
       gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
@@ -270,8 +306,10 @@ export function createFrostRenderer(): ShaderRenderer {
       gl.uniform1f(displayU.uGrain, cfg.grain ?? DEFAULTS.grain);
       gl.uniform1f(
         displayU.uVignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
+
+      uploadAudioUniforms(gl, displayU, a);
       gl.uniform1f(displayU.uGlow, (cfg.glow ?? DEFAULTS.glow) + amp * 0.1);
       gl.uniform1f(displayU.uTime, time);
 
@@ -309,18 +347,32 @@ export function createFrostRenderer(): ShaderRenderer {
         const sy = 0.2 + Math.random() * 0.6;
         // Run a sim step with seed to plant crystal point.
         // dt=0 → pow(0.995, 0) = 1.0 (no decay during seed-planting).
-        stepSim(gl, 0, 0, -10.0, -10.0, false, sx, sy, {
-          growth: DEFAULTS.growth,
-          branch: DEFAULTS.branch,
-          symmetry: DEFAULTS.symmetry,
-          melt: DEFAULTS.melt,
-          colors: {
-            primary: [0.5, 0.5, 0.5],
-            secondary: [0.5, 0.5, 0.5],
-            accent: [0.5, 0.5, 0.5],
-            bg: [0.05, 0.05, 0.05],
+        stepSim(
+          gl,
+          0,
+          0,
+          -10.0,
+          -10.0,
+          false,
+          sx,
+          sy,
+          {
+            growth: DEFAULTS.growth,
+            branch: DEFAULTS.branch,
+            symmetry: DEFAULTS.symmetry,
+            melt: DEFAULTS.melt,
+            colors: {
+              primary: [0.5, 0.5, 0.5],
+              secondary: [0.5, 0.5, 0.5],
+              accent: [0.5, 0.5, 0.5],
+              bg: [0.05, 0.05, 0.05],
+            },
           },
-        });
+          // Seed-planting runs SILENT: reset() bootstraps the pane, and reacting
+          // to whatever happened to be playing would bake a transient into the
+          // initial crystal field.
+          SILENT_AUDIO
+        );
       }
     },
 
