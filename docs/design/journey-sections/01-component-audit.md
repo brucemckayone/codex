@@ -101,7 +101,7 @@ documented in-code as a known follow-up at `JourneyBuilderCanvas.svelte:9-14`.
   `q1/a1`, `eyebrow/headline/accent/sub/felt/button/quiet/trust/bg`, `price/risk`,
   `role/clip/duration/note`. It is a 1:1 match with `section-fields.ts`. The
   **public** tree is the one that diverged, not the canvas.
-- **`JourneyPreviewFrame.svelte` (143 lines) is exported (`components/page-builder/index.ts:17`)
+- **`JourneyPreviewFrame.svelte` (143 lines) is exported (`components/page-builder/index.ts:17`) — DELETED in PR #483
   but imported by no route.** The full-page iframe preview path is dead code today; only
   the inline canvas is live. Worth confirming before any worktree assumes it is a
   verification surface.
@@ -889,7 +889,7 @@ Proof, Guide, Faq. None of the 8 `render-edit` components has a test.
 | `apps/web/src/lib/page-builder/journey-palette.test.ts` | 395 | **The highest-blast-radius test in the program.** It reads `journey-palette.css` and `render-edit/journey-sections.css` **as text** and asserts structure: the compound selector has exactly 3 `.journey-palette` repetitions and no descendant combinator (`:86-87`); `--jp-ink` is declared exactly twice in the palette and **zero times** in `journey-sections.css` (`:95-97`); the ink derives from `--brand-bg` not `--color-brand-primary` in both poles (`:100-115`); both dark selector forms present (`:130-135`); heading auto-contrast is not a fixed lightness (`:139-146`); no surface token reads the brand primary (`:149-158`); **`journey-sections.css` must contain `@import '../journey-palette.css'` and it must precede the first rule** (`:171-178`); the two-class cycle-safety split (`:183-206`); the member dashboard's own re-points (`:209-265`); and a jsdom `JourneyRenderer` mount asserting the two palette classes sit on different, nested elements (`:329-391`). |
 | `apps/web/src/lib/page-builder/render/coerce.test.ts` | 77 | The bridge readers. |
 | `apps/web/src/lib/page-builder/offer-paths.test.ts` | 564 | Invite pricing derivation. |
-| `apps/web/src/lib/page-builder/page-builder-store.test.ts` (349), `builder-save.test.ts` (581), `page-preview-bridge.test.ts` (325), `preview-protocol.test.ts` (62), `monetisation-store.test.ts` (304), `render/brand-overrides.test.ts` (117), `render/safe-href.test.ts` (40), `components/page-builder/preview-wiring.test.ts` (63) | Store/save/preview plumbing — unaffected by section-level work. |
+| `apps/web/src/lib/page-builder/page-builder-store.test.ts` (349), `builder-save.test.ts` (581), `page-preview-bridge.test.ts` (325), `preview-protocol.test.ts` (62), `monetisation-store.test.ts` (304), `render/brand-overrides.test.ts` (117), `render/safe-href.test.ts` (40), `components/page-builder/preview-wiring.test.ts` (63) — *the three preview tests + their sources were deleted in PR #483* | Store/save/preview plumbing — unaffected by section-level work. |
 
 **Consequence for the split**: `journey-palette.test.ts` is a text-assertion test over *both*
 shared stylesheets. **Any worktree that edits either CSS file can break it**, and it will
@@ -1102,7 +1102,7 @@ warm build) applies directly.
 - `apps/web/src/lib/page-builder/render/safe-href.ts` (41) — security guard
 - `apps/web/src/lib/page-builder/render/brand-overrides.ts` (138) + its 117-line test
 - `apps/web/src/lib/page-builder/page-builder-store.svelte.ts` (528), `builder-save.ts` (335),
-  `page-preview-bridge.ts` (163), `preview-protocol.ts` (81) — store/save plumbing, orthogonal
+  `page-preview-bridge.ts` (163), `preview-protocol.ts` (81) — store/save plumbing, orthogonal — *DELETED in PR #483*
 
 ### E.5 Three open questions the foundation round must answer
 

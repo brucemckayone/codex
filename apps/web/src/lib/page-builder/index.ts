@@ -69,14 +69,6 @@ export type {
   LibraryAccessSource,
   ListJourneysQuery,
 } from './journey-queries';
-
-// Live-preview protocol — `codex:page-preview:v1` message + guard + sender contract.
-export {
-  isPagePreviewMessage,
-  PAGE_PREVIEW_MESSAGE_TYPE,
-  type PagePreviewMessage,
-  type PagePreviewSender,
-} from './preview-protocol';
 // Section model — the catalogue + ordering + search + variants + design axes +
 // factories. `resolveDesign` / `SECTION_DESIGN_*` are the design-language half
 // (`docs/design/journey-sections/02-axis-contract.md`); they sit beside

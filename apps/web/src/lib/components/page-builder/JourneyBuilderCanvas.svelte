@@ -36,8 +36,8 @@
     · block-toolbarred — move ↑/↓, duplicate, add-after, delete (on selection)
 
   The primary editing surface (the user chose inline WYSIWYG over an iframe): every
-  edit mutates the `pageBuilder` store, which the route also streams to the public
-  preview bridge for a separate full-width real-page preview. In `editable={false}`
+  edit mutates the `pageBuilder` store the canvas renders directly; the route's
+  "Full width" preview is this same canvas with editing off. In `editable={false}`
   (Preview mode) the block chrome + contenteditable are off — a clean read-only page.
 -->
 <script lang="ts">
@@ -713,10 +713,12 @@
       style="left: {addPos.x}px; top: {addPos.y}px;"
       onmousedown={stop}
     >
-      <!-- `focusOnMount`, unlike the rail's copy of this picker: see the prop's
-           own note. Here the popover is the component's last child, so without it
-           the keyboard never reaches the thing the button just opened. -->
-      <AddSectionPicker onadd={onAdd} onclose={closeAdd} focusOnMount />
+      <!-- `mode="popover"`: the rail's copy renders the same catalogue as a
+           takeover panel; this one is the bordered popover, and focus-on-mount
+           is unconditional inside the component. The popover is this
+           component's last child, so without focus moving in, the keyboard
+           never reaches the thing the button just opened. -->
+      <AddSectionPicker mode="popover" onadd={onAdd} onclose={closeAdd} />
     </div>
     <button
       type="button"

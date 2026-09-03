@@ -12143,6 +12143,30 @@ export const studio_builder_add_section_no_match = (params) => `No sections matc
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_back = () => `Back to sections`
+
+
+/**
+ * @param {{ total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_total = (params) => `Showing all ${params.total} section types`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_builder_add_section_filtered = (params) => `Showing ${params.count} of ${params.total} section types`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_sections = () => `Sections`
 
 
@@ -12267,35 +12291,11 @@ export const studio_builder_axis_desc_inherited = (params) => `Inherited from th
 
 
 /**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_overridden = () => `Overridden`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_inherited = () => `Inherited`
-
-
-/**
  * @param {{ source: NonNullable<unknown>, axis: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_builder_axis_use_source_title = (params) => `Use the ${params.source} for ${params.axis}`
-
-
-/**
- * @param {{ source: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_builder_axis_use_source = (params) => `Use ${params.source}`
 
 
 /**

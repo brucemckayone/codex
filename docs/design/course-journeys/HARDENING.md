@@ -273,7 +273,10 @@ Routes under `_org/[slug]/`. Public = new `(space)/journeys/`; studio = `studio/
 | studio-journeys | `studio/journeys/+page.svelte` | Client `query()`, no server load (P5, mirror `content/`); client `$effect` gate | `listJourneys({orgId,status})` reactive off URL | `live` rollups streamed |
 | builder-new | `studio/journeys/new/` (`+page.ts` ssr=false) | Client; `command()`/`form()` create | inherit studio gate | — |
 | course-editor | `studio/journeys/[id]/curriculum/` | Client `query()` + `command()`/`form()` CRUD | admin/owner **server** `+page.server.ts` gate (mutating) | `waitUntil(invalidate(course:config:{courseId}))` per mutation |
-| builder (sales) | `studio/journeys/[id]/page/` + `+page.server.ts` | Clone `studio/brand/`: `BrandStudioLayout`, same-origin iframe of `(space)/journeys/[slug]`, new `codex:page-preview:v1` bridge | admin/owner server gate | `invalidate(page:config:{pageId})` + collection keys |
+| builder (sales) | `studio/journeys/[id]/page/` + `+page.server.ts` | ~~Clone `studio/brand/`: `BrandStudioLayout`, same-origin iframe of `(space)/journeys/[slug]`, new `codex:page-preview:v1` bridge~~ **superseded — see note below the table** | admin/owner server gate | `invalidate(page:config:{pageId})` + collection keys |
+
+> **DELETED 2026-09-02 (PR #483):** the `codex:page-preview:v1` receiver (page-preview-bridge / preview-protocol / preview-wiring / JourneyPreviewFrame) is gone from the tree — the builder previews inline. Any future sender must reintroduce BOTH ends of the bridge.
+
 | reporting | `studio/journeys/[id]/insights/` | Client `query()`, no server load (P5, mirror `analytics/`); provenance-tagged | client `$effect` gate | consume `live` now; `course` after new tables |
 
 **Caching mechanics (critical):** `VersionedCache` keys version by **`id` alone**
@@ -320,7 +323,7 @@ current code. Also note `savePlaybackProgress` already auto-sets `completed=true
 
 **Dependency graph (whole build):**
 ```
-WP-0 (shared contracts: PageBuilderState + SectionModel types + codex:page-preview:v1 msg type + generalized boundary gate)
+WP-0 (shared contracts: PageBuilderState + SectionModel types + codex:page-preview:v1 msg type + generalized boundary gate) — *the page-preview half of WP-0 shipped, then was deleted in PR #483; the types remain*
   │
 WP-1 SCHEMA (11 tables + accessType→policy) ──────┐   [BE, atomic, single PR front]
   │                                                │
