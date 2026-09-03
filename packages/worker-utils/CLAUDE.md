@@ -9,8 +9,8 @@ Hono worker factory, `procedure()` handler, and shared middleware stack. This is
 - **`multipartProcedure(config)`** — Extension of `procedure()` for file upload endpoints (FormData + file validation)
 - **`binaryUploadProcedure(config)`** — For raw binary uploads (non-FormData)
 - **`PaginatedResult`** — Marker class; `procedure()` checks `instanceof` to emit list envelope
-- **`createServiceRegistry(env, obs?, orgId?)`** — Lazy-loaded service factory (called internally by `procedure()`)
-- **`sendEmailToWorker(params)`** — Worker-to-worker email trigger helper
+- **`createServiceRegistry(env, obs?, orgId?, executionCtx?)`** — Lazy-loaded service factory (called internally by `procedure()`; `executionCtx` wires `waitUntil` so VersionedCache writes survive the response)
+- **`sendEmailToWorker(env, executionCtx, params)`** — Worker-to-worker email trigger helper (fire-and-forget via `executionCtx.waitUntil`)
 - **`createHealthCheckHandler(options)`** — Standard health endpoint (DB/KV/R2 checks)
 - **`sequence(...middleware)`** — Compose middleware in order
 
@@ -24,7 +24,7 @@ app.post('/path',
       roles: ['creator', 'admin'],          // requires auth: 'required'
       requireOrgMembership: true,            // resolves ctx.organizationId + ctx.organizationRole
       requireOrgManagement: false,           // checks management permission
-      rateLimit: 'api' | 'auth' | 'strict' | 'streaming' | 'webhook' | 'web',
+      rateLimit: 'api' | 'auth' | 'strict' | 'streaming' | 'web',  // omitted = 'api' (100/min per subject); auth: 'worker' routes are exempt
       allowedIPs: ['1.2.3.4'],
     },
     input: {
@@ -43,7 +43,7 @@ app.post('/path',
 | Field | Type / Availability |
 |---|---|
 | `ctx.user` | User (auth required/platform_owner) or User\|null (optional) |
-| `ctx.session` | Session (auth required only) |
+| `ctx.session` | Session (auth required/optional/platform_owner; `undefined` for none/worker) |
 | `ctx.input` | `{ params, query, body }` — all validated |
 | `ctx.organizationId` | String (requireOrgMembership only) |
 | `ctx.organizationRole` | String (requireOrgMembership only) |
@@ -56,8 +56,8 @@ app.post('/path',
 ### Execution Order
 
 1. IP whitelist (if `allowedIPs`)
-2. Rate limiting (if `rateLimit`)
-3. Auth enforcement
+2. Auth enforcement (session or worker HMAC)
+3. Rate limiting (ALWAYS runs — omitted `rateLimit` means the `api` preset, 100/min per subject; `auth: 'worker'` routes are exempt)
 4. Role check (if `roles`)
 5. Org membership (if `requireOrgMembership`) — resolves from URL param, subdomain, or `organizationId` query param
 6. Service registry creation (lazy)
@@ -106,7 +106,7 @@ File errors: `MissingFileError`, `FileTooLargeError`, `InvalidFileTypeError` —
 
 `ctx.services` provides lazy getters for every service. Access a service by name — it instantiates on first access.
 
-Available services: `content`, `media`, `access`, `imageProcessing` (alias: `images`), `organization`, `settings`, `purchase`, `subscription`, `tier`, `connect`, `transcoding`, `adminAnalytics`, `adminContent`, `adminCustomer`, `templates`, `notifications`, `preferences`, `identity`
+Available services: `content`, `categories`, `media`, `access`, `entitlements`, `imageProcessing` (alias: `images`), `organization`, `settings`, `devDomain`, `purchase`, `feeConfig`, `agreements`, `subscription`, `tier`, `connect`, `courseSubscription`, `courseAccess`, `courseJourney`, `courseInsights`, `transcoding`, `adminAnalytics`, `adminContent`, `adminCustomer`, `templates`, `notifications`, `preferences`, `identity`
 
 ### Adding a New Service
 
@@ -182,7 +182,7 @@ procedure({ policy: { auth: 'worker' }, ... })
 
 ## Exceptions (bypass procedure())
 
-Stripe webhooks and RunPod webhooks use raw Hono handlers + `waitUntil(cleanup())` because they need HMAC-SHA256 validation before any parsing. They manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`.
+Stripe webhooks and RunPod webhooks use raw Hono handlers + `waitUntil(cleanup())` because they need HMAC-SHA256 validation before any parsing. They manage their own DB lifecycle with `createWebhookDbClient(c.env)` + `waitUntil(cleanup())` (the RunPod webhook in media-api uses `createDbClient` directly).
 
 ## Reference Files
 

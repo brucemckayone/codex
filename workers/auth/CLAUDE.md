@@ -47,7 +47,7 @@ Auth emails (verification, password reset, welcome) are sent via `POST /internal
 | `DATABASE_URL` | Yes | Neon PostgreSQL |
 | `BETTER_AUTH_SECRET` | Yes | BetterAuth signing secret |
 | `AUTH_SESSION_KV` | Yes | Session cache + verification token storage |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_DO` | Yes | Durable Object the `auth` rate-limit preset (5/15min) counts in — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17); counters live in the DO, not KV |
 | `ENVIRONMENT` | Yes | `development` / `test` / `production` |
 | `WEB_APP_URL` | No | App base URL (cookie domain, email links) |
 | `API_URL` | No | Trusted origin for CORS |

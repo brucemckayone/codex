@@ -61,7 +61,7 @@ ctx.executionCtx.waitUntil(
 CacheType.USER_PROFILE         // 'user:profile'
 CacheType.USER_PREFERENCES     // 'user:preferences'
 CacheType.ORG_CONFIG           // 'org:config'
-CacheType.ORG_STATS            // 'org:stats'
+CacheType.ORG_STATS            // 'org:stats:v2'
 CacheType.ORG_CREATORS         // 'org:creators'
 CacheType.ORG_MEMBERS          // 'org:members'
 CacheType.CONTENT_METADATA     // 'content:metadata'

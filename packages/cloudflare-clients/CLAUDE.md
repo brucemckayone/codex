@@ -57,19 +57,9 @@ const uploadUrl = await client.generateSignedUploadUrl('key', 'video/mp4');
 const exists = await client.objectExists('key');
 ```
 
-## CachePurgeClient
+## Cache Purge
 
-Purges Cloudflare CDN cached URLs via the API. Fire-and-forget — errors are logged, never thrown.
-
-```ts
-import { CachePurgeClient } from '@codex/cloudflare-clients';
-
-const purge = CachePurgeClient.create(env.CF_ZONE_ID, env.CF_API_TOKEN);
-await purge.purgeByUrls(['https://example.com/image.jpg']); // batches at 30 per call
-await purge.purgeEverything(); // purge all
-```
-
-If `zoneId` or `apiToken` are missing, `CachePurgeClient.create()` returns a no-op stub.
+No cache-purge client exists in this package — the orphaned `src/cache/` subdir was removed in Codex-vwv5c (commit 5d9263a1). `CF_ZONE_ID`/`CF_API_TOKEN` in `@codex/shared-types` are vestigial.
 
 ## KV
 
@@ -77,10 +67,10 @@ The `kv` module currently exports a placeholder. KV operations are handled direc
 
 ## R2 Key Conventions
 
-- Media files: `originals/{mediaId}/...`, `hls/{mediaId}/...`, `thumbnails/{mediaId}/...`
-- Avatars: `{userId}/avatar/...`
+- Media files: `{creatorId}/originals/{mediaId}/...`, `{creatorId}/hls/{mediaId}/...`, `{creatorId}/thumbnails/{mediaId}/...` (all creator-scoped)
+- Avatars: `avatars/{userId}/{size}.webp` (root-level `avatars/` folder, not per-user)
 - Org logos: `logos/{orgId}/logo.{ext}`
-- Content thumbnails: `{creatorId}/thumbnails/{contentId}/...`
+- Content thumbnails: `{creatorId}/content-thumbnails/{contentId}/{size}.webp` (`thumbnails/` is auto-generated media thumbnails, keyed by mediaId)
 
 Key builders are in `@codex/transcoding` (`getContentThumbnailKey`, `getOrgLogoKey`, `getUserAvatarKey`).
 
@@ -101,4 +91,4 @@ Key builders are in `@codex/transcoding` (`getContentThumbnailKey`, `getOrgLogoK
 
 - `packages/cloudflare-clients/src/r2/services/r2-service.ts`
 - `packages/cloudflare-clients/src/r2/services/r2-signing-client.ts`
-- `packages/cloudflare-clients/src/cache/client.ts` — CachePurgeClient
+- `packages/cloudflare-clients/src/kv/client.ts` — placeholder only (`kvPlaceholder`); no KV client implemented

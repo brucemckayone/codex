@@ -59,8 +59,8 @@ Email template management (CRUD across three scopes) and sending via Resend. Inc
 ## Template Resolution (when sending)
 
 When `/internal/send` is called, `NotificationsService` resolves templates in priority order:
-1. **Creator** scope — template owned by the content creator
-2. **Organization** scope — template owned by the org
+1. **Organization** scope — template owned by the org
+2. **Creator** scope — template owned by the content creator
 3. **Global** scope — platform-wide fallback
 
 First match wins.
@@ -80,7 +80,7 @@ First match wins.
 | Binding | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon DB connection |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings (unsubscribe limiter counts in `RATE_LIMIT_API`) — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
 | `WORKER_SHARED_SECRET` | Yes | HMAC for `/internal/send`; also used for unsubscribe token signing |
 | `RESEND_API_KEY` | No | Required in production for email delivery |

@@ -4,7 +4,7 @@ Org management dashboard: analytics, content management, and customer support. A
 
 ## Endpoints
 
-All endpoints require `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`. Scoped by `ctx.organizationId` (resolved from org membership). Rate limited via `api` preset (100/min) on `/api/*`.
+All endpoints EXCEPT `/api/admin/fees/*` require `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership). The 9 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer) instead require `policy: { auth: 'platform_owner' }` with no org policy. Rate limited via `api` preset (100/min) on `/api/*`.
 
 ### Analytics
 
@@ -21,9 +21,9 @@ All endpoints require `auth: 'required'` + `requireOrgMembership: true` + `requi
 | Method | Path | Input | Status | Response |
 |---|---|---|---|---|
 | GET | `/api/admin/content` | query: `adminContentListQuerySchema` (status, pagination) | 200 | `{ items, pagination }` |
-| POST | `/api/admin/content/:id/publish` | params: id | 200 | `{ data: Content }` |
-| POST | `/api/admin/content/:id/unpublish` | params: id | 200 | `{ data: Content }` |
-| DELETE | `/api/admin/content/:id` | params: id | 204 | — |
+| POST | `/api/admin/content/:contentId/publish` | params: contentId | 200 | `{ data: Content }` |
+| POST | `/api/admin/content/:contentId/unpublish` | params: contentId | 200 | `{ data: Content }` |
+| DELETE | `/api/admin/content/:contentId` | params: contentId | 204 | — |
 
 ### Customer Management
 
@@ -43,9 +43,9 @@ All endpoints require `auth: 'required'` + `requireOrgMembership: true` + `requi
 
 | Service | Package | Purpose |
 |---|---|---|
-| `AnalyticsService` (`adminAnalytics`) | `@codex/admin` | Revenue, customer, top-content, dashboard, activity feed |
-| `AdminContentService` (`adminContent`) | `@codex/admin` | List, publish, unpublish, delete content (admin scope) |
-| `AdminCustomerService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant access |
+| `AdminAnalyticsService` (`adminAnalytics`) | `@codex/admin` | Revenue, customer, top-content, dashboard, activity feed |
+| `AdminContentManagementService` (`adminContent`) | `@codex/admin` | List, publish, unpublish, delete content (admin scope) |
+| `AdminCustomerManagementService` (`adminCustomer`) | `@codex/admin` | List customers, get details, grant access |
 
 ## Auth Pattern
 
@@ -57,8 +57,8 @@ All endpoints require `auth: 'required'` + `requireOrgMembership: true` + `requi
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon PostgreSQL |
 | `AUTH_SESSION_KV` | Yes | Session validation |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
-| `BETTER_AUTH_SECRET` | Yes | Session validation |
+| `RATE_LIMIT_API` | Yes | Native rate-limit binding the `/api/*` limiter counts in — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
+| `ENVIRONMENT` | No | `development` / `test` / `production` (dev-webhook + guards) |
 
 ## Strict Rules
 
@@ -70,4 +70,4 @@ All endpoints require `auth: 'required'` + `requireOrgMembership: true` + `requi
 ## Reference Files
 
 - `workers/admin-api/src/index.ts` — all routes defined inline (no separate route files)
-- `workers/admin-api/src/types.ts` — `AdminApiEnv`, `AdminVariables`
+- `workers/admin-api/src/types.ts` — `AdminApiEnv` (only public type; `AdminVariables` is deliberately unexported)

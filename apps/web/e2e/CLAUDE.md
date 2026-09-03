@@ -2,7 +2,7 @@
 
 End-to-end tests against the SvelteKit app, running against the full local stack (workers + dev server). Sibling to the API E2E suite at the repo root (`/e2e/`) which uses Vitest — these are different runners with different fixture systems; don't confuse them.
 
-**Stack:** Playwright 1.52, Node 22, BetterAuth + Neon test branch, lvh.me wildcard DNS.
+**Stack:** Playwright 1.56, Node 22, BetterAuth + Neon test branch, lvh.me wildcard DNS.
 
 ---
 
@@ -104,7 +104,7 @@ each cost an agent a wrong conclusion, and encodes each as a helper:
 Two more rules specific to this surface:
 
 - **Compare the canvas and the published page at the SAME inline size.** `.jp-sec`
-  carries `container-type: inline-size`, so the journey CSS's 19 `@container`
+  carries `container-type: inline-size`, so the journey CSS's many `@container`
   rules resolve against ITS width. Use `matchInlineSize()`, and read
   `offsetWidth` — never `getBoundingClientRect().width`: the canvas renders at a
   real 1440 and is `transform: scale()`d, so the same element reports 1440
@@ -129,7 +129,7 @@ Three escape hatches:
 
 ## Test fixtures (`fixtures/auth.ts`)
 
-`fixtures/auth.ts` extends Playwright's `test` with `authenticatedUser` and `authenticatedPage` fixtures. Used by specs that need a stock authenticated context without spec-local setup.
+`fixtures/auth.ts` extends Playwright's `test` with an `authenticateAsUser` fixture (call it inside a test to create + log in a fresh user) plus `createOrgMember`, `createOrgWithMembers`, and `getMemberByRole`. Used by specs that need a stock authenticated context without spec-local setup.
 
 **Health-check fixture**: All auth-dependent specs should skip cleanly when the auth worker isn't running — pattern:
 
@@ -170,7 +170,7 @@ await expect(page).toHaveURL(pattern);           // Poll URL — no wait events
 
 ### `cleanupDatabase()` wipes everything
 
-`@codex/test-utils/src/database.ts` exports a `cleanupDatabase()` that deletes ALL rows from key tables — `organizations`, `users`, `subscriptions`, etc. If a Playwright spec calls this (directly or transitively), the seeded `studio-alpha`/`studio-beta` orgs vanish and every subsequent test in the suite breaks.
+`@codex/test-utils/src/database.ts` exports a `cleanupDatabase()` that deletes ALL rows from key tables — `organizations`, `purchases`, `content`, agreements, payouts, etc. — but deliberately PRESERVES `users` (only `cleanupDatabaseComplete()` wipes those). If a Playwright spec calls this (directly or transitively), the seeded `studio-alpha`/`studio-beta` orgs vanish and every subsequent test in the suite breaks.
 
 Vitest integration tests CAN call `cleanupDatabase` (they run in `--concurrency=1` and re-seed in `beforeAll`). Playwright specs must NOT.
 
@@ -235,14 +235,14 @@ PR #261 had 12 of 22 commits as text-locator drift fixes. The trend: button copy
 | Path | Purpose |
 |---|---|
 | `playwright.config.ts` | Test runner config, web server orchestration |
-| `e2e/fixtures/auth.ts` | `authenticatedUser` / `authenticatedPage` test fixtures |
+| `e2e/fixtures/auth.ts` | `authenticateAsUser` / `createOrgMember` / `createOrgWithMembers` / `getMemberByRole` test fixtures |
 | `e2e/helpers/auth-cookies.ts` | `aliasSessionCookies`, `parseSetCookieHeaders`, `parseSetCookieStrings` |
 | `e2e/helpers/seed-auth.ts` | `loginAsSeedViewer`, `SEED_VIEWER` |
 | `e2e/helpers/spa-nav.ts` | `expectClickNavigates` |
 | `e2e/helpers/studio.ts` | `registerSharedStudioUser`, `injectOrgCookies`, `navigateToStudio` |
 | `e2e/helpers/subscription.ts` | Seeded creator login, rate-bypass helpers, Stripe cleanup |
 | `e2e/helpers/agreements.ts` | Two-actor topology for revenue-share negotiation specs |
-| `packages/test-utils/src/e2e/cookies.ts` | `parseCookieString` (Cookie REQUEST header parser) |
+| `packages/test-utils/src/e2e/cookies.ts` | `buildPlaywrightCookies` (BrowserCookie shaping). `parseCookieString` (Cookie REQUEST header parser) lives in `packages/test-utils/src/e2e/fixtures/auth.fixture.ts` |
 | `packages/test-utils/src/e2e/fixtures/auth.fixture.ts` | API E2E auth fixture (vitest, NOT Playwright) |
 
 ---

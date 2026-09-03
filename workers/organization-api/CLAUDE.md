@@ -64,7 +64,7 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | Method | Path | Auth | Input | Success | Notes |
 |---|---|---|---|---|---|
 | POST | `/api/organizations/:id/followers` | `required` | — | 201 | Follow org (idempotent) |
-| DELETE | `/api/organizations/:id/followers` | `required` | — | 204 | Unfollow org (idempotent) |
+| DELETE | `/api/organizations/:id/followers` | `required` | — | 200 | Unfollow org (idempotent) — returns `null` without `successStatus: 204`, so the envelope is 200 `{ data: null }` |
 | GET | `/api/organizations/:id/followers/me` | `required` | — | 200 `{ following }` | Check if current user follows |
 | GET | `/api/organizations/:id/followers/count` | `optional` | — | 200 `{ count }` | Public follower count |
 
@@ -73,7 +73,7 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | Binding | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon DB connection |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
 | `CACHE_KV` | No | `VersionedCache` for public endpoints (org info, stats, creators) |
 | `MEDIA_BUCKET` | No | R2 bucket for logo storage |

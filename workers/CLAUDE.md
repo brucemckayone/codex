@@ -4,7 +4,7 @@ Cloudflare Workers microservices forming the API layer. All workers follow: Requ
 
 ## Worker Registry
 
-All ports from `@codex/constants` `SERVICE_PORTS`. Use `getServiceUrl(service, env)` — NEVER hardcode.
+All ports from `@codex/constants` `SERVICE_PORTS`. Use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode.
 
 | Worker | Port | Purpose | Auth Model |
 |---|---|---|---|
@@ -74,7 +74,7 @@ All ports from `@codex/constants` `SERVICE_PORTS`. Use `getServiceUrl(service, e
 | `api` | 100/min | Standard API endpoints |
 | `strict` | 20/min | Checkout, sensitive mutations |
 | `streaming` | 60/min | Streaming URL generation (HLS refreshes) |
-| `webhook` | 1000/min | Stripe/RunPod webhooks |
+| `web` | 300/min | General web traffic — there is deliberately **no `webhook` preset**: Stripe/RunPod webhooks are HMAC-authenticated and unthrottled |
 
 ### Security Headers (All Workers)
 
@@ -93,10 +93,10 @@ Callers use `workerFetch()` from `@codex/security`. The receiving worker uses `p
 ```typescript
 // Caller (e.g., content-api)
 import { workerFetch } from '@codex/security';
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl } from '@codex/urls';
 
 await workerFetch(
-  `${getServiceUrl('media', env)}/internal/media/${mediaId}/transcode`,
+  `${buildServiceUrl('media', env)}/internal/media/${mediaId}/transcode`,
   { method: 'POST', body: JSON.stringify({ creatorId }) },
   env.WORKER_SHARED_SECRET
 );
@@ -133,7 +133,7 @@ Request with cookie → KV cache hit? Return cached → DB lookup → Cache resu
 - **MUST** use `createWorker()` for worker setup — provides middleware stack and security headers
 - **MUST** validate all input with Zod schemas — no unvalidated input reaches handlers
 - **MUST** scope all database queries by creator/org — NEVER return data across scope boundaries
-- **MUST** use `getServiceUrl()` from `@codex/constants` for all inter-worker URLs
+- **MUST** use `buildServiceUrl()` from `@codex/urls` for all inter-worker URLs
 - **MUST** run `pnpm dev` from monorepo root — NEVER `cd workers/x && pnpm dev`
 - **NEVER** put business logic in route handlers — it belongs in service packages
 - **NEVER** catch and swallow errors in handlers — let `procedure()` handle error mapping

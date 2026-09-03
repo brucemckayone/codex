@@ -1,6 +1,6 @@
 # @codex/notifications
 
-Email template management and sending via Resend. 3-tier template resolution (Creator > Org > Global), notification preferences, unsubscribe token handling, and audit logging.
+Email template management and sending via Resend. 3-tier template resolution (Org > Creator > Global), notification preferences, unsubscribe token handling, and audit logging.
 
 ## Key Exports
 
@@ -36,7 +36,7 @@ const service = new NotificationsService({
 
 | Method | Signature | Notes |
 |---|---|---|
-| `sendEmail` | `(params: SendEmailParams)` | Resolves template (Creator → Org → Global), checks notification preferences if `userId`+`category` provided, injects branding tokens, renders, sends. Logs to `emailAuditLogs`. Retries up to `DEFAULT_RETRY_CONFIG.maxRetries` (2). |
+| `sendEmail` | `(params: SendEmailParams)` | Resolves template (Org → Creator → Global), checks notification preferences if `userId`+`category` provided, injects branding tokens, renders, sends. Logs to `emailAuditLogs`. Retries up to `DEFAULT_RETRY_CONFIG.maxRetries` (2). |
 | `previewTemplate` | `(templateName: string, data: TemplateData, organizationId?, creatorId?)` | Renders template without sending. Returns rendered HTML/text. |
 
 ### `sendEmail` Params
@@ -99,8 +99,8 @@ Simple CRUD for `notificationPreferences` table.
 ## Template Resolution Order
 
 When `sendEmail()` resolves which template to use:
-1. Creator-level template (if `creatorId` provided + template exists)
-2. Org-level template (if `organizationId` provided + template exists)
+1. Org-level template (if `organizationId` provided + template exists)
+2. Creator-level template (if `creatorId` provided + template exists)
 3. Global template (platform fallback)
 
 First match wins.
@@ -123,11 +123,11 @@ Use `createEmailProvider(config: ProviderConfig)` factory to create the appropri
 ## Unsubscribe Tokens
 
 ```typescript
-const token = await generateUnsubscribeToken(userId, email, secret);
-const payload = await verifyUnsubscribeToken(token, secret); // { userId, email }
+const token = await generateUnsubscribeToken({ userId, category: 'marketing' }, secret);
+const payload = await verifyUnsubscribeToken(token, secret); // { userId, category, expiresAt } | null
 ```
 
-JWT-based. Used to generate one-click unsubscribe links in email footers.
+HMAC-SHA256 signed two-segment token (`base64url(payload).base64url(sig)`) — NOT a JWT. Only `marketing` and `digest` categories can be unsubscribed; transactional emails always deliver. Used to generate one-click unsubscribe links in email footers.
 
 ## Custom Errors
 
@@ -139,7 +139,7 @@ JWT-based. Used to generate one-click unsubscribe links in email footers.
 
 ## Rules
 
-- **MUST** use template resolution (Creator > Org > Global) — NEVER hardcode email content
+- **MUST** use template resolution (Org > Creator > Global) — NEVER hardcode email content
 - **MUST** log all sent emails to `emailAuditLogs` table — required for compliance (handled inside `sendEmail()`)
 - **MUST** use the appropriate provider — NEVER send real emails in dev/test (`ConsoleProvider` or `InMemoryEmailProvider`)
 - **NEVER** include raw user passwords or tokens in template data

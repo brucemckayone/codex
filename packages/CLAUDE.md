@@ -11,7 +11,7 @@
 | **@codex/shared-types** | TypeScript contracts, API shapes | `HonoEnv`, `SingleItemResponse`, `PaginatedListResponse`, `ErrorResponse`, `Bindings` | [shared-types/CLAUDE.md](shared-types/CLAUDE.md) |
 | **@codex/service-errors** | Error classes, BaseService | `BaseService`, `NotFoundError`, `ForbiddenError`, `ValidationError`, `BusinessLogicError`, `mapErrorToResponse` | [service-errors/CLAUDE.md](service-errors/CLAUDE.md) |
 | **@codex/security** | Auth middleware, rate limiting | `requireAuth`, `optionalAuth`, `workerAuth`, `rateLimit`, `securityHeaders` | [security/CLAUDE.md](security/CLAUDE.md) |
-| **@codex/validation** | Zod schemas, sanitization | `*Schema`, `sanitizeSvgContent`, `validateImageUpload`, `orgSlugSchema` | [validation/CLAUDE.md](validation/CLAUDE.md) |
+| **@codex/validation** | Zod schemas, sanitization | `*Schema`, `sanitizeSvgContent`, `validateImageUpload`, `createSlugSchema` | [validation/CLAUDE.md](validation/CLAUDE.md) |
 | **@codex/constants** | Shared constants | `SERVICE_PORTS`, `ENV_NAMES`, `CACHE_PRESETS`, `isDev`, `RESERVED_SUBDOMAINS`, `CURRENCY`, `FEES` | [constants/CLAUDE.md](constants/CLAUDE.md) |
 | **@codex/urls** | URL builders, host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig`, `cookieDomainFor` | [urls/CLAUDE.md](urls/CLAUDE.md) |
 
@@ -33,7 +33,7 @@
 | Package | Purpose | Key Exports | CLAUDE.md |
 |---|---|---|---|
 | **@codex/worker-utils** | Worker factory, procedure handler, service registry | `createWorker`, `procedure`, `multipartProcedure`, `PaginatedResult`, `createServiceRegistry`, `sendEmailToWorker` | [worker-utils/CLAUDE.md](worker-utils/CLAUDE.md) |
-| **@codex/cloudflare-clients** | R2, presigned URLs, CDN cache purge | `R2Service`, `R2SigningClient`, `createR2SigningClientFromEnv`, `CachePurgeClient` | [cloudflare-clients/CLAUDE.md](cloudflare-clients/CLAUDE.md) |
+| **@codex/cloudflare-clients** | R2, presigned URLs | `R2Service`, `R2SigningClient`, `R2Presigner`, `createR2SigningClientFromEnv` | [cloudflare-clients/CLAUDE.md](cloudflare-clients/CLAUDE.md) |
 | **@codex/cache** | Version-based KV cache invalidation | `VersionedCache`, `CacheType`, `buildCacheKey` | [cache/CLAUDE.md](cache/CLAUDE.md) |
 | **@codex/observability** | Structured logging, PII redaction | `ObservabilityClient`, `createRequestTimer` | [observability/CLAUDE.md](observability/CLAUDE.md) |
 | **@codex/image-processing** | Image resize (WASM), WebP variants, R2 upload | `ImageProcessingService`, `OrphanedFileService`, `InvalidImageError` | [image-processing/CLAUDE.md](image-processing/CLAUDE.md) |
@@ -45,8 +45,13 @@
 ## Dependency Graph
 
 ```
-Foundation (no dependencies between foundation packages):
-  database, shared-types, service-errors, security, validation, constants
+Foundation (constants and shared-types are the leaves):
+  constants, shared-types
+  validation       → constants, shared-types
+  urls             → constants
+  database         → constants, shared-types, observability
+  service-errors   → constants, database, observability
+  security         → constants, database, observability
 
 Services (depend on Foundation):
   content      → database, service-errors, validation, cloudflare-clients, transcoding
@@ -62,9 +67,9 @@ Services (depend on Foundation):
 
 Utilities (used by Workers and Services):
   worker-utils    → security, service-errors, shared-types, observability + all services
-  cloudflare-clients → (standalone, Cloudflare + AWS SDK only)
-  cache           → (standalone, KV only)
-  observability   → (standalone)
+  cloudflare-clients → constants, observability, service-errors (+ AWS SDK)
+  cache           → observability (KV only otherwise)
+  observability   → constants
   image-processing→ cloudflare-clients, validation, transcoding (key builders), @cf-wasm/photon
   platform-settings→ database, cloudflare-clients, service-errors, shared-types, validation
   test-utils      → database
@@ -92,7 +97,7 @@ Utilities (used by Workers and Services):
 | Build a worker route | `@codex/worker-utils` (`procedure()`) |
 | Error types, BaseService | `@codex/service-errors` |
 | Input validation schemas | `@codex/validation` |
-| Service URLs, constants | `@codex/constants` |
+| Service URLs (`buildServiceUrl`), host/cookie domains | `@codex/urls` (ports and other shared constants: `@codex/constants`) |
 | Logging | `@codex/observability` |
 | Test factories, DB setup | `@codex/test-utils` |
 
