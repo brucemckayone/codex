@@ -57,13 +57,21 @@ uniform vec3 u_brandSecondary;
 uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_density;
-uniform float u_speed;
 uniform float u_scale;
 uniform float u_warmth;
 uniform float u_glow;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU (see vapor-renderer.ts).
+ *
+ * Already scaled by the preset's speed setting, which is why there is no
+ * u_speed uniform any more — speed multiplies the integration RATE on the CPU
+ * rather than the elapsed time here. That is what keeps a speed change from
+ * retroactively rescaling the position the volume has already drifted to.
+ */
+uniform float u_clock;
 ${AUDIO_UNIFORMS}
 ${AUDIO_HELPERS}
 ${MOTION_HELPERS}
@@ -122,11 +130,19 @@ void main() {
   vec3 rd = normalize(vec3(uv + mouseOffset, 2.0));
 
   // ── Pacing clock ────────────────────────────────────────────────
-  // With audio, motion is driven by the musical clock so the volume drifts
-  // with the track and stills between phrases. Without audio it falls back to
-  // wall-clock at a matched average rate. Crossfaded rather than switched, so
-  // entering immersive mode is a glide, not a jump.
-  float clock = mix(u_time * 0.5, u_beatPhase, u_audioActive) * u_speed;
+  // Integrated by the renderer, not derived here.
+  //
+  // The obvious form — mix(u_time * k, u_beatPhase, u_audioActive) — is
+  // WRONG, and this shader shipped it briefly. u_beatPhase starts at zero
+  // when the analyser is created, while u_time may already be at 60s, so as
+  // the audio ramp eases 0 to 1 the crossfade sweeps the clock *backwards*
+  // from ~30 to ~0. The whole volume lurches in reverse at the exact moment
+  // playback starts.
+  //
+  // The renderer instead differentiates the musical clock and integrates the
+  // resulting RATE, blending rates rather than positions. Position is then
+  // monotone by construction and no rate change can ever move it backwards.
+  float clock = u_clock;
 
   // Bounded, non-repeating volume drift. Replaces the old single-sine sweep;
   // peak rate is ~0.062 per unit clock per axis (see motion-glsl.ts), so even

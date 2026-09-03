@@ -752,10 +752,19 @@ const DEFAULTS = {
   sporeDecay: 0.998,
 };
 
-/** Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1]. */
-function hexToRgb(hex: string): [number, number, number] {
+/**
+ * Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1], or null if the
+ * string is not a well-formed 6-digit hex.
+ *
+ * Returns null rather than a placeholder colour so callers can fall back to
+ * something meaningful. This previously returned mid-grey `[0.5, 0.5, 0.5]` on
+ * malformed input, which is indistinguishable from a deliberate grey: every
+ * caller's `?? fallback` was dead code, and a typo'd token painted the hero
+ * grey instead of using the brand colour.
+ */
+function hexToRgb(hex: string): [number, number, number] | null {
   const clean = hex.replace('#', '');
-  if (clean.length !== 6) return [0.5, 0.5, 0.5];
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return null;
   const r = parseInt(clean.substring(0, 2), 16) / 255;
   const g = parseInt(clean.substring(2, 4), 16) / 255;
   const b = parseInt(clean.substring(4, 6), 16) / 255;
@@ -994,7 +1003,10 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
       camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
       specular: rv('shader-specular', DEFAULTS.specular),
       impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
-      pulseColor: pulseColorRaw ? hexToRgb(pulseColorRaw) : DEFAULTS.pulseColor,
+      // `?? DEFAULTS` covers a malformed token, not just a missing one — a
+      // typo'd hex now falls back to the designed red instead of painting grey.
+      pulseColor:
+        (pulseColorRaw ? hexToRgb(pulseColorRaw) : null) ?? DEFAULTS.pulseColor,
     };
   },
   ink: (base, rv) => ({

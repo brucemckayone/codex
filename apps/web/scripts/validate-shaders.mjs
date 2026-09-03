@@ -26,7 +26,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -90,6 +96,119 @@ function firstErrorLine(diagnostic) {
   return m ? Number(m[1]) : null;
 }
 
+const RENDERER_DIR = path.resolve(
+  HERE,
+  '../src/lib/components/ui/ShaderHero/renderers'
+);
+
+/**
+ * Uniforms every renderer gets through the shared helpers rather than by
+ * naming them. A renderer that spreads `AUDIO_UNIFORM_NAMES` and calls
+ * `uploadAudioUniforms` covers all of these at once.
+ */
+const AUDIO_UNIFORMS = new Set([
+  'u_audioActive',
+  'u_bass',
+  'u_mids',
+  'u_treble',
+  'u_level',
+  'u_beatPulse',
+  'u_energy',
+  'u_flux',
+  'u_centroid',
+  'u_beatPhase',
+  'u_beatSeed',
+]);
+
+/**
+ * Uniforms GLSL itself provides or that the vertex stage owns — never uploaded
+ * by a renderer, so their absence is not a defect.
+ */
+const IGNORED_UNIFORMS = new Set(['gl_DepthRange']);
+
+/**
+ * Check that every uniform a shader DECLARES is actually reachable from its
+ * renderer.
+ *
+ * ## Why this is a separate check from compilation
+ *
+ * A uniform that is declared and read by the shader but never uploaded is
+ * perfectly legal GLSL: it silently reads zero. So the compile gate passes,
+ * `tsc` passes, `biome` passes, `svelte-check` passes, and the unit tests pass
+ * — while the feature does nothing at all.
+ *
+ * This is not hypothetical. A subagent was killed mid-task by a spend limit
+ * after rewriting `life-sim.frag.ts` and `life-display.frag.ts` to consume the
+ * shared audio block, but before wiring `life-renderer.ts` to upload it. Every
+ * gate in the repo was green and the preset's entire audio response was dead.
+ * A cap kill leaves files that compile but are semantically incomplete, which
+ * is exactly the case a type system cannot see.
+ *
+ * The check is deliberately textual and one-directional: it asks only whether
+ * the renderer MENTIONS each declared uniform name. That catches the "never
+ * wired at all" case, which is the one that actually happens, without trying
+ * to prove a particular `gl.uniform*` call is reached at runtime.
+ */
+function checkUniformCoverage(preset, sources) {
+  const rendererPath = path.join(RENDERER_DIR, `${preset}-renderer.ts`);
+  let renderer;
+  try {
+    renderer = readFileSync(rendererPath, 'utf8');
+  } catch (err) {
+    // ONLY a genuinely absent renderer is a skip. Not every shader module maps
+    // to a preset renderer (jfa-*, the shared vertex shader), and those are
+    // reported as skipped rather than clean — counting an unchecked preset as
+    // passing is how a coverage number stops meaning anything.
+    //
+    // Anything else rethrows. A bare `catch {}` here already bit once: with
+    // `readFileSync` missing from the imports, every call threw ReferenceError,
+    // was swallowed as "no renderer", and the gate printed a tick having
+    // checked nothing at all.
+    if (err.code !== 'ENOENT') throw err;
+    return { skipped: true };
+  }
+
+  // Strip comments before testing. A textual `includes` would otherwise count
+  // a uniform named only in a comment as wired — including a commented-OUT
+  // upload call, which is the most likely way real wiring gets disabled. Found
+  // by falsifying this very check: commenting out life's uDropGain upload left
+  // the gate green.
+  const code = renderer
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  const wiresAudioBlock =
+    code.includes('AUDIO_UNIFORM_NAMES') &&
+    code.includes('uploadAudioUniforms');
+
+  const declared = new Set();
+  for (const source of sources) {
+    for (const m of source.matchAll(
+      /^\s*uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?\w+\s+(\w+)/gm
+    )) {
+      declared.add(m[1]);
+    }
+  }
+
+  const unwired = [];
+  for (const name of declared) {
+    if (IGNORED_UNIFORMS.has(name)) continue;
+    // An audio uniform is wired either through the shared helper OR by being
+    // named directly. Several presets (ether, ink, pulse, ripple, suture)
+    // predate the shared block and hand-roll their own list — those are wired,
+    // just not via the helper, and reporting them is a false positive.
+    if (AUDIO_UNIFORMS.has(name)) {
+      if (!wiresAudioBlock && !code.includes(name)) {
+        unwired.push(`${name} (shared audio block)`);
+      }
+      continue;
+    }
+    if (!code.includes(name)) unwired.push(name);
+  }
+
+  return unwired.length > 0 ? { rendererPath, unwired, wiresAudioBlock } : null;
+}
+
 async function main() {
   const filter = process.argv.slice(2);
   const esbuild = await loadEsbuild();
@@ -109,6 +228,18 @@ async function main() {
   const work = mkdtempSync(path.join(tmpdir(), 'glsl-gate-'));
   let checked = 0;
   const failures = [];
+  /** preset name → every GLSL source belonging to it, for the coverage check. */
+  const sourcesByPreset = new Map();
+
+  /**
+   * Map a shader filename to its preset. `life-sim.frag.ts` and
+   * `life-display.frag.ts` both belong to `life`, whose single renderer
+   * uploads for both passes.
+   */
+  const presetOf = (file) =>
+    file
+      .replace(/\.(frag|vert)\.ts$/, '')
+      .replace(/-(sim|display)$/, '');
 
   try {
     for (const file of files) {
@@ -149,6 +280,11 @@ async function main() {
         continue;
       }
 
+      const preset = presetOf(file);
+      const bucket = sourcesByPreset.get(preset) ?? [];
+      bucket.push(...sources.map(([, src]) => src));
+      sourcesByPreset.set(preset, bucket);
+
       const ext = file.endsWith('.vert.ts') ? 'vert' : 'frag';
       const stage = STAGE_FOR_EXT[ext];
 
@@ -179,7 +315,52 @@ async function main() {
       `\n${failures.length} of ${checked} shader sources FAILED to compile:\n  ${failures.join('\n  ')}`
     );
   } else {
-    console.log(`✓ ${checked} shader sources compiled (${files.length} modules)`);
+    console.log(
+      `✓ ${checked} shader sources compiled (${files.length} modules)`
+    );
+  }
+
+  // ── Uniform coverage ────────────────────────────────────────────────
+  // Runs even when compilation failed, since the two answer different
+  // questions and a reader wants both.
+  const unwiredPresets = [];
+  const skipped = [];
+  let covered = 0;
+  for (const [preset, sources] of sourcesByPreset) {
+    const result = checkUniformCoverage(preset, sources);
+    if (result === null) {
+      covered++;
+      continue;
+    }
+    if (result.skipped) {
+      skipped.push(preset);
+      continue;
+    }
+    unwiredPresets.push(preset);
+    fail(
+      `\n✖ ${preset}: shader declares uniforms its renderer never uploads` +
+        `\n  renderer: ${path.relative(process.cwd(), result.rendererPath)}` +
+        `\n  unwired:  ${result.unwired.join(', ')}` +
+        (result.wiresAudioBlock
+          ? ''
+          : '\n  hint:     spread ...AUDIO_UNIFORM_NAMES into UNIFORM_NAMES and' +
+            '\n            call uploadAudioUniforms(gl, uniforms, a) after useProgram') +
+        '\n  These read 0 at runtime. Legal GLSL, so nothing else catches it.'
+    );
+  }
+
+  if (unwiredPresets.length > 0) {
+    fail(
+      `\n${unwiredPresets.length} preset(s) have unwired uniforms: ${unwiredPresets.join(', ')}`
+    );
+  } else {
+    const note =
+      skipped.length > 0
+        ? ` (${skipped.length} skipped, no preset renderer: ${skipped.join(', ')})`
+        : '';
+    console.log(
+      `✓ ${covered} presets have every declared uniform wired${note}`
+    );
   }
 }
 

@@ -85,6 +85,17 @@ export interface ResolvedAudio {
   beatPhase: number;
   beatSeed: number;
   /**
+   * Onsets since the analyser was created, or 0 while silent.
+   *
+   * Exposed for FBO presets that want to inject exactly ONE deposit per beat:
+   * compare against the value you saw last frame and act on a change. Do NOT
+   * threshold `beatPulse` for this — it spikes and decays over ~400ms, so a
+   * `beatPulse > x` test fires on every frame of the decay, and a raw
+   * `bass > x` test fires continuously through any sustained bass note. Both
+   * flood a stateful simulation.
+   */
+  onsetCount: number;
+  /**
    * True once the ramp has fully reached zero. Renderers can use this to skip
    * audio-only work (extra passes, deposits) entirely while silent — but must
    * NOT use it to branch the *look*, or the transition will pop.
@@ -92,7 +103,14 @@ export interface ResolvedAudio {
   silent: boolean;
 }
 
-/** All-zero audio, i.e. the exact pre-audio look. */
+/**
+ * All-zero audio, i.e. the exact pre-audio look.
+ *
+ * Exported as `SILENT_AUDIO` for FBO presets whose `reset()` runs warm-up sim
+ * steps before any frame is rendered. Those steps need a `ResolvedAudio` but
+ * must not react to audio — a warm-up is bootstrapping state, not playback, so
+ * feeding it live values would bake a transient into the initial condition.
+ */
 const SILENT: ResolvedAudio = {
   active: 0,
   bass: 0,
@@ -105,8 +123,11 @@ const SILENT: ResolvedAudio = {
   centroid: 0.25,
   beatPhase: 0,
   beatSeed: 0.5,
+  onsetCount: 0,
   silent: true,
 };
+
+export { SILENT as SILENT_AUDIO };
 
 export interface AudioFade {
   /**
@@ -165,6 +186,7 @@ export function createAudioFade(): AudioFade {
         centroid: audio.centroid,
         beatPhase: audio.beatPhase,
         beatSeed: seed,
+        onsetCount: audio.onsetCount,
         silent: false,
       };
     },

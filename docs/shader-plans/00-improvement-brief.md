@@ -187,11 +187,45 @@ Helpers: `audioMod(sig, depth)` (bounded around 1.0), `audioLift(sig, depth)`
 2. **`u_beatPhase` REPLACES `u_time` for internal motion, not adds to it.** This
    is the single biggest quality lever. A preset driven by `u_beatPhase` freezes
    when the music stops and eases back in; one driven by `u_time` runs at a
-   constant rate with a wobble bolted on. Crossfade so hero mode still moves:
+   constant rate with a wobble bolted on.
+
+   **Blend RATES, never positions.** This brief originally told you to crossfade
+   in the shader, and that was wrong:
 
    ```glsl
-   float clock = mix(u_time * 0.5, u_beatPhase, u_audioActive) * u_speed;
+   float clock = mix(u_time * 0.5, u_beatPhase, u_audioActive) * u_speed;  // WRONG
    ```
+
+   `u_beatPhase` starts at **zero** when the analyser is created, while `u_time`
+   may already be at 60s. So as the ramp eases 0→1 the crossfade sweeps the
+   clock *backwards* from ~30 to ~0: the preset lurches in reverse at the exact
+   moment playback starts, which is precisely the artefact this work exists to
+   remove. Vapor shipped that form briefly; `tunnel` caught it.
+
+   Integrate in the renderer instead — differentiate the musical clock, clamp
+   the rate, blend that against an idle rate, accumulate. Position is then
+   monotone by construction and no rate change can move it backwards.
+
+   ```ts
+   let musicalRate = IDLE_CLOCK_RATE;
+   if (!a.silent) {
+     musicalRate = prevBeatPhase < 0
+       ? IDLE_CLOCK_RATE                    // no previous sample to difference
+       : Math.min(MAX_CLOCK_RATE, Math.max(0, (a.beatPhase - prevBeatPhase) / dt));
+     prevBeatPhase = a.beatPhase;
+   } else {
+     prevBeatPhase = -1;
+   }
+   const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+   clock += dt * rate * cfg.speed;   // upload as its own uniform; zero it in reset()
+   ```
+
+   Clamp the differentiated rate. The render loop pauses (hidden tab, preset
+   switch, reduced motion) while the analyser clamps its own dt rather than
+   freezing, so one frame after a long pause can show a large phase jump —
+   differentiating that unclamped spikes the rate and produces exactly one
+   visible jerk. `vapor-renderer.ts` and `tunnel-renderer.ts` both implement
+   this; copy either.
 
 3. **Gate on `u_audioActive`, which is a smooth 0..1 ramp, not a boolean.** At 0
    the render must be exactly the silent look. Never branch the *look* on a

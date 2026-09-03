@@ -49,13 +49,13 @@ const UNIFORM_NAMES = [
   'u_brandAccent',
   'u_bgColor',
   'u_density',
-  'u_speed',
   'u_scale',
   'u_warmth',
   'u_glow',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
   ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
@@ -85,6 +85,25 @@ const DEFAULTS = {
  */
 const MOUSE_TAU_SEC = 0.4;
 
+/**
+ * Wall-clock pacing rate, in clock-units per second, used when no audio is
+ * playing. Matches the average rate of the musical clock at mid energy so the
+ * crossfade between them is imperceptible.
+ */
+const IDLE_CLOCK_RATE = 0.5;
+
+/**
+ * Upper bound on the differentiated musical clock, in clock-units per second.
+ *
+ * `beatPhase` advances at 0.35..1.5/s in normal operation, but it is sampled
+ * from a render loop that pauses (hidden tab, preset switch, reduced-motion),
+ * and the analyser clamps its own dt at 100ms rather than freezing. So a
+ * single frame after a long pause can show a large phase jump; differentiating
+ * it unclamped would spike the rate and jerk the volume exactly once, which
+ * is the visible artefact this whole integration exists to prevent.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createVaporRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<VaporUniform, WebGLUniformLocation | null> | null = null;
@@ -95,6 +114,11 @@ export function createVaporRenderer(): ShaderRenderer {
 
   const audioFade = createAudioFade();
   const deltaClock = createDeltaClock();
+
+  /** Integrated pacing clock. Monotone — see u_clock in vapor.frag.ts. */
+  let clock = 0;
+  /** Previous `beatPhase` sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -132,6 +156,29 @@ export function createVaporRenderer(): ShaderRenderer {
       lerpedMouse.x += (targetX - lerpedMouse.x) * k;
       lerpedMouse.y += (targetY - lerpedMouse.y) * k;
 
+      // Integrate the pacing clock by blending RATES, never positions. See the
+      // u_clock comment in vapor.frag.ts for why crossfading the positions is
+      // wrong: beatPhase starts at 0 while u_time does not, so a positional
+      // mix sweeps the clock backwards when audio starts.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        // First audio frame has no previous sample to difference against;
+        // fall back to the idle rate for that one frame rather than treating
+        // the whole accumulated phase as one frame's advance.
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
+
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
       quad.bind(program);
@@ -156,12 +203,15 @@ export function createVaporRenderer(): ShaderRenderer {
 
       // All float uniforms — no int uniforms in this preset
       gl.uniform1f(uniforms.u_density, cfg.density ?? DEFAULTS.density);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
+      // No u_speed uniform: speed now scales the CPU-integrated clock instead,
+      // so the shader never sees it. Uploading a stripped uniform would be a
+      // silent no-op and imply the shader still reads it.
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1f(uniforms.u_warmth, cfg.warmth ?? DEFAULTS.warmth);
       gl.uniform1f(uniforms.u_glow, cfg.glow ?? DEFAULTS.glow);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(uniforms.u_clock, clock);
       // Vignette reads as a frame around a hero, but as a tunnel in fullscreen
       // immersive mode — so it fades out with the audio ramp rather than being
       // switched off, which would pop on the first beat.
@@ -184,6 +234,11 @@ export function createVaporRenderer(): ShaderRenderer {
     reset(_gl: WebGL2RenderingContext): void {
       // Reset lerped mouse to center for smooth restart.
       lerpedMouse = { x: 0.5, y: 0.5 };
+      // Rewind the integrated clock too. reset() means "start this preset
+      // fresh", and leaving the clock running would resume the volume
+      // mid-drift at whatever position the previous session reached.
+      clock = 0;
+      prevBeatPhase = -1;
     },
 
     destroy(gl: WebGL2RenderingContext): void {

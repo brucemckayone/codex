@@ -8,6 +8,14 @@
  * Warm-up: 40 coast steps on reset to let organisms form.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  type ResolvedAudio,
+  SILENT_AUDIO,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { LifeConfig, ShaderConfig } from '../shader-config';
@@ -69,6 +77,8 @@ const SIM_UNIFORM_NAMES = [
   'uMouseActive',
   'uMouseStrength',
   'uDropPos',
+  'uDropGain',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DISPLAY_UNIFORM_NAMES = [
@@ -81,6 +91,7 @@ const DISPLAY_UNIFORM_NAMES = [
   'uGrain',
   'uVignette',
   'uTime',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 export function createLifeRenderer(): ShaderRenderer {
@@ -104,6 +115,11 @@ export function createLifeRenderer(): ShaderRenderer {
   let nextAmbientInterval = 3.0 + Math.random() * 2.0;
   let clickBursts: Array<{ x: number; y: number; frames: number }> = [];
 
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+  /** Last onset acted on, so a beat seeds exactly one colony. */
+  let lastOnsetSeen = -1;
+
   function stepSim(
     gl: WebGL2RenderingContext,
     time: number,
@@ -113,7 +129,8 @@ export function createLifeRenderer(): ShaderRenderer {
     mouseStr: number,
     dropX: number,
     dropY: number,
-    cfg: LifeConfig
+    cfg: LifeConfig,
+    audio: ResolvedAudio
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
@@ -136,6 +153,18 @@ export function createLifeRenderer(): ShaderRenderer {
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform1f(simU.uMouseStrength, mouseStr);
     gl.uniform2f(simU.uDropPos, dropX, dropY);
+    // 0.5 is the historical deposit gain: the sim used a hardcoded
+    // `newState += 0.5 * exp(...)` before the drop was parameterised, and the
+    // Gaussian radius is unchanged, so this reproduces the original mass
+    // exactly. Audio lifts it slightly so a beat-seeded colony starts denser
+    // and survives its first few relaxation steps.
+    gl.uniform1f(simU.uDropGain, 0.5 * (1 + audio.energy * 0.4 * audio.active));
+
+    // The sim pass reads u_energy (to shift the birth/death thresholds within
+    // their stable band) and u_beatPhase (to pace the relaxation step), so the
+    // block must be uploaded here as well as on the display pass — a program's
+    // uniforms are per-program state.
+    uploadAudioUniforms(gl, simU, audio);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
@@ -178,10 +207,16 @@ export function createLifeRenderer(): ShaderRenderer {
         return;
 
       const cfg = config as LifeConfig;
-      const amp = audio?.amplitude ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+      // Smoothed, not raw: `amplitude` at frame rate is noisy enough to read
+      // as jitter, and this value reaches colour and step count.
+      const amp = a.level;
 
-      // Gentle speed boost with audio (up to +0.15 extra steps)
-      const audioSpeedBoost = audio?.active ? amp * 0.15 : 0;
+      // Step count rises with the slow macro envelope rather than instantaneous
+      // amplitude. Sim steps are integer, so a jittery input would make the
+      // simulation rate flicker between 2 and 3 steps frame to frame.
+      const audioSpeedBoost = a.energy * 0.5 * a.active;
       const steps = Math.max(
         1,
         Math.min(4, Math.round(cfg.speed + audioSpeedBoost))
@@ -196,7 +231,7 @@ export function createLifeRenderer(): ShaderRenderer {
         const burst = clickBursts[i];
         if (burst.frames < 5) {
           const str = 2.0 * (1.0 - burst.frames / 5.0);
-          stepSim(gl, time, burst.x, burst.y, true, str, -10, -10, cfg);
+          stepSim(gl, time, burst.x, burst.y, true, str, -10, -10, cfg, a);
           burst.frames++;
         } else {
           clickBursts.splice(i, 1);
@@ -206,9 +241,9 @@ export function createLifeRenderer(): ShaderRenderer {
       // Ambient deposits — gently more frequent with audio
       let dropX = -10.0;
       let dropY = -10.0;
-      const effectiveInterval = audio?.active
-        ? Math.max(1.5, nextAmbientInterval - amp * 1.0)
-        : nextAmbientInterval;
+      const effectiveInterval = a.silent
+        ? nextAmbientInterval
+        : Math.max(1.5, nextAmbientInterval - a.energy * 1.5);
       if (time - lastAmbientTime > effectiveInterval) {
         lastAmbientTime = time;
         nextAmbientInterval = 3.0 + Math.random() * 2.0;
@@ -216,18 +251,31 @@ export function createLifeRenderer(): ShaderRenderer {
         dropY = 0.15 + Math.random() * 0.7;
       }
 
-      // Gentle bass-driven life deposits
-      if (audio?.active && (audio.bass ?? 0) > 0.5) {
+      // Beat-seeded colonies — one deposit per detected onset.
+      //
+      // This replaces a `bass > 0.5` gate. Because that tested the RAW band it
+      // stayed true for the whole duration of any sustained bass note, so it
+      // deposited on every frame — up to 60 colonies a second, which saturates
+      // the field to a flat mass rather than seeding life. Keying on
+      // `onsetCount` fires exactly once per onset, and the analyser already
+      // refractory-gates onsets to at most one per 180ms.
+      //
+      // The position comes from `beatSeed` (re-rolled per onset) rather than
+      // Math.random(), so a colony lands somewhere musically determined and
+      // consecutive beats walk around the field instead of scattering.
+      if (!a.silent && a.onsetCount !== lastOnsetSeen) {
+        lastOnsetSeen = a.onsetCount;
         stepSim(
           gl,
           time,
-          0.2 + Math.random() * 0.6,
-          0.2 + Math.random() * 0.6,
+          0.2 + a.beatSeed * 0.6,
+          0.2 + ((a.beatSeed * 7.31) % 1.0) * 0.6,
           true,
-          0.5 + (audio.bass ?? 0) * 0.5,
+          0.5 + a.bass * 0.5,
           -10,
           -10,
-          cfg
+          cfg,
+          a
         );
       }
 
@@ -243,7 +291,8 @@ export function createLifeRenderer(): ShaderRenderer {
           isFirst ? 1.0 : 0.0,
           isFirst ? dropX : -10.0,
           isFirst ? dropY : -10.0,
-          cfg
+          cfg,
+          a
         );
       }
 
@@ -256,10 +305,13 @@ export function createLifeRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      // Immersive colour cycling
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      // Immersive colour cycling. Kept for this preset: SmoothLife's palette
+      // is a state ramp (dead → alive → accent), not a depth or structural
+      // cue, so drifting the stops reads as the organisms changing hue rather
+      // than as the depth ordering breaking down.
+      const colours = a.silent
+        ? cfg.colors
+        : computeImmersiveColours(time, cfg.colors, amp);
 
       gl.uniform3fv(displayU.uColorPrimary, colours.primary);
       gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
@@ -267,8 +319,12 @@ export function createLifeRenderer(): ShaderRenderer {
       gl.uniform3fv(displayU.uBgColor, colours.bg);
       gl.uniform1f(displayU.uIntensity, cfg.intensity);
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, audio?.active ? 0.0 : cfg.vignette);
+      // Faded by the audio ramp rather than switched, so entering immersive
+      // mode is a glide instead of the vignette popping off on the first beat.
+      gl.uniform1f(displayU.uVignette, cfg.vignette * (1 - a.active));
       gl.uniform1f(displayU.uTime, time);
+
+      uploadAudioUniforms(gl, displayU, a);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
@@ -317,8 +373,22 @@ export function createLifeRenderer(): ShaderRenderer {
         speed: 2,
       };
 
+      // Warm-up runs silent: this is bootstrapping the field, not playback, so
+      // reacting to whatever was playing at reset would bake a transient into
+      // the initial condition.
       for (let w = 0; w < 40; w++) {
-        stepSim(gl, 0, -10.0, -10.0, false, 0, -10.0, -10.0, defaultCfg);
+        stepSim(
+          gl,
+          0,
+          -10.0,
+          -10.0,
+          false,
+          0,
+          -10.0,
+          -10.0,
+          defaultCfg,
+          SILENT_AUDIO
+        );
       }
     },
 
