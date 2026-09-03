@@ -46,6 +46,34 @@ peak rate is `A*w`. Keep the sum of `A*w` across components under ~0.25 rad/s
 for a background. Above ~0.6 rad/s it reads as a camera move and starts
 competing with the hero text sitting on top of it.
 
+### 1.1b Interaction strength that grows with page uptime
+
+A third defect class, found late and worth looking for explicitly because no
+audit for "too fast" or "no audio" will surface it.
+
+`clouds` applied its pointer wind as:
+
+```glsl
+p += windShift * t * 10.0;   // t is unbounded
+```
+
+`windShift` is bounded and `10.0` is a constant, but `t` grows without limit —
+so the pointer's influence was roughly **18× stronger after ten minutes** than
+on arrival, on a page people leave open. Not jerk, not a missing signal: an
+interaction whose *strength* is a function of how long you have been looking.
+
+**The rule:** an interaction term (anything derived from `u_mouse`, `u_burst`,
+a click, a hover) may be multiplied by a **bounded** function of a clock —
+`sin(...)`, `drift2(...)`, a decaying exponential — but never by the raw clock
+itself. `film`'s `sin(mouseDist * 15.0 - t * 6.0) * u_burstStrength` is
+correct, because `t` sits inside the sine.
+
+A sweep of all 60 sources found exactly one instance, now fixed. Two
+independent detectors (statement-level, different heuristics) agreed on zero
+remaining true positives — but both are blind through a function boundary, so
+a shader that hides the multiply inside a helper would slip past. Check by
+reading when you touch an interaction term.
+
 ### 1.2 Motion that is GOOD — do not remove it
 
 The owner was specific: *"the ones that follow the most are pretty good, like
