@@ -84,7 +84,21 @@ packages/**/*.js.map
 .playwright-mcp/
 
 # Stripe MCP skills (auto-generated symlinks)
-skills/
+#
+# ANCHORED to the repo root, and `.pi/skills/` listed explicitly. This used to
+# be a bare `skills/`, which git matches at ANY depth — so it also swallowed
+# `.claude/skills/`. Sixteen skills there stayed tracked only because they
+# predate the rule (git keeps already-tracked files regardless of ignores),
+# while `denoise` and `triage` were invisible to every review.
+#
+# That is not cosmetic: `denoise/SKILL.md` and its audit agents GENERATE repo
+# content — they instructed agents to write `.skip`ped proof tests under
+# `packages/*/src/__denoise_proofs__/`. The user retired that pattern on
+# 2026-05-17, but because the instruction could not be reviewed it kept
+# regenerating the artefact; 54 files were still on `dev` months later, two
+# created as recently as 2026-09-02. A generator on an ignored path cannot be
+# fixed by a PR.
+/skills/
 skills-lock.json
 .agents/skills/stripe-*
 .agents/skills/upgrade-*
