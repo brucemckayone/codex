@@ -3534,6 +3534,10 @@ export class SubscriptionService extends BaseService {
   ): Promise<{ resolved: number; failed: number }> {
     let resolved = 0;
     let failed = 0;
+    // What transferPendingGroup ACTUALLY paid to this user's creator slices —
+    // the payout-released email must report this, not the pre-loop snapshot.
+    let creatorPaidCents = 0;
+    let creatorPaidCount = 0;
 
     // Query all unresolved payouts for this org that belong to the user
     // whose Connect account just became active.
@@ -3637,6 +3641,8 @@ export class SubscriptionService extends BaseService {
       );
       resolved += groupResult.resolved;
       failed += groupResult.failed;
+      creatorPaidCents += groupResult.creatorPaidCents;
+      creatorPaidCount += groupResult.creatorPaidCount;
     }
 
     this.obs.info('Pending payout resolution complete', {
@@ -3654,23 +3660,12 @@ export class SubscriptionService extends BaseService {
     // roll back or block the already-committed transfers.
     //
     // Gate on creator_payout rows ONLY — organization_fee rows are the org
-    // admin's slice, not the creator's personal earnings. The `resolved`
-    // counter above covers all payout types; we accumulate a separate creator-
-    // only counter from the pre-loop snapshot so the email amount matches what
-    // was actually transferred to the creator.
-    const resolvedCreatorPayoutCents = unresolvedPayouts
-      .filter(
-        (p) =>
-          p.userId === connectAccount.userId &&
-          p.payoutType === 'creator_payout'
-      )
-      .reduce((sum, p) => sum + p.amountCents, 0);
-    const resolvedCreatorPayouts = unresolvedPayouts.filter(
-      (p) =>
-        p.userId === connectAccount.userId && p.payoutType === 'creator_payout'
-    ).length;
-
-    if (resolvedCreatorPayouts > 0 && this.payoutMailer) {
+    // admin's slice, not the creator's personal earnings. Counted from what
+    // transferPendingGroup actually paid, NOT from the pre-loop snapshot:
+    // rows still under the aggregate min-transfer floor, or whose transfer
+    // failed, are skipped above — the old snapshot-based amount told creators
+    // money had been released when nothing moved.
+    if (creatorPaidCount > 0 && this.payoutMailer) {
       try {
         const [creatorRow] = await this.db
           .select({ email: users.email })
@@ -3679,7 +3674,7 @@ export class SubscriptionService extends BaseService {
           .limit(1);
 
         if (creatorRow?.email) {
-          const amountFormatted = `£${(resolvedCreatorPayoutCents / 100).toFixed(2)}`;
+          const amountFormatted = `£${(creatorPaidCents / 100).toFixed(2)}`;
           const dashboardUrl = this.webAppUrl
             ? `${this.webAppUrl}/studio/earnings`
             : '/studio/earnings';
@@ -3693,7 +3688,7 @@ export class SubscriptionService extends BaseService {
             data: {
               creatorName: creatorRow.email, // fallback; template can resolve display name
               amountFormatted,
-              payoutCount: resolvedCreatorPayouts,
+              payoutCount: creatorPaidCount,
               dashboardUrl,
             },
           });
@@ -3703,7 +3698,7 @@ export class SubscriptionService extends BaseService {
         this.obs.warn('payout-released notification dispatch failed', {
           organizationId: orgId,
           stripeAccountId,
-          resolvedCreatorPayouts,
+          creatorPaidCount,
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -3736,9 +3731,17 @@ export class SubscriptionService extends BaseService {
     orgId: string | null,
     stripeAccountId: string,
     userId: string
-  ): Promise<{ resolved: number; failed: number }> {
+  ): Promise<{
+    resolved: number;
+    failed: number;
+    /** creator_payout rows that actually transitioned pending→paid here */
+    creatorPaidCents: number;
+    creatorPaidCount: number;
+  }> {
     let resolved = 0;
     let failed = 0;
+    let creatorPaidCents = 0;
+    let creatorPaidCount = 0;
 
     const payoutFees = await this.resolvePayoutFees(
       orgId,
@@ -3759,7 +3762,7 @@ export class SubscriptionService extends BaseService {
           minTransferCents: payoutFees.minTransferCents,
         }
       );
-      return { resolved: 0, failed: 0 };
+      return { resolved: 0, failed: 0, creatorPaidCents: 0, creatorPaidCount: 0 };
     }
 
     for (const payout of group) {
@@ -3805,6 +3808,10 @@ export class SubscriptionService extends BaseService {
           .where(eq(payouts.id, payout.id));
 
         resolved++;
+        if (payout.payoutType === 'creator_payout') {
+          creatorPaidCents += payout.amountCents;
+          creatorPaidCount++;
+        }
       } catch (error) {
         failed++;
         this.obs.error('Failed to resolve pending payout', {
@@ -3819,7 +3826,7 @@ export class SubscriptionService extends BaseService {
       }
     }
 
-    return { resolved, failed };
+    return { resolved, failed, creatorPaidCents, creatorPaidCount };
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────

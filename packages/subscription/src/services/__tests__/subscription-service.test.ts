@@ -61,6 +61,7 @@ import {
   TierNotFoundError,
 } from '../../errors';
 import { SubscriptionService } from '../subscription-service';
+import type { FeeConfigService } from '../fee-config-service';
 
 describe('SubscriptionService', () => {
   let db: ReturnType<typeof setupTestDatabase>;
@@ -8356,6 +8357,58 @@ describe('SubscriptionService', () => {
         expect(params.data.payoutCount).toBe(2);
         expect(params.data.amountFormatted).toMatch(/£/);
         expect(params.data.dashboardUrl).toMatch(/earnings/);
+      });
+
+      it('does NOT fire when every transfer was skipped below the min-transfer floor', async () => {
+        // Regression guard: the notification gate used to count pending rows
+        // from the PRE-loop snapshot, so a creator whose rows were all skipped
+        // (aggregate total under minTransferCents) still received a
+        // "payout released" email quoting money that never moved.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-floor-skip'
+        );
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        });
+
+        const floorStub = {
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 100_000, // far above the 500p row
+        };
+        const feeConfig = {
+          getFeesForCreator: vi.fn(async () => floorStub),
+          getFeesForOrg: vi.fn(async () => floorStub),
+          getFeesPlatform: vi.fn(async () => floorStub),
+        } as unknown as FeeConfigService;
+        const payoutMailer = vi.fn();
+        const serviceWithFloor = new SubscriptionService(
+          { db, environment: 'test' as const, payoutMailer, feeConfig },
+          stripe
+        );
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const result = await serviceWithFloor.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        // The group was skipped, nothing transferred, nothing resolved...
+        expect(result.resolved).toBe(0);
+        expect(transferSpy).not.toHaveBeenCalled();
+        // ...so the creator must NOT be told money was released.
+        expect(payoutMailer).not.toHaveBeenCalled();
       });
 
       it('does NOT fire when resolved === 0 (no payouts drained)', async () => {
