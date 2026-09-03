@@ -1,15 +1,24 @@
 /**
- * Flux renderer — Magnetic dipole field lines.
+ * Flux renderer — magnetic field lines around a set of poles.
  *
  * Single-pass: one program + fullscreen quad, no FBOs.
- * Mouse interaction: instant response (no internal lerp).
- * Mouse acts as a movable pole — positive on hover, flips on click (burst).
+ * The pointer acts as a movable pole — positive on hover, flipping polarity
+ * on click through the burst ramp.
  *
- * Configurable: poles, lineDensity, lineWidth, strength, speed.
- * Brand colors as uniforms (primary, secondary, accent, bg).
+ * Audio integration follows the shared substrate documented in
+ * `../audio-uniforms`: one `createAudioFade()` and one `createDeltaClock()`
+ * per renderer instance, resolved once per frame, uploaded with
+ * `uploadAudioUniforms()`. No new config keys — audio is runtime state.
+ *
+ * `u_poles` is an int uniform and uses `gl.uniform1i()`.
  */
 
-import { computeImmersiveColours } from '../immersive-colours';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { FluxConfig, ShaderConfig } from '../shader-config';
 import { FLUX_FRAG } from '../shaders/flux.frag';
@@ -35,10 +44,11 @@ const UNIFORM_NAMES = [
   'u_lineDensity',
   'u_lineWidth',
   'u_strength',
-  'u_speed',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type FluxUniform = (typeof UNIFORM_NAMES)[number];
@@ -55,10 +65,54 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/**
+ * Pointer-pole time constant (seconds), applied to the pointer position and to
+ * its active weight.
+ *
+ * The old renderer uploaded `mouse.active ? 1 : 0` and snapped the position to
+ * the centre on the same frame. A pole appearing or vanishing instantly
+ * reconfigures the entire field in one frame — the single most jarring motion
+ * this preset had, and it fired every time the pointer crossed the canvas
+ * edge. Damping the weight fades the pole in and out instead.
+ */
+const MOUSE_TAU_SEC = 0.35;
+
+/**
+ * Idle pacing rate, in clock-units per second.
+ *
+ * 1.0 so that, with the speed setting applied to the integration rate, the
+ * clock equals `u_time * speed` at idle and the poles wander at the pace the
+ * old orbit had.
+ */
+const IDLE_CLOCK_RATE = 1.0;
+
+/**
+ * Upper bound on the differentiated musical clock, in clock-units per second.
+ *
+ * `beatPhase` advances at 0.35..1.5/s in normal operation, but the render loop
+ * pauses (hidden tab, preset switch, reduced motion) while the analyser clamps
+ * its own dt rather than freezing, so one frame after a long pause can show a
+ * large phase jump. Differentiating that unclamped spikes the rate and darts
+ * every pole exactly once.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createFluxRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<FluxUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  // Damped pointer state — position and active weight.
+  let lerpedMouse = { x: 0.5, y: 0.5 };
+  let lerpedActive = 0;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+
+  /** Integrated pacing clock. Monotone — see u_clock in flux.frag.ts. */
+  let clock = 0;
+  /** Previous `beatPhase` sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -67,6 +121,9 @@ export function createFluxRenderer(): ShaderRenderer {
 
       uniforms = getUniforms(gl, program, UNIFORM_NAMES);
       quad = createQuad(gl);
+
+      lerpedMouse = { x: 0.5, y: 0.5 };
+      lerpedActive = 0;
 
       return true;
     },
@@ -83,34 +140,58 @@ export function createFluxRenderer(): ShaderRenderer {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as FluxConfig;
-      const amp = audio?.amplitude ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
 
-      // Flux uses mouse directly — no internal lerp (instant response)
-      const mx = mouse.active ? mouse.x : 0.5;
-      const my = mouse.active ? mouse.y : 0.5;
+      // Frame-rate-independent pointer damping, position and weight together.
+      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
+      const targetX = mouse.active ? mouse.x : 0.5;
+      const targetY = mouse.active ? mouse.y : 0.5;
+      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
+      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
+      lerpedActive += ((mouse.active ? 1 : 0) - lerpedActive) * k;
+
+      // Integrate the pacing clock by blending RATES, never positions. See the
+      // u_clock comment in flux.frag.ts: beatPhase starts at 0 while u_time
+      // does not, so crossfading the positions rewinds every pole along its
+      // path the moment playback starts.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        // The first audio frame has no previous sample to difference against.
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
       quad.bind(program);
 
-      // Time
       gl.uniform1f(uniforms.u_time, time);
       gl.uniform2f(uniforms.u_resolution, width, height);
-      gl.uniform2f(uniforms.u_mouse, mx, my);
-      gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
+      gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
+      gl.uniform1f(uniforms.u_mouseActive, lerpedActive);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength);
 
-      // Immersive colour cycling (shared utility)
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      // Brand colours as configured rather than through
+      // computeImmersiveColours(): the four-stop ramp encodes field magnitude,
+      // so cycling the stops fights the structural cue they exist to give.
+      // Audio moves colour through u_centroid, which slides the ramp position.
+      const c = cfg.colors;
+      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
+      gl.uniform3fv(uniforms.u_bgColor, c.bg);
 
-      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
-      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
-
-      // Preset-specific config with defaults
       gl.uniform1i(uniforms.u_poles, cfg.poles ?? DEFAULTS.poles);
       gl.uniform1f(
         uniforms.u_lineDensity,
@@ -118,13 +199,21 @@ export function createFluxRenderer(): ShaderRenderer {
       );
       gl.uniform1f(uniforms.u_lineWidth, cfg.lineWidth ?? DEFAULTS.lineWidth);
       gl.uniform1f(uniforms.u_strength, cfg.strength ?? DEFAULTS.strength);
-      gl.uniform1f(uniforms.u_speed, (cfg.speed ?? DEFAULTS.speed) + amp * 0.2);
+      // No u_speed uniform: speed scales the CPU-integrated clock instead, so
+      // the shader never sees it. Uploading a stripped uniform would be a
+      // silent no-op and would imply the shader still reads it.
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(uniforms.u_clock, clock);
+      // Vignette reads as a frame around a hero but as a tunnel in fullscreen
+      // immersive mode, so it fades with the audio ramp. Switching it off on
+      // `audio.active` (the old behaviour) popped on the first beat.
       gl.uniform1f(
         uniforms.u_vignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
+
+      uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -136,7 +225,12 @@ export function createFluxRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
-      // No simulation state to reset for single-pass presets.
+      lerpedMouse = { x: 0.5, y: 0.5 };
+      lerpedActive = 0;
+      // Rewind the integrated clock: reset() means "start fresh", and leaving
+      // it running would resume the poles mid-wander.
+      clock = 0;
+      prevBeatPhase = -1;
     },
 
     destroy(gl: WebGL2RenderingContext): void {
