@@ -6,7 +6,12 @@
  * a CSS generic fallback for rendering option labels before the font loads.
  */
 
-type FontCategory = 'sans-serif' | 'serif' | 'display' | 'handwriting';
+type FontCategory =
+  | 'sans-serif'
+  | 'serif'
+  | 'monospace'
+  | 'display'
+  | 'handwriting';
 
 interface FontOption {
   /** Google Fonts family name (e.g. 'Playfair Display') */
@@ -23,6 +28,7 @@ interface FontOption {
 export const CATEGORY_LABELS: Record<FontCategory, string> = {
   'sans-serif': 'Sans Serif',
   serif: 'Serif',
+  monospace: 'Monospace',
   display: 'Display',
   handwriting: 'Handwriting & Script',
 };
@@ -32,6 +38,7 @@ export const HEADING_CATEGORY_ORDER: readonly FontCategory[] = [
   'display',
   'sans-serif',
   'serif',
+  'monospace',
   'handwriting',
 ];
 
@@ -39,6 +46,7 @@ export const HEADING_CATEGORY_ORDER: readonly FontCategory[] = [
 export const BODY_CATEGORY_ORDER: readonly FontCategory[] = [
   'sans-serif',
   'serif',
+  'monospace',
 ];
 
 // ── Catalog ────────────────────────────────────────────────────────────────
@@ -320,6 +328,34 @@ const FONT_CATALOG: readonly FontOption[] = [
     family: 'Satisfy',
     category: 'handwriting',
     fallback: 'cursive',
+    bodyFriendly: false,
+  },
+
+  // ─── Monospace ───────────────────────────────────────────────────────
+  // Added because the Terminal and Blueprint presets already selected
+  // JetBrains Mono / IBM Plex Sans, which the catalog did not carry. The
+  // fonts LOADED fine (loadGoogleFont builds its URL from the family name,
+  // not from this catalog) but the picker could not represent the org's own
+  // saved state: applying Terminal and opening the font picker showed no
+  // selection at all. A `monospace` direction is also a real brand need for
+  // developer-facing orgs, so the fix is to carry the category rather than to
+  // downgrade those presets to a sans.
+  {
+    family: 'JetBrains Mono',
+    category: 'monospace',
+    fallback: 'monospace',
+    bodyFriendly: true,
+  },
+  {
+    family: 'IBM Plex Mono',
+    category: 'monospace',
+    fallback: 'monospace',
+    bodyFriendly: true,
+  },
+  {
+    family: 'Space Mono',
+    category: 'monospace',
+    fallback: 'monospace',
     bodyFriendly: false,
   },
 ];

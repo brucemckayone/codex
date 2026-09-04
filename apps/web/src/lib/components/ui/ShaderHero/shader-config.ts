@@ -491,8 +491,17 @@ export type ShaderConfig =
   | SporeConfig
   | NoneConfig;
 
-/** Default values matching the spec in 14-final-preset-catalog.md */
-const DEFAULTS = {
+/**
+ * Default values matching the spec in 14-final-preset-catalog.md.
+ *
+ * EXPORTED because the brand-editor preset axes anchor to it
+ * (`lib/brand-editor/preset-axes.ts`). A preset that wanted a "calm" shader
+ * used to hand-author an absolute — and guessed: shipped values sat 13x above
+ * `cloudsSpeed` and rounded `nebulaDepth` from 8 down to 1. Atmospheres now
+ * declare a MULTIPLIER on the number tuned here, so a retune in this file
+ * flows through to every preset instead of leaving them stranded.
+ */
+export const DEFAULTS = {
   preset: 'none' as ShaderPresetId,
   intensity: 0.65,
   grain: 0.025,
