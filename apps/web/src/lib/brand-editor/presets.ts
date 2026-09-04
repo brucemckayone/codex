@@ -932,8 +932,31 @@ const DEFINITIONS: readonly PresetDefinition[] = [
   },
 ];
 
+/**
+ * The `/* @__PURE__ *​/` annotation is load-bearing, not decoration.
+ *
+ * This used to be a plain literal array, which Rollup could shake out of the
+ * `$lib/brand-editor` barrel for any importer that did not name it. Composing
+ * turned it into a module-scope CALL, and Rollup cannot prove `.map(build)` is
+ * side-effect free — so it became a retained side effect, dragging `build` →
+ * `composePreset` → `preset-axes` → `shader-config` into every chunk that
+ * touches the barrel.
+ *
+ * That is not hypothetical: the barrel is imported by 26 files, two of them
+ * public routes. `(auth)/+layout.svelte` imports it for
+ * `tokenOverridesToCssVars` / `parseDarkColorOverrides` alone, and measuring
+ * the built manifest showed route node 2 — the layout behind /login,
+ * /register, /forgot-password, /reset-password and /verify-email — statically
+ * reaching the 46.7KB chunk these presets live in.
+ *
+ * The annotation tells Rollup the call is safe to drop when nothing reads
+ * `BRAND_PRESETS`, restoring the shakeability the literal had. Verified by
+ * rebuilding and re-running the reachability walk over
+ * `.svelte-kit/output/client/.vite/manifest.json`; keep it on any future
+ * module-scope composition here.
+ */
 export const BRAND_PRESETS: readonly CategorizedPreset[] =
-  DEFINITIONS.map(build);
+  /* @__PURE__ */ DEFINITIONS.map(build);
 
 /** Category display order for the guided flow and the presets level. */
 export const PRESET_CATEGORY_ORDER: readonly PresetCategory[] = [
