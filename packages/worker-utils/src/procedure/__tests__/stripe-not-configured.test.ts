@@ -183,7 +183,7 @@ describe('service registry with NO Stripe key bound (WP-12 no-regression)', () =
   it.each(
     stripeBackedGetters
   )('constructs ctx.services.%s without throwing', async (name) => {
-    const { registry, cleanup } = createServiceRegistry(
+    const { registry, cleanup } = await createServiceRegistry(
       envWithoutStripeKey(),
       undefined,
       'org-1'
@@ -200,7 +200,7 @@ describe('service registry with NO Stripe key bound (WP-12 no-regression)', () =
   });
 
   it('throws the TYPED error the moment a Stripe call is actually attempted', async () => {
-    const { registry, cleanup } = createServiceRegistry(
+    const { registry, cleanup } = await createServiceRegistry(
       envWithoutStripeKey(),
       undefined,
       'org-1'

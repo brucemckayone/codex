@@ -117,7 +117,7 @@ export function procedure<
 
     // Create service registry with cleanup
     // Note: organizationId may be undefined initially, updated after policy enforcement
-    let registry: ReturnType<typeof createServiceRegistry>['registry'];
+    let registry: Awaited<ReturnType<typeof createServiceRegistry>>['registry'];
     let cleanup: (() => Promise<void>) | undefined;
 
     // Handler-registered background work (ctx.background). Cleanup is chained
@@ -137,7 +137,10 @@ export function procedure<
       // ====================================================================
       // Step 2: Create Service Registry (after org context is resolved)
       // ====================================================================
-      const registryResult = createServiceRegistry(
+      // Awaited: the registry resolves a Hyperdrive client here (which
+      // dynamically imports node-postgres) BEFORE returning, because its
+      // service getters are synchronous.
+      const registryResult = await createServiceRegistry(
         c.env,
         obs,
         organizationId,

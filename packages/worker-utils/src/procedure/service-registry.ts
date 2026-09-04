@@ -33,7 +33,11 @@ import {
   ContentService,
   MediaItemService,
 } from '@codex/content';
-import { createDbClient, createPerRequestDbClient } from '@codex/database';
+import {
+  createDbClient,
+  createHyperdriveDbClient,
+  createPerRequestDbClient,
+} from '@codex/database';
 import { IdentityService } from '@codex/identity';
 import { ImageProcessingService } from '@codex/image-processing';
 import {
@@ -232,15 +236,46 @@ export function selectHyperdrive(
   return env.HYPERDRIVE_UNCACHED;
 }
 
-export function createServiceRegistry(
+export async function createServiceRegistry(
   env: Bindings,
   _obs?: ObservabilityClient,
   organizationId?: string,
   executionCtx?: ExecutionContext,
   cachePreset?: CachePresetName
-): ServiceRegistryResult {
+): Promise<ServiceRegistryResult> {
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
+
+  // Shared per-request DB client (for services needing transactions).
+  // Declared HERE, before the eager Hyperdrive resolution below, because the
+  // resolution writes into `_hyperdriveDb`.
+  let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
+  let _hyperdriveDb:
+    | Awaited<ReturnType<typeof createHyperdriveDbClient>>
+    | undefined;
+
+  // Hyperdrive (Codex-s1i7h). Resolved HERE, before the registry is returned,
+  // because the service getters are synchronous: by the time any of them runs,
+  // the client must already exist. createHyperdriveDbClient dynamically
+  // imports node-postgres, so this await is also what keeps `pg` out of every
+  // environment without a Hyperdrive binding — including `env.test`, where a
+  // static import failed PR #487's first CI run at worker boot.
+  //
+  // A Pool constructs without dialing; the connection opens on first query,
+  // so resolving eagerly costs nothing on requests that never transact. When
+  // no binding serves this route this block is skipped entirely and the Neon
+  // path below stays lazy — which is also the rollback lever: delete the
+  // binding from a wrangler config and the worker reverts to Neon with no
+  // code change.
+  const hyperdriveOverride = selectHyperdrive(
+    env,
+    cachePreset,
+    _obs
+  )?.connectionString;
+  if (hyperdriveOverride) {
+    _hyperdriveDb = await createHyperdriveDbClient(hyperdriveOverride);
+    cleanupFns.push(_hyperdriveDb.cleanup);
+  }
 
   /**
    * `waitUntil` handed to every `VersionedCache` built here (Codex-e32xz).
@@ -327,25 +362,22 @@ export function createServiceRegistry(
   let _courseInsights: CourseInsightsService | undefined;
   let _agreements: AgreementService | undefined;
 
-  // Shared per-request DB client (for services needing transactions)
-  let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
-
+  // Shared per-request DB client (for services needing transactions).
+  // TWO SHAPES, ONE FUNCTION: when a Hyperdrive binding serves this route the
+  // client is created (async) at registry creation into `_hyperdriveDb`, and
+  // getSharedDb just returns it. Otherwise the Neon client stays LAZY and
+  // SYNC as it has always been — constructed on first use, so requests that
+  // never touch a transactional service never pay for a Pool. (Both holders
+  // are declared above, next to the eager resolution that writes the first
+  // one.)
   /**
    * Get or create shared per-request DB client
    * Reuses single WebSocket connection for all services that need transactions
    */
   function getSharedDb() {
+    if (_hyperdriveDb) return _hyperdriveDb.db;
     if (!_sharedDbClient) {
-      // Hyperdrive (Codex-s1i7h). Passing a connection string ALSO switches
-      // the driver to node-postgres — see createPerRequestDbClient. When no
-      // binding is declared this is `undefined` and the client resolves
-      // DATABASE_URL through the Neon driver exactly as before, which is the
-      // rollback lever: removing the binding from a wrangler config reverts a
-      // worker to Neon with no code change.
-      _sharedDbClient = createPerRequestDbClient(
-        env,
-        selectHyperdrive(env, cachePreset, _obs)?.connectionString
-      );
+      _sharedDbClient = createPerRequestDbClient(env);
       cleanupFns.push(_sharedDbClient.cleanup);
     }
     return _sharedDbClient.db;

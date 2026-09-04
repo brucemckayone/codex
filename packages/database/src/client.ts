@@ -3,28 +3,6 @@ import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { sql } from 'drizzle-orm';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
 import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
-import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
-// DO NOT DELETE THIS IMPORT. It has no bindings and looks unused; removing it
-// ships a worker that cannot open a database connection.
-//
-// `drizzle({ connection })` builds the `pg` Pool itself, so nothing in this
-// file references a `pg` symbol. Without a STATIC import here, esbuild bundles
-// pg's pool and protocol code but NOT its socket layer, and the built worker
-// contains neither `cloudflare:sockets` nor a `net`/`tls` require. Measured on
-// workers/organization-api, `wrangler deploy --env production --dry-run`:
-//
-//   without this line:  cloudflare:sockets 0   net/tls requires 0
-//   with this line:     cloudflare:sockets 1   net/tls requires 2
-//
-// It is a bare side-effect import rather than `import { Pool } from 'pg'`
-// because naming a symbol would need `@types/pg`, and adding that
-// devDependency made pnpm re-resolve peers and downgrade vite 7.2.4 -> 6.4.1
-// for vite-plugin-dts and neon-testing. This form costs no dependency and no
-// lockfile change.
-//
-// Guarded by client-pg-socket-import.test.ts, because a comment cannot stop a
-// tidy-up commit and the failure would only appear in production.
-import 'pg';
 import ws from 'ws';
 import { DbEnvConfig, type DbEnvVars } from './config/env.config';
 import * as schema from './schema';
@@ -240,12 +218,8 @@ export const dbWs = createDbWsProxy();
  * This factory creates a fresh Pool instance that MUST be closed before the request completes.
  *
  * @param env - Environment variables containing DATABASE_URL
- * @param connectionStringOverride - A Hyperdrive binding's `connectionString`
- *   (Codex-s1i7h). Passing it ALSO SWITCHES THE DRIVER, and that is not
- *   optional — see {@link createPerRequestDbClient}'s body. An earlier version
- *   of this comment claimed Hyperdrive was "a URL swap and not a
- *   client-construction change"; that was wrong, and believing it would ship a
- *   worker that cannot reach its database.
+ * Hyperdrive callers use {@link createHyperdriveDbClient} instead — a
+ *   Hyperdrive `connectionString` cannot ride the Neon driver at all.
  * @returns Object with db client and cleanup function
  *
  * @example
@@ -267,67 +241,13 @@ export const dbWs = createDbWsProxy();
  * ctx.waitUntil(cleanup()); // Cleanup happens after response sent
  * return result;
  */
-export function createPerRequestDbClient(
-  env: DbEnvVars,
-  connectionStringOverride?: string
-): {
+export function createPerRequestDbClient(env: DbEnvVars): {
   db: ReturnType<typeof drizzleWs<typeof schema>>;
   cleanup: () => Promise<void>;
 } {
-  // HYPERDRIVE REQUIRES A DIFFERENT DRIVER, NOT A DIFFERENT URL.
+  // NEON ONLY. The Hyperdrive path lives in createHyperdriveDbClient below,
+  // and the split is not cosmetic — see that factory's first comment block.
   //
-  // `@neondatabase/serverless` reaches Neon BY HOSTNAME: the HTTP driver POSTs
-  // to `https://<host>/sql` and the Pool opens a WebSocket to Neon's proxy. A
-  // Hyperdrive `connectionString` names a workerd-internal TCP socket, which
-  // speaks the raw PostgreSQL wire protocol and neither of those transports.
-  // Handing it to the Neon Pool produces a worker that cannot reach its
-  // database at all. Cloudflare's own Hyperdrive guide installs `pg` for
-  // exactly this reason, and documents no serverless-driver path.
-  //
-  // THIS IS INVISIBLE IN LOCAL DEV. `wrangler dev` resolves a Hyperdrive
-  // binding by handing back a DIRECT connection string to the origin database,
-  // so the Neon driver would work locally and fail only once deployed. A green
-  // local suite is not evidence here (Codex-s1i7h) — verify with
-  // `wrangler dev --remote` or a deployment, via the `cacheStatus` metric.
-  if (connectionStringOverride) {
-    // Drizzle builds the `pg` Pool from the connection string, so this file
-    // never imports `pg` directly. That is not a style choice: adding
-    // `@types/pg` as a devDependency made pnpm re-resolve peers and quietly
-    // DOWNGRADED vite 7.2.4 -> 6.4.1 for vite-plugin-dts and neon-testing in
-    // the lockfile. Reaching the driver through drizzle's own typings needs no
-    // new dependency and no lockfile change at all.
-    //
-    // No neonConfig here, deliberately: the WebSocket-proxy settings it
-    // applies are Neon-transport-only and mean nothing to a TCP socket.
-    const db = drizzleNodePg({
-      connection: connectionStringOverride,
-      schema,
-    });
-
-    // Same contract as the Neon pool below — an unhandled 'error' event on a
-    // pg Pool is an uncaught exception, which would take out the isolate
-    // rather than the one request.
-    db.$client.on('error', (err: Error) =>
-      dbObs.error('Per-request Hyperdrive pool error', { error: err.message })
-    );
-
-    return {
-      // The declared return type names the neon-serverless adapter because 39
-      // files consume this factory and none of them names a driver. The cast
-      // is sound for the surface they use: `NodePgDatabase` and
-      // `NeonDatabase` are both `PgDatabase`, the query builders are
-      // identical, `.transaction()` is a real BEGIN/COMMIT on both, and both
-      // return pg-shaped `{ rows }` from `.execute()` (checked: no production
-      // code reads a raw execute result). It is NOT sound for the neon-HTTP
-      // adapter, whose `.execute()` returns a bare array — which is why this
-      // factory, not `getDbHttp`, is the Hyperdrive entry point.
-      db: db as unknown as ReturnType<typeof drizzleWs<typeof schema>>,
-      cleanup: async () => {
-        await db.$client.end();
-      },
-    };
-  }
-
   // Apply Neon configuration (WebSocket proxy settings for local dev)
   // This must happen before creating the Pool
   DbEnvConfig.applyNeonConfig(neonConfig, env);
@@ -354,6 +274,70 @@ export function createPerRequestDbClient(
   };
 
   return { db, cleanup };
+}
+
+/**
+ * Per-request database client through a Hyperdrive binding (Codex-s1i7h).
+ *
+ * ASYNC on purpose, and so is the dynamic import inside — those two facts are
+ * the whole design:
+ *
+ * HYPERDRIVE REQUIRES A DIFFERENT DRIVER, NOT A DIFFERENT URL.
+ * `@neondatabase/serverless` reaches Neon BY HOSTNAME: the HTTP driver POSTs
+ * to `https://<host>/sql` and the Pool opens a WebSocket to Neon's proxy. A
+ * Hyperdrive `connectionString` names a workerd-internal TCP socket speaking
+ * the raw PostgreSQL wire protocol, which neither transport can use. An
+ * earlier comment here claimed Hyperdrive was "a URL swap and not a
+ * client-construction change"; that was wrong, and this factory exists
+ * because of it. Cloudflare's own Hyperdrive guide installs `pg` and
+ * documents no serverless-driver path.
+ *
+ * THE IMPORT IS DYNAMIC BECAUSE A STATIC ONE BREAKS EVERY OTHER ENVIRONMENT.
+ * This package's vite library build externalizes `pg`, so a static
+ * `import 'pg'` (or a static import of `drizzle-orm/node-postgres`, which
+ * imports pg) lands in the built dist and is evaluated by EVERY consumer at
+ * module load — including workers under `env.test` and packages under
+ * vitest, which have no Hyperdrive binding and never asked for this driver.
+ * Under both loaders pg's CJS `require('events')` resolves to a stub whose
+ * `EventEmitter` is undefined, and `class Query extends EventEmitter` throws
+ * `Class extends value undefined is not a constructor or null`. That is
+ * exactly how PR #487's first CI run failed: organization-service.test.ts
+ * and the e2e auth worker both died at import time, with `nodejs_compat`
+ * enabled, in environments that never touch Hyperdrive. Dynamic import
+ * confines pg's evaluation to the one code path that needs it.
+ *
+ * RETURNS THE NEON-ADAPTER TYPE for the same reason
+ * `createPerRequestDbClient` does: consumers name no driver. The cast is
+ * sound for that surface — `NodePgDatabase` and `NeonDatabase` are both
+ * `PgDatabase`, the query builders are identical, `.transaction()` is a real
+ * BEGIN/COMMIT on both, and both return pg-shaped `{ rows }` from
+ * `.execute()` (checked: no production code reads a raw execute result). It
+ * is NOT sound for the neon-HTTP adapter, whose `.execute()` returns a bare
+ * array — which is why this factory, not `getDbHttp`, is the entry point.
+ *
+ * THIS IS INVISIBLE IN LOCAL DEV. `wrangler dev` resolves a Hyperdrive
+ * binding by handing back a DIRECT connection string to the origin database,
+ * so neither pooling nor query caching runs locally. A green local suite is
+ * not evidence here (Codex-s1i7h) — verify with `wrangler dev --remote` or a
+ * deployment, via the `cacheStatus` metric (hit/miss/disabled/uncacheable).
+ */
+export async function createHyperdriveDbClient(
+  connectionString: string
+): Promise<{
+  db: ReturnType<typeof drizzleWs<typeof schema>>;
+  cleanup: () => Promise<void>;
+}> {
+  // DELEGATES to ./hyperdrive-client, loaded dynamically. Both halves of that
+  // indirection are load-bearing and documented at the top of that file: the
+  // DYNAMIC boundary keeps `pg` out of every consumer without a Hyperdrive
+  // binding (a static import here broke organization-service.test.ts and the
+  // e2e auth worker at module load — PR #487 run 33893639869), while the
+  // STATIC imports INSIDE that file are what make wrangler inject the `net`
+  // polyfill into the built worker (with inline dynamic imports the bundle
+  // contains pg's protocol code but no transport and cannot connect).
+  // Guarded by client-pg-socket-import.test.ts.
+  const { buildHyperdriveDbClient } = await import('./hyperdrive-client');
+  return buildHyperdriveDbClient(connectionString);
 }
 
 // ============================================================================
