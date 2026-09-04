@@ -176,6 +176,30 @@
     // Production environment
     "production": {
       "name": "media-api-production",
+      // Hyperdrive (Codex-s1i7h). PRODUCTION ONLY, on purpose: `wrangler dev`
+      // resolves a Hyperdrive binding to a DIRECT connection string, so
+      // binding it in `test` would exercise neither pooling nor query caching
+      // while quietly swapping the driver under the e2e suite. Local and CI
+      // keep the Neon driver; the swap is chosen by the binding's presence.
+      //
+      // Two configs, and which one a route gets is DERIVED from `policy.cache`
+      // by selectHyperdrive() in service-registry.ts — never hand-picked at
+      // the 199 procedure() call sites. Shared-cacheable presets
+      // (public/static/asset) ride the cached config; `private`, `fresh` and
+      // an absent preset ride the uncached one, because Hyperdrive holds reads
+      // for 60s + 15s stale-while-revalidate and does NOT purge on write.
+      //
+      // Origin is the NON-POOLED Neon host (no `-pooler`): Hyperdrive is
+      // itself the pooler, and pooling twice appears to work while failing
+      // unpredictably under load. Verified 2026-09-04 that the origin endpoint
+      // ep-withered-tree-abxyxdpc is the `production` branch (default=true).
+      //
+      // ROLLBACK IS THIS BLOCK: delete it and the worker resolves DATABASE_URL
+      // through the Neon driver again, with no code change.
+      "hyperdrive": [
+        { "binding": "HYPERDRIVE", "id": "71950e68c1b148de90caa839d6d3c597" },
+        { "binding": "HYPERDRIVE_UNCACHED", "id": "aa97ad16a236466380c1e6d25b3f8ba4" }
+      ],
       "durable_objects": {
         "bindings": [
           {

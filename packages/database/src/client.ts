@@ -3,6 +3,28 @@ import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { sql } from 'drizzle-orm';
 import { drizzle as drizzleHttp } from 'drizzle-orm/neon-http';
 import { drizzle as drizzleWs } from 'drizzle-orm/neon-serverless';
+import { drizzle as drizzleNodePg } from 'drizzle-orm/node-postgres';
+// DO NOT DELETE THIS IMPORT. It has no bindings and looks unused; removing it
+// ships a worker that cannot open a database connection.
+//
+// `drizzle({ connection })` builds the `pg` Pool itself, so nothing in this
+// file references a `pg` symbol. Without a STATIC import here, esbuild bundles
+// pg's pool and protocol code but NOT its socket layer, and the built worker
+// contains neither `cloudflare:sockets` nor a `net`/`tls` require. Measured on
+// workers/organization-api, `wrangler deploy --env production --dry-run`:
+//
+//   without this line:  cloudflare:sockets 0   net/tls requires 0
+//   with this line:     cloudflare:sockets 1   net/tls requires 2
+//
+// It is a bare side-effect import rather than `import { Pool } from 'pg'`
+// because naming a symbol would need `@types/pg`, and adding that
+// devDependency made pnpm re-resolve peers and downgrade vite 7.2.4 -> 6.4.1
+// for vite-plugin-dts and neon-testing. This form costs no dependency and no
+// lockfile change.
+//
+// Guarded by client-pg-socket-import.test.ts, because a comment cannot stop a
+// tidy-up commit and the failure would only appear in production.
+import 'pg';
 import ws from 'ws';
 import { DbEnvConfig, type DbEnvVars } from './config/env.config';
 import * as schema from './schema';
@@ -218,12 +240,12 @@ export const dbWs = createDbWsProxy();
  * This factory creates a fresh Pool instance that MUST be closed before the request completes.
  *
  * @param env - Environment variables containing DATABASE_URL
- * @param connectionStringOverride - Connection string that REPLACES the
- *   env-derived URL. The intended caller passes a Hyperdrive binding's
- *   `connectionString` (Codex-s1i7h) — the Neon driver consumes it exactly
- *   like a database URL, so connecting through Hyperdrive is a URL swap and
- *   not a client-construction change. Undefined for every caller today, so
- *   URL resolution is unchanged.
+ * @param connectionStringOverride - A Hyperdrive binding's `connectionString`
+ *   (Codex-s1i7h). Passing it ALSO SWITCHES THE DRIVER, and that is not
+ *   optional — see {@link createPerRequestDbClient}'s body. An earlier version
+ *   of this comment claimed Hyperdrive was "a URL swap and not a
+ *   client-construction change"; that was wrong, and believing it would ship a
+ *   worker that cannot reach its database.
  * @returns Object with db client and cleanup function
  *
  * @example
@@ -252,14 +274,65 @@ export function createPerRequestDbClient(
   db: ReturnType<typeof drizzleWs<typeof schema>>;
   cleanup: () => Promise<void>;
 } {
+  // HYPERDRIVE REQUIRES A DIFFERENT DRIVER, NOT A DIFFERENT URL.
+  //
+  // `@neondatabase/serverless` reaches Neon BY HOSTNAME: the HTTP driver POSTs
+  // to `https://<host>/sql` and the Pool opens a WebSocket to Neon's proxy. A
+  // Hyperdrive `connectionString` names a workerd-internal TCP socket, which
+  // speaks the raw PostgreSQL wire protocol and neither of those transports.
+  // Handing it to the Neon Pool produces a worker that cannot reach its
+  // database at all. Cloudflare's own Hyperdrive guide installs `pg` for
+  // exactly this reason, and documents no serverless-driver path.
+  //
+  // THIS IS INVISIBLE IN LOCAL DEV. `wrangler dev` resolves a Hyperdrive
+  // binding by handing back a DIRECT connection string to the origin database,
+  // so the Neon driver would work locally and fail only once deployed. A green
+  // local suite is not evidence here (Codex-s1i7h) — verify with
+  // `wrangler dev --remote` or a deployment, via the `cacheStatus` metric.
+  if (connectionStringOverride) {
+    // Drizzle builds the `pg` Pool from the connection string, so this file
+    // never imports `pg` directly. That is not a style choice: adding
+    // `@types/pg` as a devDependency made pnpm re-resolve peers and quietly
+    // DOWNGRADED vite 7.2.4 -> 6.4.1 for vite-plugin-dts and neon-testing in
+    // the lockfile. Reaching the driver through drizzle's own typings needs no
+    // new dependency and no lockfile change at all.
+    //
+    // No neonConfig here, deliberately: the WebSocket-proxy settings it
+    // applies are Neon-transport-only and mean nothing to a TCP socket.
+    const db = drizzleNodePg({
+      connection: connectionStringOverride,
+      schema,
+    });
+
+    // Same contract as the Neon pool below — an unhandled 'error' event on a
+    // pg Pool is an uncaught exception, which would take out the isolate
+    // rather than the one request.
+    db.$client.on('error', (err: Error) =>
+      dbObs.error('Per-request Hyperdrive pool error', { error: err.message })
+    );
+
+    return {
+      // The declared return type names the neon-serverless adapter because 39
+      // files consume this factory and none of them names a driver. The cast
+      // is sound for the surface they use: `NodePgDatabase` and
+      // `NeonDatabase` are both `PgDatabase`, the query builders are
+      // identical, `.transaction()` is a real BEGIN/COMMIT on both, and both
+      // return pg-shaped `{ rows }` from `.execute()` (checked: no production
+      // code reads a raw execute result). It is NOT sound for the neon-HTTP
+      // adapter, whose `.execute()` returns a bare array — which is why this
+      // factory, not `getDbHttp`, is the Hyperdrive entry point.
+      db: db as unknown as ReturnType<typeof drizzleWs<typeof schema>>,
+      cleanup: async () => {
+        await db.$client.end();
+      },
+    };
+  }
+
   // Apply Neon configuration (WebSocket proxy settings for local dev)
   // This must happen before creating the Pool
   DbEnvConfig.applyNeonConfig(neonConfig, env);
 
-  // The override is threaded through this factory rather than built at the
-  // call site so the driver semantics (config application, Pool construction,
-  // cleanup) stay in one place — only the ORIGIN of the URL changes.
-  const dbUrl = connectionStringOverride ?? DbEnvConfig.getDbUrl(env);
+  const dbUrl = DbEnvConfig.getDbUrl(env);
   if (!dbUrl) {
     throw new Error(
       'DATABASE_URL not configured. Check DB_METHOD and environment variables.'

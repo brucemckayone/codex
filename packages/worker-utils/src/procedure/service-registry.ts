@@ -26,6 +26,7 @@ import {
   type VersionedCacheConfig,
 } from '@codex/cache';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
+import type { CachePresetName } from '@codex/constants';
 // Service imports
 import {
   CategoriesService,
@@ -175,11 +176,68 @@ export function requireStripeSecretKey(
  * }
  * ```
  */
+/**
+ * Cache presets whose responses are shared between viewers, and are therefore
+ * safe to serve from Hyperdrive's query cache.
+ *
+ * `private` and `fresh` are excluded, and so is an ABSENT preset: a route that
+ * never declared one must not be silently opted into a 75-second staleness
+ * window. The dangerous reading is the default, so safety is stated as an
+ * allow-list rather than a deny-list — a preset added to CACHE_PRESETS later
+ * gets the uncached binding until someone deliberately lists it here.
+ */
+const SHARED_CACHEABLE_PRESETS: ReadonlySet<CachePresetName> = new Set([
+  'public',
+  'static',
+  'asset',
+]);
+
+/**
+ * Pick the Hyperdrive binding for a route from its cache preset (Codex-s1i7h).
+ *
+ * DERIVED, NOT HAND-PICKED. There are 199 `procedure()` call sites; a
+ * per-route choice between two bindings would be wrong somewhere within a
+ * month, and the symptom — a stale read — is intermittent and unattributable.
+ *
+ * Returns `undefined` when the needed binding is absent, which makes the
+ * caller fall back to the Neon driver against `DATABASE_URL`. That is the
+ * SAFE direction: correct-but-unpooled beats fast-but-stale. It is worth a log
+ * line though, because a worker that declares `HYPERDRIVE` without
+ * `HYPERDRIVE_UNCACHED` silently splits its traffic across two drivers.
+ */
+export function selectHyperdrive(
+  env: Bindings,
+  cachePreset: CachePresetName | undefined,
+  obs?: ObservabilityClient
+): { connectionString: string } | undefined {
+  // Not bound at all: this worker has not been migrated, or the binding was
+  // removed to roll back. Either way, Neon.
+  if (!env.HYPERDRIVE) return undefined;
+
+  if (cachePreset && SHARED_CACHEABLE_PRESETS.has(cachePreset)) {
+    return env.HYPERDRIVE;
+  }
+
+  if (!env.HYPERDRIVE_UNCACHED) {
+    obs?.warn('HYPERDRIVE declared without HYPERDRIVE_UNCACHED', {
+      signal: 'hyperdrive_binding_incomplete',
+      cachePreset: cachePreset ?? 'none',
+      // Says what the consequence is, so this is actionable without reading
+      // the source: the route still works, just not through Hyperdrive.
+      effect: 'route falls back to the Neon driver via DATABASE_URL',
+    });
+    return undefined;
+  }
+
+  return env.HYPERDRIVE_UNCACHED;
+}
+
 export function createServiceRegistry(
   env: Bindings,
   _obs?: ObservabilityClient,
   organizationId?: string,
-  executionCtx?: ExecutionContext
+  executionCtx?: ExecutionContext,
+  cachePreset?: CachePresetName
 ): ServiceRegistryResult {
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
@@ -278,15 +336,15 @@ export function createServiceRegistry(
    */
   function getSharedDb() {
     if (!_sharedDbClient) {
-      // Hyperdrive-inert swap (Codex-s1i7h): when a HYPERDRIVE binding exists,
-      // its connection string is the URL the shared client connects through.
-      // INERT today — no wrangler config declares HYPERDRIVE, so the override
-      // is undefined and URL resolution is byte-identical. The string is
-      // threaded through the factory rather than a Pool built here so client
-      // construction stays in one place (see createPerRequestDbClient).
+      // Hyperdrive (Codex-s1i7h). Passing a connection string ALSO switches
+      // the driver to node-postgres — see createPerRequestDbClient. When no
+      // binding is declared this is `undefined` and the client resolves
+      // DATABASE_URL through the Neon driver exactly as before, which is the
+      // rollback lever: removing the binding from a wrangler config reverts a
+      // worker to Neon with no code change.
       _sharedDbClient = createPerRequestDbClient(
         env,
-        env.HYPERDRIVE?.connectionString
+        selectHyperdrive(env, cachePreset, _obs)?.connectionString
       );
       cleanupFns.push(_sharedDbClient.cleanup);
     }

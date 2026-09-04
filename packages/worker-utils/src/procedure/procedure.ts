@@ -141,7 +141,14 @@ export function procedure<
         c.env,
         obs,
         organizationId,
-        c.executionCtx
+        c.executionCtx,
+        // Hyperdrive binding selection is DERIVED from the declared cache
+        // preset (Codex-s1i7h). Passing it here — rather than letting the
+        // registry guess, or each route choose — is what keeps the choice out
+        // of 199 call sites. An absent preset resolves to the cache-disabled
+        // binding, so a route that never opted in cannot be given a 75-second
+        // staleness window by accident.
+        policy?.cache
       );
       registry = registryResult.registry;
       cleanup = registryResult.cleanup;
