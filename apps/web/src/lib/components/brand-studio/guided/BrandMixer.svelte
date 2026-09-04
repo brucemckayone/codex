@@ -19,6 +19,28 @@
   Each row is a real radiogroup with roving tabindex and arrow-key movement,
   because a chip row that only responds to clicks is a keyboard trap for the
   one control that changes the most.
+
+  WHY `onkeydown` IS ON THE RADIO, NOT THE ROW
+  -------------------------------------------
+  Functionally either works — keydown bubbles, so a listener on the group is
+  reached from the focused chip, and `BrandMixer.svelte.test.ts` dispatches on
+  the chip to prove it. But a `role="radiogroup"` carrying an interaction
+  handler trips Svelte's `a11y_interactive_supports_focus`: it wants an
+  interactive role to be focusable, and in a composite widget focus belongs on
+  the CHILDREN, so there is nothing correct to put on the group.
+
+  Silencing it with `tabindex="-1"` on the group would satisfy the linter while
+  adding a focusable element nobody focuses; `tabindex="0"` would be actively
+  wrong, inserting a redundant tab stop ahead of the radios. Moving the handler
+  to the radios — which are already focusable, and are where the keystroke
+  actually lands — removes the objection instead of answering it. The group is
+  then a pure labelled container, which is all a radiogroup needs to be.
+
+  Longer term the cleanest shape is a `<fieldset>` of real
+  `<input type="radio">`, which gets keyboard, screen-reader and form semantics
+  from the platform. Not taken here: the chips carry rendered previews (a font
+  specimen, a radius-and-shadow swatch) whose restyle onto native inputs could
+  not be visually verified this session.
 -->
 <script lang="ts">
   import {
@@ -88,11 +110,15 @@
     select(ids[nextIndex]);
     // Move focus with selection so the roving tabindex stays on the checked
     // option — otherwise the next Tab leaves from a stale element.
-    const row = event.currentTarget as HTMLElement;
-    const target = row.querySelector<HTMLElement>(
-      `[data-option-id="${ids[nextIndex]}"]`
+    //
+    // The listener sits on the RADIO (see the group comment), so climb to the
+    // group before querying: `currentTarget` is the chip, not the row.
+    const row = (event.currentTarget as HTMLElement).closest(
+      '[role="radiogroup"]'
     );
-    target?.focus();
+    row
+      ?.querySelector<HTMLElement>(`[data-option-id="${ids[nextIndex]}"]`)
+      ?.focus();
   }
 </script>
 
@@ -109,13 +135,6 @@
       class="mixer__row"
       role="radiogroup"
       aria-labelledby="mixer-type-label"
-      onkeydown={(e) =>
-        onRowKeydown(
-          e,
-          typeOptions.map((o) => o.id),
-          axes.type,
-          setType
-        )}
     >
       {#each typeOptions as option (option.id)}
         {@const selected = axes.type === option.id}
@@ -129,6 +148,13 @@
           data-option-id={option.id}
           title={option.description}
           onclick={() => setType(option.id)}
+          onkeydown={(e) =>
+            onRowKeydown(
+              e,
+              typeOptions.map((o) => o.id),
+              axes.type,
+              setType
+            )}
         >
           <span
             class="mixer__chip-specimen"
@@ -152,13 +178,6 @@
       class="mixer__row"
       role="radiogroup"
       aria-labelledby="mixer-form-label"
-      onkeydown={(e) =>
-        onRowKeydown(
-          e,
-          formOptions.map((o) => o.id),
-          axes.form,
-          setForm
-        )}
     >
       {#each formOptions as option (option.id)}
         {@const selected = axes.form === option.id}
@@ -172,6 +191,13 @@
           data-option-id={option.id}
           title={option.description}
           onclick={() => setForm(option.id)}
+          onkeydown={(e) =>
+            onRowKeydown(
+              e,
+              formOptions.map((o) => o.id),
+              axes.form,
+              setForm
+            )}
         >
           <!-- The swatch IS the preview: this option's own radius and its own
                shadow strength, so the choice is visible before it is applied. -->
@@ -197,13 +223,6 @@
       class="mixer__row mixer__row--dense"
       role="radiogroup"
       aria-labelledby="mixer-atmos-label"
-      onkeydown={(e) =>
-        onRowKeydown(
-          e,
-          atmosphereOptions.map((o) => o.id),
-          axes.atmosphere,
-          setAtmosphere
-        )}
     >
       {#each atmosphereOptions as option (option.id)}
         {@const selected = axes.atmosphere === option.id}
@@ -217,6 +236,13 @@
           data-option-id={option.id}
           title={option.description}
           onclick={() => setAtmosphere(option.id)}
+          onkeydown={(e) =>
+            onRowKeydown(
+              e,
+              atmosphereOptions.map((o) => o.id),
+              axes.atmosphere,
+              setAtmosphere
+            )}
         >
           <span class="mixer__chip-text">
             <span class="mixer__chip-name">{option.label}</span>
