@@ -9,6 +9,8 @@ export { default as BrandStudioCanvas } from './BrandStudioCanvas.svelte';
 export { default as BrandStudioLayout } from './BrandStudioLayout.svelte';
 export { default as BrandStudioRail } from './BrandStudioRail.svelte';
 export { default as CanvasToolbar } from './CanvasToolbar.svelte';
+export { applyMix, currentPalette } from './guided/apply-mix';
+export { default as BrandMixer } from './guided/BrandMixer.svelte';
 export { default as BrandStudioGuided } from './guided/BrandStudioGuided.svelte';
 export {
   type BrandStudioMode,

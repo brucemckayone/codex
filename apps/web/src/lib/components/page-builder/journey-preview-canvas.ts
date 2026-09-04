@@ -6,9 +6,8 @@
  * `BrandStudioCanvas` binds the brand-editor store + a fixed 4-member brand
  * preview-route catalogue, so the stable-iframe pattern is cloned, not the
  * component). The journey builder previews ONE surface — the org's real public
- * journey sales page — so there is no route switcher; the model keeps only the
- * device + theme presets and the `onframeload` seam the WP-5 preview bridge
- * attaches to.
+ * journey sales page — so there is no route switcher; the model is the device
+ * geometry the inline canvas scales to fit its column.
  *
  * EDITOR-TREE placement: lives under `$lib/components/page-builder`, behind the
  * CE-4 import boundary — never pulled into the public chunk. Co-located in a
@@ -16,14 +15,8 @@
  * boundary cleanly.
  */
 
-/** A device-width preset the canvas constrains the iframe to. */
+/** A device-width preset the canvas renders the page at. */
 export type JourneyPreviewDeviceId = 'desktop' | 'tablet' | 'mobile';
-
-/** Theme control: a single frame in light/dark, or two frames side-by-side. */
-export type JourneyPreviewThemeMode = 'light' | 'dark' | 'split';
-
-/** The concrete theme a single rendered frame paints in (`split` resolves per-frame). */
-export type JourneyPreviewFrameTheme = 'light' | 'dark';
 
 export interface JourneyPreviewDevice {
   readonly id: JourneyPreviewDeviceId;
@@ -120,41 +113,4 @@ export function journeyPreviewScale(
 ): number {
   if (!(availableWidth > 0) || !(deviceWidth > 0)) return 1;
   return Math.min(1, availableWidth / deviceWidth);
-}
-
-/**
- * Resolve the ROOT-RELATIVE public path for a journey's sales page.
- *
- * The builder is served from `studio/journeys/[id]/page` on the org subdomain,
- * so the org's real public journey page is reached with a root-relative path
- * (the org slug lives in the hostname, never the path). The framed page mounts
- * the {@link ../../page-builder/page-preview-bridge} applier and re-renders the
- * builder's pending draft — so an unpublished draft still previews live.
- *
- * Carries `?preview=1` because the sales page now redirects an entitled viewer
- * to the course dashboard (Codex-aectb). An owner previewing a PUBLISHED journey
- * they are enrolled in would otherwise watch the frame bounce to the dashboard.
- * Unpublished drafts were never at risk — those resolve through `draftPreview`.
- *
- * @param slug the page's slug (`PageBuilderState.slug`).
- */
-export function resolveJourneyPreviewPath(slug: string): string {
-  return `/journeys/${encodeURIComponent(slug)}?preview=1`;
-}
-
-/**
- * WP-5 PREVIEW SEAM — payload handed to the parent each time a preview iframe
- * loads. The preview wiring (`preview-wiring.ts`) captures `element` + `origin`
- * and registers the frame with the {@link PagePreviewSender}, which posts the
- * builder's pending draft to `origin` (an explicit targetOrigin, never `'*'`).
- */
-export interface JourneyPreviewFrameLoad {
-  /** The framed page's window (the postMessage target). */
-  readonly window: Window;
-  /** The iframe element itself (stable across pending-edit re-renders). */
-  readonly element: HTMLIFrameElement;
-  /** Exact origin for postMessage `targetOrigin` (same-origin as the studio). */
-  readonly origin: string;
-  /** Which theme this frame is rendering. */
-  readonly theme: JourneyPreviewFrameTheme;
 }

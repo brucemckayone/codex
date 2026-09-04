@@ -4,7 +4,7 @@
 **Created**: 2026-01-12
 **Updated**: 2026-02-01
 **Purpose**: Define the complete image processing pipeline for thumbnails and media assets
-**Work Packet**: [P1-IMG-001](./roadmap/work-packets/backend/P1-IMG-001-image-processing.md)
+**Work Packet**: [P1-IMG-001](../docs/archive/design/roadmap/work-packets/backend/P1-IMG-001-image-processing.md)
 
 ---
 
@@ -586,7 +586,7 @@ CDN → User: Included in Cloudflare plan
 
 ## Related Documents
 
-- [INFRASTRUCTURE.md](./frontend/INFRASTRUCTURE.md) - CDN and caching
-- [COMPONENTS.md](./frontend/COMPONENTS.md) - Image components
-- [DATA.md](./frontend/DATA.md) - Thumbnail URL patterns
+- [INFRASTRUCTURE.md](../docs/archive/design/frontend/INFRASTRUCTURE.md) - CDN and caching
+- [COMPONENTS.md](../docs/archive/design/frontend/COMPONENTS.md) - Image components
+- [DATA.md](../docs/archive/design/frontend/DATA.md) - Thumbnail URL patterns
 

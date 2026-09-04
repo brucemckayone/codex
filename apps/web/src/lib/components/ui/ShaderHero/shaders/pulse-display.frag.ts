@@ -13,6 +13,8 @@
  * 5. Diffuse + specular (sharp, liquid-like) + ambient occlusion
  * 6. Reinhard tone mapping, vignette, film grain
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const PULSE_DISPLAY_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -28,12 +30,10 @@ uniform vec2 uResolution;
 // Logo SDF (optional — guarded by uHasLogo)
 uniform sampler2D uSdf;
 uniform float uHasLogo;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // Audio reactivity (0.0 when no audio active)
-uniform float uAudioBass;
-uniform float uAudioMids;
-uniform float uAudioTreble;
-uniform float uAudioAmplitude;
 
 #define HEIGHTMAPSCALE 90.0
 #define MARCHSTEPS 10
@@ -58,7 +58,7 @@ vec3 cam(in vec2 p, out vec3 cameraPos) {
 // ── Heightfield ───────────────────────────────────────────────────
 float h(vec3 p) {
   // Audio: bass amplifies wave height for more dramatic surface
-  float audioScale = 1.0 + uAudioBass * 1.5 + uAudioAmplitude * 0.5;
+  float audioScale = 1.0 + u_bass * 1.5 + u_level * 0.5;
   return uWaveScale * audioScale * texture(uState, p.xz / HEIGHTMAPSCALE + 0.5).x;
 }
 
@@ -111,13 +111,13 @@ void main() {
   float ao = mix(0.6, 0.64, smoothstep(0.0, 1.0, (h0 + 1.5) / 6.0));
 
   // Audio: blend accent color in on mids/treble, boost intensity with amplitude
-  vec3 surfaceColor = mix(uPulseColor, uColorAccent, uAudioTreble * 0.4);
-  float audioIntensity = uIntensity * (1.0 + uAudioAmplitude * 0.6);
+  vec3 surfaceColor = mix(uPulseColor, uColorAccent, u_treble * 0.4);
+  float audioIntensity = uIntensity * (1.0 + u_level * 0.6);
   vec3 col = surfaceColor * dif * ao * audioIntensity;
 
   // Audio: specular sharpens and brightens with amplitude
-  float specPower = mix(4000.0, 2000.0, uAudioBass);
-  float s = uSpecular * (1.0 + uAudioAmplitude * 2.0) * pow(clamp(dot(L, reflect(rd, n)), 0.0, 1.0), specPower);
+  float specPower = mix(4000.0, 2000.0, u_bass);
+  float s = uSpecular * (1.0 + u_level * 2.0) * pow(clamp(dot(L, reflect(rd, n)), 0.0, 1.0), specPower);
   col += s;
 
   // ── Logo edge glow on the raymarched surface ──────────────────

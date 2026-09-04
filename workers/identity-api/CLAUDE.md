@@ -30,7 +30,7 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 | Binding | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | Yes | Neon DB connection |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `AUTH_SESSION_KV` | Yes | Session KV (read for auth; deleted on role upgrade) |
 | `CACHE_KV` | Yes | VersionedCache (KV check on startup) |
 | `WORKER_SHARED_SECRET` | Yes | HMAC secret for worker-to-worker auth |
@@ -58,8 +58,8 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 ## Gotchas
 
 - **Avatar upload** uses `multipartProcedure()` not `procedure()` — multipart form handling.
-- **`upgrade-to-creator`** must `await` session KV deletion (not `waitUntil`) — the browser redirect immediately follows and needs the old session evicted before the next request arrives. Both key formats (`session:{token}` and raw token) are deleted.
-- **Membership lookup** is called by SvelteKit `hooks.ts` `reroute()` via worker HMAC — it is performance-critical. Returns null-role rather than 404 when user is not a member.
+- **`upgrade-to-creator`** must `await` session KV deletion (not `waitUntil`) — the browser redirect immediately follows and needs the old session evicted before the next request arrives. Only the bare token key is deleted: BetterAuth's secondaryStorage is the sole owner of session entries (Codex-kgrdp.7), so a second `session:{token}` delete would be a guaranteed no-op that still spends a KV write.
+- **Membership lookup** has no SvelteKit caller today — `hooks.ts` `reroute()` is a client-side hook that makes no server calls, and no `workerFetch` exists in `apps/web/src/lib/server`. Returns null-role rather than 404 when user is not a member.
 - **`/api/organizations/:orgId/my-membership`** does NOT require `requireOrgMembership` — it intentionally allows non-members to check their own status (returns `null` if not a member).
 
 ## Reference Files

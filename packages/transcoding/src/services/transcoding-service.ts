@@ -228,9 +228,12 @@ export class TranscodingService extends BaseService {
           statusCode: response.status,
           errorText,
         });
-        throw new RunPodApiError('triggerJob', response.status, {
-          responseBody: errorText,
-        });
+        // No `responseBody` in the context: RunPodApiError extends
+        // InternalServiceError, and mapErrorToResponse copies `context`
+        // straight into the client-visible `details` field — so this would
+        // forward a third-party upstream body to an API caller. It is already
+        // captured in the obs.error above, which is where it belongs.
+        throw new RunPodApiError('triggerJob', response.status);
       }
 
       const result = (await response.json()) as RunPodJobResponse;
@@ -253,10 +256,14 @@ export class TranscodingService extends BaseService {
       if (error instanceof RunPodApiError) {
         throw error;
       }
-      // Check for timeout/abort errors
-      throw new RunPodApiError('triggerJob', undefined, {
-        originalError: error instanceof Error ? error.message : String(error),
+      // Timeout/abort and transport errors. Log the cause here — this branch
+      // had no log at all — and keep it OUT of the error context, which
+      // mapErrorToResponse would surface to the caller as `details`.
+      this.obs.error('RunPod dispatch failed', {
+        mediaId,
+        error: error instanceof Error ? error.message : String(error),
       });
+      throw new RunPodApiError('triggerJob');
     }
 
     // Step 5: Store the RunPod job ID for webhook matching
@@ -556,13 +563,107 @@ export class TranscodingService extends BaseService {
       throw new MaxRetriesExceededError(mediaId, media.transcodingAttempts);
     }
 
-    // Step 3: Trigger new job
-    await this.triggerJob(mediaId, creatorId);
+    // Step 3: Trigger new job.
+    //
+    // THE CLAIM IN STEP 2 IS ALREADY COMMITTED, so a dispatch failure here
+    // leaves the row in `uploaded` with no RunPod job attached to it. Nothing
+    // ever moves that row again: the webhook needs a job that was never
+    // created, and a second retry re-reads `status !== 'failed'` and throws
+    // InvalidMediaStateError. The retry path closes PERMANENTLY on a
+    // transient upstream blip, and the creator's media is stranded.
+    //
+    // triggerJob() is an external HTTP call, so it cannot live inside
+    // db.transaction() — a committed remote side effect has no rollback. The
+    // compensating write below is the saga equivalent: undo the claim, keep
+    // the row retryable, and let the error propagate so the caller sees it.
+    try {
+      await this.triggerJob(mediaId, creatorId);
+    } catch (error) {
+      await this.revertRetryClaim(mediaId, media);
+      throw error;
+    }
 
     this.obs.info('Transcoding retry triggered', {
       mediaId,
       attempt: media.transcodingAttempts + 1,
     });
+  }
+
+  /**
+   * Undo the retry claim written by {@link retryTranscoding} step 2.
+   *
+   * Restores the four columns the claim overwrote to the values read BEFORE
+   * it, so the row is exactly as retryable as it was — including the original
+   * `transcodingError`, which the claim had cleared. `transcodingAttempts` is
+   * restored too: the budget exists to stop us re-transcoding media that is
+   * itself broken, and a dispatch that never reached RunPod transcoded
+   * nothing. Burning a retry for it would let three upstream blips exhaust a
+   * creator's budget on a file that was never actually attempted.
+   *
+   * CONDITIONAL ON THE CLAIM STILL BEING THERE. Between the claim and this
+   * revert a webhook for an earlier job could have landed and legitimately
+   * moved the row. The `where` therefore matches the exact shape step 2 left
+   * behind; if anything else has written since, this is a no-op rather than a
+   * clobber.
+   *
+   * NEVER THROWS. It runs on an error path, and the caller re-throws the
+   * original failure immediately after. An exception raised here would
+   * replace the real cause — a dispatch failure — with a database error and
+   * destroy the diagnosis.
+   */
+  private async revertRetryClaim(
+    mediaId: string,
+    previous: {
+      status: string;
+      transcodingAttempts: number;
+      transcodingError: string | null;
+      runpodJobId: string | null;
+    }
+  ): Promise<void> {
+    try {
+      const reverted = await this.db
+        .update(mediaItems)
+        .set({
+          status: previous.status,
+          transcodingAttempts: previous.transcodingAttempts,
+          transcodingError: previous.transcodingError,
+          runpodJobId: previous.runpodJobId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(mediaItems.id, mediaId),
+            eq(mediaItems.status, MEDIA_STATUS.UPLOADED),
+            eq(mediaItems.transcodingAttempts, previous.transcodingAttempts + 1)
+          )
+        )
+        .returning();
+
+      if (reverted.length === 0) {
+        // Something wrote between the claim and here. Say so: the row is not
+        // in the state this method assumes, and that is worth knowing when
+        // diagnosing a stranded item.
+        this.obs.warn('Retry claim not reverted — row changed underneath', {
+          mediaId,
+          expectedAttempts: previous.transcodingAttempts + 1,
+        });
+        return;
+      }
+
+      this.obs.info('Retry claim reverted after dispatch failure', {
+        mediaId,
+        restoredStatus: previous.status,
+        restoredAttempts: previous.transcodingAttempts,
+      });
+    } catch (revertError) {
+      this.obs.error('Failed to revert retry claim — media may be stranded', {
+        mediaId,
+        error:
+          revertError instanceof Error
+            ? revertError.message
+            : String(revertError),
+      });
+    }
   }
 
   /**

@@ -12,9 +12,11 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
+import { NotFoundError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   deleteAccountSchema,
+  publicProfileParamsSchema,
   updateCreatorOnboardingSchema,
   updateNotificationPreferencesSchema,
   updateProfileSchema,
@@ -24,6 +26,49 @@ import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
+
+/**
+ * GET /api/user/public/:username
+ * Public creator profile — the ONLY anonymous route in this worker.
+ *
+ * The three `creators.<host>/<username>` page loads have always called this
+ * path; nothing served it, so every call 404'd into their `catch` and the
+ * profile rendered as a placeholder (URL handle for a name, letter avatar,
+ * boilerplate bio, no social links) for every creator on the platform.
+ *
+ * Security shape, since this is unauthenticated and enumerable by design:
+ * - `auth: 'none'` — no session is resolved, so the body cannot vary by viewer
+ * - `cache: 'public'` — legal only because of the line above; the type system
+ *   rejects `public` on an authenticated route (`CachePolicyRule`)
+ * - `rateLimit: 'api'` — 100/min per subject. identity-api declares the
+ *   matching `RATE_LIMIT_API` binding, without which the preset would fail
+ *   OPEN and log `rate_limit.fail_open` on every request
+ * - params are slug-validated, so arbitrary path input never reaches Neon
+ * - the service returns only { id, name, image, bio, socialLinks } from an
+ *   explicit column allowlist — no email, no role
+ *
+ * An unknown username returns 404 via NotFoundError, which is deliberately
+ * indistinguishable from "this user has no public profile": a caller must not
+ * be able to tell a non-existent handle from a private one.
+ */
+app.get(
+  '/public/:username',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
+    input: { params: publicProfileParamsSchema },
+    handler: async (ctx) => {
+      const profile = await ctx.services.identity.getPublicProfileByUsername(
+        ctx.input.params.username
+      );
+      if (!profile) {
+        throw new NotFoundError('Creator not found', {
+          username: ctx.input.params.username,
+        });
+      }
+      return profile;
+    },
+  })
+);
 
 /**
  * POST /api/user/avatar

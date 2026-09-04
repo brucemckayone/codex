@@ -8,7 +8,7 @@ Transcoding orchestration via RunPod. Handles the full transcoding lifecycle: tr
 
 | Method | Path | Auth | Input | Success | Notes |
 |---|---|---|---|---|---|
-| POST | `/internal/media/:id/transcode` | `worker` (HMAC) | params: `id` (uuid); body: `{ priority? }` | 200 | Trigger transcoding; RunPod dispatch runs via `waitUntil` |
+| POST | `/internal/media/:id/transcode` | `worker` (HMAC) | params: `id` (uuid); body: `{ priority? }` | 200 | Trigger transcoding; RunPod dispatch runs via `ctx.background()` |
 | POST | `/api/transcoding/retry/:id` | `required`, `rateLimit: 'strict'` | params: `id` (uuid) | 200 | Retry a failed job; only 1 retry allowed per media item |
 | GET | `/api/transcoding/status/:id` | `required`, `rateLimit: 'api'` | params: `id` (uuid) | 200 | Get current transcoding status |
 
@@ -56,7 +56,7 @@ Two distinct HMAC mechanisms — do not confuse them:
 | `RUNPOD_ENDPOINT_ID` | Yes | RunPod endpoint to dispatch to |
 | `RUNPOD_WEBHOOK_SECRET` | Yes | HMAC secret for verifying RunPod callbacks |
 | `WORKER_SHARED_SECRET` | Yes | HMAC secret for worker-to-worker auth |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
 | `ORPHAN_CLEANUP_DO` | No | Durable Object namespace for cleanup DO |
 | `ENVIRONMENT` | No | `development` / `production` |
@@ -75,9 +75,9 @@ Two distinct HMAC mechanisms — do not confuse them:
 
 - **Webhook is not a `procedure()` endpoint** — RunPod owns the callback contract. Raw body must be read before JSON parsing for HMAC verification. Managed by `verifyRunpodSignature` middleware which stores raw body in context.
 - **Webhook error classification**: `ValidationError` and `ServiceError` (permanent) → return 200 to stop RunPod retries. Transient errors (DB/network) → return 500 to trigger RunPod retry.
-- **`waitUntil` for dispatch**: `triggerJobInternal` returns `{ dispatchPromise }` — the actual RunPod API call runs via `ctx.executionCtx.waitUntil(dispatchPromise)` so the HTTP response is returned before RunPod is called.
+- **`ctx.background()` for dispatch**: `triggerJobInternal` returns `{ dispatchPromise }` — the actual RunPod API call runs via `ctx.background(dispatchPromise)` (NOT `ctx.executionCtx.waitUntil`, which races procedure()'s own `waitUntil(cleanup())` and reliably kills the post-response DB writes) so the HTTP response is returned before RunPod is called.
 - **Orphan cleanup DO**: Singleton instance (`idFromName('singleton')`), alarms run every hour, processes 50 orphans/run, max 3 retries per file.
-- **No database check in health**: Only KV checked on startup (`RATE_LIMIT_KV`, `AUTH_SESSION_KV`).
+- **Health check runs both DB and KV checks**: `standardDatabaseCheck` (added 2026-05-22) plus `createKvCheck(['AUTH_SESSION_KV'])` — the rate-limit KV is gone.
 
 ## Reference Files
 

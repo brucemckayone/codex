@@ -8,6 +8,12 @@
  * Configurable: density, speed, size, refraction, blur.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig } from '../shader-config';
@@ -54,6 +60,8 @@ const UNIFORM_NAMES = [
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type RainUniform = (typeof UNIFORM_NAMES)[number];
@@ -69,10 +77,27 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/** Pacing rate with no audio, in clock-units/sec — matches the old wall-clock feel. */
+const IDLE_CLOCK_RATE = 1.0;
+
+/**
+ * Cap on the differentiated musical clock. The render loop pauses while the
+ * analyser clamps its own dt, so one frame after a long pause can show a large
+ * phase jump — unclamped that spikes the rate and lurches the scene once.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createRainRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<RainUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+  /** Integrated pacing clock. Monotone — see u_clock in the fragment shader. */
+  let clock = 0;
+  /** Previous beatPhase sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   // Internal lerped mouse state for smooth wiper
   let lerpedMouse = { x: 0.5, y: 0.5 };
@@ -110,6 +135,28 @@ export function createRainRenderer(): ShaderRenderer {
       const targetY = mouse.active ? mouse.y : 0.5;
       lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
       lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+
+      // Integrate the pacing clock by blending RATES, never positions.
+      // beatPhase starts at zero while u_time does not, so a positional
+      // crossfade sweeps the clock backwards the moment audio starts.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -151,6 +198,9 @@ export function createRainRenderer(): ShaderRenderer {
       );
 
       // Draw to screen (no FBO)
+      gl.uniform1f(uniforms.u_clock, clock);
+      uploadAudioUniforms(gl, uniforms, a);
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
     },
@@ -160,6 +210,8 @@ export function createRainRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
+      clock = 0;
+      prevBeatPhase = -1;
       // No simulation state to reset for single-pass presets.
       lerpedMouse = { x: 0.5, y: 0.5 };
     },

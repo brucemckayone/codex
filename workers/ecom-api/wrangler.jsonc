@@ -148,12 +148,58 @@
     // Production environment
     "production": {
       "name": "ecom-api-production",
+      // Hyperdrive (Codex-s1i7h). PRODUCTION ONLY, on purpose: `wrangler dev`
+      // resolves a Hyperdrive binding to a DIRECT connection string, so
+      // binding it in `test` would exercise neither pooling nor query caching
+      // while quietly swapping the driver under the e2e suite. Local and CI
+      // keep the Neon driver; the swap is chosen by the binding's presence.
+      //
+      // Two configs, and which one a route gets is DERIVED from `policy.cache`
+      // by selectHyperdrive() in service-registry.ts — never hand-picked at
+      // the 199 procedure() call sites. Shared-cacheable presets
+      // (public/static/asset) ride the cached config; `private`, `fresh` and
+      // an absent preset ride the uncached one, because Hyperdrive holds reads
+      // for 60s + 15s stale-while-revalidate and does NOT purge on write.
+      //
+      // Origin is the NON-POOLED Neon host (no `-pooler`): Hyperdrive is
+      // itself the pooler, and pooling twice appears to work while failing
+      // unpredictably under load. Verified 2026-09-04 that the origin endpoint
+      // ep-withered-tree-abxyxdpc is the `production` branch (default=true).
+      //
+      // ROLLBACK IS THIS BLOCK: delete it and the worker resolves DATABASE_URL
+      // through the Neon driver again, with no code change.
+      "hyperdrive": [
+        { "binding": "HYPERDRIVE", "id": "71950e68c1b148de90caa839d6d3c597" },
+        { "binding": "HYPERDRIVE_UNCACHED", "id": "aa97ad16a236466380c1e6d25b3f8ba4" }
+      ],
       // Payouts sweep every 15 min (Codex-vv77x). Defined per-env (NOT top-
       // level) so it does NOT inherit into dev/staging — Cloudflare's free-plan
       // cap is 5 cron triggers per ACCOUNT, shared across prod + dev worker
       // scripts.
+      // Payouts sweep, HOURLY (Codex-vv77x). Defined per-env (NOT top-level)
+      // so it does NOT inherit into dev/staging — the cron-trigger cap is per
+      // ACCOUNT, shared across prod + dev worker scripts.
+      //
+      // WHY HOURLY AND NOT `*/15`: Neon bills TIME AWAKE, and every run opens
+      // a DB client, so the cadence sets a floor on compute cost that no cache
+      // can lower. Measured 2026-09-04 on the `production` branch: 35.5 awake
+      // hours in 68.3 wall-clock hours = 12.5 h/day, of which `*/15` alone
+      // accounted for 8.0 h/day (96 wakes x the 5-minute autosuspend) — about
+      // 64%, before a single user arrived. Hourly makes that 2.0 h/day.
+      //
+      // THE MINUTE IS LOAD-BEARING: `0` puts this in the SAME 5-minute wake
+      // window as media-api's `0 * * * *`, so the two crons share one wake
+      // instead of stacking two. Moving either off `:00` silently doubles the
+      // floor, and nothing else in the repo would notice.
+      //
+      // Safe because the cron is INSURANCE, not the primary path: the
+      // account.updated webhook resolves these rows first and Stripe retries
+      // it for 3 days (see docs/payouts/payout-pipeline.md stage 5). The
+      // sweep's own DEFAULT_OLDER_THAN_MINUTES=15 age threshold is unchanged,
+      // so this only widens the detection window for a DROPPED webhook from
+      // ~15 min to ~1 h.
       "triggers": {
-        "crons": ["*/15 * * * *"]
+        "crons": ["0 * * * *"]
       },
       "vars": {
         "ENVIRONMENT": "production",

@@ -43,6 +43,8 @@ import type {
   SaleListItem,
   SalesStats,
 } from '@codex/purchase';
+// `import type` from @codex/shared-types is sanctioned for apps/web — it pulls
+// no runtime value, so the vite server-only module guard is not tripped.
 import type {
   AllSettingsResponse,
   BrandingSettingsResponse,
@@ -55,6 +57,7 @@ import type {
   OrganizationWithRole,
   PaginatedListResponse,
   PublicBrandingResponse,
+  PublicCreatorProfile,
   SessionData,
   UserData,
 } from '@codex/shared-types';
@@ -579,6 +582,30 @@ export function createServerApi(
       getProfile: () => request<UserData>('identity', '/api/user/profile'),
 
       /**
+       * Public creator profile by username — anonymous, no session needed.
+       *
+       * Returns `null` for an unknown handle instead of throwing, because the
+       * only caller (the `_creators/[username]` loads) renders its own
+       * not-found state and a 404 here is an expected answer, not a fault.
+       * Any OTHER status still throws, so a genuine outage is not silently
+       * rendered as "no such creator" — which is exactly what the previous
+       * bare `try/catch` around `api.fetch` did.
+       */
+      getPublicProfile: async (
+        username: string
+      ): Promise<PublicCreatorProfile | null> => {
+        try {
+          return await request<PublicCreatorProfile>(
+            'identity',
+            `/api/user/public/${encodeURIComponent(username)}`
+          );
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) return null;
+          throw err;
+        }
+      },
+
+      /**
        * Update user profile
        */
       updateProfile: (data: UpdateProfileInput) =>
@@ -814,41 +841,31 @@ export function createServerApi(
         }),
 
       /**
-       * Upload content thumbnail (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
+       * Upload content thumbnail.
+       *
+       * Goes through `forwardMultipartUpload` like every other multipart path.
+       * It used to hand the inbound `File` straight to a new FormData, which is
+       * precisely the shape that arrives at the worker WITHOUT a filename in
+       * workerd and is rejected as MissingFileError — the bug the helper's
+       * header says it exists to stop a third path reintroducing. It also
+       * masked the worker's real error behind a fixed string.
        */
       uploadThumbnail: (
         id: string,
         file: File
-      ): Promise<{ thumbnailUrl: string; size: number; mimeType: string }> => {
-        const url = `${serverApiUrl(platform, 'content')}/api/content/${id}/thumbnail`;
-        const formData = new FormData();
-        formData.append('thumbnail', file);
-
-        return fetch(url, {
-          method: 'POST',
-          headers: sessionCookie
-            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
-            : {},
-          body: formData,
-        }).then(async (res) => {
-          if (!res.ok)
-            throw new ApiError(res.status, 'Thumbnail upload failed');
-          const json = await res.json();
-          const record = json as Record<string, unknown>;
-          if ('data' in record && record.data != null) {
-            return record.data as {
-              thumbnailUrl: string;
-              size: number;
-              mimeType: string;
-            };
-          }
-          return json as {
-            thumbnailUrl: string;
-            size: number;
-            mimeType: string;
-          };
-        });
-      },
+      ): Promise<{ thumbnailUrl: string; size: number; mimeType: string }> =>
+        forwardMultipartUpload<{
+          thumbnailUrl: string;
+          size: number;
+          mimeType: string;
+        }>({
+          url: `${serverApiUrl(platform, 'content')}/api/content/${id}/thumbnail`,
+          fieldName: 'thumbnail',
+          file,
+          fallbackFilename: 'thumbnail',
+          sessionCookie,
+          failureMessage: 'Thumbnail upload failed',
+        }),
 
       /**
        * Delete content thumbnail

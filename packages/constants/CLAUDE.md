@@ -4,18 +4,18 @@ Shared constants and utilities. Zero dependencies — safe to import anywhere.
 
 ## Service Ports & URLs
 
-**MUST** use `getServiceUrl(service, env)` — NEVER hardcode ports or URLs.
+**MUST** use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode ports or URLs. (`getServiceUrl` was relocated to `@codex/urls` in WP-3 and is not exported from this package.)
 
 ```ts
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl } from '@codex/urls';
 
-const authUrl = getServiceUrl('auth', env);       // → https://auth.revelations.studio (prod)
-const contentUrl = getServiceUrl('content', env); // → http://localhost:4001 (dev)
+const authUrl = buildServiceUrl('auth', env);       // → https://auth.revelations.studio (prod)
+const contentUrl = buildServiceUrl('content', env); // → http://localhost:4001 (dev)
 ```
 
-**`ServiceName`** values: `'auth' | 'content' | 'access' | 'org' | 'ecom' | 'admin' | 'identity' | 'notifications' | 'media'`
+**`ServiceName`** values (type lives in `@codex/urls`): `'auth' | 'content' | 'access' | 'org' | 'ecom' | 'admin' | 'identity' | 'notifications' | 'media'`
 
-`getServiceUrl` resolves via env vars first (`AUTH_WORKER_URL`, `API_URL`, `ORG_API_URL`, etc.), then falls back to defaults. Validates all URLs through `validateServiceUrl()` (SSRF protection).
+`buildServiceUrl` (in `@codex/urls`) resolves via env vars first (`AUTH_WORKER_URL`, `API_URL`, `ORG_API_URL`, etc.), then falls back to `ENV_HOSTS` defaults. Validates env-var URLs through `validateServiceUrl()` (SSRF protection).
 
 | Service | Port | Env var override |
 |---|---|---|
@@ -34,7 +34,7 @@ const contentUrl = getServiceUrl('content', env); // → http://localhost:4001 (
 
 ```ts
 isDev(env)           // true in development/test; accepts Env object or boolean
-ENV_NAMES            // { PRODUCTION, STAGING, DEVELOPMENT, TEST }
+ENV_NAMES            // { PRODUCTION, STAGING, DEV_REMOTE: 'dev', DEVELOPMENT, TEST }
 validateServiceUrl(url, requireHttps?) // SSRF protection — throws on private IPs in prod
 ```
 
@@ -43,7 +43,7 @@ validateServiceUrl(url, requireHttps?) // SSRF protection — throws on private 
 ## Cookies
 
 ```ts
-getCookieConfig(env?, host?, options?)
+getCookieConfig(env?, host?, options?)  // lives in @codex/urls (cookie-config.ts) — moved out of constants in WP-5a
 // Returns: { path, httpOnly, secure, sameSite, domain?, maxAge? }
 // secure=true always in prod; false only for localhost/lvh.me/nip.io in dev
 // domain=.revelations.studio in prod (or COOKIE_DOMAIN env var)
@@ -62,7 +62,7 @@ FEES.SUBSCRIPTION_ORG_PERCENT  // 1500 (15.00%)
 CURRENCY                 // { GBP: 'gbp', USD: 'usd', EUR: 'eur' }
 STRIPE_EVENTS            // checkout.session.completed, customer.subscription.*, etc.
 PURCHASE_STATUS          // { PENDING, COMPLETED, FAILED, REFUNDED }
-SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLETE }
+SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLETE, PAUSED }
 BILLING_INTERVAL         // { MONTH, YEAR }
 CONNECT_ACCOUNT_STATUS   // { ONBOARDING, ACTIVE, RESTRICTED, DISABLED }
 ```
@@ -85,8 +85,8 @@ VIDEO_PROGRESS       // { COMPLETION_THRESHOLD: 0.95 }
 Used by `@codex/security`'s `RATE_LIMIT_PRESETS`:
 
 ```ts
-RATE_LIMIT_PRESETS   // { AUTH, STRICT, STREAMING, API, WEBHOOK, WEB }
-// AUTH: 5/15min, STRICT: 20/min, STREAMING: 60/min, API: 100/min, WEB: 300/min, WEBHOOK: 1000/min
+RATE_LIMIT_PRESETS   // { AUTH, STRICT, STREAMING, API, WEB } — no WEBHOOK preset (webhooks are HMAC-authenticated; a per-IP cap only breaks retries)
+// AUTH: 5/15min, STRICT: 20/min, STREAMING: 60/min, API: 100/min, WEB: 300/min
 ```
 
 ## Cache Presets
@@ -181,17 +181,17 @@ POSTGRES_ERROR_CODES // { UNIQUE_VIOLATION: '23505', FOREIGN_KEY_VIOLATION: '235
 ## URLs & Subdomains
 
 ```ts
-DOMAINS              // { PROD: 'revelations.studio', STAGING: '...', DEV: 'lvh.me', LOCAL: 'localhost' }
+DOMAINS              // { PROD: 'revelations.studio', STAGING: 'staging.revelations.studio', DEV_REMOTE: 'dev.revelations.studio', DEV: 'lvh.me', LOCAL: 'localhost' }
 RESERVED_SUBDOMAINS  // Array of reserved org slug names (cdn, api, auth, www, admin, etc.)
 RESERVED_SUBDOMAINS_SET  // Set<string> for O(1) lookups
 ```
 
-**MUST** check `RESERVED_SUBDOMAINS_SET` when validating org slugs (built into `createOrganizationSchema` in `@codex/validation`).
+**MUST** check `isReservedSubdomain(slug)` when validating org slugs (built into `createOrganizationSchema` in `@codex/validation`). The helper adds the `cdn-` prefix rule on top of `RESERVED_SUBDOMAINS_SET` — reading the Set directly re-opens that gap.
 
 ## Security & Observability Constants
 
 ```ts
-AUTH_ROLES           // { ADMIN, CREATOR, USER }
+AUTH_ROLES           // { USER: 'customer', CREATOR, ADMIN, SYSTEM, PLATFORM_OWNER }
 CSP_DIRECTIVES       // CSP directive constants for security headers
 SENSITIVE_KEYS       // Array of field names to redact in logs
 SENSITIVE_PATTERNS   // Regex patterns for detecting sensitive data
@@ -208,7 +208,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 
 ## Strict Rules
 
-- **MUST** use `getServiceUrl(service, env)` — NEVER hardcode URLs or port numbers
+- **MUST** use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode URLs or port numbers
 - **MUST** use `RESERVED_SUBDOMAINS_SET` for org slug validation
 - **MUST** use `getCookieConfig(env)` for cookie configuration
 - **MUST** name a `CACHE_PRESETS` preset for any `Cache-Control` — NEVER hand-write the value; add a preset here instead
@@ -218,8 +218,8 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 ## Reference Files
 
 - `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
-- `packages/constants/src/env.ts` — `getServiceUrl`, `isDev`, `validateServiceUrl`, `INFRA_KEYS`
-- `packages/constants/src/cookies.ts` — `getCookieConfig`, `COOKIES`
+- `packages/constants/src/env.ts` — `ENV_NAMES`, `isDev`, `isDevRemote`, `validateServiceUrl`, `INFRA_KEYS` (URL building moved to `@codex/urls`)
+- `packages/constants/src/cookies.ts` — `COOKIES`, `CookieConfig` (`getCookieConfig` moved to `@codex/urls`)
 - `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`
 - `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
 - `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`

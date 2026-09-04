@@ -1,5 +1,5 @@
-// Stubs for WP-3 (buildServiceUrl) and WP-4 (URL builders).
-// Each throws an explicit "not implemented (WP-N)" error on call.
+// URL builders and host/cookie-domain logic. WP-3 (buildServiceUrl) and WP-4
+// (the content/org/journey builders) are fully implemented in build-url.ts.
 export {
   type BuildJourneyUrlOptions,
   buildContentUrl,

@@ -49,6 +49,34 @@ export interface AudioState {
    * don't trigger every frame. Use for beat-synced deposits.
    */
   beatPulse: number;
+  /**
+   * Slow macro envelope (0-1, tau ~4s). Tracks musical *sections*. Use for
+   * bloom, density, palette temperature — anything where per-note movement
+   * would read as twitchy.
+   */
+  energy: number;
+  /**
+   * Positive spectral flux (0-1). Dense/percussive passages read high,
+   * sustained pads near zero. Use for detail, sparkle and grain — never for
+   * geometry or camera, it is noisy by construction.
+   */
+  flux: number;
+  /**
+   * Spectral centroid (0-1) — timbral brightness. Drives hue/temperature so
+   * colour tracks *what* the music sounds like, not just how loud it is.
+   */
+  centroid: number;
+  /**
+   * Monotonic musical clock in beats-ish units, advancing at a rate set by
+   * `energy`. Drive a preset's internal motion from this instead of wall-clock
+   * `time` and it breathes with the track, stopping when the track stops.
+   */
+  beatPhase: number;
+  /**
+   * Onsets since analyser creation. Seed per-beat random choices from this so
+   * a chosen direction or hue stays stable between beats.
+   */
+  onsetCount: number;
   /** Whether audio is actively playing */
   active: boolean;
 }

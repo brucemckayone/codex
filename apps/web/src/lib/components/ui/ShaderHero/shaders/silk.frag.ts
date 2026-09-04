@@ -14,6 +14,8 @@
  *   u_foldScale, u_foldDepth, u_speed, u_softness, u_sheen, u_lining,
  *   u_intensity, u_grain, u_vignette
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const SILK_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -30,13 +32,20 @@ uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_foldScale;
 uniform float u_foldDepth;
-uniform float u_speed;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by speed. Replaces u_time * u_speed so motion advances with the
+ * music, and so a speed change cannot retroactively rescale accumulated phase.
+ */
+uniform float u_clock;
 uniform float u_softness;
 uniform float u_sheen;
 uniform float u_lining;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // -- iq-style value noise (replaces sin(x)*sin(y) which produced checkerboard artefacts) --
 float hash1(vec2 p) {
@@ -77,22 +86,38 @@ float fbm(vec2 p) {
   return totalAmp > 0.0 ? f / totalAmp : 0.0;
 }
 
+/**
+ * Audio-scaled fold depth.
+ *
+ * A function rather than a local because TWO scopes need the identical value:
+ * heightfield() builds the relief from it, and main() normalises the valley
+ * mask against it. If they disagreed, the mask would drift across the folds
+ * as audio changed the amplitude — the lining would creep up the peaks.
+ */
+float foldDepthNow() {
+  return u_foldDepth * audioLift(u_energy, 0.28);
+}
+
 float heightfield(vec2 uv) {
   float aspect = u_resolution.x / u_resolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y) * u_foldScale;
-  float t = u_time * u_speed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
 
   // Slow domain drift — fabric flowing
   p += vec2(t * 0.4, t * 0.25);
 
-  float h = fbm(p) * u_foldDepth;
+  // Fold depth is the fabric's relief. Driven by the slow envelope so the
+  // cloth breathes over a phrase rather than twitching per note — the folds
+  // are geometry, and rule 1 keeps raw bands off geometry.
+  float foldDepth = foldDepthNow();
+  float h = fbm(p) * foldDepth;
 
   // Mouse depression — Gaussian dip
   vec2 mouseUV = vec2(u_mouse.x * aspect, u_mouse.y);
   vec2 fragUV = vec2(uv.x * aspect, uv.y);
   float mouseDist = distance(fragUV, mouseUV);
-  float hoverDepth = u_mouseActive * u_foldDepth * 0.25 * exp(-mouseDist * mouseDist * 18.0);
-  float burstDepth = u_burst * u_foldDepth * 0.5 * exp(-mouseDist * mouseDist * 8.0);
+  float hoverDepth = u_mouseActive * foldDepth * 0.25 * exp(-mouseDist * mouseDist * 18.0);
+  float burstDepth = u_burst * foldDepth * 0.5 * exp(-mouseDist * mouseDist * 8.0);
   h -= hoverDepth + burstDepth;
 
   return h;
@@ -149,11 +174,18 @@ void main() {
   vec3 broadSheenColor = mix(vec3(1.0), u_brandAccent, 0.35);
   vec3 anisoColor = mix(u_brandPrimary * 2.2, u_brandAccent * 1.8, fresnel);
 
-  vec3 specular = broadSheenColor * broadSheen * u_sheen
-                + anisoColor       * aniso      * u_sheen * 1.2;
+  // Treble sharpens and brightens the narrow anisotropic lobe — the glint that
+  // makes silk read as silk. Beats add a brief overall sheen flare. Both are
+  // light-side terms, so a transient never disturbs the cloth.
+  float sheen = u_sheen * (1.0 + beatHit(1.7) * 0.5);
+  vec3 specular = broadSheenColor * broadSheen * sheen
+                + anisoColor       * aniso      * sheen * 1.2
+                                   * audioLift(u_treble, 0.7);
 
   // ── 6. Fabric colour — primary, with secondary in valleys, subtle accent in peaks ─
-  float hNorm = clamp(hC / u_foldDepth * 0.5 + 0.5, 0.0, 1.0);
+  // Normalise against the SAME depth the relief used, or the valley mask
+  // drifts as audio changes the fold amplitude.
+  float hNorm = clamp(hC / max(foldDepthNow(), 1e-4) * 0.5 + 0.5, 0.0, 1.0);
   float valleyMask = smoothstep(0.45, 0.20, hNorm) * u_lining;
   float peakMask = smoothstep(0.55, 0.85, hNorm) * 0.18;
 

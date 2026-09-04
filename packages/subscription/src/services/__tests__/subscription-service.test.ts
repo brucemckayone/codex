@@ -41,7 +41,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -60,6 +60,7 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
+import type { FeeConfigService } from '../fee-config-service';
 import { SubscriptionService } from '../subscription-service';
 
 describe('SubscriptionService', () => {
@@ -2859,6 +2860,57 @@ describe('SubscriptionService', () => {
       expect(stripe.subscriptions.retrieve).toHaveBeenCalledWith(
         sub.stripeSubscriptionId
       );
+    });
+
+    it('writes charge correlation on PENDING ledger rows (refund reversal depends on it)', async () => {
+      // Regression guard. The pending/failed inserts in executeTransfers used
+      // to omit stripeChargeId + transferGroup, but
+      // reverseSubscriptionPayoutsForCharge selects rows BY stripeChargeId —
+      // an uncorrelated pending obligation is invisible to refund reversal,
+      // and the 15-min sweep later pays out a refunded charge.
+      const { org, tier1 } = await createFullOrg('invoice-pending-corr');
+      // Route the org fee to the pending (connect_not_ready) branch without
+      // involving Stripe: an org whose owner's Connect account cannot charge.
+      await db
+        .update(stripeConnectAccounts)
+        .set({ chargesEnabled: false })
+        .where(eq(stripeConnectAccounts.organizationId, org.id));
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = `ch_pending_corr_${createUniqueSlug('c')}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_corr' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.subscriptionId, sub.id),
+            eq(payoutsTable.payoutType, 'organization_fee')
+          )
+        );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe('pending');
+      // The contract this test exists to pin:
+      expect(rows[0]?.stripeChargeId).toBe(chargeId);
+      expect(rows[0]?.transferGroup).toBe(`sub_${sub.id}`);
     });
 
     it('should skip if no subscription ID in invoice', async () => {
@@ -8307,6 +8359,58 @@ describe('SubscriptionService', () => {
         expect(params.data.dashboardUrl).toMatch(/earnings/);
       });
 
+      it('does NOT fire when every transfer was skipped below the min-transfer floor', async () => {
+        // Regression guard: the notification gate used to count pending rows
+        // from the PRE-loop snapshot, so a creator whose rows were all skipped
+        // (aggregate total under minTransferCents) still received a
+        // "payout released" email quoting money that never moved.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-floor-skip'
+        );
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        });
+
+        const floorStub = {
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 100_000, // far above the 500p row
+        };
+        const feeConfig = {
+          getFeesForCreator: vi.fn(async () => floorStub),
+          getFeesForOrg: vi.fn(async () => floorStub),
+          getFeesPlatform: vi.fn(async () => floorStub),
+        } as unknown as FeeConfigService;
+        const payoutMailer = vi.fn();
+        const serviceWithFloor = new SubscriptionService(
+          { db, environment: 'test' as const, payoutMailer, feeConfig },
+          stripe
+        );
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const result = await serviceWithFloor.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        // The group was skipped, nothing transferred, nothing resolved...
+        expect(result.resolved).toBe(0);
+        expect(transferSpy).not.toHaveBeenCalled();
+        // ...so the creator must NOT be told money was released.
+        expect(payoutMailer).not.toHaveBeenCalled();
+      });
+
       it('does NOT fire when resolved === 0 (no payouts drained)', async () => {
         const { org, stripeAccountId } = await seedConnectAndSubscription(
           'wp10-notif-no-payouts'
@@ -9609,6 +9713,59 @@ describe('SubscriptionService', () => {
         stripeRefundId: 're_again',
       });
       expect(createReversal).not.toHaveBeenCalled();
+    });
+
+    it('cancels a never-transferred PENDING obligation for a refunded charge', async () => {
+      // Regression guard: executeTransfers used to write pending/failed rows
+      // (connect_not_ready, min_transfer_floor, transfer_failed) with NO
+      // stripeChargeId. reverseSubscriptionPayoutsForCharge selects rows by
+      // stripeChargeId, so those obligations were invisible to refund
+      // reversal — the 15-min sweep later paid out a refunded charge. The
+      // pending write shape now carries the charge correlation; this asserts
+      // the read side of that contract: a correlated pending row with no
+      // transfer is cancelled, not paid later.
+      const chargeId = `ch_pending_${Date.now()}`;
+      const { org, tier1 } = await createFullOrg(
+        `sub-pending-clawback-${Math.random().toString(36).slice(2, 8)}`
+      );
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+      await db.insert(payoutsTable).values({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 135,
+        payoutType: 'organization_fee',
+        status: 'pending',
+        reason: 'connect_not_ready',
+        // The fields executeTransfers now writes on every ledger row:
+        stripeChargeId: chargeId,
+        transferGroup: `sub_${sub.id}`,
+        sourceType: 'subscription',
+      });
+      const createReversal = stubCreateReversal();
+
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: null,
+        stripeRefundId: 're_pending',
+      });
+
+      // Nothing was ever transferred, so there is nothing to reverse at
+      // Stripe — the obligation is simply cancelled in the ledger.
+      expect(createReversal).not.toHaveBeenCalled();
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe('cancelled_by_refund');
     });
 
     it('reverses proportionally on a partial refund', async () => {

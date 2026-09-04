@@ -111,6 +111,75 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('retries and then throws when the provider REPORTS failure without throwing', async () => {
+    // ResendProvider catches every error and RETURNS { success: false, error }
+    // — it never throws. sendWithRetry used to ignore that flag, so a failed
+    // send was logged "Email sent successfully", never retried, and the
+    // caller marked the emailAuditLogs row SUCCESS. Silent email loss.
+    (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        id: 'template-1',
+        name: 'test-template',
+        subject: 'Hi',
+        htmlBody: '<p>Hi</p>',
+        textBody: 'Hi',
+        scope: 'global',
+      },
+    ]);
+
+    (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: false,
+      error: 'Resend rejected: domain not verified',
+    });
+
+    await expect(
+      service.sendEmail({
+        to: 'user@example.com',
+        templateName: 'test-template',
+        data: {},
+      })
+    ).rejects.toThrow(/domain not verified/);
+
+    // DEFAULT_RETRY_CONFIG.maxRetries = 2, so 3 attempts total. The old code
+    // called the provider exactly once and returned success.
+    expect(mockEmailProvider.send).toHaveBeenCalledTimes(3);
+  });
+
+  it('does NOT treat a user opt-out (success:false + skipped) as a provider failure', async () => {
+    // The opt-out path returns { success: false, skipped: 'opted_out' }.
+    // A naive `if (!result.success) throw` would convert a legitimate skip
+    // into a retry storm and a FAILED audit row.
+    (
+      mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        id: 'template-1',
+        name: 'test-template',
+        subject: 'Hi',
+        htmlBody: '<p>Hi</p>',
+        textBody: 'Hi',
+        scope: 'global',
+      },
+    ]);
+
+    (mockEmailProvider.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: false,
+      skipped: 'opted_out',
+    });
+
+    const result = await service.sendEmail({
+      to: 'user@example.com',
+      templateName: 'test-template',
+      data: {},
+    });
+
+    expect(result.skipped).toBe('opted_out');
+    // One attempt only — a skip is terminal, not transient.
+    expect(mockEmailProvider.send).toHaveBeenCalledTimes(1);
+  });
+
   it('throws error if template not found', async () => {
     (
       mockDb.query.emailTemplates.findMany as ReturnType<typeof vi.fn>

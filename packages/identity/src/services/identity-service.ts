@@ -20,7 +20,7 @@ import {
   BusinessLogicError,
   type ServiceConfig,
 } from '@codex/service-errors';
-import type { UserProfile } from '@codex/shared-types';
+import type { PublicCreatorProfile, UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
 import { and, eq, ne } from 'drizzle-orm';
 
@@ -141,6 +141,122 @@ export class IdentityService extends BaseService {
       };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.fetchProfileFromDB');
+    }
+  }
+
+  /**
+   * Public creator profile, by username. ANONYMOUS-READABLE.
+   *
+   * Serves the `creators.<host>/<username>` pages, which previously called a
+   * route no worker implemented and silently rendered a placeholder profile
+   * for every creator.
+   *
+   * Returns ONLY the four fields those pages read, plus the id. No email, no
+   * role, no timestamps — and the cached slot holds exactly this shape, so the
+   * endpoint cannot leak by someone later returning the cached object whole.
+   *
+   * Having a username IS the opt-in: the column exists for creator profile
+   * URLs, `upgradeToCreator` sets it atomically with `role: 'creator'`, and the
+   * partial unique index only covers non-deleted rows. A user with no username
+   * has no public profile and is not addressable here.
+   *
+   * Returns `null` (not a throw) for an unknown username. This route is
+   * anonymous and enumerable by nature, so a 404-shaped answer and a
+   * "no such creator" answer must be indistinguishable; the caller renders its
+   * own not-found page.
+   *
+   * @param username - the profile's username, as it appears in the URL
+   */
+  async getPublicProfileByUsername(
+    username: string
+  ): Promise<PublicCreatorProfile | null> {
+    // Two hops, deliberately. The profile is keyed by USER ID so the
+    // `invalidate(userId)` calls already made by updateProfile, uploadAvatar
+    // and upgradeToCreator clear it for free — an edited bio or a new avatar
+    // can never leave a stale public copy. Only a username RENAME needs its
+    // own invalidation, which updateProfile now does for the old and new
+    // value. Keying the profile by username instead would have made every one
+    // of those three existing invalidations silently miss.
+    if (!this.cache) {
+      const userId = await this.resolveUsernameFromDB(username);
+      return userId ? await this.fetchPublicProfileFromDB(userId) : null;
+    }
+
+    const userId = await this.cache.get(
+      username.toLowerCase(),
+      CacheType.USERNAME_TO_ID,
+      () => this.resolveUsernameFromDB(username),
+      // Long TTL: a username changes far less often than a profile.
+      { ttl: 3600 }
+    );
+
+    if (!userId) return null;
+
+    return await this.cache.get(
+      userId,
+      CacheType.USER_PUBLIC_PROFILE,
+      () => this.fetchPublicProfileFromDB(userId),
+      { ttl: 600 }
+    );
+  }
+
+  /**
+   * username -> user id. Cache fetcher for `CacheType.USERNAME_TO_ID`.
+   *
+   * Hits the `idx_unique_username` partial index, which is already scoped to
+   * `deleted_at IS NULL`, so a soft-deleted account frees its username and
+   * cannot be resolved.
+   */
+  private async resolveUsernameFromDB(
+    username: string
+  ): Promise<string | null> {
+    try {
+      const user = await this.db.query.users.findFirst({
+        where: and(eq(users.username, username), whereNotDeleted(users)),
+        columns: { id: true },
+      });
+      return user?.id ?? null;
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.resolveUsernameFromDB');
+    }
+  }
+
+  /**
+   * The public projection. Cache fetcher for `CacheType.USER_PUBLIC_PROFILE`.
+   *
+   * `columns` is an explicit allowlist rather than a full row followed by a
+   * projection: the row never enters memory with `email` on it, so neither the
+   * cache slot nor a future careless return can carry it.
+   */
+  private async fetchPublicProfileFromDB(
+    userId: string
+  ): Promise<PublicCreatorProfile | null> {
+    try {
+      const user = await this.db.query.users.findFirst({
+        where: and(eq(users.id, userId), whereNotDeleted(users)),
+        columns: {
+          id: true,
+          name: true,
+          image: true,
+          avatarUrl: true,
+          bio: true,
+          socialLinks: true,
+        },
+      });
+
+      if (!user) return null;
+
+      return {
+        id: user.id,
+        name: user.name,
+        // Same precedence as getProfile: a custom upload wins over the
+        // OAuth-provider image.
+        image: user.avatarUrl ?? user.image,
+        bio: user.bio ?? null,
+        socialLinks: user.socialLinks ?? null,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.fetchPublicProfileFromDB');
     }
   }
 
@@ -301,6 +417,22 @@ export class IdentityService extends BaseService {
       // Invalidate cache after successful update
       if (this.cache) {
         await this.cache.invalidate(userId);
+
+        // The public profile is keyed by user id, so the invalidate above
+        // already covers it. The username -> id slot is NOT, and it is the one
+        // thing a profile update can change. Bump BOTH the old and the new
+        // value: the old so a freed username stops resolving to this user, the
+        // new in case it was probed (and cached as a miss... which it is not,
+        // since a null is never written — but a previous owner's id may be
+        // sitting there). Same old-and-new discipline as the org slug rename
+        // in `invalidateOrgSlugCacheEntry`.
+        const previousUsername = existing.username;
+        const nextUsername = updated.username;
+        if (previousUsername !== nextUsername) {
+          for (const name of [previousUsername, nextUsername]) {
+            if (name) await this.cache.invalidate(name.toLowerCase());
+          }
+        }
       }
 
       return {
@@ -384,6 +516,12 @@ export class IdentityService extends BaseService {
 
       if (this.cache) {
         await this.cache.invalidate(userId);
+        // This is where a username first comes into existence, so bump its
+        // slot too. `writeCacheSlot` never stores a null, so an earlier probe
+        // of this name could not have cached a miss — but stating it here
+        // keeps the public-profile invariant local to the writes that affect
+        // it, instead of resting on a guard in another package.
+        await this.cache.invalidate(input.username.toLowerCase());
       }
 
       return {

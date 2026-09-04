@@ -140,45 +140,28 @@
     !!uploadJourneySignatureImageForm.pending || sellMedia.signatureImageBusy
   );
 
-  async function onClearCover(): Promise<void> {
+  /**
+   * Clear one uploaded still: run the store command, say what happened, surface
+   * the store's own error. The THREE copies this replaced differed only in
+   * which command and which messages — and the hero/signature success copy says
+   * what actually happens next (A32's chain falls through to the film's frame),
+   * so each call site keeps naming its own message.
+   *
+   * The command arrives ALREADY INVOKED-WITH-RECEIVER (`() =>
+   * sellMedia.clearCover()`): a bare `sellMedia.clearCover` detaches `this`
+   * from the class-based store, the write never runs, and neither typecheck nor
+   * a mocked-store test can see it (codex-review SF-001).
+   */
+  async function onClear(
+    clear: () => Promise<void>,
+    removed: string,
+    failed: string
+  ): Promise<void> {
     try {
-      await sellMedia.clearCover();
-      toast.success(m.studio_builder_media_toast_cover_removed());
+      await clear();
+      toast.success(removed);
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : m.studio_builder_media_toast_cover_remove_failed()
-      );
-    }
-  }
-
-  async function onClearHeroImage(): Promise<void> {
-    try {
-      await sellMedia.clearHeroImage();
-      // Says what actually happens next: A32's chain falls through to the hero
-      // film's frame, so this is a step DOWN the chain, not "the hero is empty".
-      toast.success(m.studio_builder_media_toast_hero_image_removed());
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : m.studio_builder_media_toast_hero_image_remove_failed()
-      );
-    }
-  }
-
-  async function onClearSignatureImage(): Promise<void> {
-    try {
-      await sellMedia.clearSignatureImage();
-      // Says what actually happens next: the chain falls through to the
-      // signature film's frame, so this is a step DOWN the chain rather than
-      // "the letter is now unsigned".
-      toast.success(m.studio_builder_media_toast_signature_image_removed());
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : m.studio_builder_media_toast_signature_image_remove_failed()
-      );
+      toast.error(err instanceof Error ? err.message : failed);
     }
   }
 </script>
@@ -319,7 +302,12 @@
             type="button"
             class="cover__btn cover__btn--quiet"
             disabled={coverBusy}
-            onclick={onClearCover}
+            onclick={() =>
+            onClear(
+              () => sellMedia.clearCover(),
+              m.studio_builder_media_toast_cover_removed(),
+              m.studio_builder_media_toast_cover_remove_failed()
+            )}
           >
             {m.studio_builder_media_remove()}
           </button>
@@ -418,7 +406,12 @@
             type="button"
             class="cover__btn cover__btn--quiet"
             disabled={heroImageBusy}
-            onclick={onClearHeroImage}
+            onclick={() =>
+            onClear(
+              () => sellMedia.clearHeroImage(),
+              m.studio_builder_media_toast_hero_image_removed(),
+              m.studio_builder_media_toast_hero_image_remove_failed()
+            )}
           >
             {m.studio_builder_media_remove()}
           </button>
@@ -519,7 +512,12 @@
             type="button"
             class="cover__btn cover__btn--quiet"
             disabled={signatureImageBusy}
-            onclick={onClearSignatureImage}
+            onclick={() =>
+            onClear(
+              () => sellMedia.clearSignatureImage(),
+              m.studio_builder_media_toast_signature_image_removed(),
+              m.studio_builder_media_toast_signature_image_remove_failed()
+            )}
           >
             {m.studio_builder_media_remove()}
           </button>

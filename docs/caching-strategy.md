@@ -237,6 +237,14 @@ the cache call.
 **Currently wired up:**
 - `IdentityService.getProfile()` → `USER_PROFILE`, 10 min TTL
 - `IdentityService.getNotificationPreferences()` → `USER_PREFERENCES`, 10 min TTL
+- `IdentityService.getPublicProfileByUsername()` → two hops:
+  `USERNAME_TO_ID` (1 h, keyed by lowercased username) then
+  `USER_PUBLIC_PROFILE` (10 min, keyed by **user id**). The profile is keyed by
+  id so the three existing `invalidate(userId)` calls clear it for free; only a
+  username *rename* needs its own bump, which `updateProfile` does for the old
+  and the new value. It is a separate `CacheType` from `USER_PROFILE` because
+  that entry carries the user's `email` and this one feeds an unauthenticated
+  endpoint.
 - Invalidated via `cache.invalidate(userId)` on profile/preferences update
 
 **Natural next additions:**
@@ -418,7 +426,9 @@ and organization-api routes (`workers/organization-api/src/routes/{members,follo
 
 ```typescript
 // Entity-level (data cache + client manifest)
-CacheType.USER_PROFILE           // 'user:profile'
+CacheType.USER_PROFILE           // 'user:profile'  (carries email)
+CacheType.USER_PUBLIC_PROFILE    // 'user:public-profile'
+CacheType.USERNAME_TO_ID         // 'user:username-to-id'
 CacheType.USER_PREFERENCES       // 'user:preferences'
 CacheType.ORG_CONFIG             // 'org:config'
 

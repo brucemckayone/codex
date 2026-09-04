@@ -69,6 +69,15 @@ export const BRAND_PREFIX_KEYS = new Set([
   'shader-intensity',
   'shader-grain',
   'shader-vignette',
+  // Shader palette. Absent or '0' on use-custom-colors means the shader paints
+  // in the org's brand colours (--color-brand-*), which is the default and what
+  // every org did before these keys existed. Set the flag and the four colour
+  // keys override that, letting the hero effect diverge from the brand palette.
+  'shader-use-custom-colors',
+  'shader-color-primary',
+  'shader-color-secondary',
+  'shader-color-accent',
+  'shader-color-bg',
   // Suture
   'shader-curl',
   'shader-dissipation',

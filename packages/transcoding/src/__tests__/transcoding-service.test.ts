@@ -156,6 +156,68 @@ describe('TranscodingService', () => {
         /RunPod API error/
       );
     });
+
+    it('never puts the RunPod upstream body in the client-visible error context', async () => {
+      // RunPodApiError extends InternalServiceError, and
+      // mapErrorToResponse copies `context` straight into the response's
+      // `details` field — so a `responseBody` in the context forwards a
+      // third-party upstream body to whoever called the API. The body is
+      // still logged via obs; it just must not ride on the error.
+      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+
+      const upstreamBody =
+        'RunPod internal: worker-77 at 10.4.2.9 rejected token sk_live_UPSTREAM';
+      (global.fetch as Mock).mockResolvedValue({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        text: async () => upstreamBody,
+      });
+
+      const err = await service
+        .triggerJob(mediaId, creatorId)
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      const serialised = JSON.stringify({
+        message: (err as Error).message,
+        context: (err as { context?: unknown }).context,
+      });
+      expect(serialised).not.toContain(upstreamBody);
+      expect(serialised).not.toContain('sk_live_UPSTREAM');
+      expect(serialised).not.toContain('10.4.2.9');
+      // The operation and status code ARE safe correlation data.
+      expect(
+        (err as { context?: { statusCode?: number } }).context?.statusCode
+      ).toBe(502);
+    });
+
+    it('never puts the transport error message in the error context', async () => {
+      // The timeout/abort branch had no log at all and passed
+      // `originalError: error.message` into the context — a fetch failure
+      // message can carry internal hostnames and the endpoint URL.
+      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+
+      const transportMessage =
+        'request to https://internal-runpod.codex.local/v2/ep-secret/run failed';
+      (global.fetch as Mock).mockRejectedValue(new Error(transportMessage));
+
+      const err = await service
+        .triggerJob(mediaId, creatorId)
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/RunPod API error/);
+      const serialised = JSON.stringify({
+        message: (err as Error).message,
+        context: (err as { context?: unknown }).context,
+      });
+      expect(serialised).not.toContain(transportMessage);
+      expect(serialised).not.toContain('internal-runpod.codex.local');
+      expect(serialised).not.toContain('ep-secret');
+    });
   });
 
   describe('handleWebhook', () => {
@@ -699,5 +761,138 @@ describe('TranscodingService', () => {
       // Verify no fetch happened — guard tripped before dispatch
       expect(global.fetch).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * retryTranscoding — the compensating write
+ *
+ * The claim (`failed` -> `uploaded`, attempts+1) commits before the RunPod
+ * dispatch, so a dispatch failure used to leave the row in `uploaded` with no
+ * job attached. Nothing moved it again: the webhook needs a job that was never
+ * created, and the next retry re-read `status !== 'failed'` and threw
+ * InvalidMediaStateError (HTTP 422). One upstream blip stranded a creator's
+ * media permanently.
+ *
+ * That is the exact sequence that failed CI run 33667762392 and skipped the
+ * 2026-09-02 production deploy: 500 from the dispatch, then 422 on both vitest
+ * retries.
+ */
+describe('TranscodingService.retryTranscoding', () => {
+  const mediaId = '550e8400-e29b-41d4-a716-446655440000';
+  const creatorId = 'user_123';
+
+  /** The row as it sits after a genuine transcoding failure. */
+  const failedMedia = {
+    id: mediaId,
+    creatorId,
+    status: 'failed' as MediaStatus,
+    mediaType: 'video' as MediaType,
+    r2Key: 'user_123/originals/uuid/video.mp4',
+    transcodingPriority: 1,
+    transcodingAttempts: 1,
+    transcodingError: 'Corrupted input file',
+    runpodJobId: 'runpod-job-earlier',
+  };
+
+  /** Every `.set()` payload the service wrote, in order. */
+  let writes: Record<string, unknown>[];
+  let service: TranscodingService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn();
+    service = new TranscodingService(mockConfig);
+    writes = [];
+
+    mockDb.update.mockReturnValue({
+      set: vi.fn((payload: Record<string, unknown>) => {
+        writes.push(payload);
+        return {
+          // `where` is awaited directly by triggerJob and chained with
+          // `.returning()` by the claim and the revert, so it has to satisfy
+          // both shapes.
+          where: vi.fn(() => ({
+            returning: vi.fn().mockResolvedValue([{ id: mediaId }]),
+          })),
+        };
+      }),
+    });
+  });
+
+  it('restores the row to retryable when the RunPod dispatch fails', async () => {
+    // retryTranscoding reads the failed row; triggerJob then re-reads it and
+    // requires 'uploaded', which the claim has just made true.
+    mockDb.query.mediaItems.findFirst
+      .mockResolvedValueOnce(failedMedia)
+      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
+
+    // The 2026-09-02 failure verbatim: wrangler answers a request that lands
+    // during an isolate reload with a 503, which TranscodingService reports as
+    // a RunPod API error.
+    (global.fetch as Mock).mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () =>
+        'Your worker restarted mid-request. Please try sending the request again.',
+    });
+
+    await expect(
+      service.retryTranscoding(mediaId, creatorId)
+    ).rejects.toThrow();
+
+    // The claim went out first...
+    expect(writes[0]).toMatchObject({
+      status: 'uploaded',
+      transcodingAttempts: 2,
+      transcodingError: null,
+      runpodJobId: null,
+    });
+
+    // ...and the LAST write puts every one of those columns back, so the row
+    // is exactly as retryable as it was before the attempt.
+    expect(writes.at(-1)).toMatchObject({
+      status: 'failed',
+      transcodingAttempts: 1,
+      transcodingError: 'Corrupted input file',
+      runpodJobId: 'runpod-job-earlier',
+    });
+  });
+
+  it('does not spend a retry on an attempt that never reached RunPod', async () => {
+    mockDb.query.mediaItems.findFirst
+      .mockResolvedValueOnce(failedMedia)
+      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
+    (global.fetch as Mock).mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => 'upstream unavailable',
+    });
+
+    await expect(
+      service.retryTranscoding(mediaId, creatorId)
+    ).rejects.toThrow();
+
+    // The budget guards against re-transcoding media that is itself broken.
+    // Nothing was transcoded here, so the counter must come back to 1 — three
+    // upstream blips must not exhaust a creator's three retries.
+    expect(writes.at(-1)?.transcodingAttempts).toBe(1);
+  });
+
+  it('leaves the claim in place when the dispatch succeeds', async () => {
+    mockDb.query.mediaItems.findFirst
+      .mockResolvedValueOnce(failedMedia)
+      .mockResolvedValueOnce({ ...failedMedia, status: 'uploaded' });
+    (global.fetch as Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'runpod-job-new' }),
+    });
+
+    await service.retryTranscoding(mediaId, creatorId);
+
+    // Calibration for the two tests above: if a revert were written on the
+    // HAPPY path they would pass for the wrong reason, because they only
+    // inspect the last write.
+    expect(writes.map((w) => w.status)).not.toContain('failed');
   });
 });

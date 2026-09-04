@@ -28,15 +28,10 @@ export {
 } from './design-vocabulary';
 // Canvas (INLINE WYSIWYG render of the section components + block toolbar).
 export { default as JourneyBuilderCanvas } from './JourneyBuilderCanvas.svelte';
-export { default as JourneyPreviewFrame } from './JourneyPreviewFrame.svelte';
 export {
   JOURNEY_PREVIEW_DEVICES,
   type JourneyPreviewDevice,
   type JourneyPreviewDeviceId,
-  type JourneyPreviewFrameLoad,
-  type JourneyPreviewFrameTheme,
-  type JourneyPreviewThemeMode,
-  resolveJourneyPreviewPath,
 } from './journey-preview-canvas';
 // Page-mode settings panels (Look / Pricing / Media / Brand / SEO).
 export { default as PageBrandPanel } from './PageBrandPanel.svelte';
@@ -44,10 +39,6 @@ export { default as PageDesignPanel } from './PageDesignPanel.svelte';
 export { default as PageMediaPanel } from './PageMediaPanel.svelte';
 export { default as PagePricingPanel } from './PagePricingPanel.svelte';
 export { default as PageSeoPanel } from './PageSeoPanel.svelte';
-export {
-  createJourneyPreviewWiring,
-  type JourneyPreviewWiring,
-} from './preview-wiring';
 export { default as SectionEditor } from './SectionEditor.svelte';
 export { default as SectionList } from './SectionList.svelte';
 export {

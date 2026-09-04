@@ -63,9 +63,18 @@ describe('Guided → store wiring (WP-1.7)', () => {
 
   it('preset path: applyPreset sets the palette AND spread-merges token overrides (Codex-oqv3r)', () => {
     // A pre-existing fine-tune override the preset does not touch.
+    //
+    // `player-text` is the right choice here and `shadow-scale` no longer is.
+    // Presets are now COMPOSED and fill every design key, so `shadow-scale`
+    // has an authored value on every one of them — the preset winning that key
+    // is the documented conflict rule, not a lost fine-tune. The `player-*`
+    // family is the surface presets deliberately never write (the player is
+    // dark chrome over video, so org-brand.css's white-on-dark derivation is
+    // already right — see preset-axes.ts "WHAT IS DELIBERATELY NOT SET"), which
+    // makes it a permanently valid probe for merge-vs-replace.
     brandEditor.open(
       ORG_ID,
-      makeSaved({ tokenOverrides: { 'shadow-scale': '1.5' } })
+      makeSaved({ tokenOverrides: { 'player-text': '#FF00FF' } })
     );
     const preset = BRAND_PRESETS[0];
 
@@ -76,7 +85,12 @@ describe('Guided → store wiring (WP-1.7)', () => {
       preset.values.secondaryColor
     );
     // The untouched key must survive — a spread-merge, not a wholesale replace.
-    expect(brandEditor.pending?.tokenOverrides['shadow-scale']).toBe('1.5');
+    expect(brandEditor.pending?.tokenOverrides['player-text']).toBe('#FF00FF');
+    // And a key the preset DOES author must win, which is the other half of
+    // the same rule.
+    expect(brandEditor.pending?.tokenOverrides['shadow-scale']).toBe(
+      preset.tokenOverrides?.['shadow-scale']
+    );
   });
 
   it('handoff: an edit made in Guided is visible through the Advanced store view', () => {

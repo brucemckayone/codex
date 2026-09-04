@@ -11,6 +11,8 @@
  *  - Background gradient now primary-tinted (was flat bg * 0.25..0.4)
  *  - Luminance-aware filmic grain
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const POLLEN_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -33,6 +35,14 @@ uniform float u_bokeh;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by this preset's rate setting. Replaces wall-clock time so motion
+ * advances with the music and cannot run backwards.
+ */
+uniform float u_clock;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -98,7 +108,7 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_drift;
+  float t = u_clock;  // integrated musical clock, monotone by construction
 
   vec2 uv = (2.0 * gl_FragCoord.xy - u_resolution) / u_resolution.y;
   float aspect = u_resolution.x / u_resolution.y;
@@ -120,14 +130,18 @@ void main() {
     float depthFrac = float(layer) / max(float(u_depth - 1), 1.0);
     float layerScale = 1.0 - depthFrac * 0.25;
     float layerBright = 1.0 - depthFrac * 0.35;
-    float bokehFactor = depthFrac * u_bokeh;
+    // Treble tightens the bokeh — bright audio content reads as the field
+    // pulling into focus, which is a lens property rather than motion.
+    float bokehFactor = depthFrac * u_bokeh * (1.0 - u_treble * u_audioActive * 0.35);
     float layerDriftSpeed = 0.8 + depthFrac * 0.4;
 
     float parallaxStr = (1.0 - depthFrac) * 0.12;
     vec2 mouseParallax = (u_mouse - 0.5) * parallaxStr;
 
     float gridSize = floor(6.0 + u_density * 8.0);
-    float driftTime = u_time * u_drift * layerDriftSpeed;
+    // Drift paces on the musical clock; the per-layer speed spread stays,
+    // since that spread is the depth cue.
+    float driftTime = u_clock * layerDriftSpeed;
 
     vec2 layerUv = uv * layerScale + mouseParallax;
     vec2 cellId = floor(layerUv * gridSize * 0.5 + 0.5);

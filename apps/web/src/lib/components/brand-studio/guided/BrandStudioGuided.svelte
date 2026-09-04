@@ -2,15 +2,25 @@
   @component BrandStudioGuided
 
   The SHALLOW end of the `/studio/brand` difficulty dial (Codex-cijzb · WP-1.7).
-  Three fast starts — all writing the SAME `brandEditor` store, so every choice
+  Four fast starts — all writing the SAME `brandEditor` store, so every choice
   live-previews through the WP-1.4 bridge and carries seamlessly into the full
   rail (WP-1.5) when the admin "opens the full editor":
 
-    1. Presets   — the 12 built-in presets via the REUSED BrandEditorPresets
-                   component (click → store.applyPreset, spread-merge preserved).
-    2. Seed      — one colour → generateFullPalettes → clickable complete palettes.
-    3. From logo — client-side canvas colour extraction from the uploaded logo →
+    1. Presets   — the 27 built-in presets via the REUSED BrandEditorPresets
+                   component, each offering its three VARIANTS (click →
+                   store.applyPreset, spread-merge preserved).
+    2. Mix       — three plain-language dials (type / form / atmosphere) that
+                   compose a complete look on the admin's own palette. The
+                   low-granularity counterpart to the fine-tune rail: it never
+                   names a CSS token, and it goes through the same
+                   `composePreset` the built-in presets do, so a mixed look is
+                   as complete and as legible as a shipped one.
+    3. Seed      — one colour → generateFullPalettes → clickable complete palettes.
+    4. From logo — client-side canvas colour extraction from the uploaded logo →
                    a seed → the same palette generator. (The only new colour code.)
+
+  Presets and Mix share one `axes` state, so the two tabs never disagree about
+  what is selected.
 
   This view occupies the rail region; the live-preview CANVAS is shared with
   Advanced mode and never unmounts, so the handoff is a pure content swap — no
@@ -18,7 +28,11 @@
   brand-editor-mockups.html, Concept D ("Guided").
 -->
 <script lang="ts">
-  import { brandEditor, BRAND_DEFAULT_PRIMARY } from '$lib/brand-editor';
+  import {
+    brandEditor,
+    BRAND_DEFAULT_PRIMARY,
+    type PresetAxisPoint,
+  } from '$lib/brand-editor';
   import {
     generateFullPalettes,
     type FullPalette,
@@ -30,7 +44,9 @@
   // to static-import here: brand-studio is admin-only studio UI, outside the
   // public-route bundle the brand-editor boundary gate protects.
   import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
+  import { applyMix } from './apply-mix';
   import { applyFullPalette } from './apply-palette';
+  import BrandMixer from './BrandMixer.svelte';
   import {
     extractColorsFromLogo,
     type LogoExtraction,
@@ -59,6 +75,35 @@
 
   // Which quick-start is showing. Typed as string so it binds to Tabs' value.
   let activePath = $state<string>('presets');
+
+  // ── Axis mix ──────────────────────────────────────────────────────────────
+  // The mixer and the preset gallery are two views of one selection: picking a
+  // preset variant moves the dials, and moving a dial keeps the palette but
+  // drops the preset's identity (it is no longer THAT look). Holding both in
+  // one place is what keeps them from disagreeing on screen.
+  //
+  // The initial point is a deliberate neutral rather than a guess at the org's
+  // existing brand: token overrides do not record which axis produced them, so
+  // inferring a point from saved state would be reverse-engineering. Nothing is
+  // written until the admin actually picks something.
+  let axes = $state<PresetAxisPoint>({
+    type: 'neutral',
+    form: 'crisp',
+    atmosphere: 'still',
+  });
+  /** Id of the applied look, or null once the dials diverge from a preset. */
+  let appliedId = $state<string | null>(null);
+
+  function onPresetApplied(next: PresetAxisPoint, id: string): void {
+    axes = next;
+    appliedId = id;
+  }
+
+  function onMixChanged(next: PresetAxisPoint): void {
+    axes = next;
+    appliedId = null;
+    applyMix(next);
+  }
 
   // The seed is the current primary until the admin picks one (via the colour
   // input or a logo swatch); `seedOverride` holds that explicit pick.
@@ -168,21 +213,27 @@
       {orgName ? `Let's brand ${orgName}.` : "Let's brand your space."}
     </h1>
     <p class="guided__subtitle">
-      Start anywhere — pick a preset, drop in a colour, or pull colours from your
-      logo. You can refine every detail later.
+      Start anywhere — pick a preset and one of its looks, mix your own from
+      three choices, drop in a colour, or pull colours from your logo. You can
+      refine every detail later.
     </p>
   </header>
 
   <Tabs.Root bind:value={activePath} class="guided__tabs">
     <Tabs.List class="guided__tablist">
       <Tabs.Trigger value="presets">Presets</Tabs.Trigger>
+      <Tabs.Trigger value="mix">Mix</Tabs.Trigger>
       <Tabs.Trigger value="seed">Seed colour</Tabs.Trigger>
       <Tabs.Trigger value="logo">From logo</Tabs.Trigger>
     </Tabs.List>
 
     <div class="guided__scroll">
       <Tabs.Content value="presets" class="guided__panel">
-        <BrandEditorPresets />
+        <BrandEditorPresets onapply={onPresetApplied} {appliedId} />
+      </Tabs.Content>
+
+      <Tabs.Content value="mix" class="guided__panel">
+        <BrandMixer {axes} onchange={onMixChanged} />
       </Tabs.Content>
 
       <Tabs.Content value="seed" class="guided__panel">

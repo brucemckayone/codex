@@ -336,9 +336,16 @@ export type AdminCustomerListQueryInput = z.infer<
 /**
  * Customer ID path parameter schema
  * Uses Better Auth user ID format (alphanumeric)
+ *
+ * The param is `customerId`, NOT `id`, deliberately: procedure()'s org
+ * resolver treats a bare `:id` on an org-scoped route as the ORGANIZATION id
+ * (see resolveOrganizationId in worker-utils/procedure/helpers.ts), which made
+ * `GET /api/admin/customers/:id` resolve the customer as an org and fail for
+ * every caller. Never name a non-org resource `:id` on a route that requires
+ * org membership.
  */
 export const adminCustomerIdParamsSchema = z.object({
-  id: userIdSchema,
+  customerId: userIdSchema,
 });
 
 export type AdminCustomerIdParams = z.infer<typeof adminCustomerIdParamsSchema>;

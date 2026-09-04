@@ -31,25 +31,25 @@ When working with beads, you MUST have a full understanding of how tasks fit int
 
 ## Workers (Cloudflare)
 
-All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceUrl(service, env)` to resolve URLs. NEVER hardcode port numbers.
+All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServiceUrl(service, envOrIsLocal)` from `@codex/urls` to resolve service URLs. NEVER hardcode port numbers.
 
 | # | Worker | Port | Purpose | Key Endpoints |
 |---|---|---|---|---|
-| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /register`, `/login`, `GET /session` |
-| 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /content`, `GET /stream/:id` |
-| 3 | **organization-api** | 42071 | Org CRUD, membership, settings | `POST /organizations`, `GET /organizations/:slug` |
-| 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe` |
-| 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /analytics/revenue`, `POST /content/publish-override` |
-| 6 | **identity-api** | 42074 | User profiles, platform settings (branding, contact, features) | `GET /settings/branding`, `PUT /settings/features` |
-| 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /templates`, `POST /send` |
-| 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /transcode`, `POST /webhook` |
+| 1 | **auth** | 42069 | BetterAuth, sessions (PG+KV cache), rate limiting | `POST /api/auth/sign-up/email`, `POST /api/auth/sign-in/email`, `GET /api/auth/session` |
+| 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /api/content`, `GET /api/access/content/:id/stream` |
+| 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
+| 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |
+| 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
+| 6 | **identity-api** | 42074 | User profiles, preferences, creator onboarding, org membership (user side) | `GET /api/user/profile`, `PATCH /api/user/profile`, `GET /api/user/public/:username` (the worker's only anonymous route) |
+| 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /api/templates`, `POST /internal/send` (worker HMAC) |
+| 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /internal/media/:id/transcode` (worker HMAC), `POST /api/transcoding/webhook` (RunPod HMAC) |
 | 9 | **dev-cdn** | 4100 | Local development CDN proxy (Miniflare R2) | `GET /:key` |
 
 > **Note**: Content-API and Access share port 4001 — access control is co-deployed with the content worker because signed URL generation needs direct R2 access.
 
 ---
 
-## Packages (21 total)
+## Packages (24 total)
 
 ### Foundation (core infrastructure, no business logic)
 | Package | Purpose | Key Exports |
@@ -59,7 +59,8 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceU
 | **@codex/service-errors** | Error handling | `BaseService`, `*Error` classes, `mapErrorToResponse` |
 | **@codex/security** | Auth & protection | `requireAuth`, `rateLimit`, `workerAuth`, `securityHeaders` |
 | **@codex/validation** | Zod schemas | `*Schema`, `sanitizeSvgContent` |
-| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `getServiceUrl`, `isDev`, `getCookieConfig` |
+| **@codex/constants** | Shared constants | `SERVICE_PORTS`, `ENV_NAMES`, `CACHE_PRESETS`, `isDev` |
+| **@codex/urls** | URL builders & host/cookie domain logic | `buildServiceUrl`, `buildContentUrl`, `buildOrgUrl`, `parseHost`, `getCookieConfig` |
 
 ### Services (business logic)
 | Package | Purpose | Key Exports |
@@ -69,8 +70,10 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `getServiceU
 | **@codex/identity** | User identity | `IdentityService` |
 | **@codex/access** | Access control, streaming | `ContentAccessService` |
 | **@codex/purchase** | Stripe, purchases | `PurchaseService` |
+| **@codex/subscription** | Tiers, Connect, subscription lifecycle | `TierService`, `SubscriptionService`, `ConnectAccountService` |
+| **@codex/agreements** | Revenue-share agreements | `AgreementService`, `validateProposedShare` |
 | **@codex/notifications** | Email, templates | `NotificationsService`, `TemplateService` |
-| **@codex/admin** | Admin analytics/mgmt | `AnalyticsService` |
+| **@codex/admin** | Admin analytics/mgmt | `AdminAnalyticsService` |
 | **@codex/transcoding** | RunPod transcoding | `TranscodingService` |
 
 ### Utilities
@@ -127,14 +130,14 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 
 | Type | HTTP Status | Response Shape |
 |---|---|---|
-| **Single item** | 200 (GET/PATCH) or 201 (POST create) | `{ data: T }` — handler returns plain object, procedure wraps |
+| **Single item** | 200 by default; 201 only when the route declares `successStatus: 201` | `{ data: T }` — handler returns plain object, procedure wraps |
 | **List** | 200 | `{ items: T[], pagination: { page, limit, total, totalPages } }` — handler returns `PaginatedResult` |
 | **Error** | 4xx/5xx | `{ error: { code, message, details? } }` — from `mapErrorToResponse()` |
 | **No content** | 204 | Empty body — handler returns `null` |
 
 ### Ports & URLs
 
-- **MUST** use `getServiceUrl(service, env)` from `@codex/constants` — NEVER hardcode localhost URLs or port numbers
+- **MUST** use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode localhost URLs or port numbers. (There is no `getServiceUrl`; it was renamed when the URL builders moved to `@codex/urls` in WP-3.)
 - **MUST** use `SERVICE_PORTS` from `@codex/constants` as single source of truth for port assignments
 
 ### Currency
@@ -147,7 +150,7 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 
 ### Adding a New API Endpoint
 
-1. Define Zod schema → `packages/validation/src/[domain].ts`
+1. Define Zod schema → `packages/validation/src/schemas/[domain].ts` (older domains sit at src root: `auth.ts`, `image.ts`, `text.ts`)
 2. Add service method → `packages/[service]/src/services/*-service.ts` (extend `BaseService`)
 3. Create worker route → `workers/[worker]/src/routes/*.ts` using `procedure()`
 4. **Always**: Scope by creatorId/orgId, validate input, use transactions for multi-step
@@ -182,7 +185,7 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 ### Testing
 
 - Unit tests → `@codex/test-utils` factories, `setupTestDatabase()`
-- Integration tests → Use `withNeonTestBranch()` (CI), `dbWs` for transactions
+- Integration tests → Neon test branching is wired globally by `config/vitest/test-setup.ts` (`withNeonTestBranch()` is a deprecated no-op — never add new calls), `dbWs` for transactions
 - Test factories → `packages/test-utils/src/factories.ts`
 - Reference test → `packages/organization/src/services/__tests__/organization-service.test.ts`
 
@@ -239,7 +242,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 - With JS disabled, SvelteKit waits for all promises before sending HTML (graceful degradation)
 - Streaming only works in `+page.server.ts`, NOT `+page.ts` (universal loads)
 
-**Pages using streaming:** Org landing, content detail (org + creator), studio dashboard, studio customers.
+**Pages using streaming:** Org landing, content detail (org + creator), pricing, journey detail, creator studio earnings.
 
 ### Studio SPA Mode
 
@@ -289,7 +292,7 @@ executionCtx.waitUntil(
 `PaginatedResult` loses its identity and `procedure()` emits `{ data: {...} }`
 instead of the list envelope. Cache `{ items, pagination }` and re-wrap after.
 
-**Currently cached:** User profile (10min), user preferences (10min), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
+**Currently cached:** User profile (10min), user preferences (10min), public creator profile (10min, keyed by user id) + its username->id hop (1h), org branding (30min), org content collection versions. See `docs/caching-strategy.md` for full details.
 
 ---
 

@@ -8,6 +8,7 @@
   @prop {(preset: string | null) => void} onchange - Callback when selection changes
 -->
 <script lang="ts">
+  import { HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
   import ShaderPreview from './ShaderPreview.svelte';
 
   interface Props {
@@ -17,34 +18,29 @@
 
   const { value, onchange }: Props = $props();
 
-  const PRESETS = [
-    { id: 'none', label: 'None', description: 'No shader effect' },
-    { id: 'suture', label: 'Suture', description: 'Organic flowing fluid' },
-    { id: 'ether', label: 'Ether', description: 'Ethereal glowing forms' },
-    { id: 'warp', label: 'Warp', description: 'Domain warping textures' },
-    { id: 'ripple', label: 'Ripple', description: 'Water ripple surface' },
-    { id: 'pulse', label: 'Pulse', description: 'Liquid wave surface' },
-    { id: 'ink', label: 'Ink', description: 'Ink dispersion' },
-    { id: 'nebula', label: 'Nebula', description: 'Cosmic dust clouds' },
-    { id: 'silk', label: 'Silk', description: 'Flowing fabric' },
-    { id: 'aurora', label: 'Aurora', description: 'Northern lights' },
-    { id: 'plasma', label: 'Plasma', description: 'Iridescent fluid' },
-    { id: 'flux', label: 'Flux', description: 'Magnetic field lines' },
-    { id: 'caustic', label: 'Caustic', description: 'Underwater light' },
-    { id: 'lava', label: 'Lava', description: 'Molten crust' },
-    { id: 'rain', label: 'Rain', description: 'Raindrops on glass' },
-    { id: 'frost', label: 'Frost', description: 'Ice crystal growth' },
-    { id: 'glow', label: 'Glow', description: 'Bioluminescent deep sea' },
-    { id: 'life', label: 'Life', description: 'Cellular automata' },
-    { id: 'tendrils', label: 'Tendrils', description: 'Flowing curl noise' },
-    { id: 'ocean', label: 'Ocean', description: 'Caustics over sand' },
-    { id: 'waves', label: 'Waves', description: 'Ocean surface' },
-    { id: 'clouds', label: 'Clouds', description: 'Procedural sky' },
-    { id: 'julia', label: 'Julia', description: 'Animated fractal' },
-    { id: 'tunnel', label: 'Tunnel', description: 'Fractal tunnel' },
-    { id: 'flow', label: 'Flow', description: 'Paint streaks' },
-    { id: 'spore', label: 'Spore', description: 'Slime network' },
-  ] as const;
+  /**
+   * Every shader preset, derived from the single source of truth.
+   *
+   * This list used to be hardcoded here, and it had drifted: it named 26 of
+   * the 41 presets, so `topo`, `turing`, `glass`, `film`, `physarum`,
+   * `mycelium`, `pollen`, `growth`, `geode`, `lenia`, `bismuth`, `pearl`,
+   * `vortex`, `gyroid`, `fracture` and `vapor` could not be chosen for
+   * immersive audio playback at all — no matter how audio-reactive they were.
+   *
+   * Two lists that must agree, with nothing forcing them to, always diverge:
+   * adding a preset to `HERO_FX_PRESETS` gave no signal that this copy also
+   * needed the entry. Deriving removes the failure mode rather than
+   * documenting it — a new preset now appears here automatically.
+   *
+   * `none` is re-described. In the brand editor it means "fall back to the
+   * default gradient hero"; here it means "play audio with no visualiser at
+   * all", since the immersive player is a fullscreen overlay with no gradient
+   * behind it. Same id, different consequence — so the label is overridden
+   * rather than inherited.
+   */
+  const PRESETS = HERO_FX_PRESETS.map((p) =>
+    p.id === 'none' ? { ...p, description: 'No shader effect' } : p
+  );
 
   function isSelected(presetId: string): boolean {
     if (presetId === 'none') return value === null;

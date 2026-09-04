@@ -105,6 +105,7 @@ export type {
   ErrorResponse,
   HonoEnv,
   ProgressData,
+  PublicCreatorProfile,
   SessionData,
   UserData,
   UserProfile,

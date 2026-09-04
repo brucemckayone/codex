@@ -10,6 +10,8 @@
  *  - Bloom halo on brightest film highlights — soap-bubble rainbow glow
  *  - Luminance-aware filmic grain
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const FILM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -31,6 +33,14 @@ uniform float u_ripple;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by this preset's rate setting. Replaces wall-clock time so motion
+ * advances with the music and cannot run backwards.
+ */
+uniform float u_clock;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -86,7 +96,7 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_filmSpeed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
 
   vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
   vec2 uv = v_uv * aspect;
@@ -101,6 +111,10 @@ void main() {
   float maxDist = length(center);
   float fresnel = centerDist / maxDist;
   thickness += u_shift * fresnel * 0.3;
+  // Timbre shifts film thickness, which is what physically sets interference
+  // colour — so this is the rare case where an audio-to-visual mapping is
+  // motivated rather than decorative. Beats add a brief thickness swell.
+  thickness += audioHueShift(0.22) + beatHit(1.8) * 0.06;
 
   vec2 mouseUV = u_mouse * aspect;
   float mouseDist = distance(uv, mouseUV);

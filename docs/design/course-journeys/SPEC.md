@@ -277,7 +277,7 @@ and the token-override store into reusable pieces both tools consume.
   the brand-editor colour/token controls).
 - **Canvas** — an **iframe of the real sales page**, same-origin.
 - **Live preview** — mirror `brand-preview-bridge.ts`: versioned message type
-  (`codex:page-preview:v1`), **explicit `targetOrigin`**, applier **inert unless embedded**,
+  (`codex:page-preview:v1`), **explicit `targetOrigin`**, applier **inert unless embedded** — *historical: this bridge was deleted in PR #483 (2026-09-02); the builder previews inline*,
   never posts back. Payload = the pending page draft (sections + brandOverrides); the
   framed page re-derives its render — copy/order/theme changes go live with no reload.
 - **Import boundary** — inert applier + store under `$lib/page-builder` (public-bundle

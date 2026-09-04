@@ -1,12 +1,28 @@
+import {
+  type AtmosphereAxisId,
+  composePreset,
+  type FormAxisId,
+  type PresetPalette,
+  type PresetSpec,
+  type TypeAxisId,
+} from './preset-axes';
 import type { BrandPreset } from './types';
 
 /**
  * Built-in brand presets.
  *
- * Each preset provides a complete set of brand values that produce
- * a visually distinct result when applied. The CSS engine (org-brand.css)
- * derives the full palette from these inputs via OKLCH relative colors.
+ * A preset is NOT a list of token values. It is a palette plus one point on
+ * each of three axes — type, form, atmosphere — which `composePreset` expands
+ * into the complete `BrandPreset` the store consumes. See `preset-axes.ts` for
+ * why (three defects that partial hand-authoring caused, and how composition
+ * makes each unrepresentable).
+ *
+ * Every preset carries VARIANTS: the same palette with one or two axes swapped.
+ * `variants[0]` is always the signature — identical to the preset's own
+ * top-level values — so the guided mixer can render a uniform row without
+ * special-casing the default.
  */
+
 export type PresetCategory =
   | 'Professional'
   | 'Creative'
@@ -18,103 +34,188 @@ export type PresetCategory =
   | 'Playful'
   | 'Atmospheric';
 
-interface CategorizedPreset extends BrandPreset {
-  category: PresetCategory;
+/** The axis coordinates a composed look was built from. */
+export interface PresetAxisPoint {
+  readonly type: TypeAxisId;
+  readonly form: FormAxisId;
+  readonly atmosphere: AtmosphereAxisId;
 }
 
-export const BRAND_PRESETS: readonly CategorizedPreset[] = [
+/** A sub-preset: one preset's palette, re-pointed on one or two axes. */
+export interface PresetVariant extends BrandPreset {
+  /** Short label for the variant selector, e.g. "Editorial". */
+  readonly label: string;
+  /** One line explaining how this variant differs. */
+  readonly note: string;
+  readonly axes: PresetAxisPoint;
+}
+
+export interface CategorizedPreset extends BrandPreset {
+  readonly category: PresetCategory;
+  /** The signature axis point. Powers the guided mixer's initial state. */
+  readonly axes: PresetAxisPoint;
+  /** Signature first, then alternates. Never empty. */
+  readonly variants: readonly PresetVariant[];
+}
+
+// ── Authoring shape ────────────────────────────────────────────────────────
+
+interface VariantSpec {
+  readonly label: string;
+  readonly note: string;
+  readonly type?: TypeAxisId;
+  readonly form?: FormAxisId;
+  readonly atmosphere?: AtmosphereAxisId;
+}
+
+interface PresetDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly category: PresetCategory;
+  readonly description: string;
+  readonly palette: PresetPalette;
+  readonly axes: PresetAxisPoint;
+  /** Two alternates. The signature is synthesised as `variants[0]`. */
+  readonly alternates: readonly [VariantSpec, VariantSpec];
+}
+
+function build(def: PresetDefinition): CategorizedPreset {
+  const spec = (axes: PresetAxisPoint, id: string): PresetSpec => ({
+    id,
+    name: def.name,
+    description: def.description,
+    palette: def.palette,
+    ...axes,
+  });
+
+  const signature = composePreset(spec(def.axes, def.id));
+
+  const variants: PresetVariant[] = [
+    {
+      ...signature,
+      label: 'Signature',
+      note: def.description,
+      axes: def.axes,
+    },
+    ...def.alternates.map((alt) => {
+      const axes: PresetAxisPoint = {
+        type: alt.type ?? def.axes.type,
+        form: alt.form ?? def.axes.form,
+        atmosphere: alt.atmosphere ?? def.axes.atmosphere,
+      };
+      const composed = composePreset(
+        spec(axes, `${def.id}.${alt.label.toLowerCase().replace(/\s+/g, '-')}`)
+      );
+      return {
+        ...composed,
+        name: `${def.name} · ${alt.label}`,
+        description: alt.note,
+        label: alt.label,
+        note: alt.note,
+        axes,
+      };
+    }),
+  ];
+
+  return {
+    ...signature,
+    category: def.category,
+    axes: def.axes,
+    variants,
+  };
+}
+
+// ── Definitions ────────────────────────────────────────────────────────────
+
+const DEFINITIONS: readonly PresetDefinition[] = [
   // ─── Professional ───────────────────────────────────────────────────
   {
     id: 'corporate',
     name: 'Corporate',
     category: 'Professional',
-    description: 'Professional and trustworthy — tight spacing',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'topo',
-      'shader-topo-line-count': '40',
-      'shader-topo-speed': '0.3',
-      'heading-color': '#1E3A5F',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#ffffff',
-      'hero-cta-bg': '#1E40AF',
-      'hero-cta-text': '#ffffff',
-      'card-hover-scale': '1.01',
-      'card-image-hover-scale': '1.02',
-      'text-transform-label': 'uppercase',
+    description: 'Trustworthy and dense — contour lines, tight spacing',
+    palette: {
+      primary: '#1E40AF',
+      secondary: '#4B5563',
+      accent: '#059669',
+      background: null,
+      darkPrimary: '#60A5FA',
+      darkBackground: '#0B1220',
+      headingIntent: '#1E3A5F',
     },
-    values: {
-      primaryColor: '#1E40AF',
-      secondaryColor: '#4B5563',
-      accentColor: '#059669',
-      backgroundColor: null,
-      fontBody: 'Source Sans 3',
-      fontHeading: 'Source Sans 3',
-      radius: 0.375,
-      density: 0.95,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'humanist', form: 'sharp', atmosphere: 'contour' },
+    alternates: [
+      {
+        label: 'Editorial',
+        note: 'Serif headlines at a larger scale — annual-report weight',
+        type: 'editorial',
+        form: 'crisp',
+      },
+      {
+        label: 'Open',
+        note: 'Roomier spacing and a softer lift — less buttoned-up',
+        form: 'soft',
+        atmosphere: 'haze',
+      },
+    ],
   },
   {
     id: 'executive',
     name: 'Executive',
     category: 'Professional',
-    description: 'Refined and authoritative — dark navy, gold accent',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'silk',
-      'shader-silk-speed': '0.3',
-      'shader-silk-sheen': '0.7',
-      'heading-color': '#1E293B',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#ffffff',
-      'hero-cta-bg': '#D97706',
-      'hero-cta-text': '#1E293B',
-      'glass-tint': '#D97706',
-      'card-hover-scale': '1.015',
-      'card-image-hover-scale': '1.03',
-      'text-transform-label': 'uppercase',
+    description: 'Refined and authoritative — slate, gold, folded silk',
+    palette: {
+      primary: '#1E293B',
+      secondary: '#64748B',
+      accent: '#D97706',
+      background: null,
+      darkPrimary: '#CBD5E1',
+      darkBackground: '#0B1120',
+      headingIntent: '#1E293B',
     },
-    values: {
-      primaryColor: '#1E293B',
-      secondaryColor: '#64748B',
-      accentColor: '#D97706',
-      backgroundColor: null,
-      fontBody: 'DM Sans',
-      fontHeading: 'DM Sans',
-      radius: 0.25,
-      density: 0.9,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'neutral', form: 'sharp', atmosphere: 'drape' },
+    alternates: [
+      {
+        label: 'Classical',
+        note: 'Garamond at an airy scale — old-institution confidence',
+        type: 'classical',
+        form: 'plush',
+      },
+      {
+        label: 'Deep',
+        note: 'Aetheric folds and a centred hero — boardroom drama',
+        atmosphere: 'voidform',
+      },
+    ],
   },
   {
     id: 'consulting',
     name: 'Consulting',
     category: 'Professional',
-    description: 'Clean, approachable, expert — teal primary',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'clouds',
-      'shader-clouds-speed': '0.4',
-      'hero-cta-bg': '#0D9488',
-      'hero-cta-text': '#ffffff',
-      'card-hover-scale': '1.02',
-      'text-transform-label': 'capitalize',
+    description: 'Clean, approachable expertise — teal over pale haze',
+    palette: {
+      primary: '#0D9488',
+      secondary: '#6B7280',
+      accent: '#F97316',
+      background: null,
+      darkPrimary: '#2DD4BF',
+      darkBackground: '#08201E',
+      headingIntent: '#0F766E',
     },
-    values: {
-      primaryColor: '#0D9488',
-      secondaryColor: '#6B7280',
-      accentColor: '#F97316',
-      backgroundColor: null,
-      fontBody: 'Inter',
-      fontHeading: 'Inter',
-      radius: 0.5,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'humanist', form: 'crisp', atmosphere: 'haze' },
+    alternates: [
+      {
+        label: 'Grounded',
+        note: 'Slab headings and flat elevation — practical, unfussy',
+        type: 'slab',
+        form: 'flat',
+      },
+      {
+        label: 'Quiet',
+        note: 'No animation at all — the content carries the page',
+        atmosphere: 'still',
+      },
+    ],
   },
 
   // ─── Creative ───────────────────────────────────────────────────────
@@ -122,89 +223,90 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'vibrant',
     name: 'Vibrant',
     category: 'Creative',
-    description: 'Bold and energetic — rounded, saturated colors',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'glow',
-      'shader-glow-count': '8',
-      'shader-glow-size': '0.6',
-      'heading-color': '#7C3AED',
-      'hero-glass-tint': '#EC4899',
-      'hero-border-tint': '#EC4899',
-      'glass-tint': '#EC4899',
-      'card-hover-scale': '1.04',
-      'card-image-hover-scale': '1.08',
-      'text-transform-label': 'none',
+    description: 'Bold and energetic — drifting orbs, rounded geometry',
+    palette: {
+      primary: '#7C3AED',
+      secondary: '#EC4899',
+      accent: '#F59E0B',
+      background: null,
+      darkPrimary: '#A78BFA',
+      darkBackground: '#140B24',
+      headingIntent: '#7C3AED',
     },
-    values: {
-      primaryColor: '#7C3AED',
-      secondaryColor: '#EC4899',
-      accentColor: '#F59E0B',
-      backgroundColor: null,
-      fontBody: 'Poppins',
-      fontHeading: 'Poppins',
-      radius: 0.75,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'geometric', form: 'soft', atmosphere: 'bloomlight' },
+    alternates: [
+      {
+        label: 'Poster',
+        note: 'Heavy display headlines — gallery-billboard loud',
+        type: 'poster',
+        form: 'sharp',
+      },
+      {
+        label: 'Electric',
+        note: 'Crackling plasma behind the hero — maximum voltage',
+        atmosphere: 'charge',
+      },
+    ],
   },
   {
     id: 'sunset',
     name: 'Sunset',
     category: 'Creative',
-    description: 'Warm gradient feel — coral, amber, earthy',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'nebula',
-      'shader-nebula-speed': '0.3',
-      'shader-nebula-density': '0.6',
-      'hero-glass-tint': '#FBBF24',
-      'hero-border-tint': '#FBBF24',
-      'glass-tint': '#FBBF24',
-      'card-hover-scale': '1.03',
-      'text-transform-label': 'capitalize',
+    description: 'Warm gradient heat — deep field dust and star depth',
+    palette: {
+      primary: '#E11D48',
+      secondary: '#F97316',
+      accent: '#FBBF24',
+      background: null,
+      darkPrimary: '#FB7185',
+      darkBackground: '#1A0A10',
+      headingIntent: '#BE123C',
     },
-    values: {
-      primaryColor: '#E11D48',
-      secondaryColor: '#F97316',
-      accentColor: '#FBBF24',
-      backgroundColor: null,
-      fontBody: 'Nunito',
-      fontHeading: 'Nunito',
-      radius: 1,
-      density: 1.05,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'geometric', form: 'soft', atmosphere: 'deepfield' },
+    alternates: [
+      {
+        label: 'Film',
+        note: 'Analogue grain and heavy vignette — sun-bleached',
+        atmosphere: 'grain',
+        form: 'crisp',
+      },
+      {
+        label: 'Molten',
+        note: 'Lava crust under a slab headline — furnace heat',
+        type: 'slab',
+        atmosphere: 'forge',
+      },
+    ],
   },
   {
     id: 'ocean',
     name: 'Ocean',
     category: 'Creative',
-    description: 'Cool and calming — deep blues to aqua',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'caustic',
-      'shader-caustic-speed': '0.5',
-      'shader-caustic-brightness': '0.6',
-      'hero-glass-tint': '#34D399',
-      'hero-border-tint': '#0891B2',
-      'glass-tint': '#34D399',
-      'card-hover-scale': '1.02',
+    description: 'Fresh and clear — caustic light through shallow water',
+    palette: {
+      primary: '#0284C7',
+      secondary: '#0891B2',
+      accent: '#34D399',
+      background: null,
+      darkPrimary: '#38BDF8',
+      darkBackground: '#06182A',
+      headingIntent: '#0369A1',
     },
-    values: {
-      primaryColor: '#0284C7',
-      secondaryColor: '#0891B2',
-      accentColor: '#34D399',
-      backgroundColor: null,
-      fontBody: 'Outfit',
-      fontHeading: 'Outfit',
-      radius: 0.75,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'neutral', form: 'soft', atmosphere: 'tide' },
+    alternates: [
+      {
+        label: 'Swell',
+        note: 'Long rolling waves and roomier spacing — open water',
+        atmosphere: 'dunes',
+        form: 'plush',
+      },
+      {
+        label: 'Current',
+        note: 'Laminar flow lines under grotesk type — kinetic',
+        type: 'grotesk',
+        atmosphere: 'stream',
+      },
+    ],
   },
 
   // ─── Bold ───────────────────────────────────────────────────────────
@@ -212,99 +314,88 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'dark',
     name: 'Dark',
     category: 'Bold',
-    description: 'Moody and modern — dark surface, light accents',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'ether',
-      'shader-intensity': '0.7',
-      'heading-color': '#818CF8',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#818CF8',
-      'hero-glass-tint': '#818CF8',
-      'glass-tint': '#A78BFA',
-      'card-hover-scale': '1.03',
+    description: 'Dark-first indigo — aetheric folds, centred hero',
+    palette: {
+      primary: '#818CF8',
+      secondary: '#A78BFA',
+      accent: '#FBBF24',
+      background: '#0F172A',
+      darkPrimary: '#A78BFA',
+      darkBackground: '#0B1120',
+      headingIntent: '#818CF8',
     },
-    values: {
-      primaryColor: '#818CF8',
-      secondaryColor: '#A78BFA',
-      accentColor: '#FBBF24',
-      backgroundColor: '#0F172A',
-      fontBody: 'DM Sans',
-      fontHeading: 'DM Sans',
-      radius: 0.5,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#A78BFA',
-        backgroundColor: '#0B1120',
+    axes: { type: 'neutral', form: 'crisp', atmosphere: 'voidform' },
+    alternates: [
+      {
+        label: 'Borealis',
+        note: 'Slow curtains of light instead of folds — colder, calmer',
+        atmosphere: 'borealis',
       },
-    },
+      {
+        label: 'Grotesk',
+        note: 'Technical headlines and square corners — harder edge',
+        type: 'grotesk',
+        form: 'precise',
+      },
+    ],
   },
   {
     id: 'neon',
     name: 'Neon',
     category: 'Bold',
-    description: 'High contrast, electric — black background, neon green',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'flux',
-      'shader-flux-line-density': '0.7',
-      'shader-flux-speed': '0.5',
-      'heading-color': '#22D3EE',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#22D3EE',
-      'hero-glass-tint': '#A3E635',
-      'hero-border-tint': '#22D3EE',
-      'player-text': '#22D3EE',
-      'glass-tint': '#A3E635',
-      'card-hover-scale': '1.05',
-      'card-image-hover-scale': '1.1',
-      'text-transform-label': 'uppercase',
+    description: 'Near-black with electric cyan — fast banded flux',
+    palette: {
+      primary: '#22D3EE',
+      secondary: '#A3E635',
+      accent: '#F472B6',
+      background: '#09090B',
+      darkPrimary: '#67E8F9',
+      darkBackground: '#050505',
+      headingIntent: '#22D3EE',
     },
-    values: {
-      primaryColor: '#22D3EE',
-      secondaryColor: '#A3E635',
-      accentColor: '#F472B6',
-      backgroundColor: '#09090B',
-      fontBody: 'Space Grotesk',
-      fontHeading: 'Space Grotesk',
-      radius: 0.25,
-      density: 0.95,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#67E8F9',
-        backgroundColor: '#050505',
+    axes: { type: 'grotesk', form: 'precise', atmosphere: 'current' },
+    alternates: [
+      {
+        label: 'Arcade',
+        note: 'Plasma and a poster headline — coin-op energy',
+        type: 'poster',
+        atmosphere: 'charge',
       },
-    },
+      {
+        label: 'Terminal',
+        note: 'Monospace throughout — machine-room readout',
+        type: 'mono',
+      },
+    ],
   },
   {
     id: 'ember',
     name: 'Ember',
     category: 'Bold',
-    description: 'Fiery intensity — deep red, warm surface',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'lava',
-      'shader-lava-glow': '0.7',
-      'shader-lava-speed': '0.4',
-      'heading-color': '#DC2626',
-      'hero-glass-tint': '#EA580C',
-      'hero-border-tint': '#DC2626',
-      'glass-tint': '#EA580C',
-      'card-hover-scale': '1.03',
+    description: 'Charcoal and fire — molten crust, industrial weight',
+    palette: {
+      primary: '#DC2626',
+      secondary: '#EA580C',
+      accent: '#FCD34D',
+      background: '#1C1917',
+      darkPrimary: '#F87171',
+      darkBackground: '#120F0E',
+      headingIntent: '#DC2626',
     },
-    values: {
-      primaryColor: '#DC2626',
-      secondaryColor: '#EA580C',
-      accentColor: '#FCD34D',
-      backgroundColor: '#1C1917',
-      fontBody: 'Rubik',
-      fontHeading: 'Rubik',
-      radius: 0.375,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'slab', form: 'sharp', atmosphere: 'forge' },
+    alternates: [
+      {
+        label: 'Poster',
+        note: 'Archivo Black at scale — protest-print volume',
+        type: 'poster',
+      },
+      {
+        label: 'Smoulder',
+        note: 'Film grain over a quieter form — banked heat',
+        atmosphere: 'grain',
+        form: 'flat',
+      },
+    ],
   },
 
   // ─── Minimal ────────────────────────────────────────────────────────
@@ -312,83 +403,87 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'minimal',
     name: 'Minimal',
     category: 'Minimal',
-    description: 'Clean and understated — sharp corners, neutral palette',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'none',
-      'card-hover-scale': '1.0',
-      'card-image-hover-scale': '1.0',
-      'text-transform-label': 'none',
+    description: 'Near-black on white, no animation, almost no elevation',
+    palette: {
+      primary: '#1A1A1A',
+      secondary: '#737373',
+      accent: null,
+      background: null,
+      darkPrimary: '#E5E5E5',
+      darkBackground: '#0A0A0A',
+      headingIntent: 'auto',
     },
-    values: {
-      primaryColor: '#1A1A1A',
-      secondaryColor: '#737373',
-      accentColor: null,
-      backgroundColor: null,
-      fontBody: null,
-      fontHeading: null,
-      radius: 0,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'neutral', form: 'flat', atmosphere: 'still' },
+    alternates: [
+      {
+        label: 'Airy',
+        note: 'Lighter weights at open spacing — gallery-wall quiet',
+        type: 'airy',
+        form: 'soft',
+      },
+      {
+        label: 'Haze',
+        note: 'One pale cloud drift — motion without noise',
+        atmosphere: 'haze',
+      },
+    ],
   },
   {
     id: 'paper',
     name: 'Paper',
     category: 'Minimal',
-    description: 'Warm, editorial — off-white, soft radius',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'heading-color': '#78716C',
-      'glass-tint': '#D6D3D1',
-      'card-hover-scale': '1.015',
-      'text-transform-label': 'capitalize',
+    description: 'Warm off-white and stone — serif, flat, still',
+    palette: {
+      primary: '#78716C',
+      secondary: '#A8A29E',
+      accent: '#B45309',
+      background: '#FAFAF9',
+      darkPrimary: '#D6D3D1',
+      darkBackground: '#1C1917',
+      headingIntent: '#57534E',
     },
-    values: {
-      primaryColor: '#78716C',
-      secondaryColor: '#A8A29E',
-      accentColor: '#B45309',
-      backgroundColor: '#FAFAF9',
-      fontBody: 'Lora',
-      fontHeading: 'Lora',
-      radius: 0.5,
-      density: 1.1,
-      heroLayout: 'default',
-      darkOverrides: null,
-    },
+    axes: { type: 'editorial', form: 'flat', atmosphere: 'still' },
+    alternates: [
+      {
+        label: 'Alabaster',
+        note: 'Pale nacre sheen behind the hero — dark ink over it',
+        atmosphere: 'alabaster',
+      },
+      {
+        label: 'Classical',
+        note: 'Garamond at a large airy scale — private-press feel',
+        type: 'classical',
+        form: 'plush',
+      },
+    ],
   },
   {
     id: 'mono',
     name: 'Mono',
     category: 'Minimal',
-    description: 'Pure black and white — maximum contrast, no colour',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'none',
-      'heading-color': '#000000',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#000000',
-      'hero-cta-bg': '#000000',
-      'hero-cta-text': '#ffffff',
-      'card-hover-scale': '1.01',
-      'text-transform-label': 'uppercase',
+    description: 'Pure black and white — square corners, zero colour',
+    palette: {
+      primary: '#000000',
+      secondary: '#525252',
+      accent: null,
+      background: '#FFFFFF',
+      darkPrimary: '#FFFFFF',
+      darkBackground: '#0A0A0A',
+      headingIntent: 'auto',
     },
-    values: {
-      primaryColor: '#000000',
-      secondaryColor: '#525252',
-      accentColor: null,
-      backgroundColor: '#FFFFFF',
-      fontBody: null,
-      fontHeading: null,
-      radius: 0,
-      density: 0.95,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#ffffff',
-        backgroundColor: '#0A0A0A',
+    axes: { type: 'mono', form: 'precise', atmosphere: 'still' },
+    alternates: [
+      {
+        label: 'Grotesk',
+        note: 'Proportional grotesk headlines over a mono body feel',
+        type: 'grotesk',
       },
-    },
+      {
+        label: 'Lattice',
+        note: 'A rotating gyroid mesh — structure, still no colour',
+        atmosphere: 'lattice',
+      },
+    ],
   },
 
   // ─── Organic ────────────────────────────────────────────────────────
@@ -396,204 +491,177 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'forest',
     name: 'Forest',
     category: 'Organic',
-    description: 'Deep greens and earthy tones — nature-inspired calm',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'growth',
-      'shader-growth-speed': '0.3',
-      'shader-growth-glow': '0.4',
-      'heading-color': '#14532D',
-      'hero-glass-tint': '#65A30D',
-      'hero-border-tint': '#65A30D',
-      'glass-tint': '#65A30D',
-      'card-hover-scale': '1.02',
-      'text-transform-label': 'capitalize',
+    description: 'Deep green on pale sage — branching growth, slab type',
+    palette: {
+      primary: '#14532D',
+      secondary: '#854D0E',
+      accent: '#65A30D',
+      background: '#FAFDF7',
+      darkPrimary: '#22C55E',
+      darkBackground: '#0C1A0F',
+      headingIntent: '#14532D',
     },
-    values: {
-      primaryColor: '#14532D',
-      secondaryColor: '#854D0E',
-      accentColor: '#65A30D',
-      backgroundColor: '#FAFDF7',
-      fontBody: 'Bitter',
-      fontHeading: 'Bitter',
-      radius: 0.75,
-      density: 1.05,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#22C55E',
-        backgroundColor: '#0C1A0F',
+    axes: { type: 'slab', form: 'soft', atmosphere: 'canopy' },
+    alternates: [
+      {
+        label: 'Editorial',
+        note: 'Serif headlines — field-guide typography',
+        type: 'editorial',
       },
-    },
+      {
+        label: 'Rain',
+        note: 'Rain on glass instead of growth — quieter, wetter',
+        atmosphere: 'drizzle',
+        form: 'plush',
+      },
+    ],
   },
   {
     id: 'desert',
     name: 'Desert',
     category: 'Organic',
-    description: 'Warm sand and terracotta — sun-baked, expansive',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'waves',
-      'shader-waves-speed': '0.3',
-      'shader-waves-chop': '0.2',
-      'heading-color': '#78350F',
-      'hero-glass-tint': '#D97706',
-      'hero-border-tint': '#D97706',
-      'glass-tint': '#D2B48C',
-      'card-hover-scale': '1.02',
-      'text-transform-label': 'capitalize',
+    description: 'Terracotta and sand — long rolling swells, serif type',
+    palette: {
+      primary: '#A0522D',
+      secondary: '#92400E',
+      accent: '#D97706',
+      background: '#FDF8F0',
+      darkPrimary: '#D2956B',
+      darkBackground: '#1A120B',
+      headingIntent: '#78350F',
     },
-    values: {
-      primaryColor: '#A0522D',
-      secondaryColor: '#92400E',
-      accentColor: '#D97706',
-      backgroundColor: '#FDF8F0',
-      fontBody: 'Libre Baskerville',
-      fontHeading: 'Libre Baskerville',
-      radius: 0.5,
-      density: 1.1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#D2956B',
-        backgroundColor: '#1A120B',
+    axes: { type: 'editorial', form: 'plush', atmosphere: 'dunes' },
+    alternates: [
+      {
+        label: 'Classical',
+        note: 'Garamond at a large scale — expedition-journal weight',
+        type: 'classical',
       },
-    },
+      {
+        label: 'Heat',
+        note: 'Molten crust under the hero — noon rather than dusk',
+        atmosphere: 'forge',
+        form: 'crisp',
+      },
+    ],
   },
   {
     id: 'bloom',
     name: 'Bloom',
     category: 'Organic',
-    description: 'Soft pinks and botanical warmth — delicate, flourishing',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'pollen',
-      'shader-pollen-density': '0.5',
-      'shader-pollen-drift': '0.3',
-      'heading-color': '#9D174D',
-      'hero-glass-tint': '#F472B6',
-      'hero-border-tint': '#F9A8D4',
-      'glass-tint': '#F9A8D4',
-      'card-hover-scale': '1.02',
-      'card-image-hover-scale': '1.04',
-      'text-transform-label': 'none',
+    description: 'Rose on blush — pollen adrift, centred hero',
+    palette: {
+      primary: '#BE185D',
+      secondary: '#DB2777',
+      accent: '#F472B6',
+      background: '#FDF2F8',
+      darkPrimary: '#F472B6',
+      darkBackground: '#1A0A14',
+      headingIntent: '#9D174D',
     },
-    values: {
-      primaryColor: '#BE185D',
-      secondaryColor: '#DB2777',
-      accentColor: '#F472B6',
-      backgroundColor: '#FDF2F8',
-      fontBody: 'Nunito',
-      fontHeading: 'Playfair Display',
-      radius: 1,
-      density: 1.05,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#F472B6',
-        backgroundColor: '#1A0A14',
+    axes: { type: 'editorial', form: 'soft', atmosphere: 'driftseed' },
+    alternates: [
+      {
+        label: 'Soft',
+        note: 'Rounded display type and pill corners — sweeter',
+        type: 'soft',
+        form: 'pill',
       },
-    },
+      {
+        label: 'Bloom',
+        note: 'Drifting orbs instead of pollen — warmer light',
+        atmosphere: 'bloomlight',
+      },
+    ],
   },
 
-  // ─── Tech ──────────────────────────────────────────────────────────
+  // ─── Tech ───────────────────────────────────────────────────────────
   {
     id: 'terminal',
     name: 'Terminal',
     category: 'Tech',
-    description: 'Hacker aesthetic — black background, green phosphor glow',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'spore',
-      'shader-spore-decay': '0.95',
-      'heading-color': '#4ADE80',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#4ADE80',
-      'hero-glass-tint': '#4ADE80',
-      'hero-border-tint': '#4ADE80',
-      'player-text': '#4ADE80',
-      'glass-tint': '#4ADE80',
-      'card-hover-scale': '1.01',
-      'text-transform-label': 'uppercase',
+    description: 'Phosphor green on black — monospace, square corners',
+    palette: {
+      primary: '#4ADE80',
+      secondary: '#86EFAC',
+      accent: '#FDE047',
+      background: '#0A0A0A',
+      darkPrimary: '#4ADE80',
+      darkBackground: '#050505',
+      headingIntent: '#4ADE80',
     },
-    values: {
-      primaryColor: '#4ADE80',
-      secondaryColor: '#86EFAC',
-      accentColor: '#FDE047',
-      backgroundColor: '#0A0A0A',
-      fontBody: 'JetBrains Mono',
-      fontHeading: 'JetBrains Mono',
-      radius: 0.125,
-      density: 0.9,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#4ADE80',
-        backgroundColor: '#050505',
+    axes: { type: 'mono', form: 'precise', atmosphere: 'spores' },
+    alternates: [
+      {
+        label: 'Lattice',
+        note: 'A gyroid mesh instead of agent trails — colder geometry',
+        atmosphere: 'lattice',
       },
-    },
+      {
+        label: 'Grotesk',
+        note: 'Proportional headlines — less retro, more product',
+        type: 'grotesk',
+        form: 'sharp',
+      },
+    ],
   },
   {
     id: 'blueprint',
     name: 'Blueprint',
     category: 'Tech',
-    description: 'Technical precision — blueprint blue, structured grid',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'gyroid',
-      'shader-gyroid-speed': '0.3',
-      'shader-gyroid-density': '0.5',
-      'heading-color': '#1E3A8A',
-      'hero-cta-bg': '#1E3A8A',
-      'hero-cta-text': '#ffffff',
-      'glass-tint': '#BFDBFE',
-      'card-hover-scale': '1.015',
-      'text-transform-label': 'uppercase',
+    description: 'Draughtsman blue on pale — gyroid lattice, zero radius',
+    palette: {
+      primary: '#1E3A8A',
+      secondary: '#3B82F6',
+      accent: '#60A5FA',
+      background: '#EFF6FF',
+      darkPrimary: '#60A5FA',
+      darkBackground: '#0A1628',
+      headingIntent: '#1E3A8A',
     },
-    values: {
-      primaryColor: '#1E3A8A',
-      secondaryColor: '#3B82F6',
-      accentColor: '#60A5FA',
-      backgroundColor: '#EFF6FF',
-      fontBody: 'IBM Plex Sans',
-      fontHeading: 'IBM Plex Sans',
-      radius: 0.25,
-      density: 0.9,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#60A5FA',
-        backgroundColor: '#0A1628',
+    axes: { type: 'mono', form: 'precise', atmosphere: 'lattice' },
+    alternates: [
+      {
+        label: 'Humanist',
+        note: 'Open sans throughout — documentation rather than drawing',
+        type: 'humanist',
+        form: 'sharp',
       },
-    },
+      {
+        label: 'Contour',
+        note: 'Topographic lines — survey rather than schematic',
+        atmosphere: 'contour',
+      },
+    ],
   },
   {
     id: 'gradient',
     name: 'Gradient',
     category: 'Tech',
-    description: 'Purple-to-cyan energy — modern SaaS, fluid motion',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'flow',
-      'shader-flow-curl': '0.6',
-      'shader-flow-contrast': '0.5',
-      'heading-color': '#7C3AED',
-      'hero-glass-tint': '#06B6D4',
-      'hero-border-tint': '#8B5CF6',
-      'glass-tint': '#06B6D4',
-      'card-hover-scale': '1.04',
-      'card-image-hover-scale': '1.08',
-      'text-transform-label': 'none',
+    description: 'Violet to cyan — laminar flow, centred hero',
+    palette: {
+      primary: '#8B5CF6',
+      secondary: '#06B6D4',
+      accent: '#F472B6',
+      background: null,
+      darkPrimary: '#A78BFA',
+      darkBackground: '#0D0A1F',
+      headingIntent: '#7C3AED',
     },
-    values: {
-      primaryColor: '#8B5CF6',
-      secondaryColor: '#06B6D4',
-      accentColor: '#F472B6',
-      backgroundColor: null,
-      fontBody: 'Inter',
-      fontHeading: 'Inter',
-      radius: 0.75,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#A78BFA',
+    axes: { type: 'grotesk', form: 'crisp', atmosphere: 'stream' },
+    alternates: [
+      {
+        label: 'Bloom',
+        note: 'Soft orbs and generous radius — friendlier SaaS',
+        atmosphere: 'bloomlight',
+        form: 'soft',
       },
-    },
+      {
+        label: 'Flux',
+        note: 'Fast banded flux — launch-day energy',
+        atmosphere: 'current',
+      },
+    ],
   },
 
   // ─── Luxury ─────────────────────────────────────────────────────────
@@ -601,105 +669,87 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'onyx',
     name: 'Onyx',
     category: 'Luxury',
-    description: 'Premium dark — gold accents on near-black, crystalline',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'bismuth',
-      'shader-bismuth-iridescence': '0.7',
-      'shader-bismuth-speed': '0.3',
-      'heading-color': '#B8860B',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#D4A843',
-      'hero-glass-tint': '#B8860B',
-      'hero-border-tint': '#D4A843',
-      'player-text': '#D4A843',
-      'glass-tint': '#B8860B',
-      'card-hover-scale': '1.015',
-      'text-transform-label': 'uppercase',
+    description: 'Antique gold on true black — bismuth facets, garamond',
+    palette: {
+      primary: '#B8860B',
+      secondary: '#D4A843',
+      accent: '#F5DEB3',
+      background: '#0C0A09',
+      darkPrimary: '#D4A843',
+      darkBackground: '#080706',
+      headingIntent: '#B8860B',
     },
-    values: {
-      primaryColor: '#B8860B',
-      secondaryColor: '#D4A843',
-      accentColor: '#F5DEB3',
-      backgroundColor: '#0C0A09',
-      fontBody: 'DM Sans',
-      fontHeading: 'Playfair Display',
-      radius: 0.25,
-      density: 0.95,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#D4A843',
-        backgroundColor: '#080706',
+    axes: { type: 'classical', form: 'plush', atmosphere: 'facet' },
+    alternates: [
+      {
+        label: 'Editorial',
+        note: 'Playfair headlines at a tighter scale — fashion masthead',
+        type: 'editorial',
+        form: 'crisp',
       },
-    },
+      {
+        label: 'Drape',
+        note: 'Folded silk instead of mineral facets — softer luxury',
+        atmosphere: 'drape',
+      },
+    ],
   },
   {
     id: 'marble',
     name: 'Marble',
     category: 'Luxury',
-    description:
-      'Refined simplicity — off-white, charcoal veins, pearl shimmer',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'pearl',
-      'shader-pearl-speed': '0.3',
-      'shader-pearl-fresnel': '0.6',
-      'heading-color': '#292524',
-      'glass-tint': '#D6D3D1',
-      'card-hover-scale': '1.015',
-      'text-transform-label': 'capitalize',
+    description: 'Stone greys on warm white — pale nacre, dark hero ink',
+    palette: {
+      primary: '#292524',
+      secondary: '#57534E',
+      accent: '#A8A29E',
+      background: '#FAFAF9',
+      darkPrimary: '#D6D3D1',
+      darkBackground: '#1C1917',
+      headingIntent: '#292524',
     },
-    values: {
-      primaryColor: '#292524',
-      secondaryColor: '#57534E',
-      accentColor: '#A8A29E',
-      backgroundColor: '#FAFAF9',
-      fontBody: 'Cormorant Garamond',
-      fontHeading: 'Cormorant Garamond',
-      radius: 0.375,
-      density: 1.05,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#D6D3D1',
-        backgroundColor: '#1C1917',
+    axes: { type: 'classical', form: 'plush', atmosphere: 'alabaster' },
+    alternates: [
+      {
+        label: 'Facet',
+        note: 'Iridescent bismuth terraces — mineral rather than milky',
+        atmosphere: 'facet',
       },
-    },
+      {
+        label: 'Airy',
+        note: 'Light sans at open spacing — modern gallery',
+        type: 'airy',
+        form: 'flat',
+      },
+    ],
   },
   {
     id: 'velvet',
     name: 'Velvet',
     category: 'Luxury',
-    description: 'Deep purple opulence — lavender highlights, silk texture',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'silk',
-      'shader-silk-speed': '0.3',
-      'shader-silk-sheen': '0.8',
-      'shader-silk-softness': '0.6',
-      'heading-color': '#C4B5FD',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#C4B5FD',
-      'hero-glass-tint': '#A78BFA',
-      'hero-border-tint': '#8B5CF6',
-      'glass-tint': '#A78BFA',
-      'card-hover-scale': '1.02',
-      'text-transform-label': 'none',
+    description: 'Lilac on deep indigo — folded silk, centred hero',
+    palette: {
+      primary: '#A78BFA',
+      secondary: '#8B5CF6',
+      accent: '#C4B5FD',
+      background: '#1E1B4B',
+      darkPrimary: '#C4B5FD',
+      darkBackground: '#0F0D2E',
+      headingIntent: '#C4B5FD',
     },
-    values: {
-      primaryColor: '#A78BFA',
-      secondaryColor: '#8B5CF6',
-      accentColor: '#C4B5FD',
-      backgroundColor: '#1E1B4B',
-      fontBody: 'DM Sans',
-      fontHeading: 'Cormorant Garamond',
-      radius: 0.5,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#C4B5FD',
-        backgroundColor: '#0F0D2E',
+    axes: { type: 'editorial', form: 'plush', atmosphere: 'drape' },
+    alternates: [
+      {
+        label: 'Classical',
+        note: 'Garamond at maximum scale — opera-programme elegance',
+        type: 'classical',
       },
-    },
+      {
+        label: 'Borealis',
+        note: 'Curtains of light instead of silk — colder, wider',
+        atmosphere: 'borealis',
+      },
+    ],
   },
 
   // ─── Playful ────────────────────────────────────────────────────────
@@ -707,104 +757,88 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'bubblegum',
     name: 'Bubblegum',
     category: 'Playful',
-    description: 'Sugar rush — hot pink, bouncy radius, floating orbs',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'glow',
-      'shader-glow-count': '12',
-      'shader-glow-pulse': '0.5',
-      'shader-glow-size': '0.7',
-      'hero-glass-tint': '#FBBF24',
-      'hero-border-tint': '#EC4899',
-      'glass-tint': '#F9A8D4',
-      'card-hover-scale': '1.05',
-      'card-image-hover-scale': '1.1',
-      'text-transform-label': 'none',
+    description: 'Hot pink and amber — rounded display type, pill corners',
+    palette: {
+      primary: '#EC4899',
+      secondary: '#F472B6',
+      accent: '#FBBF24',
+      background: null,
+      darkPrimary: '#F9A8D4',
+      darkBackground: '#1F0A16',
+      headingIntent: '#DB2777',
     },
-    values: {
-      primaryColor: '#EC4899',
-      secondaryColor: '#F472B6',
-      accentColor: '#FBBF24',
-      backgroundColor: null,
-      fontBody: 'Nunito',
-      fontHeading: 'Fredoka',
-      radius: 1.5,
-      density: 1.05,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#F9A8D4',
+    axes: { type: 'soft', form: 'pill', atmosphere: 'bloomlight' },
+    alternates: [
+      {
+        label: 'Poster',
+        note: 'Archivo Black instead of rounded — sticker-print punch',
+        type: 'poster',
+        form: 'soft',
       },
-    },
+      {
+        label: 'Charge',
+        note: 'Plasma behind the hero — sugar rush',
+        atmosphere: 'charge',
+      },
+    ],
   },
   {
     id: 'retro',
     name: 'Retro',
     category: 'Playful',
-    description: 'Throwback vibes — orange zest, cream canvas, film grain',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'film',
-      'shader-film-speed': '0.3',
-      'shader-film-bands': '0.4',
-      'heading-color': '#9A3412',
-      'hero-glass-tint': '#FBBF24',
-      'hero-border-tint': '#EA580C',
-      'glass-tint': '#FBBF24',
-      'card-hover-scale': '1.03',
-      'text-transform-label': 'uppercase',
+    description: 'Burnt orange on cream — film grain, poster headlines',
+    palette: {
+      primary: '#EA580C',
+      secondary: '#DC2626',
+      accent: '#FBBF24',
+      background: '#FFFBEB',
+      darkPrimary: '#FB923C',
+      darkBackground: '#1A1207',
+      headingIntent: '#9A3412',
     },
-    values: {
-      primaryColor: '#EA580C',
-      secondaryColor: '#DC2626',
-      accentColor: '#FBBF24',
-      backgroundColor: '#FFFBEB',
-      fontBody: 'Space Grotesk',
-      fontHeading: 'Archivo Black',
-      radius: 0.75,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#FB923C',
-        backgroundColor: '#1A1207',
+    axes: { type: 'poster', form: 'sharp', atmosphere: 'grain' },
+    alternates: [
+      {
+        label: 'Slab',
+        note: 'Slab headings instead of display — newsprint rather than poster',
+        type: 'slab',
+        form: 'flat',
       },
-    },
+      {
+        label: 'Sunset',
+        note: 'Deep-field dust — drive-in rather than darkroom',
+        atmosphere: 'deepfield',
+      },
+    ],
   },
   {
     id: 'arcade',
     name: 'Arcade',
     category: 'Playful',
-    description: 'Game on — bright blue, lime accents, plasma energy',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'plasma',
-      'shader-plasma-speed': '0.5',
-      'shader-plasma-bands': '0.6',
-      'heading-color': '#3B82F6',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#60A5FA',
-      'hero-glass-tint': '#A3E635',
-      'hero-border-tint': '#3B82F6',
-      'player-text': '#60A5FA',
-      'glass-tint': '#A3E635',
-      'card-hover-scale': '1.05',
-      'card-image-hover-scale': '1.1',
-      'text-transform-label': 'uppercase',
+    description: 'Electric blue and lime — crackling plasma, poster type',
+    palette: {
+      primary: '#3B82F6',
+      secondary: '#A3E635',
+      accent: '#F472B6',
+      background: '#0F172A',
+      darkPrimary: '#60A5FA',
+      darkBackground: '#080E1F',
+      headingIntent: '#3B82F6',
     },
-    values: {
-      primaryColor: '#3B82F6',
-      secondaryColor: '#A3E635',
-      accentColor: '#F472B6',
-      backgroundColor: '#0F172A',
-      fontBody: 'Space Grotesk',
-      fontHeading: 'Space Grotesk',
-      radius: 0.5,
-      density: 0.95,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#60A5FA',
-        backgroundColor: '#080E1F',
+    axes: { type: 'poster', form: 'crisp', atmosphere: 'charge' },
+    alternates: [
+      {
+        label: 'Mono',
+        note: 'Fixed-width throughout — high-score-table exact',
+        type: 'mono',
+        form: 'precise',
       },
-    },
+      {
+        label: 'Flux',
+        note: 'Banded flux instead of plasma — smoother, faster',
+        atmosphere: 'current',
+      },
+    ],
   },
 
   // ─── Atmospheric ────────────────────────────────────────────────────
@@ -812,103 +846,132 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     id: 'midnight',
     name: 'Midnight',
     category: 'Atmospheric',
-    description: 'Deep blue twilight — silver accents, aurora shimmer',
-    heroLayout: 'centered',
-    tokenOverrides: {
-      'shader-preset': 'aurora',
-      'shader-aurora-speed': '0.4',
-      'shader-aurora-shimmer': '0.6',
-      'heading-color': '#CBD5E1',
-      'hero-glass-tint': '#38BDF8',
-      'hero-border-tint': '#94A3B8',
-      'glass-tint': '#94A3B8',
-      'card-hover-scale': '1.02',
-      'text-transform-label': 'capitalize',
+    description: 'Slate and sky on navy — slow aurora, centred hero',
+    palette: {
+      primary: '#94A3B8',
+      secondary: '#64748B',
+      accent: '#38BDF8',
+      background: '#0F172A',
+      darkPrimary: '#CBD5E1',
+      darkBackground: '#0A0F1F',
+      headingIntent: '#CBD5E1',
     },
-    values: {
-      primaryColor: '#94A3B8',
-      secondaryColor: '#64748B',
-      accentColor: '#38BDF8',
-      backgroundColor: '#0F172A',
-      fontBody: 'Raleway',
-      fontHeading: 'Raleway',
-      radius: 0.5,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#CBD5E1',
-        backgroundColor: '#0A0F1F',
+    axes: { type: 'airy', form: 'soft', atmosphere: 'borealis' },
+    alternates: [
+      {
+        label: 'Deep field',
+        note: 'Dust and stars instead of curtains — vaster',
+        atmosphere: 'deepfield',
       },
-    },
+      {
+        label: 'Editorial',
+        note: 'Serif headlines — long-read at night',
+        type: 'editorial',
+        form: 'plush',
+      },
+    ],
   },
   {
     id: 'storm',
     name: 'Storm',
     category: 'Atmospheric',
-    description: 'Electric intensity — dark clouds, lightning blue strikes',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'vortex',
-      'shader-vortex-speed': '0.5',
-      'shader-vortex-twist': '0.6',
-      'heading-color': '#93C5FD',
-      'hero-title-blend': 'normal',
-      'hero-title-color': '#93C5FD',
-      'hero-glass-tint': '#2563EB',
-      'hero-border-tint': '#60A5FA',
-      'glass-tint': '#2563EB',
-      'card-hover-scale': '1.04',
-      'card-image-hover-scale': '1.06',
-      'text-transform-label': 'uppercase',
+    description: 'Cobalt on gunmetal — a tightening vortex, crisp form',
+    palette: {
+      primary: '#2563EB',
+      secondary: '#1D4ED8',
+      accent: '#FBBF24',
+      background: '#1F2937',
+      darkPrimary: '#60A5FA',
+      darkBackground: '#111827',
+      headingIntent: '#93C5FD',
     },
-    values: {
-      primaryColor: '#2563EB',
-      secondaryColor: '#1D4ED8',
-      accentColor: '#FBBF24',
-      backgroundColor: '#1F2937',
-      fontBody: 'DM Sans',
-      fontHeading: 'DM Sans',
-      radius: 0.375,
-      density: 1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#60A5FA',
-        backgroundColor: '#111827',
+    axes: { type: 'grotesk', form: 'crisp', atmosphere: 'maelstrom' },
+    alternates: [
+      {
+        label: 'Rain',
+        note: 'Rain on glass — the aftermath rather than the front',
+        atmosphere: 'drizzle',
+        form: 'soft',
       },
-    },
+      {
+        label: 'Slab',
+        note: 'Slab headings and tight spacing — bulletin urgency',
+        type: 'slab',
+        form: 'sharp',
+      },
+    ],
   },
   {
     id: 'zen',
     name: 'Zen',
     category: 'Atmospheric',
-    description: 'Gentle calm — warm white, sage green, gentle rain',
-    heroLayout: 'default',
-    tokenOverrides: {
-      'shader-preset': 'rain',
-      'shader-rain-speed': '0.3',
-      'shader-rain-density': '0.3',
-      'heading-color': '#5F7A63',
-      'hero-glass-tint': '#8FAE92',
-      'hero-border-tint': '#6B8F71',
-      'glass-tint': '#8FAE92',
-      'card-hover-scale': '1.01',
-      'card-image-hover-scale': '1.02',
-      'text-transform-label': 'none',
+    description: 'Sage and brass on parchment — rain on glass, serif type',
+    palette: {
+      primary: '#6B8F71',
+      secondary: '#8FAE92',
+      accent: '#D4A843',
+      background: '#FEFCE8',
+      darkPrimary: '#8FAE92',
+      darkBackground: '#1A1A0E',
+      headingIntent: '#5F7A63',
     },
-    values: {
-      primaryColor: '#6B8F71',
-      secondaryColor: '#8FAE92',
-      accentColor: '#D4A843',
-      backgroundColor: '#FEFCE8',
-      fontBody: 'Lora',
-      fontHeading: 'Lora',
-      radius: 0.75,
-      density: 1.1,
-      heroLayout: 'default',
-      darkOverrides: {
-        primaryColor: '#8FAE92',
-        backgroundColor: '#1A1A0E',
+    axes: { type: 'editorial', form: 'soft', atmosphere: 'drizzle' },
+    alternates: [
+      {
+        label: 'Still',
+        note: 'No animation — the emptiest version of the page',
+        atmosphere: 'still',
+        form: 'flat',
       },
-    },
+      {
+        label: 'Canopy',
+        note: 'Slow branching growth — the garden rather than the rain',
+        atmosphere: 'canopy',
+      },
+    ],
   },
-] as const;
+];
+
+/**
+ * The `/* @__PURE__ *​/` annotation is load-bearing, not decoration.
+ *
+ * This used to be a plain literal array, which Rollup could shake out of the
+ * `$lib/brand-editor` barrel for any importer that did not name it. Composing
+ * turned it into a module-scope CALL, and Rollup cannot prove `.map(build)` is
+ * side-effect free — so it became a retained side effect, dragging `build` →
+ * `composePreset` → `preset-axes` → `shader-config` into every chunk that
+ * touches the barrel.
+ *
+ * That is not hypothetical: the barrel is imported by 26 files, two of them
+ * public routes. `(auth)/+layout.svelte` imports it for
+ * `tokenOverridesToCssVars` / `parseDarkColorOverrides` alone, and measuring
+ * the built manifest showed route node 2 — the layout behind /login,
+ * /register, /forgot-password, /reset-password and /verify-email — statically
+ * reaching the 46.7KB chunk these presets live in.
+ *
+ * The annotation tells Rollup the call is safe to drop when nothing reads
+ * `BRAND_PRESETS`, restoring the shakeability the literal had. Verified by
+ * rebuilding and re-running the reachability walk over
+ * `.svelte-kit/output/client/.vite/manifest.json`; keep it on any future
+ * module-scope composition here.
+ */
+export const BRAND_PRESETS: readonly CategorizedPreset[] =
+  /* @__PURE__ */ DEFINITIONS.map(build);
+
+/** Category display order for the guided flow and the presets level. */
+export const PRESET_CATEGORY_ORDER: readonly PresetCategory[] = [
+  'Professional',
+  'Creative',
+  'Bold',
+  'Minimal',
+  'Organic',
+  'Tech',
+  'Luxury',
+  'Playful',
+  'Atmospheric',
+];
+
+/** Look up a preset by id. Variants are addressed as `parent.variant-label`. */
+export function findPreset(id: string): CategorizedPreset | undefined {
+  return BRAND_PRESETS.find((p) => p.id === id);
+}

@@ -11,6 +11,13 @@
  * accumulate along the logo boundary, making the logo emerge from the fluid.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  SILENT_AUDIO,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import type { SDFResult } from '../jfa-sdf';
 import { destroyLogoTexture, loadLogoTexture } from '../logo-texture';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
@@ -50,8 +57,7 @@ const SIM_UNIFORM_NAMES = [
   'uSdf',
   'uHasLogo',
   'uTime',
-  'uAudioBass',
-  'uAudioAmplitude',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DISPLAY_UNIFORM_NAMES = [
@@ -72,10 +78,7 @@ const DISPLAY_UNIFORM_NAMES = [
   'uResolution',
   'uSdf',
   'uHasLogo',
-  'uAudioBass',
-  'uAudioMids',
-  'uAudioTreble',
-  'uAudioAmplitude',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 function screenToHeightmapUV(
@@ -128,6 +131,9 @@ export function createPulseRenderer(): ShaderRenderer {
     WebGLUniformLocation | null
   > | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
   let simBuf: DoubleFBO | null = null;
   let lastAmbientTime = 0;
   let clickSplashes: Array<{ u: number; v: number; frames: number }> = [];
@@ -185,8 +191,14 @@ export function createPulseRenderer(): ShaderRenderer {
   }
 
   // Audio values set by render() before calling stepSim
-  let currentAudioBass = 0;
-  let currentAudioAmplitude = 0;
+  /**
+   * This frame's resolved audio, shared with the sim pass — which runs from a
+   * helper outside the render scope, and needs its own upload because uniforms
+   * are per-program state.
+   */
+  let resolvedAudio = SILENT_AUDIO;
+  let _currentAudioBass = 0;
+  let _currentAudioAmplitude = 0;
 
   function stepSim(
     gl: WebGL2RenderingContext,
@@ -200,6 +212,7 @@ export function createPulseRenderer(): ShaderRenderer {
     if (!simProg || !simU || !simBuf || !quad) return;
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.useProgram(simProg);
+    uploadAudioUniforms(gl, simU, resolvedAudio);
     quad.bind(simProg);
 
     // TEXTURE0: simulation state
@@ -226,8 +239,6 @@ export function createPulseRenderer(): ShaderRenderer {
     gl.uniform1f(simU.uMouseStrength, mouseStr);
 
     // Audio uniforms for sim
-    gl.uniform1f(simU.uAudioBass, currentAudioBass);
-    gl.uniform1f(simU.uAudioAmplitude, currentAudioAmplitude);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
@@ -265,12 +276,19 @@ export function createPulseRenderer(): ShaderRenderer {
       const cfg = config as PulseConfig;
 
       // Audio values (0 when no audio) — shared with stepSim via closure
-      const bass = audio?.bass ?? 0;
-      const mids = audio?.mids ?? 0;
-      const treble = audio?.treble ?? 0;
-      const amplitude = audio?.amplitude ?? 0;
-      currentAudioBass = bass;
-      currentAudioAmplitude = amplitude;
+      // These were the RAW bands, which is the one thing the brief forbids on
+      // a simulation: at frame rate they read as jitter, and this preset feeds
+      // them into a fluid solve where the noise compounds across steps. Now
+      // the smoothed envelopes, resolved through the shared fade.
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+      resolvedAudio = a;
+      const bass = a.bass;
+      const _mids = a.mids;
+      const _treble = a.treble;
+      const amplitude = a.level;
+      _currentAudioBass = bass;
+      _currentAudioAmplitude = amplitude;
 
       // ── Logo SDF change detection ───────────────────────────────
       const logoUrl = cfg.logoUrl ?? null;
@@ -357,6 +375,7 @@ export function createPulseRenderer(): ShaderRenderer {
       // ── Display pass ────────────────────────────────────────────
       gl.viewport(0, 0, width, height);
       gl.useProgram(displayProg);
+      uploadAudioUniforms(gl, displayU, a);
       quad.bind(displayProg);
 
       // TEXTURE0: heightfield
@@ -389,10 +408,6 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.uniform2f(displayU.uResolution, width, height);
 
       // Audio uniforms for display
-      gl.uniform1f(displayU.uAudioBass, bass);
-      gl.uniform1f(displayU.uAudioMids, mids);
-      gl.uniform1f(displayU.uAudioTreble, treble);
-      gl.uniform1f(displayU.uAudioAmplitude, amplitude);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);

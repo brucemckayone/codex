@@ -2,7 +2,7 @@
  * Journey builder SAVE ORCHESTRATION (Codex-xzwl5).
  *
  * Extracted out of `studio/journeys/[id]/page/+page.svelte` so the gating logic
- * is unit-testable in isolation (same reason `preview-wiring.ts` was extracted).
+ * is unit-testable in isolation.
  *
  * WHY IT EXISTS: the save drives FOUR endpoints — page copy via
  * `saveJourneyPage`, the course's subscription plan + tier access via

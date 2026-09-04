@@ -30,12 +30,14 @@
  *   uGrain           — film grain strength
  *   uVignette        — vignette strength
  *   uTime            — elapsed time in seconds (for grain animation)
- *   uBassSmooth      — smoothed bass 0-1
- *   uMidsSmooth      — smoothed mids 0-1
- *   uTrebleSmooth    — smoothed treble 0-1
- *   uAmplitudeSmooth — smoothed amplitude 0-1
- *   uAudioActive     — 0-1 wanderer fade (saturation multiplier)
+ *   u_bass      — smoothed bass 0-1
+ *   u_mids      — smoothed mids 0-1
+ *   u_treble    — smoothed treble 0-1
+ *   u_level — smoothed amplitude 0-1
+ *   u_audioActive     — 0-1 wanderer fade (saturation multiplier)
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const INK_DISPLAY_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -44,7 +46,8 @@ out vec4 fragColor;
 uniform sampler2D uState;
 uniform vec3 uColorPrimary, uColorSecondary, uColorAccent, uBgColor;
 uniform float uIntensity, uGrain, uVignette, uTime;
-uniform float uBassSmooth, uMidsSmooth, uTrebleSmooth, uAmplitudeSmooth, uAudioActive;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
@@ -78,7 +81,7 @@ void main() {
   vec2 bassBreath = vec2(
     sin(v_uv.y * 6.2831 + uTime * 0.45),
     cos(v_uv.x * 6.2831 + uTime * 0.40)
-  ) * uBassSmooth * 0.02;
+  ) * u_bass * 0.02;
   vec2 sampleUV = clamp(v_uv + bassBreath, 0.0, 1.0);
 
   // ── 2. Read ink concentrations ────────────────────────────────────
@@ -88,8 +91,8 @@ void main() {
   // Each channel maps to its brand color. Bass lifts the whole
   // composition's baseline brightness — up to +30% at peak bass — so
   // low-end presence reads as luminosity, not just motion.
-  float bassLift = 1.0 + 0.30 * uBassSmooth;
-  float midsLift = 1.0 + 0.20 * uMidsSmooth;
+  float bassLift = 1.0 + 0.30 * u_bass;
+  float midsLift = 1.0 + 0.20 * u_mids;
   float totalLift = uIntensity * bassLift * midsLift;
 
   vec3 color = uBgColor
@@ -104,7 +107,7 @@ void main() {
   // voice, strings). Base darken factor 0.55; mids lift it toward 0.70.
   float totalInk = ink.r + ink.g + ink.b;
   float overlapFactor = smoothstep(0.8, 2.0, totalInk);
-  float darkenFloor = mix(0.55, 0.70, uMidsSmooth);
+  float darkenFloor = mix(0.55, 0.70, u_mids);
   color *= mix(1.0, darkenFloor, overlapFactor);
 
   // ── 5. Wet-edge highlight via screen-space derivatives ────────────
@@ -116,16 +119,16 @@ void main() {
   float dIdy = length(dFdy(ink));
   float dTotal = dIdx + dIdy;
   // Lower threshold + steeper ramp on treble → sharper edges on transients.
-  float edgeLo = mix(0.002, 0.0008, uTrebleSmooth);
-  float edgeHi = mix(0.03, 0.015, uTrebleSmooth);
+  float edgeLo = mix(0.002, 0.0008, u_treble);
+  float edgeHi = mix(0.03, 0.015, u_treble);
   float edgeStrength = smoothstep(edgeLo, edgeHi, dTotal);
-  float edgeGain = 0.08 + 0.12 * uTrebleSmooth;
+  float edgeGain = 0.08 + 0.12 * u_treble;
   // Edge tint picks up accent on bright transients — matches ripple's
   // accent-tinted specular behaviour.
   vec3 edgeTint = mix(
     mix(uColorPrimary, uColorAccent, 0.5),
     uColorAccent,
-    uTrebleSmooth * 0.7
+    u_treble * 0.7
   );
   color += edgeStrength * edgeGain * edgeTint * uIntensity;
 
@@ -145,11 +148,11 @@ void main() {
   float prismT = fract(
     gradAngle / 6.2831853 + 0.5
       + uTime * 0.06
-      + uMidsSmooth * 0.3
+      + u_mids * 0.3
   );
   vec3 prismatic = spectrum(prismT);
-  float prismGain = edgeStrength * uAudioActive
-                  * (0.25 + 0.40 * uTrebleSmooth);
+  float prismGain = edgeStrength * u_audioActive
+                  * (0.25 + 0.40 * u_treble);
   color += prismatic * prismGain * uIntensity;
 
   // ── 6. Pre-tonemap saturation pump ────────────────────────────────
@@ -157,7 +160,7 @@ void main() {
   // vivid HDR values, not squished SDR ones. Active only during playback.
   // Base 0.50, amp-scaled up to +0.75 at peak amplitude.
   float lum = dot(color, vec3(0.299, 0.587, 0.114));
-  float sat = 1.0 + uAudioActive * (0.50 + 0.25 * uAmplitudeSmooth);
+  float sat = 1.0 + u_audioActive * (0.50 + 0.25 * u_level);
   color = mix(vec3(lum), color, sat);
 
   // ── 7. ACES filmic tone mapping ───────────────────────────────────

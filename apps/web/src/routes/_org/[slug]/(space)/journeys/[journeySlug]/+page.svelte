@@ -8,7 +8,6 @@
   where the intro/reel sections `{#await}` it behind poster skeletons.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/state';
   import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
   import { StructuredData } from '$lib/components/seo';
@@ -18,37 +17,11 @@
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
-  import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
-  import { initPagePreviewBridge } from '$lib/page-builder/page-preview-bridge';
   import { JourneyRenderer } from '$lib/page-builder/render';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
-
-  // Live-preview receiver (Codex-isr02 P0b-2). INERT for real visitors — the
-  // bridge attaches no listener unless this page is embedded in the studio
-  // builder iframe (window.parent !== window). When embedded, builder edits
-  // arrive as `codex:page-preview:v1` messages → pageBuilder.applyPreviewState.
-  onMount(() => initPagePreviewBridge());
-
-  // The envelope the renderer draws. Standalone → the SSR `coursePage` as-is.
-  // Embedded + a preview message has landed (`pageBuilder.isOpen`) → overlay the
-  // builder's live pending sections + brand overrides so edits re-render live.
-  const renderCoursePage = $derived(
-    pageBuilder.isOpen
-      ? {
-          ...data.coursePage,
-          page: {
-            ...data.coursePage.page,
-            sections: pageBuilder.sections,
-            brandOverrides:
-              pageBuilder.pending?.brandOverrides ??
-              data.coursePage.page.brandOverrides,
-          },
-        }
-      : data.coursePage
-  );
 
   const course = $derived(data.coursePage.course);
 
@@ -156,11 +129,10 @@
   //
   // `deriveOfferPathsForPage` is the SAME derivation the invite cards and the
   // checkout radio list run, so the JSON-LD cannot drift from what the visitor is
-  // shown. It reads the AWAITED `data.coursePage.page.sections`, never the
-  // builder's live `renderCoursePage`: authored copy may only rename a path (it
+  // shown. It reads the AWAITED `data.coursePage.page.sections`: authored copy
+  // may only rename a path (it
   // "may DECORATE a real path … and may create NOTHING" — `offer-paths.ts`), so
-  // the prices are identical either way, and structured data has no business
-  // re-rendering on a keystroke inside a preview iframe that is `noindex` anyway.
+  // the prices are identical either way.
   //
   // Note also what is NOT here any more: `course.priceCents !== null`. With
   // `strictNullChecks: false` that test also passes for an ABSENT field, and
@@ -350,7 +322,7 @@
   why the override is here and not in the load.
 -->
 <JourneyRenderer
-  coursePage={renderCoursePage}
+  coursePage={data.coursePage}
   sellPreview={data.sellPreview}
   enrolled={renderEnrolled}
   offer={data.offer}
