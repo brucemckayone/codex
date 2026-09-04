@@ -27,7 +27,7 @@ drained, currency enforcement, idempotency).
 6. **Primary drain**: when a Connect account becomes active, the
    `account.updated` webhook fires `resolvePendingPayouts(orgId, accountId)`
    via `waitUntil` — replays accumulated payouts with `idempotencyKey`.
-7. **Safety-net drain**: every 15 minutes, the ecom-api `scheduled` cron
+7. **Safety-net drain**: hourly, the ecom-api `scheduled` cron
    runs `sweepUnresolvedPayouts` — picks up rows whose webhook was dropped.
 8. All Stripe transfer calls use deterministic idempotency keys — replay is
    safe.
@@ -223,7 +223,7 @@ short-circuits to the original Transfer.
 
 ---
 
-## Stage 5 — Safety-net drain: 15-minute cron sweep
+## Stage 5 — Safety-net drain: hourly cron sweep
 
 The webhook is **primary**; the cron is **insurance**. Stripe retries
 `account.updated` for 3 days then drops it — the sweep is what catches
@@ -236,11 +236,34 @@ event without the relevant `previous_attributes` fields.
 
 ```jsonc
 "triggers": {
-  "crons": ["*/15 * * * *"]
+  "crons": ["0 * * * *"]
 }
 ```
 
-Every 15 minutes in **all** environments (dev, staging, production).
+Hourly, and **only** in the `production` environment — the block sits under
+`env.production`, so it does not inherit into dev or staging.
+
+### Why hourly, and why minute `0`
+
+Neon bills **time awake**, and every sweep run opens a DB client, so the cron
+cadence sets a floor on compute cost that no amount of caching can lower.
+Measured 2026-09-04 on the `production` branch: 35.5 awake hours in 68.3
+wall-clock hours (12.5 h/day) against a 5-minute autosuspend, of which the
+then-15-minute sweep accounted for **8.0 h/day on its own** (96 wakes x 5 min)
+— roughly 64% of the database's awake time, before any user traffic. Hourly
+reduces that to 2.0 h/day.
+
+The **minute is load-bearing**. `0` places this sweep in the same 5-minute wake
+window as media-api's `0 * * * *` cron and notifications-api's `0 8 * * *`, so
+all three share ONE wake rather than stacking three. Moving any of them off
+`:00` silently multiplies the floor — nothing fails and nothing logs, so
+`packages/constants/src/__tests__/cron-wake-alignment.test.ts` asserts it.
+
+The widened cadence is safe because the cron is insurance, not the primary
+path: `account.updated` resolves these rows first and Stripe retries it for 3
+days. The sweep's own `DEFAULT_OLDER_THAN_MINUTES = 15` age threshold is
+unchanged, so only the detection window for a **dropped** webhook widens, from
+~15 minutes to ~1 hour.
 
 ### Entry point
 
@@ -429,8 +452,9 @@ If a creator is stuck, the most common fix path is:
 
 1. Confirm their Connect account is `charges_enabled=true` AND
    `payouts_enabled=true` in Stripe Dashboard.
-2. Wait up to 15 minutes for the cron sweep, OR re-trigger the
-   `account.updated` webhook from the Stripe CLI.
+2. Wait up to 1 hour for the cron sweep, OR re-trigger the
+   `account.updated` webhook from the Stripe CLI (much faster — prefer this
+   when a creator is waiting).
 3. Verify resolution via `SELECT resolved_at, stripe_transfer_id FROM
    pending_payouts WHERE user_id = '<id>'`.
 
@@ -455,7 +479,7 @@ If a creator is stuck, the most common fix path is:
   cron entry point (`dispatchScheduled`, `runScheduledPayoutsSweep`,
   `runPayoutsSweep`)
 - `workers/ecom-api/src/index.ts` — `scheduled: dispatchScheduled` export
-- `workers/ecom-api/wrangler.jsonc` — `triggers.crons: ["*/15 * * * *"]`
+- `workers/ecom-api/wrangler.jsonc` — `triggers.crons: ["0 * * * *"]`
 
 ### Schema
 - `packages/database/src/schema/subscriptions.ts` — `pendingPayouts`,

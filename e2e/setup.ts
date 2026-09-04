@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import type { GlobalSetupContext } from 'vitest/node';
 
+import { startMockRunPod, stopMockRunPod } from './helpers/mock-runpod.js';
 import { setupTestMediaFiles } from './helpers/r2-test-setup.js';
 import { startAllWorkers, stopAllWorkers } from './helpers/worker-manager.js';
 
@@ -79,6 +80,12 @@ export async function setup(
     // Upload test media files to R2 (if not already present)
     await setupTestMediaFiles();
 
+    // Before the workers, so the RunPod dispatch target is already listening
+    // the first time a transcode is triggered. media-api reads the URL from
+    // RUNPOD_DIRECT_URL in its .dev.vars.test, written by
+    // .github/scripts/generate-dev-vars.sh.
+    await startMockRunPod();
+
     // Start all workers with test environment
     await startAllWorkers();
     console.log('\n✅ All workers started and healthy. Starting tests...\n');
@@ -97,6 +104,10 @@ export async function setup(
     } catch (error) {
       console.error('\n❌ Failed to stop workers:', error);
       // Don't throw - allow test process to complete
+    } finally {
+      // In `finally` so a worker-shutdown failure cannot leave the stub
+      // holding port 4101 and break the next local run.
+      await stopMockRunPod();
     }
   };
 }
