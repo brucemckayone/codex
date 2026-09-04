@@ -112,9 +112,25 @@ app.route('/', webhookRoutes);
 /**
  * POST /internal/mock-runpod
  *
- * Stands in for RunPod's `/v2/<endpoint>/run` API during e2e tests. The
- * workflow points `RUNPOD_API_URL` at this endpoint so the transcoding
- * service's `triggerJob()` can dispatch jobs without a real RunPod account.
+ * Stands in for RunPod's `/v2/<endpoint>/run` API, so `triggerJob()` can
+ * dispatch without a real RunPod account.
+ *
+ * NOT USED BY CI — do not point `RUNPOD_DIRECT_URL` back at this route.
+ * Doing so makes media-api fetch its OWN dev server: the dispatch re-enters
+ * the wrangler instance that is serving the request, and a request landing
+ * during an isolate reload comes back as HTTP 503 "Your worker restarted
+ * mid-request". TranscodingService logs that as `RunPod API error`, so the
+ * failure reads as a third-party outage rather than a harness problem. That
+ * flake failed `should allow retrying failed transcoding` in CI run
+ * 33667762392 and, because deploy-production.yml gates on
+ * `workflow_run.conclusion == 'success'`, skipped the 2026-09-02 production
+ * deploy entirely.
+ *
+ * The e2e suite therefore dispatches to the standalone stub in
+ * `e2e/helpers/mock-runpod.ts` (a separate process cannot be reloaded by
+ * wrangler). This route is kept for hand-driven local probing — curl it
+ * directly, or set `RUNPOD_DIRECT_URL` to it in a shell where media-api is
+ * NOT the caller.
  *
  * Returns a fake job id + IN_QUEUE status, mimicking the real RunPod
  * response shape. The transcoding service stores the job id and waits for

@@ -176,8 +176,30 @@
       // level) so it does NOT inherit into dev/staging — Cloudflare's free-plan
       // cap is 5 cron triggers per ACCOUNT, shared across prod + dev worker
       // scripts.
+      // Payouts sweep, HOURLY (Codex-vv77x). Defined per-env (NOT top-level)
+      // so it does NOT inherit into dev/staging — the cron-trigger cap is per
+      // ACCOUNT, shared across prod + dev worker scripts.
+      //
+      // WHY HOURLY AND NOT `*/15`: Neon bills TIME AWAKE, and every run opens
+      // a DB client, so the cadence sets a floor on compute cost that no cache
+      // can lower. Measured 2026-09-04 on the `production` branch: 35.5 awake
+      // hours in 68.3 wall-clock hours = 12.5 h/day, of which `*/15` alone
+      // accounted for 8.0 h/day (96 wakes x the 5-minute autosuspend) — about
+      // 64%, before a single user arrived. Hourly makes that 2.0 h/day.
+      //
+      // THE MINUTE IS LOAD-BEARING: `0` puts this in the SAME 5-minute wake
+      // window as media-api's `0 * * * *`, so the two crons share one wake
+      // instead of stacking two. Moving either off `:00` silently doubles the
+      // floor, and nothing else in the repo would notice.
+      //
+      // Safe because the cron is INSURANCE, not the primary path: the
+      // account.updated webhook resolves these rows first and Stripe retries
+      // it for 3 days (see docs/payouts/payout-pipeline.md stage 5). The
+      // sweep's own DEFAULT_OLDER_THAN_MINUTES=15 age threshold is unchanged,
+      // so this only widens the detection window for a DROPPED webhook from
+      // ~15 min to ~1 h.
       "triggers": {
-        "crons": ["*/15 * * * *"]
+        "crons": ["0 * * * *"]
       },
       "vars": {
         "ENVIRONMENT": "production",

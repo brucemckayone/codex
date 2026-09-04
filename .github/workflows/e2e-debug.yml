@@ -118,7 +118,11 @@ jobs:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
           RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
-          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          # Standalone stub (e2e/helpers/mock-runpod.ts), NOT media-api's own
+          # /internal/mock-runpod — a worker fetching its own dev server races
+          # wrangler's reload. DIRECT, not RUNPOD_API_URL: the value is used
+          # verbatim, with no /<endpointId>/run appended.
+          RUNPOD_DIRECT_URL: http://127.0.0.1:4101/run
           B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
