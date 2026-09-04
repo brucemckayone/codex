@@ -48,7 +48,9 @@ export async function runUploadOrchestration(
 ): Promise<UploadOrchestrationResult> {
   await enforcePolicyInline(c, policy, obs);
   const organizationId = c.get('organizationId');
-  const registryResult = createServiceRegistry(
+  // Awaited for the same reason as in procedure(): the registry may resolve
+  // a Hyperdrive client (dynamic node-postgres import) before returning.
+  const registryResult = await createServiceRegistry(
     c.env,
     obs,
     organizationId,

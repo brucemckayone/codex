@@ -117,7 +117,7 @@ export function procedure<
 
     // Create service registry with cleanup
     // Note: organizationId may be undefined initially, updated after policy enforcement
-    let registry: ReturnType<typeof createServiceRegistry>['registry'];
+    let registry: Awaited<ReturnType<typeof createServiceRegistry>>['registry'];
     let cleanup: (() => Promise<void>) | undefined;
 
     // Handler-registered background work (ctx.background). Cleanup is chained
@@ -137,11 +137,21 @@ export function procedure<
       // ====================================================================
       // Step 2: Create Service Registry (after org context is resolved)
       // ====================================================================
-      const registryResult = createServiceRegistry(
+      // Awaited: the registry resolves a Hyperdrive client here (which
+      // dynamically imports node-postgres) BEFORE returning, because its
+      // service getters are synchronous.
+      const registryResult = await createServiceRegistry(
         c.env,
         obs,
         organizationId,
-        c.executionCtx
+        c.executionCtx,
+        // Hyperdrive binding selection is DERIVED from the declared cache
+        // preset (Codex-s1i7h). Passing it here — rather than letting the
+        // registry guess, or each route choose — is what keeps the choice out
+        // of 199 call sites. An absent preset resolves to the cache-disabled
+        // binding, so a route that never opted in cannot be given a 75-second
+        // staleness window by accident.
+        policy?.cache
       );
       registry = registryResult.registry;
       cleanup = registryResult.cleanup;

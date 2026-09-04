@@ -60,6 +60,28 @@ export type Bindings = {
   HYPERDRIVE?: import('@cloudflare/workers-types').Hyperdrive;
 
   /**
+   * Hyperdrive binding with QUERY CACHING DISABLED (Codex-s1i7h).
+   *
+   * Hyperdrive caches read queries for 60s plus a 15s
+   * stale-while-revalidate window, and does NOT purge on write — a 75s
+   * staleness window. That is wrong for any route that must observe its own
+   * write, or a write made moments earlier in the same session, so those
+   * routes connect through this binding instead.
+   *
+   * The hazard is STALENESS, not cross-tenant leakage: Hyperdrive keys its
+   * cache on query text plus bound parameters, and every scoped query in this
+   * codebase binds its creator/org id, so two tenants never share an entry.
+   * A route reading a stale row is the failure to design against.
+   *
+   * WHICH BINDING A ROUTE GETS IS DERIVED, NOT CHOSEN — the service registry
+   * maps `policy.cache` onto it (`public`/`static`/`asset` are
+   * shared-cacheable and get {@link HYPERDRIVE}; `private`, `fresh` and an
+   * absent preset get this one). With 199 `procedure()` call sites, a
+   * per-route judgement call would be wrong somewhere within a month.
+   */
+  HYPERDRIVE_UNCACHED?: import('@cloudflare/workers-types').Hyperdrive;
+
+  /**
    * Web application URL for CORS
    */
   WEB_APP_URL?: string;
