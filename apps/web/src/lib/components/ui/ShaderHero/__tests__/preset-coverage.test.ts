@@ -37,6 +37,34 @@ const presetIds = HERO_FX_PRESETS.map((p) => p.id).filter(
 );
 
 describe('preset menu coverage', () => {
+  it('offers every implemented preset in the menu', () => {
+    // THE CONVERSE, and the direction my first version of this file missed.
+    //
+    // Asserting "every menu id is in the union" leaves a preset that is fully
+    // implemented — union member, renderer, shaders, config — but absent from
+    // HERO_FX_PRESETS completely unreachable, from the brand editor AND from
+    // the audio picker that now derives from it. `pollen` and `geode` were in
+    // exactly that state: reworked, gated, committed, and selectable from
+    // nowhere.
+    //
+    // Deriving ShaderPicker from HERO_FX_PRESETS removed one drift and made
+    // this one worse, by giving both surfaces the same blind spot.
+    const source = read('lib/components/ui/ShaderHero/shader-config.ts');
+    const union = source.slice(
+      source.indexOf('export type ShaderPresetId'),
+      source.indexOf("| 'none';") + 10
+    );
+    const unionIds = [...union.matchAll(/'([a-z]+)'/g)]
+      .map((m) => m[1])
+      .filter((id) => id !== 'none');
+
+    const missing = unionIds.filter((id) => !presetIds.includes(id));
+    expect(
+      missing,
+      'presets implemented but absent from HERO_FX_PRESETS — unreachable from every picker'
+    ).toEqual([]);
+  });
+
   it('lists every preset in the ShaderPresetId union', () => {
     const source = read('lib/components/ui/ShaderHero/shader-config.ts');
     // The union is a run of `| 'name'` alternatives at the top of the file.

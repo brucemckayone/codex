@@ -63,6 +63,8 @@ export const HERO_FX_PRESETS: PresetOption[] = [
   { id: 'mycelium', label: 'Mycelium', description: 'Fungal network growth' },
   { id: 'aurora', label: 'Aurora', description: 'Northern lights curtains' },
   { id: 'tendrils', label: 'Tendrils', description: 'Flowing curl noise' },
+  { id: 'pollen', label: 'Pollen', description: 'Drifting motes with bokeh' },
+  { id: 'geode', label: 'Geode', description: 'Crystal cavity terraces' },
   { id: 'growth', label: 'Growth', description: 'Organic edge expansion' },
   { id: 'lenia', label: 'Lenia', description: 'Artificial lifeforms' },
   { id: 'ocean', label: 'Ocean', description: 'Caustics over sand' },
