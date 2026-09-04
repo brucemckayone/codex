@@ -47,6 +47,8 @@ export type {
   AtmosphereAxisId,
   FormAxis,
   FormAxisId,
+  PresetPalette,
+  PresetSpec,
   TypeAxis,
   TypeAxisId,
 } from './preset-axes';
