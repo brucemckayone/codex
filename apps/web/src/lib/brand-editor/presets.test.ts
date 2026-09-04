@@ -7,6 +7,7 @@ import {
   deriveTextOnBrand as railDeriveTextOnBrand,
 } from '$lib/components/brand-studio/rail/contrast';
 import { DEFAULTS } from '$lib/components/ui/ShaderHero/shader-config';
+import { tokenOverridesToCssVars } from './css-injection';
 import { findFont } from './font-catalog';
 import { HERO_FX_PRESETS } from './hero-fx-presets';
 import {
@@ -515,5 +516,101 @@ describe('presets and their variants', () => {
     // ALL_LOOKS.length - BRAND_PRESETS.length.
     expect(distinct.size).toBe(ALL_LOOKS.length - BRAND_PRESETS.length);
     expect(distinct.size).toBeGreaterThanOrEqual(60);
+  });
+});
+
+// ── 7. Emitted CSS values, through the real injection path ─────────────────
+
+describe('emitted CSS custom properties', () => {
+  /**
+   * An INVALID custom-property value is discarded by the CSS parser in
+   * silence — no error, no warning, the declaration simply does not apply.
+   * Composition interpolates strings, does OKLCH maths and calls
+   * `.toFixed(4)`, so `NaN`, `undefined` and `Infinity` all have a path into a
+   * value here, and none of them would announce themselves in the browser.
+   * Same silent-failure class as an invented property NAME, which the shader
+   * key check above covers.
+   */
+  const HEX = /^#[0-9A-Fa-f]{6}$/;
+  const NUMBER = /^-?\d+(\.\d+)?$/;
+  const HSL_TRIPLE = /^\d+(\.\d+)? \d+(\.\d+)?% \d+(\.\d+)?%$/;
+  const KEYWORD = /^[a-z][a-z0-9-]*$/;
+
+  function malformed(value: string): string | null {
+    if (value.trim() === '') return 'empty';
+    if (/NaN|undefined|null|Infinity/.test(value))
+      return 'non-finite/undefined';
+    if (
+      !HEX.test(value) &&
+      !NUMBER.test(value) &&
+      !HSL_TRIPLE.test(value) &&
+      !KEYWORD.test(value)
+    ) {
+      return 'unrecognised shape';
+    }
+    return null;
+  }
+
+  it('the malformed-value detector can actually fail', () => {
+    // Without this the assertion below could be vacuous.
+    expect(malformed('NaN')).toBe('non-finite/undefined');
+    expect(malformed('0.30000000000000004')).toBeNull(); // ugly but valid
+    expect(malformed('')).toBe('empty');
+    expect(malformed('#GGGGGG')).toBe('unrecognised shape');
+    expect(malformed('rgb(0 0 0)')).toBe('unrecognised shape');
+    // …and passes the real shapes composition emits.
+    expect(malformed('#1E3A5F')).toBeNull();
+    expect(malformed('1.02')).toBeNull();
+    expect(malformed('220 6% 14%')).toBeNull();
+    expect(malformed('uppercase')).toBeNull();
+  });
+
+  it('emits only well-formed values, in both buckets, for every look', () => {
+    const failures: string[] = [];
+    for (const look of ALL_LOOKS) {
+      for (const bucket of ['tokenOverrides', 'darkTokenOverrides'] as const) {
+        for (const [key, value] of Object.entries(look[bucket] ?? {})) {
+          const why = malformed(String(value));
+          if (why) {
+            failures.push(
+              `${look.id} ${bucket}.${key} = ${JSON.stringify(value)} (${why})`
+            );
+          }
+        }
+      }
+    }
+    expect(failures, failures.join('\n  ')).toEqual([]);
+  });
+
+  it('routes every composed key to a --brand-* property, never --color-*', () => {
+    // `tokenOverridesToCssVars` picks the prefix by BRAND_PREFIX_KEYS
+    // membership (css-injection.ts:597). A composed key that fell out of that
+    // registry would still be written — as `--color-{key}`, which org-brand.css
+    // does not read. The value would look right in the saved JSON and do
+    // nothing on the page.
+    const misrouted: string[] = [];
+    for (const look of ALL_LOOKS) {
+      const vars = tokenOverridesToCssVars(look.tokenOverrides ?? {});
+      for (const key of COMPOSED_DESIGN_KEYS) {
+        if (!(`--brand-${key}` in vars)) {
+          misrouted.push(
+            `${look.id}: ${key} -> ${`--color-${key}` in vars ? '--color-* (wrong prefix)' : 'absent'}`
+          );
+        }
+      }
+    }
+    expect(misrouted, misrouted.join('\n  ')).toEqual([]);
+  });
+
+  it('round-trips every shader key to --brand-shader-*', () => {
+    const misrouted: string[] = [];
+    for (const look of ALL_LOOKS) {
+      const vars = tokenOverridesToCssVars(look.tokenOverrides ?? {});
+      for (const key of Object.keys(look.tokenOverrides ?? {})) {
+        if (!key.startsWith('shader-')) continue;
+        if (!(`--brand-${key}` in vars)) misrouted.push(`${look.id}: ${key}`);
+      }
+    }
+    expect(misrouted, misrouted.join('\n  ')).toEqual([]);
   });
 });
