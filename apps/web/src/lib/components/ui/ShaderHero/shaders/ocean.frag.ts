@@ -12,6 +12,8 @@
  *  - Bloom halo on brightest caustic peaks
  *  - Luminance-aware filmic grain
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const OCEAN_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -28,12 +30,19 @@ uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_causticScale;
 uniform float u_sandScale;
-uniform float u_speed;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by speed. Replaces u_time * u_speed so motion advances with the
+ * music, and so a speed change cannot retroactively rescale accumulated phase.
+ */
+uniform float u_clock;
 uniform float u_shadow;
 uniform float u_ripple;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -104,7 +113,7 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
   float aspect = u_resolution.x / u_resolution.y;
   vec2 uv = v_uv;
 
@@ -133,7 +142,11 @@ void main() {
   vec2 lightDir = normalize(vec2(0.5, 0.7));
   float shadowSample = sandHeight((p + lightDir * 0.05) * u_sandScale, t);
   float shadowMask = smoothstep(0.0, 0.15, sandH - shadowSample);
-  float shadowDarken = mix(1.0 - u_shadow, 1.0, shadowMask);
+  // Shadow contrast deepens with the slow envelope: a busier passage reads as
+  // stronger overhead light, so the sand relief gains depth. u_energy rather
+  // than a band, because contrast flickering per note looks like a fault.
+  float shadow = clamp(u_shadow * audioLift(u_energy, 0.30), 0.0, 1.0);
+  float shadowDarken = mix(1.0 - shadow, 1.0, shadowMask);
 
   // ── Sand: dark deep basin → warm primary where sand rises ──
   vec3 sandColor = mix(u_bgColor * 0.55, u_brandPrimary, sandH * 0.8 + 0.1);
@@ -144,14 +157,24 @@ void main() {
   sandColor = mix(sandColor, sandColor + waterTint, 0.55);
 
   // ── Caustic: HDR emission so ACES tone-maps convergence to bright cores ──
-  vec3 causticColor = mix(u_brandAccent, vec3(1.0), 0.25);
-  float causticHot = causticVal * causticVal;
-  vec3 color = sandColor + causticColor * causticHot * 1.4;
+  // Audio drives the caustic LIGHT, not the sand. The sand bed is the still
+  // element that makes the moving light read as light; modulating both would
+  // lose the contrast that sells the effect.
+  //
+  // Bass raises the whole caustic field, beats sharpen the convergence
+  // exponent so hot cores tighten and flare rather than merely brightening,
+  // and treble tints the light toward white.
+  vec3 causticColor =
+    mix(u_brandAccent, vec3(1.0), 0.25 + u_treble * u_audioActive * 0.35);
+  float causticHot = pow(causticVal, 2.0 + beatHit(1.4) * 1.2);
+  vec3 color =
+    sandColor + causticColor * causticHot * 1.4 * audioLift(u_bass, 0.4);
 
   color *= shadowDarken;
 
   // ── Bloom halo on brightest caustic peaks ──
-  color += mix(u_brandSecondary, u_brandAccent, 0.6) * pow(causticVal, 4.0) * 0.35;
+  color += mix(u_brandSecondary, u_brandAccent, 0.6) * pow(causticVal, 4.0)
+         * (0.35 + beatHit(1.6) * 0.4);
 
   // ── Post-process ───────────────────────────────────────────
   color = aces(color);

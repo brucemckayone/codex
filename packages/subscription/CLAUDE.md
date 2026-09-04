@@ -72,7 +72,7 @@ The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**: a
 
 Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierarchy: a subscription only unlocks tier-gated content if the subscriber's tier `sortOrder >= content.minimumTierId.sortOrder`. The grant path is implemented in `ContentAccessService` (see `packages/access/CLAUDE.md`).
 
-Revenue split defaults: Platform 10%, Org 15% of post-platform, Creators 75% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
+Revenue split defaults: Platform 10% of gross, Org 15% of post-platform, Creators 85% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
 
 ### Webhook ordering resilience (Codex-t7psp)
 
@@ -147,7 +147,7 @@ Fee percentages are in basis points (10000 = 100%).
 ## Integration
 
 - **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`, `@codex/constants`, Stripe SDK
-- **Used by**: ecom-api worker (checkout, webhooks), organization-api worker (tier management, Connect onboarding), via `ctx.services.tier`, `ctx.services.subscription`, `ctx.services.connect`
+- **Used by**: ecom-api worker (checkout, webhooks, Connect onboarding), organization-api worker (tier management), via `ctx.services.tier`, `ctx.services.subscription`, `ctx.services.connect`
 - **Registered in**: `packages/worker-utils/src/procedure/service-registry.ts`
 
 ## Reference Files

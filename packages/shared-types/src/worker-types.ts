@@ -451,6 +451,31 @@ export type UserProfile = {
 };
 
 /**
+ * The ANONYMOUS-READABLE subset of a creator's profile, served by
+ * `GET /api/user/public/:username` and rendered by the
+ * `creators.<host>/<username>` pages.
+ *
+ * Deliberately NOT `Pick<UserProfile, ...>` and deliberately NOT a
+ * `UserProfile` with fields omitted: this is its own contract, so widening
+ * `UserProfile` later cannot silently widen what an unauthenticated caller
+ * receives. In particular there is no `email` and no `username` — the caller
+ * already knows the username, it asked by it.
+ */
+export type PublicCreatorProfile = {
+  id: string;
+  name: string;
+  /** Custom uploaded avatar if present, else the OAuth-provider image. */
+  image: string | null;
+  bio: string | null;
+  socialLinks: {
+    website?: string;
+    twitter?: string;
+    youtube?: string;
+    instagram?: string;
+  } | null;
+};
+
+/**
  * User data — canonical wire shape for `ctx.user` (Hono Variables).
  *
  * Matches what `requireAuth`/`optionalAuth` in @codex/security populate via

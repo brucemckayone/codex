@@ -89,12 +89,12 @@ import { redactSensitiveData, redactSensitiveDataAsync, REDACTION_PRESETS } from
 
 // Standalone use (when not using ObservabilityClient)
 const safe = redactSensitiveData({ password: 'secret', email: 'user@example.com' });
-// → { password: '***REDACTED***', email: 'u***@***.***' } (dev masking)
+// → { password: '[REDACTED]', email: 'user@example.com' } (standalone defaults: redactEmails=false, so emails pass through)
 ```
 
 **Redaction config**:
-- Dev: `mode: 'mask'` (asterisks, keep 4 chars), emails masked
-- Prod: `mode: 'hash'` (SHA-256), emails redacted
+- Dev: `mode: 'mask'` (`[REDACTED]`, or `first4...last4` when keepChars is set), emails NOT masked (`redactEmails: false` — emails stay visible in dev)
+- Prod: `mode: 'hash'` (FNV-1a `hash:xxxxxxxx` in the sync path `ObservabilityClient` uses; SHA-256 `sha256:...` only via `redactSensitiveDataAsync`), emails redacted
 
 `REDACTION_PRESETS` — predefined field patterns (credentials, contact, financial).
 
@@ -123,7 +123,7 @@ when KV returns one. It issues **zero** KV, DO or subrequest operations of its
 own — counters are integers in a module-scope map keyed by binding name.
 
 Already adopted once, in `packages/worker-utils/src/worker-factory.ts`, which
-covers all 10 workers and every swallowing KV path (`VersionedCache`,
+covers every worker built with `createWorker` (8 of the 9 in `workers/` — dev-cdn is a plain proxy) and every swallowing KV path (`VersionedCache`,
 `createKVSecondaryStorage`, `cacheSessionInKV`, the rate limiter):
 
 ```typescript

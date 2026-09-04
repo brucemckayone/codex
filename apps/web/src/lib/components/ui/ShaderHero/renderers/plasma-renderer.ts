@@ -1,19 +1,63 @@
 /**
- * Plasma renderer — PIC fluid + slime mold iridescent density bands (2-pass FBO).
+ * Plasma renderer — PIC fluid with slime-mould sensors, iridescent density
+ * banding (2-pass FBO).
  *
- * Ping-pong FBO (512x512): RG = velocity, B = density, A = trail.
- * Semi-Lagrangian advection with pressure forces, slime-mold angular
- * sensors for self-organising flow patterns, and density normalization.
- * Mouse injects vortex force; click burst deposits density spike.
- * Two substeps per frame for smoother evolution.
+ * Ping-pong FBO at 512x512: RG = velocity in texels per step, B = mass,
+ * A = smoothed mass. Two substeps per rendered frame, each scaled to a
+ * 60Hz-equivalent step. Mouse injects a vortex; a click injects a vortex plus a
+ * mass spike; on each detected beat the renderer ignites a fireball at a
+ * beat-chosen position through the same burst channel.
  *
- * Display pass maps density cubed through sin() bands to create
- * iridescent spectral coloring, remapped to brand palette.
+ * Display maps mass cubed through four sine bands to iridescent colour,
+ * remapped onto the brand palette.
  *
- * Inspired by Shadertoy Wt2BR1 (michael0884's "Fireballs").
+ * ## What changed and why
+ *
+ * See `shaders/plasma-sim.frag.ts` for the substantive work: 78 texture fetches
+ * per pixel per step became 49, ~50 transcendentals became 2, a dead projection
+ * was removed, and `uDiffusion` — declared, uploaded, and never read — now
+ * controls the smoothing kernel width. This file supplies what that needed.
+ *
+ * **Frame-rate independence.** Velocity is in texels per STEP and every rate in
+ * the sim was per step, so the plasma flowed twice as fast on a 120Hz display.
+ * `uDtScale = dt * 60` carries the frame's share of a 60Hz step, clamped to
+ * 1.4: the PIC gather reaches 2 texels, so a parcel travelling further than
+ * that in one step lands in no cell's gather window and its mass is silently
+ * dropped. Travel per step is (velocity <= 1) * speed * uDtScale * beat pace,
+ * and all three factors have ceilings: 1 * 1.05 * 1.4 * 1.25 = 1.84 texels,
+ * inside the window. The beat pace is the factor that makes this tight — an
+ * earlier bound of 1.8 on uDtScale omitted it and allowed 2.36.
+ *
+ * **The musical clock.** Integrated here from a blended RATE, never crossfaded
+ * in the shader: `u_beatPhase` starts at zero while `uTime` may be at 60s, so
+ * `mix(uTime * k, u_beatPhase, u_audioActive)` sweeps the clock backwards as
+ * the ramp eases in and the band sheen visibly reverses when playback starts.
+ *
+ * **Beat-ignited fireballs.** One per detected onset, keyed on `onsetCount`
+ * changing rather than on `beatPulse > x` (true on every frame of its ~400ms
+ * decay) or a raw band (true through a whole sustained note). Either would
+ * inject a mass spike every frame; since the burst does
+ * `M = mix(M, 0.5, ...)`, that pins mass at 0.5 across a wide disc and the
+ * density normalisation then drags the rest of the field down to compensate —
+ * the visible result is the whole plasma dimming while one blob glows.
+ *
+ * **The audio hacks are gone.** `speed + amplitude * 0.2` used the RAW
+ * amplitude, which is noisy at frame rate, to drive advection — jitter, not
+ * music. Band count was `+ mids * 0.1` on a base of 25, a 0.4% change, i.e.
+ * invisible. Both now come from `u_energy` at meaningful depth. The colour
+ * cycling switch was also a boolean branch on the LOOK, so the palette jumped
+ * on the first frame of playback; it is removed rather than smoothed, because
+ * the three stops encode which sine band a pixel is in and drifting them
+ * destroys the iridescence they exist to produce.
  */
 
-import { computeImmersiveColours } from '../immersive-colours';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  type ResolvedAudio,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { PlasmaConfig, ShaderConfig } from '../shader-config';
 import { PLASMA_DISPLAY_FRAG } from '../shaders/plasma-display.frag';
@@ -32,9 +76,27 @@ import {
 const SIM_RES = 512;
 
 /**
- * Init shader: faithful to original Wt2BR1 initial condition.
- * Two counter-rotating vortices + random grid kicks + density gradient.
- * Velocity is in TEXEL units per frame (not UV units).
+ * Bounds on the 60Hz-equivalent step scale. The upper bound is load-bearing:
+ * see the header note on the 2-texel PIC gather radius.
+ */
+const DT_SCALE_MIN = 0.5;
+const DT_SCALE_MAX = 1.4;
+
+/** Radians of band-sheen phase per second while silent. */
+const IDLE_CLOCK_RATE = 0.35;
+/** Radians of phase per musical beat once audio is playing. */
+const RAD_PER_BEAT = 2.0;
+/**
+ * Ceiling on the differentiated musical rate. The render loop pauses (hidden
+ * tab, preset switch, reduced motion) while the analyser clamps its own dt
+ * rather than freezing, so the first frame after a long pause can carry a large
+ * phase jump; differentiating that unclamped is one visible lurch.
+ */
+const MAX_CLOCK_RATE = 2.0;
+
+/**
+ * Init shader: two counter-rotating vortices, random grid kicks, and a faint
+ * density gradient. Velocity is in TEXEL units per step, not UV units.
  */
 const PLASMA_INIT_FRAG = `#version 300 es
 precision highp float;
@@ -51,27 +113,25 @@ float hash21(vec2 p) {
 }
 
 void main() {
-  vec2 pos = v_uv * R; // pixel coordinates
+  vec2 pos = v_uv * R;
 
-  // Two counter-rotating vortices (from original init)
-  // V = 0.5*Rot(PI/2)*dx*GS(dx/30)
+  // Two counter-rotating vortices: V = 0.5 * Rot(PI/2) * dx * gauss(dx / 30)
   vec2 dx0 = pos - vec2(R * 0.3);
   vec2 dx1 = pos - vec2(R * 0.7);
   vec2 V = 0.5 * vec2(-dx0.y, dx0.x) * exp(-dot(dx0, dx0) / 900.0)
          - 0.5 * vec2(-dx1.y, dx1.x) * exp(-dot(dx1, dx1) / 900.0);
 
-  // Random grid kicks (original: 0.2*Dir(2*PI*hash(floor(pos/20))))
+  // Random grid kicks so the vortices have something asymmetric to fold.
   float h = hash21(floor(pos / 20.0));
   V += 0.2 * vec2(cos(2.0 * PI * h), sin(2.0 * PI * h));
 
-  // Cap velocity to 1.0 texel/frame (original caps in force step)
+  // Same CFL cap the sim enforces.
   float spd = length(V);
   if (spd > 1.0) V /= spd;
 
-  // Density: slight gradient (exact original formula)
+  // Faint mass gradient, and the same value in the smoothed channel so the
+  // first step's sensors read something sane rather than zero.
   float M = 0.1 + v_uv.x * 0.01 + v_uv.y * 0.01;
-
-  // A channel = smoothed density (same as M initially)
   fragColor = vec4(V, M, M);
 }
 `;
@@ -79,7 +139,6 @@ void main() {
 const SIM_UNIFORM_NAMES = [
   'uState',
   'uTexel',
-  'uTime',
   'uMouse',
   'uMouseActive',
   'uBurst',
@@ -87,6 +146,8 @@ const SIM_UNIFORM_NAMES = [
   'uPressure',
   'uTurn',
   'uDiffusion',
+  'uDtScale',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DISPLAY_UNIFORM_NAMES = [
@@ -100,6 +161,8 @@ const DISPLAY_UNIFORM_NAMES = [
   'uVignette',
   'uTime',
   'uBands',
+  'uClock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DEFAULTS = {
@@ -112,6 +175,14 @@ const DEFAULTS = {
   grain: 0.025,
   vignette: 0.2,
 } as const;
+
+/**
+ * Ceiling on the audio-lifted advection speed. With DT_SCALE_MAX, the sim's
+ * 1-texel velocity cap and the sim's 1.25x beat-pace ceiling, this bounds
+ * parcel travel at 1.84 texels per step — inside the 2-texel PIC gather radius,
+ * past which a parcel's mass is dropped by every cell.
+ */
+const MAX_SPEED = 1.05;
 
 export function createPlasmaRenderer(): ShaderRenderer {
   let initProg: WebGLProgram | null = null;
@@ -130,15 +201,29 @@ export function createPlasmaRenderer(): ShaderRenderer {
   let quad: ReturnType<typeof createQuad> | null = null;
   let simBuf: DoubleFBO | null = null;
 
+  // Per-instance, never module-level: two live renderers (a hero and an
+  // immersive overlay) would otherwise share and fight over this state.
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+
+  /** Accumulated band-sheen phase, monotone by construction. */
+  let clock = 0;
+  /** Previous beatPhase sample, or -1 when there is none to difference. */
+  let prevBeatPhase = -1;
+  /** Last onset acted on, so a beat ignites exactly one fireball. */
+  let lastOnsetSeen = -1;
+
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
     gl: WebGL2RenderingContext,
-    time: number,
     mouseX: number,
     mouseY: number,
     mouseOn: boolean,
     burst: number,
-    cfg: PlasmaConfig
+    speed: number,
+    dtScale: number,
+    cfg: PlasmaConfig,
+    audio: ResolvedAudio
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
@@ -152,15 +237,19 @@ export function createPlasmaRenderer(): ShaderRenderer {
 
     const tx = 1.0 / SIM_RES;
     gl.uniform2f(simU.uTexel, tx, tx);
-    gl.uniform1f(simU.uTime, time);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform1f(simU.uBurst, burst);
-
-    gl.uniform1f(simU.uSpeed, cfg.speed ?? DEFAULTS.speed);
+    gl.uniform1f(simU.uSpeed, speed);
     gl.uniform1f(simU.uPressure, cfg.pressure ?? DEFAULTS.pressure);
     gl.uniform1f(simU.uTurn, cfg.turn ?? DEFAULTS.turn);
     gl.uniform1f(simU.uDiffusion, cfg.diffusion ?? DEFAULTS.diffusion);
+    gl.uniform1f(simU.uDtScale, dtScale);
+
+    // The sim pass reads u_energy (sensor force, pressure, mass target) and
+    // u_beatPhase (advection pace), so the block must be uploaded here as well
+    // as on the display pass — uniforms are per-program state.
+    uploadAudioUniforms(gl, simU, audio);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
@@ -203,30 +292,70 @@ export function createPlasmaRenderer(): ShaderRenderer {
         return;
 
       const cfg = config as PlasmaConfig;
-      const amp = audio?.amplitude ?? 0;
-      const mids = audio?.mids ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
 
-      // Audio-modulated config for sim — gentle speed boost
-      const audioCfg = audio?.active
-        ? {
-            ...cfg,
-            speed: (cfg.speed ?? DEFAULTS.speed) + amp * 0.2,
-          }
-        : cfg;
+      // ── Musical clock: blend RATES, then integrate ─────────
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, ((a.beatPhase - prevBeatPhase) / dt) * RAD_PER_BEAT)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      clock +=
+        dt * (IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active);
+
+      const dtScale = Math.min(DT_SCALE_MAX, Math.max(DT_SCALE_MIN, dt * 60));
+
+      // Advection speed rides the slow envelope, and is capped so parcel travel
+      // stays inside the PIC gather radius (see MAX_SPEED).
+      const speed = Math.min(
+        MAX_SPEED,
+        (cfg.speed ?? DEFAULTS.speed) * (1 + a.energy * 0.25 * a.active)
+      );
+
+      // ── Beat-ignited fireball — one per detected onset ─────
+      // Reuses the burst channel with the mouse parked inactive, so the beat
+      // gets the mass spike and vortex kick but not the continuous mouse
+      // vortex. Position comes from `beatSeed`, re-rolled per onset, so
+      // consecutive beats ignite in different places.
+      if (!a.silent && a.onsetCount !== lastOnsetSeen) {
+        lastOnsetSeen = a.onsetCount;
+        stepSim(
+          gl,
+          0.15 + a.beatSeed * 0.7,
+          0.15 + ((a.beatSeed * 7.31) % 1.0) * 0.7,
+          false,
+          0.4 + a.bass * 0.6,
+          speed,
+          dtScale,
+          cfg,
+          a
+        );
+      }
 
       // ── Substep 1: with mouse input ───────────────────────
       stepSim(
         gl,
-        time,
         mouse.active ? mouse.x : -10.0,
         mouse.active ? mouse.y : -10.0,
         mouse.active,
         mouse.burstStrength ?? 0.0,
-        audioCfg
+        speed,
+        dtScale,
+        cfg,
+        a
       );
 
       // ── Substep 2: coast (no input) ───────────────────────
-      stepSim(gl, time, -10.0, -10.0, false, 0.0, audioCfg);
+      stepSim(gl, -10.0, -10.0, false, 0.0, speed, dtScale, cfg, a);
 
       // ── Display pass ──────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -237,23 +366,27 @@ export function createPlasmaRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      // Immersive colour cycling
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
-
-      gl.uniform3fv(displayU.uColorPrimary, colours.primary);
-      gl.uniform3fv(displayU.uColorSecondary, colours.secondary);
-      gl.uniform3fv(displayU.uColorAccent, colours.accent);
-      gl.uniform3fv(displayU.uBgColor, colours.bg);
+      // Brand colours pass through unmodified — see the header note on why the
+      // immersive colour cycling was removed rather than smoothed.
+      gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
+      gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);
+      gl.uniform3fv(displayU.uColorAccent, cfg.colors.accent);
+      gl.uniform3fv(displayU.uBgColor, cfg.colors.bg);
       gl.uniform1f(displayU.uIntensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(displayU.uGrain, cfg.grain ?? DEFAULTS.grain);
+      // Faded by the audio ramp rather than switched off, so entering immersive
+      // mode is a glide instead of the vignette popping on the first beat.
       gl.uniform1f(
         displayU.uVignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
       gl.uniform1f(displayU.uTime, time);
-      gl.uniform1f(displayU.uBands, (cfg.bands ?? DEFAULTS.bands) + mids * 0.1);
+      // Raw config value: the audio lift on the band count is applied in the
+      // shader, where it can be gated on u_audioActive.
+      gl.uniform1f(displayU.uBands, cfg.bands ?? DEFAULTS.bands);
+      gl.uniform1f(displayU.uClock, clock);
+
+      uploadAudioUniforms(gl, displayU, a);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
@@ -266,6 +399,10 @@ export function createPlasmaRenderer(): ShaderRenderer {
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !simBuf || !quad) return;
+
+      clock = 0;
+      prevBeatPhase = -1;
+      lastOnsetSeen = -1;
 
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.useProgram(initProg);

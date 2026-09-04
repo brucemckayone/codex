@@ -25,6 +25,13 @@
  * Display pass renders to the full canvas viewport.
  */
 
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  SILENT_AUDIO,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import { computeImmersiveColours } from '../immersive-colours';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { InkConfig, ShaderConfig } from '../shader-config';
@@ -145,6 +152,7 @@ const SIM_UNIFORM_NAMES = [
   'uInkChannel',
   'uDropPos',
   'uDropChannel',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 const DISPLAY_UNIFORM_NAMES = [
@@ -157,11 +165,7 @@ const DISPLAY_UNIFORM_NAMES = [
   'uGrain',
   'uVignette',
   'uTime',
-  'uBassSmooth',
-  'uMidsSmooth',
-  'uTrebleSmooth',
-  'uAmplitudeSmooth',
-  'uAudioActive',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 export function createInkRenderer(): ShaderRenderer {
@@ -179,6 +183,9 @@ export function createInkRenderer(): ShaderRenderer {
   > | null = null;
 
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const _deltaClock = createDeltaClock();
   let simBuf: DoubleFBO | null = null;
 
   /** Timestamp (seconds) of last ambient drop. */
@@ -215,6 +222,15 @@ export function createInkRenderer(): ShaderRenderer {
    * content needs gentle onsets and offsets.
    */
   let wandererFade = 0;
+  /**
+   * This frame's resolved audio, shared with the sim pass.
+   *
+   * The sim runs from a helper that has no access to the render scope, and
+   * uniforms are PER-PROGRAM state — so the block has to be uploaded on both
+   * passes, not just the display one. Mirrors how this file already hands
+   * `wandererFade` across the same boundary.
+   */
+  let resolvedAudio = SILENT_AUDIO;
 
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
@@ -236,6 +252,7 @@ export function createInkRenderer(): ShaderRenderer {
 
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.useProgram(simProg);
+    uploadAudioUniforms(gl, simU, resolvedAudio);
     quad.bind(simProg);
 
     gl.activeTexture(gl.TEXTURE0);
@@ -322,8 +339,6 @@ export function createInkRenderer(): ShaderRenderer {
 
       const cfg = config as InkConfig;
       const bassSmooth = audio?.bassSmooth ?? 0;
-      const midsSmooth = audio?.midsSmooth ?? 0;
-      const trebleSmooth = audio?.trebleSmooth ?? 0;
       const amplitudeSmooth = audio?.amplitudeSmooth ?? 0;
       const beatPulse = audio?.beatPulse ?? 0;
       const audioActive = audio?.active ?? false;
@@ -332,6 +347,9 @@ export function createInkRenderer(): ShaderRenderer {
       const dt =
         lastRenderTime === 0 ? 1 / 60 : Math.min(0.1, time - lastRenderTime);
       lastRenderTime = time;
+      // Shared vocabulary + the five signals this preset never had.
+      const a = audioFade.update(audio, dt);
+      resolvedAudio = a;
 
       // Ease wanderer fade toward 1 (audio playing) or 0 (paused).
       const fadeTarget = audioActive ? 1 : 0;
@@ -377,7 +395,7 @@ export function createInkRenderer(): ShaderRenderer {
       const rumbleEmitterCount = emitRumble
         ? Math.min(4, 1 + Math.floor(bassSmooth * 6))
         : 0;
-      const rumbleStrength = emitRumble
+      const _rumbleStrength = emitRumble
         ? bassSmooth * bassSmooth * BASS_RUMBLE_STRENGTH * wandererFade
         : 0;
       const rumbleSize = cfg.dropSize * BASS_RUMBLE_SIZE_MULT;
@@ -574,6 +592,7 @@ export function createInkRenderer(): ShaderRenderer {
       // ── Display pass ───────────────────────────────────────
       gl.viewport(0, 0, width, height);
       gl.useProgram(displayProg);
+      uploadAudioUniforms(gl, displayU, a);
       quad.bind(displayProg);
 
       gl.activeTexture(gl.TEXTURE0);
@@ -596,11 +615,6 @@ export function createInkRenderer(): ShaderRenderer {
       gl.uniform1f(displayU.uTime, time);
 
       // Full-spectrum modulation — see display shader for exact mappings.
-      gl.uniform1f(displayU.uBassSmooth, bassSmooth);
-      gl.uniform1f(displayU.uMidsSmooth, midsSmooth);
-      gl.uniform1f(displayU.uTrebleSmooth, trebleSmooth);
-      gl.uniform1f(displayU.uAmplitudeSmooth, amplitudeSmooth);
-      gl.uniform1f(displayU.uAudioActive, wandererFade);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);

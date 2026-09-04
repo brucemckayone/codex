@@ -38,9 +38,39 @@ export { LEVELS } from './levels';
 // Brand Editor - Dark-mode override parser (SSR-safe, used by _org/[slug]/+layout.svelte)
 export { parseDarkColorOverrides } from './parse-dark-overrides';
 
-export type { PresetCategory } from './presets';
+// Brand Editor - Preset axes (the composable vocabulary the guided mixer
+// drives: type / form / atmosphere, plus the contrast helpers that keep a
+// mixed combination legible). See preset-axes.ts for the defects this
+// replaced.
+export type {
+  AtmosphereAxis,
+  AtmosphereAxisId,
+  FormAxis,
+  FormAxisId,
+  PresetPalette,
+  PresetSpec,
+  TypeAxis,
+  TypeAxisId,
+} from './preset-axes';
+export {
+  AA_TEXT_CONTRAST,
+  ATMOSPHERE_AXES,
+  composePreset,
+  contrast,
+  FORM_AXES,
+  TYPE_AXES,
+} from './preset-axes';
+export type {
+  PresetAxisPoint,
+  PresetCategory,
+  PresetVariant,
+} from './presets';
 // Brand Editor - Presets
-export { BRAND_PRESETS } from './presets';
+export {
+  BRAND_PRESETS,
+  findPreset,
+  PRESET_CATEGORY_ORDER,
+} from './presets';
 export type {
   BrandEditorState,
   LevelId,

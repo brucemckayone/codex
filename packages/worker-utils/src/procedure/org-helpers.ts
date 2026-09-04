@@ -10,7 +10,7 @@ import { isReservedSubdomain } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { OrganizationMembership } from './helpers';
 
 /**
@@ -251,7 +251,14 @@ export async function extractOrganizationFromSubdomain(
   try {
     const db = createDbClient(env);
     const org = await db.query.organizations.findFirst({
-      where: eq(schema.organizations.slug, subdomain),
+      // deletedAt is mandatory here: soft-deleted orgs keep their slug row,
+      // and a slug reused by a NEW tenant must never resolve to the dead
+      // org's id — this result is pinned into KV for 24h, so a wrong hit
+      // redirects every org-scoped request to the deleted tenant.
+      where: and(
+        eq(schema.organizations.slug, subdomain),
+        isNull(schema.organizations.deletedAt)
+      ),
       columns: {
         id: true,
       },

@@ -156,6 +156,68 @@ describe('TranscodingService', () => {
         /RunPod API error/
       );
     });
+
+    it('never puts the RunPod upstream body in the client-visible error context', async () => {
+      // RunPodApiError extends InternalServiceError, and
+      // mapErrorToResponse copies `context` straight into the response's
+      // `details` field — so a `responseBody` in the context forwards a
+      // third-party upstream body to whoever called the API. The body is
+      // still logged via obs; it just must not ride on the error.
+      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+
+      const upstreamBody =
+        'RunPod internal: worker-77 at 10.4.2.9 rejected token sk_live_UPSTREAM';
+      (global.fetch as Mock).mockResolvedValue({
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        text: async () => upstreamBody,
+      });
+
+      const err = await service
+        .triggerJob(mediaId, creatorId)
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      const serialised = JSON.stringify({
+        message: (err as Error).message,
+        context: (err as { context?: unknown }).context,
+      });
+      expect(serialised).not.toContain(upstreamBody);
+      expect(serialised).not.toContain('sk_live_UPSTREAM');
+      expect(serialised).not.toContain('10.4.2.9');
+      // The operation and status code ARE safe correlation data.
+      expect(
+        (err as { context?: { statusCode?: number } }).context?.statusCode
+      ).toBe(502);
+    });
+
+    it('never puts the transport error message in the error context', async () => {
+      // The timeout/abort branch had no log at all and passed
+      // `originalError: error.message` into the context — a fetch failure
+      // message can carry internal hostnames and the endpoint URL.
+      mockDb.query.mediaItems.findFirst.mockResolvedValue(validMedia);
+
+      const transportMessage =
+        'request to https://internal-runpod.codex.local/v2/ep-secret/run failed';
+      (global.fetch as Mock).mockRejectedValue(new Error(transportMessage));
+
+      const err = await service
+        .triggerJob(mediaId, creatorId)
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/RunPod API error/);
+      const serialised = JSON.stringify({
+        message: (err as Error).message,
+        context: (err as { context?: unknown }).context,
+      });
+      expect(serialised).not.toContain(transportMessage);
+      expect(serialised).not.toContain('internal-runpod.codex.local');
+      expect(serialised).not.toContain('ep-secret');
+    });
   });
 
   describe('handleWebhook', () => {

@@ -37,6 +37,29 @@ export const CacheType = {
   /** User profile data (name, email, username, bio, etc.) */
   USER_PROFILE: 'user:profile',
 
+  /**
+   * PUBLIC creator profile — the anonymous-readable subset only
+   * (`id`, `name`, `image`, `bio`, `socialLinks`). Keyed by USER ID, so the
+   * `invalidate(userId)` calls that `IdentityService` already makes on profile
+   * update, avatar upload and creator upgrade clear it for free.
+   *
+   * Deliberately NOT `USER_PROFILE`: that entry carries the user's `email`,
+   * and reusing it for an unauthenticated endpoint would put a PII-bearing
+   * object one careless `return` away from the public. Nothing sensitive is
+   * ever written into this slot, so the endpoint is safe by construction
+   * rather than by the caller remembering to project.
+   */
+  USER_PUBLIC_PROFILE: 'user:public-profile',
+
+  /**
+   * `username` -> user id, for the public profile lookup. Separate hop because
+   * the profile itself is keyed by id (see above); a username changes far less
+   * often than a profile does, so this slot absorbs the repeated
+   * username-resolution reads that would otherwise hit Neon on every
+   * anonymous profile view.
+   */
+  USERNAME_TO_ID: 'user:username-to-id',
+
   /** User notification preferences */
   USER_PREFERENCES: 'user:preferences',
 

@@ -21,6 +21,8 @@
  *   uMouseActive   — 1.0 if impulse should be applied, 0.0 otherwise
  *   uMouseStrength — impulse intensity (1.0 hover, larger for click)
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const PULSE_SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -38,10 +40,10 @@ uniform float uMouseStrength;
 uniform sampler2D uSdf;
 uniform float uHasLogo;
 uniform float uTime;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // Audio reactivity (0.0 when no audio active)
-uniform float uAudioBass;
-uniform float uAudioAmplitude;
 
 void main() {
   // Sample center and 4 neighbors
@@ -83,15 +85,15 @@ void main() {
   }
 
   // Audio: reduce damping when loud (waves persist longer during loud passages)
-  effectiveDamping = mix(effectiveDamping, min(effectiveDamping + 0.02, 0.998), uAudioAmplitude);
+  effectiveDamping = mix(effectiveDamping, min(effectiveDamping + 0.02, 0.998), u_level);
 
   next *= effectiveDamping;
 
   // Audio: bass-driven radial pulse from center
-  if (uAudioBass > 0.3) {
+  if (u_bass > 0.3) {
     float dist = length(v_uv - vec2(0.5));
     float ring = smoothstep(0.25, 0.15, dist) * smoothstep(0.0, 0.1, dist);
-    next += ring * uAudioBass * 0.08;
+    next += ring * u_bass * 0.08;
   }
 
   // Mouse impulse: Gaussian deposit at pre-mapped UV position

@@ -18,9 +18,9 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 | `create` | `(input: CreateContentInput, creatorId: string)` | Transaction. Media validated but not required to be ready for draft. Checks slug uniqueness. |
 | `get` | `(id: string, creatorId: string)` | Returns `ContentWithRelations` (includes mediaItem). Scoped by creatorId. |
 | `update` | `(id: string, input: UpdateContentInput, creatorId: string)` | Transaction. Checks slug conflict if slug changes. |
-| `uploadThumbnail` | `(id: string, creatorId: string, file: File)` | Processes image via `@codex/image-processing`, updates thumbnailUrl. |
-| `isSlugAvailable` | `(slug: string, creatorId: string, excludeId?: string)` | Checks slug uniqueness within creator scope. |
-| `publish` | `(id: string, creatorId: string)` | Transaction. ALL attached media MUST be `status === 'ready'`. |
+| `uploadThumbnail` | `(id: string, creatorId: string, file: File, r2: R2Bucket, r2PublicUrlBase: string)` | Processes image via `@codex/image-processing`, returns `ImageProcessingResult`. |
+| `isSlugAvailable` | `(slug: string, creatorId: string, organizationId?: string \| null, excludeContentId?: string \| null)` | Slug uniqueness — org scope when `organizationId` is given, else creator-personal scope. |
+| `publish` | `(id: string, creatorId: string)` | Transaction. Video/audio content requires its media at `status === 'ready'`. Monetised content (priced or `includedInTierId` set) additionally requires a payout-ready Connect account — else `CreatorPayoutsRequiredError`. |
 | `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete via `deletedAt`. |
 | `list` | `(creatorId: string, filters: ContentFilters, pagination?)` | Paginated. Supports status/search/type filters. |
@@ -38,7 +38,7 @@ const service = new ContentService({ db, environment });
 | Method | Signature | Notes |
 |---|---|---|
 | `create` | `(input: CreateMediaItemInput, creatorId: string)` | Registers upload, status: `uploading`. |
-| `upload` | `(id: string, creatorId: string, file: File, r2Service: R2Service)` | Uploads to R2, transitions status: `uploaded`. |
+| `upload` | `(mediaId: string, body: ArrayBuffer, contentType: string, creatorId: string)` | Uploads to R2 via the service's injected `r2` client, transitions status: `uploaded`. |
 | `get` | `(id: string, creatorId: string)` | Scoped by creatorId. |
 | `update` | `(id: string, input: UpdateMediaItemInput, creatorId: string)` | Transaction. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete. |

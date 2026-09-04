@@ -5,14 +5,17 @@
  * must route to a single, deterministic Connect account: the one owned by the
  * org's PRIMARY settlement user. That user is the explicitly pinned
  * `organizations.primary_connect_account_user_id` when set, otherwise the org
- * OWNER (the `organization_memberships` row with role 'owner' — the user who
- * onboards the org's account). Because a user has exactly ONE Connect account
+ * OWNER (the `organization_memberships` row with role 'owner' AND status
+ * 'active' — the user who onboards the org's account). Because a user has
+ * exactly ONE Connect account
  * (`stripe_connect_accounts` is unique on `user_id`), resolution is:
  * org → primary-or-owner user id → that user's single account.
  *
  * The account's own `organization_id` is NOT consulted — it is a nullable,
  * vestigial onboarding-origin field (WP1). The owner fallback is DETERMINISTIC:
- * `role='owner'` ordered by `created_at ASC` (the earliest-joined owner wins),
+ * `role='owner' AND status='active'` ordered by `created_at ASC` (the
+ * earliest-joined ACTIVE owner wins — a removed owner keeps its role, so
+ * without the status predicate a removed founder wins the tiebreak forever),
  * so a multi-owner org still resolves to a single stable account rather than an
  * arbitrary one — unlike the prior bare `.limit(1)` which Codex-rjwdm flagged as
  * non-deterministic across multi-owner orgs. The pin still wins when present, so
@@ -54,7 +57,13 @@ export async function resolvePrimaryConnect(
       .where(
         and(
           eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner')
+          eq(organizationMemberships.role, 'owner'),
+          // `removeMember` tombstones a membership with status='inactive' and
+          // leaves `role` untouched, so role='owner' AND status='inactive' is a
+          // normal persisted state. Without this predicate the earliest-joined
+          // owner wins the createdAt tiebreak even after being removed, and the
+          // org's fee is transferred to a removed founder.
+          eq(organizationMemberships.status, 'active')
         )
       )
       // Deterministic tiebreak across multi-owner orgs (Codex-rjwdm): the

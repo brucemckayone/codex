@@ -22,6 +22,45 @@ export interface AudioAnalysis {
    * instead of hard-coded `bass > X` gates.
    */
   beatPulse: number;
+  /**
+   * Very slow amplitude envelope (0-1, tau ~4s). Tracks *musical sections*
+   * rather than notes — a build swells it, a breakdown drains it. Use for
+   * macro-scale modulation (bloom, density, palette temperature) where
+   * per-note movement would read as twitchy.
+   */
+  energy: number;
+  /**
+   * Positive spectral flux (0-1). Sum of per-bin increases since the last
+   * frame, normalised. High during dense/percussive passages, near zero on
+   * sustained pads. Use for detail density, sparkle, and grain — NOT for
+   * geometry, since it is inherently noisy frame-to-frame.
+   */
+  flux: number;
+  /**
+   * Spectral centroid (0-1) — the "brightness" of the current spectrum, i.e.
+   * the amplitude-weighted mean bin position. Dark/bassy material sits near
+   * 0.1-0.2, bright/airy material near 0.5+. Smoothed. Use for hue and
+   * temperature shifts, which should track timbre rather than loudness.
+   */
+  centroid: number;
+  /**
+   * Monotonic musical clock, in beats-ish units. Advances at a rate governed
+   * by `energy`, so it *stops* when the music stops and speeds up when the
+   * track opens out.
+   *
+   * This is the single most important field for calm audio-reactivity: drive
+   * a shader's internal motion from `beatPhase` instead of wall-clock `time`
+   * and the whole preset breathes with the music instead of running at a
+   * constant rate with a wobble bolted on.
+   */
+  beatPhase: number;
+  /**
+   * Count of onsets detected since the analyser was created. Increments at
+   * most once per `MIN_ONSET_INTERVAL`. Use as a seed for per-beat random
+   * choices (a new drift direction, a new hue target) — sampling randomness
+   * from this instead of per-frame keeps a choice stable between beats.
+   */
+  onsetCount: number;
   /** Whether audio is currently playing */
   active: boolean;
 }
@@ -85,6 +124,28 @@ const MIN_ONSET_INTERVAL = 0.18;
 const BEAT_HALF_LIFE = 0.4;
 /** Cap dt to avoid massive jumps when a tab wakes from background. */
 const MAX_DT = 0.1;
+/**
+ * Macro-envelope time constant (s). Deliberately long: this tracks sections,
+ * not notes. Symmetric — a swell and a drain should feel equally gradual.
+ */
+const ENERGY_TAU_SEC = 4.0;
+/** Spectral-flux smoothing (s) — short, flux is meant to stay lively. */
+const FLUX_TAU_SEC = 0.12;
+/** Spectral-centroid smoothing (s) — timbre shifts slower than loudness. */
+const CENTROID_TAU_SEC = 0.6;
+/**
+ * Beats per second the musical clock ticks at when `energy` is 0, and the
+ * extra rate at full energy. 0.35 + 1.15 spans roughly 21-90 "bpm" — slow
+ * enough for meditation content at rest, lively at peak.
+ */
+const PHASE_RATE_BASE = 0.35;
+const PHASE_RATE_GAIN = 1.15;
+/**
+ * Flux normalisation divisor. Raw positive flux over a 256-bin spectrum can
+ * reach several thousand byte-units on a hard transient; this maps typical
+ * musical material into 0-1 without clipping constantly.
+ */
+const FLUX_SCALE = 2600;
 
 /**
  * Frame-rate-independent EMA with asymmetric attack/release.
@@ -140,6 +201,15 @@ export function createAudioAnalyser(
   let lastBeatTime = -Infinity;
   let lastFrameTime = 0;
 
+  // Musical-signal state
+  let energySm = 0;
+  let fluxSm = 0;
+  let centroidSm = 0;
+  let beatPhase = 0;
+  let onsetCount = 0;
+  /** Previous frame's bins, for positive spectral flux. */
+  const prevBins = new Uint8Array(analyser.frequencyBinCount);
+
   function getAnalysis(): AudioAnalysis {
     analyser.getByteFrequencyData(frequencyData);
 
@@ -148,6 +218,27 @@ export function createAudioAnalyser(
     const mids = averageRange(frequencyData, 10, 100);
     const treble = averageRange(frequencyData, 100, binCount);
     const amplitude = averageRange(frequencyData, 0, binCount);
+
+    // Single fused pass for positive spectral flux + spectral centroid, then
+    // roll `prevBins`. Fused because both need every bin and the spectrum is
+    // walked once per frame at 60fps — two extra passes would be wasteful.
+    let positiveFlux = 0;
+    let weightedSum = 0;
+    let magnitudeSum = 0;
+    for (let i = 0; i < binCount; i++) {
+      const v = frequencyData[i];
+      const rise = v - prevBins[i];
+      if (rise > 0) positiveFlux += rise;
+      weightedSum += v * i;
+      magnitudeSum += v;
+      prevBins[i] = v;
+    }
+    const fluxRaw = Math.min(1, positiveFlux / FLUX_SCALE);
+    // Guard the silent case: with no energy the centroid is undefined, and
+    // returning 0 would read as "very dark" rather than "no information".
+    // Hold the previous smoothed value instead so silence doesn't yank hue.
+    const centroidRaw =
+      magnitudeSum > 0 ? weightedSum / (magnitudeSum * binCount) : centroidSm;
 
     // Frame-rate-independent dt. First call: assume 60fps to seed smoothly.
     const now = performance.now() / 1000;
@@ -161,9 +252,35 @@ export function createAudioAnalyser(
     trebleSm = ema(trebleSm, treble, dt, TREBLE_ATTACK_SEC, TREBLE_RELEASE_SEC);
     ampSm = ema(ampSm, amplitude, dt, ATTACK_SEC, RELEASE_SEC);
 
+    // Macro/timbre envelopes. Symmetric tau — these describe how the music
+    // *is*, not how hard it just hit, so an asymmetric attack would make them
+    // ratchet upward and never settle.
+    const playing = !audioElement.paused;
+    energySm = ema(
+      energySm,
+      playing ? amplitude : 0,
+      dt,
+      ENERGY_TAU_SEC,
+      ENERGY_TAU_SEC
+    );
+    fluxSm = ema(fluxSm, playing ? fluxRaw : 0, dt, FLUX_TAU_SEC, FLUX_TAU_SEC);
+    centroidSm = ema(
+      centroidSm,
+      centroidRaw,
+      dt,
+      CENTROID_TAU_SEC,
+      CENTROID_TAU_SEC
+    );
+
+    // Musical clock. Advances only while playing, at a rate set by the macro
+    // envelope — so a preset driven by `beatPhase` freezes on pause and eases
+    // back in rather than teleporting to wherever wall-clock time had run to.
+    if (playing) {
+      beatPhase += dt * (PHASE_RATE_BASE + PHASE_RATE_GAIN * energySm);
+    }
+
     // Onset detection: current bass vs rolling mean of recent history.
     // (Classical spectral-flux approach, simplified to bass band only.)
-    const playing = !audioElement.paused;
     if (playing) {
       let sum = 0;
       for (let i = 0; i < ONSET_HISTORY_SIZE; i++) sum += bassHistory[i];
@@ -172,6 +289,7 @@ export function createAudioAnalyser(
       if (excess > ONSET_THRESHOLD && now - lastBeatTime > MIN_ONSET_INTERVAL) {
         beatPulse = 1;
         lastBeatTime = now;
+        onsetCount++;
       }
     }
 
@@ -192,6 +310,11 @@ export function createAudioAnalyser(
       trebleSmooth: trebleSm,
       amplitudeSmooth: ampSm,
       beatPulse,
+      energy: energySm,
+      flux: fluxSm,
+      centroid: centroidSm,
+      beatPhase,
+      onsetCount,
       active: playing,
     };
   }

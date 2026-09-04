@@ -97,7 +97,7 @@ GET /api/access/content/:id/stream
 | `R2_ACCESS_KEY_ID` | Yes | R2 signing credentials |
 | `R2_SECRET_ACCESS_KEY` | Yes | R2 signing credentials |
 | `R2_BUCKET_MEDIA` | Yes | R2 bucket name for media |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` / `RATE_LIMIT_STREAMING` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17); the limiter fails OPEN when the binding is missing |
 | `AUTH_SESSION_KV` | Yes | Session validation |
 | `MEDIA_BUCKET` | Yes (R2 binding) | R2 namespace for health check |
 | `MEDIA_API_URL` | Yes | URL to trigger transcoding |
@@ -120,5 +120,8 @@ GET /api/access/content/:id/stream
 - `workers/content-api/src/index.ts` — worker setup, route mounting
 - `workers/content-api/src/routes/content.ts` — content CRUD + thumbnail
 - `workers/content-api/src/routes/media.ts` — media CRUD + upload + upload-complete
-- `workers/content-api/src/routes/content-access.ts` — streaming, progress, library
-- `workers/content-api/src/routes/public.ts` — public browse + discover endpoints
+- `workers/content-api/src/routes/content-access.ts` — streaming, progress, library, can-view/can-enter gates, HLS playlist proxy
+- `workers/content-api/src/routes/public.ts` — public browse + discover + public categories
+- `workers/content-api/src/routes/categories.ts` — category CRUD, reorder, cover upload
+- `workers/content-api/src/routes/journeys.ts` — journeys/courses member + studio surface (~25 routes)
+- `workers/content-api/src/routes/journey-insights.ts` — studio journey insights

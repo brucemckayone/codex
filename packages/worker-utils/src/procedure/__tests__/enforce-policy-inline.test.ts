@@ -432,6 +432,43 @@ describe('enforcePolicyInline · requireOrgMembership', () => {
     expect(extractOrganizationFromSubdomain).not.toHaveBeenCalled();
   });
 
+  it('prefers an explicit :orgId over a generic :id on the same route', async () => {
+    // Regression guard. The resolver read `params.id || params.orgId || ...`,
+    // so a route declaring BOTH — notifications-api's
+    // `/organizations/:orgId/:id` — resolved the org from the TEMPLATE id.
+    // The membership check then ran against a non-existent org and every
+    // legitimate org admin got a 403 before the handler could run.
+    const { checkOrganizationMembership } = await import('../org-helpers');
+    vi.mocked(checkOrganizationMembership).mockResolvedValue({
+      role: 'admin',
+      status: 'active',
+      joinedAt: new Date(),
+    });
+
+    const { ctx, vars } = makeCtx({
+      vars: { user: { id: 'u1', role: 'user' } },
+      // UUID_A is the real organization; UUID_B is the template being edited.
+      params: { orgId: UUID_A, id: UUID_B },
+    });
+    await expect(
+      enforcePolicyInline(ctx, {
+        auth: 'required',
+        requireOrgMembership: true,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(vars.organizationId).toBe(UUID_A);
+    expect(vars.organizationId).not.toBe(UUID_B);
+    // And the membership check was asked about the ORG, not the template.
+    // Signature is (organizationId, userId, env, obs, cacheWrite); assert the
+    // two identity args positionally — `obs` is undefined here, which
+    // expect.anything() deliberately does not match.
+    const [orgArg, userArg] = vi.mocked(checkOrganizationMembership).mock
+      .calls[0] as [string, string, ...unknown[]];
+    expect(orgArg).toBe(UUID_A);
+    expect(userArg).toBe('u1');
+  });
+
   it('falls back to subdomain extraction when no UUID param', async () => {
     const { checkOrganizationMembership, extractOrganizationFromSubdomain } =
       await import('../org-helpers');

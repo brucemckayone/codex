@@ -13,9 +13,49 @@
  *  - Depth-tinted water body (brandPrimary → deeper tint via waveH)
  *  - Luminance-aware grain
  *
- * Gerstner physics (iterative height solve, finite-diff normals, 5-wave
- * superposition) preserved from original — that part is already correct.
+ * ## 2026-09 pass: analytic normals, hoisted wind, audio
+ *
+ * **Cost.** This was by far the most expensive preset in the set, for a reason
+ * that is invisible unless you count the call tree:
+ *
+ *   getNormal        -> 4 finite-difference height samples
+ *   each getWaveHeight -> 4-iteration inverse-displacement solve
+ *   each iteration   -> gerstnerDisplacement (5 waves = 5 sin + 5 cos)
+ *
+ * That is 4 x 5 = 20 Gerstner evaluations for the normal, plus 5 for the
+ * height itself: **25 per pixel**, around 125 sin and 125 cos per fragment for
+ * a background.
+ *
+ * Two fixes, neither of which changes the look:
+ *
+ * 1. **Analytic normals.** Gerstner waves have a closed-form derivative — for
+ *    each component, d/dpos of \`a*sin(dot(d,pos)*f + t*s)\` is
+ *    \`a*f*d*cos(...)\`, the same cosine the horizontal displacement already
+ *    computes. Accumulating the gradient alongside the displacement makes the
+ *    normal free, replacing 20 evaluations with 0. It is also strictly more
+ *    accurate than a finite difference, which carries an O(eps^2) error and
+ *    was sampling a *different* solve each time.
+ * 2. **Hoisted wind rotation.** \`getWindRotation()\` was called INSIDE
+ *    \`gerstnerDisplacement\`, so a mat2 that is constant across the entire
+ *    frame had its sin/cos recomputed on all 25 calls per pixel. Now computed
+ *    once in main() and passed down.
+ *
+ * Net: 25 Gerstner evaluations per pixel down to 3 (two solve iterations plus
+ * the final sample), and 25 redundant wind sin/cos pairs down to one.
+ * Iterations dropped 4 -> 2 because the inverse-displacement solve converges
+ * fast at these amplitudes; the residual is far below a pixel.
+ *
+ * **Motion.** No camera to de-jerk — this is a lit height field. The wave
+ * phase advance IS the effect and is preserved; it is now paced by the
+ * integrated musical clock rather than raw wall-clock. Mouse still steers wind
+ * direction, which is the pointer-follow motion the brief says to keep.
+ *
+ * **Audio.** Bass raises wave height, the slow energy envelope steepens chop,
+ * treble drives foam sparkle, beats add a swell, and timbre shifts the water's
+ * temperature. All gated on the audio ramp.
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const WAVES_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -31,13 +71,20 @@ uniform vec3 u_brandSecondary;
 uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_height;
-uniform float u_speed;
 uniform float u_chop;
 uniform float u_foam;
 uniform float u_depth;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU (see waves-renderer.ts) and
+ * already scaled by speed. Wave phase advances on this rather than u_time, so
+ * the swell paces with the music and settles when it stops.
+ */
+uniform float u_clock;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -51,60 +98,93 @@ mat2 getWindRotation() {
   return mat2(c, -s, s, c);
 }
 
-vec3 gerstnerDisplacement(vec2 pos, float t) {
-  mat2 windRot = getWindRotation();
+/**
+ * Inverse-displacement solve iterations.
+ *
+ * Gerstner displacement moves a point horizontally, so recovering the height
+ * at a *screen* position needs the pre-displacement position — a fixed-point
+ * iteration. Was 4; at these amplitudes (max ~0.25 * u_height per component)
+ * the map is strongly contracting and two iterations put the residual well
+ * below a pixel. Each iteration costs a full 5-wave evaluation, so this alone
+ * is a ~40% cut in the height path.
+ */
+const int SOLVE_ITERS = 2;
+
+/** One Gerstner component's contribution to displacement and to the gradient. */
+struct Wave {
+  vec2 dir;
+  float freq;
+  float amp;
+  float speed;
+};
+
+/**
+ * Evaluate the 5-wave superposition at pos.
+ *
+ * Returns displacement (xy horizontal, z vertical) and writes the analytic
+ * height gradient (dz/dx, dz/dy) into grad.
+ *
+ * The gradient is free: d/dpos of a*sin(dot(d,pos)*f + t*s) is
+ * a*f*d*cos(...), and that cosine is already computed for the horizontal
+ * displacement term. Accumulating it removes the need to sample the height
+ * field four times to finite-difference a normal.
+ *
+ * windRot is passed in rather than computed here — it is constant for the
+ * whole frame, and computing it inside cost a redundant sin/cos pair on every
+ * one of the ~25 calls this function used to receive per pixel.
+ */
+vec3 gerstner(vec2 pos, float t, mat2 windRot, float heightScale, out vec2 grad) {
+  Wave waves[5];
+  waves[0] = Wave(normalize(vec2( 1.0,  0.3)), 1.0, 0.25, 1.0);
+  waves[1] = Wave(normalize(vec2( 0.8, -0.5)), 1.8, 0.15, 1.2);
+  waves[2] = Wave(normalize(vec2(-0.3,  1.0)), 2.6, 0.10, 0.9);
+  waves[3] = Wave(normalize(vec2( 0.5,  0.8)), 3.2, 0.06, 1.4);
+  waves[4] = Wave(normalize(vec2(-0.7, -0.4)), 4.1, 0.04, 0.8);
+
   vec3 result = vec3(0.0);
+  grad = vec2(0.0);
   float Q = clamp(u_chop, 0.0, 1.0);
 
-  vec2 d1 = windRot * normalize(vec2(1.0, 0.3));
-  float f1 = 1.0, a1 = 0.25 * u_height;
-  float phase1 = dot(d1, pos) * f1 + t * 1.0;
-  result.z += a1 * sin(phase1);
-  result.xy += Q * a1 * d1 * cos(phase1);
+  for (int i = 0; i < 5; i++) {
+    vec2 d = windRot * waves[i].dir;
+    float a = waves[i].amp * heightScale;
+    float f = waves[i].freq;
+    float phase = dot(d, pos) * f + t * waves[i].speed;
+    float s = sin(phase);
+    float c = cos(phase);
 
-  vec2 d2 = windRot * normalize(vec2(0.8, -0.5));
-  float f2 = 1.8, a2 = 0.15 * u_height;
-  float phase2 = dot(d2, pos) * f2 + t * 1.2;
-  result.z += a2 * sin(phase2);
-  result.xy += Q * a2 * d2 * cos(phase2);
-
-  vec2 d3 = windRot * normalize(vec2(-0.3, 1.0));
-  float f3 = 2.6, a3 = 0.10 * u_height;
-  float phase3 = dot(d3, pos) * f3 + t * 0.9;
-  result.z += a3 * sin(phase3);
-  result.xy += Q * a3 * d3 * cos(phase3);
-
-  vec2 d4 = windRot * normalize(vec2(0.5, 0.8));
-  float f4 = 3.2, a4 = 0.06 * u_height;
-  float phase4 = dot(d4, pos) * f4 + t * 1.4;
-  result.z += a4 * sin(phase4);
-  result.xy += Q * a4 * d4 * cos(phase4);
-
-  vec2 d5 = windRot * normalize(vec2(-0.7, -0.4));
-  float f5 = 4.1, a5 = 0.04 * u_height;
-  float phase5 = dot(d5, pos) * f5 + t * 0.8;
-  result.z += a5 * sin(phase5);
-  result.xy += Q * a5 * d5 * cos(phase5);
+    result.z += a * s;
+    result.xy += Q * a * d * c;
+    grad += a * f * d * c;
+  }
 
   return result;
 }
 
-float getWaveHeight(vec2 pos, float t) {
+/**
+ * Height and normal in one pass.
+ *
+ * Replaces the old getWaveHeight + getNormal pair, which between them ran 25
+ * Gerstner evaluations per pixel (5 for the height, 20 for four
+ * finite-difference samples). This runs SOLVE_ITERS + 1 = 3, and the normal
+ * comes from the analytic gradient at the solved point — which is also more
+ * accurate, since the finite difference both carried an O(eps^2) error and
+ * sampled a separately-converged solve at each offset.
+ */
+float waveSurface(vec2 pos, float t, mat2 windRot, float heightScale, out vec3 normal) {
+  vec2 grad;
   vec2 p = pos;
-  for (int i = 0; i < 4; i++) {
-    vec3 disp = gerstnerDisplacement(p, t);
+  for (int i = 0; i < SOLVE_ITERS; i++) {
+    vec3 disp = gerstner(p, t, windRot, heightScale, grad);
     p = pos - disp.xy;
   }
-  return gerstnerDisplacement(p, t).z;
-}
+  vec3 disp = gerstner(p, t, windRot, heightScale, grad);
 
-vec3 getNormal(vec2 pos, float t) {
-  float eps = 0.01;
-  float hL = getWaveHeight(pos - vec2(eps, 0.0), t);
-  float hR = getWaveHeight(pos + vec2(eps, 0.0), t);
-  float hD = getWaveHeight(pos - vec2(0.0, eps), t);
-  float hU = getWaveHeight(pos + vec2(0.0, eps), t);
-  return normalize(vec3(hL - hR, 2.0 * eps, hD - hU));
+  // Matches the old finite-difference orientation: hL - hR is -2*eps*dz/dx,
+  // and the y term was 2*eps, so after normalising the frame is
+  // (-dz/dx, 1, -dz/dy).
+  normal = normalize(vec3(-grad.x, 1.0, -grad.y));
+  return disp.z;
 }
 
 vec3 aces(vec3 x) {
@@ -113,21 +193,37 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  // Wave phase advances on the integrated musical clock, so the swell paces
+  // with the track. The clock is monotone by construction (rates are blended,
+  // never positions) — a phase that could run backwards would reverse the
+  // entire ocean.
+  float t = u_clock;
   float aspect = u_resolution.x / u_resolution.y;
   vec2 uv = v_uv;
 
   vec2 pos = vec2(uv.x * aspect, uv.y) * 4.0;
 
-  float waveH = getWaveHeight(pos, t);
+  // Wind rotation is constant for the frame — computed once here rather than
+  // inside the wave evaluation, where it was recomputed ~25 times per pixel.
+  mat2 windRot = getWindRotation();
+
+  // Bass raises the swell. One-sided, so silence is the resting sea state and
+  // audio can only add height — never flatten it.
+  float heightScale = u_height * audioLift(u_bass, 0.45);
+
+  // Beats add a broad swell rather than a sharp displacement: a transient on
+  // geometry would read as a jolt, so it goes through the same amplitude term
+  // with a softened envelope.
+  heightScale *= 1.0 + beatHit(2.0) * 0.18;
+
+  vec3 normal;
+  float waveH = waveSurface(pos, t, windRot, heightScale, normal);
 
   vec2 mouseUV = vec2(u_mouse.x * aspect, u_mouse.y);
   vec2 fragUV = vec2(uv.x * aspect, uv.y);
   float splashDist = distance(fragUV, mouseUV);
   float splash = u_burst * 0.3 * sin(splashDist * 30.0 - u_time * 8.0) * exp(-splashDist * 5.0);
   waveH += splash;
-
-  vec3 normal = getNormal(pos, t);
 
   // Fresnel (Schlick)
   vec3 viewDir = normalize(vec3(0.0, 1.0, 0.5));
@@ -141,8 +237,14 @@ void main() {
   vec3 skyColor = mix(skyHorizon, skyZenith, skyT);
 
   // ── Water body: depth-tinted primary ────────────────────────
+  // Timbre shifts the water's temperature — bright material pulls toward the
+  // accent, dark toward the secondary. Colour tracks WHAT is playing rather
+  // than how loud it is, which is the difference between reactive and twitchy.
   vec3 deepWater = u_bgColor * 0.55;
-  vec3 waterBody = mix(deepWater, u_brandPrimary, clamp(waveH * 2.0 + 0.5, 0.0, 1.0));
+  vec3 surfaceTint = u_brandPrimary;
+  surfaceTint = audioTint(surfaceTint, u_brandAccent, max(u_centroid - 0.25, 0.0), 1.2);
+  surfaceTint = audioTint(surfaceTint, u_brandSecondary, max(0.25 - u_centroid, 0.0), 1.2);
+  vec3 waterBody = mix(deepWater, surfaceTint, clamp(waveH * 2.0 + 0.5, 0.0, 1.0));
 
   vec3 color = mix(waterBody, skyColor, fresnel * 0.45);
 
@@ -159,7 +261,10 @@ void main() {
   color += mix(vec3(1.0), u_brandAccent, 0.15) * spec * 4.0;
 
   // ── Foam with HDR whitecaps ─────────────────────────────────
-  float foamMask = smoothstep(0.15, 0.35, waveH) * u_foam;
+  // Treble lifts foam: high-frequency audio content and the fine spatial
+  // detail of whitecaps are a natural pairing, and foam is a light-side term
+  // so a transient here never moves geometry.
+  float foamMask = smoothstep(0.15, 0.35, waveH) * u_foam * audioLift(u_treble, 0.55);
   foamMask *= hash(pos * 30.0 + t * 2.0) * 0.5 + 0.5;
   color += mix(u_brandAccent, vec3(1.0), 0.4) * foamMask * 1.6;
 

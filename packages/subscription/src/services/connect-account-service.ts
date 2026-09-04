@@ -729,7 +729,12 @@ export class ConnectAccountService extends BaseService {
         .where(
           and(
             eq(organizationMemberships.userId, userId),
-            eq(organizationMemberships.role, 'owner')
+            eq(organizationMemberships.role, 'owner'),
+            // A removed owner keeps role='owner' with status='inactive'. The
+            // pin this method writes is deliberately never overwritten, so
+            // without this predicate a removed founder who onboards Connect
+            // would permanently capture the org's revenue slice.
+            eq(organizationMemberships.status, 'active')
           )
         );
 

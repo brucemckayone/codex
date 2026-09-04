@@ -34,7 +34,7 @@ In `procedure()` handlers, access via `ctx.services.settings` — `organizationI
 | `updateContact(input: UpdateContactInput)` | Update contact fields | Upserts |
 | `getFeatures()` | `signupsEnabled`, `purchasesEnabled` | Returns `FeatureSettingsResponse` |
 | `updateFeatures(input: UpdateFeaturesInput)` | Toggle features | Upserts |
-| `uploadLogo(orgId, file)` | Validate + upload logo to R2 | Returns updated branding URL |
+| `uploadLogo(validatedFile)` | Upload logo to R2 — MIME/size validation happens in the multipart handler first (`ValidatedLogoFile`); SVG sanitization happens inside | Returns `BrandingSettingsResponse` |
 
 ## Sub-Service Responsibilities
 

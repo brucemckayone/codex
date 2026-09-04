@@ -87,6 +87,8 @@ src/routes/
 │   │   ├── creators/          Creator list
 │   │   ├── library/           User's org library
 │   │   ├── pricing/
+│   │   ├── journeys/         Public journey sell pages (/journeys/[slug])
+│   │   ├── subscription/
 │   │   └── checkout/success/
 │   └── studio/                Creator studio (ssr=false — client SPA)
 │       ├── +layout.ts         export const ssr = false
@@ -94,11 +96,16 @@ src/routes/
 │       ├── +page              Dashboard
 │       ├── content/           Content list + new + edit/[id]
 │       ├── media/             Media library
+│       ├── journeys/          Journey builder (page-builder canvas)
 │       ├── analytics/
 │       ├── customers/
 │       ├── team/
 │       ├── billing/
 │       ├── monetisation/
+│       ├── payouts/
+│       ├── sales/
+│       ├── subscribers/
+│       ├── categories/
 │       ├── brand/             Unified brand editor — two-pane workspace (control
 │       │                      rail + live-preview iframe), admin/owner-gated
 │       └── settings/          General, Email Templates (Branding 301-redirects
@@ -144,13 +151,15 @@ Rerouting: `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/(space)/exp
 
 ### Collections
 
-Three collections in `src/lib/collections/`:
+Five collections in `src/lib/collections/` (library, progress, content, subscription, dismissals):
 
 | Collection | Storage | Key | Use case |
 |---|---|---|---|
 | `libraryCollection` | `localStorage` (`codex-library`) | `content.id` | User's purchased/free content — survives refresh |
 | `progressCollection` | `localStorage` (`codex-playback-progress`) | `contentId` | Playback position — survives tab close |
-| `contentCollection` | QueryClient (session) | `['content']` | Browsable catalogue — server-authoritative |
+| `getContentCollection(orgId)` | QueryClient (per-org) | `['content', orgId]` | Browsable catalogue — server-authoritative, org-scoped to prevent cross-org cache leakage |
+| `subscriptionCollection` | `localStorage` | `organizationId` | Per-org subscription state |
+| `dismissalCollection` | `localStorage` | caller key | Dismissed UI banners |
 
 All three are `undefined` on the server. Always guard with `browser` or use `useLiveQuery` with `ssrData`.
 
@@ -193,7 +202,7 @@ All three are `undefined` on the server. Always guard with `browser` or use `use
 `initProgressSync(userId)` is called in both `(platform)/+layout.svelte` and `_org/[slug]/+layout.svelte` (when `data.user?.id` exists). It manages:
 - 2-minute periodic flush to server
 - Sync on tab visibility change
-- `beforeunload` sendBeacon to `/api/progress-beacon`
+- `pagehide` sendBeacon to `/api/progress-beacon` (deliberately NOT `beforeunload` — registering any beforeunload listener disables bfcache)
 
 `forceSync()` is called in `beforeNavigate` to flush progress before server loads run.
 
@@ -213,7 +222,7 @@ Server KV ──versions──> +layout.server.ts ──data.versions──> $ef
          visibilitychange → invalidate('cache:versions') ──> re-run load
 ```
 
-**Platform layout** tracks `user:{id}:library`. **Org layout** tracks `org:{id}:config` and `org:{id}:content`. Both layouts call `initProgressSync` independently since each is a separate route tree.
+**Platform layout** tracks `user:{id}:library`. **Org layout** tracks `org:{id}:content` plus, when signed in, `user:{id}:library` and `user:{id}:subscription:{orgId}` — it no longer reads `org:{id}:config` (dead key, removed in Codex-kgrdp.6; the org worker bumps `cache:version:{slug}` instead). Both layouts call `initProgressSync` independently since each is a separate route tree.
 
 The org layout uses `invalidate('cache:org-versions')` (separate from platform's `'cache:versions'`) and has a 60-second cooldown to prevent hammering.
 
@@ -221,9 +230,9 @@ The org layout uses `invalidate('cache:org-versions')` (separate from platform's
 
 | Key | Who bumps it | Client action on stale |
 |---|---|---|
-| `collection:user:{id}:library` | ecom-api (purchase) | `invalidateCollection('library')` |
-| `org:{id}:config` | identity-api (branding save) | `invalidateCollection('content')` |
-| `collection:org:{id}:content` | content-api (publish/unpublish) | `invalidateCollection('content')` |
+| `user:{id}:library` | ecom-api (purchase) | `invalidateCollection('library')` |
+| `org:{id}:content` | content-api (publish/unpublish) | `invalidateCollection({ kind: 'content', orgId })` |
+| `user:{id}:subscription:{orgId}` | ecom-api (checkout/tier change/cancel) | `invalidateCollection('subscription')` |
 
 ### HTTP Cache Headers
 
@@ -369,7 +378,7 @@ const org = await api.org.getPublicInfo(slug);
 ```
 
 **Key behaviours:**
-- Resolves worker URLs via `getServiceUrl()` from `@codex/constants`
+- Resolves worker URLs via `buildServiceUrl()` from `@codex/urls` (imported in api.ts under the local alias `getServiceUrl`)
 - Forwards session cookie as both `CODEX_SESSION` and `better-auth.session_token`
 - **NEVER** encode cookie values — JWT tokens use URL-safe base64; encoding corrupts them
 - Unwraps procedure envelopes: `{ data: T }` → `T`, `{ items, pagination }` → as-is, 204 → `null`
@@ -381,7 +390,7 @@ const org = await api.org.getPublicInfo(slug);
 | Namespace | Worker | Key methods |
 |---|---|---|
 | `api.auth` | auth | `getSession()` |
-| `api.account` | identity | `getProfile()`, `updateProfile()`, `uploadAvatar()` |
+| `api.account` | identity | `getProfile()`, `updateProfile()`, `uploadAvatar()`, `getPublicProfile(username)` — anonymous creator profile; returns `null` on 404 only, rethrows anything else |
 | `api.content` | content | `list()`, `get()`, `create()`, `update()`, `publish()`, `getPublicContent()`, `getDiscoverContent()` |
 | `api.access` | content/access | `getStreamingUrl()`, `getUserLibrary()`, `saveProgress()` |
 | `api.org` | org | `getPublicInfo()`, `getPublicCreators()`, `getMyMembership()`, `getMembers()`, `follow()` |
@@ -392,6 +401,9 @@ const org = await api.org.getPublicInfo(slug);
 | `api.analytics` | admin | `getDashboardStats()`, `getRevenue()`, `getTopContent()` |
 | `api.admin` | admin | `getCustomers()`, `getActivity()`, `getCustomerDetail()`, `grantContentAccess()` |
 | `api.media` | content/media | `list()`, `create()`, `upload()`, `uploadComplete()`, `transcodingStatus()` |
+| `api.categories` | content | `list()`, `create()`, `update()`, `remove()`, `reorder()`, `uploadCover()` |
+| `api.courses` | ecom | `offer()`, `upsertSubscriptionPlan()`, `withdrawSubscriptionPlan()`, `setTierAccess()` |
+| `api.agreements` | ecom | `list()`, `listPending()` — owner↔creator revenue-share agreements |
 
 ### Remote Functions — `$lib/remote/*.remote.ts`
 
@@ -422,7 +434,7 @@ export const createContentForm = form(schema, async (input) => {
 });
 ```
 
-Available remote modules: `account`, `admin`, `auth`, `avatar-delete`, `avatar-upload`, `billing`, `branding`, `checkout`, `content`, `library`, `media`, `org`, `settings`, `subscription`.
+Available remote modules: `account`, `admin`, `agreements`, `auth`, `avatar-delete`, `avatar-upload`, `billing`, `branding`, `categories`, `checkout`, `content`, `journey-checkout`, `journey-insights`, `journeys`, `library`, `media`, `onboarding`, `org`, `sales`, `settings`, `subscription`.
 
 ---
 
@@ -533,7 +545,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 | Directory | Purpose |
 |---|---|
 | `ui/` | Shared primitives — Button, Card, Badge, Dialog, Input, Select, Toast, Tabs, etc. |
-| `layout/` | SidebarRail, Header, MobileNav (MobileBottomNav, MobileBottomSheet), StudioSidebar |
+| `layout/` | SidebarRail, MobileNav (MobileBottomNav, MobileBottomSheet), StudioSidebar (incl. StudioSwitcher) |
 | `brand-editor/` | Floating brand editor panel + level components |
 | `content/` | ContentCard, content viewers |
 | `VideoPlayer/` | HLS video player with cinema mode |
@@ -557,7 +569,8 @@ Components use Melt UI headless primitives. Always check `$lib/components/ui/ind
 | `colors.css` | `--color-*` | `--color-primary-500`, `--color-text`, `--color-surface-secondary` |
 | `spacing.css` | `--space-*` | `--space-1` (4px) … `--space-24` |
 | `typography.css` | `--font-*`, `--text-*` | `--font-sans`, `--text-sm`, `--font-medium` |
-| `borders.css` | `--border-*`, `--radius-*` | `--border-width`, `--border-default`, `--radius-md` |
+| `borders.css` | `--border-*` | `--border-width`, `--border-default` |
+| `radius.css` | `--radius-*` | `--radius-md` |
 | `shadows.css` | `--shadow-*` | `--shadow-sm`, `--shadow-md` |
 | `motion.css` | `--transition-*` | `--transition-colors`, `--transition-shadow` |
 | `z-index.css` | `--z-*` | `--z-sticky`, `--z-modal` |
@@ -580,10 +593,12 @@ padding: 12px;
 
 ## Auth on the Frontend
 
-`hooks.server.ts` runs three hooks in sequence:
-1. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
-2. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
-3. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
+`hooks.server.ts` runs five hooks in sequence:
+1. `junkHostHook` — terminates reserved junk hosts (`cdn*`, `preview`, `api`, …) with a cached 404 before any SvelteKit work
+2. `cdnAssetHook` — serves public CDN assets (`cdn-assets*`/`cdn-platform*`) from bound R2
+3. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
+4. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
+5. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
 
 Session validation fails gracefully — auth worker unavailable = treat as unauthenticated.
 
@@ -598,7 +613,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 **Cookie deletion** — always use `getCookieConfig()`:
 ```typescript
-import { getCookieConfig } from '@codex/constants';
+import { getCookieConfig } from '@codex/urls';
 const cookieConfig = getCookieConfig(platform?.env, request.headers.get('host') ?? undefined);
 cookies.delete(COOKIES.SESSION_NAME, { path: cookieConfig.path, domain: cookieConfig.domain });
 ```

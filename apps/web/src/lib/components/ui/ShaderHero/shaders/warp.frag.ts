@@ -15,6 +15,8 @@
  *
  * Domain-warp structure (fbm(p + fbm(p + fbm(p)))) unchanged.
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const WARP_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -29,13 +31,20 @@ uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_warpStr;
 uniform int u_detail;
-uniform float u_speed;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by speed. Replaces u_time * u_speed so motion advances with the
+ * music, and so a speed change cannot retroactively rescale accumulated phase.
+ */
+uniform float u_clock;
 uniform float u_lightAng;
 uniform float u_contrast;
 uniform float u_invert;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -87,7 +96,7 @@ vec3 aces(vec3 x) {
 }
 
 void main() {
-  float t = u_time * u_speed;
+  float t = u_clock;  // integrated musical clock, monotone by construction
 
   vec2 p = (2.0 * gl_FragCoord.xy - u_resolution) / u_resolution.y;
   p += (u_mouse - 0.5) * 1.5;
@@ -97,7 +106,12 @@ void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float mouseDist = distance(uv, u_mouse);
   float mouseWarp = smoothstep(0.4, 0.0, mouseDist) * 0.5;
-  float effectiveWarp = u_warpStr * (1.0 + mouseWarp);
+  // Bass deepens the domain warp — the marble veining stretches and folds.
+  // This is geometry, so it rides the SMOOTHED band and stays inside a +-25%
+  // budget; the mouse term is left at full strength since pointer-follow is
+  // the interaction the brief says to keep.
+  float effectiveWarp =
+    u_warpStr * (1.0 + mouseWarp) * audioLift(u_bass, 0.22);
 
   vec2 q, r;
   float f = func(p, localTime, effectiveWarp, q, r);
@@ -129,7 +143,10 @@ void main() {
 
   // Invert + contrast
   color = mix(color, 1.0 - color, u_invert);
-  color = 1.1 * color * color * u_contrast;
+  // Beats lift contrast briefly, which on a marble surface reads as the light
+  // hardening rather than as anything moving. Timbre tilts the palette.
+  color = 1.1 * color * color * u_contrast * (1.0 + beatHit(1.7) * 0.35);
+  color = audioTint(color, u_brandAccent, max(u_centroid - 0.25, 0.0), 0.9);
 
   // ── Bloom boost on brightest cores ──
   float warpLum = dot(color, vec3(0.299, 0.587, 0.114));

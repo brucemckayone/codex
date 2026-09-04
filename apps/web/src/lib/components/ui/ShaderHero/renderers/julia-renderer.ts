@@ -2,13 +2,32 @@
  * Julia renderer — Animated Julia set fractal with cosine palette.
  *
  * Single-pass: one program + fullscreen quad, no FBOs.
- * Mouse shifts the c parameter directly for fractal exploration, lerped
- * smoothly (0.04 rate). Click recentres c to the orbit path via burstStrength.
+ *
+ * ## The pacing clock
+ *
+ * The shader's `c` orbit used to be driven by `u_time * u_speed`, and the
+ * renderer added `amplitude * 0.15` to the speed and `bass * 0.05` to the zoom
+ * — raw, per-frame band values on a rate and on geometry, which reads as
+ * jitter rather than music.
+ *
+ * `u_clock` is now a monotone accumulator whose **rate** crossfades between
+ * wall-clock and the musical clock. Blending the rate rather than the value
+ * matters: `u_beatPhase` starts at zero when the analyser is created, so
+ * `mix(u_time * k, u_beatPhase, u_audioActive)` would step the clock by however
+ * far wall-time had run and snap the fractal to a different shape on the first
+ * beat. Rates cannot do that.
+ *
+ * Mouse shifts `c` directly for fractal exploration, damped
+ * frame-rate-independently. Click kicks `c` outward along its own radius.
  * Configurable: zoom, speed, iterations (int), radius, saturation.
- * Brand colors derive the cosine palette vectors.
  */
 
-import { computeImmersiveColours } from '../immersive-colours';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { JuliaConfig, ShaderConfig } from '../shader-config';
 import { JULIA_FRAG } from '../shaders/julia.frag';
@@ -30,13 +49,14 @@ const UNIFORM_NAMES = [
   'u_brandAccent',
   'u_bgColor',
   'u_zoom',
-  'u_speed',
   'u_iterations',
   'u_radius',
   'u_saturation',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type JuliaUniform = (typeof UNIFORM_NAMES)[number];
@@ -53,14 +73,35 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/**
+ * Mouse-follow time constant (seconds). Was `* 0.04` per *frame*, which
+ * converges twice as fast at 120Hz as at 60Hz; 0.04/frame at 60fps is a tau of
+ * about 0.4s.
+ */
+const MOUSE_TAU_SEC = 0.4;
+
+/**
+ * Clamp on the differentiated musical clock. `beatPhase` advances at 0.35..1.5
+ * per second by design; the clamp guards the single frame where the analyser
+ * first appears and the difference against a stale sample is large.
+ */
+const MAX_BEAT_RATE = 2.0;
+
 export function createJuliaRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<JuliaUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
 
-  // Internal lerped mouse state for smooth c exploration
+  // Internal damped mouse state for smooth c exploration
   let lerpedMouse = { x: 0.5, y: 0.5 };
-  const MOUSE_LERP = 0.04;
+
+  /** Monotone pacing clock — see the file header. */
+  let clock = 0;
+  /** Previous `beatPhase` sample, for differentiating the musical clock. */
+  let prevPhase = -1;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -70,8 +111,9 @@ export function createJuliaRenderer(): ShaderRenderer {
       uniforms = getUniforms(gl, program, UNIFORM_NAMES);
       quad = createQuad(gl);
 
-      // Reset lerped mouse to center
       lerpedMouse = { x: 0.5, y: 0.5 };
+      clock = 0;
+      prevPhase = -1;
 
       return true;
     },
@@ -88,43 +130,55 @@ export function createJuliaRenderer(): ShaderRenderer {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as JuliaConfig;
-      const amp = audio?.amplitude ?? 0;
-      const bass = audio?.bass ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
 
-      // Lerp mouse for smooth fractal exploration
+      // Pacing clock: blend the rate, never the value.
+      const restRate = cfg.speed ?? DEFAULTS.speed;
+      const beatRate =
+        prevPhase < 0
+          ? restRate
+          : Math.min(
+              MAX_BEAT_RATE,
+              Math.max(0, (a.beatPhase - prevPhase) / dt)
+            );
+      prevPhase = a.beatPhase;
+      clock += (restRate + (beatRate - restRate) * a.active) * dt;
+
+      // Frame-rate-independent mouse damping.
       const targetX = mouse.active ? mouse.x : 0.5;
       const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
+      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
+      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
       quad.bind(program);
 
-      // Time & resolution
       gl.uniform1f(uniforms.u_time, time);
       gl.uniform2f(uniforms.u_resolution, width, height);
       gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
+      gl.uniform1f(uniforms.u_clock, clock);
 
-      // Burst strength (click recentre)
+      // Burst strength (radial c kick + brightness pulse)
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Immersive colour cycling (shared utility)
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      // Brand colours left as the configured palette rather than routed
+      // through computeImmersiveColours(): the cosine-palette vectors are built
+      // from all four stops, so cycling them shifts pa/pb/pd together and the
+      // fractal's colour structure smears. Audio moves colour here via the
+      // u_centroid hue walk and the u_treble banding term instead.
+      const c = cfg.colors;
+      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
+      gl.uniform3fv(uniforms.u_bgColor, c.bg);
 
-      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
-      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
-
-      // Preset-specific config with defaults
-      gl.uniform1f(uniforms.u_zoom, (cfg.zoom ?? DEFAULTS.zoom) + bass * 0.05);
-      gl.uniform1f(
-        uniforms.u_speed,
-        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
-      );
+      // Zoom is the static configured value — the audio breath on it lives in
+      // the shader, gated on the slow u_energy envelope. It used to get raw
+      // per-frame `bass` here, which read as a shudder.
+      gl.uniform1f(uniforms.u_zoom, cfg.zoom ?? DEFAULTS.zoom);
       // CRITICAL: u_iterations is int — use uniform1i, NOT uniform1f
       gl.uniform1i(
         uniforms.u_iterations,
@@ -137,10 +191,15 @@ export function createJuliaRenderer(): ShaderRenderer {
       );
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      // Vignette reads as a frame around a hero but as a tunnel in fullscreen
+      // immersive mode, so it fades along the audio ramp rather than being
+      // switched off, which would pop on the first beat.
       gl.uniform1f(
         uniforms.u_vignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
+
+      uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -152,8 +211,9 @@ export function createJuliaRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
-      // Reset lerped mouse to center for smooth restart.
       lerpedMouse = { x: 0.5, y: 0.5 };
+      clock = 0;
+      prevPhase = -1;
     },
 
     destroy(gl: WebGL2RenderingContext): void {

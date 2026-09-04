@@ -7,7 +7,13 @@
  * Brand colors map height to a 3-segment gradient (bg → primary → secondary → accent).
  */
 
-import type { MouseState, ShaderRenderer } from '../renderer-types';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
+import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, TopoConfig } from '../shader-config';
 import { TOPO_FRAG } from '../shaders/topo.frag';
 import {
@@ -30,13 +36,14 @@ const UNIFORM_NAMES = [
   'u_bgColor',
   'u_lineCount',
   'u_lineWidth',
-  'u_speed',
+  'u_clock',
   'u_scale',
   'u_elevation',
   'u_octaves',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type TopoUniform = (typeof UNIFORM_NAMES)[number];
@@ -54,10 +61,28 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/** Pacing rate with no audio, in clock-units/sec — matches the old u_time * u_speed. */
+const IDLE_CLOCK_RATE = 1.0;
+
+/**
+ * Cap on the differentiated musical clock. The render loop pauses (hidden tab,
+ * preset switch) while the analyser clamps its own dt rather than freezing, so
+ * one frame after a long pause can show a large phase jump. Unclamped, that
+ * spikes the rate and produces exactly one visible lurch.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createTopoRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<TopoUniform, WebGLUniformLocation | null> | null = null;
   let quad: ReturnType<typeof createQuad> | null = null;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+  /** Integrated pacing clock. Monotone — see u_clock in the fragment shader. */
+  let clock = 0;
+  /** Previous beatPhase sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -76,11 +101,33 @@ export function createTopoRenderer(): ShaderRenderer {
       mouse: MouseState,
       config: ShaderConfig,
       width: number,
-      height: number
+      height: number,
+      audio?: AudioState
     ): void {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as TopoConfig;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
+
+      // Integrate the pacing clock by blending RATES, never positions.
+      // beatPhase starts at zero while u_time does not, so a positional
+      // crossfade sweeps the clock backwards the moment audio starts.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -110,7 +157,6 @@ export function createTopoRenderer(): ShaderRenderer {
         Math.round(cfg.lineCount ?? DEFAULTS.lineCount)
       );
       gl.uniform1f(uniforms.u_lineWidth, cfg.lineWidth ?? DEFAULTS.lineWidth);
-      gl.uniform1f(uniforms.u_speed, cfg.speed ?? DEFAULTS.speed);
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
       gl.uniform1f(uniforms.u_elevation, cfg.elevation ?? DEFAULTS.elevation);
       gl.uniform1i(
@@ -122,6 +168,9 @@ export function createTopoRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_vignette, cfg.vignette ?? DEFAULTS.vignette);
 
       // Draw to screen (no FBO)
+      gl.uniform1f(uniforms.u_clock, clock);
+      uploadAudioUniforms(gl, uniforms, a);
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       drawQuad(gl);
     },
@@ -131,6 +180,10 @@ export function createTopoRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
+      // The integrated clock is state — rewind so reset() starts fresh
+      // rather than resuming motion mid-phase.
+      clock = 0;
+      prevBeatPhase = -1;
       // No simulation state to reset for single-pass presets.
     },
 

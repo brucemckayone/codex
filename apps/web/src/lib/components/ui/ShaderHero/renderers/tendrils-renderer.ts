@@ -1,14 +1,24 @@
 /**
  * Tendrils (Curl Noise Tendrils) renderer — single-pass, no FBOs.
  *
- * Curl noise advected UV with density accumulation along advected paths.
- * Divergence-free flow creates smooth, non-intersecting tendril shapes.
- * Internal lerped mouse state (MOUSE_LERP = 0.04) for smooth vortex response.
- * u_steps is an int uniform — uses gl.uniform1i().
- * Click creates a Gaussian density flash at cursor.
+ * Curl-noise advected UV with density accumulation along the advected path.
+ * The divergence-free flow gives smooth, non-intersecting filaments; the
+ * pointer adds a vortex, and a click flashes density at the cursor.
+ *
+ * Audio integration follows the shared substrate documented in
+ * `../audio-uniforms`: one `createAudioFade()` and one `createDeltaClock()`
+ * per renderer instance, resolved once per frame, uploaded with
+ * `uploadAudioUniforms()`. No new config keys — audio is runtime state.
+ *
+ * `u_steps` is an int uniform and uses `gl.uniform1i()`.
  */
 
-import { computeImmersiveColours } from '../immersive-colours';
+import {
+  AUDIO_UNIFORM_NAMES,
+  createAudioFade,
+  createDeltaClock,
+  uploadAudioUniforms,
+} from '../audio-uniforms';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
 import type { ShaderConfig, TendrilsConfig } from '../shader-config';
 import { TENDRILS_FRAG } from '../shaders/tendrils.frag';
@@ -30,13 +40,14 @@ const UNIFORM_NAMES = [
   'u_brandAccent',
   'u_bgColor',
   'u_scale',
-  'u_speed',
   'u_steps',
   'u_curl',
   'u_fade',
   'u_intensity',
   'u_grain',
   'u_vignette',
+  'u_clock',
+  ...AUDIO_UNIFORM_NAMES,
 ] as const;
 
 type TendrilsUniform = (typeof UNIFORM_NAMES)[number];
@@ -52,15 +63,51 @@ const DEFAULTS = {
   vignette: 0.2,
 } as const;
 
+/**
+ * Pointer-follow time constant (seconds) for the vortex centre.
+ *
+ * This was `lerped += (target - lerped) * 0.04` applied per *frame*, so the
+ * vortex chased the pointer twice as fast on a 120Hz display as on 60Hz.
+ * 0.04/frame at 60fps is a tau of about 0.4s.
+ */
+const MOUSE_TAU_SEC = 0.4;
+
+/**
+ * Idle pacing rate, in clock-units per second.
+ *
+ * 1.0 so that, with the speed setting applied to the integration rate, the
+ * clock equals `u_time * speed` at idle and the silent look is unchanged from
+ * before this integration existed.
+ */
+const IDLE_CLOCK_RATE = 1.0;
+
+/**
+ * Upper bound on the differentiated musical clock, in clock-units per second.
+ *
+ * `beatPhase` advances at 0.35..1.5/s in normal operation, but the render loop
+ * pauses (hidden tab, preset switch, reduced motion) while the analyser clamps
+ * its own dt rather than freezing, so one frame after a long pause can show a
+ * large phase jump. Differentiating that unclamped spikes the rate and snaps
+ * the flow exactly once.
+ */
+const MAX_CLOCK_RATE = 3.0;
+
 export function createTendrilsRenderer(): ShaderRenderer {
   let program: WebGLProgram | null = null;
   let uniforms: Record<TendrilsUniform, WebGLUniformLocation | null> | null =
     null;
   let quad: ReturnType<typeof createQuad> | null = null;
 
-  // Internal lerped mouse state for smooth vortex response
+  // Internal damped pointer state for a smooth vortex.
   let lerpedMouse = { x: 0.5, y: 0.5 };
-  const MOUSE_LERP = 0.04;
+
+  const audioFade = createAudioFade();
+  const deltaClock = createDeltaClock();
+
+  /** Integrated pacing clock. Monotone — see u_clock in tendrils.frag.ts. */
+  let clock = 0;
+  /** Previous `beatPhase` sample, for differentiating the musical clock. */
+  let prevBeatPhase = -1;
 
   return {
     init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
@@ -86,14 +133,36 @@ export function createTendrilsRenderer(): ShaderRenderer {
       if (!program || !uniforms || !quad) return;
 
       const cfg = config as TendrilsConfig;
-      const amp = audio?.amplitude ?? 0;
-      const bass = audio?.bass ?? 0;
+      const dt = deltaClock(time);
+      const a = audioFade.update(audio, dt);
 
-      // Lerp mouse for smooth vortex
+      // Frame-rate-independent pointer damping.
       const targetX = mouse.active ? mouse.x : 0.5;
       const targetY = mouse.active ? mouse.y : 0.5;
-      lerpedMouse.x += (targetX - lerpedMouse.x) * MOUSE_LERP;
-      lerpedMouse.y += (targetY - lerpedMouse.y) * MOUSE_LERP;
+      const k = 1 - Math.exp(-dt / MOUSE_TAU_SEC);
+      lerpedMouse.x += (targetX - lerpedMouse.x) * k;
+      lerpedMouse.y += (targetY - lerpedMouse.y) * k;
+
+      // Integrate the pacing clock by blending RATES, never positions. See the
+      // u_clock comment in tendrils.frag.ts: beatPhase starts at 0 while
+      // u_time does not, so crossfading the positions sweeps the clock
+      // backwards the moment playback starts and the flow reverses.
+      let musicalRate = IDLE_CLOCK_RATE;
+      if (!a.silent) {
+        // The first audio frame has no previous sample to difference against.
+        musicalRate =
+          prevBeatPhase < 0
+            ? IDLE_CLOCK_RATE
+            : Math.min(
+                MAX_CLOCK_RATE,
+                Math.max(0, (a.beatPhase - prevBeatPhase) / dt)
+              );
+        prevBeatPhase = a.beatPhase;
+      } else {
+        prevBeatPhase = -1;
+      }
+      const rate = IDLE_CLOCK_RATE + (musicalRate - IDLE_CLOCK_RATE) * a.active;
+      clock += dt * rate * (cfg.speed ?? DEFAULTS.speed);
 
       gl.viewport(0, 0, width, height);
       gl.useProgram(program);
@@ -104,32 +173,36 @@ export function createTendrilsRenderer(): ShaderRenderer {
       gl.uniform2f(uniforms.u_mouse, lerpedMouse.x, lerpedMouse.y);
       gl.uniform1f(uniforms.u_burstStrength, mouse.burstStrength);
 
-      // Immersive colour cycling (shared utility)
-      const colours = audio?.active
-        ? computeImmersiveColours(time, cfg.colors, amp)
-        : cfg.colors;
+      // Brand colours as configured rather than through
+      // computeImmersiveColours(): the five-stop density ramp is built from
+      // these stops, so cycling them fights the density cue. Audio moves
+      // colour through u_centroid, which slides the ramp position instead.
+      const c = cfg.colors;
+      gl.uniform3fv(uniforms.u_brandPrimary, c.primary);
+      gl.uniform3fv(uniforms.u_brandSecondary, c.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, c.accent);
+      gl.uniform3fv(uniforms.u_bgColor, c.bg);
 
-      gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
-      gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
-      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
-      gl.uniform3fv(uniforms.u_bgColor, colours.bg);
-
-      // Preset-specific config with defaults
       gl.uniform1f(uniforms.u_scale, cfg.scale ?? DEFAULTS.scale);
-      gl.uniform1f(
-        uniforms.u_speed,
-        (cfg.speed ?? DEFAULTS.speed) + amp * 0.15
-      );
+      // No u_speed uniform: speed scales the CPU-integrated clock instead, so
+      // the shader never sees it. Uploading a stripped uniform would be a
+      // silent no-op and would imply the shader still reads it.
       // CRITICAL: u_steps is int — use uniform1i, NOT uniform1f
       gl.uniform1i(uniforms.u_steps, Math.round(cfg.steps ?? DEFAULTS.steps));
-      gl.uniform1f(uniforms.u_curl, (cfg.curl ?? DEFAULTS.curl) + bass * 0.1);
+      gl.uniform1f(uniforms.u_curl, cfg.curl ?? DEFAULTS.curl);
       gl.uniform1f(uniforms.u_fade, cfg.fade ?? DEFAULTS.fade);
       gl.uniform1f(uniforms.u_intensity, cfg.intensity ?? DEFAULTS.intensity);
       gl.uniform1f(uniforms.u_grain, cfg.grain ?? DEFAULTS.grain);
+      gl.uniform1f(uniforms.u_clock, clock);
+      // Vignette reads as a frame around a hero but as a tunnel in fullscreen
+      // immersive mode, so it fades with the audio ramp. Switching it off on
+      // `audio.active` (the old behaviour) popped on the first beat.
       gl.uniform1f(
         uniforms.u_vignette,
-        audio?.active ? 0.0 : (cfg.vignette ?? DEFAULTS.vignette)
+        (cfg.vignette ?? DEFAULTS.vignette) * (1 - a.active)
       );
+
+      uploadAudioUniforms(gl, uniforms, a);
 
       // Draw to screen (no FBO)
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -141,8 +214,11 @@ export function createTendrilsRenderer(): ShaderRenderer {
     },
 
     reset(_gl: WebGL2RenderingContext): void {
-      // No simulation state to reset for single-pass presets.
       lerpedMouse = { x: 0.5, y: 0.5 };
+      // Rewind the integrated clock: reset() means "start fresh", and leaving
+      // it running would resume the flow mid-advection.
+      clock = 0;
+      prevBeatPhase = -1;
     },
 
     destroy(gl: WebGL2RenderingContext): void {

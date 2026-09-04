@@ -8,8 +8,8 @@ Security middleware and utilities for all Cloudflare Workers.
 |---|---|---|
 | `securityHeaders(options?)` | Middleware | CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
 | `CSP_PRESETS` | Constant | `{ stripe, api }` — CSP preset configurations |
-| `rateLimit(options)` | Middleware | KV-backed rate limiting |
-| `RATE_LIMIT_PRESETS` | Constant | `{ auth, strict, streaming, api, webhook, web }` |
+| `rateLimit(options)` | Middleware | Subject-keyed rate limiting (native binding + Durable Object) |
+| `RATE_LIMIT_PRESETS` | Constant | `{ auth, strict, streaming, api, web }` |
 | `requireAuth(options)` | Middleware | Fail-closed session validation — 401 if no valid session |
 | `optionalAuth(options)` | Middleware | Fail-open session validation — continues even if no session |
 | `workerAuth(options)` | Middleware | HMAC-SHA256 worker-to-worker validation on receiving side |
@@ -21,7 +21,7 @@ Security middleware and utilities for all Cloudflare Workers.
 
 ## Session Auth
 
-Two-tier validation: KV cache (5-min TTL) → database fallback (authoritative).
+Two-tier validation: KV cache (TTL = the session's remaining lifetime, written only by BetterAuth's `createKVSecondaryStorage`; this middleware is a read-only consumer) → database fallback (authoritative).
 
 ```ts
 // Preferred: via procedure policy (auto-validates, types ctx.user)
@@ -36,7 +36,7 @@ app.use('/api/*', requireAuth({ kv: env.AUTH_SESSION_KV }));
 
 ## Rate Limiting
 
-KV-backed, per-IP per-route. Key format: `rl:{ip}:{route}`. Falls back to in-memory if no KV (dev only).
+Counted per-subject on a native Workers Rate Limiting binding (strict/streaming/api/web) or the SQLite `RateLimitDO` (auth). Bucket keys are `rl:<preset>:<kind>:<sha256>` — never raw IPs or credentials. An unavailable backend fails OPEN, loudly (see below); there is no in-memory fallback.
 
 | Preset | Limit | Window | Store | Binding |
 |---|---|---|---|---|
@@ -120,7 +120,7 @@ app.use('/internal/*', workerAuth({ secret: env.WORKER_SHARED_SECRET }));
 
 // Calling worker — signs outgoing request
 const response = await workerFetch(
-  getServiceUrl('ecom', env),
+  buildServiceUrl('ecom', env), // from '@codex/urls'
   { method: 'POST', body: JSON.stringify(payload) },
   env.WORKER_SHARED_SECRET
 );
@@ -137,6 +137,7 @@ Applied automatically via `createWorker({ enableSecurityHeaders: true })`. Heade
 | `X-Frame-Options` | `DENY` |
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `geolocation=(), microphone=(), camera=(), payment=()` |
 | `Strict-Transport-Security` | Production only: `max-age=31536000; includeSubDomains; preload` |
 
 ## Strict Rules

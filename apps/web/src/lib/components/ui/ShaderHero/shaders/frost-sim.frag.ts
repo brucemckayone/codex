@@ -10,7 +10,7 @@
  * Uniforms:
  *   uState       — ping-pong sim texture (R=frozen, G=diffusion, B=age)
  *   uTexel       — 1.0 / simResolution
- *   uGrowth      — growth speed (threshold bias, 0.3-1.0)
+ *   growthNow()      — growth speed (threshold bias, 0.3-1.0)
  *   uBranch      — branching tendency (anisotropy strength, 0.1-0.5)
  *   uSymmetry    — symmetry fold count (int, 4-8)
  *   uMelt        — mouse melt radius (UV units * 0.1)
@@ -20,6 +20,8 @@
  *   uMouseActive — 1.0 if mouse over canvas
  *   uSeedPos     — new seed crystal position (-10 if none)
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const FROST_SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -36,6 +38,23 @@ uniform float uDt;
 uniform vec2 uMouse;
 uniform float uMouseActive;
 uniform vec2 uSeedPos;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
+
+/**
+ * Audio-scaled crystal growth rate.
+ *
+ * A function so every reference sees one value — frost growth appears in
+ * several places in the update and a divergence between them would make the
+ * front advance at one rate while the branching probability assumed another.
+ *
+ * Driven by the slow envelope: crystal growth is a front propagating through
+ * a field, and a per-note change would make the front stutter rather than
+ * accelerate.
+ */
+float growthNow() {
+  return uGrowth * audioLift(u_energy, 0.35);
+}
 
 // -- Hash noise --
 float hash21(vec2 p) {
@@ -149,7 +168,7 @@ void main() {
     float aBias = anisotropyBias(frozenDir, uSymmetry);
 
     // Threshold: lower = easier to freeze = faster growth
-    float threshold = 1.0 - uGrowth * 0.7;
+    float threshold = 1.0 - growthNow() * 0.7;
 
     // Branching modulates anisotropy's effect on threshold
     float modulated = mix(1.0, aBias, uBranch);

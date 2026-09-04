@@ -12,6 +12,8 @@
  *  - Trail brightness boosted + palette-aware tint (not a flat 0.3 mul)
  *  - Luminance-aware filmic grain — more shadow texture, clean cores
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const GLOW_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -34,6 +36,14 @@ uniform int u_depth;
 uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
+/**
+ * Monotone pacing clock, integrated on the CPU by the renderer and already
+ * scaled by u_drift. Replaces wall-clock time so the colony drifts with the
+ * music and cannot run backwards.
+ */
+uniform float u_clock;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -83,7 +93,9 @@ void main() {
     vec2 mouseOffset = (u_mouse - 0.5) * parallaxStr;
 
     vec2 layerUv = uv * layerScale + mouseOffset;
-    float driftTime = u_time * u_drift * (0.8 + layerFrac * 0.4);
+    // Drift paces on the musical clock so the plankton field moves with the
+    // track. Per-layer rate spread preserved — it is the parallax cue.
+    float driftTime = u_clock * (0.8 + layerFrac * 0.4);
 
     vec2 scaledUv = (layerUv * 0.5 + 0.5) * gridSize;
     vec2 cellId = floor(scaledUv);
@@ -106,7 +118,12 @@ void main() {
         float dist = length(layerUv - orgUv);
 
         float pulsePhase = hash(cellSeed + vec2(42.0)) * 6.28;
-        float pulseFactor = sin(u_time * u_pulse + pulsePhase) * 0.3 + 0.7;
+        // Each organism's pulse phase is its own, but the DEPTH of the pulse
+        // is shared and driven by bass — so the whole colony breathes together
+        // while still twinkling individually.
+        float pulseDepth = 0.3 * audioLift(u_bass, 0.6);
+        float pulseFactor =
+          sin(u_clock * u_pulse + pulsePhase) * pulseDepth + (1.0 - pulseDepth);
         float radius = 0.04 * u_size * pulseFactor * layerScale;
 
         // Core: sharp exponential falloff

@@ -19,6 +19,7 @@ vi.mock('@codex/database', () => ({
   schema: {
     organizations: {
       slug: 'organizations-slug-col-sentinel',
+      deletedAt: 'organizations-deletedAt-col-sentinel',
     },
     organizationMemberships: {
       organizationId: 'memberships-org-col-sentinel',
@@ -31,6 +32,7 @@ vi.mock('@codex/database', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, value: unknown) => ({ eq: [col, value] }),
   and: (...parts: unknown[]) => ({ and: parts }),
+  isNull: (col: unknown) => ({ isNull: [col] }),
 }));
 
 // Imported after the mock so org-helpers resolves the stub.
@@ -248,6 +250,30 @@ describe('extractOrganizationFromSubdomain — positive KV cache (defect 1)', ()
       )
     ).toBe(ORG_ID);
     expect(findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters soft-deleted orgs out of the slug lookup', async () => {
+    // A soft-deleted org keeps its slug row, and this resolution is pinned
+    // into KV for 24h — without the deletedAt predicate a slug reused by a
+    // NEW tenant could resolve every org-scoped request to the deleted
+    // tenant's id. Assert the query actually carries the predicate.
+    expect(
+      await extractOrganizationFromSubdomain(
+        'acme.revelations.studio',
+        envWith(undefined),
+        undefined,
+        sink
+      )
+    ).toBe(ORG_ID);
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    const where = findFirst.mock.calls[0][0].where;
+    expect(where).toEqual({
+      and: [
+        { eq: ['organizations-slug-col-sentinel', 'acme'] },
+        { isNull: ['organizations-deletedAt-col-sentinel'] },
+      ],
+    });
   });
 });
 

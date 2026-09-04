@@ -35,7 +35,7 @@ RunPod credentials are required. Storage credentials (R2, B2) are stored in RunP
 
 | Method | Signature | Notes |
 |---|---|---|
-| `triggerJob` | `(mediaId: string, creatorId: string, priority?: number)` | Validates media is in `uploaded` state + has `r2Key`. Sets status → `transcoding`, calls RunPod `/run`. If RunPod fails, reverts status → `uploaded`. Returns void (async fire-and-forget). |
+| `triggerJob` | `(mediaId: string, creatorId: string, priority?: number)` | Validates media is in `uploaded` state + has `r2Key`. Sets status → `transcoding`, awaits RunPod `/run` inline, records the job id; on failure reverts status → `uploaded` and throws `RunPodApiError`. Routes dispatch via `triggerJobInternal` (returns `{ dispatchPromise }` for `ctx.background`) — `triggerJob` itself is only used by `retryTranscoding`. |
 | `handleWebhook` | `(payload: RunPodWebhookPayload)` | Processes RunPod completion callback. On success: sets HLS keys, thumbnail key, waveform key, status → `ready`. On failure: status → `failed`, increments retry count. |
 | `handleProgressWebhook` | `(payload: RunPodProgressWebhookPayload)` | Handles progress/step updates during transcoding. |
 | `getTranscodingStatus` | `(input: GetTranscodingStatusInput)` | Returns `TranscodingStatusResponse` with status and progress info. |
@@ -84,7 +84,7 @@ See **[infrastructure/runpod/LOCAL_DEV.md](../../infrastructure/runpod/LOCAL_DEV
 
 | Function | R2 Key Pattern |
 |---|---|
-| `getOriginalKey(creatorId, mediaId)` | `{creatorId}/originals/{mediaId}/video.mp4` |
+| `getOriginalKey(creatorId, mediaId, filename)` | `{creatorId}/originals/{mediaId}/{filename}` |
 | `getHlsMasterKey(creatorId, mediaId)` | `{creatorId}/hls/{mediaId}/master.m3u8` |
 | `getHlsPreviewKey(creatorId, mediaId)` | `{creatorId}/hls/{mediaId}/preview/preview.m3u8` |
 | `getHlsVariantKey(creatorId, mediaId, variant)` | `{creatorId}/hls/{mediaId}/{variant}.m3u8` |
@@ -93,7 +93,7 @@ See **[infrastructure/runpod/LOCAL_DEV.md](../../infrastructure/runpod/LOCAL_DEV
 | `getWaveformKey(creatorId, mediaId)` | `{creatorId}/waveforms/{mediaId}/waveform.json` |
 | `getWaveformImageKey(creatorId, mediaId)` | `{creatorId}/waveforms/{mediaId}/waveform.png` |
 | `getMediaThumbnailKey(creatorId, mediaId, size)` | `{creatorId}/media-thumbnails/{mediaId}/{size}.webp` |
-| `getOrgLogoKey(orgId, variant)` | In branding folder |
+| `getOrgLogoKey(orgId, size)` | `{orgId}/branding/logo/{size}.webp` (size: sm/md/lg/original) |
 | `getUserAvatarKey(userId, size)` | Avatar path |
 | `getMezzanineKey(creatorId, mediaId)` | B2 archival path (mezzanine) |
 | `getTranscodingOutputKeys(creatorId, mediaId)` | All output keys for a media item |

@@ -85,4 +85,30 @@ describe('sendEmailToWorker', () => {
     const result = sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
     expect(result).toBeUndefined();
   });
+
+  it('never logs the recipient address on transport failure (PII)', async () => {
+    // console.* bypasses the ObservabilityClient redaction pipeline, so the
+    // transport-failure log used to carry `to: params.to` — the recipient's
+    // email address — into CF Workers logs on every failed send. It must
+    // correlate by userId instead.
+    vi.mocked(workerFetch).mockRejectedValueOnce(new Error('boom'));
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      sendEmailToWorker(mockEnv, mockExecutionCtx, {
+        ...validParams,
+        userId: 'user_abc123',
+      });
+      await mockWaitUntil.mock.calls[0][0];
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const payload = JSON.stringify(errorSpy.mock.calls[0]);
+      expect(payload).not.toContain('user@example.com');
+      expect(payload).toContain('user_abc123');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

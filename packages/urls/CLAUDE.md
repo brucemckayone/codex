@@ -18,7 +18,7 @@ A 5-row table keyed by `EnvName`. Each row provides:
 - `apiUrl(service)` — worker URL for a given service
 - `orgHost(slug)` — hostname (no scheme, no path) for a given org slug
 
-Adding a new env = one new row. Adding a new service = one new entry in `SERVICE_SUBDOMAIN`.
+Adding a new env = one new row. Adding a new service = a `ServiceName` member plus one entry each in `SERVICE_SUBDOMAIN` and `SERVICE_PORT_MAP` (ports come from `@codex/constants` `SERVICE_PORTS`).
 
 ## Public API
 
@@ -43,16 +43,17 @@ parseHost('bruce-studio.192.168.1.10.nip.io:3000');
 
 `env: null` is returned for unknown hosts (custom domains, IPs, etc.) — workers should pass env explicitly when building URLs from non-routable contexts.
 
-### URL building (WP-3 / WP-4 stubs)
+### URL building
 
 ```ts
 import {
-  buildServiceUrl,         // WP-3 stub — throws until WP-3 lands
-  buildOrgUrl,             // WP-4 stub
-  buildOrgUrlFromEnv,      // WP-4 stub
-  buildPlatformUrl,        // WP-4 stub
-  buildCreatorsUrl,        // WP-4 stub
-  buildContentUrl,         // WP-4 stub
+  buildServiceUrl,   // implemented (WP-3 landed, #249) — replaces constants' getServiceUrl
+  buildOrgUrl,
+  buildOrgUrlFromEnv,
+  buildPlatformUrl,
+  buildCreatorsUrl,
+  buildContentUrl,
+  buildJourneyUrl,   // journey/portal URL surfaces (JourneyUrlTarget, JourneySurface)
 } from '@codex/urls';
 ```
 
@@ -63,14 +64,17 @@ import { corsOriginsFor } from '@codex/urls';
 
 corsOriginsFor('development');
 // → ['http://localhost:42069', 'http://lvh.me:3000',
-//    'http://lvh.me:5173', 'http://*.nip.io']
+//    'http://lvh.me:5173', 'http://*.lvh.me:3000',
+//    'http://*.lvh.me:5173', 'http://*.nip.io']
 ```
 
-### Cookie domain (WP-5a stub)
+### Cookie domain
 
 ```ts
 import { cookieDomainFor } from '@codex/urls';
-// Throws "not implemented (WP-5a)" until WP-5a lands.
+// Implemented (WP-5a landed, #255): host-driven (primary) or env-driven cookie
+// Domain. localhost/127.x → undefined; lvh.me → .lvh.me; revelations.studio →
+// .revelations.studio (or COOKIE_DOMAIN override).
 ```
 
 ## ENV_HOSTS table
@@ -101,15 +105,17 @@ import { cookieDomainFor } from '@codex/urls';
 
 ## Migration status (Codex-rscgk epic)
 
-- ✅ **WP-1** — package foundation + `ENV_HOSTS` + `parseHost` + `corsOriginsFor` + DEV_REMOTE rename
-- ⏳ **WP-2** — hostname parsers in `apps/web` become wrappers (Codex-qyjds)
-- ⏳ **WP-3** — `buildServiceUrl` replaces `getServiceUrl` + `DEFAULT_URLS` (Codex-4xbuw)
-- ⏳ **WP-4** — URL builders + `buildOrgUrlFromEnv` (Codex-fiveo)
-- ⏳ **WP-5a** — `cookieDomainFor` unification + byte-equal fixture (Codex-ora41)
-- ⏳ **WP-5b** — BetterAuth cross-subdomain integration test (Codex-7okxb)
-- ⏳ **WP-6** — `DevDomainService` rewire (Codex-0hxw4)
-- ⏳ **WP-7** — wrangler URL env-var cleanup (Codex-10hr1)
-- ⏳ **WP-8** — sitemap structural test (Codex-6wvam)
-- ⏳ **WP-9** — dev-deploy smoke gate in CI (Codex-ikum9)
+The package is landed and consumed by 33 files across `packages/`, `workers/`
+and `apps/web`. Every export documented above is implemented — `buildServiceUrl`
+(WP-3, #249) replaced `@codex/constants`' `getServiceUrl`, `apps/web`'s
+hostname parsers are wrappers over `parseHost` (WP-2, #250), and
+`cookieDomainFor` is the single cookie-domain source (WP-5a).
 
-Plan: `~/.claude/plans/typed-honking-canyon.md`. Investigation: `docs/routing-centralization.md`.
+**One work package is still open:**
+
+- ⏳ **WP-7** — wrangler URL env-var cleanup (Codex-10hr1). 8 of 9 worker
+  configs still declare `WEB_APP_URL` / `API_URL` vars (e.g.
+  `workers/auth/wrangler.jsonc:71`) that `buildServiceUrl` now derives from
+  `SERVICE_PORTS` + `ENV_HOSTS`. Removing them is the last step.
+
+Investigation: `docs/routing-centralization.md`.

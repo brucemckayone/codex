@@ -14,13 +14,15 @@
  * Audio-reactive layer (gated by u_audioActive — wanderer fade 0..1):
  *  - u_wanderer (UV 0..1) shifts the raymarch ray origin laterally (focal
  *    point drift) AND seeds a soft radial glow in the final composition.
- *  - u_bassSmooth warps ray origin on a slow sin/cos envelope → sub-sonic
+ *  - u_bass warps ray origin on a slow sin/cos envelope → sub-sonic
  *    "pressure through the ether" breath.
- *  - u_midsSmooth sparkles on the in-loop highlight term.
- *  - u_trebleSmooth amplifies bloom-boost magnitude.
- *  - u_amplitudeSmooth lifts saturation pump + ambient brightness.
+ *  - u_mids sparkles on the in-loop highlight term.
+ *  - u_treble amplifies bloom-boost magnitude.
+ *  - u_level lifts saturation pump + ambient brightness.
  *  - u_beatPulse adds a short-lived overall brightness splash.
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const ETHER_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -45,12 +47,8 @@ uniform float u_aberration;
 
 // Audio-reactive uniforms — all gated by u_audioActive (wanderer fade).
 uniform vec2 u_wanderer;          // UV 0..1, Lissajous focal point
-uniform float u_bassSmooth;       // 0..1 smoothed bass envelope
-uniform float u_midsSmooth;       // 0..1 smoothed mids envelope
-uniform float u_trebleSmooth;     // 0..1 smoothed treble envelope
-uniform float u_amplitudeSmooth;  // 0..1 smoothed amplitude envelope
-uniform float u_beatPulse;        // 0..1 transient detector (beat onsets)
-uniform float u_audioActive;      // 0..1 wanderer fade — gate for all audio boosts
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // -- 2D rotation --
 mat2 m(float a) {
@@ -164,10 +162,10 @@ void main() {
   vec3 roOffset = vec3(wandererCentred * 1.8 * u_audioActive, 0.0);
 
   // Bass breath: small sub-sonic warp magnitude fed into map().
-  float bassBreath = 0.04 * u_bassSmooth * u_audioActive;
+  float bassBreath = 0.04 * u_bass * u_audioActive;
 
   // Mids sparkle amount fed into the highlight term.
-  float midsSparkle = u_midsSmooth * u_audioActive;
+  float midsSparkle = u_mids * u_audioActive;
 
   // -- Raymarch (with optional true per-channel chromatic aberration) --
   vec3 cl;
@@ -196,7 +194,7 @@ void main() {
   // Operates on HDR values so the lift lands on vivid source, not squished
   // SDR output. Base 0.50, amp-scaled up to +0.75 (matches ripple).
   float lumPre = dot(cl, vec3(0.299, 0.587, 0.114));
-  float sat = 1.0 + u_audioActive * (0.50 + 0.25 * u_amplitudeSmooth);
+  float sat = 1.0 + u_audioActive * (0.50 + 0.25 * u_level);
   cl = mix(vec3(lumPre), cl, sat);
 
   // -- ACES tone map (replaces the old brutal 0.7 clip) --
@@ -208,7 +206,7 @@ void main() {
   // high-frequency content.
   float lum = dot(etherColor, vec3(0.299, 0.587, 0.114));
   vec3 bloomTint = mix(u_brandSecondary, u_brandAccent, 0.5);
-  float bloomGain = 0.35 + 0.35 * u_trebleSmooth * u_audioActive;
+  float bloomGain = 0.35 + 0.35 * u_treble * u_audioActive;
   etherColor += pow(lum, 3.0) * bloomTint * bloomGain;
 
   // -- Background: subtle primary-tinted radial gradient instead of flat bg --
@@ -223,7 +221,7 @@ void main() {
   // -- Intensity blend --
   // Amplitude lifts overall intensity slightly during playback so loud
   // passages feel brighter without blowing out quiet ones.
-  float intensityScale = 1.0 + 0.25 * u_amplitudeSmooth * u_audioActive;
+  float intensityScale = 1.0 + 0.25 * u_level * u_audioActive;
   vec3 color = mix(bgGrad, etherColor, u_intensity * intensityScale);
 
   // -- Beat-pulse splash: short-lived overall brightness flash on onsets.

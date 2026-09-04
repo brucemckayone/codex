@@ -19,6 +19,8 @@
  *   uGlow           — growth front glow intensity
  *   uTime           — elapsed time (for grain animation)
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const FROST_DISPLAY_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -27,6 +29,8 @@ out vec4 fragColor;
 uniform sampler2D uState;
 uniform vec3 uColorPrimary, uColorSecondary, uColorAccent, uBgColor;
 uniform float uIntensity, uGrain, uVignette, uGlow, uTime;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 

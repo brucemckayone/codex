@@ -46,9 +46,9 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
 ## R2 Key Format
 
 R2 key builders come from `@codex/transcoding`:
-- `getContentThumbnailKey(creatorId, contentId, size)` → `{creatorId}/thumbnails/{contentId}/{size}.webp`
-- `getUserAvatarKey(userId, size)` → `{userId}/avatar/{size}.webp`
-- `getOrgLogoKey(orgId, ext)` → `logos/{orgId}/logo.{ext}`
+- `getContentThumbnailKey(creatorId, contentId, size)` → `{creatorId}/content-thumbnails/{contentId}/{size}.webp`
+- `getUserAvatarKey(userId, size)` → `avatars/{userId}/{size}.webp`
+- `getOrgLogoKey(orgId, size)` → `{orgId}/branding/logo/{size}.webp` (SVG variant written inline by `processOrgLogo` as `{orgId}/branding/logo/logo.svg`). Note: `@codex/platform-settings` `BrandingSettingsService` instead writes org logos inline to `logos/{orgId}/logo.{ext}`.
 
 ## Size Variants
 

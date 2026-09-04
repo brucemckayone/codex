@@ -465,11 +465,16 @@ app.get(
 );
 
 /**
- * GET /api/admin/customers/:id
+ * GET /api/admin/customers/:customerId
  * Get customer details with purchase history
+ *
+ * The slot is `:customerId`, not `:id`: procedure()'s org resolver consumes a
+ * bare `:id` as the organization id, so this route used to resolve the
+ * CUSTOMER as the org — 403 for org admins (not a member of "org <customerId>")
+ * and 404 for platform owners. The URL shape is unchanged, so no caller moves.
  */
 app.get(
-  '/api/admin/customers/:id',
+  '/api/admin/customers/:customerId',
   procedure({
     policy: {
       auth: 'required',
@@ -480,7 +485,7 @@ app.get(
     handler: async (ctx) => {
       return await ctx.services.adminCustomer.getCustomerDetails(
         ctx.organizationId,
-        ctx.input.params.id
+        ctx.input.params.customerId
       );
     },
   })

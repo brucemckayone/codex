@@ -228,9 +228,12 @@ export class TranscodingService extends BaseService {
           statusCode: response.status,
           errorText,
         });
-        throw new RunPodApiError('triggerJob', response.status, {
-          responseBody: errorText,
-        });
+        // No `responseBody` in the context: RunPodApiError extends
+        // InternalServiceError, and mapErrorToResponse copies `context`
+        // straight into the client-visible `details` field — so this would
+        // forward a third-party upstream body to an API caller. It is already
+        // captured in the obs.error above, which is where it belongs.
+        throw new RunPodApiError('triggerJob', response.status);
       }
 
       const result = (await response.json()) as RunPodJobResponse;
@@ -253,10 +256,14 @@ export class TranscodingService extends BaseService {
       if (error instanceof RunPodApiError) {
         throw error;
       }
-      // Check for timeout/abort errors
-      throw new RunPodApiError('triggerJob', undefined, {
-        originalError: error instanceof Error ? error.message : String(error),
+      // Timeout/abort and transport errors. Log the cause here — this branch
+      // had no log at all — and keep it OUT of the error context, which
+      // mapErrorToResponse would surface to the caller as `details`.
+      this.obs.error('RunPod dispatch failed', {
+        mediaId,
+        error: error instanceof Error ? error.message : String(error),
       });
+      throw new RunPodApiError('triggerJob');
     }
 
     // Step 5: Store the RunPod job ID for webhook matching

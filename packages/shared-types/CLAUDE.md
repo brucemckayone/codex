@@ -28,7 +28,7 @@ type Bindings = {
 
   // Optional (worker-specific)
   AUTH_SESSION_KV?: KVNamespace;
-  RATE_LIMIT_KV?: KVNamespace;
+  RATE_LIMIT_API?: RateLimit; // native rate limiting; RATE_LIMIT_KV is retired (Codex-kgrdp.17)
   CACHE_KV?: KVNamespace;
   MEDIA_BUCKET?: R2Bucket;
   ASSETS_BUCKET?: R2Bucket;
@@ -101,8 +101,8 @@ type EnrichedAuthContext<TEnv = HonoEnv> = AuthenticatedContext & {
 
 ```ts
 type UserProfile = { id, email, name, emailVerified, image, username, bio, socialLinks }
-type UserData = UserProfile & { name: string | null, role: string, createdAt, ... }
-type SessionData = { id, userId, expiresAt, token?, ... }
+type UserData = { id, email, name: string | null, emailVerified, image, role: string, createdAt, updatedAt }  // standalone — username/bio/socialLinks live ONLY on UserProfile
+type SessionData = { id, userId, token, expiresAt, ipAddress, userAgent, createdAt, updatedAt }
 type ProgressData = { positionSeconds, durationSeconds, completed, updatedAt }
 type CheckoutResponse = { sessionId, sessionUrl }
 type ErrorResponse = { error: { code, message, details? } }  // same as ApiErrorEnvelope
@@ -112,7 +112,7 @@ type ErrorResponse = { error: { code, message, details? } }  // same as ApiError
 
 ```ts
 type OrgMemberRole = 'owner' | 'admin' | 'creator' | 'subscriber' | 'member'
-type OrgMemberContext = { organizationId: string, role: OrgMemberRole }
+type OrgMemberContext = { user, session, cookie, organization: { id, name, slug }, orgRole: OrgMemberRole }  // E2E test context — no organizationId/role keys
 
 interface MembershipLookupResponse { role: OrgMemberRole | null, joinedAt: string | null }
 interface MyMembershipResponse { role: OrgMemberRole | null, status: 'active'|'inactive'|'invited'|null, joinedAt: string | null }
@@ -150,7 +150,7 @@ BetterAuth endpoints in the auth worker return their own response format (not wr
 - **MUST** use `HonoEnv` as type parameter for all Hono apps — never define per-worker env types
 - **MUST** use `ApiSingleEnvelope` / `ApiListEnvelope` for typing API response shapes
 - **NEVER** add runtime code or logic to this package — types only
-- **NEVER** import from this package in the SvelteKit web app at runtime — workers only
+- **NEVER** import runtime values from this package into the SvelteKit web app — `import type` IS sanctioned (apps/web page-builder consumes the journeys types)
 
 ## Reference Files
 

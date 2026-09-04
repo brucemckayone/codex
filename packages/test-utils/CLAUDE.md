@@ -68,9 +68,9 @@ Stripe event factories:
 |---|---|
 | `createMockObservability()` | Returns `{ obs: MockObservability, logs: MockLogEntry[] }` |
 | `createMockHonoContext(options?)` | Hono `Context` mock with spied methods |
-| `createMockKV()` | In-memory KV mock |
-| `createMockR2()` | R2 bucket mock |
-| `createMockDb()` | Drizzle DB mock |
+| `createMockKVNamespace(options?)` | In-memory KV mock |
+| `createMockR2Bucket()` | R2 bucket mock |
+| `createMockDatabase()` | Drizzle DB mock |
 
 ### `stripe-mock.ts` — Stripe Client Mock
 
@@ -81,7 +81,7 @@ Stripe event factories:
 ## Integration Test Pattern
 
 ```ts
-import { setupTestDatabase, teardownTestDatabase, seedTestUsers, createTestContentInput } from '@codex/test-utils';
+import { setupTestDatabase, teardownTestDatabase, seedTestUsers, createTestContentInput, type Database } from '@codex/test-utils';
 import * as schema from '@codex/database/schema';
 
 let db: Database;
@@ -101,7 +101,7 @@ test('creates content', async () => {
   const service = new ContentService({ db, environment: 'test' });
   const input = createTestContentInput(userId, { title: 'Test Video' });
   const [row] = await db.insert(schema.content).values(input).returning();
-  const result = await service.getById(row.id, userId);
+  const result = await service.get(row.id, userId);
   expect(result.creatorId).toBe(userId); // ALWAYS verify scoping
 });
 ```

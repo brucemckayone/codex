@@ -743,8 +743,8 @@ query WebVitalsByPage {
 
 ## Related Documents
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — System architecture overview
-- [design/frontend/OBSERVABILITY_PLAN.md](./frontend/OBSERVABILITY_PLAN.md) — Frontend-specific observability details
+- [ARCHITECTURE.md](../docs/archive/design/ARCHITECTURE.md) — System architecture overview
+- [design/frontend/OBSERVABILITY_PLAN.md](../docs/archive/design/frontend/OBSERVABILITY_PLAN.md) — Frontend-specific observability details
 - [packages/observability/CLAUDE.md](../packages/observability/CLAUDE.md) — Package documentation
 - [design/infrastructure/SECURITY.md](./infrastructure/SECURITY.md) — Security and incident response
 

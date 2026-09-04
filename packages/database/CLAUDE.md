@@ -31,7 +31,7 @@ ctx.waitUntil(cleanup()); // MUST close pool — use waitUntil so it runs after 
 
 | Domain | Tables |
 |---|---|
-| **Auth** | `sessions`, `accounts`, `verificationTokens` |
+| **Auth** | `sessions`, `accounts`, `verification` |
 | **Users** | `users` |
 | **Organization** | `organizations`, `organizationMemberships` |
 | **Content** | `content`, `mediaItems` |
@@ -40,8 +40,8 @@ ctx.waitUntil(cleanup()); // MUST close pool — use waitUntil so it runs after 
 | **Notifications** | `emailAuditLogs` |
 | **Settings** | `platformSettings` (branding, features, contact) |
 | **Storage** | orphaned entity/image tracking |
-| **Subscriptions** | `subscriptions`, `subscriptionPlans` |
-| **Followers** | `followers` |
+| **Subscriptions** | `subscriptions`, `subscriptionTiers`, `stripeConnectAccounts`, `pendingPayouts` |
+| **Followers** | `organizationFollowers` |
 
 Import: `import * as schema from '@codex/database'` (re-exported as namespace).
 
@@ -108,8 +108,8 @@ import type { Database, DatabaseWs } from '@codex/database';
 
 ## Migrations
 
-- Generate: `pnpm db:generate`
-- Apply: `pnpm db:migrate`
+- Generate: `pnpm db:gen` (root) or `pnpm db:generate` (from `packages/database`)
+- Apply: `pnpm db:local:migrate` (root) or `pnpm db:migrate` (from `packages/database`)
 - Files: `packages/database/src/migrations/`
 
 ## Reference Files

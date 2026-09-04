@@ -491,8 +491,17 @@ export type ShaderConfig =
   | SporeConfig
   | NoneConfig;
 
-/** Default values matching the spec in 14-final-preset-catalog.md */
-const DEFAULTS = {
+/**
+ * Default values matching the spec in 14-final-preset-catalog.md.
+ *
+ * EXPORTED because the brand-editor preset axes anchor to it
+ * (`lib/brand-editor/preset-axes.ts`). A preset that wanted a "calm" shader
+ * used to hand-author an absolute — and guessed: shipped values sat 13x above
+ * `cloudsSpeed` and rounded `nebulaDepth` from 8 down to 1. Atmospheres now
+ * declare a MULTIPLIER on the number tuned here, so a retune in this file
+ * flows through to every preset instead of leaving them stranded.
+ */
+export const DEFAULTS = {
   preset: 'none' as ShaderPresetId,
   intensity: 0.65,
   grain: 0.025,
@@ -752,10 +761,19 @@ const DEFAULTS = {
   sporeDecay: 0.998,
 };
 
-/** Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1]. */
-function hexToRgb(hex: string): [number, number, number] {
+/**
+ * Parse a hex color (#rrggbb) to normalized [0-1, 0-1, 0-1], or null if the
+ * string is not a well-formed 6-digit hex.
+ *
+ * Returns null rather than a placeholder colour so callers can fall back to
+ * something meaningful. This previously returned mid-grey `[0.5, 0.5, 0.5]` on
+ * malformed input, which is indistinguishable from a deliberate grey: every
+ * caller's `?? fallback` was dead code, and a typo'd token painted the hero
+ * grey instead of using the brand colour.
+ */
+function hexToRgb(hex: string): [number, number, number] | null {
   const clean = hex.replace('#', '');
-  if (clean.length !== 6) return [0.5, 0.5, 0.5];
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return null;
   const r = parseInt(clean.substring(0, 2), 16) / 255;
   const g = parseInt(clean.substring(2, 4), 16) / 255;
   const b = parseInt(clean.substring(4, 6), 16) / 255;
@@ -848,19 +866,44 @@ export function getShaderConfig(
       : null) as ShaderPresetId | null);
   const resolvedPreset = preset ?? DEFAULTS.preset;
 
-  // Read brand colors from the org's CSS custom properties
-  const primary = (style ? readColorVar(style, 'brand-primary') : null) ?? [
-    0.486, 0.227, 0.929,
-  ];
-  const secondary = (style ? readColorVar(style, 'brand-secondary') : null) ?? [
-    0.925, 0.282, 0.6,
-  ];
-  const accent = (style ? readColorVar(style, 'brand-accent') : null) ?? [
-    0.961, 0.62, 0.043,
-  ];
-  const bg = (style ? readColorVar(style, 'brand-bg') : null) ?? [
-    0.059, 0.09, 0.165,
-  ];
+  // Shader palette. By default a shader paints in the org's brand colours, so
+  // the hero matches the site with no configuration. A creator can opt into a
+  // separate shader palette — a teal shader over a purple brand — by enabling
+  // `shader-use-custom-colors` and setting the four `shader-color-*` keys.
+  //
+  // The opt-in toggle is load-bearing rather than decorative: `<input
+  // type="color">` has no empty state, so a picker always reports SOME colour.
+  // Without an explicit flag there would be no way to distinguish "the creator
+  // chose this exact colour" from "the picker defaulted", and every org would
+  // silently inherit the platform default palette the first time this panel
+  // was opened.
+  const useCustomColors =
+    (style ? readBrandVar(style, 'shader-use-custom-colors', isDark) : null) ===
+    '1';
+
+  /**
+   * Resolve one palette slot: custom shader colour when opted in and parseable,
+   * else the org brand colour, else the platform default.
+   *
+   * Falls through on an unparseable custom value rather than failing to black —
+   * a malformed token should degrade to the brand colour, not blank the hero.
+   */
+  const paletteSlot = (
+    slot: 'primary' | 'secondary' | 'accent' | 'bg',
+    fallback: [number, number, number]
+  ): [number, number, number] => {
+    if (useCustomColors && style) {
+      const raw = readBrandVar(style, `shader-color-${slot}`, isDark);
+      const parsed = raw ? parseCssColor(raw) : null;
+      if (parsed) return parsed;
+    }
+    return (style ? readColorVar(style, `brand-${slot}`) : null) ?? fallback;
+  };
+
+  const primary = paletteSlot('primary', [0.486, 0.227, 0.929]);
+  const secondary = paletteSlot('secondary', [0.925, 0.282, 0.6]);
+  const accent = paletteSlot('accent', [0.961, 0.62, 0.043]);
+  const bg = paletteSlot('bg', [0.059, 0.09, 0.165]);
 
   // Read logo URL for SDF-based shader integration
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
@@ -969,7 +1012,10 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
       camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
       specular: rv('shader-specular', DEFAULTS.specular),
       impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
-      pulseColor: pulseColorRaw ? hexToRgb(pulseColorRaw) : DEFAULTS.pulseColor,
+      // `?? DEFAULTS` covers a malformed token, not just a missing one — a
+      // typo'd hex now falls back to the designed red instead of painting grey.
+      pulseColor:
+        (pulseColorRaw ? hexToRgb(pulseColorRaw) : null) ?? DEFAULTS.pulseColor,
     };
   },
   ink: (base, rv) => ({

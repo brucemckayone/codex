@@ -43,24 +43,11 @@ export const load: PageServerLoad = async ({
     } | null;
   } | null = null;
 
-  try {
-    const profileResult = await api.fetch<{
-      id: string;
-      name: string | null;
-      image: string | null;
-      bio: string | null;
-      socialLinks?: {
-        website?: string;
-        twitter?: string;
-        youtube?: string;
-        instagram?: string;
-      } | null;
-    } | null>('identity', `/api/user/public/${encodeURIComponent(username)}`);
-    creatorProfile = profileResult ?? null;
-  } catch {
-    // Profile endpoint may not exist yet - degrade gracefully
-    creatorProfile = null;
-  }
+  // `getPublicProfile` returns null ONLY for a 404 (no such creator) and
+  // rethrows anything else, so a genuine identity-api outage no longer renders
+  // as an anonymous-looking placeholder profile the way the old blanket
+  // `catch` did.
+  creatorProfile = await api.account.getPublicProfile(username);
 
   // Fetch creator's published content.
   // If we got a creator profile with an ID, we could filter by creatorId.

@@ -42,9 +42,11 @@ export function sendEmailToWorker(
       (err: unknown) => {
         // Log transport failures so CF Workers logs capture them. Email
         // failures must not break the calling worker — behaviour unchanged.
+        // Correlate by userId, NEVER the recipient address: console.* bypasses
+        // the ObservabilityClient redaction pipeline, and `to` is PII.
         console.error('[sendEmailToWorker] transport failed', {
           templateName: params.templateName,
-          to: params.to,
+          ...(params.userId ? { userId: params.userId } : {}),
           error: err instanceof Error ? err.message : String(err),
         });
       }

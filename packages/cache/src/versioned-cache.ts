@@ -181,6 +181,15 @@ export class VersionedCache {
     id: string,
     type: string
   ): void {
+    // Never write a null/undefined slot. lookup() decides hit-vs-miss with
+    // `cached === null`, so a stored null is indistinguishable from an absent
+    // key: every read misses, re-runs the fetcher, and REWRITES the null —
+    // one wasted KV write per read, forever, on a quota-capped store. This
+    // is the "never negative-cache in KV" rule enforced at the choke point.
+    if (data === null || data === undefined) {
+      this.obs?.debug('Skipping cache write for empty value', { id, type });
+      return;
+    }
     this.stats.writes++;
     const write = this.kv
       .put(cacheKey, JSON.stringify(data), {

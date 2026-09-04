@@ -21,6 +21,8 @@
  *   uDropPos       — ambient drop position (-10 if none)
  *   uDropChannel   — channel for ambient drop
  */
+import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+
 export const INK_SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -40,6 +42,8 @@ uniform float uMouseStrength;
 uniform float uInkChannel;
 uniform vec2 uDropPos;
 uniform float uDropChannel;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
 // ── Inline value noise (no built-in noise in GLSL ES 3.0) ──────────
 // Hash-based smooth noise suitable for curl computation via finite differences.

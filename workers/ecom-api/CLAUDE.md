@@ -43,7 +43,7 @@ Stripe e-commerce integration: checkout sessions, payment/subscription/connect w
 
 ## Webhook Endpoints
 
-All webhooks bypass `procedure()`. Flow: `verifyStripeSignature()` (HMAC) → `createWebhookHandler()` → handler. Rate limit: `webhook` preset (1000/min).
+All webhooks bypass `procedure()` and are deliberately NOT rate-limited — there is no `webhook` preset (the HMAC signature is already the auth; a per-caller cap can only reject a legitimate Stripe retry burst). Flow: `verifyStripeSignature()` (HMAC) → `createWebhookHandler()` → handler.
 
 | Path | Env Var for Secret | Handler | Events |
 |---|---|---|---|
@@ -52,7 +52,7 @@ All webhooks bypass `procedure()`. Flow: `verifyStripeSignature()` (HMAC) → `c
 | `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (subscription mode), `customer.subscription.*`, `invoice.*`, `product.updated`, `price.created`, `price.updated` |
 | `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `account.*`, `capability.*`, `person.*` |
 | `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | (logging stub) | `customer.*` |
-| `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | (logging stub) | `charge.dispute.*`, `radar.early_fraud_warning.*` |
+| `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` (Codex-sxu5a) | `charge.dispute.created` handled; other `charge.dispute.*` + `radar.early_fraud_warning.*` log-only via the switch default |
 | `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` | All events — routes to correct handler. Returns 404 in production. |
 
 Dev usage: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev` — set all `STRIPE_WEBHOOK_SECRET_*` to the same CLI-generated value.
@@ -62,7 +62,7 @@ Dev usage: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/de
 ```
 verifyStripeSignature (HMAC) → createWebhookHandler (wraps handler, logs, returns { received: true })
   → handler(event, stripe, context)
-    → createPerRequestDbClient (WebSocket for transactions)
+    → createWebhookDbClient (per-request WebSocket client for transactions)
     → service method (business logic)
     → waitUntil: cache invalidation + email dispatch (fire-and-forget)
     → cleanup() DB connection
@@ -77,7 +77,7 @@ Handlers are thin orchestrators. Business logic lives in `@codex/purchase` and `
 | `PurchaseService` (`purchase`) | `@codex/purchase` | Checkout sessions, purchase completion, refunds, portal, verification |
 | `SubscriptionService` (`subscription`) | `@codex/subscription` | Subscription CRUD, webhook handlers, tier changes, stats |
 | `TierService` (`tier`) | `@codex/subscription` | Tier CRUD, Stripe Product/Price sync |
-| `ConnectService` (`connect`) | `@codex/subscription` | Connect account creation, status, dashboard links |
+| `ConnectAccountService` (`connect`) | `@codex/subscription` | Connect account creation, status, dashboard links |
 
 ## Key Flows
 
@@ -127,7 +127,7 @@ Operator action: `product.updated`, `price.created`, and `price.updated` must be
 | `STRIPE_WEBHOOK_SECRET_CONNECT` | Yes | Connect webhook secret |
 | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | No | Customer webhook secret (stub only) |
 | `STRIPE_WEBHOOK_SECRET_DISPUTE` | No | Dispute webhook secret (stub only) |
-| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17); the limiter fails OPEN when the binding is missing |
 | `AUTH_SESSION_KV` | Yes | Session validation (for `procedure()` routes) |
 | `CACHE_KV` | No | Cache invalidation after purchase/subscription |
 | `ENVIRONMENT` | No | `production` enables production guards (dev webhook 404) |
@@ -138,7 +138,7 @@ Operator action: `product.updated`, `price.created`, and `price.updated` must be
 - **MUST** verify Stripe webhooks with `verifyStripeSignature()` — NEVER process unverified webhooks
 - **MUST** return `{ received: true }` to all Stripe webhooks — prevents retries
 - **MUST** use idempotent operations — webhooks fire multiple times
-- **MUST** use `createPerRequestDbClient` + `waitUntil(cleanup())` in webhook handlers
+- **MUST** use `createWebhookDbClient(env)` from `@codex/worker-utils` and `await cleanup()` in a `finally` block in webhook handlers
 - **MUST** fire-and-forget cache invalidation and emails via `waitUntil` — never block webhook response
 - **NEVER** expose Stripe secret keys in responses or logs
 - **NEVER** put DB queries or email composition in webhook handlers — delegate to services

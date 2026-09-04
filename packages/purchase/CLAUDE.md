@@ -24,24 +24,24 @@ const service = new PurchaseService(
 
 | Method | Signature | Notes |
 |---|---|---|
-| `createCheckoutSession` | `(input: CreateCheckoutInput, customerId: string)` | Validates content is published, priced, and org-scoped. Checks for existing purchase. Returns `{ sessionUrl, sessionId }`. |
+| `createCheckoutSession` | `(input: CreateCheckoutInput, customerId: string)` | Validates content is published and priced (orgless content is purchasable since Codex-69t7c WP5). Checks for existing purchase. Returns `{ sessionUrl, sessionId }`. |
 | `completePurchase` | `(stripePaymentIntentId: string, metadata: CompletePurchaseMetadata)` | Transaction. **Idempotent** — returns existing if already processed. Calculates revenue split + creates purchase + grants `contentAccess`. |
 | `verifyPurchase` | `(contentId: string, customerId: string)` | Returns `true` if user has a completed purchase. Used by access service. |
 | `getPurchaseHistory` | `(customerId: string, input: PurchaseQueryInput)` | Paginated. Scoped to customerId. |
 | `getPurchase` | `(purchaseId: string, customerId: string)` | Get single purchase. Scoped to customerId. |
 | `verifyCheckoutSession` | `(sessionId: string, customerId: string)` | Verify Stripe session status. |
-| `processRefund` | `(purchaseId: string, customerId: string, reason?: string)` | Transaction. Issues Stripe refund + marks purchase refunded. |
-| `createPortalSession` | `(customerId: string, returnUrl: string)` | Stripe billing portal session for subscription management. |
+| `processRefund` | `(paymentIntentId: string, refundDetails?: { stripeRefundId?; refundAmountCents?; refundReason? })` | Self-heals the purchase row, issues/records refund, reverses transfers. |
+| `createPortalSession` | `(email: string, userId: string, returnUrl: string)` | Stripe billing portal session; resolves the Stripe customer by userId with stale-cache self-heal. |
 
 ## Utility Functions
 
 | Export | Purpose |
 |---|---|
 | `createStripeClient(secretKey)` | Creates pinned Stripe SDK client |
-| `verifyWebhookSignature(payload, sig, secret)` | HMAC verification for Stripe webhooks |
+| `verifyWebhookSignature(rawBody, signature, webhookSecret, stripeClient)` | Stripe webhook verification via `constructEventAsync` — needs the Stripe client instance |
 | `calculateRevenueSplit(amountCents, platformFeeBps, orgFeeBps)` | Returns `{ platformFeeCents, organizationFeeCents, creatorPayoutCents }` |
 | `DEFAULT_PLATFORM_FEE_PERCENTAGE` | `1000` (10% in basis points) |
-| `DEFAULT_ORG_FEE_PERCENTAGE` | `0` (0%) |
+| `DEFAULT_ORG_FEE_PERCENTAGE` | `1000` (10%) |
 
 ## Revenue Split
 
@@ -71,15 +71,15 @@ User clicks Buy
 
 `completePurchase()` uses `stripePaymentIntentId` as the unique key. If the Stripe webhook fires twice, the second call returns the existing purchase record without creating a duplicate.
 
-## Phase 1 Constraint
+## Orgless purchases (Codex-69t7c WP5)
 
-Content MUST belong to an organization (`organizationId != null`) to be purchasable. Personal content (no org) cannot go through checkout.
+The Phase-1 "must belong to an organization" gate is REMOVED. Orgless creator-direct content (`organizationId === null`) is purchasable: the creator slice routes to the creator's single Connect account (by userId) and NO organization-fee leg is written.
 
 ## Custom Errors
 
 | Error | HTTP | When |
 |---|---|---|
-| `ContentNotPurchasableError` | 422 | Content is free, not published, deleted, or has no org |
+| `ContentNotPurchasableError` | 422 | Content is free, not published, or deleted |
 | `AlreadyPurchasedError` | 409 | Customer already purchased this content |
 | `PaymentProcessingError` | 500 | Stripe session creation or charge failed |
 | `PurchaseNotFoundError` | 404 | Purchase doesn't exist or not owned by customer |

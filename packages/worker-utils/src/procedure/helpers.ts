@@ -452,7 +452,15 @@ async function resolveOrganizationId(
   obs?: ObservabilityClient
 ): Promise<{ organizationId: string | null; skipMembershipCheck: boolean }> {
   const params = c.req.param();
-  const idParam = params.id || params.orgId || params.organizationId;
+  // EXPLICIT org params win over the generic `:id`. The old order
+  // (`params.id` first) meant a route declaring BOTH — e.g.
+  // notifications-api's `/organizations/:orgId/:id` — resolved the org from
+  // the TEMPLATE id, so the membership check ran against a non-existent org
+  // and every legitimate org admin got a 403 before the handler ran.
+  // A route whose `:id` really is the org (the `/api/organizations/:id/*`
+  // mounts) declares no orgId, so it is unaffected. Verified: every
+  // `:orgId` / `:organizationId` route in the repo means a real organization.
+  const idParam = params.organizationId || params.orgId || params.id;
 
   if (idParam && uuidSchema.safeParse(idParam).success) {
     const isPlatformOwner = user.role === AUTH_ROLES.PLATFORM_OWNER;
