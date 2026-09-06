@@ -30,6 +30,7 @@ import {
   BASE_VERSION,
   buildVersionedCacheKey,
   CacheType,
+  cacheStatsLabel,
   VersionedCache,
 } from '@codex/cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -395,6 +396,39 @@ describe('TTL coupling with the public content list', () => {
 
     expect((spy.mock.calls[0]?.[3] as { ttl?: number } | undefined)?.ttl).toBe(
       7200
+    );
+  });
+});
+
+describe('cache type vs telemetry label', () => {
+  // `buildPublishedJourneysCacheType` folds `featured` and `limit` in, so its
+  // output is one data slot per variant and — before the label — one Cloudflare
+  // log field per variant too. Driven off the real composer so a new dimension
+  // added there fails HERE rather than quietly widening the log schema.
+  it('drops limit but keeps featured — bounded dimensions survive', () => {
+    const types = [
+      buildPublishedJourneysCacheType({ limit: 12 }),
+      buildPublishedJourneysCacheType({ limit: 50 }),
+      buildPublishedJourneysCacheType({ featured: true, limit: 12 }),
+      buildPublishedJourneysCacheType({ featured: false, limit: 6 }),
+      buildPublishedJourneysCacheType({}),
+    ];
+
+    // `featured` survives (bounded: all | featured) and is worth keeping. `limit`
+    // does not, INCLUDING its `default` placeholder — `{limit: 12}` and `{}`
+    // are the same logical read and must not be two log fields.
+    expect(new Set(types).size).toBeGreaterThan(1);
+    expect([...new Set(types.map(cacheStatsLabel))].sort()).toEqual([
+      'journeys:published:all',
+      'journeys:published:featured',
+    ]);
+  });
+
+  it('leaves the static courses type intact — nothing to collapse', () => {
+    // The one composer that is already a constant. If the label rule ever
+    // truncated a legitimate three-segment name this is what would break.
+    expect(cacheStatsLabel('journeys:courses:published')).toBe(
+      'journeys:courses:published'
     );
   });
 });
