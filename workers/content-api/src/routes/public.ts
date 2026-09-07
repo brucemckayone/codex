@@ -24,9 +24,18 @@ import {
   shouldCachePublicContentQuery,
 } from './public-cache';
 
-/** TTL for the public topic-categories list (seconds). Invalidated on category
- * mutation AND content publish/unpublish/delete, so this is a safety net. */
-const PUBLIC_CATEGORIES_CACHE_TTL = 300;
+/**
+ * TTL for the public topic-categories list (seconds). Invalidated on category
+ * mutation AND content publish/unpublish/delete, so this is a safety net —
+ * which is precisely why it can be long.
+ *
+ * Raised 300 -> 7200 on 2026-09-07 alongside the content and portal rails; see
+ * `PUBLIC_CONTENT_CACHE_TTL` for the production measurement (overnight readers
+ * 26–80 min apart, median ~53, so a 5 minute slot never survived to serve the
+ * next one). The topic list is the SLOWEST-changing of the three: it only shifts
+ * when a category gains or loses its last published item.
+ */
+const PUBLIC_CATEGORIES_CACHE_TTL = 7200;
 
 const publicCategoriesQuerySchema = z.object({ orgId: uuidSchema });
 
