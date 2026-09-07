@@ -437,5 +437,35 @@ export const ANALYTICS = {
 export const CACHE_TTL = {
   BRAND_CACHE_SECONDS: 604800, // 7 days
   BRAND_CACHE_REFRESH_MS: 24 * 60 * 60 * 1000, // 24 hours
-  ORG_PUBLIC_INFO_SECONDS: 30 * 60, // 30 minutes
+  /**
+   * Slug-keyed public org reads: `/public/:slug/info`, `/stats`, `/creators`.
+   *
+   * WHY 4 HOURS AND NOT 30 MINUTES. Measured on production 2026-09-07 over the
+   * 6h14m after the stats gauge deployed: the aggregate hit rate was 83.9%, but
+   * the marginal OVERNIGHT traffic hit at exactly 50% (+10 hits / +10 misses
+   * over ~4 idle hours). The log timeline shows why — isolated clusters of ~3
+   * reads at 23:56, 00:15, 01:19, 01:31, 02:54, with gaps of 12–83 min. A 30
+   * minute TTL expires inside the longer gaps, so each visitor missed, refetched
+   * from Neon, wrote a slot, and expired again before the next one arrived. 4h
+   * covers every gap observed. The KV census corroborated it exactly: the only
+   * surviving data key was `org:tiers`, the one slot on `ttl: 86400`.
+   *
+   * WHY IT IS SAFE, verified rather than assumed:
+   * - Version keys NEVER expire (Codex-kgrdp.5), so a data TTL can never
+   *   outlive the version key that stales it. Raising this cannot resurrect a
+   *   staled slot — that failure mode is closed by construction, not by tuning.
+   * - One version key per `id`, so a single `invalidate(slug)` stales info,
+   *   stats AND creators together.
+   * - Every mutation path that changes these reads bumps that key: content
+   *   publish/unpublish/delete (`bumpOrgContentVersion` -> `invalidateOrgSlugCache`),
+   *   org settings + branding (`settings.ts`), membership (`members.ts`), and
+   *   slug rename (`invalidateOrgSlugCacheEntry`).
+   *
+   * WHY NOT 24 HOURS. `invalidateOrgSlugCache` swallows its errors and names
+   * this TTL as its backstop ("Non-critical — slug cache expires via TTL"), and
+   * it runs inside `waitUntil`. So this number bounds the blast radius of a
+   * FAILED bump, not of normal operation. Hours is a tolerable window for a
+   * stale content count on a public page; a day is not.
+   */
+  ORG_PUBLIC_INFO_SECONDS: 4 * 60 * 60, // 4 hours
 } as const;

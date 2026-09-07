@@ -19,9 +19,28 @@ import { CacheType, type VersionedCache } from '@codex/cache';
 
 /**
  * Default TTL for cached public content lists (seconds).
- * Kept at 5 min; CDN Cache-Control is tighter (60s) to bound edge drift.
+ *
+ * CDN `Cache-Control` is tighter (60s) to bound edge drift — unchanged by this
+ * value, the two are independent.
+ *
+ * RAISED 300 -> 1800 on 2026-09-07 from a production measurement, not a guess.
+ * Over the 6h14m after the stats gauge deployed, the aggregate hit rate was
+ * 83.9% but the marginal OVERNIGHT traffic hit at exactly 50%: isolated reader
+ * clusters at 23:56, 00:15, 01:19, 01:31, 02:54 with 12–83 min between them, so
+ * a 5 minute slot had always expired before the next visitor. Every one of those
+ * paid 2 KV reads + 1 KV write + a Neon wake to cache rows nobody read back.
+ *
+ * 30 min covers the short gaps. The 64 and 83 minute ones still miss, BY CHOICE:
+ * this is a collection read that changes on every publish, and the TTL is the
+ * backstop for a FAILED `bumpOrgContentVersion` (it runs inside `waitUntil` and
+ * swallows its errors). 30 min keeps that worst case identical to the window the
+ * slug-keyed org reads already lived with, so the change introduces no new
+ * staleness ceiling anywhere in the system. Normal operation is unaffected —
+ * publish/unpublish/delete stales this immediately via the org version key.
+ *
+ * MUST stay equal to `PUBLIC_JOURNEYS_CACHE_TTL` — see the note there.
  */
-const PUBLIC_CONTENT_CACHE_TTL = 300;
+const PUBLIC_CONTENT_CACHE_TTL = 1800;
 
 /**
  * Public content list query shape accepted by the cache wiring.
