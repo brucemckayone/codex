@@ -19,6 +19,7 @@ import {
   BASE_VERSION,
   buildVersionedCacheKey,
   CacheType,
+  cacheStatsLabel,
   VersionedCache,
 } from '@codex/cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -413,5 +414,63 @@ describe('getCachedPublicContent', () => {
       (call) => (call[0] as string).startsWith('cache:content:public:')
     );
     expect(dataPut?.[2]).toMatchObject({ expirationTtl: 60 });
+  });
+});
+
+describe('cache type vs telemetry label', () => {
+  // The composer output is deliberately high-cardinality — that is what keeps
+  // `?featured=true` from colliding with the unfiltered list. It is ALSO the
+  // `statsByType` key, which `logCacheStats` turns into a Cloudflare log FIELD,
+  // so `cacheStatsLabel` collapses it. This test runs the REAL composer rather
+  // than hand-written strings: a corpus copied out of production goes stale the
+  // moment someone adds a filter dimension here, and the label rule would then
+  // pass its own unit tests while leaking a new field per value.
+  it('collapses composed variants onto bounded labels', () => {
+    const variants = [
+      { sort: 'newest', limit: 5, page: 1 },
+      { sort: 'newest', limit: 50, page: 3 },
+      { sort: 'oldest', limit: 12, page: 1, contentType: 'video' },
+      {
+        sort: 'newest',
+        limit: 1,
+        page: 1,
+        slug: 'hail-mary-prayer-in-aramaic',
+      },
+      { sort: 'newest', limit: 1, page: 1, slug: 'embodiement-meditation' },
+      { sort: 'newest', limit: 20, page: 1, category: 'meditation' },
+      { sort: 'newest', limit: 20, page: 1, featured: true },
+    ];
+
+    const types = variants.map(buildPublicContentCacheType);
+    const labels = new Set(types.map(cacheStatsLabel));
+
+    // 7 distinct data slots (the cache contract) -> 2 log fields (the fix).
+    //
+    // TWO, not one, and that is the contract rather than a shortfall: `sort` is
+    // a BOUNDED dimension, so keeping it is the entire value of a per-type
+    // split — an operator can see that `oldest` reads miss more than `newest`
+    // ones. What must never survive is an UNBOUNDED dimension: page, limit and
+    // slug all grow without limit and are dropped. Asserting "collapses to one"
+    // would be asserting that the split is useless.
+    expect(new Set(types).size).toBe(7);
+    expect([...labels].sort()).toEqual([
+      'content:public:newest',
+      'content:public:oldest',
+    ]);
+  });
+
+  it('never leaks a slug or a page size into the label', () => {
+    const label = cacheStatsLabel(
+      buildPublicContentCacheType({
+        sort: 'newest',
+        limit: 50,
+        page: 7,
+        slug: 'some-very-long-content-slug-here',
+      })
+    );
+
+    expect(label).not.toContain('slug');
+    expect(label).not.toContain('50');
+    expect(label).not.toContain('7');
   });
 });
