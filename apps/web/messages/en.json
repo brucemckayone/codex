@@ -1747,5 +1747,13 @@
   "studio_journey_new_type_label": "Type",
   "studio_journey_new_cancel": "Cancel",
   "studio_journey_new_submitting": "Creating…",
-  "studio_journey_new_submit": "Create & continue"
+  "studio_journey_new_submit": "Create & continue",
+  "legal_terms_title": "Terms of Service",
+  "legal_terms_lead": "The terms that will govern your use of Codex.",
+  "legal_privacy_title": "Privacy Policy",
+  "legal_privacy_lead": "How Codex collects, uses and protects your personal data.",
+  "legal_placeholder_heading": "Not yet published",
+  "legal_placeholder_body": "This page is a placeholder. The final wording is still being prepared and will be published here before it takes effect. Nothing on this page is binding in the meantime.",
+  "legal_placeholder_contact": "If you need this information before then, please get in touch with us directly.",
+  "legal_back_home": "Back to home"
 }
