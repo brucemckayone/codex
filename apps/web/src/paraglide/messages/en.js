@@ -14000,3 +14000,67 @@ export const studio_journey_new_submitting = () => `Creating…`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_journey_new_submit = () => `Create & continue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_terms_title = () => `Terms of Service`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_terms_lead = () => `The terms that will govern your use of Codex.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_privacy_title = () => `Privacy Policy`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_privacy_lead = () => `How Codex collects, uses and protects your personal data.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_placeholder_heading = () => `Not yet published`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_placeholder_body = () => `This page is a placeholder. The final wording is still being prepared and will be published here before it takes effect. Nothing on this page is binding in the meantime.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_placeholder_contact = () => `If you need this information before then, please get in touch with us directly.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const legal_back_home = () => `Back to home`
