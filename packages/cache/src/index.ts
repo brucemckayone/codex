@@ -22,6 +22,10 @@ export type {
 } from './helpers/invalidate';
 export { invalidateUserLibrary } from './helpers/invalidate';
 export { logCacheStats } from './helpers/log-stats';
+export {
+  cacheStatsLabel,
+  UNLABELLED_CACHE_TYPE,
+} from './helpers/stats-label';
 export type {
   CacheEntry,
   CacheOptions,

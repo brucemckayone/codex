@@ -30,6 +30,7 @@ import {
   BASE_VERSION,
   buildVersionedCacheKey,
   CacheType,
+  cacheStatsLabel,
   VersionedCache,
 } from '@codex/cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +39,7 @@ import {
   getCachedPublishedCourses,
   getCachedPublishedJourneys,
 } from '../journeys-cache';
+import { getCachedPublicContent } from '../public-cache';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock KV (same helper shape as public-cache.test.ts)
@@ -304,14 +306,14 @@ describe('portal discovery cache-aside', () => {
     expect(portals).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the 300s default TTL, matching the public content reads', async () => {
+  it('uses the 7200s default TTL, matching the public content reads', async () => {
     const fetcher = vi.fn().mockResolvedValue([]);
     await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher);
 
     const dataPut = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls.find(
       (call) => (call[0] as string).startsWith('cache:journeys:published:')
     );
-    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 300 });
+    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 7200 });
   });
 
   it('accepts a ttl override', async () => {
@@ -343,5 +345,90 @@ describe('portal discovery cache-aside', () => {
     expect(b).toEqual(['course-shape']);
     expect(journeys).toHaveBeenCalledTimes(1);
     expect(courses).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TTL coupling with the public content list', () => {
+  // `PUBLIC_JOURNEYS_CACHE_TTL` is documented as "MUST stay equal to
+  // PUBLIC_CONTENT_CACHE_TTL", because the portals rail and the catalogue sit
+  // side by side on one landing page and a rail fresher than the catalogue
+  // beside it is a confusing surface to debug. Both were raised 300 -> 7200 on
+  // 2026-09-07 together.
+  //
+  // A comment cannot hold that. Nothing stopped the next person raising one and
+  // not the other, and the drift would be invisible — both caches would look
+  // perfectly healthy. This asserts the DEFAULTS the two wrappers actually pass
+  // to `cache.get`, not the constants, so it also catches a wrapper that stops
+  // forwarding its default at all. `PUBLIC_CONTENT_CACHE_TTL` stays unexported.
+  it('both rails default to the SAME ttl', async () => {
+    const cache = new VersionedCache({ kv: createMockKV() });
+    const spy = vi.spyOn(cache, 'get');
+
+    await getCachedPublishedJourneys(
+      cache,
+      'org-1',
+      { limit: 12 },
+      async () => ['rail']
+    );
+    await getCachedPublicContent(
+      cache,
+      'org-1',
+      { orgId: 'org-1' },
+      async () => ['catalogue']
+    );
+
+    const ttls = spy.mock.calls.map(
+      (call) => (call[3] as { ttl?: number } | undefined)?.ttl
+    );
+
+    expect(ttls).toHaveLength(2);
+    expect(ttls[0]).toBeDefined();
+    expect(ttls[0]).toBe(ttls[1]);
+    // Pinned absolutely as well: equal-but-both-wrong would otherwise pass.
+    expect(ttls[0]).toBe(7200);
+  });
+
+  it('the courses rail shares that ttl too', async () => {
+    const cache = new VersionedCache({ kv: createMockKV() });
+    const spy = vi.spyOn(cache, 'get');
+
+    await getCachedPublishedCourses(cache, 'org-1', async () => ['courses']);
+
+    expect((spy.mock.calls[0]?.[3] as { ttl?: number } | undefined)?.ttl).toBe(
+      7200
+    );
+  });
+});
+
+describe('cache type vs telemetry label', () => {
+  // `buildPublishedJourneysCacheType` folds `featured` and `limit` in, so its
+  // output is one data slot per variant and — before the label — one Cloudflare
+  // log field per variant too. Driven off the real composer so a new dimension
+  // added there fails HERE rather than quietly widening the log schema.
+  it('drops limit but keeps featured — bounded dimensions survive', () => {
+    const types = [
+      buildPublishedJourneysCacheType({ limit: 12 }),
+      buildPublishedJourneysCacheType({ limit: 50 }),
+      buildPublishedJourneysCacheType({ featured: true, limit: 12 }),
+      buildPublishedJourneysCacheType({ featured: false, limit: 6 }),
+      buildPublishedJourneysCacheType({}),
+    ];
+
+    // `featured` survives (bounded: all | featured) and is worth keeping. `limit`
+    // does not, INCLUDING its `default` placeholder — `{limit: 12}` and `{}`
+    // are the same logical read and must not be two log fields.
+    expect(new Set(types).size).toBeGreaterThan(1);
+    expect([...new Set(types.map(cacheStatsLabel))].sort()).toEqual([
+      'journeys:published:all',
+      'journeys:published:featured',
+    ]);
+  });
+
+  it('leaves the static courses type intact — nothing to collapse', () => {
+    // The one composer that is already a constant. If the label rule ever
+    // truncated a legitimate three-segment name this is what would break.
+    expect(cacheStatsLabel('journeys:courses:published')).toBe(
+      'journeys:courses:published'
+    );
   });
 });

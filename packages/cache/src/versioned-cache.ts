@@ -74,6 +74,7 @@ import {
   buildVersionedCacheKey,
   buildVersionKey,
 } from './cache-keys';
+import { cacheStatsLabel } from './helpers/stats-label';
 import type {
   CacheOptions,
   CacheResult,
@@ -132,14 +133,25 @@ export class VersionedCache {
   };
 
   /**
-   * Per-type hit/miss counters, keyed by the `type` argument to `get`.
+   * Per-type hit/miss counters, keyed by {@link cacheStatsLabel} of the `type`
+   * argument — NOT by `type` itself.
    *
-   * Capped at {@link MAX_TRACKED_TYPES}. `type` is typed `string`, not the
-   * `CacheType` enum, so a caller CAN pass an unbounded value — and one call
-   * site already keys `id` off a URL slug, which is exactly the mistake in the
-   * adjacent position. Dropping types past the cap loses granularity; growing
-   * the map without bound would leak in every isolate. The aggregate counters
-   * are unaffected either way, so the ratio itself never degrades.
+   * `type` is typed `string`, not the `CacheType` enum, and callers compose it:
+   * `public-cache.ts` folds page size, filters and the content SLUG into it so
+   * that distinct queries occupy distinct KV data slots. That is correct for a
+   * cache key and wrong for a telemetry key, because `getStats()` spreads these
+   * map keys into `byType` and `logCacheStats` spreads THAT into a log event —
+   * so every distinct value minted four indexed fields in Cloudflare's log
+   * schema. Production carried 18 families / 72 fields within hours of the
+   * gauge deploying, three of them per content slug, and the split was
+   * consequently unqueryable: no `groupBy` can recombine per-slug fields.
+   *
+   * Labelling at RECORD time, not at `getStats()` time, is what makes
+   * {@link MAX_TRACKED_TYPES} a real guard. Before it, 64 distinct slugs in one
+   * isolate exhausted the cap and `typeStatsFor` then returned null for every
+   * type that arrived after — `org:config` vanished from the split with no
+   * error anywhere, while the aggregate counters kept working. That silence was
+   * the defect; the cap was only its trigger.
    */
   private statsByType = new Map<
     string,
@@ -668,20 +680,28 @@ export class VersionedCache {
   }
 
   /**
-   * Counters for one cache type, or null once the type cap is reached.
+   * Counters for one cache type, or null once the label cap is reached.
+   *
+   * The lookup is keyed by {@link cacheStatsLabel}, so two `type` values that
+   * differ only in page size or slug share one entry. Distinct KV data slots
+   * with one telemetry row is the whole point — see the `statsByType` note.
    *
    * Null rather than a throwaway object so a caller past the cap costs nothing
-   * per lookup — see {@link MAX_TRACKED_TYPES}.
+   * per lookup — see {@link MAX_TRACKED_TYPES}. With labels the cap is now
+   * effectively unreachable, which is the intent: it is a backstop against a
+   * future composer, not a working limit.
    */
   private typeStatsFor(
     type: string
   ): { gets: number; hits: number; misses: number } | null {
-    const existing = this.statsByType.get(type);
+    const label = cacheStatsLabel(type);
+
+    const existing = this.statsByType.get(label);
     if (existing) return existing;
     if (this.statsByType.size >= MAX_TRACKED_TYPES) return null;
 
     const created = { gets: 0, hits: 0, misses: 0 };
-    this.statsByType.set(type, created);
+    this.statsByType.set(label, created);
     return created;
   }
 
