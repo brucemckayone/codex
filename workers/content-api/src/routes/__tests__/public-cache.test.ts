@@ -393,14 +393,14 @@ describe('getCachedPublicContent', () => {
     expect(fetcher).toHaveBeenCalledTimes(2); // org bump reached the slug slot
   });
 
-  it('uses the 1800s default TTL', async () => {
+  it('uses the 7200s default TTL', async () => {
     const fetcher = vi.fn().mockResolvedValue({ items: [] });
     await getCachedPublicContent(cache, 'org-1', { orgId: 'org-1' }, fetcher);
 
     const dataPut = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls.find(
       (call) => (call[0] as string).startsWith('cache:content:public:')
     );
-    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 1800 });
+    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 7200 });
   });
 
   it('accepts a custom ttl override', async () => {

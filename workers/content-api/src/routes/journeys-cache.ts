@@ -37,12 +37,13 @@ import type { HonoEnv } from '@codex/shared-types';
  * reintroduces exactly that drift. CDN `Cache-Control` is tighter (60s) to bound
  * edge drift, same as the public content routes.
  *
- * Both raised 300 -> 1800 on 2026-09-07. The measurement and the safety argument
+ * Both raised 300 -> 7200 on 2026-09-07. The measurement and the safety argument
  * live on `PUBLIC_CONTENT_CACHE_TTL` in `public-cache.ts`; the short version is
- * that overnight readers arrived 12–83 min apart and a 5 minute slot never
- * survived to serve the next one.
+ * that overnight readers arrived 26–80 min apart (median ~53), so a 5 minute slot
+ * never survived to serve the next one and even 30 min would have covered under
+ * half the observed gaps.
  */
-export const PUBLIC_JOURNEYS_CACHE_TTL = 1800;
+export const PUBLIC_JOURNEYS_CACHE_TTL = 7200;
 
 /*
  * THE CDN `Cache-Control` FOR THE PORTAL READS NO LONGER LIVES HERE.

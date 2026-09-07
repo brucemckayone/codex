@@ -305,14 +305,14 @@ describe('portal discovery cache-aside', () => {
     expect(portals).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the 1800s default TTL, matching the public content reads', async () => {
+  it('uses the 7200s default TTL, matching the public content reads', async () => {
     const fetcher = vi.fn().mockResolvedValue([]);
     await getCachedPublishedJourneys(cache, 'org-1', { limit: 12 }, fetcher);
 
     const dataPut = (mockKV.put as ReturnType<typeof vi.fn>).mock.calls.find(
       (call) => (call[0] as string).startsWith('cache:journeys:published:')
     );
-    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 1800 });
+    expect(dataPut?.[2]).toMatchObject({ expirationTtl: 7200 });
   });
 
   it('accepts a ttl override', async () => {
@@ -351,7 +351,7 @@ describe('TTL coupling with the public content list', () => {
   // `PUBLIC_JOURNEYS_CACHE_TTL` is documented as "MUST stay equal to
   // PUBLIC_CONTENT_CACHE_TTL", because the portals rail and the catalogue sit
   // side by side on one landing page and a rail fresher than the catalogue
-  // beside it is a confusing surface to debug. Both were raised 300 -> 1800 on
+  // beside it is a confusing surface to debug. Both were raised 300 -> 7200 on
   // 2026-09-07 together.
   //
   // A comment cannot hold that. Nothing stopped the next person raising one and
@@ -384,7 +384,7 @@ describe('TTL coupling with the public content list', () => {
     expect(ttls[0]).toBeDefined();
     expect(ttls[0]).toBe(ttls[1]);
     // Pinned absolutely as well: equal-but-both-wrong would otherwise pass.
-    expect(ttls[0]).toBe(1800);
+    expect(ttls[0]).toBe(7200);
   });
 
   it('the courses rail shares that ttl too', async () => {
@@ -394,7 +394,7 @@ describe('TTL coupling with the public content list', () => {
     await getCachedPublishedCourses(cache, 'org-1', async () => ['courses']);
 
     expect((spy.mock.calls[0]?.[3] as { ttl?: number } | undefined)?.ttl).toBe(
-      1800
+      7200
     );
   });
 });

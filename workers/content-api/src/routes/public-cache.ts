@@ -23,24 +23,33 @@ import { CacheType, type VersionedCache } from '@codex/cache';
  * CDN `Cache-Control` is tighter (60s) to bound edge drift — unchanged by this
  * value, the two are independent.
  *
- * RAISED 300 -> 1800 on 2026-09-07 from a production measurement, not a guess.
- * Over the 6h14m after the stats gauge deployed, the aggregate hit rate was
- * 83.9% but the marginal OVERNIGHT traffic hit at exactly 50%: isolated reader
- * clusters at 23:56, 00:15, 01:19, 01:31, 02:54 with 12–83 min between them, so
- * a 5 minute slot had always expired before the next visitor. Every one of those
- * paid 2 KV reads + 1 KV write + a Neon wake to cache rows nobody read back.
+ * RAISED 300 -> 7200 on 2026-09-07 from two production measurements, not a
+ * guess. Sizing a TTL below the gap between consumers serves NOBODY: the slot is
+ * always dead by the next visitor, so every read pays 2 KV reads + 1 KV write +
+ * a Neon wake to store rows nobody reads back.
  *
- * 30 min covers the short gaps. The 64 and 83 minute ones still miss, BY CHOICE:
- * this is a collection read that changes on every publish, and the TTL is the
- * backstop for a FAILED `bumpOrgContentVersion` (it runs inside `waitUntil` and
- * swallows its errors). 30 min keeps that worst case identical to the window the
- * slug-keyed org reads already lived with, so the change introduces no new
- * staleness ceiling anywhere in the system. Normal operation is unaffected —
- * publish/unpublish/delete stales this immediately via the org version key.
+ * Window 1 (6h14m after the stats gauge deployed): aggregate 83.9%, but marginal
+ * overnight traffic hit at exactly 50% — reader clusters 12–83 min apart.
+ * Window 2 (10h16m, the full post-deploy window): 79.3% aggregate, 25.0% over
+ * the last 4h, and content-api specifically went 0-for-7 — a literal 0% hit rate
+ * across four hours. Cluster gaps were ~26, 26, 27, 53, 79, 80, 80 min, i.e. a
+ * MEDIAN of ~53 min. So 1800 would have covered 3 of those 7 gaps and 3600 only
+ * 4; 7200 covers all seven.
+ *
+ * Why 2h is safe, and why the first draft of this note was wrong. The TTL is
+ * only ever the backstop for a FAILED `bumpOrgContentVersion` (it runs inside
+ * `waitUntil` and swallows its errors) — normal operation is unaffected, because
+ * publish/unpublish/delete stales this immediately via the org version key, an
+ * invariant now asserted end to end in `content-publish-invalidation.test.ts`.
+ * An earlier draft justified 30 min as "identical to the window the slug-keyed
+ * org reads already lived with", but the same change raised
+ * `ORG_PUBLIC_INFO_SECONDS` from 30 min to 4h — so it argued from a ceiling it
+ * had itself just replaced. 4h is the system's real failed-bump ceiling, and 2h
+ * sits inside it, introducing no new staleness bound anywhere.
  *
  * MUST stay equal to `PUBLIC_JOURNEYS_CACHE_TTL` — see the note there.
  */
-const PUBLIC_CONTENT_CACHE_TTL = 1800;
+const PUBLIC_CONTENT_CACHE_TTL = 7200;
 
 /**
  * Public content list query shape accepted by the cache wiring.
