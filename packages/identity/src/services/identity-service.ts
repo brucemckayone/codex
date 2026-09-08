@@ -9,6 +9,7 @@ import {
   notificationPreferences,
   organizationMemberships,
   organizations,
+  sessions,
   users,
 } from '@codex/database/schema';
 import {
@@ -551,13 +552,39 @@ export class IdentityService extends BaseService {
    * real address for future re-registration), and name/username/bio/avatar/
    * socialLinks are cleared.
    *
-   * The caller (identity-api route) invalidates the current session's KV
-   * entry; the session-validation `deletedAt` gate in @codex/security closes
-   * the DB-fallback path for every other session.
+   * RETURNS THIS USER'S SESSION TOKENS so the caller can invalidate every
+   * cached session, not just the current one.
+   *
+   * The previous version of this comment claimed "the caller invalidates the
+   * current session's KV entry; the session-validation `deletedAt` gate in
+   * @codex/security closes the DB-fallback path for every other session", and
+   * the second half of that is true but does not close the hole. A session that
+   * is still in `AUTH_SESSION_KV` NEVER REACHES THE DB, so it never reaches the
+   * gate: `session-auth.ts` authenticates a cache hit on `expiresAt` alone
+   * (search for `c.set('user'` — the branch checks expiry and calls `next()`).
+   * So this user's other devices kept authenticating until KV reaped each entry
+   * on its own TTL, i.e. for up to the session's full remaining lifetime.
+   *
+   * WHY THE FIX IS HERE AND NOT IN THE AUTH HOT PATH. The tempting fix is to
+   * gate the cache-hit branch on `deletedAt`, and it cannot work: `UserAuthRow`
+   * carries no such field, and adding one would not help, because the cached
+   * entry was written BEFORE the deletion and therefore records `deletedAt:
+   * null` — that was true when it was written. THE STALENESS IS THE BUG, not a
+   * missing column. Invalidating at deletion time is O(devices) ONCE, where a
+   * hot-path check would be a second KV read on every authenticated request —
+   * the opposite direction from `Codex-kgrdp.4`, which exists to reduce the two
+   * reads a cache HIT already costs.
+   *
+   * The tokens are read BEFORE the soft-delete would matter and returned rather
+   * than deleted here: `AUTH_SESSION_KV` is BetterAuth's namespace and this
+   * service has no binding to it, so the route owns that write. Session ROWS
+   * are deliberately left alone — BetterAuth owns their lifecycle, and with the
+   * KV entries gone the `deletedAt` gate on the DB path is what stops them.
    *
    * @param userId - Authenticated user ID (never a client-supplied value)
+   * @returns Every session token belonging to the user, for KV invalidation
    */
-  async deleteAccount(userId: string): Promise<void> {
+  async deleteAccount(userId: string): Promise<readonly string[]> {
     try {
       // Block if the user owns any active organization. Membership lifecycle
       // uses `status` (organization_memberships has no deletedAt column); the
@@ -616,6 +643,23 @@ export class IdentityService extends BaseService {
       if (this.cache) {
         await this.cache.invalidate(userId);
       }
+
+      // Every session this user holds, so the caller can clear the cached
+      // copies. Read AFTER the tombstone lands: a session created between the
+      // UPDATE and this SELECT would still be returned here, whereas reading
+      // first could miss one. No `whereNotDeleted` — `sessions` has no
+      // `deletedAt`, BetterAuth hard-deletes on sign-out.
+      const rows = await this.db
+        .select({ token: sessions.token })
+        .from(sessions)
+        .where(eq(sessions.userId, userId));
+
+      this.obs.info('Session tokens collected for invalidation', {
+        userId,
+        sessionCount: rows.length,
+      });
+
+      return rows.map((r) => r.token);
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');
     }
