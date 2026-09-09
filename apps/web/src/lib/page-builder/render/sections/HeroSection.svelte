@@ -20,6 +20,14 @@
   how it paints: `media: none` (no plate at all), `motion: none` (no continuous
   decoration, no scroll cue) and the composition itself.
 
+  Six more are MIRRORED onto this section's own root as `data-hero-*` attributes
+  (`surface`, `edge`, `align`, `type`, `accent`, `motion`) so the stylesheet can
+  SELECT on them and not merely substitute their values. That is what the EIGHT
+  LOOKS block at the bottom of the stylesheet needs: a design language is a set of
+  shapes, faces and drawn marks, and no amount of value substitution turns a
+  square corner into a pill or a grey label into a mono one. See that block's
+  header for the selector-by-selector proof that none of it reaches Candlelit.
+
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `stage` (default) · `split-media` · `full-bleed` · `oversized` · `banner` ·
   `poster`. `stage` absorbs the retired `centered`/`left` (they were the `align`
@@ -596,6 +604,26 @@
   {/if}
 {/snippet}
 
+<!--
+  THE SIX MIRRORED AXES, and why they are attributes on THIS element rather than
+  reads of the ancestor's.
+
+  Six of the nine axes have to be SELECTED ON, not merely read: an axis value can
+  change which shapes exist (a pill versus a square corner), which face a label is
+  set in, whether a rule is drawn — none of which is expressible as a value
+  substituted into one declaration. A Svelte-scoped stylesheet cannot reach
+  `.jp-sec[data-jp-*]` on the ancestor, so the resolved `design` prop is mirrored
+  onto the section's own root under a `data-hero-*` namespace and selected there.
+  `IntroVideoSection`'s `data-iv-overlay` is the same move.
+
+  A SEPARATE NAMESPACE, deliberately. Re-using `data-jp-*` here would make every
+  bare `[data-jp-surface='panel']` rule in `journey-design.css` match this element
+  too and re-declare `--jp-ink` one level further down — idempotent today and a
+  silent trap the first time one of those rules stops being idempotent.
+
+  Absent when a host passes no `design`: Svelte omits an `undefined` attribute, so
+  every look rule below simply does not match and the section renders its base.
+-->
 <header
   class="hero"
   class:hero--enhanced={enhanced}
@@ -603,6 +631,12 @@
   class:hero--media-present={mediaPresent}
   data-hero={composition}
   data-hero-bg={p.bg || 'ember'}
+  data-hero-surface={design?.surface}
+  data-hero-edge={design?.edge}
+  data-hero-align={design?.align}
+  data-hero-type={design?.type}
+  data-hero-accent={design?.accent}
+  data-hero-motion={design?.motion}
 >
   <div class="hero__atmos" aria-hidden="true">
     <div class="hero__glow"></div>
@@ -689,14 +723,30 @@
      80svh is solved backwards from Candlelit, whose `density: airy` (1.25) must
      land on exactly the 100svh this section shipped before the axes existed.
 
-     The `vh` line is the fallback for engines without `svh`; the `svh` line then
-     overrides it. `banner` and `poster` are content-height by design. */
+     `--jp-stage-vh` RATHER THAN A BARE `svh`, which is the handoff
+     `journey-design.css` names this file for by line number. `svh` resolves
+     against the browser viewport and cannot be told not to, so inside the
+     builder's fixed-width device frame a `100svh` hero was as tall as the STUDIO
+     WINDOW — measured 373 × 900, aspect 0.414, where a real phone gives 0.462.
+     The canvas could not preview the aspect of four of this section's six
+     compositions. `--jp-stage-vh` is `var(--jp-device-vh, 1svh)`, and nothing
+     sets `--jp-device-vh` on a published page, so PUBLIC OUTPUT IS UNCHANGED:
+     `calc(100 * 1svh)` is `100svh` and `calc(80 * 1svh * 1.25)` is the same
+     `100svh` Candlelit shipped.
+
+     The `vh` line is the fallback for engines without `svh` — it must stay a
+     literal `vh`, because a browser that cannot parse `svh` invalidates the whole
+     `--jp-stage-vh` chain at computed-value time and would fall through to no
+     min-height at all. `banner` and `poster` are content-height by design. */
   .hero[data-hero='stage'],
   .hero[data-hero='split-media'],
   .hero[data-hero='full-bleed'],
   .hero[data-hero='oversized'] {
     min-height: min(100vh, calc(80vh * var(--jp-rhythm)));
-    min-height: min(100svh, calc(80svh * var(--jp-rhythm)));
+    min-height: min(
+      calc(100 * var(--jp-stage-vh)),
+      calc(80 * var(--jp-stage-vh) * var(--jp-rhythm))
+    );
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -731,7 +781,16 @@
   }
 
   /* The invitation ON the media — plate-led compositions in `click` mode. Sits
-     above the scrim so it stays legible over any frame. */
+     above the scrim so it stays legible over any frame.
+
+     `--tap-target-min`, NOT `--space-8`, and this is a measured defect rather
+     than a taste change: `--space-8` is `calc(--space-unit * 8)` = 32px at
+     density 1 and SMALLER under an org density below 1, so the only pointer
+     target in the media plate shipped at 32 × 32 against WCAG 2.5.5's 44px.
+     `--tap-target-min` is `max(2.75rem, var(--space-11))` (contract A2), so a
+     brand density may only ever make it larger. This is the one change in the
+     file that is not keyed on an axis, so it reaches Candlelit too — a 32 → 44px
+     play button on a `click`-mode plate, reported rather than hidden. */
   .hero__play {
     position: absolute;
     inset-block-start: 50%;
@@ -739,10 +798,10 @@
     z-index: 2;
     display: grid;
     place-items: center;
-    inline-size: var(--space-8);
-    block-size: var(--space-8);
+    inline-size: var(--tap-target-min);
+    block-size: var(--tap-target-min);
     border: 0;
-    border-radius: var(--radius-full);
+    border-radius: var(--hero-control-radius, var(--radius-full));
     background: var(--color-surface);
     color: var(--color-heading);
     cursor: pointer;
@@ -761,18 +820,26 @@
 
   /* The invitation IN the actions row — the three plate-less compositions.
      Deliberately third-tier: it sits beside the CTAs without competing, because
-     the conversion path is the CTA and watching a film is a detour from it. */
+     the conversion path is the CTA and watching a film is a detour from it.
+
+     `min-height: var(--tap-target-min)` for the same WCAG 2.5.5 reason as
+     `.hero__play` above: `--space-2` padding either side of `--text-sm` is a
+     ~34px target, and this one sits in the actions row NEXT TO a CtaLink that
+     already declares the floor, so it was also visibly the odd one out. */
   .hero__watch {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
+    min-height: var(--tap-target-min);
     padding: var(--space-2) var(--space-3);
-    border: 0;
-    border-radius: var(--radius-sm);
+    border: var(--hero-control-border, 0);
+    border-radius: var(--hero-control-radius, var(--radius-sm));
     background: none;
+    font-family: var(--hero-label-font, var(--font-body));
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     cursor: pointer;
+    box-shadow: var(--hero-control-shadow, none);
     transition: var(--transition-colors);
   }
 
@@ -842,14 +909,22 @@
     /* Brightened toward `--color-heading`, not toward white. `--color-heading` is
        the palette's CONTRAST pole, so the mote lifts away from the page on a dark
        ink and darkens away from it on a light one; a literal `white` only worked
-       on the dark pole. */
+       on the dark pole.
+
+       `--jp-accent-mark`, the role that now EXISTS — this file's older comment
+       asking for it is stale (`journey-design.css:149`). It is the same value as
+       `--jp-accent-text` on four of the five accent values, and differs only at
+       `accent: edge`, where `--jp-accent-text` is the plain `--jp-text` and a
+       brand-coloured mark is what the syllabus look wants. At `accent: glow`
+       both resolve to `--jp-ember-text`, so Candlelit's motes are the same
+       pixels. */
     background: radial-gradient(
       circle,
-      color-mix(in oklab, var(--jp-accent-text) 92%, var(--color-heading)),
-      color-mix(in oklab, var(--jp-accent-text) 20%, transparent) 70%
+      color-mix(in oklab, var(--jp-accent-mark) 92%, var(--color-heading)),
+      color-mix(in oklab, var(--jp-accent-mark) 20%, transparent) 70%
     );
     box-shadow: 0 0 var(--blur-sm)
-      color-mix(in oklab, var(--jp-accent-text) 55%, transparent);
+      color-mix(in oklab, var(--jp-accent-mark) 55%, transparent);
   }
 
   /* Edge vignette to focus the centre and blend into the next section.
@@ -895,13 +970,18 @@
   /* ═══════════════════════════════════════════════════════════════════════
      CONTENT
      ═══════════════════════════════════════════════════════════════════════ */
+  /* `--hero-block-gap` defaults to the shared `--jp-sec-gap` alias, so density
+     still governs the rhythm here; a look that needs conspicuously more or less
+     air than its density value alone gives it MULTIPLIES onto that alias rather
+     than replacing it, which keeps the org's own `--brand-density-scale` in the
+     chain (`--jp-sec-gap` → `--space-6` → `--space-unit`). */
   .hero__inner {
     position: relative;
     z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: var(--jp-align);
-    gap: var(--jp-sec-gap);
+    gap: var(--hero-block-gap, var(--jp-sec-gap));
     width: 100%;
     max-width: var(--jp-content-max);
     margin-inline: auto;
@@ -916,7 +996,7 @@
     display: flex;
     flex-direction: column;
     align-items: var(--jp-align);
-    gap: var(--jp-sec-gap);
+    gap: var(--hero-block-gap, var(--jp-sec-gap));
     width: 100%;
     min-width: 0;
   }
@@ -925,8 +1005,19 @@
      in `journey-sections-shared.css` (`.jp-sec__eyebrow`, `.jp-sec__heading`,
      `.jp-sec__measure`), which is where the `type`, `align` and `width` axes
      actually land. What is left here is only what is specific to this section. */
+  /* THE HEADLINE CAP IS A PROPERTY, NOT A LITERAL, and the indirection is what
+     keeps composition and look from fighting over specificity. A composition
+     declares `--hero-headline-max` ON THIS ELEMENT (`oversized`, `banner`); a
+     look declares it on `.hero` and it arrives by inheritance. A declaration on
+     the element itself always beats an inherited one whatever the selectors
+     weigh, so the precedence is composition > look by construction rather than
+     by counting attribute selectors — which is the trap a look rule at (0,3,0)
+     would otherwise set for `banner`'s (0,2,0) `max-width: none`.
+
+     16ch is Candlelit's cap, and it stays the fallback so a section with no look
+     rule and no composition rule is byte-identical to before. */
   .hero__headline {
-    max-width: 16ch;
+    max-width: var(--hero-headline-max, 16ch);
     margin-inline: var(--jp-measure-margin);
   }
 
@@ -942,10 +1033,16 @@
     color: var(--jp-accent-text);
   }
 
+  /* THE SUB-LINE IS THE `type` AXIS'S BODY RUNG, and it is a property for a
+     narrower reason than the headline above: the axis's own `--jp-body-size`
+     resolves to 24px at `type: monumental`, a 33% jump on the `--text-lg` every
+     published page ships, so wiring it directly would resize Candlelit's
+     sub-line. The looks that want a different body rung set it explicitly
+     instead, and `--text-lg` stays the value for anything that does not. */
   .hero__sub {
     margin: 0;
-    font-size: var(--text-lg);
-    line-height: var(--leading-relaxed);
+    font-size: var(--hero-sub-size, var(--text-lg));
+    line-height: var(--hero-sub-leading, var(--leading-relaxed));
     color: var(--color-text-secondary);
     text-wrap: pretty;
   }
@@ -974,21 +1071,23 @@
     color: var(--color-text-tertiary);
   }
 
-  /* `--jp-accent-text`, NOT `--jp-accent-fill`, and the same for the mote and the
+  /* `--jp-accent-mark`, NOT `--jp-accent-fill`, and the same for the mote and the
      cue spark. `--jp-accent-fill` resolves to `transparent` on `accent: text` and
      `accent: edge` — correct for a CTA fill, fatal for a small decorative MARK,
-     which simply disappears on two of the five values. `--jp-accent-text` is a real
-     colour on all five and neutralises to `--jp-heading` at `accent: none`, which
-     is the monochrome reading the axis wants. Reported: the axis has no
-     `--jp-accent-mark` role, and this is the gap it leaves. */
+     which simply disappears on two of the five values. The WT-3 pilot reported
+     that gap and `journey-design.css` now ships `--jp-accent-mark` to close it:
+     always a real colour, tracking the AA-safe `--jp-ember-text` where the value
+     tints anything and neutralising to `--jp-heading` at `accent: none`. The
+     shape is a property so a look whose tell forbids a round corner can square
+     it (plain-facts) without a second declaration of the colour. */
   .hero__trust-dot {
     flex: none;
-    width: var(--space-2);
-    height: var(--space-2);
-    border-radius: var(--radius-full);
-    background: var(--jp-accent-text);
+    width: var(--hero-dot-size, var(--space-2));
+    height: var(--hero-dot-size, var(--space-2));
+    border-radius: var(--hero-dot-radius, var(--radius-full));
+    background: var(--jp-accent-mark);
     box-shadow: 0 0 0 var(--space-1)
-      color-mix(in oklab, var(--jp-accent-text) 22%, transparent);
+      color-mix(in oklab, var(--jp-accent-mark) 22%, transparent);
   }
 
   /* The one compact row `oversized` and `banner` put beneath the headline. */
@@ -1040,13 +1139,19 @@
      canvas spelled it `0 24px 60px -28px black`, and a literal black shadow is
      invisible on a dark page and too heavy on a cream one. */
   .hero__plate {
-    border: var(--border-width) solid
-      color-mix(in oklab, var(--jp-accent-edge) 45%, transparent);
-    box-shadow: var(--shadow-xl);
-    background: radial-gradient(
-      120% 120% at 40% 15%,
-      color-mix(in oklab, var(--jp-accent-fill) 44%, var(--color-surface)),
-      var(--color-background)
+    border: var(--hero-plate-border-width, var(--border-width)) solid
+      var(
+        --hero-plate-border-color,
+        color-mix(in oklab, var(--jp-accent-edge) 45%, transparent)
+      );
+    box-shadow: var(--hero-plate-shadow, var(--shadow-xl));
+    background: var(
+      --hero-plate-bg,
+      radial-gradient(
+        120% 120% at 40% 15%,
+        color-mix(in oklab, var(--jp-accent-fill) 44%, var(--color-surface)),
+        var(--color-background)
+      )
     );
   }
 
@@ -1148,7 +1253,7 @@
      ═══════════════════════════════════════════════════════════════════════ */
   .hero[data-hero='oversized'] .hero__headline {
     /* Wider than the default 16ch cap so the display size is the constraint. */
-    max-width: 24ch;
+    --hero-headline-max: 24ch;
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -1167,7 +1272,7 @@
   }
 
   .hero[data-hero='banner'] .hero__headline {
-    max-width: none;
+    --hero-headline-max: none;
   }
 
   @container (max-width: 48rem) {
@@ -1201,6 +1306,383 @@
   .hero :global(a:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE EIGHT LOOKS — WHERE EACH PRESET'S TELL IS DELIVERED
+
+     The nine axes give this section 8 named looks, and until now seven of them
+     were permutations rather than design languages: the axes changed sizes,
+     colours and spacings, but nothing changed SHAPE, FACE or what got DRAWN.
+     Candlelit was the exception, and that is the whole reason it is the only
+     look anyone likes — its tell (ember bloom, motes, vignette) is drawn, not
+     merely parameterised. Each block below draws the other seven tells.
+
+     ── HOW THESE SELECTORS AVOID CANDLELIT ────────────────────────────────
+     Candlelit is `surface:media edge:none media:bleed type:monumental
+     align:center density:airy width:text motion:drift accent:glow`, and only
+     FOUR of those are unique to it — surface:media, edge:none, media:bleed,
+     accent:glow. Its other five are shared, so a bare rule on `type:monumental`,
+     `align:center`, `density:airy`, `width:text` or `motion:drift` would restyle
+     the one look that already works. Every key below is checked against that:
+
+       quiet-studio  [accent='none']                    accent:none is UNIQUE
+       long-read     [surface='bare'][align='start']    Candlelit is surface:media
+       open-air      [edge='soft']                      edge:soft is UNIQUE
+       plain-facts   [edge='offset']                    edge:offset is UNIQUE
+       syllabus      [accent='edge'] / [type='restrained']  both UNIQUE
+       full-send     [edge='heavy'] / [motion='stagger']    both UNIQUE
+       signal        [accent='fill'][edge='hairline']    Candlelit is accent:glow
+       (shared rung) [type='expressive']                Candlelit is monumental
+
+     `surface='bare'` alone would also hit quiet-studio and `accent='fill'` alone
+     would hit plain-facts and full-send, which is why those two are compounds.
+     No selector in this block matches the Candlelit bundle; the two changes in
+     this file that DO reach it are the `--tap-target-min` floors, which are a
+     WCAG obligation rather than a look.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ── quiet-studio · 1.4 luxury-minimal ─────────────────────────────────
+     TELL: three type sizes, one hairline, no accent colour, and more empty
+     space than content.
+
+     THIS BLOCK IS MOSTLY SUBTRACTION, which is the correct instinct for the
+     family — every mechanic in research §1.4 is an absence (no accent, no
+     elevation, no transform, three sizes). What it ADDS is air: `density: vast`
+     already multiplies the rhythm by 1.6, and this multiplies the block gap
+     again on top of it and narrows the headline to 13ch, so the emptiness is
+     conspicuous rather than merely generous. The section's own hairline frame
+     (from `edge: hairline`) is the family's "single hairline" — no second rule
+     is drawn, deliberately. */
+  .hero[data-hero-accent='none'] {
+    --hero-headline-max: 13ch;
+    --hero-block-gap: calc(var(--jp-sec-gap) * 1.75);
+    /* "Shadow / elevation: None" — the plate keeps its hairline and loses the
+       `--shadow-xl` lift, which is the one thing in the composition that reads
+       as expensive-by-effect rather than expensive-by-restraint. */
+    --hero-plate-border-color: var(--color-border-subtle);
+    --hero-plate-shadow: none;
+  }
+
+  /* THREE TYPE SIZES, READABLE AS A SYSTEM. The sizes were already three —
+     `--text-sm`, `--text-lg`, `--jp-display` — but the trust line and the
+     eyebrow shared a size without sharing a recipe, so the page read as four
+     registers. Matching the case and tracking makes the count legible. */
+  .hero[data-hero-accent='none'] .hero__trust {
+    letter-spacing: var(--jp-eyebrow-tracking, var(--tracking-wider));
+    text-transform: uppercase;
+  }
+
+  /* THE LAST BRAND COLOUR IN THE LOOK — DIAGNOSED HERE, DELIBERATELY NOT FIXED HERE.
+     `CtaLink` paints `--color-brand-primary` directly rather than the `accent`
+     axis's `--jp-accent-fill`, so quiet-studio — the one look whose entire tell
+     is "no accent colour" — still serves a saturated brand button in the middle
+     of a monochrome hero. The axis already holds the right answer: `accent:
+     none` resolves `--jp-accent-fill` to `--jp-ink-4` ON PURPOSE, because a
+     price-bearing CTA must stay dominant even in a monochrome family. So the
+     defect is in the CONSUMER, `render/CtaLink.svelte`, and fixing it there
+     fixes all eleven sections at once.
+
+     A per-section repaint was written here and REVERTED, because
+     `journey-design.test.ts` ("is the only styler of .cta in the section tree",
+     Codex-kdsuo) forbids a section painting the CTA's own colours — and it is
+     right to: the pay button's contrast is guaranteed in exactly one place, and
+     a second painter makes that guarantee unverifiable while the pin still
+     passes.
+
+     Re-routing `CtaLink` onto the accent ladder is a real design decision about
+     the contrast of the one element a visitor must read to pay (kdsuo measured
+     4.70:1), and the same test deliberately tripwires it so it cannot land
+     silently. It needs a measured contrast sweep at `accent: none` across the
+     seeded brands plus an owner's sign-off — not a section-local override. */
+
+  /* ── long-read · 1.1 editorial / magazine ──────────────────────────────
+     TELL: the eyebrow and the body share a left edge, and a hairline under every
+     section head. The measurement found the shared edge twice in the tree and
+     the head hairline NOWHERE, so the hairline is the missing half.
+
+     THE SHARED LEFT EDGE IS ALREADY TRUE and worth stating so nobody "fixes" it:
+     `align: start` resolves `--jp-measure-margin` to `0px`, which is what
+     `.hero__headline` and `.jp-sec__measure` both read, and `--jp-align` to
+     `start`, which `.hero__inner` and `.hero__actions` read. Eyebrow, headline,
+     sub-line and CTA row therefore all begin on one edge with no extra rule.
+
+     "NO BOX BORDERS ANYWHERE. Hairline horizontal rules only" (§1.1) is the half
+     the axis cannot express: `edge: hairline` draws a four-sided box. Collapsing
+     it to its bottom edge turns the section frame into an editorial rule between
+     sections and keeps the family's promise, without touching quiet-studio,
+     which shares `surface: bare` but is centred. */
+  .hero[data-hero-surface='bare'][data-hero-align='start'] {
+    --hero-headline-max: 26ch;
+    /* Reset then re-draw ONE edge, rather than zeroing three widths. Logical and
+       physical longhands both resolve onto the same used value and the cascade
+       decides between them, so `border-inline-width: 0` against `.hero`'s
+       `border` shorthand is a question about mixed-vocabulary cascade order that
+       nobody should have to answer while reading a section. `border: 0` clears
+       every physical longhand and the style with it; the logical edge that
+       follows in the same block then wins on order alone. */
+    border: 0;
+    border-block-end: var(--jp-edge-width) solid var(--jp-edge-color);
+    /* "Shadow / elevation: None." */
+    box-shadow: none;
+  }
+
+  .hero[data-hero-surface='bare'][data-hero-align='start'] .hero__headline {
+    padding-bottom: calc(var(--space-4) * var(--jp-rhythm));
+    border-bottom: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  /* ── open-air · 1.3 soft-organic / wellness ────────────────────────────
+     TELL: no border anywhere, pill controls, and a shadow you have to look for.
+
+     THE MOST DANGEROUS LOOK TO WORK ON: it shares four axes with Candlelit
+     (align, density, width, motion), so every rule here is keyed on `edge: soft`,
+     which is unique to it. `edge: soft` already zeroes the SECTION border and
+     lifts it on `--shadow-lg`; what it could not reach was the media plate's own
+     accent hairline and the square-ish controls, which is what "no border
+     anywhere" and "pill controls" actually name. */
+  .hero[data-hero-edge='soft'] {
+    /* `--radius-full` on every control, per "pill controls". */
+    --hero-control-radius: var(--radius-full);
+    /* "Edge treatment: None. No borders at all. Separation comes from space and
+       soft elevation." `--shadow-lg` is large, diffuse and at 5–9% alpha in
+       light — the shadow you have to look for. */
+    --hero-plate-border-width: 0px;
+    --hero-plate-shadow: var(--shadow-lg);
+    --hero-dot-size: var(--space-2-5);
+  }
+
+  .hero[data-hero-edge='soft'] .hero__actions :global(.cta) {
+    border-radius: var(--radius-full);
+  }
+
+  /* An exhale does not shout. The shared eyebrow atom is uppercase and tracked
+     out, which is a luxury/editorial label; this family's own §1.3 mechanic is
+     "humanist … light-to-normal weight", so the kicker drops the caps and the
+     tracking here and nowhere else. */
+  .hero[data-hero-edge='soft'] .hero__eyebrow {
+    font-weight: var(--font-medium);
+    letter-spacing: var(--tracking-normal);
+    text-transform: none;
+  }
+
+  /* ── plain-facts · 1.2 brutalist / utilitarian ─────────────────────────
+     TELL: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 everywhere. Measured across the tree: 2px borders x23, offset
+     shadow NONE FOUND, radius-0 NONE FOUND.
+
+     The offset shadow was in fact reachable — `edge: offset` emits
+     `--jp-edge-shadow: var(--space-1) var(--space-1) 0 0 var(--jp-line-strong)`
+     and `.hero` reads it — so the SECTION had one. Nothing else did, and
+     `surface: panel` handed the section `--radius-card`, so the brutalist look
+     shipped a rounded box. Radius 0 is asserted on every corner this section
+     owns, and the offset is carried onto the controls that sit inside it. */
+  .hero[data-hero-edge='offset'] {
+    /* Radius 0 EVERYWHERE, starting with the section itself, which `panel`
+       rounds to `--radius-card`. */
+    border-radius: 0;
+    --hero-control-radius: 0px;
+    --hero-dot-radius: 0px;
+    --hero-control-border: var(--border-width-thick) solid
+      var(--color-border-strong);
+    --hero-control-shadow: var(--space-1) var(--space-1) 0 0
+      var(--color-border-strong);
+    --hero-label-font: var(--font-mono);
+    --hero-plate-border-width: var(--border-width-thick);
+    --hero-plate-border-color: var(--color-border-strong);
+    --hero-plate-shadow: var(--space-1) var(--space-1) 0 0
+      var(--color-border-strong);
+    /* "Type scale ratio 1.5+ — few steps, enormous gaps between them." The
+       headline is already `--text-display`; the body drops a step so the gap is
+       enormous rather than merely large, at the family's own tight measure. */
+    --hero-sub-size: var(--text-base);
+    --hero-sub-leading: var(--leading-normal);
+    --hero-headline-max: 22ch;
+  }
+
+  .hero[data-hero-edge='offset'] .hero__media,
+  .hero[data-hero-edge='offset'] .hero__plate {
+    border-radius: 0;
+  }
+
+  /* "Mono labels" — the eyebrow and the trust row, which are this section's two
+     labels. `font-variant-numeric` matters on the trust row specifically: it is
+     where the counts live. */
+  .hero[data-hero-edge='offset'] .hero__eyebrow,
+  .hero[data-hero-edge='offset'] .hero__trust {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hero[data-hero-edge='offset'] .hero__actions :global(.cta) {
+    border-radius: 0;
+    box-shadow: var(--space-1) var(--space-1) 0 0 var(--color-border-strong);
+  }
+
+  /* ── syllabus · 1.5 technical / dense-dashboard ────────────────────────
+     TELL: hairline grid, mono numerals, and a left-border accent stripe rather
+     than a filled badge.
+
+     `accent: edge` is the axis value that exists for exactly this and, before
+     this change, the hero spent it on nothing — `--jp-accent-edge` was read only
+     by the plate's border, and `media: frame` plus a stripe-less eyebrow left
+     the look indistinguishable from `signal`. The stripe is the tell, so it is
+     drawn on the label the family would otherwise have put a filled badge on. */
+  .hero[data-hero-accent='edge'] .hero__eyebrow {
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-edge);
+    padding-inline-start: var(--space-3);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* THE HAIRLINE GRID, one rule where this section has one boundary that carries
+     meaning: between the copy and the controls. `journey-design.css` warns that
+     `--jp-line` measures 1.79:1 light / 1.49:1 dark and so may not be the ONLY
+     signal for such a boundary — it is paired with the rhythm's own gap here,
+     which is what that note asks for. */
+  /* The CHILD combinator, and only from the two copy-stack parents: `banner` and
+     `oversized` put the actions inside `.hero__meta`, a wrapping flex row that
+     also holds the sub-line, where a full-width item would push that line onto a
+     row of its own. The grid rule belongs to the vertical stack, not to the
+     compact row. */
+  .hero[data-hero-accent='edge'] .hero__inner > .hero__actions,
+  .hero[data-hero-accent='edge'] .hero__col > .hero__actions {
+    width: 100%;
+    padding-top: calc(var(--space-4) * var(--jp-rhythm));
+    border-top: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .hero[data-hero-accent='edge'] .hero__trust {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* `type: restrained` is unique to this look, and it is the axis's only
+     fine-grained rung: "many small steps, fine-grained hierarchy", radius
+     `--radius-sm`, measure 70–80ch. The section radius is asserted because
+     `surface: panel` would otherwise hand it `--radius-card`. */
+  .hero[data-hero-type='restrained'] {
+    border-radius: var(--radius-sm);
+    --hero-sub-size: var(--text-base);
+    --hero-sub-leading: var(--leading-normal);
+    --hero-headline-max: 30ch;
+  }
+
+  /* ── full-send · 1.8 playful / high-energy ─────────────────────────────
+     TELL: whole inverted bands, pill CTAs at `--radius-full`, spring easing, and
+     big numerals. Measured: inverted bands x1, spring easing x1, big numerals
+     NONE FOUND.
+
+     The band and the easing were already reachable — `surface: invert` re-points
+     `--jp-ink` and `.hero` paints `--jp-sec-bg`, and every entrance animation in
+     this file already reads `--jp-reveal-ease`, which `motion: stagger` sets to
+     `--ease-spring`. What was missing is that a spring you cannot see overshoot
+     is not spring easing: `hero-word-in` animates opacity, translate and blur,
+     none of which reads as bounce. `hero-word-pop` adds the scale that does. */
+  .hero[data-hero-edge='heavy'] {
+    /* "Corner radius: `--radius-full` on every control." */
+    --hero-control-radius: var(--radius-full);
+    --hero-dot-size: var(--space-2-5);
+    /* "Shadow: Medium, slightly hard, tinted", "border-width-thick in the accent
+       colour" — the section already has the 2px accent border from
+       `edge: heavy`; the plate matches it rather than staying hairline. */
+    --hero-plate-border-width: var(--border-width-thick);
+    --hero-plate-border-color: var(--jp-accent-edge);
+    --hero-plate-shadow: var(--shadow-md);
+  }
+
+  /* "Accent as fill, everywhere, at full strength" — the eyebrow stops being a
+     grey label and becomes the filled badge this family puts on everything.
+     `--jp-accent-fill` / `--jp-accent-on-fill` are a matched pair (the palette
+     derives `--jp-on-ember` against `--jp-ember`), so this cannot go
+     illegible when the accent axis or the brand changes. */
+  .hero[data-hero-edge='heavy'] .hero__eyebrow {
+    padding: var(--space-1-5) var(--space-4);
+    border-radius: var(--radius-full);
+    background: var(--jp-accent-fill);
+    color: var(--jp-accent-on-fill);
+    font-weight: var(--font-bold);
+  }
+
+  /* BIG NUMERALS. The hero's only numerals are in the trust row ("1,240 people
+     have taken this"), so that is where they get the size, the weight, the
+     heading ink and the lining/tabular figures the family asks for. */
+  .hero[data-hero-edge='heavy'] .hero__trust {
+    font-size: var(--text-base);
+    font-weight: var(--font-bold);
+    font-variant-numeric: lining-nums tabular-nums;
+    color: var(--color-heading);
+  }
+
+  .hero[data-hero-edge='heavy'] .hero__actions :global(.cta) {
+    border-radius: var(--radius-full);
+  }
+
+  /* ── signal · 1.9 contemporary / product (the platform default) ─────────
+     TELL: rounded cards with hairlines and a small neutral shadow; ONE filled
+     accent button per section.
+
+     The second clause is the one this section was breaking. The plate paints
+     `color-mix(--jp-accent-fill 44%, --color-surface)` behind an accent-tinted
+     border and a `--shadow-xl` lift, so a `signal` hero showed TWO saturated
+     accent elements — the plate and the CTA — and the CTA stopped being the one
+     filled thing on the page. Neutralising the plate to a surface card with a
+     hairline and `--shadow-sm` is what makes the tell true, and it is also
+     §1.9's own edge/shadow spec. */
+  .hero[data-hero-accent='fill'][data-hero-edge='hairline'] {
+    --hero-plate-border-color: var(--color-border-subtle);
+    --hero-plate-shadow: var(--shadow-sm);
+    --hero-plate-bg: linear-gradient(
+      to bottom,
+      var(--color-surface-secondary),
+      var(--color-surface)
+    );
+    /* "Shadow / elevation: `--shadow-sm` / `--shadow-md`, neutral" (§1.9).
+       `edge: hairline` ships `--shadow-xs`, which is the right floor for the
+       three looks that share that value and one step under what this family
+       asks for; the compound is what lets this one step up without moving
+       quiet-studio, long-read or syllabus with it. */
+    box-shadow: var(--shadow-sm);
+    /* Rounded to match the card language rather than the `--radius-sm` a bare
+       control default gives, and a punchier headline cap than the 16ch a
+       centred cinematic column wants, since this look is `width: wide`. */
+    --hero-control-radius: var(--radius-md);
+    --hero-headline-max: 20ch;
+  }
+
+  /* ── the shared `type` rung ─────────────────────────────────────────────
+     THE `type` AXIS HAS TO CHANGE A RELATIONSHIP, NOT ONE FONT-SIZE. Before
+     this, only the headline moved with `type` — the eyebrow was pinned at
+     `--text-sm` and the sub-line at `--text-lg` on all four values, so
+     `restrained` and `expressive` differed by the headline alone.
+
+     `expressive` is open-air + full-send only (Candlelit is `monumental`), so
+     this pair of rules is safe; `restrained` and the two `monumental` looks that
+     are not Candlelit get theirs inside their own blocks above, because
+     `monumental` is SHARED WITH CANDLELIT and a bare rule on it would resize the
+     one look that already works. */
+  .hero[data-hero-type='expressive'] {
+    --hero-sub-size: var(--text-xl);
+  }
+
+  .hero[data-hero-type='expressive'] .hero__eyebrow {
+    font-size: var(--text-base);
+  }
+
+  /* ── `motion: none` MEANS NONE ──────────────────────────────────────────
+     plain-facts and syllabus both set it, and both families say so explicitly:
+     "None. Instant state changes" / "None. Interactions are instant". The axis
+     zeroes `--jp-reveal-distance` and `--jp-reveal-duration`, and `.hero--still`
+     stops the continuous decoration — but the two hover transitions in this file
+     are hardcoded `--transition-*` shorthands the axis cannot reach, so a
+     "motionless" look still grew its play button by 6% on hover. */
+  .hero[data-hero-motion='none'] .hero__watch,
+  .hero[data-hero-motion='none'] .hero__play {
+    transition: none;
+  }
+
+  .hero[data-hero-motion='none'] .hero__play:hover {
+    transform: translate(-50%, -50%);
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -1252,6 +1734,26 @@
     animation-delay: calc(
       var(--word-i, 0) * var(--hero-word-step) + var(--hero-beat)
     );
+  }
+
+  /* full-send's PLAYFUL CASCADE. `motion: stagger` is unique to it (Candlelit is
+     `drift`), and it is the one motion value whose character is the cascade
+     itself rather than the arrival — so the word step goes from a third of the
+     beat to a half, which is a visibly sequential ripple instead of a
+     near-simultaneous settle, and the words scale up into place so
+     `--ease-spring`'s overshoot is actually visible. A spring you cannot see
+     overshoot is not spring easing; opacity and blur cannot show one.
+
+     `animation-name` as a longhand, deliberately: the shorthand above still
+     supplies the duration, easing and fill from the axis, and only the keyframe
+     set is swapped. (0,3,0) against the shorthand's (0,2,0), so it wins on that
+     one property. */
+  .hero--enhanced[data-hero-motion='stagger'] {
+    --hero-word-step: calc(var(--jp-reveal-stagger) / 2);
+  }
+
+  .hero--enhanced[data-hero-motion='stagger'] .hero__word {
+    animation-name: hero-word-pop;
   }
 
   /* Staggered entrances for the surrounding copy, on the axis's own beat. */
@@ -1354,9 +1856,9 @@
     height: 0.6875rem;
     margin-left: -0.09375rem;
     border-radius: var(--radius-sm);
-    background: linear-gradient(var(--jp-accent-text), transparent);
+    background: linear-gradient(var(--jp-accent-mark), transparent);
     box-shadow: 0 0 var(--blur-md)
-      color-mix(in oklab, var(--jp-accent-text) 80%, transparent);
+      color-mix(in oklab, var(--jp-accent-mark) 80%, transparent);
   }
 
   @keyframes hero-word-in {
@@ -1369,6 +1871,22 @@
       opacity: 1;
       transform: none;
       filter: blur(0);
+    }
+  }
+
+  /* The `stagger` twin of `hero-word-in`. No blur — a spring and a de-blur read
+     as two different intentions at once — and a scale rather than a translate,
+     because the scale is what makes `--ease-spring`'s overshoot legible. The
+     translate is kept on the axis's own distance so `motion: stagger`'s
+     `--space-6` still governs how far the word travels. */
+  @keyframes hero-word-pop {
+    from {
+      opacity: 0;
+      transform: translateY(var(--jp-reveal-distance)) scale(0.88);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
 

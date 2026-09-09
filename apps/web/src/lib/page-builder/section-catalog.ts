@@ -271,11 +271,28 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
     ],
     defaultVariant: 'theatre',
     defaultProps: {
+      /*
+       * NO `duration` SEED, DELIBERATELY (Codex-maf0y root cause).
+       *
+       * Every renderer that shows a runtime resolves it as
+       * `p.duration ?? formatDuration(clip.durationSeconds)` — the AUTHORED
+       * string WINS. So seeding a literal here does not pre-fill a helpful
+       * default; it permanently MASKS the real probed duration of whatever the
+       * creator uploads, with a number nobody chose.
+       *
+       * The previous mitigation gated the display on a real clip existing,
+       * which stopped a runtime being advertised for a video that does not
+       * exist but left the mask in place for videos that DO. Omitting the key
+       * is the fix: the field stays a text control in `section-fields.ts`, so a
+       * creator can still override, and the default is now the truth.
+       *
+       * Do not re-add a literal here. A placeholder for a FACT the system
+       * already knows is not a placeholder, it is a wrong answer.
+       */
       kicker: 'The film',
       heading: 'Meet the work',
       sub: 'A short introduction in their own words.',
       clip: 'Intro film',
-      duration: '1:00',
     },
   },
   {
@@ -504,7 +521,6 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
       heading: 'See it in motion',
       sub: 'A real practice, unhurried — exactly as you would meet it.',
       clip: 'Practice preview',
-      duration: '0:30',
     },
   },
   {
@@ -725,7 +741,6 @@ export const SECTION_CATALOG: readonly SectionDefinition[] = [
       body: 'A short bio that establishes credibility and warmth.',
       quote: '',
       clip: 'Meet your guide',
-      duration: '2:00',
     },
   },
   {
