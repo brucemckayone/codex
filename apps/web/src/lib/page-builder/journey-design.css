@@ -138,6 +138,12 @@
   );
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-normal);
+  /* Matches `type: balanced`, the default the rest of this block already
+     encodes (`--jp-display: --text-4xl`). Without a default here the canvas
+     tree — which renders `.jp-sec` with NO data-jp-* attributes at all — would
+     read an unset `--jp-eyebrow-size` and drop the eyebrow's font-size
+     declaration entirely. */
+  --jp-eyebrow-size: var(--text-sm);
 
   /* accent */
   --jp-accent-text: var(--jp-ember-text);
@@ -430,24 +436,29 @@
    qualify for the 3:1 large-text allowance and must clear the full 4.5:1. And
    `type` is visual scale ONLY — it must never promote a heading LEVEL. */
 [data-jp-type='restrained'] {
+  --jp-eyebrow-size: var(--text-xs);
   --jp-display: var(--text-2xl);
   --jp-heading-size: var(--text-xl);
   --jp-display-leading: var(--leading-snug);
   --jp-display-tracking: var(--tracking-normal);
 }
 [data-jp-type='balanced'] {
+  --jp-eyebrow-size: var(--text-sm);
   --jp-display: var(--text-4xl);
   --jp-heading-size: var(--text-2xl);
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-normal);
 }
 [data-jp-type='expressive'] {
+  --jp-eyebrow-size: var(--text-base);
   --jp-display: var(--text-5xl);
   --jp-heading-size: var(--text-3xl);
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-tight);
 }
 [data-jp-type='monumental'] {
+  /* candlelit's type value — MUST stay --text-sm or every published page shifts */
+  --jp-eyebrow-size: var(--text-sm);
   --jp-display: var(--text-display);
   --jp-heading-size: var(--text-4xl);
   --jp-display-leading: var(--leading-none);

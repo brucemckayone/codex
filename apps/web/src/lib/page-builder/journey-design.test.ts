@@ -332,24 +332,28 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
 
   'type:restrained': {
+    '--jp-eyebrow-size': 'var(--text-xs)',
     '--jp-display': 'var(--text-2xl)',
     '--jp-heading-size': 'var(--text-xl)',
     '--jp-display-leading': 'var(--leading-snug)',
     '--jp-display-tracking': 'var(--tracking-normal)',
   },
   'type:balanced': {
+    '--jp-eyebrow-size': 'var(--text-sm)',
     '--jp-display': 'var(--text-4xl)',
     '--jp-heading-size': 'var(--text-2xl)',
     '--jp-display-leading': 'var(--leading-tight)',
     '--jp-display-tracking': 'var(--tracking-normal)',
   },
   'type:expressive': {
+    '--jp-eyebrow-size': 'var(--text-base)',
     '--jp-display': 'var(--text-5xl)',
     '--jp-heading-size': 'var(--text-3xl)',
     '--jp-display-leading': 'var(--leading-tight)',
     '--jp-display-tracking': 'var(--tracking-tight)',
   },
   'type:monumental': {
+    '--jp-eyebrow-size': 'var(--text-sm)',
     '--jp-display': 'var(--text-display)',
     '--jp-heading-size': 'var(--text-4xl)',
     '--jp-display-leading': 'var(--leading-none)',
