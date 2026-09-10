@@ -298,7 +298,14 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   // paints nothing, i.e. bone-on-cream. See the rule's comment in the CSS.
   'surface:invert': {
     '--jp-ink': 'var(--jp-pole-b)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // A brand bloom (contract B1), and the ONE surface gradient that is safe by
+    // MEASUREMENT rather than by construction: `invert`'s ink IS pole B, so any
+    // gradient here moves toward the text colour. Pixel-measured: background
+    // peak 56/255, amplitude 32, worst ratio 11.73 against a 4.5 floor, with the
+    // sweep's 55% row (4.88) bracketing the real ceiling. `--jp-accent-mark`
+    // rather than `--jp-accent-fill`, which is `transparent` on three accents.
+    '--jp-sec-bg':
+      'radial-gradient(115% 80% at 50% 0%, color-mix(in oklab, var(--jp-ink) 68%, var(--jp-accent-mark) 32%), transparent 72%), var(--jp-ink)',
   },
   'surface:media': { '--jp-sec-bg': 'transparent', '--jp-sec-atmos': '1' },
 

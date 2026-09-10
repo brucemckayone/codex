@@ -380,7 +380,53 @@
    section actually resolved. */
 [data-jp-surface='invert'] {
   --jp-ink: var(--jp-pole-b);
-  --jp-sec-bg: var(--jp-ink);
+  /* A BRAND BLOOM OUT OF THE DARK (contract B1). `invert` is one look — Full
+     Send — and it was a dead flat black, which is the one surface where a little
+     light does the most work.
+
+     `--jp-accent-mark`, NOT `--jp-accent-fill`: the fill is `transparent` at
+     `accent: text`, `edge` and `none`, so a bloom spelled with it would vanish
+     if `invert` were ever paired with another accent. `--jp-accent-mark` is
+     always a real colour (see the accent block below).
+
+     THIS ONE IS MEASURED, NOT ARGUED, and that distinction is why it landed
+     after the other two. `tint` and `panel` above are safe BY CONSTRUCTION,
+     because their gradients mix LESS pole B than the surface itself and pole B
+     is the contrast pole. This one cannot borrow that argument: `invert`'s ink
+     IS pole B, so every gradient here moves TOWARD the text colour and lowers
+     contrast. There is no structural guarantee available, so it was measured.
+
+     HOW, because the method matters as much as the number. Pixel readback of the
+     real render (canvas `getImageData`, `globalCompositeOperation = 'copy'` per
+     A24), with the text colour converted to sRGB through canvas `fillStyle` —
+     the only parser that is correct for BOTH notations Chrome hands back here.
+     A regex over the computed string is not: this section's text resolves to
+     `color(srgb 1 1 1)`, whose `1 1 1` is 0-1 floats, and reading those as
+     0-255 scored pure white on pure black as 1.01:1 instead of 21:1. Elsewhere
+     the same bug read `oklab(0.33 …)` as `rgb(0.33, 0, 0)` and produced numbers
+     that looked entirely plausible while being wrong.
+
+     MEASURED SWEEP, on `of-blood-and-bones` (ember `#0e27e1`), background peak
+     in the top band vs white body text:
+
+       mix    bg peak   amplitude   worst ratio
+        12%        13           8         19.44   — invisible, a 8/255 lift
+        22%        33          19         16.10
+        32%        56          32         11.73   ← chosen
+        42%        80          46          8.06
+        55%       113          65          4.88   — brackets the floor
+
+     The 55% row is the useful one: it confirms white text holds 4.5:1 only until
+     the background reaches roughly rgb(118), so the ceiling is real and measured
+     rather than assumed. 32% sits at 2.6x the floor.
+
+     ONE-BRAND CAVEAT, stated because it bounds the claim: this sweep is a single
+     brand, and `--jp-accent-mark` varies per org. The worst case is an accent
+     near white, which at this mix lands around the 42% row's peak (~8:1) — still
+     clear of the floor, which is the other reason not to reach for 42% here. */
+  --jp-sec-bg:
+    radial-gradient(115% 80% at 50% 0%, color-mix(in oklab, var(--jp-ink) 68%, var(--jp-accent-mark) 32%), transparent 72%),
+    var(--jp-ink);
 }
 
 /* `media` unlocks the cinematic atmosphere layer. `--jp-sec-atmos` is a 0/1
