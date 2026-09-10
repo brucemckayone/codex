@@ -275,12 +275,23 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'surface:tint': {
     '--jp-ink':
       'color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // DEPTH, not a flat fill (contract B1). The gradient reaches pure
+    // `--jp-pole-a`, i.e. LESS pole B than the surface itself — and pole B is
+    // the contrast pole every text rung is derived away from, so mixing less of
+    // it can only RAISE contrast. The gradient's worst point is therefore this
+    // surface's own already-measured level, in both themes, and the flat-colour
+    // rows below stay the honest bound.
+    '--jp-sec-bg':
+      'radial-gradient(88% 62% at 14% 0%, var(--jp-pole-a), transparent 70%), var(--jp-ink)',
   },
   'surface:panel': {
     '--jp-ink':
       'color-mix(in oklab, var(--jp-pole-a) 88%, var(--jp-pole-b) 12%)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // An EDGE-LIT PLATE (contract B1). Both endpoints are surface levels whose
+    // contrast rows are already locked: the lit edge is `tint`'s 6% and it
+    // resolves into this surface's own 12%. Same pole-B argument as `tint`.
+    '--jp-sec-bg':
+      'linear-gradient(to bottom, color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%), var(--jp-ink) 58%), var(--jp-ink)',
     '--jp-sec-radius': 'var(--radius-card)',
   },
   // `--jp-sec-bg` is an addition to §2.3 — without it invert flips the text and

@@ -310,11 +310,48 @@
    on nothing this rule redefines. */
 [data-jp-surface='tint'] {
   --jp-ink: color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%);
-  --jp-sec-bg: var(--jp-ink);
+  /* A SOFT MESH RATHER THAN A FLAT FILL (contract B1).
+     Rides inside `--jp-sec-bg` because all ELEVEN sections consume that token as
+     the whole `background` SHORTHAND — `background: var(--jp-sec-bg)`, verified
+     at every one of the 11 sites, not one of them `background-color` — and the
+     shorthand takes image layers ahead of its final colour. So depth costs zero
+     section edits, which is also the only version where no section can forget
+     the new layer.
+
+     NOT by raising `--jp-sec-atmos`. That gate lights a CANDLELIT recipe (an
+     `--jp-accent-fill` bloom, a `--color-background` vignette, rising embers)
+     that 10 of the 11 sections keep mounted and zeroed. Raising it here would
+     make this look a dimmer Candlelit instead of itself — and would be mostly
+     invisible anyway, since `--jp-accent-fill` is `transparent` at
+     `accent: text`, which is what this surface's looks carry.
+
+     THE CONTRAST FLOOR HOLDS BY CONSTRUCTION, not by sampling. Every surface is
+     `color-mix(pole-a X%, pole-b …)` and pole B is the CONTRAST pole, so mixing
+     a background further toward pole B moves it toward its own text colour and
+     LOWERS contrast. This gradient only ever mixes LESS pole B than the surface
+     itself (it reaches pure `--jp-pole-a`, which is `bare`'s background), so its
+     worst point is the surface's own already-measured level — in BOTH themes,
+     with no new row needed. A flat-background contrast sweep cannot see a
+     gradient, so a gradient that needed sampling to be safe would be a hole in
+     `04-contrast-baseline.md`. */
+  --jp-sec-bg:
+    radial-gradient(88% 62% at 14% 0%, var(--jp-pole-a), transparent 70%),
+    var(--jp-ink);
 }
 [data-jp-surface='panel'] {
   --jp-ink: color-mix(in oklab, var(--jp-pole-a) 88%, var(--jp-pole-b) 12%);
-  --jp-sec-bg: var(--jp-ink);
+  /* AN EDGE-LIT PLATE (contract B1). This is the flattest surface in the set and
+     it carries THREE of the eight looks — Plain Facts, The Syllabus and Signal —
+     so a dead flat fill here is a third of the problem the owner named.
+
+     The lit edge is `tint`'s exact level (6% pole B) resolving into this
+     surface's own 12% by 58% down, so both endpoints are surface levels whose
+     contrast rows are already locked, and by the pole-B argument above the worst
+     point is this surface's own measured level in both themes. See the `tint`
+     block for the full reasoning and for why this rides in `--jp-sec-bg`. */
+  --jp-sec-bg:
+    linear-gradient(to bottom, color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%), var(--jp-ink) 58%),
+    var(--jp-ink);
   --jp-sec-radius: var(--radius-card);
 }
 

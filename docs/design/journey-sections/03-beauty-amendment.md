@@ -18,11 +18,23 @@ All figures measured in the builder canvas at a true 1440px section width
 `of-blood-and-bones` / "Bone Deep". Every one of the eight presets' nine axes was
 confirmed against `design-vocabulary.ts` before measuring — 8/8 match.
 
-**M1 · Every look is a text stack on an empty stage.** The seeded hero uses the
-catalogue's default variant `stage`, whose own hint in `section-catalog.ts` reads
-*"Headline stack over an atmosphere layer"*. There is no atmosphere layer. Of the six
-hero compositions only `split-media`, `full-bleed` and `poster` carry a media panel,
-so `stage` can never show an image.
+**M1 · Every look is a text stack on an empty stage — and the stage lights already
+exist.** The seeded hero uses the catalogue's default variant `stage`, whose own hint in
+`section-catalog.ts` reads *"Headline stack over an atmosphere layer"*. Of the six hero
+compositions only `split-media`, `full-bleed` and `poster` carry a media panel, so
+`stage` can never show an image.
+
+**CORRECTION to this doc's first version, which claimed "there is no atmosphere
+layer".** There is. **10 of the 11 sections mount one** — bloom, vignette and motes
+markup, deliberately left in the DOM — and every one of them multiplies its opacity by
+`--jp-sec-atmos`. That token is `0` in `:where(.jp-sec)` (`journey-design.css:87`) and
+is raised to `1` by exactly one axis value: `[data-jp-surface='media']`, which is
+Candlelit alone.
+
+So the atmosphere is not missing. **It is built, mounted, and switched off in seven of
+the eight looks by a single 0/1 token** — which is why Candlelit is the one look that
+reads as designed, and why the other seven read as flat. That makes B1 far cheaper than
+mounting a shader, and it changes B1's shape (below).
 
 **M2 · The `media` axis cannot act.** Before content seeding: 0 `<img>`, 0 `<video>`,
 0 `<picture>` across all 9 sections in all 8 looks. After attaching the org's only
@@ -76,23 +88,44 @@ stage has no atmosphere, that the ladder inverts, or that the page paints two bl
 
 ## The amendments
 
-### B1 — Every look gets an atmosphere layer, and `surface` is the seam
+### B1 — Every surface gets its own atmosphere, and `--jp-sec-bg` is the seam
 
-Mount the existing `ShaderHero` in the journey render tree, driven by the org brand's
-own shader tokens, so the `stage` variant's promised atmosphere exists and the `bg`
-field's hint becomes true.
+**NOT by raising `--jp-sec-atmos`.** That gate gates a CANDLELIT RECIPE: a blurred
+radial in `--jp-accent-fill` plus a `--color-background` vignette plus rising embers.
+Raising it on the other four surface values would make all eight looks a dimmer
+Candlelit — erasing the distinctness the previous pass did achieve, and making the one
+look the owner rates less special. It would also be largely invisible where it matters:
+`--jp-accent-fill` is `transparent` at `accent: text`, `edge` and `none`, so five of the
+seven looks would get a vignette and no glow. `--jp-sec-atmos` stays a Candlelit-only
+gate, untouched.
 
-**Keyed on `surface`, and only on values other than `media`.** That is not a
-convenience — it is the Candlelit guard. Candlelit is the sole look with
-`surface: media`; the other seven are `bare` (×2), `tint`, `panel` (×3) and `invert`.
-So `[data-jp-surface]:not([data-jp-surface='media'])` selects exactly the seven looks
-that have no atmosphere today and cannot reach Candlelit, without compounding
-selectors by hand.
+**Instead, each surface value carries its own depth inside `--jp-sec-bg`.** All eleven
+sections already consume that token as the whole `background` SHORTHAND
+(`background: var(--jp-sec-bg)`, verified at all 11 sites — not one uses
+`background-color`), and the shorthand accepts image layers before its final colour. So
+per-surface gradient depth needs **zero section edits**, which is both the smallest diff
+and the only version with no risk that one section forgets the new layer.
 
-Per-surface intent, so the layer is characterful rather than uniform: `bare` gets grain
-and a barely-there vignette; `tint` a slow drifting mesh; `panel` a flat plate with an
-edge-lit gradient; `invert` the shader at full strength. Static-first per A40 — the
-still frame is the baseline and motion is additive.
+`surface: media` keeps its existing declaration verbatim, so Candlelit cannot move.
+
+**THE CONTRAST RULE, and it is not optional: every atmosphere gradient must be bounded
+between two ALREADY-MEASURED surface levels.** `04-contrast-baseline.md` and the
+browser-locked rows in `journey-design.test.ts` model each surface as ONE flat colour
+sampled from `--jp-sec-bg`. A gradient makes that model blind to its own worst point —
+a sweep over a flat background cannot see a gradient, and will report a comfortable
+average while the darkest end fails. Bounding each gradient's endpoints to surface
+levels whose ratios are already locked (e.g. `--jp-ink` at one end,
+`color-mix(--jp-ink, --jp-pole-b 12%)` — which is exactly `panel` — at the other) makes
+every point along it safe BY CONSTRUCTION rather than by sampling.
+
+Per-surface intent, so the layer is characterful rather than uniform: `bare` a
+barely-there vignette; `tint` a soft two-point mesh; `panel` an edge-lit plate — it is
+the flattest, drabbest surface in the set today and carries three of the eight looks;
+`invert` a brand-derived bloom out of the black. Static-first per A40 — the still frame
+is the baseline and motion is additive.
+
+Grain/texture and the hero `ShaderHero` mount (M3) are B1's later slices, once the
+gradient depth is in and measured.
 
 ### B2 — A real display scale, built brand-agnostically
 
