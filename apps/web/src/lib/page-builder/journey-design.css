@@ -451,7 +451,39 @@
 }
 [data-jp-type='expressive'] {
   --jp-eyebrow-size: var(--text-base);
-  --jp-display: var(--text-5xl);
+  /* THE MIDPOINT OF `--text-4xl` AND `--text-display`, and NOT `--text-5xl`
+     (contract B2.1).
+
+     `--text-5xl` was the obvious step and it made this axis NON-MONOTONIC:
+     it maxes at 2.75rem while `--text-4xl` maxes at 3rem, so `expressive`
+     rendered SMALLER than `balanced` at every width. Measured through the real
+     preset switch at a 2600px viewport, before: restrained 32.4 / balanced
+     51.84 / expressive 47.52 / monumental 86.4px — so Open Air and Full Send,
+     the two looks whose whole point is exuberance, opened with a smaller
+     headline than Long Read and Signal. `InviteSection.svelte` measured the
+     same inversion independently at 375/768/1440 (30/48/44/80px).
+
+     FIXED HERE AND NOT IN `tokens/typography.css`, because `--text-5xl` has
+     seven consumers outside this system — the pricing page (×3), `TopicCard`,
+     `ProofSection`, and the clamp CEILINGS of `TodayStat` and the library page.
+     Re-anchoring the global step to satisfy one axis rung would silently resize
+     five unrelated surfaces; `--text-5xl` stays exactly as it is and simply
+     stops being used as a rung of THIS ladder.
+
+     WHY A MIDPOINT RATHER THAN A NEW CLAMP. Two properties, both load-bearing:
+
+       1. It is monotonic BY ALGEBRA, not by inspection. `--text-display`
+          exceeds `--text-4xl` at every viewport (2.75 > 2.25rem floor,
+          5 > 3rem ceiling), so a value halfway between them is necessarily
+          between `balanced` and `monumental`. M5 cannot recur here by someone
+          later re-anchoring a shared step.
+       2. It keeps `--brand-text-scale`. Both operands are real `--text-*`
+          steps, which `org-brand.css` re-declares multiplied by the brand
+          scale — so the product rides along. A hand-written `clamp()` would
+          have been the only size in this axis that ignores the org's scale.
+
+     Measured after: 32.4 / 51.84 / 69.12 / 86.4px. */
+  --jp-display: calc((var(--text-4xl) + var(--text-display)) / 2);
   --jp-heading-size: var(--text-3xl);
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-tight);

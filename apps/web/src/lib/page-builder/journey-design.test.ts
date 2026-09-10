@@ -347,7 +347,11 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
   'type:expressive': {
     '--jp-eyebrow-size': 'var(--text-base)',
-    '--jp-display': 'var(--text-5xl)',
+    // Deliberately the MIDPOINT of two steps, not a step (contract B2.1):
+    // `--text-5xl` maxes BELOW `--text-4xl`, so using it here made the axis
+    // non-monotonic. See `expressiveDisplayIsBetween*` below, which is the test
+    // that would have caught it.
+    '--jp-display': 'calc((var(--text-4xl) + var(--text-display)) / 2)',
     '--jp-heading-size': 'var(--text-3xl)',
     '--jp-display-leading': 'var(--leading-tight)',
     '--jp-display-tracking': 'var(--tracking-tight)',
@@ -2355,5 +2359,117 @@ describe('the practice-card floor — .descent__card min-width (F4)', () => {
       '@container (max-width: 45rem)|.descent__card',
       '|.descent__card', // `at` is '' at top level
     ]);
+  });
+});
+
+// ── B2.1 · the `type` ladder must be MONOTONIC ──────────────────────────────
+// M5 of `docs/design/journey-sections/03-beauty-amendment.md`: `--jp-display`
+// ran 30 / 48 / 44 / 80px at a 1440 viewport, because `expressive` borrowed
+// `--text-5xl`, whose ceiling (2.75rem) sits BELOW `--text-4xl`'s (3rem). So the
+// two looks built to be exuberant — Open Air and Full Send — opened with a
+// SMALLER headline than the two "balanced" ones.
+//
+// The axis probe could not see it and never will: every `type` value emitted the
+// same property set, each with a legitimate `--text-*` token. The defect lived
+// in the RELATIONSHIP between the values, which no per-value check inspects.
+//
+// This evaluates the steps arithmetically rather than asserting token names, so
+// it also fails if someone re-anchors a shared `--text-*` step underneath the
+// axis. It reads the `:root` definitions: `--brand-text-scale` multiplies every
+// step by the same factor at org scope, so an ordering that holds at `:root`
+// holds at org scope too.
+describe('the `type` axis display ladder (contract B2.1)', () => {
+  const TYPE_ORDER = [
+    'restrained',
+    'balanced',
+    'expressive',
+    'monumental',
+  ] as const;
+  const VIEWPORTS = [375, 768, 1440, 2600];
+
+  const rootTextSteps: Record<string, string> = {};
+  for (const rule of parseRules(TYPOGRAPHY)) {
+    if (rule.at !== '' || rule.selector !== ':root') continue;
+    for (const [prop, value] of Object.entries(rule.declarations)) {
+      if (prop.startsWith('--text-')) rootTextSteps[prop] = value;
+    }
+  }
+
+  /** `clamp(<a>rem, <b>rem + <c>vw, <d>rem)` — the only shape these steps use. */
+  const CLAMP_SHAPE =
+    /^clamp\(\s*([\d.]+)rem\s*,\s*([\d.]+)rem\s*\+\s*([\d.]+)vw\s*,\s*([\d.]+)rem\s*\)$/;
+
+  function stepPx(token: string, viewport: number): number {
+    const raw = rootTextSteps[token];
+    if (!raw)
+      throw new Error(`${token} is not defined at :root in typography.css`);
+    const m = CLAMP_SHAPE.exec(squash(raw));
+    // Deliberately throws rather than guessing: if a step stops being a simple
+    // clamp, this evaluator is no longer honest and must be updated, not coerced.
+    if (!m)
+      throw new Error(
+        `${token} is not the expected clamp shape: ${squash(raw)}`
+      );
+    const lo = Number(m[1]) * 16;
+    const base = Number(m[2]) * 16;
+    const perPx = Number(m[3]) / 100;
+    const hi = Number(m[4]) * 16;
+    return Math.min(hi, Math.max(lo, base + perPx * viewport));
+  }
+
+  function displayPx(expr: string, viewport: number): number {
+    const e = squash(expr);
+    const single = /^var\((--text-[a-z0-9]+)\)$/.exec(e);
+    if (single) return stepPx(single[1], viewport);
+    const midpoint =
+      /^calc\(\(\s*var\((--text-[a-z0-9]+)\)\s*\+\s*var\((--text-[a-z0-9]+)\)\s*\)\s*\/\s*2\)$/.exec(
+        e
+      );
+    if (midpoint)
+      return (
+        (stepPx(midpoint[1], viewport) + stepPx(midpoint[2], viewport)) / 2
+      );
+    throw new Error(
+      `--jp-display shape not understood, so not verifiable: ${e}`
+    );
+  }
+
+  const expressions = TYPE_ORDER.map((value) => {
+    const rule = DESIGN_RULES.find(
+      (r) => r.at === '' && r.selector === `[data-jp-type='${value}']`
+    );
+    if (!rule)
+      throw new Error(
+        `no [data-jp-type='${value}'] rule in journey-design.css`
+      );
+    const expr = rule.declarations['--jp-display'];
+    if (!expr)
+      throw new Error(`[data-jp-type='${value}'] declares no --jp-display`);
+    return { value, expr };
+  });
+
+  it.each(
+    VIEWPORTS
+  )('is strictly increasing at a %ipx viewport', (viewport) => {
+    const sizes = expressions.map(({ value, expr }) => ({
+      value,
+      px: Number(displayPx(expr, viewport).toFixed(2)),
+    }));
+    const rendered = sizes.map((s) => `${s.value} ${s.px}px`).join(' · ');
+
+    for (let i = 1; i < sizes.length; i++) {
+      expect(
+        sizes[i].px,
+        `--jp-display must grow with the type axis, but ${sizes[i].value} (${sizes[i].px}px) is not larger than ${sizes[i - 1].value} (${sizes[i - 1].px}px). Ladder: ${rendered}`
+      ).toBeGreaterThan(sizes[i - 1].px);
+    }
+  });
+
+  it('leaves `monumental` on --text-display, which Candlelit ships', () => {
+    // Candlelit is `type: monumental` and is the one look the owner rates, so
+    // this rung is frozen: A19/A3 — a published page must not change size.
+    expect(expressions.find((e) => e.value === 'monumental')?.expr).toBe(
+      'var(--text-display)'
+    );
   });
 });
