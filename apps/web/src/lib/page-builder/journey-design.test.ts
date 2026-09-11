@@ -425,7 +425,7 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-cta-fill-hover': 'var(--jp-ink-3)',
     '--jp-cta-ink': 'var(--jp-heading)',
     '--jp-cta-border': 'var(--jp-cta-outline)',
-    '--jp-cta-stripe': 'var(--jp-accent-edge)',
+    '--jp-cta-stripe': 'var(--jp-accent-mark)',
     '--jp-cta-stripe-width': 'var(--border-width-toast)',
   },
   'accent:glow': {
@@ -1945,6 +1945,20 @@ describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
       // Never both — a brand plate AND a neutral ring is the muddled middle.
       expect(plated && outlined, `accent:${value} is both`).toBe(false);
     }
+  });
+
+  it('paints the edge stripe with the MARK token, never the raw ember edge', () => {
+    // Measured, at both poles (`Codex-4avmh`): `--jp-accent-edge` is raw
+    // `--jp-ember` at `accent: edge`, and the stripe came out 5.97 light but
+    // 2.98 DARK — under the 3.0 non-text floor, and a light-only check passes
+    // it. This is the same asymmetry the accent block opens with.
+    const edge = ruleFor("[data-jp-accent='edge']")?.declarations ?? {};
+    expect(edge['--jp-cta-stripe']).toBe('var(--jp-accent-mark)');
+    expect(edge['--jp-cta-stripe']).not.toBe('var(--jp-accent-edge)');
+    // And the mark really is the mitigated colour on this value, not the raw
+    // ember under another name — otherwise the swap buys nothing.
+    expect(edge['--jp-accent-mark']).toBe('var(--jp-ember-text)');
+    expect(edge['--jp-accent-mark']).not.toBe('var(--jp-ember)');
   });
 
   it('--jp-cta-outline is the ONLY rung that clears 3.0, and the rejected ones cannot', () => {

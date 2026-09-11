@@ -696,7 +696,13 @@
   --jp-cta-fill-hover: var(--jp-ink-3);
   --jp-cta-ink: var(--jp-heading);
   --jp-cta-border: var(--jp-cta-outline);
-  --jp-cta-stripe: var(--jp-accent-edge);
+  /* `--jp-accent-mark`, NOT `--jp-accent-edge`. MEASURED: the edge token is
+     raw `--jp-ember`, which this file already documents at 2.04:1 as text in
+     dark, and the stripe came out 2.98 against the dark surface — under the 3.0
+     floor. `--jp-accent-mark` tracks the AA-mitigated `--jp-ember-text` and
+     measures 5.97 light / 5.40 dark. It is also what the accent block's own
+     rule asks for: "use it for any small decorative brand element". */
+  --jp-cta-stripe: var(--jp-accent-mark);
   --jp-cta-stripe-width: var(--border-width-toast);
 }
 [data-jp-accent='glow'] {
