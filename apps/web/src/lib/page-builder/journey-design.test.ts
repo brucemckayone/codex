@@ -395,6 +395,13 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-mark': 'var(--jp-ember-text)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
+    // The CTA seam (`Codex-4avmh`). "Brand as TEXT" cannot also ship a filled
+    // brand pill, so the pay button becomes an outline whose LABEL is the
+    // brand. NOT `--jp-accent-fill`, which is `transparent` here.
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-accent-text)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
   },
   'accent:fill': {
     '--jp-accent-text': 'var(--jp-ember-text)',
@@ -410,6 +417,16 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-mark': 'var(--jp-ember-text)',
     '--jp-accent-edge': 'var(--jp-ember)',
     '--jp-accent-glow': 'none',
+    // The value's tell is a left-border STRIPE, so the CTA states it. Two
+    // extra properties relative to the other accent values — which is allowed,
+    // and is exactly why this spec is keyed per `axis:value` rather than
+    // asserting one shared property set.
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-heading)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
+    '--jp-cta-stripe': 'var(--jp-accent-edge)',
+    '--jp-cta-stripe-width': 'var(--border-width-toast)',
   },
   'accent:glow': {
     '--jp-accent-text': 'var(--jp-ember-text)',
@@ -422,11 +439,19 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
   'accent:none': {
     '--jp-accent-text': 'var(--jp-heading)',
+    // STILL `--jp-ink-4`, and still the right call for the decorative plates
+    // eleven sections paint with it. It is NOT the right call for the pay
+    // button — ceiling 1.69 against its own surface — which is what the
+    // `--jp-cta-*` seam below exists to fix rather than by moving this.
     '--jp-accent-fill': 'var(--jp-ink-4)',
     '--jp-accent-on-fill': 'var(--jp-heading)',
     '--jp-accent-mark': 'var(--jp-heading)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-heading)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
   },
 
   'motion:none': {
@@ -620,12 +645,43 @@ describe('journey-design.css — the accessibility floors that are structural', 
     ).not.toBe('var(--jp-ember)');
   });
 
-  it('keeps the CTA a filled control even at accent: none', () => {
+  it('keeps the CTA a DISTINGUISHABLE control even at accent: none', () => {
     // The luxury-minimal signature failure: remove the last colour cue and a
     // price-bearing CTA becomes indistinguishable from body text.
+    //
+    // THE INTENT WAS RIGHT AND THE ASSERTION WAS NOT (`Codex-4avmh`). This
+    // guarded `--jp-accent-fill`, which NO CTA CODE PATH HAS EVER READ —
+    // `CtaLink` spent `--color-brand-primary`, as this file's own section 7
+    // states ("neither has anything else in the repo"). So it was green before
+    // the seam existed, is green after, and would have stayed green if the pay
+    // button had lost its plate entirely.
+    //
+    // Worse, the token it pinned is the one that CANNOT deliver the intent:
+    // `--jp-ink-4` is 18% off its own surface — measured 1.69 light / 1.53
+    // dark, and a CEILING of 1.69 over the whole pickable grid, against a 3.0
+    // non-text floor. A test enforcing the defect it was written to prevent.
+    //
+    // Both halves are now asserted against the token that actually governs
+    // each: `--jp-accent-fill` for the decorative plates eleven sections paint
+    // with it, and the `--jp-cta-*` seam for the pay button.
     const none = ruleFor("[data-jp-accent='none']")?.declarations ?? {};
     expect(none['--jp-accent-fill']).toBe('var(--jp-ink-4)');
-    expect(none['--jp-accent-fill']).not.toBe('transparent');
+
+    // The CTA carries no plate here, so it MUST carry a boundary.
+    expect(none['--jp-cta-fill']).toBe('transparent');
+    expect(none['--jp-cta-border']).toBe('var(--jp-cta-outline)');
+
+    // And "distinguishable" as arithmetic rather than as a token name: what it
+    // now carries clears the floor at the live poles, and what this test used
+    // to pin cannot clear it at either.
+    for (const bg of ['#fafafa', '#171717']) {
+      const l = ladderFrom(hex(bg), hex(bg));
+      expect(
+        ratio(mix(l.heading, l.ink, 0.8), l.ink),
+        `outline on ${bg}`
+      ).toBeGreaterThan(3.0);
+      expect(ratio(l.ink4, l.ink), `--jp-ink-4 on ${bg}`).toBeLessThan(3.0);
+    }
   });
 
   it('ships a scrim on media: bleed and on no other media value', () => {
@@ -1769,14 +1825,177 @@ describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
     return css.slice(open + 1, close);
   };
 
-  it('still spends exactly --color-brand-primary and --color-text-on-brand', () => {
+  /**
+   * Whitespace-INSENSITIVE, unlike `squash`: these values nest `var()` inside
+   * `var()` and a formatter is free to break them across lines, which would
+   * leave `squash` reporting `var( --jp-cta-stripe, … )`. The assertion is
+   * about the token chain, not the line breaks.
+   */
+  const tight = (value: string): string => value.replace(/\s+/g, '');
+
+  it('routes the CTA through --jp-cta-*, org-brand pair as the FALLBACK', () => {
+    // THE RE-ROUTE THIS DESCRIBE'S PART (1) WAS WAITING FOR (`Codex-4avmh`).
+    // It is deliberately NOT a re-point onto `--jp-accent-fill` /
+    // `--jp-accent-on-fill`: that pair is `transparent` at `accent: text` and
+    // `accent: edge` (an invisible pay button) and `--jp-ink-4` at
+    // `accent: none`, whose contrast against its own surface has a CEILING of
+    // 1.69 — see the invariant test below, and the seam's note in the CSS.
     const body = ruleBody(CTA, ".cta[data-variant='primary'] {");
-    expect(squash(body)).toContain('background: var(--color-brand-primary);');
-    expect(squash(body)).toContain('color: var(--color-text-on-brand);');
-    // And the journey palette is NOT in play here, which is the fact that makes
-    // the sweep above blind to this pair. If a future change re-points the CTA
-    // at the accent ladder this goes red, and the sweep starts covering it.
-    expect(body).not.toContain('--jp-');
+    expect(tight(body)).toContain(
+      'background:var(--jp-cta-fill,var(--color-brand-primary))'
+    );
+    expect(tight(body)).toContain(
+      'color:var(--jp-cta-ink,var(--color-text-on-brand))'
+    );
+    expect(tight(body)).toContain(
+      'border-color:var(--jp-cta-border,transparent)'
+    );
+    // The stripe is `accent: edge`'s whole tell. LONGHAND, because a
+    // `border-inline-start` shorthand would reset the other three edges'
+    // colour after `border-color` set it.
+    expect(tight(body)).toContain(
+      'border-inline-start-width:var(--jp-cta-stripe-width,var(--border-width))'
+    );
+    expect(tight(body)).toContain(
+      'border-inline-start-color:var(--jp-cta-stripe,var(--jp-cta-border,transparent))'
+    );
+    expect(tight(body)).not.toContain('border-inline-start:');
+    // The org-brand pair survives as the FALLBACK, which is what keeps
+    // `FloatingCta` — mounted outside any `.jp-sec`, so no `--jp-cta-*` is in
+    // scope — painting exactly the pill it always did.
+    expect(body).toContain('--color-brand-primary');
+    expect(body).toContain('--color-text-on-brand');
+  });
+
+  it('leaves accent: fill and accent: glow on the brand pill, so CANDLELIT cannot move', () => {
+    // Candlelit is `accent: glow`. The seam's DEFAULT is the brand pair, so the
+    // four looks on `fill`/`glow` inherit it and no rule reaches them — which is
+    // why this needed no compounded exclusion selector, unlike contract B1's
+    // surface work. If a future change starts declaring `--jp-cta-fill` on
+    // either value, this goes red and Candlelit's screenshot must be re-judged.
+    for (const value of ['fill', 'glow']) {
+      const rule = ruleFor(`[data-jp-accent='${value}']`);
+      expect(rule, `[data-jp-accent='${value}'] missing`).toBeDefined();
+      for (const prop of Object.keys(rule?.declarations ?? {})) {
+        expect(prop, `accent:${value} must not touch the CTA seam`).not.toMatch(
+          /^--jp-cta-/
+        );
+      }
+    }
+    // And the default really is the brand pair, in the base rule.
+    const base = ruleFor(':where(.jp-sec)');
+    expect(base?.declarations['--jp-cta-fill']).toBe(
+      'var(--color-brand-primary)'
+    );
+    expect(base?.declarations['--jp-cta-ink']).toBe(
+      'var(--color-text-on-brand)'
+    );
+  });
+
+  it('EVERY accent value is either a real plate or a boundary clearing 3.0', () => {
+    // THE INVARIANT, and the one gate that would have stopped the naive
+    // re-route. A CTA that is neither a filled plate nor an outline is not
+    // identifiable as a control (WCAG 1.4.11), and that is exactly what
+    // `--jp-accent-fill: transparent` would have shipped on two of five values.
+    const ACCENTS = ['text', 'fill', 'edge', 'glow', 'none'];
+    const base = ruleFor(':where(.jp-sec)');
+    const fallbackFill = base?.declarations['--jp-cta-fill'];
+    expect(fallbackFill).toBeDefined();
+
+    /**
+     * Follow `var()` indirection to a literal. WITHOUT THIS THE GATE IS A
+     * GREP AND IT FAILS OPEN: the first version compared the declaration to
+     * the string `'transparent'`, so `--jp-cta-fill: var(--jp-accent-fill)` —
+     * precisely the naive re-route this test exists to reject — read as a real
+     * plate, because the string is not the word. Falsified and fixed.
+     */
+    const resolve = (value: string, scope: Record<string, string>): string => {
+      let v = value.trim();
+      for (let hop = 0; hop < 8; hop += 1) {
+        const m = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/.exec(v);
+        if (!m) return v;
+        const next = scope[m[1]] ?? base?.declarations[m[1]] ?? m[2];
+        if (next === undefined) return v;
+        v = next.trim();
+      }
+      return v;
+    };
+
+    // THE ONLY PERMITTED PLATE IS THE BRAND PLATE. Stated as the rule rather
+    // than as "not transparent", because the tokens that tempt a re-route are
+    // not transparent either — `--jp-ink-4` is a real colour and still cannot
+    // clear 3.0 against its own surface at any brand, in either theme.
+    const BRAND_PLATE = 'var(--color-brand-primary)';
+
+    for (const value of ACCENTS) {
+      const d = ruleFor(`[data-jp-accent='${value}']`)?.declarations ?? {};
+      const scope = { ...base?.declarations, ...d };
+      const fill = resolve(d['--jp-cta-fill'] ?? fallbackFill ?? '', scope);
+      const border =
+        d['--jp-cta-border'] ?? base?.declarations['--jp-cta-border'];
+      const plated =
+        fill === BRAND_PLATE || fill === 'var(--color-brand-primary)';
+      const outlined = border === 'var(--jp-cta-outline)';
+      expect(
+        plated || outlined,
+        `accent:${value}: fill resolves to "${fill}", which is not the brand ` +
+          `plate, and border is "${border}", which is not the measured outline. ` +
+          `A CTA that is neither is not identifiable as a control.`
+      ).toBe(true);
+      // Never both — a brand plate AND a neutral ring is the muddled middle.
+      expect(plated && outlined, `accent:${value} is both`).toBe(false);
+    }
+  });
+
+  it('--jp-cta-outline is the ONLY rung that clears 3.0, and the rejected ones cannot', () => {
+    // Arithmetic, over the generated grid, so this is safe BY CONSTRUCTION
+    // rather than by sampling three seeded brands — which would have been blind
+    // here anyway: at `accent: none` neither the fill nor the ink has a
+    // brand-colour term, so all three seeded orgs (none of which sets
+    // `--brand-bg`) collapse to the same two rows.
+    expect(declarationsOf(DESIGN, '--jp-cta-outline')).toEqual([
+      'color-mix(in oklab, var(--jp-heading) 80%, var(--jp-ink))',
+    ]);
+
+    // Exclude the PRE-EXISTING degenerate region of the `--jp-heading` step:
+    // where the heading itself misses 4.5, every rung derived from it misses
+    // too, and a worst-case that includes it reports 1.00 for all of them and
+    // discriminates nothing. That band is a `--jp-heading` property, measured
+    // separately above, and NOT a CTA one.
+    const healthy = BRAND_GRID.filter((ink) => {
+      const h = autoContrast(ink, 0.62, 0.96, 0.25);
+      return ratio(h, ink) >= 4.5;
+    });
+    expect(healthy.length).toBeGreaterThan(100_000);
+
+    const worstOf = (of: (l: Ladder, ink: Oklab) => Oklab): number => {
+      let worst = Number.POSITIVE_INFINITY;
+      for (const ink of healthy) {
+        const l = ladderFrom(ink, ink);
+        worst = Math.min(worst, ratio(of(l, ink), ink));
+      }
+      return worst;
+    };
+    const bestOf = (of: (l: Ladder, ink: Oklab) => Oklab): number => {
+      let best = 0;
+      for (const ink of healthy) {
+        const l = ladderFrom(ink, ink);
+        best = Math.max(best, ratio(of(l, ink), ink));
+      }
+      return best;
+    };
+
+    // What ships: 80% heading. Worst case 3.47 against a 3.0 floor.
+    const outline = worstOf((l) => mix(l.heading, l.ink, 0.8));
+    expect(outline).toBeGreaterThan(3.0);
+    expect(outline).toBeCloseTo(3.47, 1);
+
+    // And the tempting reaches, each of which has a CEILING under the floor —
+    // so no brand and no theme can rescue them. This is the assertion that
+    // stops a future "use the line token, that is what borders are for".
+    expect(bestOf((l) => l.ink4)).toBeLessThan(3.0); // --jp-ink-4      ~1.69
+    expect(bestOf((l) => l.line)).toBeLessThan(3.0); // --jp-line       ~1.81
+    expect(bestOf((l) => mix(l.ink, l.heading, 0.68))).toBeLessThan(3.0); // -strong ~2.71
   });
 
   it('is the only styler of .cta in the section tree', () => {
