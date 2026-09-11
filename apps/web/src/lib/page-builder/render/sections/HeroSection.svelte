@@ -216,6 +216,34 @@
       composition === 'poster'
   );
 
+  /**
+   * `media: bleed` ON A COMPOSITION THAT HAS NO PLATE (contract B5).
+   *
+   * The axis's own name promises a backdrop, and on `stage` / `oversized` /
+   * `banner` it delivered nothing at all: `showPlate` is `plateLed && !mediaOff`,
+   * so three of the six compositions could not show media in any treatment. That
+   * made `media: bleed` INERT on the catalogue's default composition — and
+   * `bleed` is one of only FOUR axes that uniquely identify Candlelit, the one
+   * look the page-builder is judged on.
+   *
+   * WHY THIS AND NOT "THE AXIS PICKS THE COMPOSITION". Making `media` select the
+   * layout was the first plan and it is unsafe: the variant is the AUTHOR'S
+   * composition, and a page-level look preset would then silently re-lay-out
+   * every section it touched. Measured against the real data — three published
+   * pages carry a `stage` hero at `media: bleed` (`ancestral-threads`,
+   * `return-to-the-shoreline`, `tending-the-grief`) and NONE of them has any hero
+   * media, so composition-rewriting would have changed all three pages' layout
+   * with no media to justify it. That is exactly the shape change the comment
+   * above forbids. Treatment stays the axis's business, composition stays the
+   * author's — which is the separation this file already documents.
+   *
+   * SAFE ON THOSE THREE PAGES BY CONSTRUCTION: the backdrop renders NOTHING
+   * unless a still actually resolves, so a page with no hero media is untouched.
+   */
+  const bleedsBehind = $derived(
+    !plateLed && !mediaOff && design?.media === 'bleed'
+  );
+
   const MEDIA_MODES = ['none', 'image', 'loop', 'click'];
 
   /**
@@ -283,13 +311,22 @@
   /**
    * Real media is on screen, so the synthetic atmosphere yields to it.
    *
-   * Only true for the modes that actually PAINT something (`image`, `loop`) and
-   * only where a plate exists to paint into — a `click` affordance on a
-   * plate-less `stage` hero leaves the ember doing all the work, so the ember
-   * stays.
+   * Only true for the modes that actually PAINT something (`image`, `loop`), and
+   * only where there is somewhere for them to paint — which since B5 is a plate
+   * OR a `media: bleed` backdrop. A `click` affordance still leaves the ember
+   * doing all the work, because an invitation in the actions row paints no
+   * footage.
+   *
+   * `bleedsBehind` BELONGS HERE, and leaving it out was the first version's bug:
+   * the backdrop would have put a photograph behind the copy while the ember
+   * bloom stayed at full strength on top of it, which is precisely the
+   * competition the `.hero--media-present` dimming exists to prevent. The
+   * comment this replaces said a plate-less hero "leaves the ember doing all the
+   * work" — true when a plate-less hero could not show media at all, and no
+   * longer true now that one can.
    */
   const mediaPresent = $derived(
-    showPlate &&
+    (showPlate || bleedsBehind) &&
       (mediaMode === 'image' || mediaMode === 'loop') &&
       Boolean(resolvedPreview?.heroImageUrl || clipUrl)
   );
@@ -297,15 +334,22 @@
   /**
    * The plate-less compositions OFFER the film instead of showing it.
    *
-   * `loop` lands here too, and that is the point: `stage`, `oversized` and
-   * `banner` have nowhere to loop footage, so the author's intent to feature a
-   * video becomes an invitation rather than being silently dropped.
+   * `loop` lands here too, and that is the point: a plate-less composition has
+   * nowhere to loop footage, so the author's intent to feature a video becomes
+   * an invitation rather than being silently dropped.
+   *
+   * EXCEPT AT `media: bleed` SINCE B5, where it now does have somewhere — the
+   * backdrop. A looping backdrop plus an "watch the film" invitation is the same
+   * film offered twice, so the invitation stands down for `loop` specifically.
+   * `click` keeps it: there the backdrop is a still and the invitation is the
+   * only way to reach the film.
    */
   const showWatch = $derived(
     !mediaOff &&
       !plateLed &&
       Boolean(clipUrl) &&
-      (mediaMode === 'loop' || mediaMode === 'click')
+      (mediaMode === 'loop' || mediaMode === 'click') &&
+      !(bleedsBehind && mediaMode === 'loop')
   );
 
   /** Authored, because this section does not own what the creator pointed it at. */
@@ -490,6 +534,48 @@
 {/snippet}
 
 <!--
+  The `media: bleed` backdrop for the three plate-less compositions (B5).
+
+  DELIBERATELY NOT the `plate()` snippet: that one always renders something — the
+  synthetic `.hero__plate` — on every branch, which is right for an in-flow plate
+  reserving its box and wrong for a decorative backdrop. Behind the copy, an empty
+  plate is a painted grey rectangle nobody asked for, and it would have appeared
+  on three published pages. So this renders only when a still RESOLVES.
+
+  No pending branch for the same reason: `aspect-ratio` reserves the box for an
+  in-flow plate, but an absolutely-positioned backdrop takes no layout, so there
+  is no CLS to guard and a skeleton would only flash.
+
+  `--jp-media-scrim` is real at `bleed` — `linear-gradient(to top, var(--jp-ink),
+  transparent 62%)` — so the copy keeps a contrast floor over any frame. It is
+  `none` on the other four media values, which is why only `bleed` reads text
+  over media.
+-->
+{#snippet backdrop()}
+  {#await context.sellPreview then preview}
+    {@const mode = resolveMediaMode(preview)}
+    {@const clip = preview?.heroClip ?? null}
+    {@const still = preview?.heroImageUrl ?? clip?.posterUrl ?? null}
+    {#if mode === 'loop' && canPlay(preview)}
+      <!-- `loop` LOOPS here. Rendering the poster instead would silently demote
+           the author's video to a still, which is the exact failure the
+           plate-less watch-invitation was built to avoid — and a caught one: the
+           first version of this snippet rendered `still` for every mode, and
+           `HeroSection.svelte.test.ts` failed on `loop`. -->
+      <div class="hero__media hero__media--backdrop">
+        <HeroLoopVideo src={clip.playlistUrl} posterUrl={still} />
+        <span class="hero__scrim" aria-hidden="true"></span>
+      </div>
+    {:else if mode !== 'none' && still}
+      <div class="hero__media hero__media--backdrop">
+        <img class="hero__img" src={still} alt="" decoding="async" />
+        <span class="hero__scrim" aria-hidden="true"></span>
+      </div>
+    {/if}
+  {/await}
+{/snippet}
+
+<!--
   ONE `<h1>` PER PAGE, EVEN WHEN A PAGE HOLDS TWO HEROES.
 
   `duplicateSection()` clones a section with the same type, and the seeded golden
@@ -647,6 +733,10 @@
     </div>
     <div class="hero__vignette"></div>
   </div>
+
+  {#if bleedsBehind}
+    {@render backdrop()}
+  {/if}
 
   {#if composition === 'full-bleed' && showPlate}
     {@render plate()}
@@ -1234,7 +1324,23 @@
      composition owns: `none` is a valid `background-image` layer, so when the axis
      ships no scrim the floor is still there, and when it ships `bleed`'s the two
      stack. This is a gap in the axis model, reported rather than worked around. */
-  .hero[data-hero='full-bleed'] .hero__scrim {
+  /* `media: bleed` behind a plate-less composition (B5). The same backdrop
+     geometry `full-bleed` gives its plate, applied to a layer that only exists
+     when a still resolved. `padding` and `clip-path` are zeroed explicitly
+     rather than relying on `bleed`'s own `--jp-media-inset: 0px` /
+     `--jp-media-mask: none`, so this stays a backdrop even if a section ever
+     re-points those tokens. */
+  .hero__media--backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    aspect-ratio: auto;
+    border-radius: 0;
+    padding: 0;
+    clip-path: none;
+  }
+  .hero[data-hero='full-bleed'] .hero__scrim,
+  .hero__media--backdrop .hero__scrim {
     background-image: var(--jp-media-scrim),
       linear-gradient(
         to top,
