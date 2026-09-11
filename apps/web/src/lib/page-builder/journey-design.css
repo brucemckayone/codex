@@ -214,7 +214,17 @@
   --jp-media-radius: var(--radius-lg);
   --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
-  --jp-media-scrim: none;
+  /* `media: frame`'s scrim verbatim — `frame` is `SECTION_DESIGN_DEFAULTS.media`,
+     and the axis probe asserts this block resolves to whatever the DEFAULT
+     value's own rule emits. It used to be the keyword `none`, which made this
+     token unusable as one layer of a `background-image` list (contract A54's
+     mechanism); contract B5 replaced the four `none`s with real scrims, so the
+     token is now list-safe at every value it is declared at. */
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 46%
+  );
   --jp-media-mask: none;
 
   /* ── ROLE ALIASES — declared once, not per axis value ────────────────────
@@ -776,19 +786,76 @@
 }
 
 /* ═══════════════════ 9 · media ════════════════════════════════════════════
-   ASPECT RATIO AND SCRIM ARE COUPLED, and this is a known trap. Changing a
-   media box's `aspect-ratio` moves where an opaque scrim's gradient stops fall
-   relative to the text sitting on it, which silently changes that text's
-   contrast. `bleed` is the ONLY value shipping a scrim, and its 21:9 aspect and
-   62% stop are tuned together. Any future aspect change on `bleed` requires
-   re-measuring the text contrast over it — this is not a free parameter.
+   EVERY VALUE THAT HAS A MEDIA BOX SHIPS A REAL SCRIM (contract B5). Four of
+   the five were the keyword `none`, so every composition placing text over
+   media invented its own contrast floor — or had none at all. Two consequences
+   of that are gone with it: the axis token is now a legal `background-image`
+   LAYER at every value it is declared at (it could not be composed into a list
+   while it was a keyword — contract A54's mechanism), and `HeroSection`'s
+   `full-bleed` no longer carries the whole guarantee alone.
 
-   Consequence for compositions (research §5.1): any composition placing text
-   OVER media must use `bleed`, not `frame`. `frame` has no scrim.
+   ── THE SHAPE: A LEDGE AND A RAMP ─────────────────────────────────────────
+   Each scrim is an OPAQUE LEDGE at the bottom edge, then a linear ramp out to
+   nothing:
+
+     linear-gradient(to top, var(--jp-ink) <ledge>, transparent <ramp-end>)
+
+   The ledge is what makes the contrast MEASURABLE. `transparent` is
+   `rgba(0,0,0,0)` and CSS interpolates gradients premultiplied, so a stop pair
+   like this holds ONE colour and ramps only its alpha, 1 → 0. Over the ledge
+   the alpha is exactly 1, so the backdrop is `--jp-ink` — which is the section's
+   OWN surface colour, whose ratio against every text rung is already locked in
+   `04-contrast-baseline.md` at both poles and at all five `surface` values.
+   Text on the ledge is therefore safe BY CONSTRUCTION, over a photograph, over
+   the atmosphere layer, or over nothing, and needs no new contrast row.
+
+   ── WHY THE LEDGE IS A LENGTH AND THE RAMP IS A PERCENTAGE ────────────────
+   THE ASPECT ↔ SCRIM COUPLING is the known trap: a percentage stop moves in
+   pixels when `aspect-ratio` changes, so the text that sat in the opaque zone
+   silently climbs out of it. A ledge measured in `--space-*` cannot: it is the
+   same number of pixels on a 21:9 band and a 4:5 portrait. And if the box gets
+   short enough that the percentage ramp-end falls BELOW the ledge, CSS clamps
+   the later stop up to the earlier one — the scrim becomes a hard-edged opaque
+   band, which is the SAFE direction. `bleed` keeps its pure-percentage form
+   because it is Candlelit's value and must not move (see its rule).
+
+   ── MEASURED: HOW FAR UP THE RAMP THE FLOOR HOLDS ─────────────────────────
+   Above the ledge the alpha falls and the backdrop becomes part-photograph, so
+   the guarantee degrades. Measured (`journey-design.test.ts`, sRGB composite,
+   model calibrated to the browser-locked rows) as the alpha at which each rung
+   crosses its floor over the WORST possible underlay, and stated as the
+   fraction of the ramp above the ledge that still clears it:
+
+     rung                     floor   light      dark
+     --jp-heading (>=24px)    3.0     first 55%  first 49%
+     --jp-text                4.5     first 30%  first 24%
+     --jp-faint               4.5     first  5%  first  5%
+
+   The worst underlay is pure white or pure black, and those two bound EVERY
+   photograph and every brand-derived atmosphere exactly — relative luminance
+   is monotone in each sRGB channel, so the cube's extremes are the extremes of
+   the reachable range. A 140 608-colour sweep of the pickable brand cube
+   returns the identical thresholds, which the test asserts rather than assumes.
+
+   So: quiet text (`--jp-faint`) over media belongs ON THE LEDGE, and the ledge
+   is sized for it — one caption row at the largest `--jp-body-size` rung (24px)
+   plus its `--space-4` padding measures 47px against a 48px ledge.
 
    `--jp-media-mask` is a `clip-path` value. `mask` is an arch: a wide ellipse
    across the top two corners, the standard radius at the bottom two, expressed
    in percentages so it tracks the box rather than needing a raw px path(). */
+
+/* `bleed` — full-bleed: the media fills the section and the copy sits over it.
+   UNCHANGED, and deliberately the one value still spelled as a pure percentage
+   ramp with no ledge. It is Candlelit's value (`media: bleed` + `surface:
+   media`), its 21:9 aspect and 62% stop are tuned together, and two sections
+   re-read this exact token on a TEXT BLOCK's own box so the gradient grows with
+   the text (`.iv__meta[data-iv-meta='over']`, `.reel__lower[data-reel-at='over']`)
+   — a ledge in absolute length would become a hard-edged bar on a box that
+   short. Its guarantee comes from that re-read plus `full-bleed`'s own
+   composition floor, not from a ledge, and the test pins it as the exception.
+   Measured for the record at 1440px: the bottom 28.8% of the box (178px) clears
+   AA for `--jp-text` over the worst-case underlay. */
 [data-jp-media='bleed'] {
   --jp-media-radius: 0px;
   --jp-media-inset: 0px;
@@ -796,30 +863,77 @@
   --jp-media-scrim: linear-gradient(to top, var(--jp-ink), transparent 62%);
   --jp-media-mask: none;
 }
+/* `frame` — a poster panel, and `SECTION_DESIGN_DEFAULTS.media`, so this is the
+   scrim most pages get. A CAPTION LEDGE: the mid ramp-end of the set, because
+   16:9 is the mid box and a poster's text is a caption at its foot. This value
+   is also what the three stills-with-no-text consumers paint (`.guide__scrim`,
+   `.reel__scrim`, `.iv__scrim`), which is why the ramp is long and soft rather
+   than a second opaque band — depth at the bottom edge, per contract B1's
+   "characterful rather than uniform". */
 [data-jp-media='frame'] {
   --jp-media-radius: var(--radius-lg);
   --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 46%
+  );
   --jp-media-mask: none;
 }
+/* `mask` — an arched 4:5 portrait. The SHORTEST ramp fraction in the set and
+   the longest in pixels: at 4:5 the box is 1.8x as tall as a 16:9 one of the
+   same width, so 38% is more pixels than `frame`'s 46% and reads as a long,
+   soft fade rather than a band. The arch clips the top two corners, so the flat
+   bottom edge is the only edge text can sit on — which is where the ledge is. */
 [data-jp-media='mask'] {
   --jp-media-radius: var(--radius-xl);
   --jp-media-inset: 0px;
   --jp-media-aspect: 4 / 5;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 38%
+  );
   --jp-media-mask: inset(
     0 round 48% 48% var(--radius-xl) var(--radius-xl) / 34% 34%
       var(--radius-xl) var(--radius-xl)
   );
 }
+/* `inset` — a matted print. THE LEDGE READS THE MAT rather than re-spelling it:
+   the scrim covers the whole box (`inset: 0` at every consumer) while the image
+   is pushed in by `--jp-media-inset`, so the bottom `--space-12` of the box is
+   MAT, not photograph. A ledge of `--space-12` would land entirely on the mat
+   and protect nothing on the print. `calc(var(--jp-media-inset) + var(--space-12))`
+   clears the mat and then gives the same caption row every other value gets,
+   and it cannot drift if the mat is ever retuned. Over the mat the ink is the
+   surface's own colour, so that half of the ledge is invisible; what it paints
+   is a plinth under the print, which is the shortest ramp in the set (34%). */
 [data-jp-media='inset'] {
   --jp-media-radius: var(--radius-none);
   --jp-media-inset: var(--space-12);
   --jp-media-aspect: 3 / 2;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) calc(var(--jp-media-inset) + var(--space-12)),
+    transparent 34%
+  );
   --jp-media-mask: none;
 }
+/* `none` — THE ONE VALUE WITH NO SCRIM, and it is the absence of a media box
+   rather than an exemption from B5. Every consumer of `--jp-media-scrim` sits
+   inside a box this value switches off — `.hero__media`, `.guide__plate`
+   (`display: var(--jp-media-display)`), `.iv__media` / `.reel`'s figure (gated
+   in markup on `design.media === 'none'`) — and the two text-block copies are
+   gated on `design.media === 'bleed'`. A scrim declared here could not paint
+   anywhere, which is a write nothing reads.
+
+   Its text floor is therefore the section surface's own, not a scrim's: the
+   composition for `none` is `stage`, a headline stack over the atmosphere
+   layer, and `--jp-heading` / `--jp-text` / `--jp-faint` on `--jp-ink` are the
+   already-locked rows the ledge above borrows. The test pins the exception to
+   the presence of `--jp-media-display: none` so a sixth media value cannot
+   inherit it by omission. */
 [data-jp-media='none'] {
   --jp-media-display: none;
 }

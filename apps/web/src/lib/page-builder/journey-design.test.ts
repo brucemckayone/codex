@@ -145,6 +145,36 @@ const declarationsOf = (css: string, prop: string): string[] => {
   return out;
 };
 
+/**
+ * Substitute `var(--x)` for whatever `scope` declares `--x` as, repeatedly.
+ *
+ * WHY A GATE CANNOT COMPARE A DECLARATION TO A LITERAL. A custom property is an
+ * indirection: `--jp-media-scrim: var(--x)` with `--x: none` is `none` on the
+ * page and is NOT the string `none` in the stylesheet, so `value !== 'none'`
+ * passes and the check protects nothing. Anything asserting the SHAPE of a
+ * token's value has to resolve the chain first.
+ *
+ * Only tokens `scope` actually declares are substituted — a `var()` reaching
+ * outside it (`--space-12`, `--radius-lg`) is left in place, because the point
+ * is to see through a local alias, not to inline the design system.
+ */
+const resolveVars = (
+  value: string,
+  scope: Record<string, string>,
+  depth = 8
+): string => {
+  let out = value;
+  for (let i = 0; i < depth; i++) {
+    const next = out.replace(
+      /var\((--[a-z0-9-]+)\)/g,
+      (whole, token: string) => scope[token] ?? whole
+    );
+    if (next === out) return squash(out);
+    out = next;
+  }
+  throw new Error(`var() chain did not settle in ${depth} passes: ${value}`);
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 0. STYLESHEET INTEGRITY — the bug class that 500s SSR from a comment
 // ═══════════════════════════════════════════════════════════════════════════
@@ -485,6 +515,13 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-reveal-ease': 'var(--ease-smooth)',
   },
 
+  // EVERY value with a media box now ships a real scrim (contract B5). The four
+  // `none`s were the hole: any composition putting text over media invented its
+  // own floor, and the token could not be one layer of a `background-image`
+  // list while it was a keyword. The shape is an opaque `--jp-ink` LEDGE in an
+  // absolute length — so the aspect cannot move it — then a percentage ramp to
+  // `transparent`. See the `media scrim` describe below for the measurement.
+  // `bleed` is the pinned exception and is UNCHANGED: Candlelit's value.
   'media:bleed': {
     '--jp-media-radius': '0px',
     '--jp-media-inset': '0px',
@@ -497,24 +534,35 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-media-radius': 'var(--radius-lg)',
     '--jp-media-inset': '0px',
     '--jp-media-aspect': '16 / 9',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) var(--space-12), transparent 46% )',
     '--jp-media-mask': 'none',
   },
   'media:mask': {
     '--jp-media-radius': 'var(--radius-xl)',
     '--jp-media-inset': '0px',
     '--jp-media-aspect': '4 / 5',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) var(--space-12), transparent 38% )',
     '--jp-media-mask':
       'inset( 0 round 48% 48% var(--radius-xl) var(--radius-xl) / 34% 34% var(--radius-xl) var(--radius-xl) )',
   },
+  // The ledge READS the mat instead of re-spelling it: the scrim covers the
+  // whole box while the image is pushed in by `--jp-media-inset`, so a
+  // `--space-12` ledge would land entirely on the mat and protect nothing on
+  // the print.
   'media:inset': {
     '--jp-media-radius': 'var(--radius-none)',
     '--jp-media-inset': 'var(--space-12)',
     '--jp-media-aspect': '3 / 2',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) calc(var(--jp-media-inset) + var(--space-12)), transparent 34% )',
     '--jp-media-mask': 'none',
   },
+  // NO SCRIM, and it is the absence of a media box rather than an exemption:
+  // every consumer of `--jp-media-scrim` sits inside a box this value switches
+  // off. Pinned to `--jp-media-display: none` below so a sixth value cannot
+  // inherit the exception by omission.
   'media:none': { '--jp-media-display': 'none' },
 };
 
@@ -684,17 +732,51 @@ describe('journey-design.css — the accessibility floors that are structural', 
     }
   });
 
-  it('ships a scrim on media: bleed and on no other media value', () => {
-    // Aspect and scrim are coupled: `bleed`'s 21:9 and its 62% stop are tuned
-    // together, and any composition placing text over media must use `bleed`.
+  it('ships a real scrim on every media value that HAS a media box', () => {
+    // THE PRINCIPLE, restated (contract B5). The assertion this replaces was
+    // `scrim === 'none'` on four of five values, which is the wrong half of its
+    // own correct idea: the coupling it was protecting is real — `bleed`'s 21:9
+    // and its 62% stop are tuned together — but "only `bleed` may carry text"
+    // was the SYMPTOM of four values having no floor, not the rule. Each value
+    // now carries its own, measured in the `media scrim` describe below.
+    //
+    // RESOLVE THE var() CHAIN, never compare to the literal `none`. A custom
+    // property is an indirection, so `--jp-media-scrim: var(--x)` where `--x`
+    // is `none` would sail past a `!== 'none'` check.
+    const scrimless: string[] = [];
     for (const value of SECTION_DESIGN_VALUES.media) {
-      const scrim =
-        ruleFor(`[data-jp-media='${value}']`)?.declarations[
-          '--jp-media-scrim'
-        ] ?? 'none';
-      if (value === 'bleed') expect(scrim).toContain('linear-gradient');
-      else expect(scrim).toBe('none');
+      const decls = ruleFor(`[data-jp-media='${value}']`)?.declarations ?? {};
+      const scrim = resolveVars(decls['--jp-media-scrim'] ?? 'none', decls);
+      if (scrim === 'none' || scrim === '') {
+        scrimless.push(value);
+        continue;
+      }
+      expect(scrim, `media: ${value}`).toMatch(/^linear-gradient\(/);
+      // Both ends explicit: an opaque `--jp-ink` end is what makes the floor
+      // measurable, and a `transparent` end is what keeps it a scrim rather
+      // than a fill.
+      expect(scrim, `media: ${value} opaque end`).toContain('var(--jp-ink)');
+      expect(scrim, `media: ${value} open end`).toContain('transparent');
     }
+
+    // THE ONE EXCEPTION, pinned to the reason rather than to the name: `none`
+    // is the value that emits `--jp-media-display: none`, and every consumer of
+    // the scrim token sits inside a box that switches off — `.hero__media`,
+    // `.guide__plate`, and the figures `ReelSection` / `IntroVideoSection` gate
+    // in markup. A scrim there is a write nothing can read. Asserting the pair
+    // rather than the string means a sixth media value cannot inherit the
+    // exemption by forgetting a scrim.
+    const boxless = SECTION_DESIGN_VALUES.media.filter(
+      (value) =>
+        ruleFor(`[data-jp-media='${value}']`)?.declarations[
+          '--jp-media-display'
+        ] === 'none'
+    );
+    expect(scrimless).toEqual(boxless);
+    // Arithmetic, because a ratio without its magnitude says nothing: 5 values,
+    // 4 media boxes, 4 scrims, 1 value with no box.
+    expect(SECTION_DESIGN_VALUES.media).toHaveLength(5);
+    expect(scrimless).toHaveLength(1);
   });
 
   it('neutralises the reveal DISTANCE under reduced motion, above the axis rules', () => {
@@ -1212,6 +1294,544 @@ describe('the model matches the BROWSER on the surface axis', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 4b. THE MEDIA SCRIM — a measured floor at every media value (contract B5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * `fg` at `alpha` over `bg`, blended in GAMMA-ENCODED sRGB — the space the
+ * browser actually composites in, and the space the `--jp-sec-bg` figures above
+ * were read back from.
+ *
+ * THE SPACE IS THE WHOLE ANSWER, and the wrong one looks entirely plausible.
+ * 50% white over black is sRGB 127.5, relative luminance 0.2140, which is
+ * 5.28:1 against black. Blending the LINEAR values instead gives 0.5 and
+ * 11.00:1 — double, and still a number you would publish. The calibration test
+ * below asserts 5.28 and prints the 11.00 control, so the instrument cannot be
+ * quietly wrong about which space it is in.
+ *
+ * `mix` above is NOT this: it models `color-mix(in oklab, …)`, an opaque blend
+ * of two declared colours. This models one translucent layer over a backdrop.
+ */
+const linToSrgb = (c: number): number => {
+  const k = Math.min(1, Math.max(0, c));
+  return k <= 0.0031308 ? 12.92 * k : 1.055 * k ** (1 / 2.4) - 0.055;
+};
+const over = (fg: Oklab, bg: Oklab, alpha: number): Oklab => {
+  const f = oklabToLin(fg).map(linToSrgb);
+  const b = oklabToLin(bg).map(linToSrgb);
+  // Spelled as a tuple rather than `.map(…) as LinRgb`: a cast here would let a
+  // two- or four-element result through, and this is the one function every
+  // number below depends on.
+  const at = (i: number) => srgbToLin(f[i] * alpha + b[i] * (1 - alpha));
+  return linToOklab([at(0), at(1), at(2)]);
+};
+
+/** `--space-N` in px at a 16px root and `--brand-density-scale: 1`. */
+const spacePx = (token: string): number => {
+  const decl = declarationsOf(SPACING, token)[0];
+  const m = /^calc\(var\(--space-unit\) \* ([\d.]+)\)$/.exec(decl ?? '');
+  // Loudly, not leniently: a parser that returns 0 for something it does not
+  // understand is an instrument that reports a comfortable number forever.
+  if (!m) throw new Error(`cannot resolve ${token} from spacing.css: ${decl}`);
+  return Number(m[1]) * 4;
+};
+
+/** A gradient stop position, as `px + pct * boxHeight`. */
+interface Pos {
+  px: number;
+  pct: number;
+}
+const posAt = (p: Pos, boxPx: number): number => p.px + p.pct * boxPx;
+
+/** Split on commas at bracket depth zero. */
+const splitTopLevel = (value: string): string[] => {
+  const out: string[] = [];
+  let depth = 0;
+  let buf = '';
+  for (const ch of value) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      out.push(buf);
+      buf = '';
+    } else buf += ch;
+  }
+  out.push(buf);
+  return out;
+};
+
+const parsePos = (raw: string, scope: Record<string, string>): Pos => {
+  const v = resolveVars(raw, scope);
+  const calc = /^calc\((.+)\)$/.exec(v);
+  if (calc)
+    return calc[1]
+      .split('+')
+      .map((t) => parsePos(t.trim(), scope))
+      .reduce((a, b) => ({ px: a.px + b.px, pct: a.pct + b.pct }), {
+        px: 0,
+        pct: 0,
+      });
+  const pct = /^([\d.]+)%$/.exec(v);
+  if (pct) return { px: 0, pct: Number(pct[1]) / 100 };
+  const space = /^var\((--space-[\d-]+)\)$/.exec(v);
+  if (space) return { px: spacePx(space[1]), pct: 0 };
+  const px = /^([\d.]+)px$/.exec(v);
+  if (px) return { px: Number(px[1]), pct: 0 };
+  throw new Error(`unsupported gradient stop position: ${raw} → ${v}`);
+};
+
+interface ScrimStop {
+  alpha: number;
+  pos: Pos | null;
+}
+
+/**
+ * A `--jp-media-scrim` value, as alpha-vs-height.
+ *
+ * `transparent` is `rgba(0,0,0,0)` and CSS interpolates gradients PREMULTIPLIED,
+ * so `var(--jp-ink) → transparent` holds one colour and ramps only its alpha
+ * from 1 to 0. That is what lets a two-stop scrim be modelled as an alpha
+ * profile over `--jp-ink` rather than as a colour ramp — and why the naive
+ * un-premultiplied reading (a fade through mid-grey) would be wrong.
+ *
+ * THROWS on anything it does not recognise. A scrim rewritten in a shape this
+ * cannot read must fail the suite rather than be scored as safe.
+ */
+const parseScrim = (
+  value: string,
+  scope: Record<string, string>
+): ScrimStop[] => {
+  const m = /^linear-gradient\(\s*to top,\s*(.+)\)$/.exec(squash(value));
+  if (!m) throw new Error(`not a bottom-anchored scrim: ${value}`);
+  return splitTopLevel(m[1]).map((raw) => {
+    const t = raw.trim();
+    const colour = /^(var\(--jp-ink\)|transparent)/.exec(t);
+    if (!colour) throw new Error(`unsupported scrim colour: ${t}`);
+    const rest = t.slice(colour[0].length).trim();
+    return {
+      alpha: colour[0] === 'transparent' ? 0 : 1,
+      pos: rest ? parsePos(rest, scope) : null,
+    };
+  });
+};
+
+/** Alpha `yPx` above the box's BOTTOM edge, in a box `boxPx` tall. */
+const alphaAt = (stops: ScrimStop[], yPx: number, boxPx: number): number => {
+  let prev = 0;
+  const pts = stops.map((s, i) => {
+    const raw = s.pos ? posAt(s.pos, boxPx) : i === 0 ? 0 : boxPx;
+    // CSS clamps a stop up to the largest preceding position. That is exactly
+    // what makes a percentage ramp-end above an absolute ledge SAFE on a short
+    // box: the ramp collapses into a hard edge instead of cutting into the
+    // ledge.
+    const at = Math.max(prev, raw);
+    prev = at;
+    return { alpha: s.alpha, at };
+  });
+  if (yPx <= pts[0].at) return pts[0].alpha;
+  for (let i = 1; i < pts.length; i++) {
+    if (yPx <= pts[i].at) {
+      const span = pts[i].at - pts[i - 1].at;
+      if (span === 0) return pts[i].alpha;
+      const t = (yPx - pts[i - 1].at) / span;
+      return pts[i - 1].alpha + t * (pts[i].alpha - pts[i - 1].alpha);
+    }
+  }
+  return pts[pts.length - 1].alpha;
+};
+
+/** The lowest alpha at which `fg` still clears `floor` over `underlay`. */
+const alphaFloor = (
+  fg: Oklab,
+  ink: Oklab,
+  underlay: Oklab,
+  floor: number
+): number => {
+  if (ratio(fg, over(ink, underlay, 0)) >= floor) return 0;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 40; i++) {
+    const m = (lo + hi) / 2;
+    if (ratio(fg, over(ink, underlay, m)) >= floor) hi = m;
+    else lo = m;
+  }
+  return hi;
+};
+
+const SCRIM_POLES = { light: '#F6EFE6', dark: '#200000' } as const;
+const SCRIM_EMBER = '#552e8e';
+
+/** The section's own ink at each `surface` value — the `sweep()` mapping. */
+const inkForSurface = (poleA: Oklab, surface: string): Oklab => {
+  const poleB = autoContrast(poleA, 0.62, 0.96, 0.25);
+  const map: Record<string, Oklab> = {
+    bare: poleA,
+    tint: mix(poleA, poleB, 0.94),
+    panel: mix(poleA, poleB, 0.88),
+    invert: poleB,
+    media: poleA,
+  };
+  return map[surface];
+};
+
+interface ParsedScrim {
+  value: string;
+  stops: ScrimStop[];
+  decls: Record<string, string>;
+}
+
+/**
+ * Media values whose rule declares a scrim, with it parsed.
+ *
+ * LAZY ON PURPOSE. `parseScrim` throws on a shape it cannot model, which is the
+ * right behaviour — but at module scope a throw takes the whole FILE down and
+ * vitest reports `0 tests`, which names no gate and hides the 142 that still
+ * pass. Falsified: reverting one value to the keyword `none` produced exactly
+ * that, so the call moved inside the tests.
+ */
+let scrimCache: ParsedScrim[] | null = null;
+const scrims = (): ParsedScrim[] => {
+  if (scrimCache) return scrimCache;
+  scrimCache = SECTION_DESIGN_VALUES.media.flatMap((value) => {
+    const decls = ruleFor(`[data-jp-media='${value}']`)?.declarations ?? {};
+    const raw = decls['--jp-media-scrim'];
+    if (!raw) return [];
+    return [{ value: String(value), stops: parseScrim(raw, decls), decls }];
+  });
+  return scrimCache;
+};
+
+describe('the media scrim — one instrument, calibrated first', () => {
+  it('reproduces known pairs, and DISCRIMINATES the blend space', () => {
+    const white = hex('#ffffff');
+    const black = hex('#000000');
+    // The pair a previous session's regex scored as 1.01:1.
+    expect(ratio(white, black)).toBeCloseTo(21, 2);
+    expect(ratio(black, white)).toBeCloseTo(21, 2);
+    // alpha 1 IS the foreground, alpha 0 IS the backdrop — the round trip
+    // through sRGB must not move either end.
+    expect(ratio(over(white, black, 1), black)).toBeCloseTo(21, 2);
+    expect(ratio(over(white, black, 0), black)).toBeCloseTo(1, 3);
+    // THE DISCRIMINATING PROBE. sRGB blend → 5.28; linear blend → 11.00. A
+    // uniform or plausible-looking answer across the rungs would be the
+    // instrument talking, so this pins the one number that separates them.
+    expect(ratio(over(white, black, 0.5), black)).toBeCloseTo(5.28, 1);
+    const linearBlend = (relLum([0.5, 0.5, 0.5]) + 0.05) / 0.05;
+    expect(linearBlend).toBeCloseTo(11.0, 1);
+  });
+
+  it('leaves the browser-locked ink rows untouched at alpha 1', () => {
+    // The control: if compositing at alpha 1 moved these, every number below
+    // would be measuring a page that does not exist.
+    for (const [pole, bg, heading] of [
+      ['light', SCRIM_POLES.light, 18.38],
+      ['dark', SCRIM_POLES.dark, 17.51],
+    ] as [string, string, number][]) {
+      const l = ladderFrom(hex(bg), hex(SCRIM_EMBER));
+      expect(
+        ratio(l.heading, over(l.ink, hex('#ff00ff'), 1)),
+        pole
+      ).toBeCloseTo(heading, 1);
+    }
+  });
+
+  it('reads every shipped scrim, and refuses a shape it cannot model', () => {
+    // Guards the guard. 4 of the 5 media values ship a scrim; `none` has no
+    // media box (see the axis-rule test above), so 4 is the whole set.
+    expect(scrims().map((s) => s.value)).toEqual([
+      'bleed',
+      'frame',
+      'mask',
+      'inset',
+    ]);
+    for (const { value, stops } of scrims()) {
+      expect(stops.length, value).toBeGreaterThanOrEqual(2);
+      expect(stops[0].alpha, `${value} bottom edge`).toBe(1);
+      expect(stops[stops.length - 1].alpha, `${value} top end`).toBe(0);
+    }
+    // A radial, a `to bottom`, an unknown colour or an unresolvable stop must
+    // THROW rather than score 0 and look safe.
+    expect(() =>
+      parseScrim('radial-gradient(var(--jp-ink), transparent)', {})
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to bottom, var(--jp-ink), transparent 62%)',
+        {}
+      )
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to top, var(--jp-ember), transparent 62%)',
+        {}
+      )
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to top, var(--jp-ink) 3vh, transparent 62%)',
+        {}
+      )
+    ).toThrow();
+  });
+});
+
+describe('the media scrim — the measured floor (contract B5)', () => {
+  /**
+   * THE LEDGE IS THE GUARANTEE, and it is safe BY CONSTRUCTION rather than by
+   * sampling. Over an opaque stop the backdrop is exactly `--jp-ink` — the
+   * section's own surface colour — so the ratio is the row
+   * `04-contrast-baseline.md` already locked, at every `surface` value and both
+   * poles, whatever the photograph underneath. A flat-background contrast sweep
+   * cannot see a gradient, so a scrim that needed sampling to be safe would be
+   * a hole in that document.
+   */
+  it('gives every scrim an opaque LEDGE whose contrast is an already-locked row', () => {
+    const rows: string[] = [];
+    let worst = Infinity;
+    let worstAt = '';
+    for (const [pole, bg] of Object.entries(SCRIM_POLES)) {
+      for (const surface of SECTION_DESIGN_VALUES.surface) {
+        const l = ladderFrom(
+          inkForSurface(hex(bg), String(surface)),
+          hex(SCRIM_EMBER)
+        );
+        for (const { value, stops } of scrims()) {
+          // Every scrim's bottom edge is fully opaque, at every box height.
+          for (const boxPx of [120, 405, 1800]) {
+            expect(alphaAt(stops, 0, boxPx), `${value} @${boxPx}`).toBe(1);
+          }
+          // `--jp-faint` is the lowest rung any section paints, so it is the
+          // binding one; the heading rows are 13.09 and up.
+          for (const rung of ['heading', 'text', 'dim', 'faint'] as const) {
+            const r = ratio(l[rung], l.ink);
+            if (r < worst) {
+              worst = r;
+              worstAt = `${pole}/${surface}/${rung}`;
+            }
+            expect(
+              r,
+              `${pole} ${surface} ${value} ${rung}`
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+        rows.push(`${pole} ${surface} ${ratio(l.faint, l.ink).toFixed(2)}`);
+      }
+    }
+    // The published worst cell, so a future palette change that erodes it fails
+    // here instead of drifting: `--jp-faint` on `surface: invert` in light.
+    expect(worst, `worst ledge cell (${worstAt})`).toBeCloseTo(4.85, 1);
+    expect(worstAt).toBe('light/invert/faint');
+    expect(rows).toHaveLength(10);
+  });
+
+  /**
+   * ABOVE THE LEDGE THE GUARANTEE DEGRADES, and this is the bound on the claim.
+   * The alpha falls linearly, so the backdrop becomes part photograph, and the
+   * worst underlay is whichever sRGB extreme sits closest to the text.
+   */
+  it('measures how far up the ramp each rung holds its floor, at BOTH poles', () => {
+    const PUBLISHED: Record<string, Record<string, number>> = {
+      // rung → pole → alpha at which the floor is crossed. Quoted in
+      // `journey-design.css`'s media block as (1 - alpha) of the ramp.
+      heading: { light: 0.452, dark: 0.511 }, // >= 24px, so a 3.0 floor
+      text: { light: 0.701, dark: 0.76 },
+      faint: { light: 0.951, dark: 0.945 },
+    };
+    for (const [rung, poles] of Object.entries(PUBLISHED)) {
+      const floor = rung === 'heading' ? 3.0 : 4.5;
+      for (const [pole, want] of Object.entries(poles)) {
+        let worst = 0;
+        for (const surface of SECTION_DESIGN_VALUES.surface) {
+          const l = ladderFrom(
+            inkForSurface(
+              hex(SCRIM_POLES[pole as 'light' | 'dark']),
+              String(surface)
+            ),
+            hex(SCRIM_EMBER)
+          );
+          for (const u of [hex('#ffffff'), hex('#000000')]) {
+            worst = Math.max(
+              worst,
+              alphaFloor(
+                l[rung as 'heading' | 'text' | 'faint'],
+                l.ink,
+                u,
+                floor
+              )
+            );
+          }
+        }
+        expect(worst, `${rung} ${pole}`).toBeCloseTo(want, 2);
+      }
+    }
+    // AND THE CONSEQUENCE, stated as a rule rather than a number: quiet text
+    // over media belongs ON the ledge. 0.95 is 5% of the ramp.
+    expect(PUBLISHED.faint.light).toBeGreaterThan(0.9);
+    expect(PUBLISHED.faint.dark).toBeGreaterThan(0.9);
+  });
+
+  it('is bounded by the two sRGB extremes — a brand/photo sweep finds nothing more', () => {
+    // WHY THE CHEAP BOUND IS THE EXACT ONE. Relative luminance is monotone in
+    // every sRGB channel, so over the whole cube the reachable luminance of
+    // `blend(ink, U, alpha)` is bounded by U = white and U = black. Those two
+    // therefore bound EVERY photograph and every brand-derived atmosphere
+    // exactly — measured: a 140 608-colour stride-5 sweep of the pickable brand
+    // cube (the `BRAND_GRID` instrument) returns alpha* 0.452 / 0.701 / 0.951
+    // light and 0.511 / 0.760 / 0.945 dark, identical to the two extremes, in
+    // 111s. This asserts the ENVELOPE property over a coarse grid instead, so
+    // the claim is checked every run rather than trusted from a comment.
+    const l = ladderFrom(hex(SCRIM_POLES.light), hex(SCRIM_EMBER));
+    const white = hex('#ffffff');
+    const black = hex('#000000');
+    let checked = 0;
+    for (let r = 0; r < 256; r += 51)
+      for (let g = 0; g < 256; g += 51)
+        for (let b = 0; b < 256; b += 51) {
+          const u = hex(
+            `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`
+          );
+          for (const alpha of [0.2, 0.5, 0.8]) {
+            const bound = Math.min(
+              ratio(l.text, over(l.ink, white, alpha)),
+              ratio(l.text, over(l.ink, black, alpha))
+            );
+            expect(
+              ratio(l.text, over(l.ink, u, alpha)) + 1e-6,
+              `#${r},${g},${b} @${alpha}`
+            ).toBeGreaterThanOrEqual(bound);
+            checked += 1;
+          }
+        }
+    // Non-vacuous: 6^3 underlays x 3 alphas.
+    expect(checked).toBe(648);
+  });
+
+  /**
+   * THE ASPECT ↔ SCRIM COUPLING, dissolved for the three new values and PINNED
+   * for `bleed`. A percentage stop moves in pixels when `aspect-ratio` changes,
+   * which is how text that sat in the opaque zone silently climbs out of it.
+   */
+  it('measures the ledge in a LENGTH, so no aspect can move it', () => {
+    const SHORT = 120;
+    const TALL = 1800;
+    for (const { value, stops, decls } of scrims()) {
+      const ledge = stops[0].pos;
+      if (value === 'bleed') {
+        // THE PINNED EXCEPTION. `bleed` is Candlelit's value, its 21:9 aspect
+        // and 62% stop are tuned together, and two sections re-read this token
+        // on a TEXT BLOCK's own box so the gradient grows with the text — a
+        // ledge in absolute length would become a hard-edged bar on a box that
+        // short. Its floor comes from that re-read plus `full-bleed`'s own
+        // composition scrim, not from a ledge. Asserted as "has no ledge" so
+        // the exception is visible rather than implied.
+        expect(ledge, 'bleed ledge').toBeNull();
+        continue;
+      }
+      expect(ledge, `${value} ledge`).not.toBeNull();
+      if (!ledge) continue;
+      // A LENGTH: identical px at a 120px box and an 1800px one.
+      expect(posAt(ledge, SHORT), `${value} ledge @${SHORT}`).toBe(
+        posAt(ledge, TALL)
+      );
+      expect(ledge.pct, `${value} ledge is aspect-free`).toBe(0);
+      // AND IT CLEARS THE MAT. The scrim covers the whole box (`inset: 0` at
+      // every consumer) while the image is pushed in by `--jp-media-inset`, so
+      // at `media: inset` the bottom 48px of the box is MAT, not photograph: a
+      // bare `--space-12` ledge there would land entirely on the mat and
+      // protect nothing on the print. The floor is therefore the mat PLUS one
+      // caption row — 48px, which is a 24px line at the largest
+      // `--jp-body-size` rung plus its `--space-4` padding, measured at 47px.
+      const matPx = posAt(
+        parsePos(decls['--jp-media-inset'] ?? '0px', {}),
+        TALL
+      );
+      expect(
+        posAt(ledge, TALL) - matPx,
+        `${value} ledge above its ${matPx}px mat`
+      ).toBeGreaterThanOrEqual(48);
+      // And the whole ledge is opaque, at every box height.
+      for (const boxPx of [SHORT, 405, TALL]) {
+        expect(
+          alphaAt(stops, posAt(ledge, boxPx), boxPx),
+          `${value} top of ledge @${boxPx}`
+        ).toBe(1);
+      }
+    }
+    // DISCRIMINATING: `bleed`'s pure-percentage ramp really does move with the
+    // box, which is the property the other three no longer have.
+    const bleed = scrims().find((s) => s.value === 'bleed');
+    if (!bleed) throw new Error('bleed scrim missing');
+    expect(alphaAt(bleed.stops, 40, SHORT)).toBeLessThan(
+      alphaAt(bleed.stops, 40, TALL)
+    );
+  });
+
+  it('clamps a short box in the SAFE direction — a hard edge, never a thinner ledge', () => {
+    // A percentage ramp-end below an absolute ledge is the one case where the
+    // two spellings collide. CSS moves the later stop UP to the earlier one, so
+    // the scrim becomes fully opaque to the ledge and transparent above it —
+    // more protection, not less. Checked at a box so short that every new
+    // value's ramp-end falls under its ledge.
+    for (const { value, stops } of scrims()) {
+      if (value === 'bleed') continue;
+      const ledgePx = posAt(stops[0].pos ?? { px: 0, pct: 0 }, 100);
+      expect(alphaAt(stops, ledgePx, 100), `${value} ledge @100`).toBe(1);
+      expect(alphaAt(stops, ledgePx - 1, 100), `${value} inside @100`).toBe(1);
+      expect(alphaAt(stops, ledgePx + 1, 100), `${value} above @100`).toBe(0);
+    }
+  });
+
+  it('cannot move Candlelit — media: bleed and surface: media are byte-identical', () => {
+    // VERIFIED, NOT ASSERTED (contract: "what must NOT move"). Candlelit is
+    // `media: bleed` + `surface: media`, and this work changed the `media`
+    // axis's DEFAULT as well as three of its values. Two mechanisms keep it
+    // out of Candlelit and both are checked: `bleed` declares its own scrim, so
+    // the `:where(.jp-sec)` default (specificity 0) is shadowed; and neither of
+    // the two rules' declaration sets moved at all.
+    expect(ruleFor("[data-jp-media='bleed']")?.declarations).toEqual({
+      '--jp-media-radius': '0px',
+      '--jp-media-inset': '0px',
+      '--jp-media-aspect': '21 / 9',
+      '--jp-media-scrim':
+        'linear-gradient(to top, var(--jp-ink), transparent 62%)',
+      '--jp-media-mask': 'none',
+    });
+    expect(ruleFor("[data-jp-surface='media']")?.declarations).toEqual({
+      '--jp-sec-bg': 'transparent',
+      '--jp-sec-atmos': '1',
+    });
+    // The shadowing half: the default differs from `bleed`'s, so if `bleed`
+    // ever stopped declaring its own the change would be VISIBLE here.
+    const fallback =
+      ruleFor(':where(.jp-sec)')?.declarations['--jp-media-scrim'];
+    expect(fallback).not.toBe(
+      'linear-gradient(to top, var(--jp-ink), transparent 62%)'
+    );
+    expect(
+      ruleFor("[data-jp-media='bleed']")?.declarations['--jp-media-scrim']
+    ).toBeDefined();
+  });
+
+  it('measures bleed for the record, without touching it', () => {
+    // `bleed`'s guarantee is a percentage ramp, so it is stated as a fraction
+    // of the box: body text clears AA over the worst-case underlay for the
+    // bottom 28.8% — 178px of the 617px box a 1440px-wide 21:9 band makes.
+    const bleed = scrims().find((s) => s.value === 'bleed');
+    if (!bleed) throw new Error('bleed scrim missing');
+    const boxPx = 1440 / (21 / 9);
+    const l = ladderFrom(hex(SCRIM_POLES.light), hex(SCRIM_EMBER));
+    const alphaStar = alphaFloor(l.text, l.ink, hex('#000000'), 4.5);
+    let top = 0;
+    while (top < boxPx && alphaAt(bleed.stops, top + 1, boxPx) >= alphaStar) {
+      top += 1;
+    }
+    expect(boxPx).toBeCloseTo(617, 0);
+    expect(top / boxPx).toBeCloseTo(0.288, 2);
+    expect(top).toBeCloseTo(178, -1);
+  });
+});
+
 describe('surface: invert — the two-pole refactor (research §2.4)', () => {
   it('declares both poles from the ONE input, so neither reads what invert redefines', () => {
     const poleA = declarationsOf(PALETTE, '--jp-pole-a');
@@ -1703,21 +2323,24 @@ const KNOWN_VIOLATIONS: {
   token: string;
   bead: string;
 }[] = [
-  {
-    // `background-image: var(--jp-media-scrim), linear-gradient(…)`. The scrim
-    // is a real gradient at `media: bleed` — which is Candlelit — so this
-    // WORKS on every published page today. At the other four media values the
-    // token is `none`, the whole list goes invalid, and the second gradient
-    // disappears along with it. Not fixed here because the honest fixes are
-    // either restructuring the layers or making the axis token list-safe
-    // (a transparent gradient instead of `none`), and the latter changes the
-    // `media` axis's pinned semantics — a design-system decision, not a
-    // drive-by.
-    file: 'HeroSection.svelte',
-    prop: 'background-image',
-    token: '--jp-media-scrim',
-    bead: 'Codex-3kqqp',
-  },
+  // EMPTIED by contract B5, and the entry is quoted here because the fix is the
+  // one its own reason named. It read:
+  //
+  //   HeroSection.svelte — `background-image: var(--jp-media-scrim),
+  //   linear-gradient(…)`. The scrim is a real gradient at `media: bleed`, so
+  //   this WORKS on every published page today. At the other four media values
+  //   the token is `none`, the whole list goes invalid, and the second gradient
+  //   disappears along with it. Not fixed here because the honest fixes are
+  //   either restructuring the layers or making the axis token list-safe (a
+  //   transparent gradient instead of `none`), and the latter changes the
+  //   `media` axis's pinned semantics — a design-system decision, not a
+  //   drive-by.  (Codex-3kqqp)
+  //
+  // B5 IS that decision: every media value with a box now ships a real
+  // gradient, so `--jp-media-scrim` is no longer keyword-valued and the hero's
+  // list is valid at every value. The declaration was not touched — the token
+  // it composes was. The list is asserted EMPTY below, so if the scrim ever
+  // goes back to a keyword the hero's composed layer fails loudly.
 ];
 
 const isKnown = (d: Declaration, token: string): boolean =>
@@ -1731,7 +2354,12 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     // vacuously and the whole file stops protecting anything.
     expect(KEYWORD_VALUED_TOKENS.length).toBeGreaterThan(0);
     expect(KEYWORD_VALUED_TOKENS).toContain('--jp-edge-shadow');
-    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-media-scrim');
+    // `--jp-media-mask` replaces `--jp-media-scrim` as the media family's
+    // keyword-valued member: the scrim is a real gradient at every value that
+    // declares it (contract B5), so it LEFT this set — which is the point, and
+    // is asserted rather than left to be noticed.
+    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-media-mask');
+    expect(KEYWORD_VALUED_TOKENS).not.toContain('--jp-media-scrim');
     expect(ALL_DECLARATIONS.length).toBeGreaterThan(200);
   });
 
@@ -1771,10 +2399,11 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps the known-violation list from growing silently', () => {
-    // One entry, and it is the pre-existing HeroSection background-image list.
+  it('keeps the known-violation list EMPTY', () => {
+    // It was one entry — the HeroSection `background-image` list, fixed by
+    // contract B5 making `--jp-media-scrim` a real gradient at every value.
     // If you are adding to this, fix the declaration instead.
-    expect(KNOWN_VIOLATIONS).toHaveLength(1);
+    expect(KNOWN_VIOLATIONS).toHaveLength(0);
   });
 });
 
