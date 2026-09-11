@@ -1139,7 +1139,7 @@ export const SECTION_DESIGN_VALUES: {
   density: ['compact', 'regular', 'airy', 'vast'],
   surface: ['bare', 'tint', 'panel', 'invert', 'media'],
   edge: ['none', 'hairline', 'soft', 'heavy', 'offset'],
-  align: ['start', 'center'],
+  align: ['start', 'center', 'end'],
   type: ['restrained', 'balanced', 'expressive', 'monumental'],
   accent: ['text', 'fill', 'edge', 'glow', 'none'],
   motion: ['none', 'fade', 'rise', 'stagger', 'drift'],

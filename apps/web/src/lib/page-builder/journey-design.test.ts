@@ -378,6 +378,14 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-text-align': 'center',
     '--jp-measure-margin': 'auto',
   },
+  // The axis's first ASYMMETRIC value (contract B4). `--jp-text-align` stays
+  // `left` on purpose — the column's POSITION moves, its ragged edge does not.
+  // `auto 0` is the only two-value inline pair on this axis.
+  'align:end': {
+    '--jp-align': 'end',
+    '--jp-text-align': 'left',
+    '--jp-measure-margin': 'auto 0',
+  },
 
   'type:restrained': {
     '--jp-eyebrow-size': 'var(--text-xs)',
@@ -573,15 +581,85 @@ const ALL_AXIS_VALUES: { axis: SectionDesignAxis; value: string }[] =
   );
 
 describe('journey-design.css — the axis probe', () => {
-  it('covers all 39 axis values and nothing else', () => {
-    // 4 width + 4 density + 5 surface + 5 edge + 2 align + 4 type + 5 accent +
+  it('covers all 40 axis values and nothing else', () => {
+    // 4 width + 4 density + 5 surface + 5 edge + 3 align + 4 type + 5 accent +
     // 5 motion + 5 media. Research §2.1 says "38 CSS rules"; the enums it
     // defines in §2.2 sum to 39, so the doc's total is one short of its own
-    // table. 39 is the number.
-    expect(ALL_AXIS_VALUES).toHaveLength(39);
+    // table. It was 39 until `align: end` — contract B4's first asymmetric
+    // value, which the axis previously could not express at all (it shipped
+    // `start` and `center` only). 40 is the number.
+    expect(ALL_AXIS_VALUES).toHaveLength(40);
     expect(Object.keys(AXIS_SPEC).sort()).toEqual(
       ALL_AXIS_VALUES.map(({ axis, value }) => `${axis}:${value}`).sort()
     );
+  });
+
+  it('lets no MULTI-VALUE axis token reach a shorthand consumer (Codex-3kqqp)', () => {
+    // THE CLASS, and it has shipped to published pages twice: an axis token
+    // whose VALUE SHAPE is legal on its own but changes a shorthand's meaning
+    // when substituted into it. The CSS stays parseable, nothing warns, and the
+    // declaration quietly does something else.
+    //
+    // `align: end` is the first value to give any axis token a two-value form
+    // (`--jp-measure-margin: auto 0`). Of that token's 22 consumers, 21 were
+    // already `margin-inline: var(…)` — where `auto 0` means exactly
+    // "start auto, end 0" — and ONE was `margin: 0 var(…)` in `MapSection`,
+    // where it expands to `margin: 0 auto 0`: top 0, INLINE AUTO, bottom 0.
+    // Centred. The one asymmetric value would have been the only value it
+    // broke, and only in one section.
+    //
+    // So: for every axis token that any value declares with a space-separated
+    // value, no consumer may substitute it into a shorthand property.
+    const MULTI = new Set<string>();
+    for (const spec of Object.values(AXIS_SPEC))
+      for (const [prop, value] of Object.entries(spec)) {
+        // A bare space at bracket depth zero = more than one component value.
+        let depth = 0;
+        for (const ch of value) {
+          if (ch === '(') depth += 1;
+          else if (ch === ')') depth -= 1;
+          else if (ch === ' ' && depth === 0) {
+            MULTI.add(prop);
+            break;
+          }
+        }
+      }
+    // Non-vacuous: this must actually be watching something.
+    expect(MULTI.has('--jp-measure-margin'), 'the two-value token').toBe(true);
+
+    // THE HAZARD IS PARTIAL SUBSTITUTION, NOT SHORTHANDS AS SUCH. The first
+    // version of this gate flagged 47 sites, all of them
+    // `background: var(--jp-sec-bg)` — contract B1's DELIBERATE pattern, where
+    // the token IS the shorthand's entire value and carries its gradient layers
+    // on purpose. That is safe: substituting a whole value cannot change the
+    // component count. The defect is a token used as ONE COMPONENT beside
+    // others (`margin: 0 var(--x)`), where a second component silently
+    // re-interprets the shorthand. The implausible count is what caught it.
+    const SHORTHAND =
+      /(?:^|[;{\s])(margin|padding|inset|border|border-width|border-color|background|font|gap|transition|animation|box-shadow)\s*:\s*([^;}]*)/g;
+
+    const offenders: string[] = [];
+    for (const prop of MULTI)
+      for (const { file, css } of SECTION_SOURCES.concat([
+        { file: 'journey-sections-shared.css', css: SHARED },
+        { file: 'journey-design.css', css: DESIGN },
+      ])) {
+        for (const m of stripComments(css).matchAll(SHORTHAND)) {
+          const value = squash(m[2]);
+          if (!value.includes(`var(${prop}`)) continue;
+          // Safe iff the token is the WHOLE value — optionally with its own
+          // fallback, which lives inside the parens and cannot leak out.
+          if (new RegExp(`^var\\(\\s*${prop}\\s*(?:,[^]*)?\\)$`).test(value))
+            continue;
+          offenders.push(`${file}: ${m[1]}: ${value}`);
+        }
+      }
+    expect(
+      offenders,
+      'multi-value axis token as ONE COMPONENT of a shorthand'
+    ).toEqual([]);
+    // Guards the guard: an empty source set would pass trivially.
+    expect(SECTION_SOURCES).toHaveLength(11);
   });
 
   it.each(

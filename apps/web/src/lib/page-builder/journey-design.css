@@ -562,6 +562,34 @@
   --jp-text-align: center;
   --jp-measure-margin: auto;
 }
+/* `end` — THE AXIS'S FIRST ASYMMETRIC VALUE (contract B4).
+   MEASURED cause for it: `align` shipped exactly two values, `start` and
+   `center`, so B4's "offset columns, deliberate overlap, full-bleed elements
+   crossing a column" had nowhere to attach — the axis could not express
+   asymmetry at all. And three of the eight looks (Plain Facts, The Syllabus,
+   Signal) sat at IDENTICAL `align` + `width` + `surface` coordinates, on
+   `panel`, the flattest surface in the set, leaving `type` to carry all the
+   differentiation for three looks.
+
+   THE BLOCK MOVES, THE TEXT DOES NOT. `--jp-text-align` stays `left`: a
+   right-aligned body column is a readability regression, and the asymmetry
+   being bought here is the column's POSITION in the section, not its ragged
+   edge. So this is `start`'s mirror for placement and its twin for reading.
+
+   `auto 0` is the whole mechanism — `margin-inline-start: auto` absorbs the
+   free space a `max-width: var(--jp-measure)` block leaves, so the column sits
+   against the inline end. It is the only value of this axis with a TWO-VALUE
+   inline pair, which is why `MapSection`'s lone `margin: 0 var(…)` shorthand
+   had to become longhand first (`Codex-3kqqp`): there it would have expanded to
+   `margin: 0 auto 0` and silently centred.
+
+   Cannot reach Candlelit, which is `align: center` — so, like the `--jp-cta-*`
+   seam, this needs no compounded exclusion selector. */
+[data-jp-align='end'] {
+  --jp-align: end;
+  --jp-text-align: left;
+  --jp-measure-margin: auto 0;
+}
 
 /* ═══════════════════ 6 · type ═════════════════════════════════════════════
    The SCALE, not the face. Face and weight come from `--brand-font-heading` and

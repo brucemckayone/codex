@@ -1598,7 +1598,16 @@
     display: grid;
     gap: calc(var(--space-8) * var(--jp-rhythm));
     max-width: var(--jp-measure);
-    margin: 0 var(--jp-measure-margin);
+    /* LONGHAND, and the only consumer that was not (`Codex-3kqqp`). This was
+       `margin: 0 var(--jp-measure-margin)`, the one shorthand among the 22
+       consumers of that token. `align: end` gives the token a TWO-VALUE inline
+       pair (`auto 0`), which in that shorthand expands to `margin: 0 auto 0`
+       — top 0, inline auto, bottom 0. Valid CSS, silently CENTRED, and the one
+       asymmetric value would have been the only one it broke. Same class as
+       this file's own `max(var(--jp-edge-width), …)` regression: the
+       declaration stays parseable and does the wrong thing. */
+    margin-block: 0;
+    margin-inline: var(--jp-measure-margin);
     padding: 0;
     list-style: none;
     text-align: var(--jp-text-align);

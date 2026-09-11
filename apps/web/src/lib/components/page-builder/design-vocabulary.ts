@@ -237,7 +237,7 @@ export const AXIS_HINTS: Record<SectionDesignAxis, string> = {
   density: 'How much air between things.',
   surface: 'What the section sits on.',
   edge: 'Borders and lift.',
-  align: 'Where the text starts.',
+  align: 'Where the column sits.',
   type: 'How large the headings run.',
   accent: 'How the brand colour is used.',
   motion: 'How content arrives on scroll.',
@@ -280,6 +280,7 @@ export const AXIS_VALUE_LABELS: {
   align: {
     start: 'Left',
     center: 'Centred',
+    end: 'Right',
   },
   type: {
     restrained: 'Restrained',
