@@ -15,7 +15,41 @@
  * COLOR + SHAPE + DENSITY (active when org has any branding)
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-[data-org-brand] {
+/* WHY THE SECOND SELECTOR: A PAGE-LEVEL OVERRIDE IS ITS OWN DERIVATION SCOPE
+   (Codex-acwap · journey-sections amendment M7)
+
+   A custom property substitutes its `var()`s on the element where it is
+   DECLARED, and descendants inherit the SUBSTITUTED value. So re-declaring a
+   raw `--brand-*` input further down does NOT re-run the derivations in this
+   block — they were already resolved at org scope and merely inherit. Anything
+   reading the raw input picks the override up (`journey-palette.css`'s
+   `--jp-ember` → `var(--brand-color)`); anything reading a DERIVED token keeps
+   the org's (`CtaLink` → `--jp-cta-fill` → `--color-brand-primary`). MEASURED
+   on of-blood-and-bones / Bone Deep: a #0e27e1 eyebrow pill beside a #4465FF
+   CTA pill in the Full Send hero. One page, two brand blues — on an org whose
+   primary and accent are the SAME hex, so the split was pure waste.
+
+   The only cure in CSS is a rule that MATCHES the overriding element, and
+   `data-org-brand` on the carrier was the entire contract. Two of the four
+   carriers silently broke it — `studio/journeys/[id]/page/+page.svelte`'s
+   `.jb__canvas` and `JourneyBuilderCanvas`'s `.jbc-block__brand`, against
+   `JourneyRenderer.svelte` and the journey checkout, which both set it.
+   Matching the inline declaration itself retires the footgun rather than
+   repairing two instances of it.
+
+   SCOPED TO A BRANDED SUBTREE ON PURPOSE. `:where([data-org-brand])` is what
+   keeps this off the two ROOT carriers that inline `--brand-*` without opting
+   in: `(auth)/+layout.svelte`, which sets the inputs for ShaderHero and must
+   NOT re-theme its pages, and an UNBRANDED `_org/[slug]/+layout.svelte`, which
+   inlines the inputs unconditionally and gates only the attribute on
+   `hasBranding`. An unbranded org therefore keeps today's behaviour exactly:
+   no branded ancestor, so no derivation, page override or not.
+
+   `:where()` contributes 0 to specificity, so this twin is (0,1,0) — the same
+   number as `[data-org-brand]`, which the dark branches below and
+   `journey-palette.css`'s ladder both depend on. */
+[data-org-brand],
+:where([data-org-brand]) [style*='--brand-'] {
   /* ─── PRIMARY ───────────────────────────────────────────────────────── */
   --color-brand-primary: var(--brand-color, var(--color-primary-500));
   --color-brand-primary-hover: oklch(from var(--brand-color, var(--color-primary-500)) calc(l - 0.08) c h);
@@ -298,12 +332,30 @@
  * DARK MODE
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+/* The page-override twins carry M7 into dark exactly as the light block does —
+   see the long note at the head of this file. `.dark` / `[data-theme='dark']`
+   are (0,1,0) and `[style*='--brand-']` is (0,1,0), so each twin is (0,2,0),
+   identical to the `[data-org-brand]` form it shadows. */
 .dark [data-org-brand],
+.dark :where([data-org-brand]) [style*='--brand-'],
 [data-theme='dark'] [data-org-brand],
+[data-theme='dark'] :where([data-org-brand]) [style*='--brand-'],
 /* Brand editor scoped dark preview — data-editing-theme lives on .org-layout
    so the editor can preview dark palette without mutating <html data-theme>
    (Codex-9u8wg). The element has BOTH data-editing-theme and data-org-brand
-   so this selector uses compound attribute form (no descendant combinator). */
+   so this selector uses compound attribute form (no descendant combinator).
+
+   NO page-override twin on this one, deliberately. The compound form pins the
+   rule to the single element carrying both attributes, and a nested override
+   carrier is never that element — so in the editor's dark preview a carrier
+   falls to the LIGHT derivation. That is already what a nested
+   `[data-org-brand]` carrier does in this preview today (MEASURED: the public
+   wrapper reads the page's light hex under `data-editing-theme`, while under
+   `.dark` it reads the org's dark one), so omitting the twin is what keeps the
+   two carrier shapes agreeing. Giving the preview the dark derivation for
+   nested carriers would fix a different, latent inconsistency — it needs a
+   brand-editor decision and a dark brand value to even be visible, since no
+   seeded org sets `--brand-color-dark`. */
 [data-editing-theme='dark'][data-org-brand] {
   /* Dark primary: use explicit dark override if set, otherwise auto-derive from light */
   --color-brand-primary: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
@@ -426,8 +478,15 @@
  * scale, text-transform-label) are deliberately NOT redefined here — they
  * are single-valued across themes per design doc §1.
  */
+/* Page-override twins, same reasoning and same (0,2,0) as the block above: a
+   page's `darkTokenOverrides` land on the carrier as inline `--brand-{key}-dark`
+   / `--color-{key}-dark`, and without a rule that matches the carrier the dark
+   variant would never be selected there either. The `data-editing-theme`
+   compound again gets no twin, for the reason given above. */
 .dark [data-org-brand],
+.dark :where([data-org-brand]) [style*='--brand-'],
 [data-theme='dark'] [data-org-brand],
+[data-theme='dark'] :where([data-org-brand]) [style*='--brand-'],
 [data-editing-theme='dark'][data-org-brand] {
   /* Heading color — consumer reads --color-heading. */
   --color-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--color-text-primary)));
@@ -555,7 +614,15 @@
  *      reason, and the two must not drift.
  */
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
-  [data-org-brand] {
+  /* The page-override twin is NOT optional here (Codex-acwap). This block and
+     the OKLCH step it overrides must activate at the SAME scopes: give the
+     carrier the luminance ink without this selector and it would keep the
+     fallback pivot, so a page-level override would repaint the fill on the
+     luminance rule's promise while its label was still chosen by the rule this
+     block exists to replace. The derivation itself is untouched — only the
+     scopes it reaches. */
+  [data-org-brand],
+  :where([data-org-brand]) [style*='--brand-'] {
     --color-text-on-brand: rgb(
       from var(--brand-color, var(--color-primary-500))
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
@@ -578,7 +645,9 @@
      re-declared from the dark brand in the rule above, so a single copy would
      freeze the light reading. Same reason themes/light.css:43-46 gives. */
   .dark [data-org-brand],
+  .dark :where([data-org-brand]) [style*='--brand-'],
   [data-theme='dark'] [data-org-brand],
+  [data-theme='dark'] :where([data-org-brand]) [style*='--brand-'],
   [data-editing-theme='dark'][data-org-brand] {
     --color-text-on-brand: rgb(
       from var(--brand-color-dark, var(--brand-color, var(--color-primary-400)))

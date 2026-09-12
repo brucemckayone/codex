@@ -196,6 +196,43 @@
   // so a boolean-literal discriminant does not narrow.
   const motionOff = $derived(design?.motion === 'none');
 
+  /**
+   * ── THE AXES, MIRRORED ONTO THIS SECTION'S OWN ROOT ────────────────────────
+   * `journey-design.css` turns the nine `data-jp-*` attributes on `.jp-sec` into
+   * custom properties, and a section can only ever READ those. That stays the
+   * default for everything with a MAGNITUDE: every size, colour, rhythm, edge
+   * and duration in the stylesheet below is still a `--jp-*` read.
+   *
+   * It is not sufficient for the eight values here, because a design language is
+   * not only a set of magnitudes — it is which elements exist as boxes, which
+   * corner is square, which label is monospaced, which rule gets drawn at all.
+   * Those are SELECTOR-level decisions, a Svelte-scoped style block cannot
+   * select on an ancestor's attribute, and `journey-design.css` deliberately
+   * emits nothing but custom properties. So the axis value is re-emitted here
+   * UNMODIFIED as a local `data-*` attribute. `GuideSection` and `FeelSection`
+   * established the shape; `ProofSection` (`data-motion`) established the idea.
+   *
+   * `width` is deliberately not mirrored — `--jp-content-max` / `--jp-measure`
+   * already carry it and nothing here needs to select on it — and neither is
+   * `media`, which this section type does not consume at all (see the header).
+   *
+   * `undefined` when no `design` arrives, so Svelte omits the attribute and every
+   * per-look rule no-ops: a host that resolves no axes gets exactly the markup and
+   * paint this component shipped before the per-look pass, rather than a guessed
+   * default look. `SectionFrame` always passes a TOTAL `ResolvedSectionDesign`, so
+   * both real render paths — the public page and the studio canvas — have all
+   * nine.
+   */
+  const look = $derived({
+    surface: design?.surface,
+    edge: design?.edge,
+    align: design?.align,
+    type: design?.type,
+    accent: design?.accent,
+    density: design?.density,
+    motion: design?.motion,
+  });
+
   // The stats row is chrome. `table` states the same counts per row and
   // `numbered-prose` is defined as having no chrome at all, so both drop it.
   const showStats = $derived(
@@ -475,10 +512,23 @@
 {/snippet}
 
 {#if stages.length > 0}
+  <!--
+    `data-map` is the COMPOSITION; the seven `data-*` below are the axis values
+    mirrored verbatim, so the per-look blocks at the foot of the stylesheet can
+    select on a design language. See `look` in the script for why a section that
+    reads nothing but custom properties still needs them.
+  -->
   <div
     class="descent"
     class:descent--enhanced={enhanced}
     data-map={composition}
+    data-surface={look.surface}
+    data-edge={look.edge}
+    data-align={look.align}
+    data-type={look.type}
+    data-accent={look.accent}
+    data-density={look.density}
+    data-motion={look.motion}
   >
     <div class="descent__inner">
       <!-- NO EMPTY LANDMARK, AND NO PHANTOM BAND — see `hasHead`. Every child
@@ -803,6 +853,144 @@
     */
     --descent-signal: var(--jp-accent-mark);
     --descent-bloom: var(--jp-accent-mark);
+
+    /* ── THE ROLE TABLE, so a look is a VALUE and not a rule ───────────────
+       The per-look blocks at the foot of this file are keyed on axis values
+       (`edge: offset`, `accent: none`, …). Written as paint rules, this section
+       would re-declare the same box recipe on four item selectors × seven
+       looks — the shape that produced the eight different spellings of
+       `clamp(2rem, 6cqw, 4.4rem)` this tree is still cleaning up. Written as
+       properties, a look states its VALUES and the paint stays in one place,
+       which is the discipline `journey-design.css` holds itself to.
+
+       IT IS ALSO THE ONLY SAFE MECHANISM HERE, for a reason specific to this
+       component. The `spine` choreography's pre-lit state is
+       `.descent--enhanced .descent__band:not(.is-lit) .descent__node` — (0,4,0).
+       A per-look rule keyed on two attributes plus a descendant is also (0,4,0),
+       so a look that repainted the node DIRECTLY would tie with the armed state
+       and win on source order, silently disabling the ignition it sits after.
+       A property set on the ROOT cannot: it feeds the (0,1,0) base rule and the
+       (0,4,0) armed rule still overrides it.
+
+       EVERY DEFAULT BELOW REPRODUCES THE BASE COMMIT EXACTLY, which is the whole
+       point — candlelit matches none of the per-look selectors, so it resolves
+       these defaults, and a default that merely looked reasonable would have
+       restyled the one preset that already works.
+
+       Two spellings are load-bearing rather than stylistic:
+         · `0px`, never a bare `0`, wherever the value is substituted into a
+           shorthand — `--jp-edge-width` carries a unit for exactly this reason
+           (A63/A64), and a unitless zero in a length slot invalidates the whole
+           declaration SILENTLY.
+         · `--descent-item-stripe` / `--descent-item-rule` default to
+           `var(--descent-item-border)` rather than to `0 none`. They are applied
+           as `border-inline-start` / `border-block-end` AFTER the `border`
+           shorthand, so a `0 none` default would have deleted two sides of the
+           box every published page draws. Defaulting to the box means a look
+           that changes `--descent-item-border` moves all four sides together and
+           can then single out a side. */
+
+    /* items: the practice card, the stage row, the stage card, the timeline
+       panel — one material repeated, so they share one recipe. */
+    --descent-item-radius: var(--radius-card);
+    --descent-item-border: max(var(--jp-edge-width), var(--border-width)) solid
+      var(--jp-edge-color);
+    --descent-item-stripe: var(--descent-item-border);
+    --descent-item-rule: var(--descent-item-border);
+    --descent-item-bg: var(--color-surface-secondary);
+    --descent-item-shadow: var(--jp-edge-shadow);
+    --descent-item-hover-bg: var(--color-surface);
+    --descent-item-hover-edge: color-mix(
+      in oklab,
+      var(--descent-bloom) 45%,
+      transparent
+    );
+    /* The one-line row is the only item with its own corner (`--radius-md`,
+       ported from `_descent.css`), so it gets its own knob. */
+    --descent-row-radius: var(--radius-md);
+
+    /* the two stat chips in the header */
+    --descent-chip-radius: var(--radius-full);
+    --descent-chip-border: var(--border-width) solid var(--color-border-subtle);
+    --descent-chip-bg: var(--color-surface-secondary);
+    --descent-chip-shadow: none;
+    --descent-chip-pad: var(--space-1) var(--space-3);
+
+    /* labels (the uppercase content-type caps, the table's column heads) and
+       the roman numerals. `inherit` is the inherited family, i.e. no change. */
+    --descent-label-font: inherit;
+    --descent-num-font: var(--font-heading);
+    --descent-num-style: italic;
+    --descent-num-size: var(--text-lg);
+    --descent-num-weight: var(--font-normal);
+    --descent-num-color: var(--descent-signal);
+    /*
+      THE DISC NUMERAL IS SIZED SEPARATELY FROM THE STANDALONE ONES, and that
+      split is a constraint rather than a preference.
+
+      `--descent-num-size` lands on `.descent__row-rn`, which sits in a wrapping
+      flex row / grid cell and can grow. `.descent__rn` sits inside
+      `--descent-node`, a FIXED `clamp(2.75rem, 8cqw, 3.75rem)` box floored at
+      the WCAG tap-target size — and a lowercase roman numeral runs to five
+      glyphs (`xviii`), so at 44px of box the 18px rung is already close to the
+      wall. Any look that wanted "big numerals" through one shared property
+      would have pushed the disc's numeral out through its own ring. Two
+      properties, and the disc keeps its rung.
+    */
+    --descent-node-num-size: var(--text-lg);
+
+    /* the gate node — a filled disc with an accent ring today. Its numeral has
+       its own ink role because one look reverses it out of a filled plate. */
+    --descent-node-radius: var(--radius-full);
+    --descent-node-bg: radial-gradient(
+      circle at 50% 34%,
+      /* 18%, not the 26% this shipped with. The tint lifts the node's centre
+         toward the bloom's mid-lightness purple, and in DARK theme that lift is
+         what put the numeral at 4.42:1 against a 4.5 floor (measured). 18%
+         reads as the same warm centre and clears the floor at both poles; the
+         numeral is 20px/400, so it gets no large-text allowance. */
+        color-mix(in oklab, var(--descent-bloom) 18%, var(--color-surface-secondary)),
+      var(--color-surface)
+    );
+    /*
+      THE RING READS THE TOKEN DIRECTLY — no percentage carried onto it.
+
+      This was `color-mix(--descent-signal 60%, transparent)` and measured 3.35:1
+      light and **2.53:1 dark** against the node's own surface, under a 3:1 floor.
+      A ring is a resting boundary that has to read, and no alpha low enough to
+      look "faint" survives the dark pole: the sweep needed 80% before dark
+      cleared (3.45). Full strength measures 7.88 / 4.60. The lesson generalises —
+      carry state on fill and border WEIGHT, never on the boundary's opacity.
+    */
+    --descent-node-ring: var(--border-width) solid var(--descent-signal);
+    --descent-node-ink: var(--descent-num-color);
+    /* The ring bloom and the drop bloom are atmosphere and ride the
+       `--jp-sec-atmos` 0/1 gate; the inset highlight is material and does not. */
+    --descent-node-shadow:
+      0 0 0 var(--border-width)
+        color-mix(
+          in oklab,
+          var(--descent-bloom) calc(22% * var(--jp-sec-atmos)),
+          transparent
+        ),
+      0 var(--space-2-5) var(--space-8) calc(var(--space-3-5) * -1)
+        color-mix(
+          in oklab,
+          var(--descent-bloom) calc(80% * var(--jp-sec-atmos)),
+          transparent
+        ),
+      inset 0 var(--border-width) 0
+        color-mix(in oklab, var(--color-heading) 12%, transparent);
+
+    /* rules the section draws. `0px` paints no rule at all — the base state. */
+    --descent-head-rule: 0px;
+    --descent-head-gap: 0px;
+    --descent-rule: var(--border-width) solid var(--color-border-subtle);
+    /* The closing note's rule. A 14% mix of `--jp-accent-mark` — a REAL colour
+       at every accent value, so this is not contract A37's mix-of-a-mix. */
+    --descent-foot-rule: var(--border-width) solid
+      color-mix(in oklab, var(--descent-bloom) 14%, transparent);
+
     position: relative;
     isolation: isolate;
     padding-block: var(--jp-sec-pad-block);
@@ -833,6 +1021,13 @@
     align-items: var(--jp-align);
     gap: calc(var(--space-3) * var(--jp-rhythm));
     margin: 0 0 calc(var(--space-12) * var(--jp-rhythm));
+    /* The hairline under the section head, drawn by exactly two looks
+       (`long-read`, `syllabus`) and by nothing else. `0px` is the default, so on
+       every other look this pair paints nothing and costs nothing. It is the
+       flex CONTAINER that takes the rule, not a child, so the rule spans the
+       head rather than underlining one line of text. */
+    padding-block-end: var(--descent-head-gap);
+    border-block-end: var(--descent-head-rule) solid var(--color-border-subtle);
     text-align: var(--jp-text-align);
   }
 
@@ -855,10 +1050,13 @@
     display: inline-flex;
     align-items: baseline;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
-    border: var(--border-width) solid var(--color-border-subtle);
-    background: var(--color-surface-secondary);
+    padding: var(--descent-chip-pad);
+    border-radius: var(--descent-chip-radius);
+    border: var(--descent-chip-border);
+    background: var(--descent-chip-bg);
+    /* `none` by default, so this declaration is inert on every look that has
+       not asked for elevation. */
+    box-shadow: var(--descent-chip-shadow);
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
@@ -1009,56 +1207,25 @@
     grid-row: 1 / span 2;
     width: var(--descent-node);
     height: var(--descent-node);
-    border-radius: var(--radius-full);
+    /* Baseline / lit look — the final warm state. Every one of the four values
+       below is a role from the table on `.descent`, so a design language can
+       square this disc, flatten it, un-ring it or reverse it out of a filled
+       accent plate WITHOUT out-specifying the armed pre-lit state. The
+       measurements that fixed the defaults are recorded beside them there. */
+    border-radius: var(--descent-node-radius);
     display: grid;
     place-items: center;
-    /* Baseline / lit look — the final warm state. */
-    background: radial-gradient(
-      circle at 50% 34%,
-      /* 18%, not the 26% this shipped with. The tint lifts the node's centre
-         toward the bloom's mid-lightness purple, and in DARK theme that lift is
-         what put the numeral at 4.42:1 against a 4.5 floor (measured). 18%
-         reads as the same warm centre and clears the floor at both poles; the
-         numeral is 20px/400, so it gets no large-text allowance. */
-      color-mix(in oklab, var(--descent-bloom) 18%, var(--color-surface-secondary)),
-      var(--color-surface)
-    );
-    /*
-      THE RING READS THE TOKEN DIRECTLY — no percentage carried onto it.
-
-      This was `color-mix(--descent-signal 60%, transparent)` and measured 3.35:1
-      light and **2.53:1 dark** against the node's own surface, under a 3:1 floor.
-      A ring is a resting boundary that has to read, and no alpha low enough to
-      look "faint" survives the dark pole: the sweep needed 80% before dark
-      cleared (3.45). Full strength measures 7.88 / 4.60. The lesson generalises —
-      carry state on fill and border WEIGHT, never on the boundary's opacity.
-    */
-    border: var(--border-width) solid var(--descent-signal);
-    /* The ring and the drop bloom are atmosphere and ride the `--jp-sec-atmos`
-       gate; the inset highlight is material and does not. */
-    box-shadow:
-      0 0 0 var(--border-width)
-        color-mix(
-          in oklab,
-          var(--descent-bloom) calc(22% * var(--jp-sec-atmos)),
-          transparent
-        ),
-      0 var(--space-2-5) var(--space-8) calc(var(--space-3-5) * -1)
-        color-mix(
-          in oklab,
-          var(--descent-bloom) calc(80% * var(--jp-sec-atmos)),
-          transparent
-        ),
-      inset 0 var(--border-width) 0
-        color-mix(in oklab, var(--color-heading) 12%, transparent);
+    background: var(--descent-node-bg);
+    border: var(--descent-node-ring);
+    box-shadow: var(--descent-node-shadow);
   }
 
   .descent__rn {
-    font-family: var(--font-heading);
-    font-style: italic;
-    font-weight: var(--font-normal);
-    font-size: var(--text-lg);
-    color: var(--descent-signal);
+    font-family: var(--descent-num-font);
+    font-style: var(--descent-num-style);
+    font-weight: var(--descent-num-weight);
+    font-size: var(--descent-node-num-size);
+    color: var(--descent-node-ink);
   }
 
   .descent__gate-meta {
@@ -1124,11 +1291,18 @@
   .descent__stagecard,
   .descent__panel {
     position: relative;
-    border-radius: var(--radius-card);
-    background: var(--color-surface-secondary);
-    border: max(var(--jp-edge-width), var(--border-width)) solid
-      var(--jp-edge-color);
-    box-shadow: var(--jp-edge-shadow);
+    border-radius: var(--descent-item-radius);
+    background: var(--descent-item-bg);
+    border: var(--descent-item-border);
+    /* The two sides a design language singles out: the accent STRIPE that
+       replaces a badge, and the horizontal RULE that replaces a box. Both
+       default to the box above, so this pair is a no-op until a look asks — see
+       the note on the role table for why they may not default to `0 none`.
+       Declared after the shorthand on purpose: a logical longhand wins its own
+       side by declaration order. */
+    border-inline-start: var(--descent-item-stripe);
+    border-block-end: var(--descent-item-rule);
+    box-shadow: var(--descent-item-shadow);
     text-align: start;
   }
 
@@ -1184,8 +1358,8 @@
   .descent__row:hover,
   .descent__stagecard:hover,
   .descent__panel:hover {
-    border-color: color-mix(in oklab, var(--descent-bloom) 45%, transparent);
-    background: var(--color-surface);
+    border-color: var(--descent-item-hover-edge);
+    background: var(--descent-item-hover-bg);
   }
 
   .descent__card-top {
@@ -1200,6 +1374,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1-5);
+    font-family: var(--descent-label-font);
     font-size: var(--text-xs);
     letter-spacing: var(--tracking-wider);
     text-transform: uppercase;
@@ -1246,22 +1421,26 @@
     gap: calc(var(--space-3) * var(--jp-rhythm));
     padding: calc(var(--space-3) * var(--jp-rhythm))
       calc(var(--space-4) * var(--jp-rhythm));
-    border-radius: var(--radius-md);
+    border-radius: var(--descent-row-radius);
   }
 
   .descent__row-rn {
     flex: none;
     min-width: 2ch;
-    font-family: var(--font-heading);
-    font-style: italic;
-    font-size: var(--text-lg);
-    color: var(--descent-signal);
+    font-family: var(--descent-num-font);
+    font-style: var(--descent-num-style);
+    /* `--font-normal` by default, which is the weight this span already
+       inherited from the row — stated so a look can make the numeral loud. */
+    font-weight: var(--descent-num-weight);
+    font-size: var(--descent-num-size);
+    color: var(--descent-num-color);
   }
 
   .descent__row-count {
     margin: 0;
     margin-inline-start: auto;
     flex: none;
+    font-family: var(--descent-label-font);
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
@@ -1310,7 +1489,7 @@
   .descent__table th,
   .descent__table td {
     padding: calc(var(--space-3) * var(--jp-rhythm));
-    border-block-end: var(--border-width) solid var(--color-border-subtle);
+    border-block-end: var(--descent-rule);
     vertical-align: top;
     text-align: start;
     font-size: var(--text-base);
@@ -1319,11 +1498,14 @@
   }
 
   .descent__table thead th {
+    font-family: var(--descent-label-font);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: uppercase;
     color: var(--color-text-secondary);
+    /* Colour only, so a look that zeroes `--descent-rule` removes this rule
+       too rather than leaving one stray 1px line under the column heads. */
     border-block-end-color: var(--color-border);
   }
 
@@ -1357,6 +1539,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1-5);
+    font-family: var(--descent-label-font);
     font-size: var(--text-sm);
     white-space: nowrap;
   }
@@ -1370,6 +1553,7 @@
      reads as a number column at both `align` values. */
   .descent__table .descent__num {
     text-align: end;
+    font-family: var(--descent-label-font);
     font-variant-numeric: tabular-nums;
   }
 
@@ -1414,16 +1598,28 @@
     display: grid;
     gap: calc(var(--space-8) * var(--jp-rhythm));
     max-width: var(--jp-measure);
-    margin: 0 var(--jp-measure-margin);
+    /* LONGHAND, and the only consumer that was not (`Codex-3kqqp`). This was
+       `margin: 0 var(--jp-measure-margin)`, the one shorthand among the 22
+       consumers of that token. `align: end` gives the token a TWO-VALUE inline
+       pair (`auto 0`), which in that shorthand expands to `margin: 0 auto 0`
+       — top 0, inline auto, bottom 0. Valid CSS, silently CENTRED, and the one
+       asymmetric value would have been the only one it broke. Same class as
+       this file's own `max(var(--jp-edge-width), …)` regression: the
+       declaration stays parseable and does the wrong thing. */
+    margin-block: 0;
+    margin-inline: var(--jp-measure-margin);
     padding: 0;
     list-style: none;
     text-align: var(--jp-text-align);
   }
 
+  /* Deliberately NOT sized off `--descent-num-size`: this numeral is inline
+     inside the `h3`, so it already travels with the stage-name rung. Giving it
+     the standalone numeral size would shrink it below the words beside it. */
   .descent__para-rn {
-    font-family: var(--font-heading);
-    font-style: italic;
-    color: var(--descent-signal);
+    font-family: var(--descent-num-font);
+    font-style: var(--descent-num-style);
+    color: var(--descent-num-color);
   }
 
   .descent__para-gloss,
@@ -1446,8 +1642,7 @@
   .descent__foot {
     margin: 0;
     padding-top: calc(var(--space-8) * var(--jp-rhythm));
-    border-top: var(--border-width) solid
-      color-mix(in oklab, var(--descent-bloom) 14%, transparent);
+    border-top: var(--descent-foot-rule);
     text-align: var(--jp-text-align);
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
@@ -1609,6 +1804,699 @@
     }
   }
 
+  /* ═══ PER-LOOK COMMITMENTS ═══════════════════════════════════════════════
+     Everything above is axis-GENERIC: it consumes magnitudes and paints one
+     arrangement per composition. What follows commits each design LANGUAGE to
+     its documented tell (`00-design-language-research.md` §1), because a tell is
+     a SELECTOR-level statement — which elements are boxes, which corner is
+     square, which label is monospaced, which rule is drawn — and
+     `journey-design.css` deliberately emits nothing but custom properties.
+
+     ── THE SELECTOR DISCIPLINE, stated once so every block can be checked ───
+     `candlelit` is the one preset that already works and it must come out of
+     this pass byte-identical. It is uniquely identified by FOUR of its nine axis
+     values — `surface: media`, `edge: none`, `media: bleed`, `accent: glow` —
+     and SHARES the other five: `type: monumental` (with quiet-studio,
+     plain-facts), `align: center` (quiet-studio, open-air, full-send),
+     `density: airy` (open-air), `width: text` (long-read, open-air),
+     `motion: drift` (open-air).
+
+     So NO selector below is keyed on any of those five ALONE. Every one names a
+     value from this list, and none of them matches the candlelit bundle:
+
+       edge: offset                    → plain-facts  only
+       accent: edge                    → syllabus     only
+       type: restrained                → syllabus     only
+       accent: none                    → quiet-studio only
+       density: vast                   → quiet-studio only
+       motion: fade                    → quiet-studio only
+       surface: bare                   → quiet-studio + long-read
+       surface: bare  + align: start   → long-read    only
+       edge: soft                      → open-air     only
+       edge: heavy                     → full-send    only
+       motion: stagger                 → full-send    only
+       edge: hairline + accent: fill   → signal       only
+
+     `surface: bare` is used as a SHARED key on purpose rather than by accident:
+     the two bare looks are exactly the two whose families forbid box borders
+     ("no box borders anywhere" for editorial, "one hairline" for
+     luxury-minimal), so the removals they have in common belong on the value
+     they have in common. Candlelit is `surface: media` and cannot match it.
+
+     `long-read` and `signal` each share all nine of their axis values with some
+     sibling, so neither has a single value to key on; both compounds are
+     justified in their own block.
+
+     `open-air` is the dangerous one — it shares FOUR axes with candlelit — so
+     every open-air rule here is keyed on `edge: soft`, which candlelit
+     (`edge: none`) cannot match.
+
+     WHAT IS NOT DONE HERE, and why. This section never renders `.cta`:
+     `journey-design.test.ts` ("is the only styler of .cta in the section tree",
+     `Codex-kdsuo`) reserves the pay button's colours to `render/CtaLink.svelte`,
+     because that one contrast pair is guaranteed in exactly one place. So
+     `signal`'s "one filled accent BUTTON per section" has no carrier in a
+     section with no conversion affordance; what lands instead is the family's
+     fill DISCIPLINE on the one badge this section owns. Nothing below sets
+     `color` or `background` on `.cta`, and nothing should.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ── 1.2 BRUTALIST · `plain-facts` — `edge: offset` ──────────────────────
+     Tell: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 EVERYWHERE.
+
+     MEASURED ON THE BASE: two of the three already held and the third held
+     nowhere. The 2px border and the hard offset drop arrive on their own,
+     because `.descent`'s shell and the four item selectors already read
+     `--jp-edge-width` / `--jp-edge-color` / `--jp-edge-shadow` — this file was
+     never the "vanishing card" case GuideSection found. What was found NOWHERE
+     is radius 0 and the mono label: the shell rounds to `--jp-sec-radius`
+     (`--radius-card` under this look's own `surface: panel`), the items round to
+     `--radius-card`, the row to `--radius-md`, the stat chips to `--radius-full`
+     and the node to `--radius-full`, and not one label in the section was
+     monospaced.
+
+     The numerals also lose their SERIF ITALIC here. Brutalism has no ornament,
+     so this is one of the places where the correct edit is a removal. */
+  .descent[data-edge='offset'] {
+    /* The shell has to be squared off too, not just its furniture — the tell's
+       own adverb is "everywhere". */
+    border-radius: var(--radius-none);
+    --descent-item-radius: var(--radius-none);
+    --descent-row-radius: var(--radius-none);
+    --descent-node-radius: var(--radius-none);
+    --descent-chip-radius: var(--radius-none);
+    /* "Every block is a visible box": the chips take the section's own 2px edge
+       and its hard drop rather than a hairline and no elevation. */
+    --descent-chip-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --descent-chip-shadow: var(--jp-edge-shadow);
+    --descent-chip-pad: var(--space-2) var(--space-3);
+    /* MONO LABELS — the caps on a practice card, the table's column heads, the
+       practice counts and the count column. */
+    --descent-label-font: var(--font-mono);
+    --descent-num-font: var(--font-mono);
+    --descent-num-style: normal;
+    /* The node stops being a lit disc and becomes a square 2px-ruled cell. Its
+       ring is INK, not accent: brutalist borders are structure. */
+    --descent-node-bg: var(--color-surface-secondary);
+    --descent-node-ring: var(--jp-edge-width) solid var(--jp-edge-color);
+    --descent-node-shadow: var(--jp-edge-shadow);
+    --descent-foot-rule: var(--jp-edge-width) solid var(--jp-edge-color);
+  }
+
+  /* The spine's two gradients go flat. A 180° fade is the opposite of an
+     "un-blurred" material, and the `--jp-sec-atmos` gate already zeroes the
+     bloom at every surface but `media`, so the glow needs no undoing — only the
+     fade does. */
+  .descent[data-edge='offset'] .descent__spine-track {
+    background: var(--jp-edge-color);
+  }
+
+  .descent[data-edge='offset'] .descent__spine-draw {
+    background: var(--descent-signal);
+    box-shadow: none;
+  }
+
+  /* MONO TABULAR FIGURES on the counts. `.descent__stat b` is the one figure
+     that carries `--font-heading` explicitly, so the role property cannot reach
+     it. Tabular so digits do not shuffle between rows. */
+  .descent[data-edge='offset'] .descent__stat b,
+  .descent[data-edge='offset'] .descent__row-count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The accent spent as the family spends it: "solid rectangles of it, text
+     reversed out". COMPOUNDED with `accent: fill` rather than left on
+     `edge: offset` alone, because `--jp-accent-fill` is `transparent` at
+     `accent: text` and `accent: edge` — a creator who picked either with this
+     edge would get `--jp-accent-on-fill` ink on the section's own surface, which
+     is the two-token contrast pair broken in half. `.descent__head` is a column
+     flex box with `align-items: var(--jp-align)`, so the slab shrink-wraps its
+     own text at both align values with no width of its own. */
+  .descent[data-edge='offset'][data-accent='fill'] .descent__eyebrow {
+    padding: var(--space-1) var(--space-3);
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  /* ── 1.5 TECHNICAL · `syllabus` — `accent: edge` · `type: restrained` ────
+     Tell: a hairline GRID, mono numerals, and a left-border accent stripe
+     rather than a filled badge.
+
+     MEASURED ON THE BASE: the section drew hairlines in exactly one place — the
+     `table` composition's row rules — and a hairline grid needs two axes and has
+     to survive the composition switch, because the ruled list is the LOOK's
+     shape and not one arrangement's. Mono numerals: nowhere. The left stripe:
+     nowhere; the node was a filled accent-ringed disc, which is precisely the
+     "filled badge" the tell names in opposition. */
+  .descent[data-accent='edge'] {
+    --descent-item-radius: var(--radius-sm);
+    --descent-row-radius: var(--radius-sm);
+    /* THE BOX GOES, THE RULES STAY. `--descent-item-border: 0 none` cascades
+       into both `--descent-item-stripe` and `--descent-item-rule` (they default
+       to it), so those two re-state what this look keeps: a hairline UNDER every
+       item, and the accent stripe BESIDE it. */
+    --descent-item-border: 0 none;
+    --descent-item-bg: transparent;
+    --descent-item-shadow: none;
+    /* THE LEFT-BORDER ACCENT STRIPE. `--jp-accent-mark`, NOT `--jp-accent-edge`:
+       the edge token is a 45%-ember mix at `accent: glow` and `--jp-line` at
+       two more values, i.e. below the 3:1 graphic floor a stripe that CARRIES
+       the tell has to clear. accent-mark is a real colour at every accent value
+       and measures 6.04 dark / 14.62 light (the table on `.descent`). Read
+       directly, with no mix carried onto it (A37). */
+    --descent-item-stripe: var(--border-width-thick) solid var(--jp-accent-mark);
+    --descent-item-rule: var(--border-width) solid var(--color-border-subtle);
+    /* So the stripe still reads on hover: `border-color` paints all four sides,
+       and only the inline-start side has any width here. */
+    --descent-item-hover-edge: var(--jp-accent-mark);
+    --descent-item-hover-bg: var(--color-surface-secondary);
+    --descent-chip-radius: var(--radius-sm);
+    --descent-label-font: var(--font-mono);
+    --descent-num-font: var(--font-mono);
+    --descent-num-style: normal;
+    /* The disc becomes a ruled CELL with an accent tab — no longer filled with
+       accent, which is the half of the tell stated in opposition. It keeps an
+       opaque surface because the spine passes behind it. */
+    --descent-node-radius: var(--radius-sm);
+    --descent-node-bg: var(--color-surface);
+    --descent-node-ring: var(--border-width) solid var(--color-border);
+    --descent-node-shadow: none;
+    /* A hairline under the section head, so the block reads as a table with a
+       header row. */
+    --descent-head-rule: var(--border-width);
+    --descent-head-gap: calc(var(--jp-sec-gap) / 3);
+    --descent-foot-rule: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .descent[data-accent='edge'] .descent__node {
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-mark);
+  }
+
+  /* THE SECOND AXIS OF THE GRID. Vertical hairlines between the columns, with
+     the last one dropped so the table does not draw its own right-hand box —
+     "hairline on everything" is about the grid, not about a frame. */
+  .descent[data-accent='edge'] .descent__table th,
+  .descent[data-accent='edge'] .descent__table td {
+    border-inline-end: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .descent[data-accent='edge'] .descent__table th:last-child,
+  .descent[data-accent='edge'] .descent__table td:last-child {
+    border-inline-end: 0;
+  }
+
+  /* The practice pool becomes the ruled list too. Left as a wrapping flex row
+     it would put two stripes side by side and the hairlines would not line up
+     into a grid; one column makes the rules continuous.
+
+     `gap: 0` so consecutive rules abut, and the padding moves onto the row —
+     compounded rather than declared on the bare `.descent__card` selector,
+     which `journey-design.test.ts`'s F4 model reads verbatim. */
+  .descent[data-accent='edge'] .descent__practices {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .descent[data-accent='edge'] .descent__card {
+    padding: calc(var(--space-2) * var(--jp-rhythm))
+      calc(var(--space-3) * var(--jp-rhythm));
+  }
+
+  .descent[data-accent='edge'] .descent__rows {
+    gap: 0;
+  }
+
+  /* MONO TABULAR FIGURES, as at `plain-facts` — the one figure the role
+     property cannot reach plus the counts. */
+  .descent[data-accent='edge'] .descent__stat b,
+  .descent[data-accent='edge'] .descent__row-count {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* `type: restrained` is `syllabus`'s type value and nobody else's, so the
+     dense-dashboard reading rhythm lands here: normal rather than relaxed
+     leading — "many small steps, fine-grained hierarchy", 0.75× rhythm. */
+  .descent[data-type='restrained'] .descent__gloss,
+  .descent[data-type='restrained'] .descent__cell-gloss,
+  .descent[data-type='restrained'] .descent__para-gloss {
+    line-height: var(--leading-normal);
+  }
+
+  /* ── SURFACE: BARE — the two looks whose families forbid boxes ───────────
+     `quiet-studio` ("three type sizes, ONE hairline, no accent colour, and more
+     empty space than content") and `long-read` ("hairline horizontal rules
+     only, no box borders anywhere") are the only two `surface: bare` looks, and
+     these are the removals they share. Candlelit is `surface: media`.
+
+     MEASURED ON THE BASE: the section drew a full hairline box around every
+     practice card, stage row, stage card and timeline panel, a bordered pill
+     around each stat chip, and a ringed disc per gate — because the item border
+     is FLOORED at `max(--jp-edge-width, --border-width)` and both looks are
+     `edge: hairline`, so the floor is not even the active term. That is "boxes
+     everywhere" on the two looks defined by their absence.
+
+     THE SPINE GOES WITH THE DISC, and that pairing is mechanical rather than
+     aesthetic. `.descent__spine` sits at `z-index: 0` behind `.descent__stages`,
+     and the disc is what occludes it: un-fill the disc without hiding the spine
+     and a 2px ink line runs straight through the numeral. At `accent: none`
+     `--jp-accent-mark` resolves to `--jp-heading`, so the spine there is not
+     merely visible but the highest-contrast graphic in the section — a
+     full-height near-black stripe on the quietest look in the family. Hiding it
+     is one declaration and the numerals still carry the sequence; the markup
+     stays mounted, so the scroll driver and the enhancement gate are untouched. */
+  .descent[data-surface='bare'] {
+    --descent-item-border: 0 none;
+    --descent-item-bg: transparent;
+    --descent-item-shadow: none;
+    --descent-item-hover-bg: transparent;
+    --descent-item-hover-edge: transparent;
+    --descent-chip-border: 0 none;
+    --descent-chip-bg: transparent;
+    --descent-chip-pad: 0px;
+    --descent-chip-radius: var(--radius-none);
+    --descent-node-bg: transparent;
+    --descent-node-ring: 0 none;
+    --descent-node-shadow: none;
+  }
+
+  .descent[data-surface='bare'] .descent__spine {
+    display: none;
+  }
+
+  /* One column, and no inline inset: with no box to sit inside, a padded card
+     just breaks the left edge its own copy should share. */
+  .descent[data-surface='bare'] .descent__practices {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .descent[data-surface='bare'] .descent__card,
+  .descent[data-surface='bare'] .descent__row,
+  .descent[data-surface='bare'] .descent__stagecard,
+  .descent[data-surface='bare'] .descent__panel {
+    padding-inline: 0;
+  }
+
+  /* The chips lose their pill, so they need real space between them or "3
+     stages 12 practices" reads as one phrase. */
+  .descent[data-surface='bare'] .descent__stats {
+    gap: calc(var(--space-6) * var(--jp-rhythm));
+  }
+
+  /* ── 1.1 EDITORIAL · `long-read` — `surface: bare` + `align: start` ──────
+     Tell: the eyebrow and the body share a left edge, and there is a hairline
+     under every section head.
+
+     A COMPOUND BY NECESSITY. `long-read` has no axis value of its own:
+     `surface: bare` is shared with `quiet-studio` and `align: start` with
+     `plain-facts`, `syllabus` and `signal` — but `quiet-studio` is
+     `align: center` and none of the other three is `surface: bare`, so the PAIR
+     is `long-read` alone. Candlelit is `surface: media`, so it matches neither
+     half, let alone both.
+
+     MEASURED ON THE BASE: the shared left edge already holds, and by the axis
+     rather than by luck — `align: start` sets `--jp-measure-margin: 0px`, and
+     the eyebrow, heading, sub, gloss and prose list all sit on it. The HEAD
+     HAIRLINE was found nowhere in the section. */
+  .descent[data-surface='bare'][data-align='start'] {
+    --descent-head-rule: var(--border-width);
+    --descent-head-gap: calc(var(--jp-sec-gap) / 3);
+    /* HAIRLINE HORIZONTAL RULES ONLY: the box is already gone (above), and what
+       replaces it is one rule per item rather than nothing at all, so a list of
+       practices still reads as a list. */
+    --descent-item-rule: var(--border-width) solid var(--color-border-subtle);
+    --descent-item-radius: var(--radius-none);
+    --descent-row-radius: var(--radius-none);
+    --descent-foot-rule: var(--border-width) solid var(--color-border-subtle);
+    /* THE HOVER MUST NOT ERASE THE RULE IT JUST DREW. `surface: bare` sets the
+       hover edge to `transparent` — correct for `quiet-studio`, which has no
+       item boundary at all, and a live defect here: `border-color` paints all
+       four sides, so pointing at a practice row would have made its own
+       hairline disappear. It darkens one rung instead, which is also the
+       family's whole hover vocabulary. */
+    --descent-item-hover-edge: var(--color-border);
+  }
+
+  /* Flush, so consecutive rules read as a ruled column and not as a dashed
+     one. Compounded, never on the bare selectors — see the F4 note above. */
+  .descent[data-surface='bare'][data-align='start'] .descent__practices,
+  .descent[data-surface='bare'][data-align='start'] .descent__rows {
+    gap: 0;
+  }
+
+  .descent[data-surface='bare'][data-align='start'] .descent__card,
+  .descent[data-surface='bare'][data-align='start'] .descent__row {
+    padding-block: calc(var(--space-3) * var(--jp-rhythm));
+  }
+
+  /* ── 1.4 LUXURY-MINIMAL · `quiet-studio` — `accent: none` · `density: vast`
+        · `motion: fade` ────────────────────────────────────────────────────
+     Tell: three type sizes, ONE hairline, no accent colour, and more empty
+     space than content.
+
+     THIS LOOK GETS WORSE IF ANYTHING IS ADDED, so every rule below REMOVES
+     something. The boxes went with `surface: bare`; what is left is the
+     arithmetic.
+
+     NO ACCENT COLOUR is already true of the colour LADDER and was worth
+     checking rather than assuming: at `accent: none` `--jp-accent-mark` resolves
+     to `--jp-heading`, so `--descent-signal` carries no hue at all. What it does
+     carry is maximum contrast, which is wrong for the DECORATIVE uses — the
+     content-type glyph on every practice card was painting at heading strength.
+     A glyph beside a label it does not add to is furniture, so it demotes.
+
+     ONE HAIRLINE, as an arithmetic claim rather than an adjective, because that
+     is the only form of it that can be checked. After the removals the section
+     draws exactly one rule outside the `table` composition — the closing note's
+     — and a table's own row rules stay, because there they are the data
+     structure and not decoration. */
+  .descent[data-accent='none'] {
+    /* Letter-spaced small caps, the family's own label treatment, through the
+       shared eyebrow seam rather than a local override.
+
+       THE SEAM ONLY WORKS IF NOTHING LOCAL OUT-SPECIFIES IT, which is how the
+       first draft of this rule died: the three-sizes collapse below also set
+       `letter-spacing` on `.descent__eyebrow`, at (0,3,0) against the shared
+       atom's (0,1,0), so the atom never read this property and the declaration
+       was inert — present, plausible, and doing nothing. The eyebrow is out of
+       that group now. It needs nothing from it anyway: `--jp-eyebrow-size` is
+       already `--text-sm` at this look's `type: monumental`, i.e. the metadata
+       rung, so only the WEIGHT is a fourth level by another means. */
+    --jp-eyebrow-tracking: var(--tracking-widest);
+    /* The numerals join the METADATA rung rather than sitting between the
+       metadata and the copy. A roman numeral here labels a stage; it is not a
+       display figure, and at `--text-lg` it was a fourth size all by itself —
+       the one rung that made the arithmetic below false. Small, tracked and
+       still serif-italic is also this family's own treatment of a marginal
+       number. */
+    --descent-num-size: var(--text-sm);
+    --descent-node-num-size: var(--text-sm);
+  }
+
+  .descent[data-accent='none'] .descent__eyebrow {
+    font-weight: var(--font-normal);
+  }
+
+  .descent[data-accent='none'] .descent__card-type :global(.descent__card-glyph),
+  .descent[data-accent='none'] .descent__inc-item :global(.descent__card-glyph) {
+    color: var(--color-text-secondary);
+  }
+
+  /* THREE TYPE SIZES ON THE WHOLE SECTION. The base draws seven: eyebrow, stat
+     chip, sub, stage name, gloss, card type and card title. Collapsing the four
+     metadata rungs onto `--text-sm` and the three copy rungs onto
+     `--jp-body-size` leaves exactly `--text-sm` · `--jp-body-size` ·
+     `--jp-heading-size` (14 / 24 / 48px at this look's `type: monumental`).
+
+     Weight and tracking travel with the size, because "three sizes" is a
+     HIERARCHY claim and a semibold label at the same size as a normal one is a
+     fourth level by another means.
+
+     Keyed on `density: vast`, which is quiet-studio's and nobody else's — a bare
+     `type: monumental` rule here is the precise shape that would have restyled
+     candlelit.
+
+     `.descent__eyebrow` is deliberately absent: it already sits on `--text-sm`
+     through `--jp-eyebrow-size`, and listing it here would out-specify the
+     shared atom's tracking seam — see the note above. */
+  .descent[data-density='vast'] .descent__stat,
+  .descent[data-density='vast'] .descent__card-type,
+  .descent[data-density='vast'] .descent__row-count {
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-widest);
+  }
+
+  .descent[data-density='vast'] .descent__sub,
+  .descent[data-density='vast'] .descent__gloss,
+  .descent[data-density='vast'] .descent__card-title,
+  .descent[data-density='vast'] .descent__para-gloss,
+  .descent[data-density='vast'] .descent__para-list,
+  .descent[data-density='vast'] .descent__foot {
+    font-size: var(--jp-body-size);
+  }
+
+  /* THE TABLE COMPOSITION IS PART OF THE CLAIM, not an exception to it. Its
+     cells sit at `--text-base`, its column heads at `--text-xs` and its row
+     header at `max(--text-base, --jp-body-size / 1.2)` — three more rungs, on
+     the one composition a "three type sizes" look is most likely to be judged
+     by. They fold onto the same two. */
+  .descent[data-density='vast'] .descent__table th,
+  .descent[data-density='vast'] .descent__table td {
+    font-size: var(--text-sm);
+  }
+
+  .descent[data-density='vast'] .descent__cell-name {
+    font-size: var(--jp-body-size);
+  }
+
+  /* The stage name folds onto the copy rung rather than adding a fourth size.
+     It keeps its own family and colour, so the outline is still legible — by
+     weight, family and the space around it, which is how this family builds
+     hierarchy. */
+  .descent[data-density='vast'] .descent__gate-name,
+  .descent[data-density='vast'] .descent__row-name,
+  .descent[data-density='vast'] .descent__stagecard-name,
+  .descent[data-density='vast'] .descent__panel-name,
+  .descent[data-density='vast'] .descent__para-name {
+    font-size: var(--jp-body-size);
+  }
+
+  /* MORE EMPTY SPACE THAN CONTENT, on a doubling of the section's own rhythm
+     rather than three arbitrary values. `--jp-rhythm` is already 1.6 at `vast`
+     and still multiplies the org's `--brand-density-scale` through
+     `--space-unit`, so this compounds with both rather than replacing them. */
+  .descent[data-density='vast'] .descent__head {
+    margin-block-end: calc(var(--space-12) * var(--jp-rhythm) * 2);
+  }
+
+  .descent[data-density='vast'] .descent__stages {
+    gap: calc(var(--space-12) * var(--jp-rhythm) * 2);
+  }
+
+  .descent[data-density='vast'] .descent__practices,
+  .descent[data-density='vast'] .descent__rows {
+    gap: calc(var(--space-6) * var(--jp-rhythm));
+  }
+
+  .descent[data-density='vast'] .descent__footwrap {
+    margin-top: calc(var(--space-12) * var(--jp-rhythm) * 2);
+  }
+
+  /* "SLOW FADE ONLY. NO TRANSFORM." `motion: fade` already zeroes
+     `--jp-reveal-distance`, so the shared reveal is a pure opacity ramp — but
+     the descent's own armed state scales the gate node to 0.94, which is a
+     transform the axis cannot reach. It goes.
+
+     `.descent--enhanced` is carried in the selector deliberately: the armed rule
+     is (0,4,0) and so is `.descent[data-motion='fade'] … .descent__node`, so
+     without it this would tie and win only on source order. */
+  .descent[data-motion='fade'].descent--enhanced
+    .descent__band:not(.is-lit)
+    .descent__node {
+    transform: none;
+  }
+
+  /* ── 1.3 SOFT-ORGANIC · `open-air` — `edge: soft` ───────────────────────
+     Tell: no border ANYWHERE, pill controls, and a shadow you have to look for.
+
+     Keyed ONLY on `edge: soft`. This look shares four axes with candlelit
+     (`align: center`, `density: airy`, `width: text`, `motion: drift`) and a
+     bare rule on any of them would restyle the one preset that works;
+     `edge: soft` is open-air's and nobody else's, and candlelit is `edge: none`.
+
+     MEASURED ON THE BASE: the pills are genuinely there — the stat chip is
+     already `--radius-full`. "No border anywhere" was not, and the cause is this
+     file's own FLOOR: the four item selectors read
+     `max(var(--jp-edge-width), var(--border-width))`, and `edge: soft` sets the
+     axis width to `0px` precisely so that "elevation, no border" stays
+     reachable. The floor overrode the axis's one value for a borderless
+     material and drew a hairline on every card. The comment defending that
+     floor is right about `edge: none` dissolving a boundary silently and wrong
+     about this look, which asks for it by name — and the boundary is not lost,
+     it becomes the shadow. */
+  .descent[data-edge='soft'] {
+    --descent-item-border: 0 none;
+    /* THE SHADOW YOU HAVE TO LOOK FOR. `--jp-edge-shadow` is `--shadow-lg` at
+       this value: a 10%/5%-alpha, 14px-blur drop — "large, very diffuse, very
+       low opacity" — and it is already this section's item shadow, so the only
+       change needed is that it is no longer competing with a hairline. */
+    --descent-item-radius: var(--radius-xl);
+    --descent-row-radius: var(--radius-xl);
+    --descent-item-hover-bg: color-mix(
+      in oklab,
+      var(--jp-accent-mark) 6%,
+      var(--color-surface)
+    );
+    --descent-item-hover-edge: transparent;
+    /* Pill controls with no border, and the diffuse drop instead. */
+    --descent-chip-border: 0 none;
+    --descent-chip-shadow: var(--jp-edge-shadow);
+    --descent-chip-pad: var(--space-2) var(--space-4);
+    /* The disc keeps its organic radial fill and loses its ring; the drop is
+       what makes it sit above the page. */
+    --descent-node-ring: 0 none;
+    --descent-node-shadow: var(--jp-edge-shadow);
+    /* No border anywhere includes the table's row rules. The rows separate by
+       tint and rhythm instead — see below. */
+    --descent-rule: 0 none;
+    --descent-foot-rule: 0 none;
+  }
+
+  /* "Accent as a TINTED BACKGROUND + accent text. NEVER a hard fill." With the
+     rules gone the table needs banding, and this is the family's own way to
+     spend accent. The 8% mix sits on `--jp-accent-mark`, a real colour at every
+     accent value, so it is not A37's mix-of-a-mix — `--jp-accent-edge` would
+     have been exactly that. */
+  .descent[data-edge='soft'] .descent__table tbody tr:nth-child(odd) {
+    background: color-mix(in oklab, var(--jp-accent-mark) 8%, transparent);
+  }
+
+  /* Rhythm is the other half of the separation once the rules are gone. */
+  .descent[data-edge='soft'] .descent__table th,
+  .descent[data-edge='soft'] .descent__table td {
+    padding: calc(var(--space-4) * var(--jp-rhythm));
+  }
+
+  /* The closing note keeps its air but loses its rule, per "no border
+     anywhere". Removing the rule without keeping the space would have pulled
+     the note up against the stages. */
+  .descent[data-edge='soft'] .descent__foot {
+    padding-top: 0;
+  }
+
+  /* ── 1.8 PLAYFUL · `full-send` — `edge: heavy` · `motion: stagger` ───────
+     Tell: whole inverted bands, pill CTAs at `--radius-full`, spring easing,
+     and BIG NUMERALS.
+
+     MEASURED ON THE BASE: the inverted band already arrives — `surface: invert`
+     re-points `--jp-ink` at the other pole and `.descent` paints `--jp-sec-bg`,
+     so the whole section flips, and `--color-surface*` re-derive with it through
+     `journey-palette.css`. Big numerals were found NOWHERE: this section is full
+     of figures — two stat counts, a roman numeral per stage, a practice count
+     per row, a count column — and every one of them sat at `--text-lg` or
+     smaller, which made the loudest family in the set the quietest thing on the
+     page. Spring easing was reachable but invisible: `--jp-reveal-ease` is
+     `--ease-spring` here and the reveal rides it, but a reveal fires once and
+     the one place a viewer can FEEL a curve is the thing they are pointing at.
+
+     The disc numeral is deliberately NOT enlarged — see the note on
+     `--descent-node-num-size` for the box it would have to fit through. */
+  .descent[data-edge='heavy'] {
+    /* Pills at `--radius-full` on the furniture that is pill-shaped (the
+       one-line row, the chips), and the family's soft panel corner on the rest. */
+    --descent-row-radius: var(--radius-full);
+    --descent-item-radius: var(--radius-xl);
+    --descent-chip-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --descent-chip-pad: var(--space-3) var(--space-5);
+    /* BIG NUMERALS, one step and a weight up: `--text-2xl` rather than the full
+       `--jp-heading-size`, because `.descent__row-rn` also renders inside a
+       table cell, where a 40px glyph sets the height of every row. */
+    --descent-num-size: var(--text-2xl);
+    --descent-num-weight: var(--font-semibold);
+    --descent-num-style: normal;
+    --descent-node-ring: var(--jp-edge-width) solid var(--jp-edge-color);
+  }
+
+  /* The stat chip becomes a stat BLOCK, with the figure as the loud half.
+     `column`, never `column-reverse`: the visual order then still matches the
+     DOM order, so the figure reads before its unit either way. */
+  .descent[data-edge='heavy'] .descent__stat {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    text-align: center;
+  }
+
+  .descent[data-edge='heavy'] .descent__stat b {
+    font-size: var(--jp-heading-size);
+    line-height: var(--leading-none);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* SPRING EASING, MADE VISIBLE. The overshoot only ever GROWS the item, and it
+     is a lift rather than a scale on the numerals' own box, so nothing crosses
+     contract A2's 44px floor in either direction.
+
+     The transition is declared ONLY on the three items that have none: the
+     practice card already carries one from `.descent--enhanced` (and only ever
+     renders under `spine`), and re-declaring it here at higher specificity would
+     drop `opacity` from that list and make the ignition fade instant. */
+  .descent[data-motion='stagger'] .descent__row,
+  .descent[data-motion='stagger'] .descent__stagecard,
+  .descent[data-motion='stagger'] .descent__panel {
+    transition: transform var(--jp-reveal-duration) var(--jp-reveal-ease);
+  }
+
+  .descent[data-motion='stagger'] .descent__card:hover,
+  .descent[data-motion='stagger'] .descent__row:hover,
+  .descent[data-motion='stagger'] .descent__stagecard:hover,
+  .descent[data-motion='stagger'] .descent__panel:hover {
+    transform: translateY(calc(var(--space-1) * -1));
+  }
+
+  /* ── 1.9 CONTEMPORARY · `signal` — `edge: hairline` + `accent: fill` ─────
+     Tell: rounded cards with hairlines and a small NEUTRAL shadow; one filled
+     accent button per section.
+
+     ANOTHER COMPOUND BY NECESSITY. `signal` shares all nine of its axis values:
+     `edge: hairline` is also `quiet-studio`, `long-read` and `syllabus`, and
+     `accent: fill` is also `plain-facts` and `full-send` — but those two are
+     `edge: offset` and `edge: heavy`, and the three other hairline looks are
+     `accent: none` / `text` / `edge`. So the PAIR is `signal` alone, and
+     candlelit (`edge: none`, `accent: glow`) matches neither half.
+
+     MEASURED ON THE BASE, and this is the honest finding: the first half of the
+     tell ALREADY HOLDS and needs nothing. The items read `--radius-card`,
+     `--jp-edge-width` (a hairline here) and `--jp-edge-shadow`, which is
+     `--shadow-xs` at this edge — a 1px, 10%-alpha drop, i.e. the small NEUTRAL
+     shadow the tell names rather than a coloured one. This file never had the
+     "vanishing card" defect.
+
+     What was missing is the FILL. `accent: fill` resolves `--jp-accent-fill` to
+     `--jp-ember` and `--jp-accent-on-fill` to `--jp-on-ember` — the pinned
+     contrast PAIR — and this section spent neither, so the one family whose
+     signature is a single confident accent object had no accent object at all.
+     The gate node is the section's one badge, so it takes the fill and its
+     numeral reverses out of it. The pair is used TOGETHER, which is the whole
+     point of there being two tokens; `--jp-on-ember`'s own AA behaviour is
+     modelled and pinned in `journey-design.test.ts`.
+
+     Set as properties, not as paint: the armed pre-lit state out-specifies a
+     per-look rule at equal specificity, so a direct repaint here would have
+     silently disabled the ignition. See the role table for the arithmetic. */
+  .descent[data-edge='hairline'][data-accent='fill'] {
+    --descent-node-bg: var(--jp-accent-fill);
+    --descent-node-ring: 0 none;
+    --descent-node-ink: var(--jp-accent-on-fill);
+    --descent-node-shadow: var(--jp-edge-shadow);
+    /* THE TELL HAS TO REACH THE HEADER TOO. The stat chips were the one piece of
+       furniture in the section that opted out of the card recipe: a `--radius-full`
+       pill with a `--color-border-subtle` hairline and NO elevation, i.e. neither
+       "rounded card" nor "small neutral shadow". A pill is the playful and
+       soft-organic families' chip; this one is a small card, so it takes the
+       section's own edge and the same `--shadow-xs`. */
+    --descent-chip-radius: var(--radius-card);
+    --descent-chip-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --descent-chip-shadow: var(--jp-edge-shadow);
+    /* A crisper hover than the shared 45% mix — "medium contrast, one confident
+       accent". `--jp-accent-mark` (6.04 dark / 14.62 light) rather than
+       `--jp-accent-fill`, which is `--jp-ember` and measures 2.04:1 dark: a
+       boundary owes 3:1 even when it only appears on hover.
+
+       Spent through the hover ROLES rather than as a new rule on purpose. The
+       practice card's only transition comes from `.descent--enhanced`, whose
+       list is `opacity, transform, border-color, background`; a per-look
+       transition at (0,4,0) would replace that list and make the ignition fade
+       instant. Staying inside the two properties that list already carries means
+       the hover animates and the choreography is untouched. */
+    --descent-item-hover-edge: var(--jp-accent-mark);
+  }
+
   /* ═══════════════════════════════════════════════════════════════════════
      REDUCED MOTION
 
@@ -1629,6 +2517,33 @@
     }
     .descent__spine-draw::after {
       display: none;
+    }
+
+    /*
+      THE ONE HOVER TRANSFORM THE DESIGN-LANGUAGE PASS ADDED, undone.
+
+      A media query adds NO specificity, so the `transition: none` above —
+      (0,1,0) on `.descent__item`, which every row / stage card / panel carries —
+      does not reach `full-send`'s (0,3,0) rules. Both halves have to be
+      restated at or above that specificity, and both are: the transition that
+      would carry the lift, and the lift itself.
+
+      Listed explicitly rather than behind a wildcard so the next look that adds
+      a hover transform has to come here and say so. `journey-sections-shared.css`
+      kills keyframes under `.jp-sec` with `!important`; a transform driven by a
+      TRANSITION outside a keyframe is the one thing that guard cannot see.
+    */
+    .descent[data-motion='stagger'] .descent__row,
+    .descent[data-motion='stagger'] .descent__stagecard,
+    .descent[data-motion='stagger'] .descent__panel {
+      transition: none;
+    }
+
+    .descent[data-motion='stagger'] .descent__card:hover,
+    .descent[data-motion='stagger'] .descent__row:hover,
+    .descent[data-motion='stagger'] .descent__stagecard:hover,
+    .descent[data-motion='stagger'] .descent__panel:hover {
+      transform: none;
     }
   }
 </style>

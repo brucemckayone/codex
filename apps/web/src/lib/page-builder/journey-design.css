@@ -138,6 +138,12 @@
   );
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-normal);
+  /* Matches `type: balanced`, the default the rest of this block already
+     encodes (`--jp-display: --text-4xl`). Without a default here the canvas
+     tree — which renders `.jp-sec` with NO data-jp-* attributes at all — would
+     read an unset `--jp-eyebrow-size` and drop the eyebrow's font-size
+     declaration entirely. */
+  --jp-eyebrow-size: var(--text-sm);
 
   /* accent */
   --jp-accent-text: var(--jp-ember-text);
@@ -150,6 +156,53 @@
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 
+  /* ── THE PRIMARY CTA — the one element a visitor must read to pay ────────
+     `CtaLink` keeps sole ownership of `.cta` colour (`Codex-kdsuo`); this is
+     that ownership expressed as a SEAM rather than a constant, so the accent
+     axis can reach the pay button without any section repainting it.
+
+     WHY NOT `--jp-accent-fill` / `--jp-accent-on-fill`, which already exist and
+     which the `accent: none` rule below was written for. MEASURED, calibrated
+     against the browser rows in `04-contrast-baseline.md` (`Codex-4avmh`):
+
+       accent: text  `--jp-accent-fill` is `transparent` → the pay button
+                     disappears entirely.
+       accent: edge  same — and that is The Syllabus.
+       accent: none  `--jp-accent-fill` is `--jp-ink-4`, which is 18% off its own
+                     surface. Measured 1.69 light / 1.53 dark at the live poles,
+                     1.34–1.69 across all 36 author-reachable brand-preset
+                     backgrounds, and a CEILING of 1.69 over the 140 608-colour
+                     sRGB grid. WCAG 1.4.11's non-text floor is 3.0, so that
+                     token can NEVER read as a button — it cannot deliver the
+                     rationale its own rule states ("a price-bearing CTA must
+                     stay the visually dominant element").
+
+     So this is the `--jp-accent-mark` argument a second time: a family that
+     exists BECAUSE `--jp-accent-fill` is transparent on two of five values, and
+     that is always a real, separated colour.
+
+     THE INVARIANT, and `journey-design.test.ts` enforces it per accent value:
+     every value yields EITHER a non-transparent `--jp-cta-fill` OR a
+     `--jp-cta-border` that clears 3.0 against the surface. A CTA that is
+     neither a plate nor an outline is not identifiable as a control.
+
+     The default is the brand pill, unchanged — so `accent: fill` and
+     `accent: glow` (Plain Facts, Full Send, Signal, and CANDLELIT) keep the
+     exact pair that already carries an exhaustive 4.58:1 floor by construction,
+     and Candlelit needs no compounded exclusion selector to stay identical. */
+  --jp-cta-fill: var(--color-brand-primary);
+  --jp-cta-fill-hover: var(--color-brand-primary-hover);
+  --jp-cta-ink: var(--color-text-on-brand);
+  --jp-cta-border: transparent;
+  --jp-cta-stripe: transparent;
+  --jp-cta-stripe-width: var(--border-width);
+  /* The ONLY boundary that is safe by construction rather than by sampling.
+     Worst case against its own surface, over every pickable background with a
+     non-degenerate `--jp-heading`: 3.47:1. Deliberately NOT `--jp-line`
+     (ceiling 1.81) or `--jp-line-strong` (ceiling 2.71) — both of which can
+     never clear 3.0, at any brand, in either theme. */
+  --jp-cta-outline: color-mix(in oklab, var(--jp-heading) 80%, var(--jp-ink));
+
   /* motion */
   --jp-reveal-distance: var(--space-4);
   --jp-reveal-duration: var(--duration-slow);
@@ -161,7 +214,17 @@
   --jp-media-radius: var(--radius-lg);
   --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
-  --jp-media-scrim: none;
+  /* `media: frame`'s scrim verbatim — `frame` is `SECTION_DESIGN_DEFAULTS.media`,
+     and the axis probe asserts this block resolves to whatever the DEFAULT
+     value's own rule emits. It used to be the keyword `none`, which made this
+     token unusable as one layer of a `background-image` list (contract A54's
+     mechanism); contract B5 replaced the four `none`s with real scrims, so the
+     token is now list-safe at every value it is declared at. */
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 46%
+  );
   --jp-media-mask: none;
 
   /* ── ROLE ALIASES — declared once, not per axis value ────────────────────
@@ -189,6 +252,27 @@
     6cqw,
     calc(var(--space-14) * var(--jp-rhythm))
   );
+
+  /* FULL-BLEED ACROSS THE COLUMN (contract B4), as a vocabulary item rather
+     than a per-section invention — which is the clause's actual wording.
+     `ProofSection` already did this twice, spelling the arithmetic inline at
+     `:1116` and `:1772`: a negative inline margin escaping the section's own
+     padding, cancelled by an equal padding so the content inside still clears
+     the gutter. That is the only correct form of the idiom and it was a local
+     secret; any other section wanting an edge-to-edge rail had to rediscover
+     it, and could get the sign or the cancellation wrong silently.
+
+     IT IS AXIS-RESPONSIVE FOR FREE, which is why no per-value rule is needed:
+     `--jp-sec-pad-inline` is itself axis-keyed, and `surface: bare` zeroes it
+     (see that rule). So on `bare` the breakout is exactly `0px` — correctly
+     inert, because there is no padding to escape and a negative margin there
+     would band against the next full-bleed section. The same reason `bare` was
+     left without atmosphere depth in B1.
+
+     Pair it with `padding-inline: var(--jp-sec-pad-inline)` on the same
+     element, as both existing sites do: the box goes edge-to-edge, its
+     CONTENTS stay on the measure's gutter. */
+  --jp-bleed-inline: calc(var(--jp-sec-pad-inline) * -1);
   --jp-sec-gap: calc(var(--space-6) * var(--jp-rhythm));
 
   /* ── THE STAGE HEIGHT BASIS ──────────────────────────────────────────────
@@ -304,11 +388,48 @@
    on nothing this rule redefines. */
 [data-jp-surface='tint'] {
   --jp-ink: color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%);
-  --jp-sec-bg: var(--jp-ink);
+  /* A SOFT MESH RATHER THAN A FLAT FILL (contract B1).
+     Rides inside `--jp-sec-bg` because all ELEVEN sections consume that token as
+     the whole `background` SHORTHAND — `background: var(--jp-sec-bg)`, verified
+     at every one of the 11 sites, not one of them `background-color` — and the
+     shorthand takes image layers ahead of its final colour. So depth costs zero
+     section edits, which is also the only version where no section can forget
+     the new layer.
+
+     NOT by raising `--jp-sec-atmos`. That gate lights a CANDLELIT recipe (an
+     `--jp-accent-fill` bloom, a `--color-background` vignette, rising embers)
+     that 10 of the 11 sections keep mounted and zeroed. Raising it here would
+     make this look a dimmer Candlelit instead of itself — and would be mostly
+     invisible anyway, since `--jp-accent-fill` is `transparent` at
+     `accent: text`, which is what this surface's looks carry.
+
+     THE CONTRAST FLOOR HOLDS BY CONSTRUCTION, not by sampling. Every surface is
+     `color-mix(pole-a X%, pole-b …)` and pole B is the CONTRAST pole, so mixing
+     a background further toward pole B moves it toward its own text colour and
+     LOWERS contrast. This gradient only ever mixes LESS pole B than the surface
+     itself (it reaches pure `--jp-pole-a`, which is `bare`'s background), so its
+     worst point is the surface's own already-measured level — in BOTH themes,
+     with no new row needed. A flat-background contrast sweep cannot see a
+     gradient, so a gradient that needed sampling to be safe would be a hole in
+     `04-contrast-baseline.md`. */
+  --jp-sec-bg:
+    radial-gradient(88% 62% at 14% 0%, var(--jp-pole-a), transparent 70%),
+    var(--jp-ink);
 }
 [data-jp-surface='panel'] {
   --jp-ink: color-mix(in oklab, var(--jp-pole-a) 88%, var(--jp-pole-b) 12%);
-  --jp-sec-bg: var(--jp-ink);
+  /* AN EDGE-LIT PLATE (contract B1). This is the flattest surface in the set and
+     it carries THREE of the eight looks — Plain Facts, The Syllabus and Signal —
+     so a dead flat fill here is a third of the problem the owner named.
+
+     The lit edge is `tint`'s exact level (6% pole B) resolving into this
+     surface's own 12% by 58% down, so both endpoints are surface levels whose
+     contrast rows are already locked, and by the pole-B argument above the worst
+     point is this surface's own measured level in both themes. See the `tint`
+     block for the full reasoning and for why this rides in `--jp-sec-bg`. */
+  --jp-sec-bg:
+    linear-gradient(to bottom, color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%), var(--jp-ink) 58%),
+    var(--jp-ink);
   --jp-sec-radius: var(--radius-card);
 }
 
@@ -337,7 +458,53 @@
    section actually resolved. */
 [data-jp-surface='invert'] {
   --jp-ink: var(--jp-pole-b);
-  --jp-sec-bg: var(--jp-ink);
+  /* A BRAND BLOOM OUT OF THE DARK (contract B1). `invert` is one look — Full
+     Send — and it was a dead flat black, which is the one surface where a little
+     light does the most work.
+
+     `--jp-accent-mark`, NOT `--jp-accent-fill`: the fill is `transparent` at
+     `accent: text`, `edge` and `none`, so a bloom spelled with it would vanish
+     if `invert` were ever paired with another accent. `--jp-accent-mark` is
+     always a real colour (see the accent block below).
+
+     THIS ONE IS MEASURED, NOT ARGUED, and that distinction is why it landed
+     after the other two. `tint` and `panel` above are safe BY CONSTRUCTION,
+     because their gradients mix LESS pole B than the surface itself and pole B
+     is the contrast pole. This one cannot borrow that argument: `invert`'s ink
+     IS pole B, so every gradient here moves TOWARD the text colour and lowers
+     contrast. There is no structural guarantee available, so it was measured.
+
+     HOW, because the method matters as much as the number. Pixel readback of the
+     real render (canvas `getImageData`, `globalCompositeOperation = 'copy'` per
+     A24), with the text colour converted to sRGB through canvas `fillStyle` —
+     the only parser that is correct for BOTH notations Chrome hands back here.
+     A regex over the computed string is not: this section's text resolves to
+     `color(srgb 1 1 1)`, whose `1 1 1` is 0-1 floats, and reading those as
+     0-255 scored pure white on pure black as 1.01:1 instead of 21:1. Elsewhere
+     the same bug read `oklab(0.33 …)` as `rgb(0.33, 0, 0)` and produced numbers
+     that looked entirely plausible while being wrong.
+
+     MEASURED SWEEP, on `of-blood-and-bones` (ember `#0e27e1`), background peak
+     in the top band vs white body text:
+
+       mix    bg peak   amplitude   worst ratio
+        12%        13           8         19.44   — invisible, a 8/255 lift
+        22%        33          19         16.10
+        32%        56          32         11.73   ← chosen
+        42%        80          46          8.06
+        55%       113          65          4.88   — brackets the floor
+
+     The 55% row is the useful one: it confirms white text holds 4.5:1 only until
+     the background reaches roughly rgb(118), so the ceiling is real and measured
+     rather than assumed. 32% sits at 2.6x the floor.
+
+     ONE-BRAND CAVEAT, stated because it bounds the claim: this sweep is a single
+     brand, and `--jp-accent-mark` varies per org. The worst case is an accent
+     near white, which at this mix lands around the 42% row's peak (~8:1) — still
+     clear of the floor, which is the other reason not to reach for 42% here. */
+  --jp-sec-bg:
+    radial-gradient(115% 80% at 50% 0%, color-mix(in oklab, var(--jp-ink) 68%, var(--jp-accent-mark) 32%), transparent 72%),
+    var(--jp-ink);
 }
 
 /* `media` unlocks the cinematic atmosphere layer. `--jp-sec-atmos` is a 0/1
@@ -416,6 +583,34 @@
   --jp-text-align: center;
   --jp-measure-margin: auto;
 }
+/* `end` — THE AXIS'S FIRST ASYMMETRIC VALUE (contract B4).
+   MEASURED cause for it: `align` shipped exactly two values, `start` and
+   `center`, so B4's "offset columns, deliberate overlap, full-bleed elements
+   crossing a column" had nowhere to attach — the axis could not express
+   asymmetry at all. And three of the eight looks (Plain Facts, The Syllabus,
+   Signal) sat at IDENTICAL `align` + `width` + `surface` coordinates, on
+   `panel`, the flattest surface in the set, leaving `type` to carry all the
+   differentiation for three looks.
+
+   THE BLOCK MOVES, THE TEXT DOES NOT. `--jp-text-align` stays `left`: a
+   right-aligned body column is a readability regression, and the asymmetry
+   being bought here is the column's POSITION in the section, not its ragged
+   edge. So this is `start`'s mirror for placement and its twin for reading.
+
+   `auto 0` is the whole mechanism — `margin-inline-start: auto` absorbs the
+   free space a `max-width: var(--jp-measure)` block leaves, so the column sits
+   against the inline end. It is the only value of this axis with a TWO-VALUE
+   inline pair, which is why `MapSection`'s lone `margin: 0 var(…)` shorthand
+   had to become longhand first (`Codex-3kqqp`): there it would have expanded to
+   `margin: 0 auto 0` and silently centred.
+
+   Cannot reach Candlelit, which is `align: center` — so, like the `--jp-cta-*`
+   seam, this needs no compounded exclusion selector. */
+[data-jp-align='end'] {
+  --jp-align: end;
+  --jp-text-align: left;
+  --jp-measure-margin: auto 0;
+}
 
 /* ═══════════════════ 6 · type ═════════════════════════════════════════════
    The SCALE, not the face. Face and weight come from `--brand-font-heading` and
@@ -430,24 +625,61 @@
    qualify for the 3:1 large-text allowance and must clear the full 4.5:1. And
    `type` is visual scale ONLY — it must never promote a heading LEVEL. */
 [data-jp-type='restrained'] {
+  --jp-eyebrow-size: var(--text-xs);
   --jp-display: var(--text-2xl);
   --jp-heading-size: var(--text-xl);
   --jp-display-leading: var(--leading-snug);
   --jp-display-tracking: var(--tracking-normal);
 }
 [data-jp-type='balanced'] {
+  --jp-eyebrow-size: var(--text-sm);
   --jp-display: var(--text-4xl);
   --jp-heading-size: var(--text-2xl);
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-normal);
 }
 [data-jp-type='expressive'] {
-  --jp-display: var(--text-5xl);
+  --jp-eyebrow-size: var(--text-base);
+  /* THE MIDPOINT OF `--text-4xl` AND `--text-display`, and NOT `--text-5xl`
+     (contract B2.1).
+
+     `--text-5xl` was the obvious step and it made this axis NON-MONOTONIC:
+     it maxes at 2.75rem while `--text-4xl` maxes at 3rem, so `expressive`
+     rendered SMALLER than `balanced` at every width. Measured through the real
+     preset switch at a 2600px viewport, before: restrained 32.4 / balanced
+     51.84 / expressive 47.52 / monumental 86.4px — so Open Air and Full Send,
+     the two looks whose whole point is exuberance, opened with a smaller
+     headline than Long Read and Signal. `InviteSection.svelte` measured the
+     same inversion independently at 375/768/1440 (30/48/44/80px).
+
+     FIXED HERE AND NOT IN `tokens/typography.css`, because `--text-5xl` has
+     seven consumers outside this system — the pricing page (×3), `TopicCard`,
+     `ProofSection`, and the clamp CEILINGS of `TodayStat` and the library page.
+     Re-anchoring the global step to satisfy one axis rung would silently resize
+     five unrelated surfaces; `--text-5xl` stays exactly as it is and simply
+     stops being used as a rung of THIS ladder.
+
+     WHY A MIDPOINT RATHER THAN A NEW CLAMP. Two properties, both load-bearing:
+
+       1. It is monotonic BY ALGEBRA, not by inspection. `--text-display`
+          exceeds `--text-4xl` at every viewport (2.75 > 2.25rem floor,
+          5 > 3rem ceiling), so a value halfway between them is necessarily
+          between `balanced` and `monumental`. M5 cannot recur here by someone
+          later re-anchoring a shared step.
+       2. It keeps `--brand-text-scale`. Both operands are real `--text-*`
+          steps, which `org-brand.css` re-declares multiplied by the brand
+          scale — so the product rides along. A hand-written `clamp()` would
+          have been the only size in this axis that ignores the org's scale.
+
+     Measured after: 32.4 / 51.84 / 69.12 / 86.4px. */
+  --jp-display: calc((var(--text-4xl) + var(--text-display)) / 2);
   --jp-heading-size: var(--text-3xl);
   --jp-display-leading: var(--leading-tight);
   --jp-display-tracking: var(--tracking-tight);
 }
 [data-jp-type='monumental'] {
+  /* candlelit's type value — MUST stay --text-sm or every published page shifts */
+  --jp-eyebrow-size: var(--text-sm);
   --jp-display: var(--text-display);
   --jp-heading-size: var(--text-4xl);
   --jp-display-leading: var(--leading-none);
@@ -489,6 +721,15 @@
   --jp-accent-mark: var(--jp-ember-text);
   --jp-accent-edge: var(--jp-line);
   --jp-accent-glow: none;
+  /* The value's whole tell is "brand as TEXT", so a filled brand pill
+     contradicts it — this is The Long Read and Open Air. An outline CTA whose
+     label IS the brand: `--jp-ember-text` measures 13.93 light / 5.40 dark,
+     which is why the accent ladder never tints text with raw `--jp-ember`
+     (8.49 light but 2.04 DARK — the failure a light-only check passes). */
+  --jp-cta-fill: transparent;
+  --jp-cta-fill-hover: var(--jp-ink-3);
+  --jp-cta-ink: var(--jp-accent-text);
+  --jp-cta-border: var(--jp-cta-outline);
 }
 [data-jp-accent='fill'] {
   --jp-accent-text: var(--jp-ember-text);
@@ -498,12 +739,53 @@
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
+/* `edge` IS THE ONE VALUE THAT SPENDS THE ORG'S SECOND BRAND COLOUR.
+   Before this, the whole accent axis spent ONE hue: on this fixture
+   `--brand-color` and `--brand-accent` are the SAME hex (#4465FF), so five
+   accent values painted five variations of one blue, and `--brand-secondary`
+   (#00933C) reached exactly one place system-wide — a single blurred
+   box-shadow on `accent: glow`, at a -40px spread. A brand colour the owner
+   did not know was in use, used where nobody could see it.
+
+   `edge`'s tell is a BORDER STRIPE rather than a fill, which is the safest
+   role to hand a second hue: it is non-text, so its floor is 3.0, and
+   MEASURED `--jp-blood` clears that at both poles (3.84 light / 4.47 dark).
+   The mark goes through `--jp-blood-text` (10.81 / 8.36) for the same reason
+   the rest of this axis never paints text with a raw brand colour.
+
+   ONE LOOK MOVES — The Syllabus, the only preset on `accent: edge` — and it
+   gains a genuinely different hue rather than another arrangement of the same
+   blue (OKLab distance 0.345, well past the 0.1 where a viewer reads two
+   colours as different). Candlelit keeps its green glow untouched: it is
+   `accent: glow`, which this rule cannot reach.
+
+   The `--jp-cta-*` seam needs no edit — its stripe already reads
+   `--jp-accent-mark` and its ring `--jp-accent-edge`, so the pay button's
+   stripe follows the hue from one place. */
 [data-jp-accent='edge'] {
   --jp-accent-text: var(--jp-text);
   --jp-accent-fill: transparent;
-  --jp-accent-mark: var(--jp-ember-text);
-  --jp-accent-edge: var(--jp-ember);
+  --jp-accent-mark: var(--jp-blood-text);
+  --jp-accent-edge: var(--jp-blood);
   --jp-accent-glow: none;
+  /* This value's documented tell is a LEFT-BORDER STRIPE, not a filled button,
+     so the CTA finally states it — The Syllabus. The stripe carries the brand
+     (`--jp-accent-edge` is `--jp-ember` here) and the remaining three edges
+     carry the neutral outline, so the brand appears exactly once. Longhand
+     only: a `border-inline-start` shorthand would re-assert width and style
+     and re-poison the other three edges' colour. */
+  --jp-cta-fill: transparent;
+  --jp-cta-fill-hover: var(--jp-ink-3);
+  --jp-cta-ink: var(--jp-heading);
+  --jp-cta-border: var(--jp-cta-outline);
+  /* `--jp-accent-mark`, NOT `--jp-accent-edge`. MEASURED: the edge token is
+     raw `--jp-ember`, which this file already documents at 2.04:1 as text in
+     dark, and the stripe came out 2.98 against the dark surface — under the 3.0
+     floor. `--jp-accent-mark` tracks the AA-mitigated `--jp-ember-text` and
+     measures 5.97 light / 5.40 dark. It is also what the accent block's own
+     rule asks for: "use it for any small decorative brand element". */
+  --jp-cta-stripe: var(--jp-accent-mark);
+  --jp-cta-stripe-width: var(--border-width-toast);
 }
 [data-jp-accent='glow'] {
   --jp-accent-text: var(--jp-ember-text);
@@ -521,6 +803,18 @@
   --jp-accent-mark: var(--jp-heading);
   --jp-accent-edge: var(--jp-line);
   --jp-accent-glow: none;
+  /* "No accent colour" — Quiet Studio — so the pay button carries none either.
+     A monochrome outline, which is what `--jp-accent-fill: --jp-ink-4` above
+     was reaching for and cannot achieve: see the `--jp-cta-*` note for the
+     1.69 ceiling. The label is `--jp-heading` against the section's own
+     surface, i.e. exactly the contrast every heading on the page already has
+     (20.07 light / 15.96 dark at the live poles) — so this adds no contrast
+     exposure the page does not already carry, and it is far clear of the
+     filled pill's own 4.61 on the fixture brand. */
+  --jp-cta-fill: transparent;
+  --jp-cta-fill-hover: var(--jp-ink-3);
+  --jp-cta-ink: var(--jp-heading);
+  --jp-cta-border: var(--jp-cta-outline);
 }
 
 /* ═══════════════════ 8 · motion ═══════════════════════════════════════════
@@ -564,19 +858,76 @@
 }
 
 /* ═══════════════════ 9 · media ════════════════════════════════════════════
-   ASPECT RATIO AND SCRIM ARE COUPLED, and this is a known trap. Changing a
-   media box's `aspect-ratio` moves where an opaque scrim's gradient stops fall
-   relative to the text sitting on it, which silently changes that text's
-   contrast. `bleed` is the ONLY value shipping a scrim, and its 21:9 aspect and
-   62% stop are tuned together. Any future aspect change on `bleed` requires
-   re-measuring the text contrast over it — this is not a free parameter.
+   EVERY VALUE THAT HAS A MEDIA BOX SHIPS A REAL SCRIM (contract B5). Four of
+   the five were the keyword `none`, so every composition placing text over
+   media invented its own contrast floor — or had none at all. Two consequences
+   of that are gone with it: the axis token is now a legal `background-image`
+   LAYER at every value it is declared at (it could not be composed into a list
+   while it was a keyword — contract A54's mechanism), and `HeroSection`'s
+   `full-bleed` no longer carries the whole guarantee alone.
 
-   Consequence for compositions (research §5.1): any composition placing text
-   OVER media must use `bleed`, not `frame`. `frame` has no scrim.
+   ── THE SHAPE: A LEDGE AND A RAMP ─────────────────────────────────────────
+   Each scrim is an OPAQUE LEDGE at the bottom edge, then a linear ramp out to
+   nothing:
+
+     linear-gradient(to top, var(--jp-ink) <ledge>, transparent <ramp-end>)
+
+   The ledge is what makes the contrast MEASURABLE. `transparent` is
+   `rgba(0,0,0,0)` and CSS interpolates gradients premultiplied, so a stop pair
+   like this holds ONE colour and ramps only its alpha, 1 → 0. Over the ledge
+   the alpha is exactly 1, so the backdrop is `--jp-ink` — which is the section's
+   OWN surface colour, whose ratio against every text rung is already locked in
+   `04-contrast-baseline.md` at both poles and at all five `surface` values.
+   Text on the ledge is therefore safe BY CONSTRUCTION, over a photograph, over
+   the atmosphere layer, or over nothing, and needs no new contrast row.
+
+   ── WHY THE LEDGE IS A LENGTH AND THE RAMP IS A PERCENTAGE ────────────────
+   THE ASPECT ↔ SCRIM COUPLING is the known trap: a percentage stop moves in
+   pixels when `aspect-ratio` changes, so the text that sat in the opaque zone
+   silently climbs out of it. A ledge measured in `--space-*` cannot: it is the
+   same number of pixels on a 21:9 band and a 4:5 portrait. And if the box gets
+   short enough that the percentage ramp-end falls BELOW the ledge, CSS clamps
+   the later stop up to the earlier one — the scrim becomes a hard-edged opaque
+   band, which is the SAFE direction. `bleed` keeps its pure-percentage form
+   because it is Candlelit's value and must not move (see its rule).
+
+   ── MEASURED: HOW FAR UP THE RAMP THE FLOOR HOLDS ─────────────────────────
+   Above the ledge the alpha falls and the backdrop becomes part-photograph, so
+   the guarantee degrades. Measured (`journey-design.test.ts`, sRGB composite,
+   model calibrated to the browser-locked rows) as the alpha at which each rung
+   crosses its floor over the WORST possible underlay, and stated as the
+   fraction of the ramp above the ledge that still clears it:
+
+     rung                     floor   light      dark
+     --jp-heading (>=24px)    3.0     first 55%  first 49%
+     --jp-text                4.5     first 30%  first 24%
+     --jp-faint               4.5     first  5%  first  5%
+
+   The worst underlay is pure white or pure black, and those two bound EVERY
+   photograph and every brand-derived atmosphere exactly — relative luminance
+   is monotone in each sRGB channel, so the cube's extremes are the extremes of
+   the reachable range. A 140 608-colour sweep of the pickable brand cube
+   returns the identical thresholds, which the test asserts rather than assumes.
+
+   So: quiet text (`--jp-faint`) over media belongs ON THE LEDGE, and the ledge
+   is sized for it — one caption row at the largest `--jp-body-size` rung (24px)
+   plus its `--space-4` padding measures 47px against a 48px ledge.
 
    `--jp-media-mask` is a `clip-path` value. `mask` is an arch: a wide ellipse
    across the top two corners, the standard radius at the bottom two, expressed
    in percentages so it tracks the box rather than needing a raw px path(). */
+
+/* `bleed` — full-bleed: the media fills the section and the copy sits over it.
+   UNCHANGED, and deliberately the one value still spelled as a pure percentage
+   ramp with no ledge. It is Candlelit's value (`media: bleed` + `surface:
+   media`), its 21:9 aspect and 62% stop are tuned together, and two sections
+   re-read this exact token on a TEXT BLOCK's own box so the gradient grows with
+   the text (`.iv__meta[data-iv-meta='over']`, `.reel__lower[data-reel-at='over']`)
+   — a ledge in absolute length would become a hard-edged bar on a box that
+   short. Its guarantee comes from that re-read plus `full-bleed`'s own
+   composition floor, not from a ledge, and the test pins it as the exception.
+   Measured for the record at 1440px: the bottom 28.8% of the box (178px) clears
+   AA for `--jp-text` over the worst-case underlay. */
 [data-jp-media='bleed'] {
   --jp-media-radius: 0px;
   --jp-media-inset: 0px;
@@ -584,30 +935,77 @@
   --jp-media-scrim: linear-gradient(to top, var(--jp-ink), transparent 62%);
   --jp-media-mask: none;
 }
+/* `frame` — a poster panel, and `SECTION_DESIGN_DEFAULTS.media`, so this is the
+   scrim most pages get. A CAPTION LEDGE: the mid ramp-end of the set, because
+   16:9 is the mid box and a poster's text is a caption at its foot. This value
+   is also what the three stills-with-no-text consumers paint (`.guide__scrim`,
+   `.reel__scrim`, `.iv__scrim`), which is why the ramp is long and soft rather
+   than a second opaque band — depth at the bottom edge, per contract B1's
+   "characterful rather than uniform". */
 [data-jp-media='frame'] {
   --jp-media-radius: var(--radius-lg);
   --jp-media-inset: 0px;
   --jp-media-aspect: 16 / 9;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 46%
+  );
   --jp-media-mask: none;
 }
+/* `mask` — an arched 4:5 portrait. The SHORTEST ramp fraction in the set and
+   the longest in pixels: at 4:5 the box is 1.8x as tall as a 16:9 one of the
+   same width, so 38% is more pixels than `frame`'s 46% and reads as a long,
+   soft fade rather than a band. The arch clips the top two corners, so the flat
+   bottom edge is the only edge text can sit on — which is where the ledge is. */
 [data-jp-media='mask'] {
   --jp-media-radius: var(--radius-xl);
   --jp-media-inset: 0px;
   --jp-media-aspect: 4 / 5;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) var(--space-12),
+    transparent 38%
+  );
   --jp-media-mask: inset(
     0 round 48% 48% var(--radius-xl) var(--radius-xl) / 34% 34%
       var(--radius-xl) var(--radius-xl)
   );
 }
+/* `inset` — a matted print. THE LEDGE READS THE MAT rather than re-spelling it:
+   the scrim covers the whole box (`inset: 0` at every consumer) while the image
+   is pushed in by `--jp-media-inset`, so the bottom `--space-12` of the box is
+   MAT, not photograph. A ledge of `--space-12` would land entirely on the mat
+   and protect nothing on the print. `calc(var(--jp-media-inset) + var(--space-12))`
+   clears the mat and then gives the same caption row every other value gets,
+   and it cannot drift if the mat is ever retuned. Over the mat the ink is the
+   surface's own colour, so that half of the ledge is invisible; what it paints
+   is a plinth under the print, which is the shortest ramp in the set (34%). */
 [data-jp-media='inset'] {
   --jp-media-radius: var(--radius-none);
   --jp-media-inset: var(--space-12);
   --jp-media-aspect: 3 / 2;
-  --jp-media-scrim: none;
+  --jp-media-scrim: linear-gradient(
+    to top,
+    var(--jp-ink) calc(var(--jp-media-inset) + var(--space-12)),
+    transparent 34%
+  );
   --jp-media-mask: none;
 }
+/* `none` — THE ONE VALUE WITH NO SCRIM, and it is the absence of a media box
+   rather than an exemption from B5. Every consumer of `--jp-media-scrim` sits
+   inside a box this value switches off — `.hero__media`, `.guide__plate`
+   (`display: var(--jp-media-display)`), `.iv__media` / `.reel`'s figure (gated
+   in markup on `design.media === 'none'`) — and the two text-block copies are
+   gated on `design.media === 'bleed'`. A scrim declared here could not paint
+   anywhere, which is a write nothing reads.
+
+   Its text floor is therefore the section surface's own, not a scrim's: the
+   composition for `none` is `stage`, a headline stack over the atmosphere
+   layer, and `--jp-heading` / `--jp-text` / `--jp-faint` on `--jp-ink` are the
+   already-locked rows the ledge above borrows. The test pins the exception to
+   the presence of `--jp-media-display: none` so a sixth media value cannot
+   inherit it by omission. */
 [data-jp-media='none'] {
   --jp-media-display: none;
 }

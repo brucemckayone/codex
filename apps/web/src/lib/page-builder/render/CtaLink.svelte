@@ -9,6 +9,9 @@
 
   Consumes semantic `--color-*` tokens only — NEVER raw `--brand-*` — so it
   re-themes with the org brand and any per-page brandOverrides automatically.
+  The primary variant additionally reads the `--jp-cta-*` seam so the journey
+  `accent` axis can restyle the pay button without any section repainting
+  `.cta`, which `journey-design.test.ts` still forbids (`Codex-kdsuo`).
 
   @prop {string} href - Navigation target (absolute or app-relative URL)
   @prop {'primary' | 'secondary'} [variant='primary'] - Visual weight
@@ -96,13 +99,39 @@
     font-size: var(--text-base);
   }
 
+  /*
+    The journey `accent` axis reaches the pay button through the `--jp-cta-*`
+    seam (`journey-design.css`), which is why these are `var()`s with the
+    org-brand pair as the FALLBACK rather than as the value.
+
+    Outside a `.jp-sec` — `FloatingCta` is the case — nothing declares
+    `--jp-cta-*`, so every fallback fires and this element paints exactly the
+    brand pill it always has. Inside one, `accent: fill` and `accent: glow`
+    resolve the seam back to that same pair, so four of the eight looks
+    (including Candlelit) are byte-identical to before.
+
+    Measured, at the point of the change (`Codex-4avmh`): the filled pair
+    carries an exhaustive 4.58:1 floor for any brand hex; the outline values
+    put 7.70–20.07 on the label and never less than 3.47:1 on the boundary.
+
+    LONGHAND border properties only. The base `.cta` rule already set border
+    width and style through the `border` shorthand; a `border-inline-start`
+    shorthand here would re-assert both AND reset the other three edges'
+    colour after `border-color` had set it.
+  */
   .cta[data-variant='primary'] {
-    background: var(--color-brand-primary);
-    color: var(--color-text-on-brand);
+    background: var(--jp-cta-fill, var(--color-brand-primary));
+    color: var(--jp-cta-ink, var(--color-text-on-brand));
+    border-color: var(--jp-cta-border, transparent);
+    border-inline-start-width: var(--jp-cta-stripe-width, var(--border-width));
+    border-inline-start-color: var(
+      --jp-cta-stripe,
+      var(--jp-cta-border, transparent)
+    );
   }
 
   .cta[data-variant='primary']:hover {
-    background: var(--color-brand-primary-hover);
+    background: var(--jp-cta-fill-hover, var(--color-brand-primary-hover));
   }
 
   .cta[data-variant='secondary'] {
