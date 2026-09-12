@@ -718,11 +718,34 @@
   --jp-accent-edge: var(--jp-ember);
   --jp-accent-glow: none;
 }
+/* `edge` IS THE ONE VALUE THAT SPENDS THE ORG'S SECOND BRAND COLOUR.
+   Before this, the whole accent axis spent ONE hue: on this fixture
+   `--brand-color` and `--brand-accent` are the SAME hex (#4465FF), so five
+   accent values painted five variations of one blue, and `--brand-secondary`
+   (#00933C) reached exactly one place system-wide — a single blurred
+   box-shadow on `accent: glow`, at a -40px spread. A brand colour the owner
+   did not know was in use, used where nobody could see it.
+
+   `edge`'s tell is a BORDER STRIPE rather than a fill, which is the safest
+   role to hand a second hue: it is non-text, so its floor is 3.0, and
+   MEASURED `--jp-blood` clears that at both poles (3.84 light / 4.47 dark).
+   The mark goes through `--jp-blood-text` (10.81 / 8.36) for the same reason
+   the rest of this axis never paints text with a raw brand colour.
+
+   ONE LOOK MOVES — The Syllabus, the only preset on `accent: edge` — and it
+   gains a genuinely different hue rather than another arrangement of the same
+   blue (OKLab distance 0.345, well past the 0.1 where a viewer reads two
+   colours as different). Candlelit keeps its green glow untouched: it is
+   `accent: glow`, which this rule cannot reach.
+
+   The `--jp-cta-*` seam needs no edit — its stripe already reads
+   `--jp-accent-mark` and its ring `--jp-accent-edge`, so the pay button's
+   stripe follows the hue from one place. */
 [data-jp-accent='edge'] {
   --jp-accent-text: var(--jp-text);
   --jp-accent-fill: transparent;
-  --jp-accent-mark: var(--jp-ember-text);
-  --jp-accent-edge: var(--jp-ember);
+  --jp-accent-mark: var(--jp-blood-text);
+  --jp-accent-edge: var(--jp-blood);
   --jp-accent-glow: none;
   /* This value's documented tell is a LEFT-BORDER STRIPE, not a filled button,
      so the CTA finally states it — The Syllabus. The stripe carries the brand

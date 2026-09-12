@@ -365,6 +365,22 @@
      values. */
   --jp-ember-text: color-mix(in oklab, var(--jp-ember) 55%, var(--jp-heading));
 
+  /* THE SECOND BRAND HUE, MITIGATED THE SAME WAY. `--jp-blood` is
+     `--brand-secondary` (the org's own second colour) and it fails as text for
+     exactly the reason `--jp-ember` does — MEASURED on of-blood-and-bones'
+     #00933C against the two poles every seeded org resolves to: 3.84 light /
+     4.47 dark, both under 4.5, and the light pole is the worse one so a
+     dark-only check would pass it. Through this 55% mix it is 10.81 / 8.36.
+     The ratios track ember's own (4.42 / 3.89 raw, 11.61 / 7.93 mixed) closely
+     enough that the same rule applies: NEVER paint text with raw `--jp-blood`.
+
+     IT BELONGS HERE, not in the root-only block above with `--jp-blood`
+     itself, for the reason stated there: this reads the SECTION's own
+     `--jp-heading`, so it must re-derive per section. Declaring it at root
+     would freeze it against the page's heading and silently lose contrast on
+     every lifted surface — the same trap `--jp-faint` hit. */
+  --jp-blood-text: color-mix(in oklab, var(--jp-blood) 55%, var(--jp-heading));
+
   /* ── atmosphere ─────────────────────────────────────────────────────────
      The ember bloom is a fixed-strength gradient; this veil is what makes its
      APPARENT strength track the ink's darkness. It is the ink's own colour, so

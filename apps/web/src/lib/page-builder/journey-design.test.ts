@@ -452,8 +452,12 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'accent:edge': {
     '--jp-accent-text': 'var(--jp-text)',
     '--jp-accent-fill': 'transparent',
-    '--jp-accent-mark': 'var(--jp-ember-text)',
-    '--jp-accent-edge': 'var(--jp-ember)',
+    // THE SECOND BRAND HUE. This is the one accent value that spends
+    // `--brand-secondary` rather than `--brand-color`; before it, the whole
+    // axis painted one colour (this fixture's primary and accent are the same
+    // hex) and the secondary reached only one invisible box-shadow.
+    '--jp-accent-mark': 'var(--jp-blood-text)',
+    '--jp-accent-edge': 'var(--jp-blood)',
     '--jp-accent-glow': 'none',
     // The value's tell is a left-border STRIPE, so the CTA states it. Two
     // extra properties relative to the other accent values — which is allowed,
@@ -2662,10 +2666,40 @@ describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
     const edge = ruleFor("[data-jp-accent='edge']")?.declarations ?? {};
     expect(edge['--jp-cta-stripe']).toBe('var(--jp-accent-mark)');
     expect(edge['--jp-cta-stripe']).not.toBe('var(--jp-accent-edge)');
-    // And the mark really is the mitigated colour on this value, not the raw
-    // ember under another name — otherwise the swap buys nothing.
-    expect(edge['--jp-accent-mark']).toBe('var(--jp-ember-text)');
-    expect(edge['--jp-accent-mark']).not.toBe('var(--jp-ember)');
+
+    // AND THE MARK IS A MITIGATED RUNG, WHICHEVER HUE IT SPENDS. This was
+    // pinned to `var(--jp-ember-text)` BY NAME, and it reddened the moment
+    // `edge` moved to the org's second brand colour — a change that satisfies
+    // the rule it was written for. The rule is "never a RAW brand hue as a
+    // mark", not "always the ember rung", so it is now stated that way: the
+    // mark must be one of the `*-text` rungs, and never `--jp-ember` or
+    // `--jp-blood` directly.
+    const RAW = ['var(--jp-ember)', 'var(--jp-blood)', 'var(--jp-rose)'];
+    expect(RAW).not.toContain(edge['--jp-accent-mark']);
+    expect(edge['--jp-accent-mark']).toMatch(/^var\(--jp-[a-z]+-text\)$/);
+
+    // Stated as ARITHMETIC too, so a future hue cannot pass the string rule
+    // and fail the eye. Both brand hues measured against the two poles every
+    // seeded org resolves to: RAW fails at one pole or both (ember 4.42/3.89,
+    // blood 3.84/4.47 — and the LIGHT pole is the worse one for both, so a
+    // dark-only check would wave them through); the 55% rung clears 4.5 at
+    // both (ember 11.61/7.93, blood 10.81/8.36).
+    for (const hue of ['#4465FF', '#00933C']) {
+      for (const bg of ['#fafafa', '#171717']) {
+        const ink = hex(bg);
+        const heading = autoContrast(ink, 0.62, 0.96, 0.25);
+        expect(
+          ratio(mix(hex(hue), heading, 0.55), ink),
+          `${hue} mixed on ${bg}`
+        ).toBeGreaterThan(4.5);
+      }
+      // Non-vacuous: the raw hue really is the thing the rung is protecting
+      // against, at its worse pole.
+      expect(
+        ratio(hex(hue), hex('#fafafa')),
+        `${hue} raw on light`
+      ).toBeLessThan(4.5);
+    }
   });
 
   it('--jp-cta-outline is the ONLY rung that clears 3.0, and the rejected ones cannot', () => {
