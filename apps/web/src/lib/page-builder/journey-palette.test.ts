@@ -443,7 +443,6 @@ describe('the ladder re-derives PER SECTION, not once per page', () => {
       '--jp-ink',
       '--jp-ember',
       '--jp-blood',
-      '--jp-blood-deep',
       '--jp-rose',
     ]) {
       expect(selectorDeclaring(input), input).not.toContain('.jp-sec');

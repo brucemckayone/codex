@@ -598,6 +598,52 @@ describe('journey-design.css — the axis probe', () => {
     );
   });
 
+  it('makes the full-bleed breakout a TOKEN, not a per-section invention (B4)', () => {
+    // Contract B4 asks for composition options "as axis-keyed options rather
+    // than per-section inventions". The breakout existed as an invention:
+    // `ProofSection` spelled `calc(var(--jp-sec-pad-inline) * -1)` inline at
+    // two sites, so any other section wanting an edge-to-edge rail had to
+    // rediscover the idiom — and could get the SIGN or the cancelling padding
+    // wrong with nothing to catch it.
+    expect(declarationsOf(DESIGN, '--jp-bleed-inline')).toEqual([
+      'calc(var(--jp-sec-pad-inline) * -1)',
+    ]);
+
+    // No section may re-spell it. This is the half that keeps it a vocabulary
+    // item: a future section copying the arithmetic reds here.
+    const respelt = SECTION_SOURCES.flatMap(({ file, css }) =>
+      stripComments(css)
+        .split('\n')
+        .filter((l) =>
+          /calc\(\s*var\(--jp-sec-pad-inline\)\s*\*\s*-1\s*\)/.test(l)
+        )
+        .map((l) => `${file}: ${squash(l)}`)
+    );
+    expect(
+      respelt,
+      'respelt the breakout instead of using --jp-bleed-inline'
+    ).toEqual([]);
+
+    // And it is actually CONSUMED — a token nothing reads is a write-only
+    // channel, which is the defect this file already documents elsewhere.
+    const readers = SECTION_SOURCES.filter(({ css }) =>
+      stripComments(css).includes('var(--jp-bleed-inline)')
+    );
+    expect(readers.length, '--jp-bleed-inline has no reader').toBeGreaterThan(
+      0
+    );
+
+    // AXIS-RESPONSIVE BY DERIVATION, which is why it needs no per-value rule:
+    // `surface: bare` zeroes the padding, so the breakout is 0px there —
+    // correctly inert, since a negative margin with no padding to escape would
+    // band against the next full-bleed section.
+    expect(
+      ruleFor("[data-jp-surface='bare']")?.declarations['--jp-sec-pad-inline']
+    ).toBe('0px');
+    // Guards the guard.
+    expect(SECTION_SOURCES).toHaveLength(11);
+  });
+
   it('lets no MULTI-VALUE axis token reach a shorthand consumer (Codex-3kqqp)', () => {
     // THE CLASS, and it has shipped to published pages twice: an axis token
     // whose VALUE SHAPE is legal on its own but changes a shorthand's meaning

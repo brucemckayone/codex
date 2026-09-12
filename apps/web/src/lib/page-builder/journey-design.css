@@ -252,6 +252,27 @@
     6cqw,
     calc(var(--space-14) * var(--jp-rhythm))
   );
+
+  /* FULL-BLEED ACROSS THE COLUMN (contract B4), as a vocabulary item rather
+     than a per-section invention — which is the clause's actual wording.
+     `ProofSection` already did this twice, spelling the arithmetic inline at
+     `:1116` and `:1772`: a negative inline margin escaping the section's own
+     padding, cancelled by an equal padding so the content inside still clears
+     the gutter. That is the only correct form of the idiom and it was a local
+     secret; any other section wanting an edge-to-edge rail had to rediscover
+     it, and could get the sign or the cancellation wrong silently.
+
+     IT IS AXIS-RESPONSIVE FOR FREE, which is why no per-value rule is needed:
+     `--jp-sec-pad-inline` is itself axis-keyed, and `surface: bare` zeroes it
+     (see that rule). So on `bare` the breakout is exactly `0px` — correctly
+     inert, because there is no padding to escape and a negative margin there
+     would band against the next full-bleed section. The same reason `bare` was
+     left without atmosphere depth in B1.
+
+     Pair it with `padding-inline: var(--jp-sec-pad-inline)` on the same
+     element, as both existing sites do: the box goes edge-to-edge, its
+     CONTENTS stay on the measure's gutter. */
+  --jp-bleed-inline: calc(var(--jp-sec-pad-inline) * -1);
   --jp-sec-gap: calc(var(--space-6) * var(--jp-rhythm));
 
   /* ── THE STAGE HEIGHT BASIS ──────────────────────────────────────────────

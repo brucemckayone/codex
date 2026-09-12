@@ -1113,7 +1113,7 @@
       overflow: hidden;
       /* Edge-to-edge inside the section, so it bleeds back over the inline
          padding the section box applied. */
-      margin-inline: calc(var(--jp-sec-pad-inline) * -1);
+      margin-inline: var(--jp-bleed-inline);
       padding-inline: var(--jp-sec-pad-inline);
       mask-image: linear-gradient(
         to right,
@@ -1769,7 +1769,7 @@
       scroll-snap-type: x mandatory;
       -webkit-overflow-scrolling: touch;
       scroll-padding-inline: var(--jp-sec-pad-inline);
-      margin-inline: calc(var(--jp-sec-pad-inline) * -1);
+      margin-inline: var(--jp-bleed-inline);
       padding-inline: var(--jp-sec-pad-inline);
       padding-bottom: var(--space-2);
       scrollbar-width: none;

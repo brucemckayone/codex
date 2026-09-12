@@ -141,7 +141,6 @@
      agrees with its dark CTA. */
   --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
   --jp-blood: var(--brand-secondary, var(--jp-ember));
-  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
   --jp-rose: var(--brand-accent, var(--jp-ember));
 }
 
@@ -297,7 +296,7 @@
   --jp-line-hover: color-mix(in oklab, var(--jp-ink) 56%, var(--jp-heading) 44%);
 
   /* ── brand accents ──────────────────────────────────────────────────────
-     `--jp-ember`, `--jp-blood`, `--jp-blood-deep` and `--jp-rose` are declared
+     `--jp-ember`, `--jp-blood` and `--jp-rose` are declared
      in the ROOT-ONLY block above, not here — see the note there (Codex-8jve9).
      A `.jp-sec` inherits them already resolved. The two rungs BELOW them stay
      here because they must re-derive per section. */
@@ -470,11 +469,6 @@
      why this is safe to land against a fixture where no org declares one.
      Chain order copied from `tokens/org-brand.css`'s dark branch so a journey
      accent resolves exactly like every other org accent.
-
-     `--jp-blood-deep` is absent on purpose, exactly as `--jp-pole-b` is: it is
-     declared at the root in terms of `--jp-blood`, and substitution happens per
-     element AFTER the cascade picks a winner, so it re-derives from whichever
-     blood won here for free.
 
      No `[data-editing-theme='dark']` form, also on purpose: `--jp-pole-a` above
      does not have one either, so the brand-editor dark-preview gap is
