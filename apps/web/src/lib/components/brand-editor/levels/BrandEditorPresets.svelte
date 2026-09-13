@@ -4,12 +4,17 @@
   The preset gallery, grouped by category, with every preset's VARIANTS
   exposed as first-class choices rather than hidden behind the signature.
 
-  Structure note: the card is a `<div>` and the variant chips are the only
-  buttons in it. An earlier shape made the whole card a `<button>`, which
-  cannot contain the variant buttons — nested interactive elements are invalid
-  and collapse for screen readers. Making the variant row the interactive
-  surface avoids that entirely, and reads better: a preset is a palette, and
-  the thing you actually pick is one of its looks.
+  Structure note: the card's HEADER is a button and the variant chips are
+  buttons beside it — siblings, never nested. An earlier shape made the whole
+  card a single `<button>`, which cannot legally contain the variant buttons;
+  nested interactive elements are invalid and collapse for screen readers.
+  That constraint still holds and is why the header, not the `<article>`, is
+  the clickable element.
+
+  The header applies `variants[0]`, the signature — identical to the preset's
+  own top-level values. It exists because a card whose swatches, name and
+  description were all inert read as broken: clicking the obvious target did
+  nothing, and only the three small chips at the bottom applied anything.
 -->
 <script lang="ts">
   import {
@@ -83,8 +88,16 @@
       <h3 class="presets__group-label">{group.category}</h3>
 
       {#each group.presets as preset (preset.id)}
+        {@const signature = preset.variants[0]}
         <article class="presets__card">
-          <header class="presets__head">
+          <button
+            type="button"
+            class="presets__head"
+            class:is-applied={appliedId === signature.id}
+            aria-pressed={appliedId === signature.id}
+            title={signature.note}
+            onclick={() => apply(signature, signature.axes)}
+          >
             <span class="presets__swatches" aria-hidden="true">
               <span
                 class="presets__swatch presets__swatch--lg"
@@ -113,7 +126,7 @@
               <span class="presets__name">{preset.name}</span>
               <span class="presets__desc">{preset.description}</span>
             </span>
-          </header>
+          </button>
 
           <div
             class="presets__variants"
@@ -208,11 +221,49 @@
     background: var(--color-surface);
   }
 
+  /*
+   * The card's primary action. A `<button>` needs its own reset here: the
+   * browser default supplies a centred text alignment, its own font and a
+   * grey background, all of which would fight the card.
+   *
+   * The negative margin cancels the padding, so the RESTING layout is
+   * pixel-identical to the inert `<header>` this replaced — the padding
+   * exists only to give the hover and focus surface some room to breathe.
+   * Flex `gap` is measured between items' outer edges, so the row below
+   * keeps its `--space-2` separation.
+   */
   .presets__head {
     display: flex;
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
+    appearance: none;
+    margin: calc(var(--space-1) * -1);
+    padding: var(--space-1);
+    border: var(--border-width) var(--border-style) transparent;
+    border-radius: var(--radius-md);
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .presets__head:hover {
+    border-color: var(--color-interactive);
+    background: var(--color-surface-secondary);
+  }
+
+  .presets__head.is-applied {
+    border-color: var(--color-interactive);
+    background: var(--color-interactive-subtle);
+  }
+
+  /* R14 */
+  .presets__head:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .presets__swatches {
