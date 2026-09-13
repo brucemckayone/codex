@@ -16,6 +16,28 @@
   `TurnSectionProps` is `{eyebrow, statement, lede, points}`: no media reference
   at any depth, so claiming nine would have meant inventing a consumer (A50).
 
+  ── EIGHT DESIGN LANGUAGES, NOT 38 PERMUTATIONS ────────────────────────────
+  The eight axes reach every MAGNITUDE in this file. They do not, on their own,
+  make a look recognisable: a design language is also which elements are boxes,
+  which corner is square, which label is monospaced and which rule is drawn at
+  all — selector-level decisions that a properties-only axis file cannot carry
+  and a Svelte-scoped style block cannot select on, because the `data-jp-*`
+  attributes live on the ANCESTOR `.jp-sec`.
+
+  So seven axis values are re-emitted UNMODIFIED as local `data-*` attributes on
+  `.turn` (see `look` in the script), and the PER-LOOK COMMITMENTS block at the
+  foot of the stylesheet spends them on each family's documented tell
+  (`00-design-language-research.md` §1). Read that block's own header before
+  adding a rule to it: it carries the selector discipline that keeps `candlelit`
+  — the one preset the product owner says already works — out of the blast
+  radius, which is not a convention but arithmetic. Candlelit is uniquely
+  identified by four of its nine values (`surface: media`, `edge: none`,
+  `media: bleed`, `accent: glow`) and SHARES the other five, so a bare rule on
+  `type: monumental`, `align: center`, `density: airy`, `width: text` or
+  `motion: drift` restyles it. Every attribute-constrained selector emitted from
+  this file names one of TWELVE keys and none matches the candlelit bundle —
+  checkable by evaluating each selector against the bundle, and it was.
+
   ── SIX COMPOSITIONS ───────────────────────────────────────────────────────
   `statement` (default) · `column` · `paired` · `arc` · `before-after` ·
   `numbered`.
@@ -75,16 +97,17 @@
     context: JourneySalesContext;
     variant?: string;
     /**
-     * Present for the uniform contract and NOT destructured: all eight axes this
-     * section consumes land in CSS, because none of them changes what is
-     * RENDERED.
+     * The resolved axes. Nothing here changes what is RENDERED — every one of
+     * them lands in CSS — but seven are MIRRORED onto this section's own root as
+     * local `data-*` attributes so the per-look block can select on them. See
+     * `look` below.
      */
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
   }
 
-  const { config, variant, editable = false, onEdit }: Props = $props();
+  const { config, variant, design, editable = false, onEdit }: Props = $props();
 
   // The builder authors this section as flat `{kicker, heading, body}`, which maps
   // 1:1 onto eyebrow/statement/lede through the shared alias table. The
@@ -98,6 +121,42 @@
     points: asStringArray(config, 'points'),
     from: asStringFrom(config, aliasKeys('turn', 'from')),
     to: asStringFrom(config, aliasKeys('turn', 'to')),
+  });
+
+  /**
+   * ── THE AXES, MIRRORED ONTO THIS SECTION'S OWN ROOT ────────────────────────
+   * `journey-design.css` turns the `data-jp-*` attributes on `.jp-sec` into
+   * custom properties, and a section can only ever READ those. That stays the
+   * default for everything with a magnitude: every size, colour, rhythm, edge
+   * and duration in the stylesheet below is still a `--jp-*` read.
+   *
+   * It is NOT sufficient for the seven values here, because a design language is
+   * not only a set of magnitudes — it is which elements exist as boxes, which
+   * corner is square, which label is monospaced, which rule gets drawn at all.
+   * Those are selector-level decisions and a scoped style block cannot reach an
+   * ancestor's attribute, so the axis value is re-emitted here UNMODIFIED.
+   *
+   * `width` is deliberately not mirrored: nothing in this file needs to select
+   * on it, because `--jp-content-max` / `--jp-measure` already carry it. Neither
+   * is `media` — this section has no media reference at any depth (see the
+   * header), so mirroring it would be inventing a consumer (contract A50).
+   *
+   * `undefined` when no `design` arrives, so Svelte omits the attribute and
+   * every per-look rule no-ops. That is the honest degradation — a host that
+   * resolves no axes gets exactly the markup and CSS this component shipped
+   * before the per-look pass, rather than a guessed default look. `SectionFrame`
+   * always passes a TOTAL `ResolvedSectionDesign` (`resolveDesign` emits all
+   * nine), so both real render paths — the public page and the studio canvas —
+   * always have all of them.
+   */
+  const look = $derived({
+    surface: design?.surface,
+    edge: design?.edge,
+    align: design?.align,
+    type: design?.type,
+    accent: design?.accent,
+    density: design?.density,
+    motion: design?.motion,
   });
 
   const COMPOSITIONS = [
@@ -285,7 +344,18 @@
 {/snippet}
 
 {#if hasContent}
-  <div class="turn" data-turn={composition} data-split={split}>
+  <div
+    class="turn"
+    data-turn={composition}
+    data-split={split}
+    data-surface={look.surface}
+    data-edge={look.edge}
+    data-align={look.align}
+    data-type={look.type}
+    data-accent={look.accent}
+    data-density={look.density}
+    data-motion={look.motion}
+  >
     <!-- The cinematic atmosphere. ONE `--jp-sec-atmos` gate on this wrapper
          rather than one per layer (pilot lesson 3), and the wrapper holds nothing
          but decoration so gating it can never fade the copy. -->
@@ -368,6 +438,99 @@
     border-radius: var(--jp-sec-radius);
     box-shadow: var(--jp-edge-shadow);
     text-align: var(--jp-text-align);
+
+    /* ── LOCAL ROLES, so a look is a VALUE and not a rule ──────────────────
+       The PER-LOOK COMMITMENTS block at the foot of this file is keyed on axis
+       values (`edge: offset`, `accent: none`, …). Written as paint rules, six
+       of the eight looks would re-declare the same panel, row and numeral
+       declarations — which is the shape that produced the eight different
+       spellings of `clamp(2rem, 6cqw, 4.4rem)` this tree is still cleaning up.
+       Written as properties, a look states its VALUES and the paint lives in
+       one place: the same discipline `journey-design.css` holds itself to
+       ("every axis value sets only custom properties").
+
+       EVERY DEFAULT HERE REPRODUCES THE BASE COMMIT EXACTLY, which is the whole
+       point: candlelit resolves NONE of the per-look selectors, so it resolves
+       these defaults, and a default that merely looked reasonable would have
+       silently restyled the one preset that already works. Each default is the
+       literal the base declared at its single call site:
+
+         --turn-thread-*    the 6cqw / 2px / round-capped accent gradient bar
+         --turn-label-font  `inherit` — neither label declared a family
+         --turn-arc-*       `0 none` / `0px` / `none` / `transparent` paint
+                            nothing at all, and `var(--space-2) 0px` is the
+                            arc's `padding-inline-start` written logically
+         --turn-rail-*      `--space-1`, 2px, `--jp-accent-mark`
+         --turn-root-radius `--radius-full`
+         --turn-num-*       the italic-serif numeral, `normal` numerics
+         --turn-row-*       `--space-5 * --jp-rhythm` block padding, a
+                            `--border-width` separator in `--jp-edge-color`,
+                            no gap, no stripe, `--space-1` of indent per stage
+         --turn-panel-*     1px `--jp-edge-color`, `--radius-card`, no shadow,
+                            the 4% heading tint, `--jp-accent-mark` on `--to`
+
+       `0px`, `0 none` and `normal`, never a bare `0` or a blank: these are
+       substituted into `border`, `padding-inline`, `margin-block-start` and
+       `font-variant-numeric`, and a unitless zero in a length slot is the
+       A63/A64 class of failure that invalidates the whole declaration
+       SILENTLY. `--turn-row-indent` is the one deliberate exception — it is
+       multiplied inside `calc()`, where `0px` is what stays valid. */
+
+    /* the decorative thread under the section head */
+    --turn-thread-width: clamp(var(--space-12), 6cqw, var(--space-20));
+    --turn-thread-height: var(--border-width-thick);
+    --turn-thread-radius: var(--radius-full);
+    --turn-thread-fill: linear-gradient(
+      90deg,
+      var(--jp-accent-mark),
+      transparent
+    );
+
+    /* the two uppercase labels — the eyebrow and the panel captions */
+    --turn-label-font: inherit;
+
+    /* the block that holds the stage list, which four looks turn into a box */
+    --turn-arc-pad-block: 0px;
+    --turn-arc-pad-inline: var(--space-2) 0px;
+    --turn-arc-border: 0 none;
+    --turn-arc-radius: 0px;
+    --turn-arc-shadow: none;
+    --turn-arc-bg: transparent;
+
+    /* the descent rail and its root */
+    --turn-rail-x: var(--space-1);
+    --turn-rail-w: var(--border-width-thick);
+    --turn-rail-fill: var(--jp-accent-mark);
+    --turn-root-radius: var(--radius-full);
+
+    /* the numeral */
+    --turn-num-col: clamp(var(--space-12), 6cqw, var(--space-16));
+    --turn-num-font: var(--font-heading);
+    --turn-num-style: italic;
+    --turn-num-weight: var(--font-normal);
+    --turn-num-size: calc(var(--jp-heading-size) / 1.2);
+    --turn-num-tracking: var(--tracking-wide);
+    --turn-num-numeric: normal;
+    --turn-num-color: var(--jp-accent-text);
+
+    /* the stage row */
+    --turn-row-pad-block: calc(var(--space-5) * var(--jp-rhythm));
+    --turn-row-pad-inline: 0px;
+    --turn-row-gap: 0px;
+    --turn-row-rule: var(--border-width);
+    --turn-row-rule-color: var(--jp-edge-color);
+    --turn-row-stripe: 0px;
+    --turn-row-stripe-color: var(--jp-accent-edge);
+    --turn-row-indent: var(--space-1);
+
+    /* the `before-after` panels */
+    --turn-panel-pad: calc(var(--space-6) * var(--jp-rhythm));
+    --turn-panel-border: var(--border-width) solid var(--jp-edge-color);
+    --turn-panel-radius: var(--radius-card);
+    --turn-panel-shadow: none;
+    --turn-panel-bg: color-mix(in oklab, var(--color-heading) 4%, transparent);
+    --turn-panel-to-border-color: var(--jp-accent-mark);
+    --turn-panel-to-bg: var(--turn-panel-bg);
   }
 
   .turn__inner {
@@ -420,6 +583,14 @@
     margin-inline: var(--jp-measure-margin);
   }
 
+  /* The eyebrow's SIZE and TRACKING come from the shared `.jp-sec__eyebrow`
+     atom, which reads `--jp-eyebrow-size` — the seam the `type` axis now
+     travels down, so this section must not re-pin either. What is left is the
+     one thing the atom has no opinion on and two families do: the FACE. */
+  .turn__eyebrow {
+    font-family: var(--turn-label-font);
+  }
+
   .turn__statement {
     margin: 0;
   }
@@ -436,14 +607,14 @@
      `--jp-accent-fill`: the latter is `transparent` at `accent: text` and
      `accent: edge`, so this would vanish on two of five values (pilot lesson 4). */
   .turn__thread {
-    width: clamp(var(--space-12), 6cqw, var(--space-20));
-    height: var(--border-width-thick);
-    border-radius: var(--radius-full);
+    width: var(--turn-thread-width);
+    height: var(--turn-thread-height);
+    border-radius: var(--turn-thread-radius);
     /* `center`, not the original `left center`: the `align` axis can centre this
        section, and a centred bar that grows from its left edge reads as a
        mis-alignment. */
     transform-origin: center;
-    background: linear-gradient(90deg, var(--jp-accent-mark), transparent);
+    background: var(--turn-thread-fill);
   }
 
   /* ═══ COMPOSITIONS ═══════════════════════════════════════════════════════ */
@@ -489,10 +660,21 @@
   }
 
   /* ── the descent arc ── */
+  /* Four of the eight looks make this element a BOX — a hard-shadowed brutalist
+     block, a soft-organic tinted panel, a hairline technical table, a
+     contemporary card. It is the one carrier in this section that always exists
+     whenever there is a list, so it is where each family's box idiom lands
+     rather than on a composition-specific element. Every role defaults to
+     paint-nothing, so the base is byte-identical. */
   .turn__arc {
     position: relative;
-    padding-inline-start: var(--space-2);
     width: 100%;
+    padding-block: var(--turn-arc-pad-block);
+    padding-inline: var(--turn-arc-pad-inline);
+    border: var(--turn-arc-border);
+    border-radius: var(--turn-arc-radius);
+    background: var(--turn-arc-bg);
+    box-shadow: var(--turn-arc-shadow);
     text-align: start;
   }
 
@@ -507,10 +689,10 @@
      pole (contract A39). */
   .turn__rail {
     position: absolute;
-    left: var(--space-1);
+    left: var(--turn-rail-x);
     top: var(--space-6);
     bottom: var(--space-6);
-    width: var(--border-width-thick);
+    width: var(--turn-rail-w);
     translate: -50% 0;
     border-radius: var(--radius-full);
   }
@@ -531,19 +713,22 @@
      must be a real colour on all five accent values — and measures 6.04 dark /
      14.62 light on the same page. The WT-1 report asks the orchestrator to decide
      whether `glow`'s edge mix should be raised in `journey-design.css`. */
-    background: var(--jp-accent-mark);
+    background: var(--turn-rail-fill);
   }
 
-  /* The root — where the descent lands. */
+  /* The root — where the descent lands. Its fill is the RAIL's role, not a
+     second one: a look that neutralises the rail (syllabus moves the accent
+     onto the row edges) must not be left with a lone accent bead at the
+     bottom of a grey line. */
   .turn__root {
     position: absolute;
-    left: var(--space-1);
+    left: var(--turn-rail-x);
     bottom: var(--space-6);
     width: var(--space-3);
     height: var(--space-3);
-    border-radius: var(--radius-full);
+    border-radius: var(--turn-root-radius);
     translate: -50% 50%;
-    background: var(--jp-accent-mark);
+    background: var(--turn-rail-fill);
     box-shadow: var(--jp-accent-glow);
   }
 
@@ -557,17 +742,28 @@
   .turn__stage {
     position: relative;
     display: grid;
-    grid-template-columns: clamp(var(--space-12), 6cqw, var(--space-16)) 1fr;
+    grid-template-columns: var(--turn-num-col) 1fr;
     column-gap: clamp(var(--space-3), 1.8cqw, var(--space-5));
     align-items: baseline;
-    padding-block: calc(var(--space-5) * var(--jp-rhythm));
+    padding-block: var(--turn-row-pad-block);
+    padding-inline: var(--turn-row-pad-inline);
+    /* THE LEFT ACCENT STRIPE, `0px` on seven looks. A role rather than a rule
+       because `syllabus`'s whole tell is "a left-border accent stripe rather
+       than a filled badge", and a stripe that has to be added by one selector
+       and removed by seven is the wrong way round. */
+    border-inline-start: var(--turn-row-stripe) solid
+      var(--turn-row-stripe-color);
   }
 
-  /* WIDTH is a token, COLOUR is the axis: reading `--jp-edge-width` here would
-     let `edge: none` delete the only boundary between rows, which is a legibility
-     loss rather than a style choice. */
+  /* WIDTH is a token by DEFAULT, COLOUR is the axis: reading `--jp-edge-width`
+     here would let `edge: none` delete the only boundary between rows, which is
+     a legibility loss rather than a style choice. The looks that DO want the
+     axis width (brutalist 2px, playful 2px) opt in by setting the role; the
+     two that want no rule at all (soft-organic, luxury-minimal) replace it with
+     space, which is what those two families separate with. */
   .turn__stage + .turn__stage {
-    border-block-start: var(--border-width) solid var(--jp-edge-color);
+    margin-block-start: var(--turn-row-gap);
+    border-block-start: var(--turn-row-rule) solid var(--turn-row-rule-color);
   }
 
   /* The numeral was `color-mix(brand-accent calc(58% + var(--d) * 10%),
@@ -580,25 +776,30 @@
     grid-column: 1;
     justify-self: start;
     padding-inline-start: clamp(var(--space-3), 1.6cqw, var(--space-5));
-    font-family: var(--font-heading);
-    font-style: italic;
-    font-weight: var(--font-normal);
+    font-family: var(--turn-num-font);
+    font-style: var(--turn-num-style);
+    font-weight: var(--turn-num-weight);
     /* A DISPLAY glyph, not card-scale text, so it derives from the heading step
        rather than from `--jp-body-size` — contract A44's prohibition is on
        re-inventing the BODY rung, which `--jp-body-size` now owns. `/ 1.2` lands
        on 40px at `type: monumental`, exactly the `--text-3xl` the numeral
        shipped. */
-    font-size: calc(var(--jp-heading-size) / 1.2);
+    font-size: var(--turn-num-size);
     line-height: var(--leading-none);
-    letter-spacing: var(--tracking-wide);
-    color: var(--jp-accent-text);
+    letter-spacing: var(--turn-num-tracking);
+    font-variant-numeric: var(--turn-num-numeric);
+    color: var(--turn-num-color);
   }
 
   /* `numbered` is the same list without the rail, so its numerals sit upright and
-     read as counting rather than as a descent. */
-  .turn[data-turn='numbered'] .turn__num {
-    font-style: normal;
-    font-variant-numeric: tabular-nums;
+     read as counting rather than as a descent. Stated as the two ROLES rather
+     than as declarations on `.turn__num`, so a look can still set the face and
+     the size underneath it — a declaration here would have out-specified every
+     per-look numeral value in the block at the foot of this file. Nothing
+     re-italicises it: no look sets `--turn-num-style: italic`. */
+  .turn[data-turn='numbered'] {
+    --turn-num-style: normal;
+    --turn-num-numeric: tabular-nums;
   }
 
   /* PROGRESSIVE INDENT — each stage steps a little further right. Was
@@ -608,7 +809,7 @@
   .turn__stage-body {
     grid-column: 2;
     padding-inline-start: calc(
-      var(--d, 0) * var(--space-1) * var(--jp-rhythm)
+      var(--d, 0) * var(--turn-row-indent) * var(--jp-rhythm)
     );
   }
 
@@ -649,24 +850,29 @@
   }
 
   .turn__panel {
-    padding: calc(var(--space-6) * var(--jp-rhythm));
-    border: var(--border-width) solid var(--jp-edge-color);
+    padding: var(--turn-panel-pad);
+    border: var(--turn-panel-border);
     /* NOT `var(--jp-sec-radius, …)`: that property is always defined (the axis
        defaults it to `--radius-none`), so the fallback could never fire and every
        panel would be square outside `surface: panel`. A card's radius is a brand
        token, not an axis. */
-    border-radius: var(--radius-card);
-    background: color-mix(in oklab, var(--color-heading) 4%, transparent);
+    border-radius: var(--turn-panel-radius);
+    background: var(--turn-panel-bg);
+    box-shadow: var(--turn-panel-shadow);
   }
 
   /* The panel a reader is being moved TOWARD carries the accent edge, so the
-     direction of the pair is visible without colour alone. */
+     direction of the pair is visible without colour alone. Both roles, because
+     three families say "toward" with a wash rather than with an outline and one
+     forbids the outline outright. */
   .turn__panel--to {
-    border-color: var(--jp-accent-mark);
+    border-color: var(--turn-panel-to-border-color);
+    background: var(--turn-panel-to-bg);
   }
 
   .turn__panel-label {
     margin: 0 0 var(--space-2);
+    font-family: var(--turn-label-font);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
@@ -723,6 +929,631 @@
     transform: none;
   }
 
+  /* ═══ PER-LOOK COMMITMENTS ═══════════════════════════════════════════════
+     Everything above is axis-generic: it consumes magnitudes and paints one
+     arrangement. What follows commits each design LANGUAGE to its documented
+     tell (`00-design-language-research.md` §1), because a tell is a
+     SELECTOR-level statement — which elements are boxes, which corner is
+     square, which label is monospaced, which rule is drawn — and
+     `journey-design.css` deliberately emits nothing but custom properties.
+
+     ── THE SELECTOR DISCIPLINE, stated once so every block can be checked ───
+     `candlelit` is the one preset that already works and it must come out of
+     this pass byte-identical. It is uniquely identified by FOUR of its nine
+     axis values — `surface: media`, `edge: none`, `media: bleed`,
+     `accent: glow` — and SHARES the other five: `type: monumental` (with
+     quiet-studio, plain-facts), `align: center` (quiet-studio, open-air,
+     full-send), `density: airy` (open-air), `width: text` (long-read,
+     open-air), `motion: drift` (open-air).
+
+     So NO selector below is keyed on any of those five. Every one of them names
+     one of these TWELVE keys, and none matches the candlelit bundle:
+
+       surface: bare                   -> quiet-studio + long-read
+       surface: bare  + align: start   -> long-read    only
+       edge: offset                    -> plain-facts  only
+       edge: soft                      -> open-air     only
+       accent: none                    -> quiet-studio only
+       density: vast                   -> quiet-studio only
+       motion: fade                    -> quiet-studio only
+       accent: edge                    -> syllabus     only
+       type: restrained                -> syllabus     only
+       edge: heavy                     -> full-send    only
+       edge: hairline + accent: fill   -> signal       only
+       type: expressive                -> open-air + full-send (never candlelit,
+                                          which is `monumental`)
+
+     The two COMPOUNDS are compounds by necessity rather than by taste:
+     `long-read` and `signal` each share all nine of their axis values with some
+     sibling, so neither has a single value to key on. Each is justified in its
+     own block.
+
+     `open-air` is the dangerous one — it shares FOUR axes with candlelit
+     (align, density, width, motion) — so every open-air rule here is keyed on
+     `edge: soft`, which candlelit (`edge: none`) cannot match.
+
+     `motion: stagger` is deliberately ABSENT even though it is full-send's
+     alone. The family's motion row asks for spring easing, and it is already
+     visible without a rule: `--jp-reveal-ease` is `--ease-spring` at that value
+     and `.turn__root` already transitions from `scale(0.4)` on it, which IS an
+     overshoot. Adding a second spring transform would have bought a new
+     reduced-motion liability for a curve the section already draws. */
+
+  /* ── A BARE SURFACE MUST NOT CARRY A BOX ─────────────────────────────────
+     The single highest-leverage line in this pass, and a base DEFECT rather
+     than a taste call.
+
+     `.turn` paints `border: var(--jp-edge-width) solid var(--jp-edge-color)`
+     and `box-shadow: var(--jp-edge-shadow)` unconditionally. At `edge: none`
+     that is `0px` and the keyword `none`, so candlelit paints nothing and
+     always has — but both `surface: bare` looks are `edge: hairline`, so
+     quiet-studio and long-read each shipped a full 1px `--jp-line` RECTANGLE
+     plus `--shadow-xs` around a section whose `--jp-sec-pad-inline` the same
+     axis had set to `0px`. A box with zero inset, hugging the copy, on the two
+     looks whose tells are "a single hairline, used perhaps twice on the page"
+     and "hairline horizontal rules only — no box borders anywhere". Each look
+     then spends its hairline where it means something, below.
+
+     `border-width`, the longhand, rather than re-spelling the `border`
+     shorthand: the axis keeps ownership of the colour, so a future rule can
+     bring one edge back without re-deriving it. */
+  .turn[data-surface='bare'] {
+    border-width: 0px;
+    box-shadow: none;
+  }
+
+  /* ── 1.1 EDITORIAL · `long-read` — `surface: bare` + `align: start` ──────
+     Tell: the eyebrow and the body share a left edge, and there is a hairline
+     under every section head.
+
+     A COMPOUND BY NECESSITY. `surface: bare` is shared with quiet-studio and
+     `align: start` with plain-facts, syllabus and signal — but quiet-studio is
+     `align: center` and none of the other three is `surface: bare`, so the PAIR
+     is long-read alone. Candlelit is `surface: media`, so it matches neither
+     half, let alone both.
+
+     Measured on the base: the shared left edge already HOLDS — `align: start`
+     resolves `--jp-align: start` and `--jp-measure-margin: 0px`, and the
+     eyebrow, statement, lede and thread all sit on it. The HEAD HAIRLINE was
+     nowhere: `.turn__thread` is a 6cqw accent gradient with a `--radius-full`
+     cap, which is a cinematic flourish and not an editorial rule. It becomes
+     the rule. And the `before-after` panels were `--radius-card` boxes on a 4%
+     tint — the one thing this family forbids — so they become measure-wide rows
+     divided by that same hairline. */
+  .turn[data-surface='bare'][data-align='start'] {
+    /* THE HAIRLINE UNDER THE SECTION HEAD. `--radius-none` matters as much as
+       the height: a 1px bar with a round cap still reads as a graphic. */
+    --turn-thread-width: 100%;
+    --turn-thread-height: var(--border-width);
+    --turn-thread-radius: var(--radius-none);
+    /* `--jp-edge-color`, which is `--jp-line` at this look's `edge: hairline`,
+       and NOT `--color-border-subtle`. The subtle rung sits below the one the
+       baseline already measures at 1.79:1 light / 1.49:1 dark
+       (`04-contrast-baseline.md`), and a rule nobody can see does not deliver a
+       tell whose whole content is "there IS a hairline here". Every horizontal
+       rule in this look is that one colour, owned by the axis, so a creator who
+       changes `edge` moves all of them together. */
+    --turn-thread-fill: var(--jp-edge-color);
+    /* NO BOX BORDERS ANYWHERE: horizontal rules only, on the panels too. */
+    --turn-panel-border: 0 none;
+    --turn-panel-radius: var(--radius-none);
+    --turn-panel-bg: transparent;
+    --turn-panel-to-bg: transparent;
+    --turn-panel-pad: 0px;
+    /* The progressive indent is the descent's flourish and it is the exact
+       thing this tell is about, so it goes: every row starts on the left edge
+       the eyebrow and the body share. */
+    --turn-row-indent: 0px;
+  }
+
+  /* The rule spans the MEASURE, not the statement's tight cap, so it reads as a
+     section rule and not as an underlined heading. `.turn__head` is a column
+     flex box with `align-items: start`, which shrink-wraps every child to its
+     content — so the thread needs BOTH the `100%` above and this cap to land on
+     the measure rather than on the widest line of copy. */
+  .turn[data-surface='bare'][data-align='start'] .turn__thread {
+    max-width: var(--jp-measure);
+  }
+
+  /* One column, not two. `auto-fit` at `minmax(min(100%, 16rem), 1fr)` is a
+     card grid, and this family sets everything in a single measure — two 16rem
+     columns of prose in a bare editorial section is a table of contents. */
+  .turn[data-surface='bare'][data-align='start'] .turn__panels {
+    grid-template-columns: 1fr;
+    gap: 0px;
+    max-width: var(--jp-measure);
+  }
+
+  .turn[data-surface='bare'][data-align='start'] .turn__panel {
+    padding-block: calc(var(--jp-sec-gap) / 2);
+    border-block-end: var(--border-width) solid var(--jp-edge-color);
+  }
+
+  /* "Accent as TEXT: kickers, drop-cap, link underline, footnote markers." So
+     the direction of the pair is carried by the caption's colour rather than by
+     a coloured box — the box having just been removed. `--jp-accent-text` is
+     `--jp-ember-text` at `accent: text`, the rung contract A38 made AA-safe;
+     never `--jp-ember`, which measures 2.04:1 in dark on the golden org. */
+  .turn[data-surface='bare'][data-align='start']
+    .turn__panel--to
+    .turn__panel-label {
+    color: var(--jp-accent-text);
+  }
+
+  /* ── 1.2 BRUTALIST · `plain-facts` — `edge: offset` ──────────────────────
+     Tell: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 everywhere.
+
+     MEASURED ON THE BASE: the 2px border and the hard drop are both reachable
+     on the SHELL — `edge: offset` sets `--jp-edge-width: --border-width-thick`
+     and `--jp-edge-shadow: --space-1 --space-1 0 0 --jp-line-strong` — and that
+     is exactly where they stop. `--jp-edge-shadow` had ONE consumer in this
+     file. Radius 0 was found nowhere: this look's surface is `panel`, which
+     resolves `--jp-sec-radius` to `--radius-card`, so the brutalist section
+     shipped ROUNDED CORNERS carrying a hard un-blurred offset drop — which
+     reads as a mistake rather than as a style. Mono labels were nowhere, and
+     the loudest glyph in the section, the numeral, was an italic serif.
+
+     `media: none` is this look's media value and this section has no media at
+     any depth, so nothing here can be taken away underneath it — the
+     `display: none` grid-track defect the sibling media sections hit cannot
+     occur in this component. */
+  .turn[data-edge='offset'] {
+    /* RADIUS 0, ABSOLUTELY — the tell's own adverb. The section SHELL has to be
+       squared off too, not just its furniture. */
+    border-radius: var(--radius-none);
+    --turn-label-font: var(--font-mono);
+    /* "Accent as fill: solid RECTANGLES of it." The gradient-to-transparent
+       thread with the round cap is ornament twice over; it becomes a slab. */
+    --turn-thread-height: var(--jp-edge-width);
+    --turn-thread-radius: var(--radius-none);
+    --turn-thread-fill: var(--jp-accent-mark);
+    /* THE GRID VISIBLE AS ACTUAL LINES, and the hard drop finally gets a second
+       carrier: the stage list closes into a 2px box with 2px rules between its
+       rows. `box-shadow` takes the token as its WHOLE value and the border does
+       plain substitution with no math on the width — the two rules contracts
+       A54, A63 and A64 exist for. */
+    --turn-arc-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --turn-arc-radius: var(--radius-none);
+    --turn-arc-shadow: var(--jp-edge-shadow);
+    --turn-arc-pad-inline: var(--space-5) var(--space-4);
+    --turn-rail-x: var(--space-2);
+    --turn-row-rule: var(--jp-edge-width);
+    --turn-row-indent: 0px;
+    /* MONO NUMERALS, upright and tabular so the digits cannot shuffle. Sized on
+       the BODY rung, not the heading rung: "no separate display face" is this
+       family's own type row, and a 40px italic numeral is the opposite of it. */
+    --turn-num-font: var(--font-mono);
+    --turn-num-style: normal;
+    --turn-num-numeric: tabular-nums;
+    --turn-num-size: max(var(--text-lg), var(--jp-body-size));
+    --turn-num-tracking: var(--tracking-normal);
+    --turn-root-radius: var(--radius-none);
+    /* Surface: panel — every block is a visible box, with the hard drop. */
+    --turn-panel-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --turn-panel-radius: var(--radius-none);
+    --turn-panel-shadow: var(--jp-edge-shadow);
+    --turn-panel-bg: transparent;
+    --turn-panel-to-bg: transparent;
+    --turn-panel-pad: var(--space-4);
+  }
+
+  /* The accent spent as the family spends it: a solid rectangle with the text
+     reversed out. COMPOUNDED with `accent: fill` rather than left on
+     `edge: offset` alone, because `--jp-accent-fill` is `transparent` at
+     `accent: text` and `accent: edge` — a creator who picked either with this
+     edge would get `--jp-accent-on-fill` on the section's own ink, which is the
+     measured two-token contrast pair broken in half. `.turn__head` is a column
+     flex box with `align-items: var(--jp-align)`, so the slab shrink-wraps its
+     text at both align values with no width of its own. */
+  .turn[data-edge='offset'][data-accent='fill'] .turn__eyebrow {
+    padding: var(--space-1) var(--space-3);
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  /* ── 1.3 SOFT-ORGANIC · `open-air` — `edge: soft` ────────────────────────
+     Tell: no border anywhere, pill controls, and a shadow you have to look for.
+
+     KEYED ONLY ON `edge: soft`, and this is the block to check twice. open-air
+     shares FOUR axes with candlelit — `align: center`, `density: airy`,
+     `width: text`, `motion: drift` — so a bare rule on any of them restyles the
+     one preset that already works. `edge: soft` is open-air's and nobody
+     else's, and candlelit is `edge: none`.
+
+     Measured on the base: "no border anywhere" was false in three places the
+     `edge` axis CANNOT reach, because each spelled its own `--border-width`
+     literal — the row separator, the panel box and the `to` panel's accent
+     outline. `--jp-edge-width` is `0px` at this value and all three now read
+     roles instead. And the diffuse drop — `--jp-edge-shadow` is `--shadow-lg`
+     here, literally "the shadow you have to look for" — had exactly ONE
+     consumer, the section shell, whose `surface: tint` background is a 6% wash:
+     a very soft shadow under a nearly invisible plate. It moves onto the two
+     things a reader is actually looking at. */
+  .turn[data-edge='soft'] {
+    /* `--radius-xl` on panels, `--radius-full` on controls — the family's own
+       two radii, and the shell is one of the panels. */
+    border-radius: var(--radius-xl);
+    --turn-arc-radius: var(--radius-xl);
+    --turn-arc-shadow: var(--jp-edge-shadow);
+    --turn-arc-bg: color-mix(in oklab, var(--jp-accent-mark) 5%, transparent);
+    --turn-arc-pad-block: calc(var(--space-4) * var(--jp-rhythm));
+    --turn-arc-pad-inline: calc(var(--space-6) * var(--jp-rhythm));
+    --turn-rail-x: var(--space-3);
+    /* NO BORDER ANYWHERE. Separation comes from space and soft elevation, so
+       the row rule goes and the rhythm it was carrying grows to replace it —
+       removing a boundary without replacing it is a legibility loss, not a
+       style choice. */
+    --turn-row-rule: 0px;
+    --turn-row-pad-block: calc(var(--space-6) * var(--jp-rhythm));
+    --turn-panel-border: 0 none;
+    --turn-panel-radius: var(--radius-xl);
+    --turn-panel-shadow: var(--jp-edge-shadow);
+    --turn-panel-to-border-color: transparent;
+  }
+
+  /* "Surface: tinted — soft washes and GRADIENT BLOOMS, low chroma." The
+     `.turn__well` bloom is mounted on every look and gated to zero by
+     `--jp-sec-atmos`, which only `surface: media` raises — so the one other
+     family whose surface row asks for a bloom has never had one. The gate is
+     re-opened at `--opacity-55`: half strength, which is what "low chroma"
+     means for a layer whose own stops are already 15% and 11% mixes behind
+     `--blur-xl`. Keyed on `edge: soft`, so candlelit's own `1` is untouched. */
+  .turn[data-edge='soft'] .turn__atmos {
+    opacity: var(--opacity-55);
+  }
+
+  /* "Accent as tinted background + accent text. NEVER a hard fill." The `to`
+     panel's 1px accent outline (removed above) becomes a wash, which is the
+     only way this family is allowed to say "toward".
+
+     The 8% mix sits on `--jp-accent-mark`, which resolves to `--jp-ember-text`
+     at four of five accent values and to `--jp-heading` at the fifth — never to
+     a pre-mixed value — so this is NOT contract A37's mix-of-a-mix.
+     `--jp-accent-edge` would have been exactly that: it is already a 45% ember
+     mix at `accent: glow`, and 8% of it lands near 3.6%. */
+  .turn[data-edge='soft'] .turn__panel--to {
+    background: color-mix(in oklab, var(--jp-accent-mark) 8%, transparent);
+  }
+
+  /* PILL CONTROLS. There is no control in this section, so the family's
+     roundness lands where it can be seen: the numeral sits in a soft tinted
+     disc instead of on the bare page. `aspect-ratio` with `place-content`
+     rather than a fixed width and a line-height, so the disc tracks the glyph
+     at every `type` value and can never clip it — and `min-width` is derived
+     from the numeral's own role, so it cannot fall out of step with it.
+
+     `padding-inline-start: 0` is the same value the narrow-container block at
+     the foot of this file sets, so the two cannot disagree — this rule
+     out-specifies it (0,2,0 against 0,1,0) and lands on the identical value. */
+  .turn[data-edge='soft'] .turn__stage {
+    align-items: center;
+  }
+
+  .turn[data-edge='soft'] .turn__num {
+    display: grid;
+    place-content: center;
+    aspect-ratio: 1;
+    min-width: calc(var(--turn-num-size) * 1.9);
+    padding-inline-start: 0;
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--jp-accent-mark) 10%, transparent);
+  }
+
+  /* ── 1.4 LUXURY-MINIMAL · `quiet-studio` — `accent: none` · `density: vast`
+        · `motion: fade` ─────────────────────────────────────────────────────
+     Tell: three type sizes, ONE hairline, no accent colour, and more empty
+     space than content.
+
+     THIS LOOK GETS WORSE IF ANYTHING IS ADDED, so every rule below REMOVES
+     something. The box around the section has already gone (the `surface: bare`
+     rule above, which is half of what was wrong here). What is left is the
+     COUNT — and the count is the only form of this tell that can be checked. */
+  .turn[data-accent='none'] {
+    /* THE ONE HAIRLINE, and only one. `--jp-accent-mark` already resolves to
+       `--jp-heading` at `accent: none`, so the base was not leaking ember into
+       this bar — it was leaking WEIGHT: 2px with a round cap and a fade to
+       transparent is a graphic, not a hairline. */
+    --turn-thread-height: var(--border-width);
+    --turn-thread-radius: var(--radius-none);
+    --turn-thread-fill: var(--jp-edge-color);
+    /* No SECOND rule anywhere: the row separator and both panel boxes go, and
+       the space below replaces them. */
+    --turn-row-rule: 0px;
+    --turn-row-indent: 0px;
+    --turn-panel-border: 0 none;
+    --turn-panel-radius: var(--radius-none);
+    --turn-panel-bg: transparent;
+    --turn-panel-to-bg: transparent;
+    --turn-panel-to-border-color: transparent;
+    --turn-panel-pad: 0px;
+  }
+
+  /* THREE TYPE SIZES ON THE WHOLE SECTION, as arithmetic rather than as an
+     adjective. The base draws EIGHT: eyebrow `--text-sm`, statement
+     `--jp-heading-size`, lede `--text-lg`, numeral `--jp-heading-size / 1.2`,
+     stage name `max(--text-lg, --jp-body-size)`, gloss
+     `max(--text-sm, --jp-body-size / 1.2)`, panel label `--text-sm`, panel body
+     `max(--text-base, --jp-body-size)`. Collapsing the four metadata rungs onto
+     one and the three running rungs onto `--jp-body-size` leaves exactly
+     `--text-sm`, `--jp-body-size` and `--jp-heading-size`.
+
+     Weight and tracking come with the size, because "three sizes" is a
+     HIERARCHY claim and a semibold label beside a normal one at the same size
+     is a fourth level by another means. `--tracking-widest` is the family's own
+     label row ("uppercase with `--tracking-wider` or wider"). */
+  .turn[data-density='vast'] .turn__eyebrow,
+  .turn[data-density='vast'] .turn__num,
+  .turn[data-density='vast'] .turn__gloss,
+  .turn[data-density='vast'] .turn__panel-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-widest);
+  }
+
+  .turn[data-density='vast'] .turn__lede,
+  .turn[data-density='vast'] .turn__name,
+  .turn[data-density='vast'] .turn__panel-body {
+    font-size: var(--jp-body-size);
+  }
+
+  /* The numeral joins the metadata rung above, so its italic serif goes with
+     the rest of the ornament — a roman numeral at label scale, tracked out, is
+     what this family does with a sequence. */
+  .turn[data-density='vast'] .turn__num {
+    font-family: inherit;
+    font-style: normal;
+  }
+
+  /* MORE EMPTY SPACE THAN CONTENT, on a doubling scale rather than three
+     arbitrary values: 3 · 2 · 1 of the section gap, which at `vast` is already
+     1.6x the regular rhythm and still multiplies the org's own
+     `--brand-density-scale` through `--space-unit`. */
+  .turn[data-density='vast'] .turn__grid {
+    gap: calc(var(--jp-sec-gap) * 3);
+  }
+
+  .turn[data-density='vast'] .turn__panels {
+    gap: calc(var(--jp-sec-gap) * 2);
+  }
+
+  .turn[data-density='vast'] .turn__head {
+    gap: var(--jp-sec-gap);
+  }
+
+  /* "Slow fade only. NO TRANSFORM." `motion: fade` already resolves
+     `--jp-reveal-distance: 0px`, so the shared `.jp-reveal` atom is a pure
+     opacity ramp — but the three bespoke transitions in the ENHANCED block
+     above are NOT on that atom, and every one of them is a transform: the
+     thread scales in X, the rail scales in Y, the root scales up from 0.4. On
+     the base, the one look documented as never transforming animated three
+     transforms. They become opacity.
+
+     The thread and the root already carry their own opacity ramp (the thread
+     from `.jp-reveal`, the root from its own rule), so taking the transform
+     away is the whole edit. The rail is the only one of the three with no ramp
+     at all, so it is given one. */
+  .turn[data-motion='fade']:global(.reveal--armed) .turn__thread,
+  .turn[data-motion='fade']:global(.reveal--armed) .turn__root {
+    transform: none;
+  }
+
+  .turn[data-motion='fade']:global(.reveal--armed) .turn__rail--progress {
+    transform: none;
+    opacity: 0;
+    transition: opacity var(--jp-reveal-duration) var(--jp-reveal-ease)
+      var(--jp-reveal-stagger);
+  }
+
+  .turn[data-motion='fade']:global(.reveal--armed.is-in) .turn__rail--progress {
+    opacity: 1;
+  }
+
+  /* ── 1.5 TECHNICAL · `syllabus` — `accent: edge` · `type: restrained` ────
+     Tell: a hairline grid, mono numerals, and a LEFT-BORDER ACCENT STRIPE
+     rather than a filled badge.
+
+     MEASURED ON THE BASE: the numerals are an italic serif; the only accent in
+     the section is `.turn__root`, a `--radius-full` disc — which is precisely
+     the "filled badge" this tell contrasts itself against — and there is no
+     left stripe anywhere in the file. The one thing the base gets right is the
+     row separator, which is already a hairline; the work is to CLOSE it into a
+     grid and move the accent off the badge and onto the row edge.
+
+     `--jp-accent-edge` is read DIRECTLY with no percentage carried onto it. At
+     `accent: edge` it resolves to the full `--jp-ember`, not to a mix, so
+     contract A37's mix-of-a-mix and A39's 45%-ember measurement — which is
+     `accent: glow`, i.e. candlelit's value — do not apply to this rule. And
+     candlelit cannot match this selector to be measured against it. */
+  .turn[data-accent='edge'] {
+    /* `--radius-sm` — the family's single radius, on the shell and its box. */
+    border-radius: var(--radius-sm);
+    --turn-label-font: var(--font-mono);
+    /* THE HAIRLINE GRID. The rows are already hairline-separated, so the outer
+       rule COMPLETES a table rather than adding a second idiom. */
+    --turn-arc-border: var(--border-width) solid var(--jp-edge-color);
+    --turn-arc-radius: var(--radius-sm);
+    --turn-arc-pad-inline: 0px;
+    /* THE LEFT-BORDER ACCENT STRIPE, on every row. This is the whole tell. */
+    --turn-row-stripe: var(--border-width-thick);
+    --turn-row-pad-inline: var(--space-4);
+    --turn-row-indent: 0px;
+    /* MONO NUMERALS, upright and tabular, at the fine-grained scale this
+       family's type row asks for rather than at display scale. */
+    --turn-num-font: var(--font-mono);
+    --turn-num-style: normal;
+    --turn-num-numeric: tabular-nums;
+    --turn-num-size: max(var(--text-sm), calc(var(--jp-body-size) / 1.2));
+    --turn-num-tracking: var(--tracking-normal);
+    /* NOT A FILLED BADGE — and no rail either. The per-row stripe above IS the
+       continuous vertical line down the left of the list, so a second line 4px
+       inside it (the rail sits at `--turn-rail-x`, inside the row's own
+       padding) would be two rules saying one thing. The root is a
+       `--radius-full` accent disc, which is the literal "filled badge" this
+       tell contrasts itself against, so it goes with the rail it terminated.
+       `0px` on the rail width, not `display: none`, so the arc composition
+       still emits the same DOM and only the paint changes. */
+    --turn-rail-w: 0px;
+    --turn-rail-fill: var(--jp-edge-color);
+    /* Panel, with a header row (below). */
+    --turn-panel-radius: var(--radius-sm);
+    --turn-panel-bg: transparent;
+    --turn-panel-to-bg: transparent;
+    --turn-panel-to-border-color: var(--jp-edge-color);
+    --turn-panel-pad: 0px;
+  }
+
+  /* THE HEADER ROW the family's surface row asks for. Deliberately a LIFTED
+     strip under a hairline and NOT an inversion: research §5.1's rule is that
+     any new surface must re-derive its own text ladder, and this component
+     cannot — `journey-design.css` re-points `--jp-ink` per SECTION, so a
+     locally inverted strip would carry the section's ladder onto the opposite
+     pole with nothing measured. `--color-surface-secondary` is `--jp-ink-3`, a
+     single rung of lift, and the caption keeps `--color-text-secondary`
+     (`--jp-dim`, measured 7.79 dark / 11.05 light against `--jp-ink`) — a rung
+     of lift costs a fraction of that and stays clear of the 4.5 floor. */
+  .turn[data-accent='edge'] .turn__panel-label {
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    border-block-end: var(--border-width) solid var(--jp-edge-color);
+    background: var(--color-surface-secondary);
+  }
+
+  .turn[data-accent='edge'] .turn__root {
+    display: none;
+  }
+
+  .turn[data-accent='edge'] .turn__panel-body {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  /* The `to` panel says "toward" with an EDGE — the same left stripe as the
+     rows — rather than with a coloured outline, which is the distinction the
+     tell draws. */
+  .turn[data-accent='edge'] .turn__panel--to {
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-edge);
+  }
+
+  /* `type: restrained` is syllabus's value and nobody else's. Its gloss is the
+     one place this section can be genuinely dense: at `restrained` the body
+     rung floors at `--text-base`, and a technical gloss reads as a caption
+     under its row rather than as running copy. */
+  .turn[data-type='restrained'] .turn__gloss {
+    margin-block-start: var(--space-1);
+    line-height: var(--leading-snug);
+  }
+
+  /* ── 1.8 PLAYFUL · `full-send` — `edge: heavy` ───────────────────────────
+     Tell: whole inverted bands, pill CTAs at `--radius-full`, spring easing,
+     and BIG NUMERALS.
+
+     Measured on the base: the inverted band is already right —
+     `surface: invert` re-points `--jp-ink` at pole B and `.turn` paints
+     `--jp-sec-bg`, so the whole section flips and the ladder re-derives — and
+     the 2px accent border is reachable, because `edge: heavy` sets
+     `--jp-edge-color: var(--jp-accent-edge)`. Spring easing needs no rule; see
+     the block header.
+
+     BIG NUMERALS were not there, anywhere in the tree. The numeral is
+     `--jp-heading-size / 1.2` in an italic serif at `--font-normal`: at
+     `type: expressive` that is roughly 25px of quiet italic, the SMALLEST
+     display glyph in the section, in the one family whose entire point is
+     loudness. It becomes the loud half of the row — the full heading rung, the
+     brand's own heading weight, upright and tabular so a two-digit stage cannot
+     shuffle against a one-digit one. The numeral column widens with it, through
+     its own role, so the name beside it cannot be pushed off the grid. */
+  .turn[data-edge='heavy'] {
+    /* `--radius-xl` on panels, `--radius-full` on every control. */
+    border-radius: var(--radius-xl);
+    --turn-num-col: clamp(var(--space-16), 9cqw, var(--space-24));
+    --turn-num-style: normal;
+    --turn-num-weight: var(--heading-weight, var(--font-semibold));
+    --turn-num-size: var(--jp-heading-size);
+    --turn-num-tracking: var(--tracking-tight);
+    --turn-num-numeric: tabular-nums;
+    /* Whole BANDS, not hairlines: the list is a 2px-bordered block in the
+       accent and the rows are divided at the same weight. */
+    --turn-arc-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --turn-arc-radius: var(--radius-xl);
+    --turn-arc-pad-block: var(--space-4);
+    --turn-arc-pad-inline: var(--space-6);
+    --turn-rail-x: var(--space-3);
+    --turn-row-rule: var(--jp-edge-width);
+    --turn-row-rule-color: var(--jp-edge-color);
+    /* The one bar in this section keeps its `--radius-full` cap and takes the
+       family's weight. */
+    --turn-thread-height: var(--jp-edge-width);
+    --turn-panel-radius: var(--radius-xl);
+    --turn-panel-border: var(--jp-edge-width) solid var(--jp-edge-color);
+  }
+
+  /* ── 1.9 CONTEMPORARY · `signal` — `edge: hairline` + `accent: fill` ─────
+     Tell: rounded cards with hairlines and a small neutral shadow; ONE filled
+     accent button per section.
+
+     ANOTHER COMPOUND BY NECESSITY. `signal` shares all nine of its axis values:
+     `edge: hairline` is also quiet-studio, long-read and syllabus, and
+     `accent: fill` is also plain-facts and full-send — but those two are
+     `edge: offset` and `edge: heavy`, and the three other hairline looks are
+     `accent: none` / `text` / `edge`. So the PAIR is signal alone, and
+     candlelit (`edge: none`, `accent: glow`) matches neither half.
+
+     Measured on the base: `--jp-edge-shadow` is `--shadow-xs` at this value — a
+     1px, 10%-alpha drop, i.e. the "small NEUTRAL shadow" the tell names and not
+     a coloured one — and it had exactly ONE consumer in this file, the section
+     shell. So the stage list had no card at all and the `before-after` panels
+     were flat hairline rectangles with no elevation: the "vanishing card"
+     research §5.2 predicts for precisely this family, on the look that is the
+     PLATFORM DEFAULT and therefore the one most pages will resolve to.
+
+     There is no button in this section, so "one filled accent element per
+     section" lands on the eyebrow — and it stays ONE, because nothing else here
+     reads `--jp-accent-fill`. */
+  .turn[data-edge='hairline'][data-accent='fill'] {
+    --turn-arc-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --turn-arc-radius: var(--radius-card);
+    --turn-arc-shadow: var(--jp-edge-shadow);
+    --turn-arc-pad-block: var(--space-2);
+    --turn-arc-pad-inline: var(--space-5);
+    --turn-rail-x: var(--space-2);
+    --turn-panel-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --turn-panel-shadow: var(--jp-edge-shadow);
+  }
+
+  /* THE ONE FILLED ACCENT ELEMENT. `--jp-accent-fill` / `--jp-accent-on-fill`
+     is the measured two-token pair (`--jp-ember` under `--jp-on-ember`), read
+     as a pair and never as half of one — which is the reason this look is
+     compounded with `accent: fill` rather than keyed on `edge: hairline` alone:
+     at `accent: text` and `accent: edge` the fill is `transparent`, and the
+     label would then render `--jp-accent-on-fill` on the section's own ink.
+
+     `--radius-full`, not the family's card radius: a chip is a control shape.
+     `.turn__head` is a column flex box with `align-items: var(--jp-align)`, so
+     it shrink-wraps its text at both align values with no width of its own. */
+  .turn[data-edge='hairline'][data-accent='fill'] .turn__eyebrow {
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  /* ── THE `type` AXIS AS A RELATIONSHIP, not four font sizes ──────────────
+     `--jp-eyebrow-size` (the shared seam in `journey-sections-shared.css`) now
+     moves the label WITH the heading, so the eyebrow needs nothing here — and
+     must not be re-pinned, which is why `.turn__eyebrow` above sets only the
+     face. What the axis still cannot reach is the GLOSS, the second line of a
+     stage: it is floored at `--text-sm`, so at `expressive` it sits three rungs
+     under the name it belongs to while the name itself has travelled.
+
+     `monumental` is deliberately ABSENT. It is candlelit's own type value,
+     shared with quiet-studio and plain-facts, and both of those take their
+     metadata rung from a value that is theirs alone (`density: vast`,
+     `edge: offset`). A bare `type: monumental` rule here is the precise shape
+     that would have restyled the one preset that already works. */
+  .turn[data-type='expressive'] .turn__gloss {
+    font-size: max(var(--text-base), calc(var(--jp-body-size) / 1.15));
+  }
+
   /* Belt-and-braces: the `reveal` action already withholds arming under reduced
      motion, so these hidden states normally never apply at all. This covers the
      one case it cannot — a preference flipped AFTER the section armed — and it is
@@ -739,6 +1570,17 @@
       opacity: 1 !important;
       transform: none !important;
       transition: none !important;
+    }
+
+    /* The ONE hidden state the design-language pass added. `motion: fade` —
+       quiet-studio's value, and the family documented as never transforming —
+       converts the rail's `scaleY` into an OPACITY ramp, and an opacity ramp is
+       the one thing the three rules above do not undo: they neutralise
+       `transform` and `transition`, which would leave the rail transparent
+       forever. Listed explicitly rather than as a wildcard, so the next look
+       that adds a hidden state has to come here and say so. */
+    .turn[data-motion='fade']:global(.reveal--armed) .turn__rail--progress {
+      opacity: 1 !important;
     }
   }
 

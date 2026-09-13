@@ -233,7 +233,7 @@ export const sectionDesignSchema = z.object({
   density: designAxis(['compact', 'regular', 'airy', 'vast']),
   surface: designAxis(['bare', 'tint', 'panel', 'invert', 'media']),
   edge: designAxis(['none', 'hairline', 'soft', 'heavy', 'offset']),
-  align: designAxis(['start', 'center']),
+  align: designAxis(['start', 'center', 'end']),
   type: designAxis(['restrained', 'balanced', 'expressive', 'monumental']),
   accent: designAxis(['text', 'fill', 'edge', 'glow', 'none']),
   motion: designAxis(['none', 'fade', 'rise', 'stagger', 'drift']),

@@ -656,11 +656,35 @@ describe('HeroSection — media modes', () => {
     expect(document.body.querySelector('.hero__watch')).toBeNull();
   });
 
-  it('a plate-less composition offers the film beside the CTAs instead', async () => {
-    // `stage` has nowhere to put a backdrop, so the author's intent to feature a
-    // video becomes an invitation rather than being silently dropped.
+  // These two together carry what the single test here used to assert. Its
+  // premise — "`stage` has nowhere to put a backdrop" — was true only while
+  // `media: bleed` was inert on the plate-less compositions, which is the
+  // limitation contract B5 removes. The VALUE it protected is that an author's
+  // intent to feature a video is never silently dropped, and that is now tested
+  // on both sides of the split rather than deleted with the premise.
+  it('`media: bleed` LOOPS the film as a backdrop on a plate-less composition', async () => {
     render({
       variant: 'stage',
+      // CANDLELIT is `media: bleed`.
+      config: { headline: 'A headline', mediaMode: 'loop' },
+      context: context({
+        sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),
+      }),
+    });
+    await settle();
+
+    const backdrop = document.body.querySelector('.hero__media--backdrop');
+    expect(backdrop).not.toBeNull();
+    // The film PLAYS — a poster `<img>` here would be the silent demotion.
+    expect(backdrop?.querySelector('video')).not.toBeNull();
+    // And it is not also offered beside the CTAs: that would be the same film twice.
+    expect(document.body.querySelector('.hero__watch')).toBeNull();
+  });
+
+  it('offers the film beside the CTAs when the media axis gives it nowhere to play', async () => {
+    render({
+      variant: 'stage',
+      design: { ...CANDLELIT, media: 'frame' },
       config: { headline: 'A headline', mediaMode: 'loop' },
       context: context({
         sellPreview: Promise.resolve(sellPreview({ heroClip: HERO_CLIP })),

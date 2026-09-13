@@ -79,6 +79,41 @@
     timing via the shared `reveal` action, a key-light aura breathes behind the
     play button, and two pulse rings ripple outward. All continuous motion stops
     under `prefers-reduced-motion` (research §5.1) — stopped, not sped up.
+
+  ── THE LOOK PASS: NINE AXES WIRED IS NOT EIGHT DESIGN LANGUAGES ───────────
+  Wiring the axes (A9 stage 1) made the section reach 8 preset points. It did
+  not make each point RECOGNISABLE as its research family, because a family is
+  identified by a TELL — a falsifiable signature — and a token read only carries
+  the tells the token happens to encode. Measured across the page-builder CSS
+  and all eleven sections before this pass: Cinematic's three tells appear 27–28×
+  each, while `plain-facts`'s "hard offset shadow" and "radius 0", `long-read`'s
+  "hairline under every section head" and `full-send`'s "big numerals" appeared
+  ZERO times. That density gap — not a missing axis — is why seven of the eight
+  looks read as permutations.
+
+  So the block at the end of this stylesheet is organised BY TELL, and every
+  rule in it is keyed on the axis value(s) that identify the look it serves.
+  Cinematic (`candlelit`) is the one look that already worked and is the one
+  look this pass must not move, so every selector was checked against the four
+  axis values that identify it UNIQUELY — `surface: media` · `edge: none` ·
+  `media: bleed` · `accent: glow` — and against the five it SHARES:
+  `type: monumental` (also quiet-studio, plain-facts), `align: center` (also
+  quiet-studio, open-air, full-send), `density: airy` (also open-air),
+  `width: text` (also long-read, open-air), `motion: drift` (also open-air).
+  A bare rule on one of those five would restyle Candlelit; each rule below is
+  either keyed on a value Candlelit does not hold, or compounded until it is.
+
+  ── WHY THIS COMPONENT MIRRORS THE AXES ONTO ITS OWN ROOT ──────────────────
+  `journey-design.css` states the constraint: "a section's own `<style>` is
+  Svelte-scoped and cannot reach an ancestor attribute, so sections can only
+  ever READ these properties." Reading a property is enough for everything the
+  axis expresses as a VALUE — a size, a gap, a colour, an aspect. It is not
+  enough for what a design language actually needs, which is a STRUCTURAL
+  decision: "on a bare surface this section's edge is a single rule, not a box",
+  "at radius 0 there is no rounded corner anywhere", "continuous decoration
+  belongs only to the two continuous-motion values". Those cannot be a token.
+  `ReelSection.svelte:679` set the precedent with `data-reel-align`; `axis`
+  below is the same seam, widened to the seven values this section's tells need.
 -->
 <script lang="ts">
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
@@ -241,10 +276,32 @@
    * `media: none` emits `--jp-media-display: none` (research §2.3). It is honoured
    * in markup rather than as `display: var(--jp-media-display)` because the media
    * box needs `display: grid` to centre the play button, and one property cannot
-   * be both the axis's switch and the composition's layout mode. Reading it here
-   * also means the streamed promise is never awaited for a box nobody will see.
+   * be both the axis's switch and the composition's layout mode.
    */
   const showMedia = $derived(design?.media === 'none' ? 'no' : 'yes');
+
+  /**
+   * THE NINE AXES, MIRRORED ONTO THIS COMPONENT'S ROOT. Read the header note for
+   * why a token read cannot carry a structural decision; this is the seam.
+   *
+   * The fallbacks are `SECTION_DESIGN_DEFAULTS` verbatim (contract A21:
+   * width `text` · density `regular` · surface `bare` · edge `hairline` · align
+   * `center` · type `balanced` · accent `fill` · motion `rise` · media `frame`),
+   * so a caller that omits `design` renders what `resolveDesign` — which is total
+   * and can never emit an empty axis — would have produced anyway. `width` and
+   * `media` are absent because nothing below needs them as a SELECTOR: `width` is
+   * fully expressed by `--jp-content-max` / `--jp-measure`, and `media` already
+   * has two markup consumers of its own (`overlay`, `showMedia`).
+   */
+  const axis = $derived({
+    surface: design?.surface ?? 'bare',
+    edge: design?.edge ?? 'hairline',
+    align: design?.align ?? 'center',
+    type: design?.type ?? 'balanced',
+    density: design?.density ?? 'regular',
+    accent: design?.accent ?? 'fill',
+    motion: design?.motion ?? 'rise',
+  });
 
   /**
    * WHETHER THIS SECTION HAS ANYTHING TO SAY, independently of whether it has
@@ -343,6 +400,75 @@
     editFieldAttrs('introVideo', key, editable, onEdit);
 </script>
 
+<!--
+  `media: none` REMOVES THE PLATE, NOT THE FILM.
+
+  The axis is honoured exactly as `showMedia` states it: no media box, no
+  atmosphere, no poster, no scrim, no aspect. What was ALSO happening is that a
+  section whose entire subject is the sell film had no way to reach the film on
+  that one value — and `media: none` is `plain-facts`'s value, so a creator
+  picking the Brutalist look got a heading, a paragraph, and no way to watch
+  anything. The film was not suppressed by a design decision; it was
+  unreachable as a side effect of one.
+
+  This is `HeroSection`'s A75 decision applied one level in: "the three
+  compositions without a plate OFFER the film instead of showing it … the
+  author's intent to feature a video becomes an invitation rather than being
+  silently dropped." A75 keeps the hero's affordance behind `!mediaOff` because
+  a hero's film is an embellishment beside its headline and CTAs, so dropping it
+  costs the hero nothing structural. Here it is the section's whole reason to
+  exist, and the Brutalist family's own image treatment is "None, or unframed
+  and full-bleed" — i.e. that family expresses a film as a hard-edged filled
+  BLOCK, which is exactly its `accent: fill` tell ("solid rectangles of it, text
+  reversed out"). So the invitation IS the look, not a workaround for it.
+
+  Bounded deliberately: it renders only where there is no plate AND a real clip
+  resolved, it never appears beside the frame, and it lives inside `.iv__lead`
+  so `split` and `card` keep their two-column grids intact and the `align` axis
+  places it. It reuses the EXISTING `journey_intro_play` key — the one the
+  frame's `aria-label` already spends — so no new English enters the tree.
+
+  This is a contract-level question rather than a component one, because the
+  same reasoning applies to `ReelSection`; it is raised in the handoff. Reverting
+  it is deleting this snippet's render call above.
+-->
+{#snippet watch()}
+  {#if showMedia === 'no'}
+    {#await context.sellPreview then preview}
+      {#if preview?.intro}
+        {@const intro = preview.intro}
+        {@const durationLabel = p.duration ?? formatDuration(intro.durationSeconds)}
+        <button
+          type="button"
+          class="iv__watch jp-reveal"
+          data-jp-step="3"
+          data-iv-plate={plate}
+          onclick={() => (open = true)}
+        >
+          <span class="iv__watch-icon" aria-hidden="true">
+            <PlayIcon />
+          </span>
+          <span class="iv__watch-label">{m.journey_intro_play()}</span>
+          {#if durationLabel}
+            <!-- Same resolved `durationLabel` the badge and the frame's
+                 aria-label spend, so the three cannot disagree (Codex-3tmt1).
+                 It is inside the button, so it is part of the accessible name
+                 rather than a second unnamed chip. -->
+            <span class="iv__watch-time">{durationLabel}</span>
+          {/if}
+        </button>
+
+        <IntroVideoModal
+          {open}
+          src={intro.playlistUrl}
+          title={heading}
+          onclose={() => (open = false)}
+        />
+      {/if}
+    {/await}
+  {/if}
+{/snippet}
+
 {#snippet lead()}
   <div class="iv__lead">
     {#if p.eyebrow}
@@ -371,6 +497,7 @@
         {p.sub}
       </p>
     {/if}
+    {@render watch()}
   </div>
 {/snippet}
 
@@ -530,7 +657,18 @@
 {/snippet}
 
 {#snippet shell()}
-  <div class="iv" data-iv-composition={composition} data-iv-overlay={overlay}>
+  <div
+    class="iv"
+    data-iv-composition={composition}
+    data-iv-overlay={overlay}
+    data-iv-surface={axis.surface}
+    data-iv-edge={axis.edge}
+    data-iv-align={axis.align}
+    data-iv-type={axis.type}
+    data-iv-density={axis.density}
+    data-iv-accent={axis.accent}
+    data-iv-motion={axis.motion}
+  >
     <div class="iv__inner" use:reveal={{ disabled: editable }}>
       {#if composition === 'split'}
         <div class="iv__split">
@@ -756,9 +894,22 @@
     );
   }
 
+  /* THE POSTER HONOURS `--jp-media-inset`, which it previously ignored.
+     `inset: 0` pinned the still to the BOX, so at `media: inset` — the axis
+     value whose entire description is "inset with an enormous margin" — the
+     `var(--space-12)` padding the axis emits changed nothing that paints: the
+     grid's `place-items: center` re-centred the play button inside the same
+     visual rectangle and the poster covered the padding. The mat existed in the
+     box model and nowhere on screen.
+
+     Every other `media` value emits `0px` here, so this is byte-identical at
+     `bleed` (Candlelit), `frame`, `mask` and — trivially — `none`. `inset` is
+     `quiet-studio`'s value and the only one that moves, which is the point:
+     Luxury-minimal's image treatment is a matted print, and now the mat is
+     real, painted by the box's own `--color-surface`. */
   .iv__image {
     position: absolute;
-    inset: 0;
+    inset: var(--jp-media-inset);
     z-index: 1;
     pointer-events: none;
     background: var(--iv-poster, none) center / cover no-repeat;
@@ -835,8 +986,17 @@
        WHOLE value here — never one item of a shadow list (contract A54's
        mechanism, which is about the keyword rather than the token family). */
     box-shadow: var(--jp-accent-glow);
+    /* THE EASING IS THE `motion` AXIS'S, THE DURATION IS THE CONTROL'S.
+       `--ease-smooth` was a literal, so the hover felt identical under all five
+       motion values — including `stagger`, whose whole tell is spring easing.
+       `--jp-reveal-ease` at `drift` IS `var(--ease-smooth)`, so Candlelit is
+       byte-identical here; `stagger` gets `--ease-spring` (full-send's tell),
+       `rise`/`fade` get `--ease-out`, `none` gets `linear` and is additionally
+       made instant below. The DURATION stays literal on purpose: at `drift`
+       `--jp-reveal-duration` is 800ms, and an 800ms hover lift on a control is
+       an axis value leaking into an interaction it does not describe. */
     transition:
-      transform var(--duration-slow) var(--ease-smooth),
+      transform var(--duration-slow) var(--jp-reveal-ease),
       background-color var(--duration-fast) var(--ease-default);
   }
 
@@ -1057,10 +1217,520 @@
     padding: var(--jp-sec-gap);
     border-radius: var(--radius-card);
     background: var(--color-surface-secondary);
+    /* THE CARD'S EDGE IS THE `edge` AXIS'S, which it was not reading at all —
+       so a panel whose entire job is to look like a card looked identical under
+       all five values of the axis that describes cards. Each token is the WHOLE
+       value of its property (contract A63), never one item of a list.
+
+       Zero delta at `edge: none`, which is Candlelit: `--jp-edge-width` is `0px`
+       and `--jp-edge-shadow` is `none`, exactly the unbordered unshadowed card
+       that shipped. `hairline` → 1px + `--shadow-xs` (signal's "rounded cards
+       with hairlines and a small neutral shadow"); `soft` → no border and
+       `--shadow-lg` (open-air's "shadow you have to look for"); `heavy` → 2px in
+       the accent (full-send); `offset` → 2px + the hard un-blurred drop, and
+       radius 0 from the tell block below (plain-facts). */
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    box-shadow: var(--jp-edge-shadow);
   }
 
   [data-iv-composition='card'] .iv__stage {
     order: -1;
+  }
+
+  /* ── THE PLATE-LESS INVITATION ─────────────────────────────────────────
+     Reached only at `media: none`. Every property here is an axis read, so the
+     one control carries whichever look asked for it rather than needing five
+     variants: `edge` gives it its border, its elevation and (below) its radius,
+     `accent` gives it its fill through the same `plate` discriminant the frame's
+     button uses, `type` gives it its label size, `motion` its easing.
+
+     `min-height` is the WCAG 2.5.5 floor on the POINTER target, i.e. the border
+     box (contract A61). `--tap-target-min` is `max(2.75rem, var(--space-11))`,
+     so an org density below 1 can only ever make it larger (A2). This is the
+     same defect A34 found on `CtaLink`, which measured 40–41px against the 44px
+     floor because nothing declared one — so it is declared here from the start
+     rather than inherited from a padding sum that happens to clear it. */
+  .iv__watch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    min-height: var(--tap-target-min);
+    padding-block: var(--space-3);
+    padding-inline: var(--space-5);
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    border-radius: var(--radius-full);
+    box-shadow: var(--jp-edge-shadow);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: var(--jp-body-size);
+    font-weight: var(--font-semibold);
+    line-height: var(--leading-none);
+    letter-spacing: var(--tracking-wide);
+    text-align: center;
+    transition:
+      translate var(--duration-slow) var(--jp-reveal-ease),
+      background-color var(--duration-fast) var(--ease-default);
+  }
+
+  /* The same two states the frame's button draws, for the same reason:
+     `--jp-accent-fill` is `transparent` at `accent: text` and `edge`, so one
+     solid rule would be an invisible control on two of five values. */
+  .iv__watch[data-iv-plate='solid'] {
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  .iv__watch[data-iv-plate='hollow'] {
+    color: var(--jp-accent-mark);
+    border-color: var(--jp-accent-mark);
+    border-width: var(--border-width-thick);
+    background: transparent;
+  }
+
+  .iv__watch:hover {
+    translate: 0 calc(var(--space-1) * -0.5);
+  }
+
+  /* `edge: none`/`soft` remove borders; they must NEVER remove a focus ring
+     (research §5.1). `outline` is untouched by every `edge` value. */
+  .iv__watch:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--focus-offset);
+  }
+
+  .iv__watch-icon {
+    display: inline-flex;
+    width: var(--space-5);
+    height: var(--space-5);
+    flex: none;
+  }
+
+  .iv__watch-time {
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--font-medium);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE EIGHT LOOKS — ONE BLOCK PER TELL
+
+     Read the component header first: these rules exist because the axes alone
+     deliver Cinematic's tells 27–28× and four of the other seven looks' tells
+     ZERO times, and a design language is recognised by its tell.
+
+     THE SELECTOR DISCIPLINE, stated once and applied to every rule below.
+     Eight looks are built from 38 axis values and 20 of those are SHARED, so a
+     bare rule on a shared value restyles every look holding it. Each block
+     therefore names which looks it reaches, and Candlelit's five shared values
+     (`type: monumental`, `align: center`, `density: airy`, `width: text`,
+     `motion: drift`) are never keyed on alone — where one is needed it is
+     compounded with a value Candlelit does not hold.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ── 1 · `surface: bare` — THE EDGE IS A RULE, NOT A BOX ────────────────
+     REACHES: quiet-studio (Luxury-minimal) + long-read (Editorial). Those are
+     the only two `bare` looks, and Candlelit is `surface: media`.
+
+     Both families forbid what this section was drawing. Editorial: "Hairline
+     horizontal rules only. No box borders anywhere … Shadow/elevation: None."
+     Luxury-minimal: "A single hairline, used perhaps twice on the page …
+     Shadow/elevation: None." Both are `edge: hairline`, so `.iv` was painting a
+     full 1px box plus `--shadow-xs` around a surface that is by definition
+     unpainted — `bare` is also the one value that zeroes `--jp-sec-pad-inline`,
+     so the box was hugging the page gutter with no inset to sit in.
+
+     The `edge` axis still decides the WEIGHT (`0px` at `none`/`soft`, 1px at
+     `hairline`, 2px at `heavy`/`offset`); this decides where it lands. */
+  .iv[data-iv-surface='bare'] {
+    border-width: var(--jp-edge-width) 0 0;
+    box-shadow: none;
+  }
+
+  /* ── 2 · `bare` + `align: start` — THE EDITORIAL HAIRLINE ───────────────
+     REACHES: long-read ONLY. `bare` is quiet-studio + long-read; adding
+     `align: start` excludes quiet-studio (centred), and Candlelit is neither.
+
+     THE TELL, VERBATIM: "the eyebrow and the body share a left edge, and there
+     is a hairline under every section head." The left edge already came free
+     from the axis — `--jp-align: start` on the lead's `align-items` and
+     `--jp-measure-margin: 0px` on `.jp-sec__measure` put the eyebrow, the
+     heading and the sub on one line. The hairline did not exist anywhere in the
+     tree, which is why the tell measured ZERO.
+
+     `width: 100%` is load-bearing: at `align: start` the heading is a flex item
+     under `align-items: start`, so it shrinks to its text and the rule would
+     stop mid-sentence instead of spanning the column.
+
+     `--color-border` is the A11 spelling — `journey-palette.css:525` re-points
+     it onto `--jp-line`, so it re-derives per section surface. It measures
+     1.79:1 light / 1.49:1 dark, which `journey-design.css` documents and accepts
+     for a DECORATIVE rule; the boundary itself is carried by the heading and the
+     space, never by this line alone. */
+  [data-iv-surface='bare'][data-iv-align='start'] .iv__heading {
+    width: 100%;
+    padding-block-end: calc(var(--jp-sec-gap) * 0.5);
+    border-block-end: var(--border-width) solid var(--color-border);
+  }
+
+  /* The caption line. Editorial's image treatment is "framed with a visible
+     caption line" — and `media: frame` is long-read's value, so the meta row
+     is already BELOW the frame (the aspect↔scrim rule). A rule above it is what
+     turns a floating tag pair into a caption. */
+  [data-iv-surface='bare'][data-iv-align='start']
+    .iv__meta[data-iv-meta='below'] {
+    width: 100%;
+    padding-block-start: calc(var(--jp-sec-gap) * 0.5);
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  /* ── 3 · `density: vast` — THE EMPTINESS IS THE DESIGN ──────────────────
+     REACHES: quiet-studio ONLY. `vast` is the one density value no other preset
+     holds; Candlelit is `airy`.
+
+     THE TELL: "more empty space than content." `--jp-rhythm: 1.6` already
+     multiplies the section's padding and gap, but a 1.6× multiplier is not
+     conspicuous — it reads as "slightly roomier", and Luxury-minimal's whole
+     price signal is that the emptiness is impossible to miss. Doubling the
+     inner gap and doubling the lead's internal gap (from `× 0.5` to `× 1`) puts
+     the whitespace above the noticing threshold while still deriving every
+     value from the axis's own rhythm rather than from a literal. */
+  [data-iv-density='vast'] .iv__inner {
+    gap: calc(var(--jp-sec-gap) * 2);
+  }
+
+  [data-iv-density='vast'] .iv__lead {
+    gap: var(--jp-sec-gap);
+  }
+
+  /* ── 4 · `accent: none` — THREE TYPE SIZES, NO ACCENT COLOUR ────────────
+     REACHES: quiet-studio ONLY. `none` is the one accent value no other preset
+     holds; Candlelit is `glow`.
+
+     THE TELL: "three type sizes, one hairline, no accent colour." The section
+     shipped FOUR sizes — eyebrow `--text-sm`, heading `--text-4xl`, sub
+     `--text-lg`, meta `max(--text-xs, --jp-body-size / 1.4)` ≈ 17px — so the
+     count was simply wrong, and the meta's near-but-not-equal 17px against the
+     sub's 20px read as an accident rather than a decision. Folding the meta onto
+     the body rung makes it exactly three, which is countable and therefore
+     falsifiable.
+
+     The dot goes. It is `aria-hidden` decoration and it is a MARK — the one
+     thing the family says the accent may never be ("Accent absent. Monochrome
+     from the ladder; the accent appears at most as one hairline"). Removing is
+     the correct edit on the quiet looks. */
+  [data-iv-accent='none'] .iv__meta {
+    font-size: var(--text-lg);
+  }
+
+  [data-iv-accent='none'] .iv__duration-dot {
+    display: none;
+  }
+
+  /* ── 5 · `accent: text` — THE ACCENT IS INK, NOT A FILL ─────────────────
+     REACHES: long-read (Editorial) + open-air (Soft-organic). Both deploy the
+     accent as text — Editorial "as text: kickers, drop-cap, link underline",
+     Soft-organic "accent text. Never a hard fill" — and on both the eyebrow IS
+     the kicker. Candlelit is `accent: glow`, so it keeps its neutral eyebrow.
+
+     `--jp-accent-text` and not `--jp-accent-fill`: the fill is `transparent` at
+     this value, and the text role resolves to `--jp-ember-text`, which exists
+     precisely because `--jp-ember` measures 2.98:1 on dark ink and 2.46:1 on
+     light (research §0.1 names this the single most likely regression in the
+     programme). This is the `--jp-accent-*` exception to A11, which is the one
+     place a section may speak colour outside `--color-*`. */
+  [data-iv-accent='text'] .iv__eyebrow {
+    color: var(--jp-accent-text);
+  }
+
+  /* ── 6 · `edge: offset` — RADIUS 0 EVERYWHERE, AND MONO LABELS ──────────
+     REACHES: plain-facts (Brutalist) ONLY. `offset` is unique to it; Candlelit
+     is `edge: none`.
+
+     THE TELL: "2px borders with a hard un-blurred offset shadow, mono labels,
+     and radius 0 everywhere." Two of the three already arrived from the axis —
+     `--jp-edge-width: var(--border-width-thick)` and `--jp-edge-shadow:
+     var(--space-1) var(--space-1) 0 0 var(--jp-line-strong)`, which `.iv` and
+     now `.iv__card` and `.iv__watch` read. The other two measured ZERO in the
+     whole tree, and "radius 0 EVERYWHERE" is the kind of tell that is destroyed
+     by a single exception: `surface: panel` hands this look `--radius-card` on
+     the section, and the controls and chips are `--radius-full` pills.
+
+     So every corner in the component is enumerated. An exception here is not a
+     rounding error, it is the tell failing. */
+  .iv[data-iv-edge='offset'],
+  [data-iv-edge='offset'] .iv__card,
+  [data-iv-edge='offset'] .iv__media,
+  [data-iv-edge='offset'] .iv__play,
+  [data-iv-edge='offset'] .iv__pulse,
+  [data-iv-edge='offset'] .iv__watch,
+  [data-iv-edge='offset'] .iv__tag,
+  [data-iv-edge='offset'] .iv__duration,
+  [data-iv-edge='offset'] .iv__duration-dot {
+    border-radius: var(--radius-none);
+  }
+
+  /* THE TWO OVER-MEDIA CHIPS NEED A SECOND, LONGER SELECTOR, and this was
+     MEASURED rather than assumed. Svelte scopes a descendant as
+     `:where(.svelte-hash)` — zero specificity — while the ancestor gets a real
+     class, so the chip's own pill rule is
+     `.iv__meta[data-iv-meta='over'].hash .iv__tag:where(.hash)` at (0,4,0) and
+     the rule above is only (0,3,0). It loses, silently, and `--radius-full`
+     survives on the one look whose tell is that nothing is rounded.
+
+     Unreachable at the preset (plain-facts is `media: none`, so there is no
+     over-media chip), which is exactly why it would have gone unnoticed: it
+     needs `edge: offset` with any other `media` value, i.e. a creator mixing the
+     Brutalist edge into a look that has a plate. "Radius 0 everywhere" is not a
+     rule with exceptions. */
+  [data-iv-edge='offset'] .iv__meta[data-iv-meta='over'] .iv__tag,
+  [data-iv-edge='offset'] .iv__meta[data-iv-meta='over'] .iv__duration {
+    border-radius: var(--radius-none);
+  }
+
+  /* "The BODY face at heavy weight, or the MONO face. No separate display
+     face." The labels are the mono half — the eyebrow, the on-frame tag and the
+     invitation's own label. `--jp-eyebrow-tracking` is the seam
+     `journey-sections-shared.css` documents for exactly this ("a section that
+     wants it sets `--jp-eyebrow-tracking`"), and mono at `--tracking-wider` is
+     already wide, so the tighter step is the legible one. */
+  .iv[data-iv-edge='offset'] {
+    --jp-eyebrow-tracking: var(--tracking-wide);
+  }
+
+  [data-iv-edge='offset'] .iv__eyebrow,
+  [data-iv-edge='offset'] .iv__tag,
+  [data-iv-edge='offset'] .iv__watch-label,
+  [data-iv-edge='offset'] .iv__watch-time {
+    font-family: var(--font-mono);
+  }
+
+  /* The press. Brutalist motion is not "no state changes", it is "None.
+     INSTANT state changes" — so the control moves into its own drop shadow with
+     no transition at all, which is the idiom the offset shadow exists to set
+     up. `motion: none` is what makes it instant (block 10). */
+  [data-iv-edge='offset'] .iv__watch:hover {
+    translate: var(--space-1) var(--space-1);
+    box-shadow: none;
+  }
+
+  /* ── 7 · `accent: edge` — A STRIPE, NOT A BADGE ─────────────────────────
+     REACHES: syllabus (Technical) ONLY, for the stripe on the copy column —
+     `edge` is unique to it, and it is compounded with `align: start` anyway so
+     a deliberate centred override cannot end up with a stripe down one side of
+     a centred column. Candlelit is `accent: glow`.
+
+     THE TELL: "hairline grid, mono numerals, and a left-border accent stripe
+     rather than a filled badge." All three measured low or zero here: the
+     duration was a dot plus proportional numerals, and there was no stripe and
+     no grid rule anywhere in the component.
+
+     `--jp-accent-mark` carries the stripe, NOT `--jp-accent-edge`. The edge role
+     resolves to `--jp-ember` at this value, which is a FILL token measuring
+     2.46:1 light — under the 3:1 graphic floor — and contract A38 settled that
+     marks route through the AA-safe `--jp-ember-text` after two components
+     measured exactly the 2.04:1 the axis file's own comment predicted. The
+     observation that `--jp-accent-edge` cannot carry a graphic is handed off,
+     not worked around a second time. */
+  [data-iv-accent='edge'][data-iv-align='start'] .iv__lead {
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-mark);
+    padding-inline-start: var(--jp-sec-gap);
+  }
+
+  /* Mono numerals, and the badge replaced by the stripe. `tabular-nums` was
+     already here; the mono face and the stripe are what make it read as a
+     duration in a syllabus rather than a chip. */
+  [data-iv-accent='edge'] .iv__duration {
+    font-family: var(--font-mono);
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-mark);
+    padding-inline-start: var(--space-3);
+  }
+
+  [data-iv-accent='edge'] .iv__duration-dot {
+    display: none;
+  }
+
+  /* The grid. One rule between the copy and the plate, which is what makes a
+     dense technical section read as a table rather than as a stack. */
+  [data-iv-accent='edge'] .iv__stage {
+    padding-block-start: var(--jp-sec-gap);
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+
+  /* ── 8 · `panel` + `hairline` — THE FRAME'S HAIRLINE IS NEUTRAL ─────────
+     REACHES: syllabus + signal. `panel` is plain-facts + syllabus + signal and
+     `hairline` is quiet-studio + long-read + syllabus + signal, so the pair is
+     exactly those two; Candlelit is `media`/`none` and holds neither.
+
+     Both tells name a NEUTRAL hairline — syllabus "hairline on everything —
+     reads as a table", signal "rounded cards with hairlines and a small neutral
+     shadow" — and the frame was drawing a 24% mix of the ACCENT instead, which
+     on signal put a brand-tinted line around a card whose tell is that the line
+     is not brand-tinted. Applied on every composition, not just `theatre`,
+     because "hairline on everything" is the point.
+
+     Three attribute selectors out-specify the composition rule above them by
+     construction, so this does not depend on source order. */
+  [data-iv-surface='panel'][data-iv-edge='hairline'] .iv__media {
+    border: var(--border-width) solid var(--color-border);
+  }
+
+  /* ── 9 · `panel` + `hairline` + `fill` — SIGNAL'S SMALL NEUTRAL SHADOW ──
+     REACHES: signal ONLY. The pair above is syllabus + signal; `accent: fill`
+     excludes syllabus (`edge`). Candlelit holds none of the three.
+
+     THE TELL: "rounded cards with hairlines and a SMALL NEUTRAL shadow; ONE
+     FILLED ACCENT BUTTON per section." The filled button already arrives —
+     `accent: fill` resolves `--jp-accent-fill` to the ember and `plate` picks
+     `solid` — and it is the section's only filled control, so the tell's second
+     half holds. What was missing was the neutral elevation: `--shadow-sm` on the
+     plate and `--shadow-md` under the one button, which is exactly the
+     `--shadow-sm`/`--shadow-md` pair the family table names.
+
+     `.iv__play`'s `box-shadow` is `var(--jp-accent-glow)`, which is `none` at
+     `fill`, so this replaces nothing — and it stays the WHOLE value of the
+     property, never one item of a list (A63). Syllabus keeps `--shadow-xs` from
+     its own `edge` value, which its table also names as its ceiling. */
+  [data-iv-surface='panel'][data-iv-edge='hairline'][data-iv-accent='fill']
+    .iv__media {
+    box-shadow: var(--shadow-sm);
+  }
+
+  [data-iv-surface='panel'][data-iv-edge='hairline'][data-iv-accent='fill']
+    .iv__play {
+    box-shadow: var(--shadow-md);
+  }
+
+  /* ── 10 · `edge: soft` — NO BORDER ANYWHERE, PILL CONTROLS ──────────────
+     REACHES: open-air (Soft-organic) ONLY. `soft` is unique to it.
+
+     OPEN-AIR IS THE DANGEROUS LOOK AND THIS IS WHY THE KEY IS `edge`. It shares
+     FOUR axes with Candlelit — `align: center`, `density: airy`, `width: text`,
+     `motion: drift` — so it is the one preset where the obvious selector is a
+     Candlelit regression. `surface: tint`, `edge: soft` and `accent: text` are
+     the three values that separate them, and every open-air rule in this file
+     is keyed on one of those.
+
+     THE TELL: "no border anywhere, pill controls, and a shadow you have to look
+     for." `.iv` already drops its border (`--jp-edge-width: 0px`) and takes
+     `--shadow-lg` — but the media box was still drawing the composition's
+     hairline, so the look with "Edge treatment: NONE. No borders at all" was
+     shipping a bordered frame. That is the whole tell failing on one selector.
+
+     Ordered after the composition rule deliberately: both are two
+     attribute/class steps, so equal specificity makes source order the decider
+     here, unlike block 8. */
+  [data-iv-edge='soft'] .iv__media {
+    border: none;
+  }
+
+  /* The hollow plate becomes an opaque soft one. The glassy 55% backdrop was
+     unmeasurable by construction — 55% of the background over an arbitrary
+     poster has no contrast guarantee at all — and A39's lesson is that no alpha
+     low enough to read as faint survives the dark pole. An opaque
+     `--color-surface` puts the icon on a KNOWN colour and lets the diffuse
+     elevation do the separating, which is what the family asks for. */
+  [data-iv-edge='soft'] .iv__play[data-iv-plate='hollow'] {
+    background: var(--color-surface);
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  /* Pill controls. `media: mask` puts the meta row below the frame, where it had
+     no treatment at all; as pills on the section's own surface with a shadow at
+     the edge of visibility it reads as the family's control vocabulary. */
+  [data-iv-edge='soft'] .iv__meta[data-iv-meta='below'] .iv__tag,
+  [data-iv-edge='soft'] .iv__meta[data-iv-meta='below'] .iv__duration {
+    padding-block: var(--space-1);
+    padding-inline: var(--space-4);
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ── 11 · `surface: invert` + `edge: heavy` — BIG NUMERALS, PILL CHIPS ──
+     REACHES: full-send (Playful) ONLY. Both values are unique to it; Candlelit
+     is `surface: media` / `edge: none`.
+
+     THE TELL: "whole inverted bands, pill CTAs at `--radius-full`, spring
+     easing, big numerals." The band arrives from `surface: invert` re-pointing
+     `--jp-ink` (and `journey-palette.css:517` re-declares the whole ladder on
+     `.jp-sec`, so `--color-surface` inside the section re-derives against the
+     inverted ink rather than the page's — the media box inverts with the band
+     and needs no rule). The pill CTA is the play button at `--radius-full`. The
+     spring is now real, from `--jp-reveal-ease` on the control transition.
+
+     "Big numerals" measured ZERO across the tree, and this section owns the only
+     numeral on it. `--jp-body-size` is the `type` axis's card rung (A44), so the
+     numeral scales with the axis instead of pinning a size — 1.4× of it at
+     `expressive` lands a display-weight duration under the frame. */
+  [data-iv-surface='invert'] .iv__duration {
+    font-size: calc(var(--jp-body-size) * 1.4);
+    font-weight: var(--font-bold);
+    line-height: var(--leading-none);
+  }
+
+  [data-iv-edge='heavy'] .iv__meta[data-iv-meta='below'] .iv__tag,
+  [data-iv-edge='heavy'] .iv__meta[data-iv-meta='below'] .iv__duration {
+    padding-block: var(--space-2);
+    padding-inline: var(--space-4);
+    border: var(--border-width-thick) solid var(--jp-edge-color);
+    border-radius: var(--radius-full);
+  }
+
+  /* ── 12 · `type` — THE AXIS REACHES THE BODY COPY ──────────────────────
+     REACHES: long-read + signal (`balanced`), syllabus (`restrained`), open-air
+     + full-send (`expressive`). It EXCLUDES every `monumental` look, which is
+     how Candlelit is kept byte-identical — and quiet-studio and plain-facts with
+     it, since they share that value.
+
+     THE DEFECT THIS FIXES, measured: `.iv__sub` shipped a literal `--text-lg`
+     (20px), so at `type: restrained` the heading was `--text-xl` (24px) over a
+     20px sub — a 1.2 ratio where the tell is "many small steps, FINE-GRAINED
+     hierarchy", and close enough to read as a mistake. The brief's requirement
+     is that the `type` axis "visibly change the relationship between eyebrow,
+     heading, body and caption, not just font-size", and a literal in the middle
+     of that ladder is what prevented it.
+
+     `--jp-body-size` is the card rung: 17 / 17 / 20 / 24px across restrained /
+     balanced / expressive / monumental. So restrained becomes 24 over 17,
+     balanced 30 over 17, expressive 36 over 20 — three distinct relationships
+     where there was one. Monumental keeps the literal, which is the value it
+     already had. */
+  [data-iv-type='restrained'] .iv__sub,
+  [data-iv-type='balanced'] .iv__sub,
+  [data-iv-type='expressive'] .iv__sub {
+    font-size: var(--jp-body-size);
+  }
+
+  /* ── 13 · `motion` — CONTINUOUS DECORATION IS NOT A CONSTANT ────────────
+     REACHES: plain-facts + syllabus (`none`), quiet-studio (`fade`), long-read +
+     signal (`rise`). Candlelit is `drift` and keeps both rings; full-send is
+     `stagger` and keeps them, which is right for Playful.
+
+     THE PRINCIPLE: continuous decorative motion belongs to the two values that
+     DESCRIBE continuous motion. Two infinitely expanding rings around the play
+     button were unconditional, so "Motion: None. Instant state changes" shipped
+     an infinite animation, "Slow fade only. No transform" shipped a repeating
+     scale, and "fade + rise with a short stagger" shipped a throb. At
+     `motion: none` it was worse than wrong: `--jp-reveal-duration` is `0ms`
+     there, so the rings were an infinite zero-duration animation pinned to
+     their final keyframe — invisible by accident rather than still by design.
+
+     `display: none` rather than an `{#if}` so SSR markup is unchanged and the
+     rings can never flash before the axis resolves. */
+  [data-iv-motion='none'] .iv__pulse,
+  [data-iv-motion='fade'] .iv__pulse,
+  [data-iv-motion='rise'] .iv__pulse {
+    display: none;
+  }
+
+  /* `motion: none` means INSTANT, not frozen: the two families holding it both
+     name instant interaction as the idiom ("Instant state changes",
+     "Interactions are instant"). The hover state survives — a control with no
+     feedback is a worse outcome than a control with fast feedback — it simply
+     stops being animated. */
+  [data-iv-motion='none'] .iv__play,
+  [data-iv-motion='none'] .iv__watch {
+    transition: none;
   }
 
   /* ── reveal-on-scroll ──
@@ -1082,11 +1752,25 @@
     .iv__pulse {
       opacity: 0;
     }
-    .iv__play {
+    .iv__play,
+    .iv__watch {
       transition: none;
     }
     .iv__play:hover {
       transform: none;
+    }
+    /* The invitation's hover, and the Brutalist press with it. Both are
+       instantaneous rather than animated, so neither is caught by the shared
+       `animation: none !important` block nor by the `transition: none` above —
+       a reduced-motion reader still gets a state change, just no travel.
+
+       THE SECOND SELECTOR IS NOT REDUNDANT. A media query adds no specificity,
+       so `[data-iv-edge='offset'] .iv__watch:hover` (three steps) would out-rank
+       a bare `.iv__watch:hover` (two) and the press would survive here. Matching
+       its shape makes them equal, and this block is later in the file. */
+    .iv__watch:hover,
+    [data-iv-edge='offset'] .iv__watch:hover {
+      translate: none;
     }
   }
 </style>

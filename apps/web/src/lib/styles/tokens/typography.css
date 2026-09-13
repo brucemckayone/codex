@@ -47,6 +47,12 @@
   --tracking-normal: 0;
   --tracking-wide: 0.025em;
   --tracking-wider: 0.05em;
+  /* Three of the nine journey design families ask for wider than 0.05em:
+     1.4 Luxury-minimal ("--tracking-wider OR WIDER"), 1.2 Brutalist ("mono
+     labels") and 1.7 Retro ("uppercase tracked-out labels"). Two independent
+     section agents asked for this token by name and both correctly declined to
+     invent it, because a var() with no fallback is silently dropped. */
+  --tracking-widest: 0.1em;
 
   /* Text Transform (brandable via org-brand.css) */
   --text-transform-label: uppercase;

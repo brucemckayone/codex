@@ -60,7 +60,14 @@
    failing AA in dark until Codex-rvkmc. */
 .jp-sec__eyebrow {
   margin: 0;
-  font-size: var(--text-sm);
+  /* The `type` axis reaches the eyebrow through this seam, exactly as it already
+     reaches the tracking on the line below. Before it existed the label was
+     pinned at `--text-sm` while `--jp-heading-size` travelled --text-xl ->
+     --text-4xl across the four `type` values, so at `restrained` the label sat
+     within a few px of the heading it labels and at `monumental` it was a third
+     of it. The default MUST remain `--text-sm`: that is what `monumental`
+     resolves to, and `monumental` is candlelit's type value. */
+  font-size: var(--jp-eyebrow-size, var(--text-sm));
   font-weight: var(--font-semibold);
   letter-spacing: var(--jp-eyebrow-tracking, var(--tracking-wider));
   text-transform: uppercase;

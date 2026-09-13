@@ -329,7 +329,19 @@ export const SECTION_FIELDS: Readonly<
       key: 'bg',
       label: 'Background',
       control: 'select',
-      hint: 'Uses the org brand shader unless overridden in Brand & theme.',
+      // NOT a shader, and the hint this replaces said it was (Codex-vo04w).
+      // `bg` sets `data-hero-bg` on `.hero` and nothing else: it swaps the CSS
+      // recipe of `.hero__glow` (HeroSection.svelte — `blood` deepens the
+      // radial, `still` pins the breath and hides `.hero__motes`, `ember` is the
+      // base). The glow takes its colour from `--jp-accent-fill` and its opacity
+      // from `--jp-sec-atmos`, i.e. the Accent and Surface axes. VERIFIED: no
+      // component in either page-builder tree — public `render/` or the canvas —
+      // mounts a `ShaderHero`; the app's only two mounts are
+      // `_org/[slug]/+layout.svelte` and `AuthShaderPane.svelte`. So "Brand &
+      // theme" was a dead pointer too — the shader controls there cannot reach
+      // this field. Wiring the hero to ShaderHero is contract clause B1, not a
+      // copy fix.
+      hint: 'Which glow the hero paints behind its copy, tinted by your brand accent. “Still · quiet” also freezes the glow’s breathing and hides the drifting embers. How much of it shows depends on this section’s Surface and Accent.',
       options: [
         { value: 'ember', label: 'Glow · warm' },
         { value: 'blood', label: 'Glow · deep' },

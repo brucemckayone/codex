@@ -88,8 +88,14 @@ export interface SectionDesign {
   surface?: 'bare' | 'tint' | 'panel' | 'invert' | 'media';
   /** Border weight FUSED with elevation — they co-vary, so one axis owns both. */
   edge?: 'none' | 'hairline' | 'soft' | 'heavy' | 'offset';
-  /** Text/box alignment. Two values, and it deletes ~8 alignment-only variants. */
-  align?: 'start' | 'center';
+  /**
+   * Text/box alignment, and it deletes ~8 alignment-only variants. `end` is
+   * contract B4's first ASYMMETRIC value: the column moves to the inline end
+   * while the text stays left-aligned, because a right-ragged body column is a
+   * readability regression. WIDENING ONLY — every persisted `start`/`center`
+   * stays valid.
+   */
+  align?: 'start' | 'center' | 'end';
   /** Type-scale character, from utilitarian to display-led. */
   type?: 'restrained' | 'balanced' | 'expressive' | 'monumental';
   /** How the ember accent is spent. `none` still leaves a price-bearing CTA filled. */
