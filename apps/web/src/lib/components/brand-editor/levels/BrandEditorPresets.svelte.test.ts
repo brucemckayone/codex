@@ -28,6 +28,9 @@
  * is ever inside another — it is what stops this being "fixed" later by
  * wrapping the whole card.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   BRAND_PRESETS,
@@ -145,23 +148,104 @@ describe('BrandEditorPresets · the card itself applies the preset', () => {
     );
   });
 
-  test('the header reports its applied state, and only for its own look', () => {
-    const signatureId = firstPreset?.variants[0].id ?? '';
-    const { card } = render(signatureId);
-    const head = card.querySelector('.presets__head');
+  test('the CARD is marked applied for any of its looks, not just the signature', () => {
+    // The card answers "which brand am I on?" and the chip answers "which of
+    // its looks?". Before this the state lived only on the chip, so the only
+    // way to read the active preset was to scan three chips across 27 cards.
+    //
+    // A NON-signature look is used on purpose: if the card's state were wired
+    // to `appliedId === signature.id` it would pass with variants[0] and fail
+    // here, which is the bug this asserts against.
+    const alternate = firstPreset?.variants[1].id ?? '';
+    const { card } = render(alternate);
 
-    expect(head?.getAttribute('aria-pressed')).toBe('true');
-    expect(head?.classList.contains('is-applied')).toBe(true);
+    expect(card.classList.contains('is-applied')).toBe(true);
+    // ...while the header reports only its OWN look as pressed.
+    expect(
+      card.querySelector('.presets__head')?.getAttribute('aria-pressed')
+    ).toBe('false');
+  });
 
-    cleanup?.();
-    cleanup = null;
+  test('a card whose looks are all unapplied is not marked', () => {
+    // Anti-vacuity for the assertion above: `is-applied` hardcoded true would
+    // satisfy it.
+    const { card } = render('not-a-real-look-id');
+    expect(card.classList.contains('is-applied')).toBe(false);
+  });
 
-    // A different look applied ⇒ this header is not pressed. Without this,
-    // `aria-pressed={true}` hardcoded would pass the assertion above.
-    const other = render(`${signatureId}--not-a-real-look`);
-    const otherHead = other.card.querySelector('.presets__head');
-    expect(otherHead?.getAttribute('aria-pressed')).toBe('false');
-    expect(otherHead?.classList.contains('is-applied')).toBe(false);
+  test('the header reports pressed for its own signature', () => {
+    const { card } = render(firstPreset?.variants[0].id ?? '');
+    expect(
+      card.querySelector('.presets__head')?.getAttribute('aria-pressed')
+    ).toBe('true');
+    expect(card.classList.contains('is-applied')).toBe(true);
+  });
+
+  test('the palette renders one stop per colour the preset declares', () => {
+    // The palette IS the product; a card that advertises a palette it does not
+    // render is the defect this guards. Counted from the preset's own values
+    // rather than a fixed number, since presets declare 1-4 colours.
+    const { card } = render();
+    const declared = [
+      firstPreset?.values.primaryColor,
+      firstPreset?.values.secondaryColor,
+      firstPreset?.values.accentColor,
+      firstPreset?.values.backgroundColor,
+    ].filter(Boolean).length;
+
+    expect(card.querySelectorAll('.presets__stop').length).toBe(declared);
+    expect(card.querySelectorAll('.presets__stop--primary').length).toBe(1);
+  });
+
+  test('no selected-state surface is painted in a BRAND-derived token', () => {
+    /*
+     * The durable form of the contrast bug. This gallery renders inside the
+     * org-brand scope it edits, so a selected state painted in
+     * --color-interactive* follows whatever brand is being trialled. Measured
+     * in Chrome with a probe calibrated to 21.00 on white/black: applying a
+     * dark preset put --color-text on --color-interactive-subtle at 2.55:1
+     * (card), 2.58:1 (variant chip) and the same pair on the filter chip,
+     * against a 4.5 floor — the preset's own name vanished.
+     *
+     * Asserted on the RULE rather than a computed colour on purpose. A
+     * computed check needs a mounted brand to reproduce, and would go green
+     * for the default palette while staying broken for dark brands — which is
+     * exactly how this shipped. What must hold is the invariant: these three
+     * state selectors name no brand token.
+     */
+    // Same idiom as `journey-design.test.ts`, which string-asserts its own
+    // stylesheet in this exact jsdom environment.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(here, 'BrandEditorPresets.svelte'), 'utf8');
+    // Strip comments first, or the explanation above trips its own gate.
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    const stateSelectors = [
+      '.presets__card.is-applied',
+      '.presets__variant.is-applied',
+      '.presets__filter-chip.is-active',
+    ];
+
+    for (const selector of stateSelectors) {
+      const at = bare.indexOf(selector);
+      expect(at, `${selector} is not declared`).toBeGreaterThan(-1);
+      const block = bare.slice(at, bare.indexOf('}', at));
+      expect(block, `${selector} paints a brand-derived surface`).not.toMatch(
+        /--color-interactive/
+      );
+      // ...and does declare a neutral, theme-inverting tint instead.
+      expect(block).toMatch(/color-mix\(in oklab, var\(--color-text\)/);
+    }
+  });
+
+  test('category labels sit one level below the consumer h1', () => {
+    // Lighthouse `heading-order`: BrandStudioGuided renders an <h1> and no
+    // <h2>, so an <h3> here skipped a level. Asserted because the right level
+    // is a property of the CONSUMER's hierarchy, which this file cannot see.
+    const { target } = render();
+    const labels = [...target.querySelectorAll('.presets__group-label')];
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(label.tagName).toBe('H2');
   });
 
   test('no button is nested inside another, in any card', () => {

@@ -335,7 +335,9 @@
   .guided__subtitle {
     margin-top: var(--space-1);
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    /* Codex-00fui: --color-text-muted is #a3a3a3, measured 2.31-2.52:1 here
+     against a 4.5 floor. Mixed from --color-text so it tracks the theme. */
+    color: color-mix(in oklab, var(--color-text) 72%, transparent);
     line-height: var(--leading-snug);
   }
 
@@ -361,7 +363,9 @@
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    /* Codex-00fui: --color-text-muted is #a3a3a3, measured 2.31-2.52:1 here
+     against a 4.5 floor. Mixed from --color-text so it tracks the theme. */
+    color: color-mix(in oklab, var(--color-text) 72%, transparent);
     cursor: pointer;
     border-bottom: var(--border-width-thick) solid transparent;
     margin-bottom: calc(-1 * var(--border-width));
