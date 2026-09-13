@@ -358,7 +358,7 @@
    */
   .presets__desc {
     font-size: var(--text-xs);
-    color: color-mix(in oklab, var(--color-text) 70%, transparent);
+    color: color-mix(in oklab, var(--color-text) 72%, transparent);
     line-height: var(--leading-tight);
   }
 
