@@ -112,21 +112,17 @@ export const junkHostHook: Handle = async ({ event, resolve }) => {
     },
   });
 
-  // Best-effort edge-cache write so repeat probes are answered without
-  // re-invoking the worker. The Cache API is GET-only and absent in some
-  // runtimes (vitest/jsdom), and a cache failure must NEVER break the 404.
-  // Awaited, not waitUntil: workerd cancels un-awaited promises the moment
-  // the response returns (Codex-e32xz).
-  if (event.request.method === 'GET' && typeof caches !== 'undefined') {
-    try {
-      const cache = await caches.open('junk-host-404');
-      await cache.put(event.request, response.clone());
-    } catch {
-      // Swallowed on purpose — the response below is already correct; only
-      // the cache write is lost.
-    }
-  }
-
+  // NO CACHE-API WRITE HERE, deliberately — one was removed on 2026-09-08.
+  // It did `caches.open('junk-host-404')` then `put(request, response.clone())`
+  // on every GET, and NOTHING EVER READ IT BACK: that was the only Cache API
+  // call in all of apps/web, and there is no `cache.match` anywhere. So it was
+  // write-only, and because it was AWAITED it added its own latency to the very
+  // response it existed to make cheap.
+  //
+  // Not worth reinstating with a matching read either. The body is the constant
+  // below — building it is cheaper than a cache lookup, and the cost this hook
+  // exists to avoid (the worker invocation) is already paid before any hook can
+  // run. Edge caching for these belongs in a zone Cache Rule, not worker code.
   return response;
 };
 

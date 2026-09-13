@@ -219,24 +219,52 @@ app.delete(
     input: { body: deleteAccountSchema },
     successStatus: 204,
     handler: async (ctx) => {
-      await ctx.services.identity.deleteAccount(ctx.user.id);
+      const sessionTokens = await ctx.services.identity.deleteAccount(
+        ctx.user.id
+      );
 
-      // Invalidate the current session's KV entry so the very next request
-      // fails auth. Await (not waitUntil) — the client clears its cookie and
-      // redirects immediately after, and must not race a still-cached session.
-      // One key: the bare token, BetterAuth's own (Codex-kgrdp.7) — matching
-      // upgrade-to-creator. The DB-fallback deletedAt gate in @codex/security
-      // covers this user's other-device sessions.
+      // Invalidate EVERY cached session this user holds, not just the current
+      // one. Await (not waitUntil) — the client clears its cookie and redirects
+      // immediately after, and must not race a still-cached session.
+      //
+      // ONE KEY PER SESSION: the bare token, BetterAuth's own namespace
+      // (Codex-kgrdp.7) — matching upgrade-to-creator.
+      //
+      // WHY ALL OF THEM (Codex-na929). The comment here used to say "the
+      // DB-fallback deletedAt gate in @codex/security covers this user's
+      // other-device sessions". The gate is real, but a session still present
+      // in `AUTH_SESSION_KV` NEVER REACHES THE DB and so never reaches the
+      // gate: `session-auth.ts` authenticates a cache hit on `expiresAt` alone.
+      // So every other device stayed signed in until KV reaped its entry on the
+      // session's own TTL. Deleting the cached copies is what actually closes
+      // it, and it costs nothing on the authenticated hot path — see the note
+      // on `IdentityService.deleteAccount` for why a hot-path check is the
+      // wrong shape.
+      //
+      // The current token is unioned in rather than assumed present: it is
+      // normally one of the rows, but a session whose DB row has already been
+      // reaped would otherwise be missed, and re-deleting one key is free.
       const kv = ctx.env.AUTH_SESSION_KV;
-      if (kv && ctx.session?.token) {
-        await kv.delete(ctx.session.token).catch((err: unknown) => {
-          ctx.obs?.error(
-            'Failed to invalidate session KV after account deletion',
-            {
-              error: err instanceof Error ? err.message : String(err),
-              userId: ctx.user.id,
-            }
-          );
+      if (kv) {
+        const tokens = new Set(sessionTokens);
+        if (ctx.session?.token) tokens.add(ctx.session.token);
+        // Sequential, not Promise.all: this is a rate-limited `strict` route on
+        // a handful of devices, and a burst of parallel KV writes on the same
+        // namespace buys nothing here.
+        for (const token of tokens) {
+          await kv.delete(token).catch((err: unknown) => {
+            ctx.obs?.error(
+              'Failed to invalidate session KV after account deletion',
+              {
+                error: err instanceof Error ? err.message : String(err),
+                userId: ctx.user.id,
+              }
+            );
+          });
+        }
+        ctx.obs?.info('Invalidated cached sessions after account deletion', {
+          userId: ctx.user.id,
+          sessionCount: tokens.size,
         });
       }
 

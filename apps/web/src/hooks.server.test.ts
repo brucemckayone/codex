@@ -213,9 +213,8 @@ describe('shouldShortCircuitHost — the exact measured hosts', () => {
 });
 
 describe('junkHostHook', () => {
-  it('answers a junk host with a constant cached 404 and runs nothing downstream', async () => {
-    const { put } = stubCaches();
-    const { input, resolve, request } = makeHookEvent({
+  it('answers a junk host with a constant 404 and runs nothing downstream', async () => {
+    const { input, resolve } = makeHookEvent({
       host: 'cdn-resources-dev.revelations.studio',
     });
 
@@ -225,42 +224,39 @@ describe('junkHostHook', () => {
     expect(response.headers.get('content-type')).toBe(
       'text/plain; charset=utf-8'
     );
+    // The header is kept and binds the CLIENT. It does NOT make Cloudflare's
+    // edge answer these — a Worker response is not edge-cached just because it
+    // carries `s-maxage`; that would need a zone Cache Rule.
     expect(response.headers.get('cache-control')).toBe(CACHE_PRESETS.asset);
-    // Cheap termination: not one downstream hook (session, security, render)
-    // may run for a junk host.
-    expect(resolve).not.toHaveBeenCalled();
-
-    // The cached copy is the 404 itself, keyed on the incoming request…
-    expect(put).toHaveBeenCalledTimes(1);
-    const [cachedRequest, cachedResponse] = put.mock.calls[0];
-    expect(cachedRequest).toBe(request);
-    expect(cachedResponse.status).toBe(404);
-    expect(await cachedResponse.text()).toBe('Not Found');
-    // …and cloning for the put left the returned body intact.
     expect(await response.text()).toBe('Not Found');
+    // Cheap termination: not one downstream hook (session, security, render)
+    // may run for a junk host. This is the whole saving — the worker invocation
+    // itself is already paid before any hook can run.
+    expect(resolve).not.toHaveBeenCalled();
   });
 
-  it('still returns the 404 when the edge-cache write fails', async () => {
-    stubCaches(async () => {
-      throw new Error('cache unavailable');
-    });
-    const { input, resolve } = makeHookEvent({
-      host: 'cdn.revelations.studio',
-    });
+  it('writes NOTHING to the Cache API (Codex-viidc)', async () => {
+    // The hook used to `put` the 404 into `caches.open('junk-host-404')` on
+    // every GET. Nothing ever read it back — that was the only Cache API call
+    // in apps/web and there is no `cache.match` anywhere — so the write was
+    // pure cost, and being AWAITED it added latency to the response it was
+    // meant to make cheap. This asserts it is gone, and will fail if anyone
+    // reinstates a write without also adding the matching read.
+    const { open, put } = stubCaches();
+    const { input } = makeHookEvent({ host: 'cdn.revelations.studio' });
 
     const response = await junkHostHook(input);
 
     expect(response.status).toBe(404);
-    expect(await response.text()).toBe('Not Found');
-    expect(resolve).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 
-  it('still returns the 404 when there is no Cache API at all', async () => {
-    // No vi.stubGlobal('caches') — jsdom has none. This pins the outcome
-    // (404 without a cache write), not WHICH of the two guards — the typeof
-    // check or the swallowing try/catch — carried it: removing either one
-    // alone keeps this green, and that is acceptable because both exist for
-    // this same outcome.
+  it('returns the 404 when there is no Cache API at all', async () => {
+    // No vi.stubGlobal('caches') — jsdom has none. Now trivially true since the
+    // hook never touches `caches`, but kept as the regression guard for the
+    // runtime it was written for: this hook must not depend on a global that
+    // vitest/jsdom lacks.
     const { input } = makeHookEvent({ host: 'preview.revelations.studio' });
     const response = await junkHostHook(input);
     expect(response.status).toBe(404);
@@ -269,9 +265,13 @@ describe('junkHostHook', () => {
   it.each([
     'POST',
     'HEAD',
-  ])('skips the cache write for %s (Cache API is GET-only)', async (method) => {
-    const { put } = stubCaches();
-    const { input } = makeHookEvent({
+  ])('terminates %s on a junk host too, and writes nothing', async (method) => {
+    // This used to read "skips the cache write for %s (Cache API is GET-only)".
+    // That premise died with the write itself, but the METHOD coverage is still
+    // a real contract: a junk host is junk whatever the verb, and no method may
+    // reach a cache.
+    const { open, put } = stubCaches();
+    const { input, resolve } = makeHookEvent({
       host: 'cdn-dev.revelations.studio',
       method,
     });
@@ -279,6 +279,8 @@ describe('junkHostHook', () => {
     const response = await junkHostHook(input);
 
     expect(response.status).toBe(404);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();
   });
 
@@ -333,8 +335,8 @@ describe('handle — the assembled sequence', () => {
   // behind junkHostHook (cdn assets, session validation, security, rewrite)
   // spent anything on the request.
 
-  it('terminates a junk host before the router — no session work, cached 404', async () => {
-    const { put } = stubCaches();
+  it('terminates a junk host before the router — no session work, no cache write', async () => {
+    const { open, put } = stubCaches();
     const { input, resolve, event } = makeSequenceInput({
       host: 'cdn-resources-dev.revelations.studio',
     });
@@ -350,7 +352,9 @@ describe('handle — the assembled sequence', () => {
     // sessionHook, requestId would be set and this fails.
     expect(resolve).not.toHaveBeenCalled();
     expect(event.locals.requestId).toBeUndefined();
-    expect(put).toHaveBeenCalledTimes(1);
+    // And nothing reaches the Cache API through the assembled sequence either.
+    expect(open).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 
   it('carries real traffic through every hook to the router', async () => {
