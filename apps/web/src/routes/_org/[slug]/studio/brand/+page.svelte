@@ -439,7 +439,9 @@
     padding: var(--space-1-5) var(--space-3);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    /* Codex-00fui: --color-text-muted is #a3a3a3, measured 2.31-2.52:1 here
+     against a 4.5 floor. Mixed from --color-text so it tracks the theme. */
+    color: color-mix(in oklab, var(--color-text) 72%, transparent);
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: var(--transition-colors);
