@@ -8,6 +8,13 @@
 import { describe, expect, it } from 'vitest';
 import { createWorker } from '../worker-factory';
 
+/** The body `createWorker`'s /health route returns — `res.json()` is
+ * `unknown`, and every assertion below reaches through these three fields. */
+interface HealthBody {
+  status: string;
+  checks: Record<string, unknown>;
+}
+
 describe('Health Check Enhancements', () => {
   describe('basic health check (backward compatibility)', () => {
     it('should work without any health check options', async () => {
@@ -22,7 +29,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(200);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data).toMatchObject({
         status: 'healthy',
         service: 'test-service',
@@ -48,7 +55,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(200);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('healthy');
       expect(data.checks.database).toEqual({ status: 'ok' });
     });
@@ -71,7 +78,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(503);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('unhealthy');
       expect(data.checks.database).toEqual({
         status: 'error',
@@ -96,7 +103,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(503);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('unhealthy');
       expect(data.checks.database).toEqual({
         status: 'error',
@@ -121,7 +128,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(200);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('healthy');
       expect(data.checks.kv).toEqual({ status: 'ok' });
     });
@@ -144,7 +151,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(503);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('unhealthy');
       expect(data.checks.kv).toEqual({
         status: 'error',
@@ -170,7 +177,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(200);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('healthy');
       expect(data.checks.database).toEqual({ status: 'ok' });
       expect(data.checks.kv).toEqual({ status: 'ok' });
@@ -192,7 +199,7 @@ describe('Health Check Enhancements', () => {
       const res = await app.request('/health');
       expect(res.status).toBe(503);
 
-      const data = await res.json();
+      const data = (await res.json()) as HealthBody;
       expect(data.status).toBe('unhealthy');
       expect(data.checks.database).toEqual({ status: 'ok' });
       expect(data.checks.kv).toEqual({

@@ -38,7 +38,13 @@ function boomWorker() {
 /** The shape `mapErrorToResponse()` guarantees — asserted below, so it is
  * worth naming rather than reaching through `Record<string, any>`. */
 interface ErrorEnvelope {
-  error: { code: string; message: string; details?: unknown };
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+    /** Added by createErrorHandler in development/test only (middleware.ts). */
+    stack?: string[];
+  };
 }
 async function boomBody(environment?: string) {
   const env = environment === undefined ? {} : { ENVIRONMENT: environment };
@@ -92,7 +98,7 @@ describe('createErrorHandler — local environments keep their diagnostics', () 
       expect(status).toBe(500);
       expect(body.error.message).toBe(SECRET);
       expect(Array.isArray(body.error.stack)).toBe(true);
-      expect(body.error.stack.length).toBeLessThanOrEqual(5);
+      expect(body.error.stack!.length).toBeLessThanOrEqual(5);
     });
   }
 });

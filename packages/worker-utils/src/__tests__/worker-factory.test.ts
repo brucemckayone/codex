@@ -116,7 +116,9 @@ describe('Worker Factory Integration', () => {
           name: 'Test User',
           role: 'user',
           emailVerified: true,
+          image: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
         await next();
       });
@@ -299,7 +301,9 @@ describe('Worker Factory Integration', () => {
           name: 'Creator User',
           role: 'creator',
           emailVerified: true,
+          image: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
         await next();
       });
@@ -369,7 +373,9 @@ describe('Worker Factory Integration', () => {
           name: 'Test User',
           role: 'user',
           emailVerified: true,
+          image: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
         await next();
       });
@@ -424,7 +430,9 @@ describe('Worker Factory Integration', () => {
           name: 'Creator',
           role: 'creator',
           emailVerified: true,
+          image: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
         await next();
       });

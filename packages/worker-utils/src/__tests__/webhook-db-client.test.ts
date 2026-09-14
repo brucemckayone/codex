@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-const createPerRequestDbClient = vi.fn(() => ({
+const createPerRequestDbClient = vi.fn((_env: unknown) => ({
   db: {} as unknown,
   cleanup: vi.fn(async () => {}),
 }));

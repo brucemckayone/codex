@@ -232,11 +232,13 @@ describe("enforcePolicyInline · auth: 'worker'", () => {
 
   it('throws UnauthorizedError when workerAuth middleware returns a 401 Response', async () => {
     const sec = await import('@codex/security');
-    vi.mocked(sec.workerAuth).mockReturnValue(async () => {
+    vi.mocked(sec.workerAuth).mockReturnValue((async () => {
       return new Response(JSON.stringify({ error: 'bad signature' }), {
         status: 401,
       });
-    });
+      // Hono types this slot as a union of TypedResponses; enforcePolicyInline
+      // only reads `.status`, so a plain 401 Response is the honest fake.
+    }) as unknown as ReturnType<typeof sec.workerAuth>);
     const { ctx } = makeCtx({ env: { WORKER_SHARED_SECRET: 'secret' } });
     await expect(
       enforcePolicyInline(ctx, { auth: 'worker' })

@@ -9,7 +9,7 @@
     ".": "./src/index.ts",
     "./e2e": "./src/e2e/index.ts",
     "./e2e/*": "./src/e2e/*",
-    "./*": "./src/*"
+    "./*": "./src/*.ts"
   },
   "scripts": {
     "build": "vite build --config vite.config.test-utils",
