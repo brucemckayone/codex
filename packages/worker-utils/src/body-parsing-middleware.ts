@@ -38,21 +38,27 @@ export function createBodyParsingMiddleware(options?: {
       return;
     }
 
-    // Parse JSON body
-    try {
-      const body = await c.req.json();
-      c.set('parsedBody', body);
-    } catch {
-      // Return 400 on invalid JSON
-      return c.json(
-        {
-          error: {
-            code: 'INVALID_JSON',
-            message: 'Request body must be valid JSON',
+    // Parse JSON body. An ABSENT body is not an invalid one: `c.req.json()`
+    // throws for both, which would 400 every body-less POST. See the same fix
+    // and its reasoning in `procedure/helpers.ts` (Codex-bk37r).
+    const raw = await c.req.text();
+    if (raw.trim() === '') {
+      c.set('parsedBody', {});
+    } else {
+      try {
+        c.set('parsedBody', JSON.parse(raw));
+      } catch {
+        // Return 400 on invalid JSON
+        return c.json(
+          {
+            error: {
+              code: 'INVALID_JSON',
+              message: 'Request body must be valid JSON',
+            },
           },
-        },
-        400
-      );
+          400
+        );
+      }
     }
 
     await next();
