@@ -44,6 +44,11 @@ function setTheme(theme: Theme): void {
 
   // Persist to localStorage (fast reads) and cookie (SSR-accessible if needed)
   localStorage.setItem(STORAGE_KEY, theme);
+  // The cookie is the POINT here: SSR reads it to render the correct theme on
+  // first paint, which localStorage cannot do. The CookieStore API biome
+  // prefers is async and unavailable in Safari. NOTE: a biome-ignore reason
+  // may not wrap onto a second line — it silently stops suppressing.
+  // biome-ignore lint/suspicious/noDocumentCookie: SSR needs it on first paint
   document.cookie = `${COOKIE_NAME}=${theme};path=/;max-age=${60 * 60 * 24 * 365};SameSite=Lax`;
 
   // Notify reactive consumers. Every ThemeToggle + anything else derived

@@ -74,8 +74,11 @@ export const load: PageServerLoad = async (event) => {
     );
   }
 
-  // Gate passed → user + course are non-null.
-  const dashboard = await fetchCourseDashboard(event, user!.id, course!.id);
+  // The gate above proves both, but through an `outcome` value TypeScript
+  // cannot correlate with these bindings — so re-check rather than assert,
+  // and stay correct if evaluateCourseGate's cases ever drift.
+  if (!user || !course) error(404, 'Course not found');
+  const dashboard = await fetchCourseDashboard(event, user.id, course.id);
   if (!dashboard) error(404, 'Course not found');
 
   return { dashboard };

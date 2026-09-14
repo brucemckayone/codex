@@ -70,34 +70,6 @@ export const getPublicBranding = query(z.string().min(1), async (slug) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public Org Info (Unauthenticated)
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface PublicOrgInfo {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  logoUrl: string | null;
-  brandColors: { primary?: string };
-}
-
-/**
- * Get public org info by slug — no auth required.
- * Used by org layout to load org data across subdomains.
- */
-/**
- * Get public org info by slug — no auth required.
- * Uses createServerApi but doesn't require cookies.
- */
-const getPublicOrgInfo = query(z.string().min(1), async (slug) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  const result = await api.org.getPublicInfo(slug);
-  return result as PublicOrgInfo;
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Public Creators (Unauthenticated)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -417,13 +389,4 @@ export const getFollowingStatus = query(z.string().uuid(), async (orgId) => {
   const api = createServerApi(platform, cookies);
   const result = await api.org.isFollowing(orgId);
   return result.following;
-});
-
-/**
- * Get follower count for an organization (public).
- */
-const getFollowerCount = query(z.string().uuid(), async (orgId) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  return api.org.getFollowerCount(orgId);
 });

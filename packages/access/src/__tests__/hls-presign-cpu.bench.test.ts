@@ -46,7 +46,6 @@ describe('SigV4 presign CPU spike (600 URLs)', () => {
     const totalMs = performance.now() - start;
     const perUrlUs = (totalMs / COUNT) * 1000;
 
-    // biome-ignore lint/suspicious/noConsole: benchmark output is the point.
     console.log(
       `[CPU spike] ${COUNT} aws4fetch presigns: total=${totalMs.toFixed(2)}ms, ` +
         `per-URL=${perUrlUs.toFixed(1)}µs (SDK baseline ≈${SDK_BASELINE_US}µs). ` +

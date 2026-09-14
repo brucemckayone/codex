@@ -563,6 +563,16 @@ export async function listUserLibrary(
       );
     });
 
+    // `or()` is `SQL | undefined`, and `and()` drops an undefined argument
+    // WITHOUT COMPLAINT — losing this predicate would return every org's
+    // tier-gated content, so the absent case returns empty instead. The
+    // `activeSubscriptions.length === 0` guard above already makes it
+    // unreachable; this keeps that true if the guard ever moves.
+    const subscribedOrgScope = or(...subConditions);
+    if (!subscribedOrgScope) {
+      return { items: [] as UserLibraryItem[], count: 0 };
+    }
+
     const conditions = [
       // Content a subscription grants access to = anything TIER-GATED
       // (`includedInTierId` set). The former `accessType='subscribers'` tag and
@@ -575,7 +585,7 @@ export async function listUserLibrary(
       eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
       // Must belong to one of the user's subscribed orgs (with tier check)
-      or(...subConditions)!,
+      subscribedOrgScope,
       // Cross-arm exclusion — see `notAcquiredByPurchase`. Matters most in
       // this arm: paid + tier-gated content qualifies for BOTH it and the
       // purchased arm (see 1b6f14a0), so without the exclusion a mid-flight
@@ -726,6 +736,15 @@ export async function listUserLibrary(
                   AND ${subscriptions.currentPeriodEnd} > ${asOf})`
   );
 
+  if (!relationshipPredicate) {
+    // Unreachable: both arguments above are SQL literals, so drizzle's `or()`
+    // cannot return undefined. Guarded because `and()` drops an undefined
+    // argument SILENTLY — losing this predicate would hand every user every
+    // org's free and follower-gated content. That is a broken invariant, not
+    // an empty result, so it throws rather than returning nothing.
+    throw new Error('[library] relationship predicate collapsed to undefined');
+  }
+
   const buildRelationshipQuery = async (
     bucketAccessType:
       | typeof CONTENT_ACCESS_TYPE.FREE
@@ -739,7 +758,7 @@ export async function listUserLibrary(
       eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
-      relationshipPredicate!,
+      relationshipPredicate,
       // Cross-arm exclusion — see `notAcquiredByPurchase`. Defensive here:
       // free/followers items shouldn't be priced, but a flag-flip
       // (paid → free) could create overlap. Keeps the priority contract

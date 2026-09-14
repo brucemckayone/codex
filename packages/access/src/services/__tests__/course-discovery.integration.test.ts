@@ -40,7 +40,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CourseJourneyService } from '../course-journey-service';
 

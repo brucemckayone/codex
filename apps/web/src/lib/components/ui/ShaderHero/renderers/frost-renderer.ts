@@ -14,7 +14,6 @@
 import {
   AUDIO_UNIFORM_NAMES,
   createAudioFade,
-  createDeltaClock,
   type ResolvedAudio,
   SILENT_AUDIO,
   uploadAudioUniforms,

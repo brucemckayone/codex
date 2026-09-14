@@ -41,7 +41,6 @@ import {
   creatorOrganizationAgreements,
   organizationFollowers,
   organizationMemberships,
-  organizations,
   type PayoutType,
   payouts,
   stripeConnectAccounts,
@@ -1273,7 +1272,7 @@ export class SubscriptionService extends BaseService {
   async handleSubscriptionCreated(
     stripeSubscription: Stripe.Subscription,
     webAppUrl?: string
-  ): Promise<WebhookHandlerResult | void> {
+  ): Promise<WebhookHandlerResult | undefined> {
     const stripeSubId = stripeSubscription.id;
     const metadata = stripeSubscription.metadata ?? {};
     const userId = metadata.codex_user_id;
@@ -1316,18 +1315,11 @@ export class SubscriptionService extends BaseService {
       amountCents = invoice.amount_paid;
     }
 
-    const item = stripeSubscription.items.data[0];
-    const billingInterval =
-      item?.price?.recurring?.interval === 'year'
-        ? BILLING_INTERVAL.YEAR
-        : BILLING_INTERVAL.MONTH;
-
     const email = await this.buildSubscriptionCreatedEmail(
       userId,
       tierId,
       stripeSubscription,
       amountCents,
-      billingInterval,
       webAppUrl
     );
 
@@ -1347,7 +1339,6 @@ export class SubscriptionService extends BaseService {
     tierId: string,
     stripeSubscription: Stripe.Subscription,
     amountCents: number,
-    billingInterval: string,
     webAppUrl?: string
   ): Promise<WebhookEmailPayload | null> {
     // Look up user email
@@ -1453,7 +1444,7 @@ export class SubscriptionService extends BaseService {
   async handleInvoicePaymentSucceeded(
     stripeInvoice: Stripe.Invoice,
     webAppUrl?: string
-  ): Promise<WebhookHandlerResult | void> {
+  ): Promise<WebhookHandlerResult | undefined> {
     // Stripe v19+: subscription ID is in parent.subscription_details
     const subDetails = stripeInvoice.parent?.subscription_details;
     const stripeSubId =
@@ -1608,7 +1599,7 @@ export class SubscriptionService extends BaseService {
   async handleInvoicePaymentFailed(
     stripeInvoice: Stripe.Invoice,
     webAppUrl?: string
-  ): Promise<WebhookHandlerResult | void> {
+  ): Promise<WebhookHandlerResult | undefined> {
     // Stripe v19+: subscription ID is in parent.subscription_details
     const subDetails = stripeInvoice.parent?.subscription_details;
     const stripeSubId =
@@ -1805,7 +1796,7 @@ export class SubscriptionService extends BaseService {
    */
   async handleSubscriptionUpdated(
     stripeSubscription: Stripe.Subscription
-  ): Promise<WebhookHandlerResult | void> {
+  ): Promise<WebhookHandlerResult | undefined> {
     const stripeSubId = stripeSubscription.id;
 
     // Ordering race #3 (Codex-1hvda): customer.subscription.updated can arrive

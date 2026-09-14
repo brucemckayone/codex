@@ -364,7 +364,7 @@ describe('org sitemap', () => {
       // Need 10 full pages = 500 items, but cap is 497.
       mockGetPublicContent.mockImplementation(() => {
         return Promise.resolve({
-          items: Array.from({ length: 50 }, (_, i) => ({
+          items: Array.from({ length: 50 }, () => ({
             slug: `item-${Math.random()}`,
             publishedAt: '2026-01-01',
           })),

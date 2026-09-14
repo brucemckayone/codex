@@ -65,7 +65,7 @@ import type { StripeWebhookEnv } from '../types';
  */
 function revokeAccess(
   c: Context<StripeWebhookEnv>,
-  result: WebhookHandlerResult | void,
+  result: WebhookHandlerResult | undefined,
   reason: RevocationReason
 ): void {
   if (!c.env.CACHE_KV) return;
@@ -122,7 +122,7 @@ function revokeAccess(
  */
 function clearAccess(
   c: Context<StripeWebhookEnv>,
-  result: WebhookHandlerResult | void
+  result: WebhookHandlerResult | undefined
 ): void {
   if (!c.env.CACHE_KV) return;
   if (!result?.userId || !result?.orgId) return;
@@ -159,7 +159,7 @@ function clearAccess(
  */
 function dispatchEmail(
   c: Context<StripeWebhookEnv>,
-  result: WebhookHandlerResult | void
+  result: WebhookHandlerResult | undefined
 ): void {
   if (result?.email) {
     sendEmailToWorker(c.env, c.executionCtx, result.email);
@@ -300,7 +300,7 @@ export async function handleSubscriptionWebhook(
      * just changed). Fire-and-forget, mirrors the content checkout handler.
      */
     const invalidateCourseBuyer = (
-      result: CourseSubscriptionWebhookResult | void
+      result: CourseSubscriptionWebhookResult | undefined
     ): void => {
       if (!result?.userId) return;
       invalidateUserLibrary({

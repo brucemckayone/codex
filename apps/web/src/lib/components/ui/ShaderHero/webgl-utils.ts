@@ -21,6 +21,20 @@ export interface DoubleFBO {
   swap(): void;
 }
 
+/**
+ * WebGL allocators return `null` only when the context is lost or the driver
+ * is out of memory — at which point nothing downstream can work. Asserting
+ * here names the failing allocation instead of letting `null` flow into
+ * `bindBuffer`/`bindTexture`, where it is a LEGAL no-op that unbinds and the
+ * real error surfaces much later as a blank canvas.
+ */
+function mustAllocate<T>(value: T | null, what: string): T {
+  if (value === null) {
+    throw new Error(`[ShaderHero] WebGL could not allocate ${what}`);
+  }
+  return value;
+}
+
 /** Compile a GLSL shader. Returns null on failure (logs error). */
 function compileShader(
   gl: WebGL2RenderingContext,
@@ -88,7 +102,7 @@ export function createQuad(gl: WebGL2RenderingContext): {
   buffer: WebGLBuffer;
   bind: (prog: WebGLProgram) => void;
 } {
-  const buffer = gl.createBuffer()!;
+  const buffer = mustAllocate(gl.createBuffer(), 'a vertex buffer');
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(
     gl.ARRAY_BUFFER,
@@ -125,7 +139,7 @@ export function createFBOWithFormat(
   type: number,
   filter: number = gl.LINEAR
 ): FBO {
-  const tex = gl.createTexture()!;
+  const tex = mustAllocate(gl.createTexture(), 'a texture');
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
@@ -133,7 +147,7 @@ export function createFBOWithFormat(
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-  const fbo = gl.createFramebuffer()!;
+  const fbo = mustAllocate(gl.createFramebuffer(), 'a framebuffer');
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(
     gl.FRAMEBUFFER,

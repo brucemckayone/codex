@@ -118,7 +118,7 @@ export async function loadSubscriptionFromServer(
     );
     const sub = await getCurrentSubscription(orgId);
 
-    if (sub && sub.tier) {
+    if (sub?.tier) {
       // `currentPeriodEnd` arrives as an ISO string over the JSON wire — the
       // `CurrentSubscription` type now reflects that via `DateAsString<…>`,
       // so no instanceof guard is needed here. Stored as-is.

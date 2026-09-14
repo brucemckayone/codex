@@ -770,7 +770,7 @@ export class CourseSubscriptionService extends BaseService {
    */
   async handleCourseSubscriptionCreated(
     stripeSub: Stripe.Subscription
-  ): Promise<CourseSubscriptionWebhookResult | void> {
+  ): Promise<CourseSubscriptionWebhookResult | undefined> {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
@@ -798,7 +798,7 @@ export class CourseSubscriptionService extends BaseService {
   async handleCourseInvoicePaymentSucceeded(
     stripeInvoice: Stripe.Invoice,
     stripeSub: Stripe.Subscription
-  ): Promise<CourseSubscriptionWebhookResult | void> {
+  ): Promise<CourseSubscriptionWebhookResult | undefined> {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
@@ -860,7 +860,7 @@ export class CourseSubscriptionService extends BaseService {
    */
   async handleCourseSubscriptionUpdated(
     stripeSub: Stripe.Subscription
-  ): Promise<CourseSubscriptionWebhookResult | void> {
+  ): Promise<CourseSubscriptionWebhookResult | undefined> {
     const presence = await this.ensureDataPresent(stripeSub);
     if (!presence) return;
     const { row } = presence;
@@ -898,7 +898,7 @@ export class CourseSubscriptionService extends BaseService {
    */
   async handleCourseSubscriptionDeleted(
     stripeSub: Stripe.Subscription
-  ): Promise<CourseSubscriptionWebhookResult | void> {
+  ): Promise<CourseSubscriptionWebhookResult | undefined> {
     const [row] = await this.db
       .select()
       .from(courseSubscriptions)
