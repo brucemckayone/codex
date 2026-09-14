@@ -15,7 +15,6 @@
 import { JFA_DISTANCE_FRAG } from './shaders/jfa-distance.frag';
 import { JFA_SEED_FRAG } from './shaders/jfa-seed.frag';
 import { JFA_STEP_FRAG } from './shaders/jfa-step.frag';
-import type { FBO } from './webgl-utils';
 import {
   createFBOWithFormat,
   createProgram,
@@ -36,7 +35,24 @@ let seedU: Record<string, WebGLUniformLocation | null> | null = null;
 let stepU: Record<string, WebGLUniformLocation | null> | null = null;
 let distU: Record<string, WebGLUniformLocation | null> | null = null;
 
-function ensurePrograms(gl: WebGL2RenderingContext): boolean {
+/**
+ * The compiled pipeline, handed to the caller as ONE non-nullable value.
+ *
+ * Returning these rather than a boolean is what lets `generateSDF` use them
+ * without a non-null assertion on every line: TypeScript cannot correlate a
+ * `true` return with the nullability of six separate module-scoped bindings,
+ * so a boolean forces the caller to re-assert what the callee already proved.
+ */
+interface JFAPipeline {
+  seed: WebGLProgram;
+  step: WebGLProgram;
+  dist: WebGLProgram;
+  seedU: Record<string, WebGLUniformLocation | null>;
+  stepU: Record<string, WebGLUniformLocation | null>;
+  distU: Record<string, WebGLUniformLocation | null>;
+}
+
+function ensurePrograms(gl: WebGL2RenderingContext): JFAPipeline | null {
   // Cache hit: validate handles are still live. An external `gl.deleteProgram`
   // (e.g. explicit teardown or GPU context loss recovery) doesn't null out
   // our module-scoped refs, so a stale handle could silently reach drawQuad
@@ -49,9 +65,19 @@ function ensurePrograms(gl: WebGL2RenderingContext): boolean {
     distProg &&
     gl.isProgram(seedProg) &&
     gl.isProgram(stepProg) &&
-    gl.isProgram(distProg)
+    gl.isProgram(distProg) &&
+    seedU &&
+    stepU &&
+    distU
   ) {
-    return true;
+    return {
+      seed: seedProg,
+      step: stepProg,
+      dist: distProg,
+      seedU,
+      stepU,
+      distU,
+    };
   }
 
   // Context changed, first call, or any cached handle was invalidated — recompile.
@@ -61,7 +87,7 @@ function ensurePrograms(gl: WebGL2RenderingContext): boolean {
 
   if (!seedProg || !stepProg || !distProg) {
     console.warn('[JFA-SDF] Failed to compile JFA programs');
-    return false;
+    return null;
   }
 
   seedU = getUniforms(gl, seedProg, ['u_logo'] as const);
@@ -73,7 +99,14 @@ function ensurePrograms(gl: WebGL2RenderingContext): boolean {
   distU = getUniforms(gl, distProg, ['u_jfa', 'u_logo'] as const);
 
   cachedGL = gl;
-  return true;
+  return {
+    seed: seedProg,
+    step: stepProg,
+    dist: distProg,
+    seedU,
+    stepU,
+    distU,
+  };
 }
 
 /**
@@ -124,7 +157,8 @@ export function generateSDF(
   size: number,
   quad: { bind: (prog: WebGLProgram) => void }
 ): SDFResult {
-  if (!ensurePrograms(gl)) {
+  const prog = ensurePrograms(gl);
+  if (!prog) {
     throw new Error('JFA program compilation failed');
   }
 
@@ -161,11 +195,11 @@ export function generateSDF(
   gl.viewport(0, 0, size, size);
 
   // ── Pass 1: Seed initialization ───────────────────────────────
-  gl.useProgram(seedProg!);
-  quad.bind(seedProg!);
+  gl.useProgram(prog.seed);
+  quad.bind(prog.seed);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, logoTexture);
-  gl.uniform1i(seedU!.u_logo, 0);
+  gl.uniform1i(prog.seedU.u_logo, 0);
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
   drawQuad(gl);
 
@@ -177,13 +211,13 @@ export function generateSDF(
   for (let i = 0; i < passes; i++) {
     const stepSize = 2 ** (passes - 1 - i); // size/2, size/4, ..., 1
 
-    gl.useProgram(stepProg!);
-    quad.bind(stepProg!);
+    gl.useProgram(prog.step);
+    quad.bind(prog.step);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, readFBO.tex);
-    gl.uniform1i(stepU!.u_state, 0);
-    gl.uniform1f(stepU!.u_stepSize, stepSize);
-    gl.uniform2f(stepU!.u_texel, tx, tx);
+    gl.uniform1i(prog.stepU.u_state, 0);
+    gl.uniform1f(prog.stepU.u_stepSize, stepSize);
+    gl.uniform2f(prog.stepU.u_texel, tx, tx);
     gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO.fbo);
     drawQuad(gl);
 
@@ -194,18 +228,18 @@ export function generateSDF(
   }
 
   // ── Pass N+1: Distance finalization ───────────────────────────
-  gl.useProgram(distProg!);
-  quad.bind(distProg!);
+  gl.useProgram(prog.dist);
+  quad.bind(prog.dist);
 
   // u_jfa = final JFA result (readFBO after last swap)
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, readFBO.tex);
-  gl.uniform1i(distU!.u_jfa, 0);
+  gl.uniform1i(prog.distU.u_jfa, 0);
 
   // u_logo = original logo mask (for inside/outside determination)
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, logoTexture);
-  gl.uniform1i(distU!.u_logo, 1);
+  gl.uniform1i(prog.distU.u_logo, 1);
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, sdfFBO.fbo);
   drawQuad(gl);

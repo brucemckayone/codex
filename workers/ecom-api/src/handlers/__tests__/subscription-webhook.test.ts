@@ -16,7 +16,6 @@ import type { KVNamespace } from '@cloudflare/workers-types';
 import { STRIPE_EVENTS } from '@codex/constants';
 import {
   createMockHonoContext,
-  createMockStripeInvoice,
   createMockStripeSubscription,
   type MockHonoContext,
 } from '@codex/test-utils';

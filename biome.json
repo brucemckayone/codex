@@ -11,10 +11,11 @@
     "rules": {
       "recommended": true,
       "suspicious": {
-        "noExplicitAny": "warn"
+        "noExplicitAny": "error"
       },
       "style": {
-        "useConst": "error"
+        "useConst": "error",
+        "noNonNullAssertion": "error"
       }
     }
   },
@@ -70,5 +71,26 @@
       "!**/src/paraglide",
       "!**/docs/**/prototype"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.test.svelte.ts",
+        "**/*.svelte.test.ts",
+        "**/*.bench.test.ts",
+        "**/*.spec.ts",
+        "e2e/**",
+        "**/test-utils/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
+    }
+  ]
 }

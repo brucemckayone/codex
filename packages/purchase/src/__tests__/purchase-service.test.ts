@@ -1670,13 +1670,12 @@ describe('PurchaseService Integration', () => {
           }),
         };
         const svc = new PurchaseService(
-          // biome-ignore lint/suspicious/noExplicitAny: test stub
           {
             db,
             environment: 'test',
-            feeConfig: stubFeeWithOrg as any,
+            feeConfig: stubFeeWithOrg,
             mailer,
-          } as any,
+          } as unknown as ConstructorParameters<typeof PurchaseService>[0],
           ss
         );
 

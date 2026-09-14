@@ -113,12 +113,14 @@ export const load: PageServerLoad = async ({
   // subscription — no tier gate (includedInTierId == null, the WP-1
   // successor of accessType 'subscribers').
   // Saves 2-3 round-trips per non-gated page load (Codex-585ie).
-  const mayRequireSubscription =
-    !!content.organization?.id && content.includedInTierId != null;
+  const gatingOrgId =
+    content.includedInTierId != null
+      ? (content.organization?.id ?? null)
+      : null;
 
-  const subContextPromise = mayRequireSubscription
+  const subContextPromise = gatingOrgId
     ? loadSubscriptionContext(
-        content.organization!.id,
+        gatingOrgId,
         content.includedInTierId ?? null,
         platform,
         cookies

@@ -221,10 +221,7 @@ function collectExport(
   }
 }
 
-function signatureFromFunction(
-  node: ts.FunctionDeclaration,
-  checker: ts.TypeChecker
-): string {
+function signatureFromFunction(node: ts.FunctionDeclaration): string {
   const params = node.parameters
     .map((p) => {
       const name = p.name.getText();
@@ -317,5 +314,5 @@ function computeUnifiedDiff(
   lines.push(`@@ -1,${beforeLines.length} +1,${afterLines.length} @@`);
   for (const line of beforeLines) lines.push(`-${line}`);
   for (const line of afterLines) lines.push(`+${line}`);
-  return lines.join('\n') + '\n';
+  return `${lines.join('\n')}\n`;
 }

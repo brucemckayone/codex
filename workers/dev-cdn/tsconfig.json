@@ -4,7 +4,8 @@
     "rootDir": "src",
     "outDir": "dist",
     "lib": ["ES2022", "WebWorker"],
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types"],
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"]
 }

@@ -720,7 +720,7 @@ describe('TierService', () => {
 
     it('should handle DB failure after new Stripe prices during update', async () => {
       const org = await createOrgWithConnect('stripe-update-db-fail');
-      const tier = await service.createTier(org.id, {
+      await service.createTier(org.id, {
         name: 'Update DB Fail',
         priceMonthly: 499,
         priceAnnual: 4990,

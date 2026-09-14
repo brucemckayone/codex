@@ -1963,7 +1963,7 @@ export class PurchaseService extends BaseService {
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<{ userId: string } | void> {
+  ): Promise<{ userId: string } | undefined> {
     try {
       // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
       // checkout.session.completed, the row won't exist yet — rebuild it from
@@ -2319,7 +2319,7 @@ export class PurchaseService extends BaseService {
       stripeDisputeId?: string;
       disputeReason?: string;
     }
-  ): Promise<{ userId: string; orgId: string | null } | void> {
+  ): Promise<{ userId: string; orgId: string | null } | undefined> {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),

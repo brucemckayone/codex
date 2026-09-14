@@ -144,6 +144,36 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 
 - Default currency is **GBP (£)**, not USD ($)
 
+### Static Analysis
+
+`biome.json` is parsed as STRICT JSON by biome's own linter, so it cannot carry
+comments. The reasoning for its settings lives here.
+
+- **Every biome diagnostic fails CI.** `check:ci` is
+  `biome check --error-on-warnings .` because plain `biome check` exits **0** on
+  warnings — which is how 186 of them accumulated behind a green gate before
+  2026-09-14. That includes `suppressions/unused`: a `biome-ignore` comment that
+  no longer suppresses anything is an error, not a note.
+- **A `biome-ignore` reason MUST fit on one line.** A reason wrapped onto a
+  second line silently stops suppressing and the rule still fires. Put the
+  prose in a separate comment block *above* the one-line suppression.
+- **`noNonNullAssertion` is an error in production source and OFF in tests**
+  (`biome.json` `overrides`). In a test, `x!` after an explicit
+  `expect(x).toBeDefined()` is the readable form. In production it hides a
+  nullability contract — and on a drizzle `or(...)`, which is
+  `SQL | undefined`, it hides a scoping hole, because `and()` drops an
+  `undefined` argument **without complaining**. Narrow the value, or guard and
+  throw; never assert.
+- **`pnpm typecheck` runs `--continue=dependencies-successful`.** Turbo's
+  default (`never`) CANCELS sibling tasks on the first failure, so a red
+  typecheck reported one package while tearing down others mid-run — they print
+  `ELIFECYCLE Command failed.` with zero diagnostics, indistinguishable from a
+  pass.
+- **Package tests are NOT typechecked.** 23 of 24 packages exclude
+  `**/*.test.ts` (their tsconfig drives the `dist` build too). Workers and
+  apps/web do include theirs. Tracked in Codex-629bw — until it lands, a broken
+  package test only surfaces at runtime.
+
 ---
 
 ## Common Developer Tasks

@@ -35,12 +35,17 @@ function boomWorker() {
   return app;
 }
 
+/** The shape `mapErrorToResponse()` guarantees — asserted below, so it is
+ * worth naming rather than reaching through `Record<string, any>`. */
+interface ErrorEnvelope {
+  error: { code: string; message: string; details?: unknown };
+}
 async function boomBody(environment?: string) {
   const env = environment === undefined ? {} : { ENVIRONMENT: environment };
   const res = await boomWorker().request('/boom', {}, env);
   return {
     status: res.status,
-    body: (await res.json()) as Record<string, any>,
+    body: (await res.json()) as ErrorEnvelope,
   };
 }
 
@@ -103,7 +108,7 @@ describe('createErrorHandler — explicit argument still wins', () => {
     });
 
     const res = await app.request('/boom', {}, { ENVIRONMENT: 'production' });
-    const body = (await res.json()) as Record<string, any>;
+    const body = (await res.json()) as ErrorEnvelope;
 
     expect(body.error.message).toBe(SECRET);
   });
@@ -116,7 +121,7 @@ describe('createErrorHandler — explicit argument still wins', () => {
     });
 
     const res = await app.request('/boom', {}, { ENVIRONMENT: 'development' });
-    const body = (await res.json()) as Record<string, any>;
+    const body = (await res.json()) as ErrorEnvelope;
 
     expect(body.error.message).toBe('An unexpected error occurred');
     expect(body.error).not.toHaveProperty('stack');
