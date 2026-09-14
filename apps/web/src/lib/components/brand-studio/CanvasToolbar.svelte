@@ -211,7 +211,9 @@
     min-width: var(--space-12);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
-    color: var(--color-text-muted);
+    /* Codex-00fui: --color-text-muted is #a3a3a3, measured 2.31-2.52:1 here
+     against a 4.5 floor. Mixed from --color-text so it tracks the theme. */
+    color: color-mix(in oklab, var(--color-text) 72%, transparent);
   }
 
   /* Trailing size controls — square icon buttons for rail-collapse + full-screen.

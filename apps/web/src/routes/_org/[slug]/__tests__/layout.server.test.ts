@@ -296,6 +296,94 @@ describe('org layout load — unknown-slug negative cache', () => {
   });
 });
 
+// ─── (c2) not-found vs unavailable ──────────────────────────────────────────
+/**
+ * The bottom of the load used to be one `error(404)` serving two unrelated
+ * claims: "an endpoint ran and the row is not there" and "no endpoint
+ * answered". Conflating them cost a real diagnosis (Codex-4p2l7) — five
+ * studio E2E failures rendered "Organization not found" for orgs the fixture
+ * had just verified as present, and nothing distinguished the branches.
+ *
+ * The status is asserted, but the MESSAGE is what these tests really pin: a
+ * load-thrown error on a client-rendered subtree returns HTTP 200 with the
+ * payload embedded, so the rendered sentence is the only evidence a
+ * Playwright page snapshot preserves.
+ */
+describe('org layout load — not-found vs unavailable', () => {
+  /** The `body.message` SvelteKit attaches to a thrown HttpError. */
+  function messageOf(thrown: unknown): string {
+    return isHttpError(thrown) ? thrown.body.message : String(thrown);
+  }
+
+  it('answers 503, not 404, when NEITHER endpoint answered', async () => {
+    getPublicInfoMock.mockRejectedValue(new ApiError(500, 'boom'));
+    getBySlugMock.mockRejectedValue(new ApiError(500, 'boom'));
+
+    const thrown = await expectThrown(baseInput({ slug: ORG_SLUG }));
+
+    expect(isHttpError(thrown, 503)).toBe(true);
+    // The wording must not read as "no such org" — that is the whole point.
+    expect(messageOf(thrown)).not.toMatch(/not found/i);
+    expect(messageOf(thrown)).toMatch(/temporary/i);
+  });
+
+  it('says unavailable when the public call times out and the fallback is unauthenticated', async () => {
+    // The shape the flake would take in CI: a slow/failed public read plus an
+    // anonymous visitor, who gets 401 from the authenticated route.
+    getPublicInfoMock.mockRejectedValue(new ApiError(408, 'timeout'));
+    getBySlugMock.mockRejectedValue(new ApiError(401, 'unauthenticated'));
+
+    const thrown = await expectThrown(baseInput({ slug: ORG_SLUG }));
+
+    expect(isHttpError(thrown, 503)).toBe(true);
+  });
+
+  it('keeps 404 when the FALLBACK definitively answered not-found', async () => {
+    getPublicInfoMock.mockRejectedValue(new ApiError(500, 'boom'));
+    getBySlugMock.mockRejectedValue(orgNotFound());
+
+    const thrown = await expectThrown(baseInput({ slug: MISSING_SLUG }));
+
+    expect(isHttpError(thrown, 404)).toBe(true);
+    expect(messageOf(thrown)).toMatch(/not found/i);
+  });
+
+  it('keeps 404 when the fallback RAN and returned nothing', async () => {
+    // An empty result from a bare `slug = ? AND deleted_at IS NULL` lookup is
+    // an answer, not a failure.
+    getPublicInfoMock.mockRejectedValue(new ApiError(500, 'boom'));
+    getBySlugMock.mockResolvedValue(null);
+
+    const thrown = await expectThrown(baseInput({ slug: MISSING_SLUG }));
+
+    expect(isHttpError(thrown, 404)).toBe(true);
+  });
+
+  it('keeps 404 for the definitive public 404 — the scan path is unchanged', async () => {
+    getPublicInfoMock.mockRejectedValue(orgNotFound());
+
+    const thrown = await expectThrown(baseInput({ slug: MISSING_SLUG }));
+
+    expect(isHttpError(thrown, 404)).toBe(true);
+    // Unchanged: a definitive 404 must not have run the fallback at all.
+    expect(getBySlugMock).not.toHaveBeenCalled();
+  });
+
+  it('does not remember an unavailable slug — a 503 must never mint a 404', async () => {
+    getPublicInfoMock.mockRejectedValue(new ApiError(500, 'boom'));
+    getBySlugMock.mockRejectedValue(new ApiError(500, 'boom'));
+
+    const first = await expectThrown(baseInput({ slug: ORG_SLUG }));
+    const second = await expectThrown(baseInput({ slug: ORG_SLUG }));
+
+    // Still 503 on the repeat, and still re-tried: had the outage been
+    // remembered, the second call would be a cached 404 with no subrequests.
+    expect(isHttpError(first, 503)).toBe(true);
+    expect(isHttpError(second, 503)).toBe(true);
+    expect(getPublicInfoMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 // ─── (d) version-read budget ────────────────────────────────────────────────
 describe('org layout load — version read budget', () => {
   it('reads one version key for an anonymous visitor', async () => {

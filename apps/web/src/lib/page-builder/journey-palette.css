@@ -141,7 +141,6 @@
      agrees with its dark CTA. */
   --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
   --jp-blood: var(--brand-secondary, var(--jp-ember));
-  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
   --jp-rose: var(--brand-accent, var(--jp-ember));
 }
 
@@ -297,7 +296,7 @@
   --jp-line-hover: color-mix(in oklab, var(--jp-ink) 56%, var(--jp-heading) 44%);
 
   /* ── brand accents ──────────────────────────────────────────────────────
-     `--jp-ember`, `--jp-blood`, `--jp-blood-deep` and `--jp-rose` are declared
+     `--jp-ember`, `--jp-blood` and `--jp-rose` are declared
      in the ROOT-ONLY block above, not here — see the note there (Codex-8jve9).
      A `.jp-sec` inherits them already resolved. The two rungs BELOW them stay
      here because they must re-derive per section. */
@@ -364,6 +363,22 @@
      unmistakably brand. Cheap for removing a measured AA failure from two axis
      values. */
   --jp-ember-text: color-mix(in oklab, var(--jp-ember) 55%, var(--jp-heading));
+
+  /* THE SECOND BRAND HUE, MITIGATED THE SAME WAY. `--jp-blood` is
+     `--brand-secondary` (the org's own second colour) and it fails as text for
+     exactly the reason `--jp-ember` does — MEASURED on of-blood-and-bones'
+     #00933C against the two poles every seeded org resolves to: 3.84 light /
+     4.47 dark, both under 4.5, and the light pole is the worse one so a
+     dark-only check would pass it. Through this 55% mix it is 10.81 / 8.36.
+     The ratios track ember's own (4.42 / 3.89 raw, 11.61 / 7.93 mixed) closely
+     enough that the same rule applies: NEVER paint text with raw `--jp-blood`.
+
+     IT BELONGS HERE, not in the root-only block above with `--jp-blood`
+     itself, for the reason stated there: this reads the SECTION's own
+     `--jp-heading`, so it must re-derive per section. Declaring it at root
+     would freeze it against the page's heading and silently lose contrast on
+     every lifted surface — the same trap `--jp-faint` hit. */
+  --jp-blood-text: color-mix(in oklab, var(--jp-blood) 55%, var(--jp-heading));
 
   /* ── atmosphere ─────────────────────────────────────────────────────────
      The ember bloom is a fixed-strength gradient; this veil is what makes its
@@ -454,11 +469,6 @@
      why this is safe to land against a fixture where no org declares one.
      Chain order copied from `tokens/org-brand.css`'s dark branch so a journey
      accent resolves exactly like every other org accent.
-
-     `--jp-blood-deep` is absent on purpose, exactly as `--jp-pole-b` is: it is
-     declared at the root in terms of `--jp-blood`, and substitution happens per
-     element AFTER the cascade picks a winner, so it re-derives from whichever
-     blood won here for free.
 
      No `[data-editing-theme='dark']` form, also on purpose: `--jp-pole-a` above
      does not have one either, so the brand-editor dark-preview gap is

@@ -191,6 +191,27 @@
       "vars": {
         "ENVIRONMENT": "staging"
       },
+      // WITHOUT THIS BLOCK A STAGING DEPLOY RUNS WITH ZERO CACHING, SILENTLY
+      // (Codex-ujgil). `CACHE_KV` is declared optional in
+      // `apps/web/src/app.d.ts` and every consumer guards on it, so an absent
+      // binding is not an error anywhere — staging would simply serve every
+      // request uncached and nothing would say so. This env was the only one of
+      // the four missing it.
+      //
+      // ITS OWN NAMESPACE, not dev's. Pointing staging at the dev/test id
+      // (8bde7d71…) would have staging serve cache entries written against a
+      // DIFFERENT database. Sharing physical KV ids across environments was
+      // already a P0 here — production shared dev's AUTH_SESSION_KV and
+      // RATE_LIMIT_KV, which meant session and rate-limit bleed — and it was
+      // resolved by giving production its own. Same reasoning, same shape: the
+      // namespace is TITLED `CACHE_KV_STAGING` and BOUND as `CACHE_KV`, exactly
+      // as production binds `CACHE_KV_PRODUCTION`.
+      "kv_namespaces": [
+        {
+          "binding": "CACHE_KV",
+          "id": "417e300fd10f445aad5d5e294991c73b"
+        }
+      ],
       "routes": [
         // Specific routes first (for priority)
         {

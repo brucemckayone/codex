@@ -29,7 +29,12 @@ import type {
   SectionProps,
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
-import { createSection, findSectionDefinition } from './section-catalog';
+import {
+  createSection,
+  findSectionDefinition,
+  resolveDesign,
+} from './section-catalog';
+import { sectionDesignForType } from './section-design-defaults';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -120,6 +125,42 @@ function clone<T>(value: T): T {
 function indexOf(id: string): number {
   return state.pending?.sections.findIndex((s) => s.id === id) ?? -1;
 }
+
+/**
+ * Whole-bag equality over two axis bags — same keys, same values, ABSENCE
+ * INCLUDED. Used for provenance ({@link setPageDesign}) and for the
+ * look-signature validity check ({@link applyLookSignature}); per-axis
+ * comparison cannot serve either, because absence is overloaded here (see the
+ * long note in `setPageDesign`).
+ */
+function sameBag(
+  a: Readonly<SectionDesign> | undefined,
+  b: Readonly<SectionDesign> | undefined
+): boolean {
+  const x = (a ?? {}) as Record<string, string>;
+  const y = (b ?? {}) as Record<string, string>;
+  const kx = Object.keys(x);
+  const ky = Object.keys(y);
+  return kx.length === ky.length && kx.every((k) => x[k] === y[k]);
+}
+
+/**
+ * THE LOOK'S PER-TYPE SIGNATURE (`SectionDesignPreset.designByType`), remembered
+ * from the creator's last look pick, together with the page bag it was picked
+ * with.
+ *
+ * Session-scoped on purpose: the persisted page row carries only the nine axes,
+ * so there is nothing on a loaded draft to recover a signature FROM, and the
+ * nine-axis -> signature map lives in `$lib/components/page-builder` which this
+ * module may never import (CE-4). {@link applyLookSignature} states the
+ * consequence.
+ */
+let lookSignature: {
+  /** The page look this signature was picked with — the validity check. */
+  readonly design: Readonly<SectionDesign>;
+  /** The look's opinion per section type, which wins over the shared rhythm. */
+  readonly byType: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
+} | null = null;
 
 // ── Undo / redo (whole-draft history) ────────────────────────────────────────
 // snapshot() captures `pending` BEFORE a discrete action; snapshotEdit() coalesces
@@ -244,6 +285,8 @@ function redo(): void {
 function open(pageId: string, saved: PageBuilderState): void {
   initEffects();
   clearHistory();
+  // A fresh session knows no signature — the row stores only the nine axes.
+  lookSignature = null;
   state.pageId = pageId;
   state.saved = clone(saved);
 
@@ -282,6 +325,7 @@ function firstSectionId(page: PageBuilderState): string | null {
 function close(): void {
   clearStorage();
   clearHistory();
+  lookSignature = null;
   state.saved = null;
   state.pending = null;
   state.pageId = null;
@@ -369,21 +413,91 @@ function toggleSection(id: string): void {
  * new section's id so the caller can scroll/focus it. The renderer skips unknown
  * types, so `type` is a plain string (matches the contract).
  *
+/**
+ * Layer the LOOK'S OWN SIGNATURE over the rhythm a just-created section carries.
+ *
+ * WHY THIS EXISTS AT ALL. `createSection` calls
+ * `sectionDesignForType(type, inherited)` with TWO arguments
+ * (`section-catalog.ts:1301`), so the third — `SectionDesignPreset.designByType`,
+ * the axes that ARE a look — never reached a section the creator ADDED. Only
+ * {@link setPageDesign} passed it, which made the whole mechanism reachable by
+ * an explicit look pick and by nothing else. That is the dominant path, not an
+ * edge: `createJourney` inserts `sections: []`, so EVERY section on a page
+ * arrives through {@link addSection}.
+ *
+ * MEASURED on a Quiet Studio page, whose signature is `accent: 'none'` on every
+ * type — the one axis value no other preset uses, and the reason
+ * `design-vocabulary.ts:196` says the renouncement "cannot be partial".
+ * `addSection('hero')` stored `{ width: 'full', edge: 'none', accent: 'glow',
+ * motion: 'drift' }`: the rhythm's `accent: 'glow'` survived because it differs
+ * from the page bag's `none`, and a section value beats a page value in
+ * `resolveDesign`. `SectionFrame` then emitted `data-jp-accent="glow"`, which
+ * resolves `--jp-accent-fill: var(--jp-ember)` and `--jp-accent-glow`
+ * (`journey-design.css:932-943`) — Candlelit's ember bloom on the look built to
+ * renounce it. `map` leaked the same way through `accent: 'edge'` plus
+ * `motion: 'stagger'`, whose `--ease-bounce` overshoot is the opposite of quiet.
+ *
+ * IT ALSO UNFREEZES PROVENANCE, which is the half that would not have healed on
+ * its own. {@link setPageDesign} re-diffs a section only when its stored bag
+ * equals what the OUTGOING look would have written — computed WITH that look's
+ * signature. A two-argument bag differs from that three-argument bag by exactly
+ * the signature axes, so `sameBag` judged every added section creator-touched
+ * and left it "completely alone" on this and every later look switch. Computing
+ * the bag the same way here makes the two agree, so an untouched added section
+ * moves with the look like any other. The agreement is exact because a page bag
+ * is TOTAL — all eight presets and the service's `NEW_PAGE_DESIGN` state all
+ * nine axes — so `resolveDesign` hands back the page's own values unchanged.
+ *
+ * RESIDUAL, stated so it is a decision rather than a surprise: the signature is
+ * remembered from a pick in THIS session, never stored. After a reload the stash
+ * is empty and an added section falls back to the shared rhythm until the
+ * creator re-picks a look. Closing that needs the nine-axis -> signature map,
+ * which lives in `$lib/components/page-builder/design-vocabulary.ts` and cannot
+ * be imported here (CE-4), so it belongs either to that panel re-asserting the
+ * look on load or to the two `addSection` call sites passing the bag.
+ */
+function applyLookSignature(
+  section: PageSection,
+  pageDesign: SectionDesign | null
+): void {
+  if (!lookSignature) return;
+  if (!sameBag(lookSignature.design, pageDesign ?? undefined)) return;
+  const override = lookSignature.byType[section.type];
+  // A type the look states nothing about keeps `createSection`'s bag byte for
+  // byte — which is also why Candlelit, whose `designByType` is undefined, never
+  // reaches this line at all.
+  if (!override) return;
+  // The baseline is computed EXACTLY as `createSection` computes it — the
+  // resolved look, through the one resolver the renderer uses — so the only
+  // difference on this path is the third argument.
+  const inherited = resolveDesign(
+    { type: section.type, variant: section.variant },
+    { design: pageDesign ?? undefined }
+  );
+  const design = sectionDesignForType(section.type, inherited, override);
+  // Absence, not `{}`: the store's contract for "inherited", and the only
+  // round-trip-stable way to say it through the save.
+  if (design) section.design = design;
+  else delete section.design;
+}
+
+/**
  * THE PAGE'S OWN LOOK IS PASSED IN, and that is what gives a page RHYTHM. The
  * catalogue writes the new section a per-type axis bag
  * (`section-design-defaults.ts`), minus every axis the page already sets to the
  * same value — so the stored `design` holds only real exceptions and the
  * inspector's "Inherited" pills stay truthful. `$state.snapshot` because
  * `pending.design` is a rune proxy and the comparison must read plain values.
+ * {@link applyLookSignature} then lets the LOOK overrule that rhythm where it
+ * has an opinion — without it, a section added to a Quiet Studio page came back
+ * wearing Candlelit's bloom.
  */
 function addSection(type: string, afterId?: string): string {
   if (!state.pending) return '';
   snapshot();
-  const section = createSection(
-    type,
-    makeId,
-    $state.snapshot(state.pending.design) ?? null
-  );
+  const pageDesign = $state.snapshot(state.pending.design) ?? null;
+  const section = createSection(type, makeId, pageDesign);
+  applyLookSignature(section, pageDesign);
   const from = afterId ? indexOf(afterId) : -1;
   const at = from >= 0 ? from + 1 : state.pending.sections.length;
   state.pending.sections.splice(at, 0, section);
@@ -431,10 +545,143 @@ function setSectionVariant(id: string, variant: string): void {
  * at the SECTION level ({@link setSectionDesignAxis}), where a deliberate
  * exception (a vast hero over a compact FAQ) is good design.
  */
-function setPageDesign(design: SectionDesign): void {
+function setPageDesign(
+  design: SectionDesign,
+  compositions?: {
+    /** The look's per-type composition preferences (`SectionDesignPreset.variants`). */
+    next?: Readonly<Record<string, string>>;
+    /** The OUTGOING look's preferences, so a look-managed variant can be told
+        from a creator's choice. The panel knows this from `findDesignPreset`. */
+    previous?: Readonly<Record<string, string>>;
+    /**
+     * The look's per-type DESIGN preferences (`SectionDesignPreset.designByType`)
+     * — its signature axes, which win over the shared rhythm. Separate from
+     * `next` because a composition says WHICH BOXES a section draws and a design
+     * axis says HOW it is treated; the two are orthogonal and a look can state
+     * either without the other.
+     */
+    nextDesign?: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
+    /** The OUTGOING look's design preferences, for the same provenance reason
+        as `previous`: a bag that equals what the old look asked for is
+        look-managed and moves; anything else is the creator's and is left. */
+    previousDesign?: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
+  }
+): void {
   if (!state.pending) return;
   snapshot();
+
+  // ── RE-DIFF THE RHYTHM AGAINST THE NEW LOOK ──────────────────────────────
+  // Without this, a page can have a RHYTHM or a LOOK, never both.
+  //
+  // `sectionDesignForType` stores each section's rhythm as a DIFF against
+  // whichever look was active at creation — `section-design-defaults.ts:259`,
+  // `if (inherited && inherited[key] === value) continue`. Absence means
+  // "inherited", which is correct and is what keeps the inspector's "Inherited"
+  // pill honest. But it makes the stored bag RELATIVE to one particular look,
+  // and this function used to move that look out from under it.
+  //
+  // The failure is silent and it UNDOES THE TABLE'S OWN STATED PURPOSE. That
+  // file exists to end "`surface: media` applied even to `ache` and `map`,
+  // which have no media at all" — yet create a page under a look whose surface
+  // is `bare` (so the table's `surface: bare` for `ache` matches and is
+  // omitted), then switch to Candlelit, and `ache` inherits `media` again. The
+  // exact absurdity, reintroduced by the diffing that was supposed to prevent it.
+  //
+  // HOW A RHYTHM BAG IS TOLD FROM A CREATOR'S. Per-axis comparison CANNOT do it,
+  // and that is worth stating because it is the obvious approach and it is wrong:
+  // ABSENCE IS OVERLOADED HERE. {@link setSectionDesignAxis} deletes the key to
+  // clear an override, so an absent axis means BOTH "the table never wrote it"
+  // and "the creator deliberately cleared it". Re-materialising absent axes
+  // therefore resurrects overrides a creator removed on purpose — a first cut of
+  // this did exactly that, and gave a section holding one deliberate
+  // `{ density: 'compact' }` six axes it had never asked for.
+  //
+  // So provenance is decided on the WHOLE BAG. If a section's stored design is
+  // exactly what the table would have written under the old look, no creator has
+  // touched it and it is safe to recompute wholesale. If it differs by even one
+  // axis, a human has been in there and the section is left completely alone.
+  // That fails SAFE in the direction that matters: the worst case is a page that
+  // keeps today's behaviour, never one that loses an authored choice.
+  //
+  // It also covers the case that motivated the fix, because on a freshly created
+  // page every section's bag is exactly the table's diff — so switching look
+  // re-materialises the axes the old look had made redundant, and `ache` keeps
+  // `surface: bare` instead of inheriting Candlelit's `media`.
+  //
+  // NOT RETROACTIVE, deliberately. This runs only when a creator picks a look,
+  // so it cannot alter what the 695 already-published pages render — those carry
+  // no section `design` keys at all and are a separate decision.
+  const previous = state.pending.design;
+
+  for (const section of state.pending.sections) {
+    // Provenance is computed against the OUTGOING look's own signature too, not
+    // just the shared rhythm — otherwise the first look switch makes every
+    // look-managed section look creator-touched and freezes it forever.
+    const wasRhythm = sectionDesignForType(
+      section.type,
+      previous,
+      compositions?.previousDesign?.[section.type]
+    );
+    // Untouched by a human? Then and only then, re-diff against the new look.
+    if (sameBag(section.design, wasRhythm)) {
+      // Absence, not an empty object: the store's own contract for "inherited",
+      // and the only round-trip-stable representation through the save.
+      //
+      // THE LOOK'S SIGNATURE WINS OVER THE RHYTHM. Without the third argument
+      // the incoming look reaches almost nothing: the rhythm states a value for
+      // 89 of 99 type/axis slots and a section's value beats the page's, so
+      // every look rendered Candlelit's treatment (`look-reach.test.ts`).
+      section.design = sectionDesignForType(
+        section.type,
+        design,
+        compositions?.nextDesign?.[section.type]
+      );
+    }
+
+    // ── THE COMPOSITION HALF ───────────────────────────────────────────────
+    // A `design` axis says HOW a section is treated; a `variant` says WHICH
+    // BOXES IT DRAWS. Until presets carried composition preferences, all eight
+    // looks rendered the SAME eleven compositions out of the catalogue's 63 —
+    // which is why they read as one design at eight settings rather than as
+    // eight designs.
+    //
+    // Provenance uses the OUTGOING look's preference, exactly as the axis half
+    // above uses the outgoing look's rhythm. A stored variant that equals what
+    // the previous look asked for is look-managed and moves; anything else is a
+    // composition the creator chose in the picker and is left alone. When the
+    // outgoing look pinned nothing, the catalogue default plays that role — and
+    // `undefined` counts as the default, because absence IS the default here
+    // (`resolveVariant` falls through to `defaultVariant`).
+    if (!compositions?.next && !compositions?.previous) continue;
+    const def = findSectionDefinition(section.type);
+    if (!def) continue;
+    const wasLookVariant =
+      compositions.previous?.[section.type] ?? def.defaultVariant;
+    const isCreatorChoice =
+      section.variant !== undefined && section.variant !== wasLookVariant;
+    if (isCreatorChoice) continue;
+    const wanted = compositions.next?.[section.type];
+    // Undefined means "this look pins nothing" (Candlelit, Signal) — fall back
+    // to the catalogue default rather than leaving the previous look's pick.
+    section.variant = wanted ?? def.defaultVariant;
+  }
+
   state.pending.design = { ...design };
+
+  // REMEMBER THE SIGNATURE FOR WHATEVER IS ADDED NEXT ({@link addSection}).
+  // Stored WITH the page bag it was picked with, because undo / redo / discard
+  // can each walk `pending.design` back past this pick, and a signature applied
+  // over a look the page no longer wears would be worse than none. A look that
+  // states no signature (Candlelit, Signal) CLEARS it rather than leaving the
+  // outgoing look's opinion to outlive the switch. Cloned for the same reason
+  // the page bag is spread: the panel hands us a module constant, and a stash
+  // holds it across time rather than for the length of one call.
+  lookSignature = compositions?.nextDesign
+    ? {
+        design: { ...design },
+        byType: structuredClone(compositions.nextDesign),
+      }
+    : null;
 }
 
 /**

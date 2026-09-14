@@ -193,6 +193,33 @@ export const updateMediaItemSchema = z.object({
 
 export type UpdateMediaItemInput = z.infer<typeof updateMediaItemSchema>;
 
+/**
+ * Body of `POST /api/media/:id/upload-complete`.
+ *
+ * Carries the CLIENT's own `loadedmetadata` measurement of the file it just
+ * uploaded. `media_items.duration_seconds` is otherwise written only by
+ * `MediaService.markAsReady` from the RunPod webhook, so the column stayed NULL
+ * for the minutes between a creator finishing an upload and transcoding
+ * completing — which is exactly when they are building the page that shows the
+ * runtime badge.
+ *
+ * `.catch({})` IS THE RISK POSTURE, not laziness. A runtime badge is advisory
+ * display copy, so a malformed, absent or hostile body must degrade to "no
+ * duration" and let the upload complete. A 400 here would lose the creator's
+ * file after its bytes are already in R2.
+ *
+ * `min(1)`, unlike `updateMediaItemSchema`'s `min(0)`: a zero-length runtime is
+ * not a runtime. Storing 0 paints a `0:00` badge, which is a lie, where NULL
+ * correctly paints nothing.
+ */
+export const uploadCompleteSchema = z
+  .object({
+    durationSeconds: z.number().int().min(1).max(86400).optional(),
+  })
+  .catch({});
+
+export type UploadCompleteInput = z.infer<typeof uploadCompleteSchema>;
+
 // ============================================================================
 // Content Schemas
 // ============================================================================

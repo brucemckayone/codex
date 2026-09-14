@@ -1,5 +1,6 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
+import { sessions } from '@codex/database/schema';
 import type { ImageProcessingResult } from '@codex/image-processing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -945,17 +946,28 @@ describe('IdentityService', () => {
 
   describe('deleteAccount (Codex-eb00a.11)', () => {
     const userId = 'user-123';
-    // Two select shapes are used:
-    //   org check:     select().from().innerJoin().where()  → rows
-    //   content check: select().from().where().limit()      → rows
+    // THREE select shapes are used, and the third one forced this mock to
+    // dispatch on the TABLE rather than on the chain shape:
+    //   org check:      select().from().innerJoin().where()  → rows
+    //   content check:  select().from().where().limit()      → rows
+    //   session tokens: select().from(sessions).where()      → rows   (Codex-na929)
+    // The last two are both `.from().where()`, so a single `where` mock cannot
+    // serve both: the content check needs it to return `{ limit }` while the
+    // token query awaits it directly. Keying on the table is what Drizzle
+    // actually does and keeps each shape honest.
     const mockOwnedOrgsWhere = vi.fn();
     const mockExistsLimit = vi.fn();
+    const mockSessionsWhere = vi.fn();
     const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
     const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
-    const mockSelectFrom = vi.fn(() => ({
-      innerJoin: mockInnerJoin,
-      where: mockExistsWhere,
-    }));
+    // Dispatch by OBJECT IDENTITY against the imported table, not by sniffing a
+    // Drizzle internal — the schema module is not mocked here, so the service
+    // and this test hold the same reference.
+    const mockSelectFrom = vi.fn((table: unknown) =>
+      table === sessions
+        ? { where: mockSessionsWhere }
+        : { innerJoin: mockInnerJoin, where: mockExistsWhere }
+    );
 
     beforeEach(() => {
       (mockDb.select as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -966,9 +978,11 @@ describe('IdentityService', () => {
       mockOwnedOrgsWhere.mockClear();
       mockExistsWhere.mockClear();
       mockExistsLimit.mockClear();
-      // Defaults: owns no organizations, has no content/uploads.
+      mockSessionsWhere.mockClear();
+      // Defaults: owns no organizations, has no content/uploads, one session.
       mockOwnedOrgsWhere.mockResolvedValue([]);
       mockExistsLimit.mockResolvedValue([]);
+      mockSessionsWhere.mockResolvedValue([{ token: 'tok-current' }]);
     });
 
     it('soft-deletes and scrubs PII when the user owns no organizations', async () => {
@@ -988,6 +1002,42 @@ describe('IdentityService', () => {
       expect(setArg.avatarUrl).toBeNull();
       expect(setArg.image).toBeNull();
       expect(setArg.socialLinks).toBeNull();
+    });
+
+    it('returns every session token, not just the current one (Codex-na929)', async () => {
+      // The hole this closes: a session still in AUTH_SESSION_KV never reaches
+      // the DB, so it never reaches the `deletedAt` gate — the other devices
+      // stayed authenticated until KV reaped each entry on its own TTL.
+      mockReturning.mockResolvedValue([{ id: userId }]);
+      mockSessionsWhere.mockResolvedValue([
+        { token: 'tok-laptop' },
+        { token: 'tok-phone' },
+        { token: 'tok-tablet' },
+      ]);
+
+      const tokens = await service.deleteAccount(userId);
+
+      expect(tokens).toEqual(['tok-laptop', 'tok-phone', 'tok-tablet']);
+      // Read AFTER the tombstone UPDATE, so a session created mid-flight is
+      // still caught rather than missed.
+      expect(mockDb.update).toHaveBeenCalledTimes(1);
+      expect(mockSessionsWhere).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns an empty list when the user holds no sessions', async () => {
+      // Anti-vacuity for the test above: prove the assertion tracks the query
+      // rather than passing on a fixed default.
+      mockReturning.mockResolvedValue([{ id: userId }]);
+      mockSessionsWhere.mockResolvedValue([]);
+      await expect(service.deleteAccount(userId)).resolves.toEqual([]);
+    });
+
+    it('does NOT query for session tokens when deletion was blocked', async () => {
+      // A blocked deletion must not look like a completed one to the caller.
+      mockReturning.mockResolvedValue([{ id: userId }]);
+      mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Acme' }]);
+      await expect(service.deleteAccount(userId)).rejects.toThrow();
+      expect(mockSessionsWhere).not.toHaveBeenCalled();
     });
 
     it('blocks deletion and does NOT soft-delete when the user owns an organization', async () => {

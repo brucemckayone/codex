@@ -49,10 +49,29 @@
   the mistake `SectionFieldDef.mediaSlot`'s own JSDoc exists to prevent. Eight
   consumed axes is the correct count for this type, not a shortfall.
 
-  Three axes are read in MARKUP rather than CSS, because a component's scoped
-  styles cannot reach an ancestor attribute: `accent` (whether
-  `--jp-accent-fill` is a real colour at all — see the badge note), `motion`
-  (whether `sticky`'s bar pins at all) and the composition itself.
+  SEVEN AXES ARE ALSO READ IN MARKUP, because a component's scoped styles cannot
+  reach an ancestor attribute. Two are read as PREDICATES — `accent` (whether
+  `--jp-accent-fill` is a real colour at all, see the badge note) and `motion`
+  (whether `sticky`'s bar pins) — and `surface` `edge` `align` `type` `accent`
+  `density` `motion` are re-emitted UNMODIFIED as local `data-*` attributes for
+  the PER-LOOK COMMITMENTS block at the foot of the stylesheet. See `look` in the
+  script for the full reasoning, including why `media` is deliberately not among
+  them.
+
+  ══════════════════════════════════════════════════════════════════════════
+   EIGHT DESIGN LANGUAGES, NOT 38 PERMUTATIONS
+  ══════════════════════════════════════════════════════════════════════════
+  The nine axes reach every MAGNITUDE in this file, and that is not enough on its
+  own to make a look recognisable. A design language is also which elements are
+  boxes, which corner is square, which label is monospaced, which numeral is
+  tabular and which rule is drawn at all — selector-level decisions a
+  properties-only axis file deliberately cannot carry.
+
+  So the foot of the stylesheet spends the mirrored attributes on each family's
+  documented tell (`00-design-language-research.md` §1). Read that block's own
+  header before adding a rule to it: it carries the selector discipline that
+  keeps `candlelit` — the one preset the product owner says already works — out
+  of the blast radius, which is arithmetic rather than convention.
 
   ══════════════════════════════════════════════════════════════════════════
    SIX COMPOSITIONS
@@ -365,12 +384,58 @@
   );
 
   /**
-   * The `motion` axis, read in MARKUP because a component's scoped styles cannot
-   * reach the ancestor `data-jp-motion` attribute. `sticky`'s pinning is an
-   * enhancement over an in-flow bar, and a creator who asks for no motion should
-   * not get a bar that follows them down the section.
+   * ── THE AXES, MIRRORED ONTO THIS SECTION'S OWN ROOT ────────────────────────
+   * `journey-design.css` turns the nine `data-jp-*` attributes on `.jp-sec` into
+   * custom properties, and a section can only ever READ those. That stays the
+   * default for everything with a magnitude: every size, rhythm, edge, colour
+   * and duration below is still a `--jp-*` read.
+   *
+   * It is NOT sufficient, because a design language is not only a set of
+   * magnitudes — it is which elements are boxes, which corner is square, which
+   * label is monospaced, which numeral is tabular, which rule gets drawn at all.
+   * Those are SELECTOR-level decisions, and a Svelte-scoped style block cannot
+   * reach an ancestor's attribute, so the axis value is re-emitted here
+   * UNMODIFIED as a local `data-*` attribute. `GuideSection`'s `look` is the
+   * same mechanism, for the same reason.
+   *
+   * `media` IS DELIBERATELY ABSENT, and that is contract A50 holding rather than
+   * an omission. The header above states why this type consumes no media axis at
+   * all (no media field exists anywhere in its read model), and `media: none`
+   * would have been a convenient key for `plain-facts` — so mirroring it would
+   * have re-introduced a control that changes nothing, through the back door.
+   * `edge: offset` identifies `plain-facts` just as uniquely and is a value this
+   * section really does spend. `width` is absent for the ordinary reason: nothing
+   * here needs to select on it, because `--jp-content-max` / `--jp-measure`
+   * already carry it.
+   *
+   * `undefined` when no `design` arrives, so Svelte omits the attribute and every
+   * per-look rule no-ops — the honest degradation. `SectionFrame` always passes a
+   * TOTAL `ResolvedSectionDesign`, so both real render paths have all nine.
    */
-  const motion = $derived(design?.motion === 'none' ? 'none' : 'on');
+  const look = $derived({
+    surface: design?.surface,
+    edge: design?.edge,
+    align: design?.align,
+    type: design?.type,
+    accent: design?.accent,
+    density: design?.density,
+    motion: design?.motion,
+  });
+
+  /**
+   * `sticky`'s pinning is an ENHANCEMENT over an in-flow bar, and a creator who
+   * asks for no motion should not get a bar that follows them down the section.
+   *
+   * This used to be a separate `data-motion="on|none"` attribute, which is why
+   * `FeelSection`'s own note cites this file as the precedent for the on/off
+   * form. It is now the AXIS VALUE, matching `GuideSection` and `FeelSection`
+   * (both of which key per-look rules on `data-motion='stagger'` / `'none'`), and
+   * the pinning predicate becomes `:not([data-motion='none'])` — exactly the same
+   * set, including the no-`design` case where the attribute is absent entirely.
+   * One attribute cannot mean two things, and the per-look block below needs the
+   * value.
+   */
+  const motionOn = $derived(design?.motion !== 'none');
 
   /**
    * `--jp-reveal-stagger` is calibrated for ~5 block beats and the shared
@@ -426,7 +491,7 @@
 
   // Ambient loops (breathe / descent / pulse) only after JS confirms motion is
   // welcome; the static baseline stays the SSR / no-JS / reduced-motion render.
-  const enhanced = $derived(mounted && !reduced && motion === 'on');
+  const enhanced = $derived(mounted && !reduced && motionOn);
 
   onMount(() => {
     mounted = true;
@@ -495,7 +560,13 @@
     data-invite={composition}
     data-detail={detail}
     data-plated={plated}
-    data-motion={motion}
+    data-surface={look.surface}
+    data-edge={look.edge}
+    data-align={look.align}
+    data-type={look.type}
+    data-accent={look.accent}
+    data-density={look.density}
+    data-motion={look.motion}
   >
     <!-- THE ATMOSPHERE, gated ONCE on the shared parent (pilot lesson 3, a
          correction to research §2.3's per-layer gate). The bloom's opacity is
@@ -882,9 +953,9 @@
     padding-block: var(--jp-sec-pad-block);
     padding-inline: var(--jp-sec-pad-inline);
     background: var(--jp-sec-bg);
-    border: var(--jp-edge-width) solid var(--jp-edge-color);
-    border-radius: var(--jp-sec-radius);
-    box-shadow: var(--jp-edge-shadow);
+    border: var(--invite-shell-border);
+    border-radius: var(--invite-shell-radius);
+    box-shadow: var(--invite-shell-shadow);
     text-align: var(--jp-text-align);
     overflow: clip;
 
@@ -931,6 +1002,112 @@
        and 1.34 is solved backwards so `airy` lands on the 40px this section
        shipped before the axes existed. */
     --invite-block-gap: calc(var(--jp-sec-gap) * 1.34);
+
+    /* ── THE ROLE TABLE, so a look is a VALUE and not a rule ───────────────
+       The PER-LOOK COMMITMENTS block at the foot of this file is keyed on axis
+       values (`edge: offset`, `accent: none`, …). Written as paint rules, six of
+       the eight looks would re-declare the same card / badge / numeral
+       declarations — the shape that produced the eight different spellings of
+       `clamp(2rem, 6cqw, 4.4rem)` this tree is still cleaning up. Written as
+       properties, a look states its VALUES and the paint stays in one place,
+       which is the discipline `journey-design.css` holds itself to.
+
+       EVERY DEFAULT HERE REPRODUCES THE BASE COMMIT EXACTLY. That is the whole
+       point of the table rather than a nicety: `candlelit` matches none of the
+       per-look selectors, so it resolves these defaults, and a default that
+       merely looked reasonable would silently have restyled the one preset that
+       already works. Byte-for-byte, what each default replaces:
+
+         --invite-shell-*     the three declarations `.invite` already made
+         --invite-card-*      `--radius-card` / axis border / axis shadow /
+                              `--color-surface-secondary` / `space-6 * rhythm`
+         --invite-best-*      the 2px `--jp-accent-mark` inset ring, no fill,
+                              no elevation of its own
+         --invite-badge-*     `--radius-full`, `--text-xs`, `--font-semibold`
+         --invite-num-*       `--font-heading`, inherited weight, `normal`
+                              numerals — i.e. no change
+         --invite-label-font  `inherit`; the eyebrow had NO local rule at all,
+                              so `inherit` is what it already computed
+         --invite-head-*      `0px` paints no rule
+         --invite-tick-*      the `--space-2` round dot
+         --invite-table-rule  the fixed hairline the matrix already drew
+         --radius-button      re-pointed only, never redefined: `CtaLink` reads
+                              it for `border-radius` and this is the ONLY way a
+                              section can reach the pay button's GEOMETRY
+                              without becoming a second styler of `.cta`
+                              (`journey-design.test.ts`, Codex-kdsuo — colour is
+                              guaranteed in exactly one place and this file
+                              never touches it)
+
+       `0px`, `1em` and `0 none` — never a bare `0` or `1`. These substitute into
+       `border-block-end`, `font-size` and `border`, and a UNITLESS zero in a
+       length slot is the A63/A64 class of failure that invalidates the whole
+       declaration silently.
+
+       AND NOTHING IN THIS TABLE MAY BE COMPOSED INTO A LIST. Three of these hold
+       `var(--jp-edge-shadow)`, which is the KEYWORD `none` at `edge: none`
+       (candlelit) and `edge: heavy`; `box-shadow`'s grammar is `none | <shadow>#`
+       so `none` as one item of a comma list invalidates the declaration at
+       computed-value time and paints nothing (contract A54). Each is read as the
+       WHOLE value of its own property. The local indirection is not a loophole
+       around `journey-design.test.ts`'s list guard — it is the same rule, one
+       level down, and it is stated here because the guard cannot see through
+       an alias. */
+    --invite-shell-radius: var(--jp-sec-radius);
+    --invite-shell-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --invite-shell-shadow: var(--jp-edge-shadow);
+
+    --invite-card-radius: var(--radius-card);
+    --invite-card-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --invite-card-shadow: var(--jp-edge-shadow);
+    --invite-card-bg: var(--color-surface-secondary);
+    --invite-card-pad: calc(var(--space-6) * var(--jp-rhythm));
+
+    --invite-best-outline: var(--border-width-thick) solid var(--jp-accent-mark);
+    --invite-best-offset: calc(var(--border-width-thick) * -1);
+    --invite-best-bg: var(--invite-card-bg);
+    --invite-best-shadow: var(--invite-card-shadow);
+    --invite-best-stripe: 0 none;
+
+    /* THE BADGE, as seven values rather than seven rules. Three families state
+       their recommended flag as "not a plate" — `syllabus` explicitly ("a
+       left-border accent stripe RATHER THAN a filled badge"), `quiet-studio`
+       ("no accent colour"), `long-read` ("no box borders anywhere") — and one
+       (`open-air`) as a tint, "never a hard fill". The plate that survives is
+       the filled pill three other looks keep, including candlelit.
+       `--invite-badge-pos: static` is what un-straddles it from the card's top
+       border and drops it into the card flow, which is why `align-self` appears
+       on the base rule at all. */
+    --invite-badge-pos: absolute;
+    --invite-badge-shift: translateY(-50%);
+    --invite-badge-pad: var(--space-1) var(--space-3);
+    --invite-badge-radius: var(--radius-full);
+    --invite-badge-size: var(--text-xs);
+    --invite-badge-weight: var(--font-semibold);
+    --invite-badge-tracking: var(--tracking-wider);
+    --invite-badge-bg: var(--jp-accent-fill);
+    --invite-badge-ink: var(--jp-accent-on-fill);
+    --invite-badge-ring: none;
+
+    --invite-num-font: var(--font-heading);
+    --invite-num-weight: inherit;
+    --invite-num-variant: normal;
+
+    --invite-label-font: inherit;
+    --invite-rowhead-size: calc(var(--jp-body-size) / 1.2);
+    --invite-sub-size: var(--text-lg);
+
+    --invite-head-rule: 0px;
+    --invite-head-gap: 0px;
+
+    --invite-tick-w: var(--space-2);
+    --invite-tick-h: var(--space-2);
+    --invite-tick-radius: var(--radius-full);
+
+    --invite-table-rule: var(--border-width) solid var(--color-border-subtle);
+
+    --invite-single-ring: var(--border-width) solid var(--jp-accent-edge);
+    --invite-bar-ring: var(--border-width) solid var(--jp-accent-mark);
   }
 
   /* ── the atmosphere ─────────────────────────────────────────────────────
@@ -1077,6 +1254,26 @@
     gap: calc(var(--space-3) * var(--jp-rhythm));
     max-width: var(--jp-measure);
     margin-inline: var(--jp-measure-margin);
+    /* The head hairline, OFF by default (`0px` paints no rule). `long-read`'s
+       tell is "a hairline under every section head" and the measurement found it
+       nowhere in the tree; `syllabus` wants the same rule so a block reads as a
+       table with a header row. Both are `--invite-head-rule` VALUES rather than
+       two more selectors. */
+    padding-block-end: var(--invite-head-gap);
+    border-block-end: var(--invite-head-rule) solid var(--color-border-subtle);
+  }
+
+  /* NO LOCAL RULE BEFORE THIS, deliberately: the `.jp-sec__eyebrow` atom already
+     owns size (`--jp-eyebrow-size`, the `type` axis's own seam), tracking, weight
+     and colour, and re-spelling any of them here would take the label off the
+     axis. What this adds is the two roles the atom does NOT name — the FACE, so
+     `plain-facts` and `syllabus` can set their families' mono label, and the ink,
+     so the two families that deploy "accent as text" can spend it. Both default
+     to what the atom already computed: `inherit` is the atom's own effective face
+     (it sets none), and `--color-text-secondary` is the value it sets. */
+  .invite__eyebrow {
+    font-family: var(--invite-label-font);
+    color: var(--color-text-secondary);
   }
 
   .invite__heading {
@@ -1094,7 +1291,7 @@
 
   .invite__sub {
     margin: 0;
-    font-size: var(--text-lg);
+    font-size: var(--invite-sub-size);
     line-height: var(--leading-relaxed);
     color: var(--color-text-secondary);
   }
@@ -1127,11 +1324,11 @@
     display: flex;
     flex-direction: column;
     gap: calc(var(--space-3) * var(--jp-rhythm));
-    padding: calc(var(--space-6) * var(--jp-rhythm));
-    border-radius: var(--radius-card);
-    border: var(--jp-edge-width) solid var(--jp-edge-color);
-    box-shadow: var(--jp-edge-shadow);
-    background: var(--color-surface-secondary);
+    padding: var(--invite-card-pad);
+    border-radius: var(--invite-card-radius);
+    border: var(--invite-card-border);
+    box-shadow: var(--invite-card-shadow);
+    background: var(--invite-card-bg);
     /* A CARD's copy stays left-aligned regardless of `align`, and this is
        deliberate rather than an oversight — it is also today's effective value,
        since nothing set `text-align` on the grid. `align` positions the
@@ -1188,34 +1385,66 @@
     to mean. Outline follows `border-radius`, and the card is an `<li>` that is
     never focusable, so this cannot collide with the CTA's own focus ring.
   */
+  /*
+    THE FOUR ROLES A "RECOMMENDED" CARD CAN SPEND, and only the first is on by
+    default. The ring is candlelit's and the base commit's; the other three exist
+    because three families say the recommended path in their own vocabulary and
+    a ring is not it — `syllabus` uses a LEFT STRIPE "rather than a filled
+    badge", `open-air` has "no border anywhere" so it must use a tint, and
+    `signal` lifts the featured tier on "a small neutral shadow". Their defaults
+    are no-ops: `--invite-best-bg` and `--invite-best-shadow` re-read the card's
+    own values, and `--invite-best-stripe` is `0 none`.
+
+    `border-inline-start` is the stripe's own property, so it overrides exactly
+    one side of `.invite__offer`'s `border` shorthand and needs no math on
+    `--jp-edge-width`.
+  */
   .invite__offer[data-best='true'] {
-    outline: var(--border-width-thick) solid var(--jp-accent-mark);
-    outline-offset: calc(var(--border-width-thick) * -1);
+    outline: var(--invite-best-outline);
+    outline-offset: var(--invite-best-offset);
+    border-inline-start: var(--invite-best-stripe);
+    box-shadow: var(--invite-best-shadow);
+    background: var(--invite-best-bg);
   }
 
   .invite__badge {
-    position: absolute;
+    position: var(--invite-badge-pos);
     top: 0;
     right: var(--space-5);
-    transform: translateY(-50%);
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-wider);
+    /* Only consulted when `--invite-badge-pos` resolves to `static`: an
+       absolutely-positioned flex child with both offsets resolved ignores its
+       align-self entirely, so this is inert on the default and is what
+       shrink-wraps the label once a look drops it into the card's flow. */
+    align-self: flex-start;
+    transform: var(--invite-badge-shift);
+    padding: var(--invite-badge-pad);
+    border-radius: var(--invite-badge-radius);
+    font-family: var(--invite-label-font);
+    font-size: var(--invite-badge-size);
+    font-weight: var(--invite-badge-weight);
+    letter-spacing: var(--invite-badge-tracking);
     text-transform: uppercase;
     white-space: nowrap;
-    color: var(--jp-accent-on-fill);
-    background: var(--jp-accent-fill);
+    color: var(--invite-badge-ink);
+    background: var(--invite-badge-bg);
+    /* THE WHOLE VALUE of its own `box-shadow`, default `none` — which is the
+       initial value the base rule computed, so this adds nothing to candlelit. */
+    box-shadow: var(--invite-badge-ring);
   }
 
   /* `accent: text` and `accent: edge` make `--jp-accent-fill` transparent, so
      there is no plate for `--jp-accent-on-fill` to sit on. Outlined pill +
-     ladder ink (pilot lesson 4). */
-  .invite[data-plated='no'] .invite__badge {
-    background: transparent;
-    color: var(--color-heading);
-    box-shadow: inset 0 0 0 var(--border-width) var(--jp-accent-mark);
+     ladder ink (pilot lesson 4).
+
+     NOW EXPRESSED AS THE THREE ROLE VALUES rather than as paint, so the per-look
+     block below can restate them instead of having to out-specify them. Note
+     this rule and the per-look blocks keyed on a single axis value are BOTH
+     (0,2,0), so source order is what decides — which is the ordinary CSS reason
+     the PER-LOOK COMMITMENTS block is last in the file and not merely tidy. */
+  .invite[data-plated='no'] {
+    --invite-badge-bg: transparent;
+    --invite-badge-ink: var(--color-heading);
+    --invite-badge-ring: inset 0 0 0 var(--border-width) var(--jp-accent-mark);
   }
 
   /* Card-scale text reads the `type` axis's third rung (contract A44,
@@ -1240,9 +1469,16 @@
   /* Deliberately only the SIZE moves onto the axis. Face, weight, leading and
      tracking are left exactly as this section has always had them (inherited
      from the `<p>`), because each is an independent appearance change on seven
-     published pages and none of them is what the `type` axis is for. */
+     published pages and none of them is what the `type` axis is for.
+     `--invite-num-*` therefore default to precisely that: `--font-heading`,
+     inherited weight, `normal` numerals. They exist because the amount is THE
+     numeral of this section, and three families make a mechanical statement
+     about numerals — mono for `plain-facts` and `syllabus`, tabular so digits
+     cannot shuffle, and big for `full-send`. */
   .invite__price-amount {
-    font-family: var(--font-heading);
+    font-family: var(--invite-num-font);
+    font-weight: var(--invite-num-weight);
+    font-variant-numeric: var(--invite-num-variant);
     font-size: var(--invite-price-size);
     color: var(--color-heading);
   }
@@ -1294,10 +1530,10 @@
 
   .invite__bullets li::before {
     content: '';
-    width: var(--space-2);
-    height: var(--space-2);
+    width: var(--invite-tick-w);
+    height: var(--invite-tick-h);
     margin-top: calc(var(--space-2) * 0.75);
-    border-radius: var(--radius-full);
+    border-radius: var(--invite-tick-radius);
     background: var(--jp-accent-mark);
   }
 
@@ -1314,7 +1550,7 @@
     gap: calc(var(--space-4) * var(--jp-rhythm));
     padding: calc(var(--space-8) * var(--jp-rhythm))
       calc(var(--space-10) * var(--jp-rhythm));
-    border-radius: var(--radius-card);
+    border-radius: var(--invite-card-radius);
     /*
       A FLOOR ON THE BOUNDARY, for the same reason `CtaLink` floors its
       `min-height`: `edge: none` and `edge: soft` legitimately remove a border,
@@ -1352,7 +1588,7 @@
       stays the axis's alone, so `soft`'s elevation still lands.
     */
     border: var(--jp-edge-width) solid var(--jp-accent-edge);
-    outline: var(--border-width) solid var(--jp-accent-edge);
+    outline: var(--invite-single-ring);
     outline-offset: calc(var(--border-width) * -1);
     box-shadow: var(--jp-edge-shadow);
     background: color-mix(in oklab, var(--color-surface) 60%, transparent);
@@ -1488,7 +1724,7 @@
   .invite__table th,
   .invite__table td {
     padding: calc(var(--space-3) * var(--jp-rhythm));
-    border-bottom: var(--border-width) solid var(--color-border-subtle);
+    border-bottom: var(--invite-table-rule);
     vertical-align: top;
   }
 
@@ -1501,7 +1737,8 @@
      A44), which is the only way the `type` axis still reaches them. */
   .invite__table tbody th {
     font-weight: var(--font-semibold);
-    font-size: calc(var(--jp-body-size) / 1.2);
+    font-family: var(--invite-label-font);
+    font-size: var(--invite-rowhead-size);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
     color: var(--color-text-secondary);
@@ -1543,7 +1780,7 @@
     width: 100%;
     padding: calc(var(--space-4) * var(--jp-rhythm))
       calc(var(--space-6) * var(--jp-rhythm));
-    border-radius: var(--radius-card);
+    border-radius: var(--invite-card-radius);
     /*
       Same boundary floor and the same unitless-zero reason as the threshold card
       above, but a DIFFERENT token for the ring, and the split is deliberate.
@@ -1567,7 +1804,7 @@
       `none`, and takes the ring with it.
     */
     border: var(--jp-edge-width) solid var(--jp-accent-edge);
-    outline: var(--border-width) solid var(--jp-accent-mark);
+    outline: var(--invite-bar-ring);
     outline-offset: calc(var(--border-width) * -1);
     box-shadow: var(--jp-edge-shadow);
     background: var(--color-surface-secondary);
@@ -1692,7 +1929,12 @@
      inside the flow.
      ═══════════════════════════════════════════════════════════════════════ */
   @media (prefers-reduced-motion: no-preference) {
-    .invite[data-invite='sticky'][data-motion='on'] .invite__bar {
+    /* `:not([data-motion='none'])` and no longer `[data-motion='on']`, because
+       the attribute now carries the AXIS VALUE for the per-look block below. The
+       matched set is IDENTICAL, including the no-`design` case: the attribute is
+       then absent entirely, `:not()` matches, and the bar pins exactly as it did
+       when `motion` defaulted to `'on'`. */
+    .invite[data-invite='sticky']:not([data-motion='none']) .invite__bar {
       position: sticky;
       bottom: var(--space-4);
       z-index: 2;
@@ -1725,6 +1967,604 @@
     }
   }
 
+  /* ═══ PER-LOOK COMMITMENTS ═══════════════════════════════════════════════
+     Everything above is axis-generic: it consumes magnitudes and paints one
+     arrangement per composition. What follows commits each design LANGUAGE to
+     its documented tell (`00-design-language-research.md` §1), because a tell is
+     a SELECTOR-level statement — which elements are boxes, which corner is
+     square, which label is monospaced, which numeral is tabular, which rule is
+     drawn — and `journey-design.css` deliberately emits nothing but custom
+     properties.
+
+     ── THE SELECTOR DISCIPLINE, stated once so every block can be checked ───
+     `candlelit` is the one preset that already works and it must come out of
+     this pass byte-identical. It is uniquely identified by FOUR of its nine axis
+     values — `surface: media`, `edge: none`, `media: bleed`, `accent: glow` —
+     and SHARES the other five: `type: monumental` (with quiet-studio,
+     plain-facts), `align: center` (quiet-studio, open-air, full-send),
+     `density: airy` (open-air), `width: text` (long-read, open-air),
+     `motion: drift` (open-air).
+
+     So NO selector below is keyed on any of those five. Every one of them names
+     one of these twelve, and none matches the candlelit bundle:
+
+       edge: offset                    → plain-facts  only
+       edge: offset + accent: fill     → plain-facts  only
+       accent: edge                    → syllabus     only
+       type: restrained                → syllabus     only
+       accent: none                    → quiet-studio only
+       density: vast                   → quiet-studio only
+       edge: soft                      → open-air     only
+       edge: heavy                     → full-send    only
+       motion: stagger                 → full-send    only
+       surface: bare  + align: start   → long-read    only
+       edge: hairline + accent: fill   → signal       only
+       accent: text                    → long-read + open-air (never candlelit,
+                                         which is `glow`)
+
+     The two compounds are compounds BY NECESSITY rather than by taste:
+     `long-read` and `signal` each share all nine of their axis values with some
+     sibling, so neither has a single value to key on. Each is justified in its
+     own block.
+
+     `open-air` is the dangerous one — it shares FOUR axes with candlelit — so
+     every open-air rule here is keyed on `edge: soft`, which candlelit
+     (`edge: none`) cannot match.
+
+     `media` IS NOT AVAILABLE as a key here and that is deliberate: see `look` in
+     the script. `media: none` would have identified `plain-facts` uniquely and
+     `edge: offset` does the same job on a value this section actually spends. */
+
+  /* ── 1.2 BRUTALIST · `plain-facts` — `edge: offset` ──────────────────────
+     Tell: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 everywhere.
+
+     MEASURED ON THE BASE: the 2px border and the hard drop were BOTH already
+     reachable — `--jp-edge-width` is `--border-width-thick` at this value and
+     `--jp-edge-shadow` is `var(--space-1) var(--space-1) 0 0 var(--jp-line-strong)`,
+     and the section shell and every offer card already read both. That half of
+     the tell needed nothing. The other two halves were absent outright: this
+     file contained no `--font-mono` anywhere, and `radius 0 everywhere` was
+     contradicted in six places — the section shell (`--jp-sec-radius` is
+     `--radius-card` under `surface: panel`, this look's surface), the offer card,
+     the threshold card, the sticky bar, the badge pill and the pay button's own
+     `--radius-button`.
+
+     THE PAY BUTTON IS REACHED BY RE-POINTING `--radius-button`, never by
+     selecting `.cta`. `CtaLink` reads that token for its `border-radius`, and it
+     is the one styler of `.cta` in the tree by test (Codex-kdsuo) — a section
+     that paints the pay button's COLOURS breaks the single place its contrast is
+     guaranteed. Geometry through the token costs nothing and touches no rule. */
+  .invite[data-edge='offset'] {
+    --invite-shell-radius: var(--radius-none);
+    --invite-card-radius: var(--radius-none);
+    --invite-badge-radius: var(--radius-none);
+    --invite-tick-radius: var(--radius-none);
+    --radius-button: var(--radius-none);
+
+    /* MONO LABELS AND MONO NUMERALS. The eyebrow, the badge and the matrix's row
+       spine take the family's label face; the price amount loses the serif
+       `--font-heading` it inherits by default, because "no separate display
+       face" is this family's own row and a serif £27 is the single most
+       display-like thing in the section. Tabular so the digits cannot shuffle
+       between one card and the next. */
+    --invite-label-font: var(--font-mono);
+    --invite-num-font: var(--font-mono);
+    --invite-num-variant: tabular-nums;
+
+    /* "The grid visible as actual lines" — the matrix's row rule steps up from
+       the fixed hairline to the axis's own 2px `--jp-line-strong`. Plain
+       substitution, no math on the token (A64). */
+    --invite-table-rule: var(--jp-edge-width) solid var(--jp-edge-color);
+  }
+
+  /* The head rule, at the axis's weight and in the axis's colour rather than
+     `--color-border-subtle` — a 2px subtle hairline is a contradiction, and this
+     family's rules are meant to be seen. `width: 100%` because `.invite__head`
+     is a column flex child of a container with `align-items: start` here, which
+     shrink-wraps it to its longest line. */
+  .invite[data-edge='offset'] .invite__head {
+    width: 100%;
+    padding-block-end: calc(var(--jp-sec-gap) / 3);
+    border-block-end: var(--jp-edge-width) solid var(--jp-edge-color);
+  }
+
+  /* The accent spent as the family spends it: "solid rectangles of it, text
+     reversed out". COMPOUNDED with `accent: fill` rather than left on
+     `edge: offset` alone, because `--jp-accent-fill` is `transparent` at
+     `accent: text` and `accent: edge` — a creator who picked those with this edge
+     would get `--jp-accent-on-fill` ink on the section's own background, which is
+     the two-token contrast pair broken in half. `.invite__head` is a column flex
+     box with `align-items: var(--jp-align)`, so the slab shrink-wraps its text at
+     both align values with no width of its own.
+
+     The `width: 100%` above is on the HEAD, not the eyebrow, so the slab still
+     shrink-wraps inside it. */
+  .invite[data-edge='offset'][data-accent='fill'] .invite__eyebrow {
+    padding: var(--space-1) var(--space-3);
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  /* ── 1.5 TECHNICAL · `syllabus` — `accent: edge` · `type: restrained` ────
+     Tell: a hairline grid, mono numerals, and a LEFT-BORDER ACCENT STRIPE
+     rather than a filled badge.
+
+     MEASURED ON THE BASE: none of the three reached this section. Numerals were
+     proportional-figure serif; the only hairline was the matrix's row rule,
+     which four of the six compositions never render; and the recommended path
+     was signalled by a 2px ring on ALL FOUR sides of a `--radius-card` box, with
+     a RINGED BADGE PILL sitting on top of it — `accent: edge` makes
+     `--jp-accent-fill` transparent, so `data-plated="no"` already outlines the
+     pill instead of filling it. An outlined pill is still the badge the tell
+     names in opposition: "rather than" is a statement about the CARRIER, not
+     about the fill.
+
+     SO THE LABEL LOSES ITS BOX AND KEEPS ITS TEXT. Hiding the badge outright
+     would have been wrong for a different reason — it is the visible string that
+     says which path the page recommends, and this file's own `ctaName` note
+     explains that it is what programmatically associates "Recommended" with the
+     offer's own heading. Removing information is not a treatment change.
+
+     THE STRIPE IS `--jp-accent-mark`, NOT `--jp-accent-edge`, and the
+     measurement is already in this file (see `.invite__offer[data-best]`):
+     `--jp-accent-edge` measured 2.30:1 light / 1.27:1 dark against a 3:1 graphic
+     floor, while `--jp-accent-mark` tracks the AA-safe `--jp-ember-text` and
+     clears it everywhere. A stripe that carries the tell has to be seen. Read
+     directly, with no mix carried onto it (contract A37). */
+  .invite[data-accent='edge'] {
+    --invite-card-radius: var(--radius-sm);
+    --invite-tick-radius: var(--radius-none);
+    --invite-label-font: var(--font-mono);
+    --invite-num-font: var(--font-mono);
+    --invite-num-variant: tabular-nums;
+
+    /* The hairline under the section head, so the block reads as a table with a
+       header row — the same value `long-read` sets for a different reason. */
+    --invite-head-rule: var(--border-width);
+    --invite-head-gap: calc(var(--jp-sec-gap) / 3);
+
+    /* THE STRIPE REPLACES THE RING. `outline: none` rather than a zero width, so
+       the shorthand is unambiguous; `--invite-best-offset` is then inert. */
+    --invite-best-outline: none;
+    --invite-best-stripe: var(--border-width-thick) solid var(--jp-accent-mark);
+
+    /* NOT A BADGE — a mono column label in the card's own flow, so the accent
+       appears exactly once per row: in the stripe. `--jp-accent-text` is
+       `--jp-text` at this accent value, i.e. deliberately neutral, which is the
+       family's own row ("accent as edge — left-border status stripes, plus small
+       fills on badges only", and this badge no longer has a fill to be one of).
+
+       These six restate what `.invite[data-plated='no']` set earlier at the SAME
+       specificity (0,2,0) — source order is what decides, which is why the
+       PER-LOOK block sits after it rather than merely tidily at the end. */
+    --invite-badge-pos: static;
+    --invite-badge-shift: none;
+    --invite-badge-pad: 0px;
+    --invite-badge-radius: var(--radius-none);
+    --invite-badge-bg: transparent;
+    --invite-badge-ink: var(--jp-accent-text);
+    --invite-badge-ring: none;
+  }
+
+  .invite[data-accent='edge'] .invite__head {
+    width: 100%;
+  }
+
+  /* `type: restrained` is `syllabus`'s type value and nobody else's, so the
+     dense-dashboard reading rhythm lands here: "many small steps, fine-grained
+     hierarchy". The sub drops off the fixed `--text-lg` onto the body rung it
+     actually is, and the matrix's row spine goes a full step under it. */
+  .invite[data-type='restrained'] {
+    --invite-sub-size: var(--jp-body-size);
+    --invite-rowhead-size: var(--text-xs);
+  }
+
+  /* ── 1.4 LUXURY-MINIMAL · `quiet-studio` — `accent: none` · `density: vast`
+     Tell: three type sizes, ONE hairline, no accent colour, and more empty space
+     than content.
+
+     THIS LOOK GETS WORSE IF ANYTHING IS ADDED, so almost every declaration below
+     REMOVES something. Measured on the base, against each half of the tell:
+
+       "one hairline"      — `edge: hairline` is this look's edge value, so the
+                             section shell drew a full box AND every offer card
+                             drew its own. On the golden four-path offer that is
+                             FIVE hairline boxes, not one hairline.
+       "no accent colour"  — the badge is a filled plate at `--jp-accent-fill`,
+                             which at `accent: none` is `--jp-ink-4`: not brand,
+                             but still a plate, and a plate is the thing this
+                             family does not have.
+       "three type sizes"  — the section drew SEVEN: `--jp-eyebrow-size`,
+                             `--jp-display`, `--text-lg` (sub), `--jp-body-size`
+                             (offer name), `--invite-price-size`, `--text-sm`
+                             (cadence / who / blurb / bullets / note) and
+                             `--text-xs` (badge), plus `--jp-body-size / 1.2` for
+                             the matrix spine — eight in `table`.
+
+     The size collapse below is stated as ARITHMETIC rather than as an adjective,
+     which is the only form of the claim that can be checked: `--text-sm` (eyebrow
+     at `monumental`, cadence, who, blurb, bullets, note, badge, row spine),
+     `--jp-body-size` (sub, offer name, price) and `--jp-display` (heading).
+     Exactly three. Weight comes with it, because "three sizes" is a hierarchy
+     claim and a semibold offer name at the same size as a normal sub is a fourth
+     level by another means. */
+  .invite[data-accent='none'] {
+    --invite-shell-border: 0 none;
+    --invite-shell-shadow: none;
+    --invite-shell-radius: var(--radius-none);
+
+    --invite-card-bg: transparent;
+    --invite-card-border: 0 none;
+    --invite-card-shadow: none;
+    --invite-card-radius: var(--radius-none);
+    --invite-card-pad: 0px;
+    --invite-best-outline: none;
+
+    /* The two rings this section hardcodes so a border-less `edge` value cannot
+       dissolve a boundary. CHECKED, not assumed: this look is `edge: hairline`,
+       so `--jp-edge-width` is `--border-width` and BOTH surfaces still draw the
+       axis's own 1px border underneath — removing the ring leaves exactly one
+       hairline on each rather than none, which is the tell. The removal would be
+       a real regression at `edge: none` / `edge: soft`, and neither is this
+       look's value. */
+    --invite-single-ring: none;
+    --invite-bar-ring: none;
+
+    /* NO PLATE. The label survives as a label: "labels uppercase with
+       `--tracking-wider` or wider" is this family's own row, so it takes the
+       wider step and the quiet secondary ink rather than the heading rung. */
+    --invite-badge-pos: static;
+    --invite-badge-shift: none;
+    --invite-badge-pad: 0px;
+    --invite-badge-radius: var(--radius-none);
+    --invite-badge-bg: transparent;
+    --invite-badge-ink: var(--color-text-secondary);
+    --invite-badge-ring: none;
+    --invite-badge-tracking: var(--tracking-widest);
+
+    /* The eyebrow's tracking through the shared atom's own documented seam
+       (`journey-sections-shared.css`), never a re-spelled recipe. */
+    --jp-eyebrow-tracking: var(--tracking-widest);
+
+    /* The bullet tick stops being a dot and becomes a short rule — the same
+       "hairlines, not marks" logic, one element down. */
+    --invite-tick-w: var(--space-3);
+    --invite-tick-h: var(--border-width);
+    --invite-tick-radius: var(--radius-none);
+  }
+
+  /* THE ONE HAIRLINE, and only one: a short rule opening the copy column. A
+     pseudo-element, so there is no markup change and nothing enters the
+     inline-edit seam's `textContent`. `flex: none` because `.invite__head` is a
+     column flex container, which makes a `::before` a flex ITEM.
+
+     ON THE HEAD RATHER THAN ON `.invite__inner`, deliberately: `banner` makes
+     `.invite__inner` a two-column GRID, where a `::before` would claim a cell and
+     push the action out of its track. It also means a section with nothing to say
+     (`hasCopy` false, `hasDoorway` true) draws no rule at all, which is the honest
+     answer — the hairline opens a piece of writing, and there is none. */
+  .invite[data-accent='none'] .invite__head::before {
+    content: '';
+    flex: none;
+    width: var(--space-16);
+    height: var(--border-width);
+    margin-block-end: calc(var(--jp-sec-gap) / 2);
+    background: var(--color-border);
+  }
+
+  /* MORE EMPTY SPACE THAN CONTENT, and the three collapsed sizes. `vast` already
+     carries a 1.6 rhythm through `--jp-sec-gap`, so doubling it is the family's
+     "the emptiness IS the design" rather than an arbitrary number — and it still
+     multiplies the org's own `--brand-density-scale` through `--space-unit`. */
+  .invite[data-density='vast'] {
+    --invite-block-gap: calc(var(--jp-sec-gap) * 2);
+    --invite-sub-size: var(--jp-body-size);
+    --invite-price-size: var(--jp-body-size);
+    --invite-badge-size: var(--text-sm);
+    --invite-rowhead-size: var(--text-sm);
+  }
+
+  .invite[data-density='vast'] .invite__offer-name {
+    font-weight: var(--font-normal);
+  }
+
+  /* ── 1.1 EDITORIAL · `long-read` — `surface: bare` + `align: start` ──────
+     Tell: the eyebrow and the body share a left edge, and there is a hairline
+     under every section head.
+
+     A COMPOUND BY NECESSITY. `long-read` has no axis value of its own:
+     `surface: bare` is shared with `quiet-studio` and `align: start` with
+     `plain-facts`, `syllabus` and `signal` — but `quiet-studio` is
+     `align: center` and none of the other three is `surface: bare`, so the PAIR
+     is `long-read` alone. Candlelit is `surface: media`, so it matches neither
+     half, let alone both.
+
+     MEASURED ON THE BASE: the shared left edge already holds — `align: start`
+     sets `--jp-measure-margin: 0px` and `.invite__head`'s `align-items: start`
+     puts the eyebrow, the heading and the sub on one edge. The HEAD HAIRLINE was
+     absent, and "no box borders anywhere" was contradicted by the section shell
+     (a full hairline box, from `edge: hairline`) and by every offer card, which
+     is a `--radius-card` plate on `--color-surface-secondary`. The cards become
+     rule-separated columns, which is what a magazine does with a comparison. */
+  .invite[data-surface='bare'][data-align='start'] {
+    --invite-shell-border: 0 none;
+    --invite-shell-shadow: none;
+    --invite-shell-radius: var(--radius-none);
+
+    --invite-head-rule: var(--border-width);
+    --invite-head-gap: calc(var(--jp-sec-gap) / 3);
+
+    --invite-card-bg: transparent;
+    --invite-card-border: 0 none;
+    --invite-card-shadow: none;
+    --invite-card-radius: var(--radius-none);
+    --invite-card-pad: 0px;
+    --invite-best-outline: none;
+
+    --invite-badge-pos: static;
+    --invite-badge-shift: none;
+    --invite-badge-pad: 0px;
+    --invite-badge-bg: transparent;
+    --invite-badge-ink: var(--jp-accent-text);
+    --invite-badge-ring: none;
+  }
+
+  /* The rule spans the MEASURE, not the head's longest line, so it reads as a
+     section rule and not as an underlined heading. `width: 100%` is required
+     because `.invite__head` is a column flex child of a container with
+     `align-items: start`, which shrink-wraps it. */
+  .invite[data-surface='bare'][data-align='start'] .invite__head {
+    width: 100%;
+  }
+
+  /* HAIRLINE HORIZONTAL RULES ONLY. A rule ABOVE each column rather than a box
+     around it — the only edge a magazine draws — and the recommended one steps up
+     to the thick accent rule, so the flag survives the removal of the ring
+     without a box coming back. `--jp-accent-mark` for the 3:1 reason the ring
+     block states at length. */
+  .invite[data-surface='bare'][data-align='start'] .invite__offer {
+    padding-block: calc(var(--jp-sec-gap) / 2);
+    border-block-start: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .invite[data-surface='bare'][data-align='start']
+    .invite__offer[data-best='true'] {
+    border-block-start: var(--border-width-thick) solid var(--jp-accent-mark);
+  }
+
+  /* THE PRICE-LESS THRESHOLD, un-boxed and returned to the left edge. This is
+     the branch four of the seven published pages actually render, and it was the
+     last box: a bordered, ringed, blurred, CENTRED plate inside a section whose
+     whole tell is "the eyebrow and the body share a left edge". The CTA does not
+     need the plate to be found — `CtaLink`'s primary variant is a filled brand
+     control that this file may not repaint and does not need to.
+
+     The `align-items` / `text-align` centring on `.invite__single` is left alone
+     for every other look on purpose: a single centred doorway is a legitimate
+     close, and `align` positions the section's column rather than dictating the
+     inside of a card (the same argument `.invite__offer`'s `text-align: left`
+     makes). `long-read` is the one family that states the shared edge AS the
+     tell.
+
+     `backdrop-filter` is dropped in both spellings, since there is no plate left
+     to frost. */
+  .invite[data-surface='bare'][data-align='start'] .invite__single {
+    align-items: var(--jp-align);
+    padding: 0px;
+    border: 0 none;
+    outline: none;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    text-align: var(--jp-text-align);
+  }
+
+  /* ── 1.3 SOFT-ORGANIC · `open-air` — `edge: soft` ───────────────────────
+     Tell: no border anywhere, pill controls, and a shadow you have to look for.
+
+     KEYED ONLY ON `edge: soft`. This look shares four axes with candlelit
+     (`align: center`, `density: airy`, `width: text`, `motion: drift`) and a bare
+     rule on any of them would restyle the one preset that works; `edge: soft` is
+     open-air's and nobody else's, and candlelit is `edge: none`.
+
+     MEASURED ON THE BASE, half of it already held: `--jp-edge-width` is `0px`
+     here and `--jp-edge-shadow` is `--shadow-lg` — a 14px-blur, 10%/5%-alpha drop,
+     i.e. "large, very diffuse, very low opacity" — and the shell, the cards, the
+     threshold card and the bar all already read both. What did NOT hold is that
+     four borders in this file are NOT the `edge` axis's to remove: the
+     recommended card's 2px outline, the threshold card's 1px ring, the bar's 1px
+     ring, and the badge's own inset ring (this look is `accent: text`, so
+     `data-plated="no"` outlines the pill). "No border anywhere" cannot be true
+     while any of those draw.
+
+     SO THE RECOMMENDED FLAG MOVES ONTO THE FAMILY'S OWN VOCABULARY — "accent as
+     tinted background + accent text, NEVER a hard fill" — and the diffuse shadow
+     does the separating that the removed rings were doing. The 8% and 14% mixes
+     sit on `--jp-accent-mark`, which is `--jp-ember-text` at four of five accent
+     values and `--jp-heading` at the fifth, never a pre-mixed token, so this is
+     not contract A37's mix-of-a-mix: `--jp-accent-edge` WOULD have been exactly
+     that (already a 45% ember mix at `accent: glow`, so 8% of it is ~3.6% ember).
+
+     THE MATRIX'S ROW RULES STAY. The rule beside `.invite__table th` already
+     settled that argument: a row rule there is STRUCTURE, not treatment, and a
+     comparison matrix with no row separation is not a lighter matrix, it is an
+     unreadable one. This look's tell loses to WCAG on that one element, said out
+     loud rather than quietly.
+
+     AND THE TWO RING REMOVALS ARE SAFE HERE, SPECIFICALLY — checked rather than
+     assumed, because the rings' own comments explain that they exist so a
+     border-less `edge` value cannot dissolve a boundary. That argument is about
+     `edge: none`, where `--jp-edge-shadow` is the KEYWORD `none` and the axis
+     contributes neither a border nor an elevation. At `edge: soft` it is
+     `--shadow-lg`, a real 14px drop, and both surfaces read it — so the boundary
+     is carried, by the exact material this family names. Removing the ring at
+     `edge: none` would be the regression; this is not that. */
+  .invite[data-edge='soft'] {
+    /* "`--radius-xl` on panels, `--radius-full` on controls." The tinted band IS
+       a panel here — `surface: tint` leaves `--jp-sec-radius` at the root default
+       `--radius-none`, so the band was square. */
+    --invite-shell-radius: var(--radius-xl);
+    --invite-card-radius: var(--radius-xl);
+    --radius-button: var(--radius-full);
+
+    --invite-best-outline: none;
+    --invite-best-bg: color-mix(
+      in oklab,
+      var(--jp-accent-mark) 8%,
+      var(--color-surface-secondary)
+    );
+
+    --invite-single-ring: none;
+    --invite-bar-ring: none;
+
+    /* The badge as this family's own accent: a tinted pill with accent TEXT,
+       "never a hard fill". MIXED INTO `--invite-card-bg` AND NOT INTO
+       `transparent`, which is a straddle problem rather than a taste one: the
+       badge is `position: absolute` at `top: 0` with a `-50%` shift, so half of
+       it hangs over the section's tinted band and half over the card. A
+       translucent pill would read as two different colours across that seam.
+       Opaque, it is one chip. */
+    --invite-badge-radius: var(--radius-full);
+    --invite-badge-ring: none;
+    --invite-badge-ink: var(--jp-accent-text);
+    --invite-badge-bg: color-mix(
+      in oklab,
+      var(--jp-accent-mark) 14%,
+      var(--invite-card-bg)
+    );
+  }
+
+  /* ── 1.8 PLAYFUL · `full-send` — `edge: heavy` · `motion: stagger` ───────
+     Tell: whole inverted bands, pill CTAs at `--radius-full`, spring easing, and
+     BIG NUMERALS.
+
+     MEASURED ON THE BASE: the inverted band already holds, and it holds properly
+     rather than by accident — `surface: invert` re-points `--jp-ink` to pole B and
+     `.journey-palette--page .jp-sec` derives `--color-surface-secondary` from
+     `--jp-ink-3`, so the offer cards flip WITH the band instead of staying a
+     light plate on a dark one. The 2px accent border also already holds
+     (`--jp-edge-color` is `--jp-accent-edge` at this value). The other three did
+     not: the pay button was `--radius-md`, nothing in the file responded to
+     `--ease-spring` outside the shared reveal, and the section's one real numeral
+     — the price — measured 33px at `expressive`, against a 44px heading.
+
+     THE BIG NUMERAL IS THE PRICE, at `--jp-display` and bold with tabular
+     figures. It is the number this section exists to state, and this is the one
+     family that says numerals out loud.
+
+     THE 2px RING ON THE RECOMMENDED CARD IS KEPT ON PURPOSE. At `edge: heavy` the
+     card border is already 2px of `--jp-accent-edge` and the inset ring sits
+     directly inside it, so the recommended card carries a contiguous 4px accent
+     edge — which in this family reads as the intended shout rather than as a
+     doubled border. Considered and left alone; the change would have been a
+     change for its own sake. */
+  .invite[data-edge='heavy'] {
+    --radius-button: var(--radius-full);
+    --invite-shell-radius: var(--radius-xl);
+    --invite-card-radius: var(--radius-xl);
+    --invite-badge-radius: var(--radius-full);
+
+    --invite-price-size: var(--jp-display);
+    --invite-num-weight: var(--font-bold);
+    --invite-num-variant: tabular-nums;
+  }
+
+  .invite[data-edge='heavy'] .invite__price-amount {
+    line-height: var(--leading-none);
+  }
+
+  /* SPRING EASING, MADE VISIBLE. `--jp-reveal-ease` is `--ease-spring` at this
+     motion value and the reveal already rides it, but a reveal happens once and
+     off-screen; the place a viewer can FEEL a curve is the thing they are
+     pointing at. So the offer card lifts, with the overshoot on the way up.
+
+     `translate` and not `transform: scale()`: a scaled card resamples its own
+     text and the price is the largest glyph run in the section. `:focus-within`
+     as well as `:hover` so a keyboard user reaching the CTA inside the card gets
+     the same feedback — and neither state carries any information, so this is
+     decoration and not a hover-only affordance.
+
+     `.cta` IS NOT TOUCHED, and not for want of a better carrier: `CtaLink` owns a
+     `transition` that includes its own background, so re-declaring `transition`
+     on `.cta` from here would silently drop the button's colour transition — and
+     painting `.cta` at all is what `journey-design.test.ts` forbids (Codex-kdsuo).
+     The card is the element this file owns. */
+  .invite[data-motion='stagger'] .invite__offer {
+    transition: translate var(--jp-reveal-duration) var(--jp-reveal-ease);
+  }
+
+  .invite[data-motion='stagger'] .invite__offer:hover,
+  .invite[data-motion='stagger'] .invite__offer:focus-within {
+    translate: 0 calc(var(--space-2) * -1);
+  }
+
+  /* ── 1.9 CONTEMPORARY · `signal` — `edge: hairline` + `accent: fill` ─────
+     Tell: rounded cards with hairlines and a small neutral shadow; one filled
+     accent button per section.
+
+     ANOTHER COMPOUND BY NECESSITY. `signal` shares all nine of its axis values:
+     `edge: hairline` is also `quiet-studio`, `long-read` and `syllabus`, and
+     `accent: fill` is also `plain-facts` and `full-send` — but those two are
+     `edge: offset` and `edge: heavy`, and the three other hairline looks are
+     `accent: none` / `text` / `edge`. So the PAIR is `signal` alone, and
+     candlelit (`edge: none`, `accent: glow`) matches neither half.
+
+     MEASURED ON THE BASE, and this is the one look that was mostly already
+     right — which is worth stating rather than inventing work for. The cards are
+     `--radius-card` (`--radius-lg`, the family's own radius) with a hairline
+     border and `--shadow-xs`, "a small NEUTRAL shadow" and not a coloured one;
+     and "one filled accent button per section" is exact — every composition gives
+     the recommended path `variant="primary"` and each sibling `secondary`, so
+     there is precisely one filled control.
+
+     THE ONE REAL GAP is how "recommended" is said. A 2px ember ring is a
+     brutalist or technical device; this family differentiates a featured tier by
+     LIFTING it. So the ring steps down to a hairline in the same AA-safe
+     `--jp-accent-mark` — the width is not part of a contrast ratio, so the 3:1
+     floor the ring owes is unchanged — and the elevation steps up from
+     `--shadow-xs` to `--shadow-md`, which is the family's own shadow row.
+     Resting versus recommended is still carried on weight and elevation, never
+     on opacity (contract A39).
+
+     THE SECOND GAP IS ARITHMETIC, and it is why the badge moves too. The family's
+     colour row is "accent as FILL on the CTA ONLY; accent as text on links", and
+     this look is `accent: fill` — so the card shipped TWO full-strength accent
+     plates side by side, the "Recommended" pill and the pay button beneath it,
+     against a row that says one. The pill becomes the chip this family actually
+     uses: the card's own opaque surface, a hairline in `--jp-accent-mark`, and
+     the accent as TEXT.
+
+     THE PLATE HAS TO STAY OPAQUE, and `--invite-card-bg` rather than
+     `transparent` is the whole reason: the badge is `position: absolute` at
+     `top: 0` with a `-50%` shift, so it STRADDLES the card's top border. A
+     transparent chip would have the hairline running straight through its
+     letters. `--jp-ember-text` on `--jp-ink-3` is the pair `journey-design.test.ts`
+     already pins as clearing AA on a panel surface, so the ink is safe on it. */
+  .invite[data-edge='hairline'][data-accent='fill'] {
+    --invite-best-outline: var(--border-width) solid var(--jp-accent-mark);
+    --invite-best-offset: calc(var(--border-width) * -1);
+    --invite-best-shadow: var(--shadow-md);
+
+    --invite-badge-bg: var(--invite-card-bg);
+    --invite-badge-ink: var(--jp-accent-text);
+    --invite-badge-ring: inset 0 0 0 var(--border-width) var(--jp-accent-mark);
+  }
+
+  /* ── ACCENT AS TEXT — `long-read` + `open-air` ───────────────────────────
+     The two families whose accent row is "accent as TEXT: kickers, link
+     underlines, footnote markers" (1.1) and "tinted background + accent text"
+     (1.3). Both spend it on the eyebrow, which is the only kicker this section
+     has; `--jp-accent-text` is the axis's AA-safe text rung and never
+     `--jp-ember`, which measures 2.04:1 as text in dark (research §5.1).
+
+     A shared key rather than two rules, because it is genuinely the same
+     statement — and `accent: text` is exactly those two looks. Candlelit is
+     `accent: glow`, so its eyebrow keeps the atom's `--color-text-secondary`. */
+  .invite[data-accent='text'] .invite__eyebrow {
+    color: var(--jp-accent-text);
+  }
+
   /* ═══════════════════════════════════════════════════════════════════════
      REDUCED MOTION
 
@@ -1746,6 +2586,20 @@
   @media (prefers-reduced-motion: reduce) {
     .invite__descent::before {
       display: none;
+    }
+
+    /* The one transform the per-look pass added, and the one thing
+       `journey-sections-shared.css`'s `animation: none !important` guard cannot
+       reach — it stops KEYFRAMES, and this is a transition to a translated
+       state. Listed explicitly rather than as a wildcard, so the next look that
+       adds a hover transform has to come here and say so. */
+    .invite[data-motion='stagger'] .invite__offer {
+      transition: none;
+    }
+
+    .invite[data-motion='stagger'] .invite__offer:hover,
+    .invite[data-motion='stagger'] .invite__offer:focus-within {
+      translate: none;
     }
   }
 </style>

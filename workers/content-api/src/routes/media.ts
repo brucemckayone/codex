@@ -35,7 +35,7 @@ import { createDbClient } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { ConflictError, InternalServiceError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
-import { createIdParamsSchema } from '@codex/validation';
+import { createIdParamsSchema, uploadCompleteSchema } from '@codex/validation';
 import {
   binaryUploadProcedure,
   PaginatedResult,
@@ -232,8 +232,9 @@ app.post(
  *
  * Flow:
  * 1. Verify creator owns media and status is 'uploading'
- * 2. Update status to 'uploaded'
- * 3. Call media-api to trigger transcoding
+ * 2. Record the client-measured duration if we do not have one yet
+ * 3. Update status to 'uploaded'
+ * 4. Call media-api to trigger transcoding
  *
  * Security: Creator/Admin only
  * @returns {{ success: boolean, status: string }}
@@ -245,7 +246,10 @@ app.post(
       auth: 'required',
       roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
     },
-    input: { params: createIdParamsSchema() },
+    input: {
+      params: createIdParamsSchema(),
+      body: uploadCompleteSchema,
+    },
     handler: async (
       ctx
     ): Promise<{
@@ -273,7 +277,26 @@ app.post(
         );
       }
 
-      // 3. Update status to 'uploaded' (no-op if already uploaded)
+      // 3. Record the client's measurement, so the runtime badge is available
+      // IMMEDIATELY rather than only after RunPod calls back minutes later.
+      //
+      // ONLY WHEN WE HAVE NOTHING. `markAsReady` writes the figure measured off
+      // the transcoded output, and that is the better authority for the file
+      // that actually gets streamed — so this must never overwrite it. This
+      // route is also deliberately idempotent (step 2 re-triggers transcoding
+      // when a dispatch failed), and without the null check a retry arriving
+      // after transcoding had completed would clobber the good value with the
+      // client's.
+      const clientDuration = ctx.input.body?.durationSeconds;
+      if (clientDuration && media.durationSeconds == null) {
+        await ctx.services.media.update(
+          mediaId,
+          { durationSeconds: clientDuration },
+          creatorId
+        );
+      }
+
+      // 4. Update status to 'uploaded' (no-op if already uploaded)
       if (media.status === MEDIA_STATUS.UPLOADING) {
         await ctx.services.media.updateStatus(
           mediaId,
@@ -282,7 +305,7 @@ app.post(
         );
       }
 
-      // 4. Trigger transcoding via media-api worker (fire-and-forget)
+      // 5. Trigger transcoding via media-api worker (fire-and-forget)
       // The media-api call blocks until RunPod completes (minutes on /runsync),
       // so we dispatch it via waitUntil and return immediately to the client.
       const mediaApiUrl = ctx.env.MEDIA_API_URL;

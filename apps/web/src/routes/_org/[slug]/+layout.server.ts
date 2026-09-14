@@ -136,6 +136,29 @@ export const load: LayoutServerLoad = async ({
   const layoutTimer = logger.startTimer('org-layout', { threshold: 3000 });
   const api = createServerApi(platform, cookies);
 
+  /**
+   * Why control reached the bottom of this load, if it does.
+   *
+   * The bottom used to be a single `error(404)` serving two unrelated
+   * situations: an endpoint RAN and said the row does not exist, and no
+   * endpoint answered at all. They are not the same claim, and conflating
+   * them cost a real diagnosis — five studio E2E failures on main showed a
+   * rendered "Organization not found" page for orgs the test fixture had
+   * just verified as present (`db=1 orgApi=200`), and nothing in the page or
+   * on the wire could say which branch produced it (Codex-4p2l7).
+   *
+   * DEFAULTS TO `unavailable`, deliberately, because the two mistakes are not
+   * equally cheap. Answering 404 while the directory is down tells a crawler
+   * to delist a real org and tells its owner it does not exist; answering 503
+   * for a slug nobody owns costs one retry from a scanner. Only an endpoint
+   * that actually replied may downgrade this to `not-found`.
+   *
+   * Note the wildcard-scan path is untouched: a truly missing slug is
+   * answered by the public endpoint with 404 + NOT_FOUND and returns above,
+   * remembered, long before it reaches here.
+   */
+  let bottom: 'not-found' | 'unavailable' = 'unavailable';
+
   // Try public endpoint first (works across subdomains without cookies)
   try {
     const publicTimer = logger.startTimer('org-layout:public-info', {
@@ -266,6 +289,11 @@ export const load: LayoutServerLoad = async ({
           .catch(() => ({ tiers: [] as SubscriptionTier[] })),
       };
     }
+
+    // The fallback RAN and returned nothing. That is an answer, not a
+    // failure — the resolver is a plain `slug = ? AND deleted_at IS NULL`
+    // lookup, so an empty result means the row is not there.
+    bottom = 'not-found';
   } catch (err) {
     // Both endpoints failed — distinguish 404 from other errors
     const status = err instanceof ApiError ? err.status : 500;
@@ -274,16 +302,38 @@ export const load: LayoutServerLoad = async ({
     // (same resolver), so it is worth remembering even though this path is
     // narrow: it needs an authenticated caller, since an anonymous one gets a
     // 401 from `/slug/:slug`.
-    if (status === 404 && code === 'NOT_FOUND') rememberMissingSlug(slug);
+    if (status === 404 && code === 'NOT_FOUND') {
+      rememberMissingSlug(slug);
+      bottom = 'not-found';
+    }
     logger.error('Org layout: both endpoints failed', {
       slug,
       status,
       code,
+      signal:
+        bottom === 'not-found'
+          ? 'org_resolve_not_found'
+          : 'org_resolve_unavailable',
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
-  error(404, `Organization "${slug}" not found`);
+  if (bottom === 'not-found') {
+    layoutTimer.end({ slug, path: 'not-found' });
+    error(404, `Organization "${slug}" not found`);
+  }
+
+  // NOTHING ANSWERED. The status is the honest one, and the WORDING is the
+  // load-bearing part: a load-thrown error on a client-rendered subtree comes
+  // back as HTTP 200 with the payload embedded (see apps/web/e2e/helpers/
+  // journeys.ts "TRAP 3"), so the status alone is invisible to a Playwright
+  // trace. The rendered sentence is what an `error-context.md` page snapshot
+  // captures, and it is now impossible to mistake this for "no such org".
+  layoutTimer.end({ slug, path: 'unavailable' });
+  error(
+    503,
+    `Organization "${slug}" could not be loaded right now. This is a temporary problem on our side — please try again in a moment.`
+  );
 };
 
 /**

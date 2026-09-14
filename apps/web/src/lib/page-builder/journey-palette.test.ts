@@ -443,7 +443,6 @@ describe('the ladder re-derives PER SECTION, not once per page', () => {
       '--jp-ink',
       '--jp-ember',
       '--jp-blood',
-      '--jp-blood-deep',
       '--jp-rose',
     ]) {
       expect(selectorDeclaring(input), input).not.toContain('.jp-sec');
@@ -757,5 +756,258 @@ describe('--jp-on-ember decides on luminance, and the fallback survives', () => 
     expect(block).not.toContain('[data-theme=');
     expect(block).not.toContain('.dark ');
     expect(declarationsOf(PALETTE, '--jp-ember')).toHaveLength(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A PAGE-LEVEL BRAND OVERRIDE IS ITS OWN DERIVATION SCOPE (Codex-acwap · M7)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * A custom property substitutes its `var()`s on the element where it is
+ * DECLARED; descendants inherit the SUBSTITUTED value. So a page that
+ * re-declares `--brand-color` deeper in the tree does not re-run
+ * `org-brand.css`'s derivations — anything reading the raw input follows the
+ * override (`--jp-ember`), anything reading a derived token keeps the ORG value
+ * (`CtaLink` → `--jp-cta-fill` → `--color-brand-primary`). MEASURED in Chrome
+ * against this stylesheet verbatim, org #4465FF with a page override of
+ * #0e27e1, on a carrier WITHOUT `data-org-brand`:
+ *
+ *   pole      eyebrow (raw)   CTA (derived)   before        after
+ *   light     #0e27e1         #4465FF         SPLIT         both #0e27e1
+ *   dark      #0e27e1         #4465FF         SPLIT         both #0e27e1
+ *   editing   #0e27e1         #4465FF         SPLIT         both #0e27e1
+ *
+ * and the org scope itself never moved (#4465FF at all three poles, before and
+ * after) — that row is the control that separates a fix from a blunt repaint.
+ * The dark poles were calibrated with a `--brand-color-dark` fixture first: they
+ * move to it, which is what proves all three dark hooks engage. Identical
+ * light/dark numbers above are the BRAND (no seeded org sets a dark brand), not
+ * a flip that failed to take.
+ *
+ * WHY THESE ASSERTIONS AND NOT COMPUTED STYLES — the reason this file gives at
+ * its head, unchanged: jsdom hands custom properties back as their raw declared
+ * string and implements neither `oklch(from …)` nor relative `rgb()`. What jsdom
+ * CAN decide is SELECTOR MATCHING, and that is the whole of this bug: the fix is
+ * a rule that matches the overriding element. So the cascade test below asks
+ * jsdom's own engine `el.matches(selector)` and never resolves a value.
+ */
+
+/** The twin that makes an inline `--brand-*` declaration a derivation scope. */
+const OVERRIDE_SCOPE = ":where([data-org-brand]) [style*='--brand-']";
+
+/**
+ * The brand editor's dark PREVIEW hook. Compound on purpose — both attributes
+ * sit on `.org-layout` — so it pins its rule to that ONE element and a nested
+ * carrier is never it. It therefore gets no twin, and a nested carrier falls to
+ * the light derivation in the preview, which is what a nested
+ * `[data-org-brand]` carrier already did there (measured). Excluded here so the
+ * predicate stays a predicate instead of growing an exception list.
+ */
+const EDITING_COMPOUND = "[data-editing-theme='dark'][data-org-brand]";
+
+interface CssRule {
+  /** The comma-separated selector list, each entry whitespace-squashed. */
+  selectors: string[];
+  /** The declaration text between the braces. */
+  body: string;
+  /** `''` at top level, else the enclosing at-rule preludes. */
+  at: string;
+}
+
+/**
+ * Brace-depth walker over the token stream AFTER comments are stripped — a
+ * commented-out rule must not satisfy any assertion here, which a plain
+ * substring search on the source could not tell apart.
+ */
+const parseRules = (css: string): CssRule[] => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules: CssRule[] = [];
+  const stack: string[] = [];
+  let prelude = '';
+
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === '}') {
+      stack.pop();
+      prelude = '';
+      continue;
+    }
+    if (ch !== '{') {
+      prelude += ch;
+      continue;
+    }
+
+    const head = prelude.replace(/\s+/g, ' ').trim();
+    prelude = '';
+    if (head.startsWith('@')) {
+      stack.push(head);
+      continue;
+    }
+
+    let depth = 1;
+    let j = i + 1;
+    while (j < code.length && depth > 0) {
+      if (code[j] === '{') depth++;
+      else if (code[j] === '}') depth--;
+      if (depth > 0) j++;
+    }
+    rules.push({
+      selectors: head
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      body: code.slice(i + 1, j),
+      at: stack.join(' '),
+    });
+    i = j;
+  }
+
+  return rules;
+};
+
+const ORG_BRAND_CSS = readSrc('lib/styles/tokens/org-brand.css');
+
+/** Every rule that DERIVES a token from a raw `--brand-*` input at org scope. */
+const brandDerivingRules = (): CssRule[] =>
+  parseRules(ORG_BRAND_CSS).filter(
+    (r) =>
+      r.selectors.some((s) => s.includes('[data-org-brand]')) &&
+      /--[\w-]+\s*:[^;]*var\(\s*--brand-/.test(r.body)
+  );
+
+describe('a page-level brand override re-derives the palette (Codex-acwap)', () => {
+  it('gives EVERY brand-deriving rule a page-override twin', () => {
+    // The predicate, not a list of known selectors: a NEW rule that derives
+    // from a `--brand-*` input and forgets its twin fails here without anyone
+    // remembering to extend this test.
+    const rules = brandDerivingRules();
+
+    // Guards the guard — an empty or mis-parsed set would pass trivially.
+    // Five blocks: the light derivation, the two dark ones (primary chain and
+    // per-theme tokenOverrides) and the `@supports` luminance pair.
+    expect(rules).toHaveLength(5);
+
+    const missing = rules.flatMap((rule) =>
+      rule.selectors
+        .filter(
+          (s) =>
+            s.includes('[data-org-brand]') &&
+            !s.includes(OVERRIDE_SCOPE) &&
+            s !== EDITING_COMPOUND
+        )
+        .filter(
+          (s) =>
+            !rule.selectors.includes(
+              s.replace('[data-org-brand]', OVERRIDE_SCOPE)
+            )
+        )
+        .map((s) => `${rule.at} { ${s} }`)
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('activates the luminance ink at the SAME scopes as the fallback', () => {
+    // The ink must follow the fill. Give the carrier the luminance fill without
+    // the luminance ink and a page override repaints on one rule's promise while
+    // its label is still chosen by the rule the `@supports` block exists to
+    // replace — for the 8.47% of brands where the two disagree, an AA failure.
+    // MEASURED: with the twin, a #059669 page override puts BLACK on the
+    // carrier (the luminance answer, 5.57:1); the fallback would put white
+    // (3.77:1). File order per journey-design.test.ts: the two OKLCH fallbacks
+    // (light, dark), then the two `@supports` overrides.
+    const ink = parseRules(ORG_BRAND_CSS).filter((r) =>
+      /--color-text-on-brand\s*:/.test(r.body)
+    );
+    expect(ink).toHaveLength(4);
+
+    const [lightFallback, darkFallback, lightLuminance, darkLuminance] = ink;
+    expect(lightFallback.at).toBe('');
+    expect(darkFallback.at).toBe('');
+    expect(lightLuminance.at).toContain('@supports');
+    expect(darkLuminance.at).toContain('@supports');
+    expect(lightLuminance.selectors).toEqual(lightFallback.selectors);
+    expect(darkLuminance.selectors).toEqual(darkFallback.selectors);
+  });
+
+  describe('the cascade, decided by jsdom’s own selector engine', () => {
+    /** Rules that declare the token `CtaLink` ultimately falls back to. */
+    const primaryRules = parseRules(ORG_BRAND_CSS).filter((r) =>
+      /--color-brand-primary\s*:/.test(r.body)
+    );
+
+    const scopesOf = (el: Element): CssRule[] =>
+      primaryRules.filter((r) => r.selectors.some((s) => el.matches(s)));
+
+    let host: HTMLDivElement;
+
+    const build = (html: string): ((id: string) => Element) => {
+      host = document.createElement('div');
+      host.innerHTML = html;
+      document.body.appendChild(host);
+      return (id: string) => {
+        const el = host.querySelector(`#${id}`);
+        if (!el) throw new Error(`fixture element #${id} missing`);
+        return el;
+      };
+    };
+
+    afterEach(() => host?.remove());
+
+    /**
+     * `#carrier` is the shape the builder ships — `.jb__canvas` and
+     * `.jbc-block__brand` inline the override and never set the attribute.
+     * `#opted-in` is the shape `JourneyRenderer.svelte:208` and the journey
+     * checkout ship. They must resolve through the SAME rules, or one page
+     * paints two brand blues.
+     */
+    const BRANDED = `
+      <div id="org" data-org-brand style="--brand-color:#4465FF">
+        <section id="carrier" style="--brand-color:#0e27e1"></section>
+        <section id="opted-in" data-org-brand style="--brand-color:#0e27e1"></section>
+        <section id="plain"></section>
+      </div>`;
+
+    it('reaches a carrier that never opted in, at parity with one that did', () => {
+      const q = build(BRANDED);
+
+      expect(scopesOf(q('carrier')).length).toBeGreaterThan(0);
+      expect(scopesOf(q('carrier'))).toEqual(scopesOf(q('opted-in')));
+
+      // Controls: org scope still derives, and an element with no inline input
+      // is still not a scope — so this cannot pass by matching everything.
+      expect(scopesOf(q('org')).length).toBeGreaterThan(0);
+      expect(scopesOf(q('plain'))).toEqual([]);
+    });
+
+    it('holds at both dark hooks, which need the class AND the attribute', () => {
+      // A theme flip needs `.dark` and `[data-theme='dark']`: org-brand.css keys
+      // its dark branches on both, and a twin added to only one form would leave
+      // half the cascade on the light derivation.
+      for (const wrapper of ['class="dark"', "data-theme='dark'"]) {
+        const q = build(`<div ${wrapper}>${BRANDED}</div>`);
+        const carrier = scopesOf(q('carrier'));
+        expect(carrier).toEqual(scopesOf(q('opted-in')));
+        // More rules match than in light, or the wrapper did nothing at all.
+        expect(carrier.length).toBeGreaterThan(1);
+        host.remove();
+      }
+    });
+
+    it('stays OUT of a subtree with no branded ancestor', () => {
+      // THE BLAST RADIUS, and the reason the twin is scoped rather than a bare
+      // `[style*='--brand-']`. Two root carriers inline the raw inputs without
+      // opting in: `(auth)/+layout.svelte`, which sets them for ShaderHero and
+      // must not re-theme its pages, and an UNBRANDED `_org/[slug]/+layout`,
+      // which inlines them unconditionally and gates only the attribute on
+      // `hasBranding`. Broadening the twin re-themes both, silently.
+      const q = build(`
+        <div id="auth-root" style="--brand-color:#4465FF">
+          <section id="auth-child" style="--brand-color:#0e27e1"></section>
+        </div>`);
+
+      expect(scopesOf(q('auth-root'))).toEqual([]);
+      expect(scopesOf(q('auth-child'))).toEqual([]);
+    });
   });
 });

@@ -145,6 +145,36 @@ const declarationsOf = (css: string, prop: string): string[] => {
   return out;
 };
 
+/**
+ * Substitute `var(--x)` for whatever `scope` declares `--x` as, repeatedly.
+ *
+ * WHY A GATE CANNOT COMPARE A DECLARATION TO A LITERAL. A custom property is an
+ * indirection: `--jp-media-scrim: var(--x)` with `--x: none` is `none` on the
+ * page and is NOT the string `none` in the stylesheet, so `value !== 'none'`
+ * passes and the check protects nothing. Anything asserting the SHAPE of a
+ * token's value has to resolve the chain first.
+ *
+ * Only tokens `scope` actually declares are substituted — a `var()` reaching
+ * outside it (`--space-12`, `--radius-lg`) is left in place, because the point
+ * is to see through a local alias, not to inline the design system.
+ */
+const resolveVars = (
+  value: string,
+  scope: Record<string, string>,
+  depth = 8
+): string => {
+  let out = value;
+  for (let i = 0; i < depth; i++) {
+    const next = out.replace(
+      /var\((--[a-z0-9-]+)\)/g,
+      (whole, token: string) => scope[token] ?? whole
+    );
+    if (next === out) return squash(out);
+    out = next;
+  }
+  throw new Error(`var() chain did not settle in ${depth} passes: ${value}`);
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 0. STYLESHEET INTEGRITY — the bug class that 500s SSR from a comment
 // ═══════════════════════════════════════════════════════════════════════════
@@ -275,19 +305,37 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'surface:tint': {
     '--jp-ink':
       'color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // DEPTH, not a flat fill (contract B1). The gradient reaches pure
+    // `--jp-pole-a`, i.e. LESS pole B than the surface itself — and pole B is
+    // the contrast pole every text rung is derived away from, so mixing less of
+    // it can only RAISE contrast. The gradient's worst point is therefore this
+    // surface's own already-measured level, in both themes, and the flat-colour
+    // rows below stay the honest bound.
+    '--jp-sec-bg':
+      'radial-gradient(88% 62% at 14% 0%, var(--jp-pole-a), transparent 70%), var(--jp-ink)',
   },
   'surface:panel': {
     '--jp-ink':
       'color-mix(in oklab, var(--jp-pole-a) 88%, var(--jp-pole-b) 12%)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // An EDGE-LIT PLATE (contract B1). Both endpoints are surface levels whose
+    // contrast rows are already locked: the lit edge is `tint`'s 6% and it
+    // resolves into this surface's own 12%. Same pole-B argument as `tint`.
+    '--jp-sec-bg':
+      'linear-gradient(to bottom, color-mix(in oklab, var(--jp-pole-a) 94%, var(--jp-pole-b) 6%), var(--jp-ink) 58%), var(--jp-ink)',
     '--jp-sec-radius': 'var(--radius-card)',
   },
   // `--jp-sec-bg` is an addition to §2.3 — without it invert flips the text and
   // paints nothing, i.e. bone-on-cream. See the rule's comment in the CSS.
   'surface:invert': {
     '--jp-ink': 'var(--jp-pole-b)',
-    '--jp-sec-bg': 'var(--jp-ink)',
+    // A brand bloom (contract B1), and the ONE surface gradient that is safe by
+    // MEASUREMENT rather than by construction: `invert`'s ink IS pole B, so any
+    // gradient here moves toward the text colour. Pixel-measured: background
+    // peak 56/255, amplitude 32, worst ratio 11.73 against a 4.5 floor, with the
+    // sweep's 55% row (4.88) bracketing the real ceiling. `--jp-accent-mark`
+    // rather than `--jp-accent-fill`, which is `transparent` on three accents.
+    '--jp-sec-bg':
+      'radial-gradient(115% 80% at 50% 0%, color-mix(in oklab, var(--jp-ink) 68%, var(--jp-accent-mark) 32%), transparent 72%), var(--jp-ink)',
   },
   'surface:media': { '--jp-sec-bg': 'transparent', '--jp-sec-atmos': '1' },
 
@@ -330,26 +378,42 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-text-align': 'center',
     '--jp-measure-margin': 'auto',
   },
+  // The axis's first ASYMMETRIC value (contract B4). `--jp-text-align` stays
+  // `left` on purpose — the column's POSITION moves, its ragged edge does not.
+  // `auto 0` is the only two-value inline pair on this axis.
+  'align:end': {
+    '--jp-align': 'end',
+    '--jp-text-align': 'left',
+    '--jp-measure-margin': 'auto 0',
+  },
 
   'type:restrained': {
+    '--jp-eyebrow-size': 'var(--text-xs)',
     '--jp-display': 'var(--text-2xl)',
     '--jp-heading-size': 'var(--text-xl)',
     '--jp-display-leading': 'var(--leading-snug)',
     '--jp-display-tracking': 'var(--tracking-normal)',
   },
   'type:balanced': {
+    '--jp-eyebrow-size': 'var(--text-sm)',
     '--jp-display': 'var(--text-4xl)',
     '--jp-heading-size': 'var(--text-2xl)',
     '--jp-display-leading': 'var(--leading-tight)',
     '--jp-display-tracking': 'var(--tracking-normal)',
   },
   'type:expressive': {
-    '--jp-display': 'var(--text-5xl)',
+    '--jp-eyebrow-size': 'var(--text-base)',
+    // Deliberately the MIDPOINT of two steps, not a step (contract B2.1):
+    // `--text-5xl` maxes BELOW `--text-4xl`, so using it here made the axis
+    // non-monotonic. See `expressiveDisplayIsBetween*` below, which is the test
+    // that would have caught it.
+    '--jp-display': 'calc((var(--text-4xl) + var(--text-display)) / 2)',
     '--jp-heading-size': 'var(--text-3xl)',
     '--jp-display-leading': 'var(--leading-tight)',
     '--jp-display-tracking': 'var(--tracking-tight)',
   },
   'type:monumental': {
+    '--jp-eyebrow-size': 'var(--text-sm)',
     '--jp-display': 'var(--text-display)',
     '--jp-heading-size': 'var(--text-4xl)',
     '--jp-display-leading': 'var(--leading-none)',
@@ -369,6 +433,13 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-accent-mark': 'var(--jp-ember-text)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
+    // The CTA seam (`Codex-4avmh`). "Brand as TEXT" cannot also ship a filled
+    // brand pill, so the pay button becomes an outline whose LABEL is the
+    // brand. NOT `--jp-accent-fill`, which is `transparent` here.
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-accent-text)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
   },
   'accent:fill': {
     '--jp-accent-text': 'var(--jp-ember-text)',
@@ -381,9 +452,23 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   'accent:edge': {
     '--jp-accent-text': 'var(--jp-text)',
     '--jp-accent-fill': 'transparent',
-    '--jp-accent-mark': 'var(--jp-ember-text)',
-    '--jp-accent-edge': 'var(--jp-ember)',
+    // THE SECOND BRAND HUE. This is the one accent value that spends
+    // `--brand-secondary` rather than `--brand-color`; before it, the whole
+    // axis painted one colour (this fixture's primary and accent are the same
+    // hex) and the secondary reached only one invisible box-shadow.
+    '--jp-accent-mark': 'var(--jp-blood-text)',
+    '--jp-accent-edge': 'var(--jp-blood)',
     '--jp-accent-glow': 'none',
+    // The value's tell is a left-border STRIPE, so the CTA states it. Two
+    // extra properties relative to the other accent values — which is allowed,
+    // and is exactly why this spec is keyed per `axis:value` rather than
+    // asserting one shared property set.
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-heading)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
+    '--jp-cta-stripe': 'var(--jp-accent-mark)',
+    '--jp-cta-stripe-width': 'var(--border-width-toast)',
   },
   'accent:glow': {
     '--jp-accent-text': 'var(--jp-ember-text)',
@@ -396,11 +481,19 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
   },
   'accent:none': {
     '--jp-accent-text': 'var(--jp-heading)',
+    // STILL `--jp-ink-4`, and still the right call for the decorative plates
+    // eleven sections paint with it. It is NOT the right call for the pay
+    // button — ceiling 1.69 against its own surface — which is what the
+    // `--jp-cta-*` seam below exists to fix rather than by moving this.
     '--jp-accent-fill': 'var(--jp-ink-4)',
     '--jp-accent-on-fill': 'var(--jp-heading)',
     '--jp-accent-mark': 'var(--jp-heading)',
     '--jp-accent-edge': 'var(--jp-line)',
     '--jp-accent-glow': 'none',
+    '--jp-cta-fill': 'transparent',
+    '--jp-cta-fill-hover': 'var(--jp-ink-3)',
+    '--jp-cta-ink': 'var(--jp-heading)',
+    '--jp-cta-border': 'var(--jp-cta-outline)',
   },
 
   'motion:none': {
@@ -434,6 +527,13 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-reveal-ease': 'var(--ease-smooth)',
   },
 
+  // EVERY value with a media box now ships a real scrim (contract B5). The four
+  // `none`s were the hole: any composition putting text over media invented its
+  // own floor, and the token could not be one layer of a `background-image`
+  // list while it was a keyword. The shape is an opaque `--jp-ink` LEDGE in an
+  // absolute length — so the aspect cannot move it — then a percentage ramp to
+  // `transparent`. See the `media scrim` describe below for the measurement.
+  // `bleed` is the pinned exception and is UNCHANGED: Candlelit's value.
   'media:bleed': {
     '--jp-media-radius': '0px',
     '--jp-media-inset': '0px',
@@ -446,24 +546,35 @@ const AXIS_SPEC: Record<string, Record<string, string>> = {
     '--jp-media-radius': 'var(--radius-lg)',
     '--jp-media-inset': '0px',
     '--jp-media-aspect': '16 / 9',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) var(--space-12), transparent 46% )',
     '--jp-media-mask': 'none',
   },
   'media:mask': {
     '--jp-media-radius': 'var(--radius-xl)',
     '--jp-media-inset': '0px',
     '--jp-media-aspect': '4 / 5',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) var(--space-12), transparent 38% )',
     '--jp-media-mask':
       'inset( 0 round 48% 48% var(--radius-xl) var(--radius-xl) / 34% 34% var(--radius-xl) var(--radius-xl) )',
   },
+  // The ledge READS the mat instead of re-spelling it: the scrim covers the
+  // whole box while the image is pushed in by `--jp-media-inset`, so a
+  // `--space-12` ledge would land entirely on the mat and protect nothing on
+  // the print.
   'media:inset': {
     '--jp-media-radius': 'var(--radius-none)',
     '--jp-media-inset': 'var(--space-12)',
     '--jp-media-aspect': '3 / 2',
-    '--jp-media-scrim': 'none',
+    '--jp-media-scrim':
+      'linear-gradient( to top, var(--jp-ink) calc(var(--jp-media-inset) + var(--space-12)), transparent 34% )',
     '--jp-media-mask': 'none',
   },
+  // NO SCRIM, and it is the absence of a media box rather than an exemption:
+  // every consumer of `--jp-media-scrim` sits inside a box this value switches
+  // off. Pinned to `--jp-media-display: none` below so a sixth value cannot
+  // inherit the exception by omission.
   'media:none': { '--jp-media-display': 'none' },
 };
 
@@ -474,15 +585,131 @@ const ALL_AXIS_VALUES: { axis: SectionDesignAxis; value: string }[] =
   );
 
 describe('journey-design.css — the axis probe', () => {
-  it('covers all 39 axis values and nothing else', () => {
-    // 4 width + 4 density + 5 surface + 5 edge + 2 align + 4 type + 5 accent +
+  it('covers all 40 axis values and nothing else', () => {
+    // 4 width + 4 density + 5 surface + 5 edge + 3 align + 4 type + 5 accent +
     // 5 motion + 5 media. Research §2.1 says "38 CSS rules"; the enums it
     // defines in §2.2 sum to 39, so the doc's total is one short of its own
-    // table. 39 is the number.
-    expect(ALL_AXIS_VALUES).toHaveLength(39);
+    // table. It was 39 until `align: end` — contract B4's first asymmetric
+    // value, which the axis previously could not express at all (it shipped
+    // `start` and `center` only). 40 is the number.
+    expect(ALL_AXIS_VALUES).toHaveLength(40);
     expect(Object.keys(AXIS_SPEC).sort()).toEqual(
       ALL_AXIS_VALUES.map(({ axis, value }) => `${axis}:${value}`).sort()
     );
+  });
+
+  it('makes the full-bleed breakout a TOKEN, not a per-section invention (B4)', () => {
+    // Contract B4 asks for composition options "as axis-keyed options rather
+    // than per-section inventions". The breakout existed as an invention:
+    // `ProofSection` spelled `calc(var(--jp-sec-pad-inline) * -1)` inline at
+    // two sites, so any other section wanting an edge-to-edge rail had to
+    // rediscover the idiom — and could get the SIGN or the cancelling padding
+    // wrong with nothing to catch it.
+    expect(declarationsOf(DESIGN, '--jp-bleed-inline')).toEqual([
+      'calc(var(--jp-sec-pad-inline) * -1)',
+    ]);
+
+    // No section may re-spell it. This is the half that keeps it a vocabulary
+    // item: a future section copying the arithmetic reds here.
+    const respelt = SECTION_SOURCES.flatMap(({ file, css }) =>
+      stripComments(css)
+        .split('\n')
+        .filter((l) =>
+          /calc\(\s*var\(--jp-sec-pad-inline\)\s*\*\s*-1\s*\)/.test(l)
+        )
+        .map((l) => `${file}: ${squash(l)}`)
+    );
+    expect(
+      respelt,
+      'respelt the breakout instead of using --jp-bleed-inline'
+    ).toEqual([]);
+
+    // And it is actually CONSUMED — a token nothing reads is a write-only
+    // channel, which is the defect this file already documents elsewhere.
+    const readers = SECTION_SOURCES.filter(({ css }) =>
+      stripComments(css).includes('var(--jp-bleed-inline)')
+    );
+    expect(readers.length, '--jp-bleed-inline has no reader').toBeGreaterThan(
+      0
+    );
+
+    // AXIS-RESPONSIVE BY DERIVATION, which is why it needs no per-value rule:
+    // `surface: bare` zeroes the padding, so the breakout is 0px there —
+    // correctly inert, since a negative margin with no padding to escape would
+    // band against the next full-bleed section.
+    expect(
+      ruleFor("[data-jp-surface='bare']")?.declarations['--jp-sec-pad-inline']
+    ).toBe('0px');
+    // Guards the guard.
+    expect(SECTION_SOURCES).toHaveLength(11);
+  });
+
+  it('lets no MULTI-VALUE axis token reach a shorthand consumer (Codex-3kqqp)', () => {
+    // THE CLASS, and it has shipped to published pages twice: an axis token
+    // whose VALUE SHAPE is legal on its own but changes a shorthand's meaning
+    // when substituted into it. The CSS stays parseable, nothing warns, and the
+    // declaration quietly does something else.
+    //
+    // `align: end` is the first value to give any axis token a two-value form
+    // (`--jp-measure-margin: auto 0`). Of that token's 22 consumers, 21 were
+    // already `margin-inline: var(…)` — where `auto 0` means exactly
+    // "start auto, end 0" — and ONE was `margin: 0 var(…)` in `MapSection`,
+    // where it expands to `margin: 0 auto 0`: top 0, INLINE AUTO, bottom 0.
+    // Centred. The one asymmetric value would have been the only value it
+    // broke, and only in one section.
+    //
+    // So: for every axis token that any value declares with a space-separated
+    // value, no consumer may substitute it into a shorthand property.
+    const MULTI = new Set<string>();
+    for (const spec of Object.values(AXIS_SPEC))
+      for (const [prop, value] of Object.entries(spec)) {
+        // A bare space at bracket depth zero = more than one component value.
+        let depth = 0;
+        for (const ch of value) {
+          if (ch === '(') depth += 1;
+          else if (ch === ')') depth -= 1;
+          else if (ch === ' ' && depth === 0) {
+            MULTI.add(prop);
+            break;
+          }
+        }
+      }
+    // Non-vacuous: this must actually be watching something.
+    expect(MULTI.has('--jp-measure-margin'), 'the two-value token').toBe(true);
+
+    // THE HAZARD IS PARTIAL SUBSTITUTION, NOT SHORTHANDS AS SUCH. The first
+    // version of this gate flagged 47 sites, all of them
+    // `background: var(--jp-sec-bg)` — contract B1's DELIBERATE pattern, where
+    // the token IS the shorthand's entire value and carries its gradient layers
+    // on purpose. That is safe: substituting a whole value cannot change the
+    // component count. The defect is a token used as ONE COMPONENT beside
+    // others (`margin: 0 var(--x)`), where a second component silently
+    // re-interprets the shorthand. The implausible count is what caught it.
+    const SHORTHAND =
+      /(?:^|[;{\s])(margin|padding|inset|border|border-width|border-color|background|font|gap|transition|animation|box-shadow)\s*:\s*([^;}]*)/g;
+
+    const offenders: string[] = [];
+    for (const prop of MULTI)
+      for (const { file, css } of SECTION_SOURCES.concat([
+        { file: 'journey-sections-shared.css', css: SHARED },
+        { file: 'journey-design.css', css: DESIGN },
+      ])) {
+        for (const m of stripComments(css).matchAll(SHORTHAND)) {
+          const value = squash(m[2]);
+          if (!value.includes(`var(${prop}`)) continue;
+          // Safe iff the token is the WHOLE value — optionally with its own
+          // fallback, which lives inside the parens and cannot leak out.
+          if (new RegExp(`^var\\(\\s*${prop}\\s*(?:,[^]*)?\\)$`).test(value))
+            continue;
+          offenders.push(`${file}: ${m[1]}: ${value}`);
+        }
+      }
+    expect(
+      offenders,
+      'multi-value axis token as ONE COMPONENT of a shorthand'
+    ).toEqual([]);
+    // Guards the guard: an empty source set would pass trivially.
+    expect(SECTION_SOURCES).toHaveLength(11);
   });
 
   it.each(
@@ -594,25 +821,90 @@ describe('journey-design.css — the accessibility floors that are structural', 
     ).not.toBe('var(--jp-ember)');
   });
 
-  it('keeps the CTA a filled control even at accent: none', () => {
+  it('keeps the CTA a DISTINGUISHABLE control even at accent: none', () => {
     // The luxury-minimal signature failure: remove the last colour cue and a
     // price-bearing CTA becomes indistinguishable from body text.
+    //
+    // THE INTENT WAS RIGHT AND THE ASSERTION WAS NOT (`Codex-4avmh`). This
+    // guarded `--jp-accent-fill`, which NO CTA CODE PATH HAS EVER READ —
+    // `CtaLink` spent `--color-brand-primary`, as this file's own section 7
+    // states ("neither has anything else in the repo"). So it was green before
+    // the seam existed, is green after, and would have stayed green if the pay
+    // button had lost its plate entirely.
+    //
+    // Worse, the token it pinned is the one that CANNOT deliver the intent:
+    // `--jp-ink-4` is 18% off its own surface — measured 1.69 light / 1.53
+    // dark, and a CEILING of 1.69 over the whole pickable grid, against a 3.0
+    // non-text floor. A test enforcing the defect it was written to prevent.
+    //
+    // Both halves are now asserted against the token that actually governs
+    // each: `--jp-accent-fill` for the decorative plates eleven sections paint
+    // with it, and the `--jp-cta-*` seam for the pay button.
     const none = ruleFor("[data-jp-accent='none']")?.declarations ?? {};
     expect(none['--jp-accent-fill']).toBe('var(--jp-ink-4)');
-    expect(none['--jp-accent-fill']).not.toBe('transparent');
+
+    // The CTA carries no plate here, so it MUST carry a boundary.
+    expect(none['--jp-cta-fill']).toBe('transparent');
+    expect(none['--jp-cta-border']).toBe('var(--jp-cta-outline)');
+
+    // And "distinguishable" as arithmetic rather than as a token name: what it
+    // now carries clears the floor at the live poles, and what this test used
+    // to pin cannot clear it at either.
+    for (const bg of ['#fafafa', '#171717']) {
+      const l = ladderFrom(hex(bg), hex(bg));
+      expect(
+        ratio(mix(l.heading, l.ink, 0.8), l.ink),
+        `outline on ${bg}`
+      ).toBeGreaterThan(3.0);
+      expect(ratio(l.ink4, l.ink), `--jp-ink-4 on ${bg}`).toBeLessThan(3.0);
+    }
   });
 
-  it('ships a scrim on media: bleed and on no other media value', () => {
-    // Aspect and scrim are coupled: `bleed`'s 21:9 and its 62% stop are tuned
-    // together, and any composition placing text over media must use `bleed`.
+  it('ships a real scrim on every media value that HAS a media box', () => {
+    // THE PRINCIPLE, restated (contract B5). The assertion this replaces was
+    // `scrim === 'none'` on four of five values, which is the wrong half of its
+    // own correct idea: the coupling it was protecting is real — `bleed`'s 21:9
+    // and its 62% stop are tuned together — but "only `bleed` may carry text"
+    // was the SYMPTOM of four values having no floor, not the rule. Each value
+    // now carries its own, measured in the `media scrim` describe below.
+    //
+    // RESOLVE THE var() CHAIN, never compare to the literal `none`. A custom
+    // property is an indirection, so `--jp-media-scrim: var(--x)` where `--x`
+    // is `none` would sail past a `!== 'none'` check.
+    const scrimless: string[] = [];
     for (const value of SECTION_DESIGN_VALUES.media) {
-      const scrim =
-        ruleFor(`[data-jp-media='${value}']`)?.declarations[
-          '--jp-media-scrim'
-        ] ?? 'none';
-      if (value === 'bleed') expect(scrim).toContain('linear-gradient');
-      else expect(scrim).toBe('none');
+      const decls = ruleFor(`[data-jp-media='${value}']`)?.declarations ?? {};
+      const scrim = resolveVars(decls['--jp-media-scrim'] ?? 'none', decls);
+      if (scrim === 'none' || scrim === '') {
+        scrimless.push(value);
+        continue;
+      }
+      expect(scrim, `media: ${value}`).toMatch(/^linear-gradient\(/);
+      // Both ends explicit: an opaque `--jp-ink` end is what makes the floor
+      // measurable, and a `transparent` end is what keeps it a scrim rather
+      // than a fill.
+      expect(scrim, `media: ${value} opaque end`).toContain('var(--jp-ink)');
+      expect(scrim, `media: ${value} open end`).toContain('transparent');
     }
+
+    // THE ONE EXCEPTION, pinned to the reason rather than to the name: `none`
+    // is the value that emits `--jp-media-display: none`, and every consumer of
+    // the scrim token sits inside a box that switches off — `.hero__media`,
+    // `.guide__plate`, and the figures `ReelSection` / `IntroVideoSection` gate
+    // in markup. A scrim there is a write nothing can read. Asserting the pair
+    // rather than the string means a sixth media value cannot inherit the
+    // exemption by forgetting a scrim.
+    const boxless = SECTION_DESIGN_VALUES.media.filter(
+      (value) =>
+        ruleFor(`[data-jp-media='${value}']`)?.declarations[
+          '--jp-media-display'
+        ] === 'none'
+    );
+    expect(scrimless).toEqual(boxless);
+    // Arithmetic, because a ratio without its magnitude says nothing: 5 values,
+    // 4 media boxes, 4 scrims, 1 value with no box.
+    expect(SECTION_DESIGN_VALUES.media).toHaveLength(5);
+    expect(scrimless).toHaveLength(1);
   });
 
   it('neutralises the reveal DISTANCE under reduced motion, above the axis rules', () => {
@@ -1130,6 +1422,544 @@ describe('the model matches the BROWSER on the surface axis', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 4b. THE MEDIA SCRIM — a measured floor at every media value (contract B5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * `fg` at `alpha` over `bg`, blended in GAMMA-ENCODED sRGB — the space the
+ * browser actually composites in, and the space the `--jp-sec-bg` figures above
+ * were read back from.
+ *
+ * THE SPACE IS THE WHOLE ANSWER, and the wrong one looks entirely plausible.
+ * 50% white over black is sRGB 127.5, relative luminance 0.2140, which is
+ * 5.28:1 against black. Blending the LINEAR values instead gives 0.5 and
+ * 11.00:1 — double, and still a number you would publish. The calibration test
+ * below asserts 5.28 and prints the 11.00 control, so the instrument cannot be
+ * quietly wrong about which space it is in.
+ *
+ * `mix` above is NOT this: it models `color-mix(in oklab, …)`, an opaque blend
+ * of two declared colours. This models one translucent layer over a backdrop.
+ */
+const linToSrgb = (c: number): number => {
+  const k = Math.min(1, Math.max(0, c));
+  return k <= 0.0031308 ? 12.92 * k : 1.055 * k ** (1 / 2.4) - 0.055;
+};
+const over = (fg: Oklab, bg: Oklab, alpha: number): Oklab => {
+  const f = oklabToLin(fg).map(linToSrgb);
+  const b = oklabToLin(bg).map(linToSrgb);
+  // Spelled as a tuple rather than `.map(…) as LinRgb`: a cast here would let a
+  // two- or four-element result through, and this is the one function every
+  // number below depends on.
+  const at = (i: number) => srgbToLin(f[i] * alpha + b[i] * (1 - alpha));
+  return linToOklab([at(0), at(1), at(2)]);
+};
+
+/** `--space-N` in px at a 16px root and `--brand-density-scale: 1`. */
+const spacePx = (token: string): number => {
+  const decl = declarationsOf(SPACING, token)[0];
+  const m = /^calc\(var\(--space-unit\) \* ([\d.]+)\)$/.exec(decl ?? '');
+  // Loudly, not leniently: a parser that returns 0 for something it does not
+  // understand is an instrument that reports a comfortable number forever.
+  if (!m) throw new Error(`cannot resolve ${token} from spacing.css: ${decl}`);
+  return Number(m[1]) * 4;
+};
+
+/** A gradient stop position, as `px + pct * boxHeight`. */
+interface Pos {
+  px: number;
+  pct: number;
+}
+const posAt = (p: Pos, boxPx: number): number => p.px + p.pct * boxPx;
+
+/** Split on commas at bracket depth zero. */
+const splitTopLevel = (value: string): string[] => {
+  const out: string[] = [];
+  let depth = 0;
+  let buf = '';
+  for (const ch of value) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      out.push(buf);
+      buf = '';
+    } else buf += ch;
+  }
+  out.push(buf);
+  return out;
+};
+
+const parsePos = (raw: string, scope: Record<string, string>): Pos => {
+  const v = resolveVars(raw, scope);
+  const calc = /^calc\((.+)\)$/.exec(v);
+  if (calc)
+    return calc[1]
+      .split('+')
+      .map((t) => parsePos(t.trim(), scope))
+      .reduce((a, b) => ({ px: a.px + b.px, pct: a.pct + b.pct }), {
+        px: 0,
+        pct: 0,
+      });
+  const pct = /^([\d.]+)%$/.exec(v);
+  if (pct) return { px: 0, pct: Number(pct[1]) / 100 };
+  const space = /^var\((--space-[\d-]+)\)$/.exec(v);
+  if (space) return { px: spacePx(space[1]), pct: 0 };
+  const px = /^([\d.]+)px$/.exec(v);
+  if (px) return { px: Number(px[1]), pct: 0 };
+  throw new Error(`unsupported gradient stop position: ${raw} → ${v}`);
+};
+
+interface ScrimStop {
+  alpha: number;
+  pos: Pos | null;
+}
+
+/**
+ * A `--jp-media-scrim` value, as alpha-vs-height.
+ *
+ * `transparent` is `rgba(0,0,0,0)` and CSS interpolates gradients PREMULTIPLIED,
+ * so `var(--jp-ink) → transparent` holds one colour and ramps only its alpha
+ * from 1 to 0. That is what lets a two-stop scrim be modelled as an alpha
+ * profile over `--jp-ink` rather than as a colour ramp — and why the naive
+ * un-premultiplied reading (a fade through mid-grey) would be wrong.
+ *
+ * THROWS on anything it does not recognise. A scrim rewritten in a shape this
+ * cannot read must fail the suite rather than be scored as safe.
+ */
+const parseScrim = (
+  value: string,
+  scope: Record<string, string>
+): ScrimStop[] => {
+  const m = /^linear-gradient\(\s*to top,\s*(.+)\)$/.exec(squash(value));
+  if (!m) throw new Error(`not a bottom-anchored scrim: ${value}`);
+  return splitTopLevel(m[1]).map((raw) => {
+    const t = raw.trim();
+    const colour = /^(var\(--jp-ink\)|transparent)/.exec(t);
+    if (!colour) throw new Error(`unsupported scrim colour: ${t}`);
+    const rest = t.slice(colour[0].length).trim();
+    return {
+      alpha: colour[0] === 'transparent' ? 0 : 1,
+      pos: rest ? parsePos(rest, scope) : null,
+    };
+  });
+};
+
+/** Alpha `yPx` above the box's BOTTOM edge, in a box `boxPx` tall. */
+const alphaAt = (stops: ScrimStop[], yPx: number, boxPx: number): number => {
+  let prev = 0;
+  const pts = stops.map((s, i) => {
+    const raw = s.pos ? posAt(s.pos, boxPx) : i === 0 ? 0 : boxPx;
+    // CSS clamps a stop up to the largest preceding position. That is exactly
+    // what makes a percentage ramp-end above an absolute ledge SAFE on a short
+    // box: the ramp collapses into a hard edge instead of cutting into the
+    // ledge.
+    const at = Math.max(prev, raw);
+    prev = at;
+    return { alpha: s.alpha, at };
+  });
+  if (yPx <= pts[0].at) return pts[0].alpha;
+  for (let i = 1; i < pts.length; i++) {
+    if (yPx <= pts[i].at) {
+      const span = pts[i].at - pts[i - 1].at;
+      if (span === 0) return pts[i].alpha;
+      const t = (yPx - pts[i - 1].at) / span;
+      return pts[i - 1].alpha + t * (pts[i].alpha - pts[i - 1].alpha);
+    }
+  }
+  return pts[pts.length - 1].alpha;
+};
+
+/** The lowest alpha at which `fg` still clears `floor` over `underlay`. */
+const alphaFloor = (
+  fg: Oklab,
+  ink: Oklab,
+  underlay: Oklab,
+  floor: number
+): number => {
+  if (ratio(fg, over(ink, underlay, 0)) >= floor) return 0;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 40; i++) {
+    const m = (lo + hi) / 2;
+    if (ratio(fg, over(ink, underlay, m)) >= floor) hi = m;
+    else lo = m;
+  }
+  return hi;
+};
+
+const SCRIM_POLES = { light: '#F6EFE6', dark: '#200000' } as const;
+const SCRIM_EMBER = '#552e8e';
+
+/** The section's own ink at each `surface` value — the `sweep()` mapping. */
+const inkForSurface = (poleA: Oklab, surface: string): Oklab => {
+  const poleB = autoContrast(poleA, 0.62, 0.96, 0.25);
+  const map: Record<string, Oklab> = {
+    bare: poleA,
+    tint: mix(poleA, poleB, 0.94),
+    panel: mix(poleA, poleB, 0.88),
+    invert: poleB,
+    media: poleA,
+  };
+  return map[surface];
+};
+
+interface ParsedScrim {
+  value: string;
+  stops: ScrimStop[];
+  decls: Record<string, string>;
+}
+
+/**
+ * Media values whose rule declares a scrim, with it parsed.
+ *
+ * LAZY ON PURPOSE. `parseScrim` throws on a shape it cannot model, which is the
+ * right behaviour — but at module scope a throw takes the whole FILE down and
+ * vitest reports `0 tests`, which names no gate and hides the 142 that still
+ * pass. Falsified: reverting one value to the keyword `none` produced exactly
+ * that, so the call moved inside the tests.
+ */
+let scrimCache: ParsedScrim[] | null = null;
+const scrims = (): ParsedScrim[] => {
+  if (scrimCache) return scrimCache;
+  scrimCache = SECTION_DESIGN_VALUES.media.flatMap((value) => {
+    const decls = ruleFor(`[data-jp-media='${value}']`)?.declarations ?? {};
+    const raw = decls['--jp-media-scrim'];
+    if (!raw) return [];
+    return [{ value: String(value), stops: parseScrim(raw, decls), decls }];
+  });
+  return scrimCache;
+};
+
+describe('the media scrim — one instrument, calibrated first', () => {
+  it('reproduces known pairs, and DISCRIMINATES the blend space', () => {
+    const white = hex('#ffffff');
+    const black = hex('#000000');
+    // The pair a previous session's regex scored as 1.01:1.
+    expect(ratio(white, black)).toBeCloseTo(21, 2);
+    expect(ratio(black, white)).toBeCloseTo(21, 2);
+    // alpha 1 IS the foreground, alpha 0 IS the backdrop — the round trip
+    // through sRGB must not move either end.
+    expect(ratio(over(white, black, 1), black)).toBeCloseTo(21, 2);
+    expect(ratio(over(white, black, 0), black)).toBeCloseTo(1, 3);
+    // THE DISCRIMINATING PROBE. sRGB blend → 5.28; linear blend → 11.00. A
+    // uniform or plausible-looking answer across the rungs would be the
+    // instrument talking, so this pins the one number that separates them.
+    expect(ratio(over(white, black, 0.5), black)).toBeCloseTo(5.28, 1);
+    const linearBlend = (relLum([0.5, 0.5, 0.5]) + 0.05) / 0.05;
+    expect(linearBlend).toBeCloseTo(11.0, 1);
+  });
+
+  it('leaves the browser-locked ink rows untouched at alpha 1', () => {
+    // The control: if compositing at alpha 1 moved these, every number below
+    // would be measuring a page that does not exist.
+    for (const [pole, bg, heading] of [
+      ['light', SCRIM_POLES.light, 18.38],
+      ['dark', SCRIM_POLES.dark, 17.51],
+    ] as [string, string, number][]) {
+      const l = ladderFrom(hex(bg), hex(SCRIM_EMBER));
+      expect(
+        ratio(l.heading, over(l.ink, hex('#ff00ff'), 1)),
+        pole
+      ).toBeCloseTo(heading, 1);
+    }
+  });
+
+  it('reads every shipped scrim, and refuses a shape it cannot model', () => {
+    // Guards the guard. 4 of the 5 media values ship a scrim; `none` has no
+    // media box (see the axis-rule test above), so 4 is the whole set.
+    expect(scrims().map((s) => s.value)).toEqual([
+      'bleed',
+      'frame',
+      'mask',
+      'inset',
+    ]);
+    for (const { value, stops } of scrims()) {
+      expect(stops.length, value).toBeGreaterThanOrEqual(2);
+      expect(stops[0].alpha, `${value} bottom edge`).toBe(1);
+      expect(stops[stops.length - 1].alpha, `${value} top end`).toBe(0);
+    }
+    // A radial, a `to bottom`, an unknown colour or an unresolvable stop must
+    // THROW rather than score 0 and look safe.
+    expect(() =>
+      parseScrim('radial-gradient(var(--jp-ink), transparent)', {})
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to bottom, var(--jp-ink), transparent 62%)',
+        {}
+      )
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to top, var(--jp-ember), transparent 62%)',
+        {}
+      )
+    ).toThrow();
+    expect(() =>
+      parseScrim(
+        'linear-gradient(to top, var(--jp-ink) 3vh, transparent 62%)',
+        {}
+      )
+    ).toThrow();
+  });
+});
+
+describe('the media scrim — the measured floor (contract B5)', () => {
+  /**
+   * THE LEDGE IS THE GUARANTEE, and it is safe BY CONSTRUCTION rather than by
+   * sampling. Over an opaque stop the backdrop is exactly `--jp-ink` — the
+   * section's own surface colour — so the ratio is the row
+   * `04-contrast-baseline.md` already locked, at every `surface` value and both
+   * poles, whatever the photograph underneath. A flat-background contrast sweep
+   * cannot see a gradient, so a scrim that needed sampling to be safe would be
+   * a hole in that document.
+   */
+  it('gives every scrim an opaque LEDGE whose contrast is an already-locked row', () => {
+    const rows: string[] = [];
+    let worst = Infinity;
+    let worstAt = '';
+    for (const [pole, bg] of Object.entries(SCRIM_POLES)) {
+      for (const surface of SECTION_DESIGN_VALUES.surface) {
+        const l = ladderFrom(
+          inkForSurface(hex(bg), String(surface)),
+          hex(SCRIM_EMBER)
+        );
+        for (const { value, stops } of scrims()) {
+          // Every scrim's bottom edge is fully opaque, at every box height.
+          for (const boxPx of [120, 405, 1800]) {
+            expect(alphaAt(stops, 0, boxPx), `${value} @${boxPx}`).toBe(1);
+          }
+          // `--jp-faint` is the lowest rung any section paints, so it is the
+          // binding one; the heading rows are 13.09 and up.
+          for (const rung of ['heading', 'text', 'dim', 'faint'] as const) {
+            const r = ratio(l[rung], l.ink);
+            if (r < worst) {
+              worst = r;
+              worstAt = `${pole}/${surface}/${rung}`;
+            }
+            expect(
+              r,
+              `${pole} ${surface} ${value} ${rung}`
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+        rows.push(`${pole} ${surface} ${ratio(l.faint, l.ink).toFixed(2)}`);
+      }
+    }
+    // The published worst cell, so a future palette change that erodes it fails
+    // here instead of drifting: `--jp-faint` on `surface: invert` in light.
+    expect(worst, `worst ledge cell (${worstAt})`).toBeCloseTo(4.85, 1);
+    expect(worstAt).toBe('light/invert/faint');
+    expect(rows).toHaveLength(10);
+  });
+
+  /**
+   * ABOVE THE LEDGE THE GUARANTEE DEGRADES, and this is the bound on the claim.
+   * The alpha falls linearly, so the backdrop becomes part photograph, and the
+   * worst underlay is whichever sRGB extreme sits closest to the text.
+   */
+  it('measures how far up the ramp each rung holds its floor, at BOTH poles', () => {
+    const PUBLISHED: Record<string, Record<string, number>> = {
+      // rung → pole → alpha at which the floor is crossed. Quoted in
+      // `journey-design.css`'s media block as (1 - alpha) of the ramp.
+      heading: { light: 0.452, dark: 0.511 }, // >= 24px, so a 3.0 floor
+      text: { light: 0.701, dark: 0.76 },
+      faint: { light: 0.951, dark: 0.945 },
+    };
+    for (const [rung, poles] of Object.entries(PUBLISHED)) {
+      const floor = rung === 'heading' ? 3.0 : 4.5;
+      for (const [pole, want] of Object.entries(poles)) {
+        let worst = 0;
+        for (const surface of SECTION_DESIGN_VALUES.surface) {
+          const l = ladderFrom(
+            inkForSurface(
+              hex(SCRIM_POLES[pole as 'light' | 'dark']),
+              String(surface)
+            ),
+            hex(SCRIM_EMBER)
+          );
+          for (const u of [hex('#ffffff'), hex('#000000')]) {
+            worst = Math.max(
+              worst,
+              alphaFloor(
+                l[rung as 'heading' | 'text' | 'faint'],
+                l.ink,
+                u,
+                floor
+              )
+            );
+          }
+        }
+        expect(worst, `${rung} ${pole}`).toBeCloseTo(want, 2);
+      }
+    }
+    // AND THE CONSEQUENCE, stated as a rule rather than a number: quiet text
+    // over media belongs ON the ledge. 0.95 is 5% of the ramp.
+    expect(PUBLISHED.faint.light).toBeGreaterThan(0.9);
+    expect(PUBLISHED.faint.dark).toBeGreaterThan(0.9);
+  });
+
+  it('is bounded by the two sRGB extremes — a brand/photo sweep finds nothing more', () => {
+    // WHY THE CHEAP BOUND IS THE EXACT ONE. Relative luminance is monotone in
+    // every sRGB channel, so over the whole cube the reachable luminance of
+    // `blend(ink, U, alpha)` is bounded by U = white and U = black. Those two
+    // therefore bound EVERY photograph and every brand-derived atmosphere
+    // exactly — measured: a 140 608-colour stride-5 sweep of the pickable brand
+    // cube (the `BRAND_GRID` instrument) returns alpha* 0.452 / 0.701 / 0.951
+    // light and 0.511 / 0.760 / 0.945 dark, identical to the two extremes, in
+    // 111s. This asserts the ENVELOPE property over a coarse grid instead, so
+    // the claim is checked every run rather than trusted from a comment.
+    const l = ladderFrom(hex(SCRIM_POLES.light), hex(SCRIM_EMBER));
+    const white = hex('#ffffff');
+    const black = hex('#000000');
+    let checked = 0;
+    for (let r = 0; r < 256; r += 51)
+      for (let g = 0; g < 256; g += 51)
+        for (let b = 0; b < 256; b += 51) {
+          const u = hex(
+            `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`
+          );
+          for (const alpha of [0.2, 0.5, 0.8]) {
+            const bound = Math.min(
+              ratio(l.text, over(l.ink, white, alpha)),
+              ratio(l.text, over(l.ink, black, alpha))
+            );
+            expect(
+              ratio(l.text, over(l.ink, u, alpha)) + 1e-6,
+              `#${r},${g},${b} @${alpha}`
+            ).toBeGreaterThanOrEqual(bound);
+            checked += 1;
+          }
+        }
+    // Non-vacuous: 6^3 underlays x 3 alphas.
+    expect(checked).toBe(648);
+  });
+
+  /**
+   * THE ASPECT ↔ SCRIM COUPLING, dissolved for the three new values and PINNED
+   * for `bleed`. A percentage stop moves in pixels when `aspect-ratio` changes,
+   * which is how text that sat in the opaque zone silently climbs out of it.
+   */
+  it('measures the ledge in a LENGTH, so no aspect can move it', () => {
+    const SHORT = 120;
+    const TALL = 1800;
+    for (const { value, stops, decls } of scrims()) {
+      const ledge = stops[0].pos;
+      if (value === 'bleed') {
+        // THE PINNED EXCEPTION. `bleed` is Candlelit's value, its 21:9 aspect
+        // and 62% stop are tuned together, and two sections re-read this token
+        // on a TEXT BLOCK's own box so the gradient grows with the text — a
+        // ledge in absolute length would become a hard-edged bar on a box that
+        // short. Its floor comes from that re-read plus `full-bleed`'s own
+        // composition scrim, not from a ledge. Asserted as "has no ledge" so
+        // the exception is visible rather than implied.
+        expect(ledge, 'bleed ledge').toBeNull();
+        continue;
+      }
+      expect(ledge, `${value} ledge`).not.toBeNull();
+      if (!ledge) continue;
+      // A LENGTH: identical px at a 120px box and an 1800px one.
+      expect(posAt(ledge, SHORT), `${value} ledge @${SHORT}`).toBe(
+        posAt(ledge, TALL)
+      );
+      expect(ledge.pct, `${value} ledge is aspect-free`).toBe(0);
+      // AND IT CLEARS THE MAT. The scrim covers the whole box (`inset: 0` at
+      // every consumer) while the image is pushed in by `--jp-media-inset`, so
+      // at `media: inset` the bottom 48px of the box is MAT, not photograph: a
+      // bare `--space-12` ledge there would land entirely on the mat and
+      // protect nothing on the print. The floor is therefore the mat PLUS one
+      // caption row — 48px, which is a 24px line at the largest
+      // `--jp-body-size` rung plus its `--space-4` padding, measured at 47px.
+      const matPx = posAt(
+        parsePos(decls['--jp-media-inset'] ?? '0px', {}),
+        TALL
+      );
+      expect(
+        posAt(ledge, TALL) - matPx,
+        `${value} ledge above its ${matPx}px mat`
+      ).toBeGreaterThanOrEqual(48);
+      // And the whole ledge is opaque, at every box height.
+      for (const boxPx of [SHORT, 405, TALL]) {
+        expect(
+          alphaAt(stops, posAt(ledge, boxPx), boxPx),
+          `${value} top of ledge @${boxPx}`
+        ).toBe(1);
+      }
+    }
+    // DISCRIMINATING: `bleed`'s pure-percentage ramp really does move with the
+    // box, which is the property the other three no longer have.
+    const bleed = scrims().find((s) => s.value === 'bleed');
+    if (!bleed) throw new Error('bleed scrim missing');
+    expect(alphaAt(bleed.stops, 40, SHORT)).toBeLessThan(
+      alphaAt(bleed.stops, 40, TALL)
+    );
+  });
+
+  it('clamps a short box in the SAFE direction — a hard edge, never a thinner ledge', () => {
+    // A percentage ramp-end below an absolute ledge is the one case where the
+    // two spellings collide. CSS moves the later stop UP to the earlier one, so
+    // the scrim becomes fully opaque to the ledge and transparent above it —
+    // more protection, not less. Checked at a box so short that every new
+    // value's ramp-end falls under its ledge.
+    for (const { value, stops } of scrims()) {
+      if (value === 'bleed') continue;
+      const ledgePx = posAt(stops[0].pos ?? { px: 0, pct: 0 }, 100);
+      expect(alphaAt(stops, ledgePx, 100), `${value} ledge @100`).toBe(1);
+      expect(alphaAt(stops, ledgePx - 1, 100), `${value} inside @100`).toBe(1);
+      expect(alphaAt(stops, ledgePx + 1, 100), `${value} above @100`).toBe(0);
+    }
+  });
+
+  it('cannot move Candlelit — media: bleed and surface: media are byte-identical', () => {
+    // VERIFIED, NOT ASSERTED (contract: "what must NOT move"). Candlelit is
+    // `media: bleed` + `surface: media`, and this work changed the `media`
+    // axis's DEFAULT as well as three of its values. Two mechanisms keep it
+    // out of Candlelit and both are checked: `bleed` declares its own scrim, so
+    // the `:where(.jp-sec)` default (specificity 0) is shadowed; and neither of
+    // the two rules' declaration sets moved at all.
+    expect(ruleFor("[data-jp-media='bleed']")?.declarations).toEqual({
+      '--jp-media-radius': '0px',
+      '--jp-media-inset': '0px',
+      '--jp-media-aspect': '21 / 9',
+      '--jp-media-scrim':
+        'linear-gradient(to top, var(--jp-ink), transparent 62%)',
+      '--jp-media-mask': 'none',
+    });
+    expect(ruleFor("[data-jp-surface='media']")?.declarations).toEqual({
+      '--jp-sec-bg': 'transparent',
+      '--jp-sec-atmos': '1',
+    });
+    // The shadowing half: the default differs from `bleed`'s, so if `bleed`
+    // ever stopped declaring its own the change would be VISIBLE here.
+    const fallback =
+      ruleFor(':where(.jp-sec)')?.declarations['--jp-media-scrim'];
+    expect(fallback).not.toBe(
+      'linear-gradient(to top, var(--jp-ink), transparent 62%)'
+    );
+    expect(
+      ruleFor("[data-jp-media='bleed']")?.declarations['--jp-media-scrim']
+    ).toBeDefined();
+  });
+
+  it('measures bleed for the record, without touching it', () => {
+    // `bleed`'s guarantee is a percentage ramp, so it is stated as a fraction
+    // of the box: body text clears AA over the worst-case underlay for the
+    // bottom 28.8% — 178px of the 617px box a 1440px-wide 21:9 band makes.
+    const bleed = scrims().find((s) => s.value === 'bleed');
+    if (!bleed) throw new Error('bleed scrim missing');
+    const boxPx = 1440 / (21 / 9);
+    const l = ladderFrom(hex(SCRIM_POLES.light), hex(SCRIM_EMBER));
+    const alphaStar = alphaFloor(l.text, l.ink, hex('#000000'), 4.5);
+    let top = 0;
+    while (top < boxPx && alphaAt(bleed.stops, top + 1, boxPx) >= alphaStar) {
+      top += 1;
+    }
+    expect(boxPx).toBeCloseTo(617, 0);
+    expect(top / boxPx).toBeCloseTo(0.288, 2);
+    expect(top).toBeCloseTo(178, -1);
+  });
+});
+
 describe('surface: invert — the two-pole refactor (research §2.4)', () => {
   it('declares both poles from the ONE input, so neither reads what invert redefines', () => {
     const poleA = declarationsOf(PALETTE, '--jp-pole-a');
@@ -1621,21 +2451,24 @@ const KNOWN_VIOLATIONS: {
   token: string;
   bead: string;
 }[] = [
-  {
-    // `background-image: var(--jp-media-scrim), linear-gradient(…)`. The scrim
-    // is a real gradient at `media: bleed` — which is Candlelit — so this
-    // WORKS on every published page today. At the other four media values the
-    // token is `none`, the whole list goes invalid, and the second gradient
-    // disappears along with it. Not fixed here because the honest fixes are
-    // either restructuring the layers or making the axis token list-safe
-    // (a transparent gradient instead of `none`), and the latter changes the
-    // `media` axis's pinned semantics — a design-system decision, not a
-    // drive-by.
-    file: 'HeroSection.svelte',
-    prop: 'background-image',
-    token: '--jp-media-scrim',
-    bead: 'Codex-3kqqp',
-  },
+  // EMPTIED by contract B5, and the entry is quoted here because the fix is the
+  // one its own reason named. It read:
+  //
+  //   HeroSection.svelte — `background-image: var(--jp-media-scrim),
+  //   linear-gradient(…)`. The scrim is a real gradient at `media: bleed`, so
+  //   this WORKS on every published page today. At the other four media values
+  //   the token is `none`, the whole list goes invalid, and the second gradient
+  //   disappears along with it. Not fixed here because the honest fixes are
+  //   either restructuring the layers or making the axis token list-safe (a
+  //   transparent gradient instead of `none`), and the latter changes the
+  //   `media` axis's pinned semantics — a design-system decision, not a
+  //   drive-by.  (Codex-3kqqp)
+  //
+  // B5 IS that decision: every media value with a box now ships a real
+  // gradient, so `--jp-media-scrim` is no longer keyword-valued and the hero's
+  // list is valid at every value. The declaration was not touched — the token
+  // it composes was. The list is asserted EMPTY below, so if the scrim ever
+  // goes back to a keyword the hero's composed layer fails loudly.
 ];
 
 const isKnown = (d: Declaration, token: string): boolean =>
@@ -1649,7 +2482,12 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     // vacuously and the whole file stops protecting anything.
     expect(KEYWORD_VALUED_TOKENS.length).toBeGreaterThan(0);
     expect(KEYWORD_VALUED_TOKENS).toContain('--jp-edge-shadow');
-    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-media-scrim');
+    // `--jp-media-mask` replaces `--jp-media-scrim` as the media family's
+    // keyword-valued member: the scrim is a real gradient at every value that
+    // declares it (contract B5), so it LEFT this set — which is the point, and
+    // is asserted rather than left to be noticed.
+    expect(KEYWORD_VALUED_TOKENS).toContain('--jp-media-mask');
+    expect(KEYWORD_VALUED_TOKENS).not.toContain('--jp-media-scrim');
     expect(ALL_DECLARATIONS.length).toBeGreaterThan(200);
   });
 
@@ -1689,10 +2527,11 @@ describe('axis tokens that can resolve to a keyword or a unitless zero', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps the known-violation list from growing silently', () => {
-    // One entry, and it is the pre-existing HeroSection background-image list.
+  it('keeps the known-violation list EMPTY', () => {
+    // It was one entry — the HeroSection `background-image` list, fixed by
+    // contract B5 making `--jp-media-scrim` a real gradient at every value.
     // If you are adding to this, fix the declaration instead.
-    expect(KNOWN_VIOLATIONS).toHaveLength(1);
+    expect(KNOWN_VIOLATIONS).toHaveLength(0);
   });
 });
 
@@ -1743,14 +2582,221 @@ describe('the primary CTA label on the brand fill (Codex-kdsuo)', () => {
     return css.slice(open + 1, close);
   };
 
-  it('still spends exactly --color-brand-primary and --color-text-on-brand', () => {
+  /**
+   * Whitespace-INSENSITIVE, unlike `squash`: these values nest `var()` inside
+   * `var()` and a formatter is free to break them across lines, which would
+   * leave `squash` reporting `var( --jp-cta-stripe, … )`. The assertion is
+   * about the token chain, not the line breaks.
+   */
+  const tight = (value: string): string => value.replace(/\s+/g, '');
+
+  it('routes the CTA through --jp-cta-*, org-brand pair as the FALLBACK', () => {
+    // THE RE-ROUTE THIS DESCRIBE'S PART (1) WAS WAITING FOR (`Codex-4avmh`).
+    // It is deliberately NOT a re-point onto `--jp-accent-fill` /
+    // `--jp-accent-on-fill`: that pair is `transparent` at `accent: text` and
+    // `accent: edge` (an invisible pay button) and `--jp-ink-4` at
+    // `accent: none`, whose contrast against its own surface has a CEILING of
+    // 1.69 — see the invariant test below, and the seam's note in the CSS.
     const body = ruleBody(CTA, ".cta[data-variant='primary'] {");
-    expect(squash(body)).toContain('background: var(--color-brand-primary);');
-    expect(squash(body)).toContain('color: var(--color-text-on-brand);');
-    // And the journey palette is NOT in play here, which is the fact that makes
-    // the sweep above blind to this pair. If a future change re-points the CTA
-    // at the accent ladder this goes red, and the sweep starts covering it.
-    expect(body).not.toContain('--jp-');
+    expect(tight(body)).toContain(
+      'background:var(--jp-cta-fill,var(--color-brand-primary))'
+    );
+    expect(tight(body)).toContain(
+      'color:var(--jp-cta-ink,var(--color-text-on-brand))'
+    );
+    expect(tight(body)).toContain(
+      'border-color:var(--jp-cta-border,transparent)'
+    );
+    // The stripe is `accent: edge`'s whole tell. LONGHAND, because a
+    // `border-inline-start` shorthand would reset the other three edges'
+    // colour after `border-color` set it.
+    expect(tight(body)).toContain(
+      'border-inline-start-width:var(--jp-cta-stripe-width,var(--border-width))'
+    );
+    expect(tight(body)).toContain(
+      'border-inline-start-color:var(--jp-cta-stripe,var(--jp-cta-border,transparent))'
+    );
+    expect(tight(body)).not.toContain('border-inline-start:');
+    // The org-brand pair survives as the FALLBACK, which is what keeps
+    // `FloatingCta` — mounted outside any `.jp-sec`, so no `--jp-cta-*` is in
+    // scope — painting exactly the pill it always did.
+    expect(body).toContain('--color-brand-primary');
+    expect(body).toContain('--color-text-on-brand');
+  });
+
+  it('leaves accent: fill and accent: glow on the brand pill, so CANDLELIT cannot move', () => {
+    // Candlelit is `accent: glow`. The seam's DEFAULT is the brand pair, so the
+    // four looks on `fill`/`glow` inherit it and no rule reaches them — which is
+    // why this needed no compounded exclusion selector, unlike contract B1's
+    // surface work. If a future change starts declaring `--jp-cta-fill` on
+    // either value, this goes red and Candlelit's screenshot must be re-judged.
+    for (const value of ['fill', 'glow']) {
+      const rule = ruleFor(`[data-jp-accent='${value}']`);
+      expect(rule, `[data-jp-accent='${value}'] missing`).toBeDefined();
+      for (const prop of Object.keys(rule?.declarations ?? {})) {
+        expect(prop, `accent:${value} must not touch the CTA seam`).not.toMatch(
+          /^--jp-cta-/
+        );
+      }
+    }
+    // And the default really is the brand pair, in the base rule.
+    const base = ruleFor(':where(.jp-sec)');
+    expect(base?.declarations['--jp-cta-fill']).toBe(
+      'var(--color-brand-primary)'
+    );
+    expect(base?.declarations['--jp-cta-ink']).toBe(
+      'var(--color-text-on-brand)'
+    );
+  });
+
+  it('EVERY accent value is either a real plate or a boundary clearing 3.0', () => {
+    // THE INVARIANT, and the one gate that would have stopped the naive
+    // re-route. A CTA that is neither a filled plate nor an outline is not
+    // identifiable as a control (WCAG 1.4.11), and that is exactly what
+    // `--jp-accent-fill: transparent` would have shipped on two of five values.
+    const ACCENTS = ['text', 'fill', 'edge', 'glow', 'none'];
+    const base = ruleFor(':where(.jp-sec)');
+    const fallbackFill = base?.declarations['--jp-cta-fill'];
+    expect(fallbackFill).toBeDefined();
+
+    /**
+     * Follow `var()` indirection to a literal. WITHOUT THIS THE GATE IS A
+     * GREP AND IT FAILS OPEN: the first version compared the declaration to
+     * the string `'transparent'`, so `--jp-cta-fill: var(--jp-accent-fill)` —
+     * precisely the naive re-route this test exists to reject — read as a real
+     * plate, because the string is not the word. Falsified and fixed.
+     */
+    const resolve = (value: string, scope: Record<string, string>): string => {
+      let v = value.trim();
+      for (let hop = 0; hop < 8; hop += 1) {
+        const m = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/.exec(v);
+        if (!m) return v;
+        const next = scope[m[1]] ?? base?.declarations[m[1]] ?? m[2];
+        if (next === undefined) return v;
+        v = next.trim();
+      }
+      return v;
+    };
+
+    // THE ONLY PERMITTED PLATE IS THE BRAND PLATE. Stated as the rule rather
+    // than as "not transparent", because the tokens that tempt a re-route are
+    // not transparent either — `--jp-ink-4` is a real colour and still cannot
+    // clear 3.0 against its own surface at any brand, in either theme.
+    const BRAND_PLATE = 'var(--color-brand-primary)';
+
+    for (const value of ACCENTS) {
+      const d = ruleFor(`[data-jp-accent='${value}']`)?.declarations ?? {};
+      const scope = { ...base?.declarations, ...d };
+      const fill = resolve(d['--jp-cta-fill'] ?? fallbackFill ?? '', scope);
+      const border =
+        d['--jp-cta-border'] ?? base?.declarations['--jp-cta-border'];
+      const plated =
+        fill === BRAND_PLATE || fill === 'var(--color-brand-primary)';
+      const outlined = border === 'var(--jp-cta-outline)';
+      expect(
+        plated || outlined,
+        `accent:${value}: fill resolves to "${fill}", which is not the brand ` +
+          `plate, and border is "${border}", which is not the measured outline. ` +
+          `A CTA that is neither is not identifiable as a control.`
+      ).toBe(true);
+      // Never both — a brand plate AND a neutral ring is the muddled middle.
+      expect(plated && outlined, `accent:${value} is both`).toBe(false);
+    }
+  });
+
+  it('paints the edge stripe with the MARK token, never the raw ember edge', () => {
+    // Measured, at both poles (`Codex-4avmh`): `--jp-accent-edge` is raw
+    // `--jp-ember` at `accent: edge`, and the stripe came out 5.97 light but
+    // 2.98 DARK — under the 3.0 non-text floor, and a light-only check passes
+    // it. This is the same asymmetry the accent block opens with.
+    const edge = ruleFor("[data-jp-accent='edge']")?.declarations ?? {};
+    expect(edge['--jp-cta-stripe']).toBe('var(--jp-accent-mark)');
+    expect(edge['--jp-cta-stripe']).not.toBe('var(--jp-accent-edge)');
+
+    // AND THE MARK IS A MITIGATED RUNG, WHICHEVER HUE IT SPENDS. This was
+    // pinned to `var(--jp-ember-text)` BY NAME, and it reddened the moment
+    // `edge` moved to the org's second brand colour — a change that satisfies
+    // the rule it was written for. The rule is "never a RAW brand hue as a
+    // mark", not "always the ember rung", so it is now stated that way: the
+    // mark must be one of the `*-text` rungs, and never `--jp-ember` or
+    // `--jp-blood` directly.
+    const RAW = ['var(--jp-ember)', 'var(--jp-blood)', 'var(--jp-rose)'];
+    expect(RAW).not.toContain(edge['--jp-accent-mark']);
+    expect(edge['--jp-accent-mark']).toMatch(/^var\(--jp-[a-z]+-text\)$/);
+
+    // Stated as ARITHMETIC too, so a future hue cannot pass the string rule
+    // and fail the eye. Both brand hues measured against the two poles every
+    // seeded org resolves to: RAW fails at one pole or both (ember 4.42/3.89,
+    // blood 3.84/4.47 — and the LIGHT pole is the worse one for both, so a
+    // dark-only check would wave them through); the 55% rung clears 4.5 at
+    // both (ember 11.61/7.93, blood 10.81/8.36).
+    for (const hue of ['#4465FF', '#00933C']) {
+      for (const bg of ['#fafafa', '#171717']) {
+        const ink = hex(bg);
+        const heading = autoContrast(ink, 0.62, 0.96, 0.25);
+        expect(
+          ratio(mix(hex(hue), heading, 0.55), ink),
+          `${hue} mixed on ${bg}`
+        ).toBeGreaterThan(4.5);
+      }
+      // Non-vacuous: the raw hue really is the thing the rung is protecting
+      // against, at its worse pole.
+      expect(
+        ratio(hex(hue), hex('#fafafa')),
+        `${hue} raw on light`
+      ).toBeLessThan(4.5);
+    }
+  });
+
+  it('--jp-cta-outline is the ONLY rung that clears 3.0, and the rejected ones cannot', () => {
+    // Arithmetic, over the generated grid, so this is safe BY CONSTRUCTION
+    // rather than by sampling three seeded brands — which would have been blind
+    // here anyway: at `accent: none` neither the fill nor the ink has a
+    // brand-colour term, so all three seeded orgs (none of which sets
+    // `--brand-bg`) collapse to the same two rows.
+    expect(declarationsOf(DESIGN, '--jp-cta-outline')).toEqual([
+      'color-mix(in oklab, var(--jp-heading) 80%, var(--jp-ink))',
+    ]);
+
+    // Exclude the PRE-EXISTING degenerate region of the `--jp-heading` step:
+    // where the heading itself misses 4.5, every rung derived from it misses
+    // too, and a worst-case that includes it reports 1.00 for all of them and
+    // discriminates nothing. That band is a `--jp-heading` property, measured
+    // separately above, and NOT a CTA one.
+    const healthy = BRAND_GRID.filter((ink) => {
+      const h = autoContrast(ink, 0.62, 0.96, 0.25);
+      return ratio(h, ink) >= 4.5;
+    });
+    expect(healthy.length).toBeGreaterThan(100_000);
+
+    const worstOf = (of: (l: Ladder, ink: Oklab) => Oklab): number => {
+      let worst = Number.POSITIVE_INFINITY;
+      for (const ink of healthy) {
+        const l = ladderFrom(ink, ink);
+        worst = Math.min(worst, ratio(of(l, ink), ink));
+      }
+      return worst;
+    };
+    const bestOf = (of: (l: Ladder, ink: Oklab) => Oklab): number => {
+      let best = 0;
+      for (const ink of healthy) {
+        const l = ladderFrom(ink, ink);
+        best = Math.max(best, ratio(of(l, ink), ink));
+      }
+      return best;
+    };
+
+    // What ships: 80% heading. Worst case 3.47 against a 3.0 floor.
+    const outline = worstOf((l) => mix(l.heading, l.ink, 0.8));
+    expect(outline).toBeGreaterThan(3.0);
+    expect(outline).toBeCloseTo(3.47, 1);
+
+    // And the tempting reaches, each of which has a CEILING under the floor —
+    // so no brand and no theme can rescue them. This is the assertion that
+    // stops a future "use the line token, that is what borders are for".
+    expect(bestOf((l) => l.ink4)).toBeLessThan(3.0); // --jp-ink-4      ~1.69
+    expect(bestOf((l) => l.line)).toBeLessThan(3.0); // --jp-line       ~1.81
+    expect(bestOf((l) => mix(l.ink, l.heading, 0.68))).toBeLessThan(3.0); // -strong ~2.71
   });
 
   it('is the only styler of .cta in the section tree', () => {
@@ -2351,5 +3397,117 @@ describe('the practice-card floor — .descent__card min-width (F4)', () => {
       '@container (max-width: 45rem)|.descent__card',
       '|.descent__card', // `at` is '' at top level
     ]);
+  });
+});
+
+// ── B2.1 · the `type` ladder must be MONOTONIC ──────────────────────────────
+// M5 of `docs/design/journey-sections/03-beauty-amendment.md`: `--jp-display`
+// ran 30 / 48 / 44 / 80px at a 1440 viewport, because `expressive` borrowed
+// `--text-5xl`, whose ceiling (2.75rem) sits BELOW `--text-4xl`'s (3rem). So the
+// two looks built to be exuberant — Open Air and Full Send — opened with a
+// SMALLER headline than the two "balanced" ones.
+//
+// The axis probe could not see it and never will: every `type` value emitted the
+// same property set, each with a legitimate `--text-*` token. The defect lived
+// in the RELATIONSHIP between the values, which no per-value check inspects.
+//
+// This evaluates the steps arithmetically rather than asserting token names, so
+// it also fails if someone re-anchors a shared `--text-*` step underneath the
+// axis. It reads the `:root` definitions: `--brand-text-scale` multiplies every
+// step by the same factor at org scope, so an ordering that holds at `:root`
+// holds at org scope too.
+describe('the `type` axis display ladder (contract B2.1)', () => {
+  const TYPE_ORDER = [
+    'restrained',
+    'balanced',
+    'expressive',
+    'monumental',
+  ] as const;
+  const VIEWPORTS = [375, 768, 1440, 2600];
+
+  const rootTextSteps: Record<string, string> = {};
+  for (const rule of parseRules(TYPOGRAPHY)) {
+    if (rule.at !== '' || rule.selector !== ':root') continue;
+    for (const [prop, value] of Object.entries(rule.declarations)) {
+      if (prop.startsWith('--text-')) rootTextSteps[prop] = value;
+    }
+  }
+
+  /** `clamp(<a>rem, <b>rem + <c>vw, <d>rem)` — the only shape these steps use. */
+  const CLAMP_SHAPE =
+    /^clamp\(\s*([\d.]+)rem\s*,\s*([\d.]+)rem\s*\+\s*([\d.]+)vw\s*,\s*([\d.]+)rem\s*\)$/;
+
+  function stepPx(token: string, viewport: number): number {
+    const raw = rootTextSteps[token];
+    if (!raw)
+      throw new Error(`${token} is not defined at :root in typography.css`);
+    const m = CLAMP_SHAPE.exec(squash(raw));
+    // Deliberately throws rather than guessing: if a step stops being a simple
+    // clamp, this evaluator is no longer honest and must be updated, not coerced.
+    if (!m)
+      throw new Error(
+        `${token} is not the expected clamp shape: ${squash(raw)}`
+      );
+    const lo = Number(m[1]) * 16;
+    const base = Number(m[2]) * 16;
+    const perPx = Number(m[3]) / 100;
+    const hi = Number(m[4]) * 16;
+    return Math.min(hi, Math.max(lo, base + perPx * viewport));
+  }
+
+  function displayPx(expr: string, viewport: number): number {
+    const e = squash(expr);
+    const single = /^var\((--text-[a-z0-9]+)\)$/.exec(e);
+    if (single) return stepPx(single[1], viewport);
+    const midpoint =
+      /^calc\(\(\s*var\((--text-[a-z0-9]+)\)\s*\+\s*var\((--text-[a-z0-9]+)\)\s*\)\s*\/\s*2\)$/.exec(
+        e
+      );
+    if (midpoint)
+      return (
+        (stepPx(midpoint[1], viewport) + stepPx(midpoint[2], viewport)) / 2
+      );
+    throw new Error(
+      `--jp-display shape not understood, so not verifiable: ${e}`
+    );
+  }
+
+  const expressions = TYPE_ORDER.map((value) => {
+    const rule = DESIGN_RULES.find(
+      (r) => r.at === '' && r.selector === `[data-jp-type='${value}']`
+    );
+    if (!rule)
+      throw new Error(
+        `no [data-jp-type='${value}'] rule in journey-design.css`
+      );
+    const expr = rule.declarations['--jp-display'];
+    if (!expr)
+      throw new Error(`[data-jp-type='${value}'] declares no --jp-display`);
+    return { value, expr };
+  });
+
+  it.each(
+    VIEWPORTS
+  )('is strictly increasing at a %ipx viewport', (viewport) => {
+    const sizes = expressions.map(({ value, expr }) => ({
+      value,
+      px: Number(displayPx(expr, viewport).toFixed(2)),
+    }));
+    const rendered = sizes.map((s) => `${s.value} ${s.px}px`).join(' · ');
+
+    for (let i = 1; i < sizes.length; i++) {
+      expect(
+        sizes[i].px,
+        `--jp-display must grow with the type axis, but ${sizes[i].value} (${sizes[i].px}px) is not larger than ${sizes[i - 1].value} (${sizes[i - 1].px}px). Ladder: ${rendered}`
+      ).toBeGreaterThan(sizes[i - 1].px);
+    }
+  });
+
+  it('leaves `monumental` on --text-display, which Candlelit ships', () => {
+    // Candlelit is `type: monumental` and is the one look the owner rates, so
+    // this rung is frozen: A19/A3 — a published page must not change size.
+    expect(expressions.find((e) => e.value === 'monumental')?.expr).toBe(
+      'var(--text-display)'
+    );
   });
 });

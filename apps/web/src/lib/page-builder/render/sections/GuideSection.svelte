@@ -26,6 +26,28 @@
   the panel hides it for still resolves and still emits its attribute. This header
   claims only which axes this component READS.
 
+  ── EIGHT DESIGN LANGUAGES, NOT 38 PERMUTATIONS ─────────────────────────────
+  The nine axes reach every MAGNITUDE in this file. They do not, on their own,
+  make a look recognisable: a design language is also which elements are boxes,
+  which corner is square, which label is monospaced and which rule is drawn at
+  all — selector-level decisions that a properties-only axis file cannot carry
+  and a Svelte-scoped style block cannot select on, because the `data-jp-*`
+  attributes live on the ANCESTOR `.jp-sec`.
+
+  So eight axis values are re-emitted UNMODIFIED as local `data-*` attributes on
+  `.guide` (see `look` in the script), and the PER-LOOK COMMITMENTS block at the
+  foot of the stylesheet spends them on each family's documented tell
+  (`00-design-language-research.md` §1). Read that block's own header before
+  adding a rule to it: it carries the selector discipline that keeps `candlelit`
+  — the one preset the product owner says already works — out of the blast
+  radius, which is not a convention but arithmetic. Candlelit is uniquely
+  identified by four of its nine values (`surface: media`, `edge: none`,
+  `media: bleed`, `accent: glow`) and shares the other five, so a bare rule on
+  `type: monumental`, `align: center`, `density: airy`, `width: text` or
+  `motion: drift` restyles it. None of the 52 attribute-constrained selectors
+  emitted from this file matches the candlelit bundle; that is checkable by
+  evaluating each selector against the bundle, and it was.
+
   ── FIVE COMPOSITIONS ───────────────────────────────────────────────────────
   `portrait` (default) · `column` · `quote` · `credentials` · `letter`.
 
@@ -108,16 +130,23 @@
     context: JourneySalesContext;
     variant?: string;
     /**
-     * Present for the uniform contract and NOT destructured: all nine axes this
-     * section consumes land in CSS, because none of them changes what is
-     * RENDERED.
+     * The resolved axes. EIGHT OF THE NINE ARE NOW ALSO MIRRORED INTO MARKUP as
+     * plain `data-*` attributes on this section's own root — see `look` below —
+     * because a Svelte-scoped style block cannot reach the ancestor
+     * `data-jp-*` attribute `SectionFrame` writes on `.jp-sec`. The precedent is
+     * `ProofSection.svelte:311` / `InviteSection.svelte:498`, which read
+     * `data-jp-motion` in markup for exactly the same reason.
+     *
+     * Nothing here changes WHAT is rendered. It changes what this section's own
+     * CSS is able to select on, which is what a design LANGUAGE needs and a set
+     * of magnitudes cannot supply.
      */
     design?: ResolvedSectionDesign;
     editable?: boolean;
     onEdit?: (key: string, value: string) => void;
   }
 
-  const { config, context, variant, editable = false, onEdit }: Props =
+  const { config, context, variant, design, editable = false, onEdit }: Props =
     $props();
 
   /**
@@ -172,20 +201,24 @@
    * `section-fields.ts:384-395`. A string under this key renders NOTHING, and
    * that is deliberate. Do not add a string branch here.
    *
-   * WHAT THE EDITOR ACTUALLY WRITES TODAY, measured rather than assumed: the
-   * `guide` section on `studio-alpha`/`bone-deep` (landing page `4664e6ce…`)
-   * stores `"facts": "20 years teaching — somatics and grief work"` — a bare
-   * string — on a section whose `variant` is `credentials`, the one composition
-   * whose entire purpose is that list.
+   * A29 HAS SINCE LANDED, and this comment used to say the opposite — re-verified
+   * on this base rather than trusted, because the claim it replaces is exactly the
+   * kind that ages into a false alarm and then steers work away from a carrier
+   * that works. `SECTION_FIELDS.guide` declares `facts` as
+   * `control: 'repeater'` with `itemFields: [{label}, {detail}]`
+   * (`section-fields.ts:512`); `SectionEditor.svelte:413` now has a real
+   * `list | repeater` branch that hands the field to `ArrayField`; and
+   * `ArrayField.svelte:178` writes `{...base, [key]: next}` per cell, i.e. the
+   * DECLARED object shape, through `setSectionProp`. So a creator can author
+   * `{label, detail}` rows today and this list is reachable content, not a
+   * markup-complete placeholder.
    *
-   * The mechanism is `SectionEditor.svelte:183-231`: it branches on `media`,
-   * `textarea` and `select`, then falls through a catch-all `{:else}` to
-   * `<input type="text">`. There is no `repeater` / `list` / `number` / `toggle`
-   * branch, so all four render a plain text box, and `onInput` (`:78-81`) writes
-   * `target.value` into the key. So the field is not merely UNauthorable (which is
-   * how A29 reads); it is MIS-authorable — a creator sees a box labelled
-   * "Credentials", types into it, it saves, and nothing appears. Those need
-   * different fixes, which is why the distinction is recorded here.
+   * THE STRING BRANCH IS STILL REFUSED, and the reason has moved from "the
+   * control cannot do better" to "the DATA may still be wrong". A page authored
+   * before the repeater existed can hold a bare string under this key — the
+   * `guide` section on `studio-alpha`/`bone-deep` stored
+   * `"facts": "20 years teaching — somatics and grief work"` on a `credentials`
+   * section — and a control landing does not migrate rows.
    *
    * WHY NOT COERCE THE STRING. It looks like kindness and it is a trap. The field
    * declares TWO sub-fields; a free-typed string carries no information about
@@ -211,6 +244,42 @@
   const facts: GuideFact[] | undefined = $derived(
     p.facts ?? p.credentials?.map((label) => ({ label }))
   );
+
+  /**
+   * ── THE AXES, MIRRORED ONTO THIS SECTION'S OWN ROOT ────────────────────────
+   * `journey-design.css` turns the nine `data-jp-*` attributes on `.jp-sec` into
+   * custom properties, and a section can only ever READ those. That stays the
+   * default for everything with a magnitude: every size, colour, rhythm, edge
+   * and duration below is still a `--jp-*` read.
+   *
+   * It is NOT sufficient for the eight values here, because a design language is
+   * not only a set of magnitudes — it is which elements exist as boxes, which
+   * corner is square, which label is monospaced, which rule gets drawn at all.
+   * Those are selector-level decisions and a scoped style block cannot reach an
+   * ancestor's attribute, so the axis value is re-emitted here UNMODIFIED as a
+   * local `data-*` attribute.
+   *
+   * `width` is deliberately not mirrored: nothing in this file needs to select
+   * on it, because `--jp-content-max` / `--jp-measure` already carry it.
+   *
+   * `undefined` when no `design` arrives, so Svelte omits the attribute and
+   * every per-look rule no-ops. That is the honest degradation — a host that
+   * resolves no axes gets exactly the markup and CSS this component shipped
+   * before the per-look pass, rather than a guessed default look. `SectionFrame`
+   * always passes a TOTAL `ResolvedSectionDesign` (`resolveDesign` emits all
+   * nine), so both real render paths — the public page and the studio canvas —
+   * always have all of them.
+   */
+  const look = $derived({
+    surface: design?.surface,
+    edge: design?.edge,
+    align: design?.align,
+    type: design?.type,
+    accent: design?.accent,
+    density: design?.density,
+    motion: design?.motion,
+    media: design?.media,
+  });
 
   const COMPOSITIONS = [
     'portrait',
@@ -501,11 +570,15 @@
   when a creator fills one side, which is the shape the legacy `credentials`
   string array synthesises.
 
-  UNAUTHORABLE FROM THE BUILDER TODAY, and deliberately left that way: `facts` is
-  a `repeater`, and contract A29 defers the one generic array control to
-  consolidation because `SectionEditor.svelte` writes `target.value` — a raw
-  STRING — for every control except `media`. Building a bespoke control here is
-  what A29 exists to prevent. The list is markup-complete and degrades to nothing.
+  AUTHORABLE FROM THE BUILDER, as of A29's array control — see the `facts` derived
+  in the script for the verification. That matters to the per-look work at the foot
+  of the stylesheet, because this list is where four of the eight tells actually
+  land: `full-send`'s big numerals, `syllabus`'s left accent stripe, `signal`'s
+  rounded cards and `long-read`'s hairline-ruled rows are all `.guide__fact`. It is
+  the section's densest run of authorable structure, not a placeholder.
+
+  Still degrades to nothing when unauthored, which is why every look's treatment of
+  it is a VALUE in the role table rather than a rule that assumes a row exists.
 -->
 {#snippet factList()}
   {#if facts}
@@ -547,7 +620,17 @@
 {/snippet}
 
 {#if p.bio || p.name || p.heading}
-  <div class="guide guide--{composition}">
+  <div
+    class="guide guide--{composition}"
+    data-surface={look.surface}
+    data-edge={look.edge}
+    data-align={look.align}
+    data-type={look.type}
+    data-accent={look.accent}
+    data-density={look.density}
+    data-motion={look.motion}
+    data-media={look.media}
+  >
     <div class="guide__inner" use:reveal={{ disabled: editable }}>
       {#if showsPlate}
         {@render plate()}
@@ -623,6 +706,42 @@
        NEVER derived from a re-spelled `clamp()` (A44) and never a raw px. */
     --guide-meta: max(var(--text-base), calc(var(--jp-body-size) / 1.2));
     --guide-quote: max(var(--text-lg), calc(var(--jp-heading-size) / 1.2));
+
+    /* ── FIVE LOCAL ROLES, so a look is a VALUE and not a rule ────────────
+       The per-look blocks at the foot of this file are keyed on axis values
+       (`edge: offset`, `accent: none`, …). Written as paint rules, six of the
+       eight looks would re-declare the same five fact-row declarations, which
+       is the shape that produced the eight different spellings of
+       `clamp(2rem, 6cqw, 4.4rem)` this tree is still cleaning up. Written as
+       properties, a look states its VALUES and the paint lives in one place —
+       the same discipline `journey-design.css` holds itself to ("every axis
+       value sets only custom properties").
+
+       EVERY DEFAULT HERE REPRODUCES THE BASE COMMIT EXACTLY, which is the
+       whole point: candlelit resolves none of the per-look selectors, so it
+       resolves these defaults, and a default that merely looked reasonable
+       would have silently restyled the one preset that already works.
+         `--guide-pill-radius`  was `--radius-full` on tag / play / fact
+         `--guide-fact-*`       was 1px `--color-border-subtle`, no shadow,
+                                `--space-1 --space-3`
+         `--guide-label-*`      `inherit` + `--text-sm` is what
+                                `.jp-sec__eyebrow` already computes
+         `--guide-detail-size`  `1em` is the inherited size, i.e. no change
+         `--guide-head-*`       `0px` paints no rule at all
+       `0px` and `1em`, never a bare `0` or `1`: these are substituted into
+       `border-block-end` and `font-size`, and a UNITLESS zero in a length slot
+       is the A63/A64 class of failure that invalidates the whole declaration
+       silently. */
+    --guide-pill-radius: var(--radius-full);
+    --guide-fact-radius: var(--guide-pill-radius);
+    --guide-fact-border: var(--border-width) solid var(--color-border-subtle);
+    --guide-fact-shadow: none;
+    --guide-fact-pad: var(--space-1) var(--space-3);
+    --guide-label-font: inherit;
+    --guide-label-size: var(--text-sm);
+    --guide-detail-size: 1em;
+    --guide-head-rule: 0px;
+    --guide-head-gap: 0px;
   }
 
   /* `--jp-content-max` caps the section's inner wrapper; `--jp-measure` caps the
@@ -655,6 +774,27 @@
     .guide--credentials .guide__inner {
       grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
       align-items: center;
+    }
+
+    /* A DEFECT ON THE BASE, not a look decision, and it is why `plain-facts`
+       looked broken rather than merely plain.
+
+       `showsPlate` is a COMPOSITION test, so `portrait` and `credentials`
+       always render the plate element and always claim two columns — while the
+       `media` axis takes the plate away underneath them through
+       `display: var(--jp-media-display)`. A `display: none` child is not a grid
+       ITEM, so the copy column fell into track 1, `minmax(0, 0.82fr)`: 41% of
+       the section, with 59% of the row empty beside it.
+
+       `media: none` is `plain-facts`'s own media value and nobody else's, so
+       the brutalist preset rendered its entire copy column in a narrow left
+       gutter above 620cqw. Candlelit is `media: bleed` and cannot match.
+
+       Keyed on the mirrored axis attribute because a custom property cannot be
+       a `grid-template-columns` predicate — `--jp-media-display` says `none`,
+       but no selector can ask it. */
+    .guide[data-media='none'] .guide__inner {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -903,7 +1043,7 @@
     top: var(--space-4);
     inset-inline-start: var(--space-4);
     padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
+    border-radius: var(--guide-pill-radius);
     letter-spacing: var(--tracking-wider);
     text-transform: uppercase;
     color: var(--color-text-secondary);
@@ -939,7 +1079,7 @@
     aspect-ratio: 1;
     padding: 0;
     border: none;
-    border-radius: var(--radius-full);
+    border-radius: var(--guide-pill-radius);
     cursor: pointer;
     color: var(--jp-accent-on-fill);
     background: var(--jp-accent-fill);
@@ -973,12 +1113,20 @@
      `letter-spacing: -0.015em` and `--leading-tight` are therefore replaced by
      `--jp-display-tracking` / `--jp-display-leading`, deliberately. */
   .guide__eyebrow {
+    font-family: var(--guide-label-font);
+    font-size: var(--guide-label-size);
     color: var(--jp-accent-text);
   }
 
   .guide__heading {
     max-width: 22ch;
     margin-inline: var(--jp-measure-margin);
+    /* The head hairline, off by default. `long-read`'s tell is "a hairline
+       under every section head" and the measurement found it NOWHERE in the
+       tree; `syllabus` wants the same rule so the block reads as a table with a
+       header row. Both are `--guide-head-rule` values, not two more rules. */
+    padding-block-end: var(--guide-head-gap);
+    border-block-end: var(--guide-head-rule) solid var(--color-border-subtle);
   }
 
   .guide__name {
@@ -1058,19 +1206,29 @@
     display: flex;
     align-items: baseline;
     gap: var(--space-2);
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
-    border: var(--border-width) solid var(--color-border-subtle);
+    padding: var(--guide-fact-pad);
+    border-radius: var(--guide-fact-radius);
+    border: var(--guide-fact-border);
+    /* THE WHOLE VALUE of its own `box-shadow`, never one item of a list —
+       three of the values this property takes below are `var(--jp-edge-shadow)`
+       and that token is the KEYWORD `none` at `edge: none` and `edge: heavy`.
+       `box-shadow`'s grammar is `none | <shadow>#`, so `none` inside a comma
+       list invalidates the declaration at computed-value time and paints
+       nothing, silently (contract A54/A63 — three rings on every published page
+       before it was caught). */
+    box-shadow: var(--guide-fact-shadow);
     font-size: max(var(--text-xs), calc(var(--guide-meta) / 1.2));
   }
 
   .guide__fact dt {
+    font-family: var(--guide-label-font);
     font-weight: var(--font-semibold);
     color: var(--color-text);
   }
 
   .guide__fact dd {
     margin: 0;
+    font-size: var(--guide-detail-size);
     color: var(--color-text-secondary);
   }
 
@@ -1175,6 +1333,548 @@
     max-width: none;
   }
 
+
+  /* ═══ PER-LOOK COMMITMENTS ═══════════════════════════════════════════════
+     Everything above is axis-generic: it consumes magnitudes and paints one
+     arrangement. What follows commits each design LANGUAGE to its documented
+     tell (`00-design-language-research.md` §1), because a tell is a
+     SELECTOR-level statement — which elements are boxes, which corner is
+     square, which label is monospaced, which rule is drawn — and
+     `journey-design.css` deliberately emits nothing but custom properties.
+
+     ── THE SELECTOR DISCIPLINE, stated once so every block can be checked ───
+     `candlelit` is the one preset that already works and it must come out of
+     this pass byte-identical. It is uniquely identified by FOUR of its nine
+     axis values — `surface: media`, `edge: none`, `media: bleed`,
+     `accent: glow` — and SHARES the other five: `type: monumental` (with
+     quiet-studio, plain-facts), `align: center` (quiet-studio, open-air,
+     full-send), `density: airy` (open-air), `width: text` (long-read,
+     open-air), `motion: drift` (open-air).
+
+     So NO selector below is keyed on any of those five. Every one of them names
+     one of these thirteen, and none matches the candlelit bundle:
+
+       media: none                     → plain-facts  only
+       edge: offset                    → plain-facts  only
+       accent: edge                    → syllabus     only
+       type: restrained                → syllabus     only
+       accent: none                    → quiet-studio only
+       density: vast                   → quiet-studio only
+       motion: fade                    → quiet-studio only
+       edge: soft                      → open-air     only
+       type: expressive                → open-air + full-send (never candlelit,
+                                         which is `monumental`)
+       edge: heavy                     → full-send    only
+       motion: stagger                 → full-send    only
+       surface: bare  + align: start   → long-read    only
+       edge: hairline + accent: fill   → signal       only
+
+     The last two are COMPOUNDS by necessity rather than by taste: `long-read`
+     and `signal` each share all nine of their axis values with some sibling, so
+     neither has a single value to key on. Each compound is justified in its own
+     block.
+
+     `open-air` is the dangerous one — it shares FOUR axes with candlelit — so
+     every open-air rule here is keyed on `edge: soft`, which candlelit
+     (`edge: none`) cannot match. */
+
+  /* ── A LIFTED SURFACE MUST CARRY ITS OWN EDGE ───────────────────────────
+     The single highest-leverage line in this pass, and a base defect rather
+     than a taste call: `--jp-edge-width` / `--jp-edge-color` /
+     `--jp-edge-shadow` had exactly ONE consumer in this component,
+     `.guide__plate`. So `surface: panel` painted a background and a
+     `--radius-card` corner with no border and no elevation whatsoever, on all
+     three panel looks — precisely the "vanishing card" research §5.2 predicts
+     for the contemporary family, and the reason `signal`'s "rounded cards with
+     hairlines and a small neutral shadow" could not be seen.
+
+     WHY THE SURFACE LIST AND NOT A BARE RULE. Written on `.guide` bare this
+     would be free of candlelit risk (at `edge: none` the width is `0px` and the
+     shadow is the keyword `none`, so it paints nothing) — but it would draw a
+     full hairline BOX around `quiet-studio` and `long-read`, whose tells are
+     "one hairline, used perhaps twice" and "no box borders anywhere". Both are
+     `surface: bare`, so listing the three LIFTED surfaces excludes them by
+     construction. Candlelit is `surface: media` and matches none of the three.
+
+     What each look gets, from its own `edge` value and nothing added:
+       plain-facts  panel  + offset   → 2px + a hard un-blurred drop
+       syllabus     panel  + hairline → the hairline the "table" reads as
+       signal       panel  + hairline → hairline + `--shadow-xs`, neutral
+       open-air     tint   + soft     → 0px border, `--shadow-lg`: the shadow
+                                        you have to look for, on the whole band
+       full-send    invert + heavy    → 2px in the accent, around an inverted
+                                        band
+
+     `box-shadow` takes the token as its WHOLE value and the border does plain
+     substitution with no math on the width — the two rules contract A54/A63 and
+     A64 exist for. Same shape as `.guide__plate` above, which documents both. */
+  .guide[data-surface='panel'],
+  .guide[data-surface='tint'],
+  .guide[data-surface='invert'] {
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  /* ── 1.2 BRUTALIST · `plain-facts` — `edge: offset` ──────────────────────
+     Tell: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 everywhere.
+
+     MEASURED ON THE BASE: the 2px border was reachable, but the offset shadow
+     was found NOWHERE and radius 0 was found NOWHERE. In this file the reason
+     is mechanical rather than aesthetic — `--jp-edge-shadow` had exactly ONE
+     consumer, `.guide__plate`, and `plain-facts` is `media: none`, so the only
+     element that could have drawn the offset was `display: none` in the only
+     preset that ships one. It now lands on the copy box and the fact rows,
+     which no composition and no media value can remove. */
+  .guide[data-edge='offset'] {
+    /* RADIUS 0, ABSOLUTELY — the tell's own adverb. The section SHELL has to be
+       squared off too, not just its furniture: `--jp-sec-radius` is
+       `--radius-card` under `surface: panel`, which is this look's surface. */
+    border-radius: var(--radius-none);
+    --guide-pill-radius: var(--radius-none);
+    --guide-fact-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --guide-fact-shadow: var(--jp-edge-shadow);
+    --guide-fact-pad: var(--space-3) var(--space-4);
+    --guide-label-font: var(--font-mono);
+    --guide-label-size: var(--text-xs);
+  }
+
+  /* "Surface: panel — every block is a visible box." The copy column becomes
+     that box, so the hard drop has a carrier that always exists. */
+  .guide[data-edge='offset'] .guide__body {
+    padding: var(--jp-sec-gap);
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    box-shadow: var(--jp-edge-shadow);
+    border-radius: var(--radius-none);
+  }
+
+  /* The accent spent as the family spends it: "solid rectangles of it, text
+     reversed out". COMPOUNDED with `accent: fill` rather than left on
+     `edge: offset` alone, because `--jp-accent-fill` is `transparent` at
+     `accent: text` and `accent: edge` — a creator who picked those with this
+     edge would get `--jp-accent-on-fill` text on the section's own ink, which
+     is the two-token contrast pair broken in half. `.guide__body` is a column
+     flex box with `align-items: var(--jp-align)`, so the slab shrink-wraps its
+     text at both align values with no `width` of its own. */
+  .guide[data-edge='offset'][data-accent='fill'] .guide__eyebrow {
+    padding: var(--space-1) var(--space-3);
+    color: var(--jp-accent-on-fill);
+    background: var(--jp-accent-fill);
+  }
+
+  /* The pull-quote becomes another hard box, and its 1.6em serif quotation
+     ornament GOES. Brutalism has no ornament; this is one of the places where
+     the correct edit is a removal. */
+  .guide[data-edge='offset'] .guide__quote {
+    padding: var(--space-4) var(--space-5);
+    border-inline-start: 0;
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    border-radius: var(--radius-none);
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  .guide[data-edge='offset'] .guide__quote::before {
+    display: none;
+  }
+
+  .guide[data-edge='offset'] .guide__quote p {
+    font-style: normal;
+  }
+
+  /* MONO NUMERALS on the runtime, tabular so digits do not shuffle. */
+  .guide[data-edge='offset'] .guide__dur {
+    border-radius: var(--radius-none);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .guide[data-edge='offset'] .guide__play {
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  /* The control presses INTO its own offset shadow. `motion: none` is this
+     look's motion value, so `--jp-reveal-duration` resolves to `0ms` and the
+     press is a genuinely INSTANT state change — which is what the family's
+     motion row asks for, not a fast animation. The box does not shrink, so
+     contract A2's 44px floor is untouched. */
+  .guide[data-edge='offset'] .guide__play:hover {
+    transform: none;
+    translate: var(--space-1) var(--space-1);
+    box-shadow: none;
+  }
+
+  /* ── 1.5 TECHNICAL · `syllabus` — `accent: edge` · `type: restrained` ────
+     Tell: a hairline grid, mono numerals, and a left-border accent stripe
+     rather than a filled badge.
+
+     MEASURED ON THE BASE: mono numerals and the left stripe both exist in the
+     tree, but neither reached this section — the fact list is a pill CHIP row
+     in four of its five compositions, the duration is proportional-figure, and
+     the file's only left stripe is the pull-quote's. The `credentials`
+     composition already builds the ruled list; the work here is to make every
+     composition draw it, because the list is the LOOK's shape and not one
+     arrangement's. */
+  .guide[data-accent='edge'] {
+    --guide-pill-radius: var(--radius-sm);
+    --guide-label-font: var(--font-mono);
+    /* Hairline under the section head, so the block reads as a table with a
+       header row. `--radius-sm` and this rule are the family's own two values
+       ("Corner radius `--radius-sm`", "Hairline on everything"). */
+    --guide-head-rule: var(--border-width);
+    --guide-head-gap: calc(var(--jp-sec-gap) / 3);
+  }
+
+  .guide[data-accent='edge'] .guide__facts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    width: 100%;
+    max-width: var(--jp-measure);
+    margin-inline: var(--jp-measure-margin);
+  }
+
+  /* THE LEFT-BORDER ACCENT STRIPE — the tell states it in opposition to "a
+     filled badge", so it is a stripe on every row and there is no badge.
+
+     `--jp-accent-mark`, NOT `--jp-accent-edge`, and the measurement is already
+     in this file (see `.guide--credentials .guide__plate`): `--jp-accent-edge`
+     fails the 3:1 graphic floor at every accent value on a dark brand and
+     measures 2.04:1 at THIS one, while `--jp-accent-mark` measures 5.00 dark /
+     10.47 light. A stripe that carries the tell has to be seen. It is read
+     directly with no mix carried onto it (contract A37). */
+  .guide[data-accent='edge'] .guide__fact {
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-none);
+    box-shadow: none;
+    border-block-end: var(--border-width) solid var(--color-border-subtle);
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-mark);
+  }
+
+  .guide[data-accent='edge'] .guide__fact dd,
+  .guide[data-accent='edge'] .guide__dur {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* `type: restrained` is `syllabus`'s type value and nobody else's, so the
+     dense-dashboard reading rhythm lands here: the label a full step under the
+     body, and the bio at normal rather than relaxed leading — "many small
+     steps, fine-grained hierarchy", 70–80ch, 0.75× rhythm. */
+  .guide[data-type='restrained'] {
+    --guide-label-size: var(--text-xs);
+  }
+
+  .guide[data-type='restrained'] .guide__bio p {
+    line-height: var(--leading-normal);
+  }
+
+  /* ── 1.4 LUXURY-MINIMAL · `quiet-studio` — `accent: none` · `density: vast`
+        · `motion: fade` ────────────────────────────────────────────────────
+     Tell: three type sizes, ONE hairline, no accent colour, and more empty
+     space than content.
+
+     THIS LOOK GETS WORSE IF ANYTHING IS ADDED, so nearly every rule below
+     REMOVES something. Measured on the base, the accent leaked in three places
+     the `accent` axis had no way to reach: the plate's background is a two-stop
+     radial of `--color-brand-primary` / `--color-brand-accent` — RAW brand
+     tokens, not axis tokens — the pull-quote carries a 2px accent rule behind a
+     1.6em quotation ornament, and the fact rows are bordered pills. */
+  .guide[data-accent='none'] {
+    --guide-fact-border: 0 none;
+    --guide-fact-radius: var(--radius-none);
+    --guide-fact-pad: 0px;
+  }
+
+  /* NO ACCENT COLOUR. Under `media: inset` — this look's own media value — the
+     plate is a 3:2 image on a `--space-12` mount, and the mount is most of what
+     the eye reads, so this is the largest accent surface in the section. It
+     reads as paper here rather than as ember. */
+  .guide[data-accent='none'] .guide__plate {
+    background: var(--color-surface);
+  }
+
+  /* THE ONE HAIRLINE, and only one: a short rule at the head of the copy
+     column. A pseudo-element, so there is no markup change and nothing enters
+     the inline-edit seam's `textContent`. `flex: none` because `.guide__body`
+     is a flex container, which makes a `::before` a flex ITEM. */
+  .guide[data-accent='none'] .guide__body::before {
+    content: '';
+    flex: none;
+    width: var(--space-16);
+    height: var(--border-width);
+    background: var(--color-border);
+  }
+
+  .guide[data-accent='none'] .guide__quote {
+    padding-inline-start: 0;
+    border-inline-start: 0;
+  }
+
+  .guide[data-accent='none'] .guide__quote::before {
+    display: none;
+  }
+
+  /* THREE TYPE SIZES ON THE WHOLE SECTION — the tell as an arithmetic
+     constraint rather than an adjective, which is the only form of it that can
+     be checked. The base draws SEVEN: eyebrow, heading, name, bio, quote, fact
+     row, sign-off. Collapsing the four metadata rungs onto one and the quote
+     onto the body rung leaves exactly `--text-sm`, `--jp-body-size` and
+     `--jp-heading-size`. Weight and tracking come with them, because "three
+     sizes" is a hierarchy claim and a semibold name at the same size as a
+     normal eyebrow is a fourth level by another means. */
+  .guide[data-density='vast'] .guide__eyebrow,
+  .guide[data-density='vast'] .guide__name,
+  .guide[data-density='vast'] .guide__fact,
+  .guide[data-density='vast'] .guide__signoff {
+    font-size: var(--text-sm);
+    font-weight: var(--font-normal);
+    letter-spacing: var(--tracking-wider);
+  }
+
+  .guide[data-density='vast'] .guide__quote p {
+    font-size: var(--jp-body-size);
+    font-style: normal;
+    letter-spacing: var(--tracking-normal);
+  }
+
+  /* MORE EMPTY SPACE THAN CONTENT, on a doubling scale rather than three
+     arbitrary values: 2 · 1 · 0.5 of the section gap, which at `vast` is
+     already 1.6× the regular rhythm and still multiplies the org's own
+     `--brand-density-scale` through `--space-unit`. */
+  .guide[data-density='vast'] .guide__inner {
+    gap: calc(var(--jp-sec-gap) * 2);
+  }
+
+  .guide[data-density='vast'] .guide__body {
+    gap: var(--jp-sec-gap);
+  }
+
+  .guide[data-density='vast'] .guide__bio {
+    gap: calc(var(--jp-sec-gap) / 2);
+  }
+
+  /* "Slow fade only. No transform." `motion: fade` already zeroes
+     `--jp-reveal-distance`, so the reveal is a pure opacity ramp — and the one
+     transform this section sets outside the reveal is the play control's hover
+     scale, so it goes too. */
+  .guide[data-motion='fade'] .guide__play:hover {
+    transform: none;
+  }
+
+  /* ── 1.1 EDITORIAL · `long-read` — `surface: bare` + `align: start` ──────
+     Tell: the eyebrow and the body share a left edge, and there is a hairline
+     under every section head.
+
+     A COMPOUND BY NECESSITY. `long-read` has no axis value of its own:
+     `surface: bare` is shared with `quiet-studio` and `align: start` with
+     `plain-facts`, `syllabus` and `signal` — but `quiet-studio` is
+     `align: center` and none of the other three is `surface: bare`, so the PAIR
+     is `long-read` alone. Candlelit is `surface: media`, so it matches neither
+     half, let alone both.
+
+     Measured on the base: the shared left edge already holds — `align: start`
+     sets `--jp-measure-margin: 0px` and the eyebrow, heading and bio all sit on
+     it — but the HEAD HAIRLINE was not found anywhere in the tree, and the
+     pull-quote broke the left edge with a `--space-5` indent behind a 2px
+     accent rule. "Hairline horizontal rules only. No box borders anywhere." */
+  .guide[data-surface='bare'][data-align='start'] {
+    --guide-head-rule: var(--border-width);
+    --guide-head-gap: calc(var(--jp-sec-gap) / 3);
+    --guide-fact-border: 0 none;
+    --guide-fact-radius: var(--radius-none);
+    --guide-fact-pad: 0px;
+  }
+
+  /* The rule spans the MEASURE, not the 22ch headline cap, so it reads as a
+     section rule and not as an underlined heading. `width: 100%` is required
+     because `.guide__body` is a column flex box with `align-items: start`,
+     which shrink-wraps every child to its text. */
+  .guide[data-surface='bare'][data-align='start'] .guide__heading {
+    width: 100%;
+    max-width: var(--jp-measure);
+  }
+
+  /* NO BOX BORDERS ANYWHERE: the pull-quote's rules go horizontal and the
+     ornament goes, which returns its text to the shared left edge — the other
+     half of this look's tell, broken by the base's own indent. */
+  .guide[data-surface='bare'][data-align='start'] .guide__quote {
+    width: 100%;
+    padding-inline-start: 0;
+    padding-block: calc(var(--jp-sec-gap) / 2);
+    border-inline-start: 0;
+    border-block: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .guide[data-surface='bare'][data-align='start'] .guide__quote::before {
+    display: none;
+  }
+
+  .guide[data-surface='bare'][data-align='start'] .guide__facts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    width: 100%;
+    max-width: var(--jp-measure);
+  }
+
+  .guide[data-surface='bare'][data-align='start'] .guide__fact {
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding-block: calc(var(--jp-sec-gap) / 3);
+    border-block-end: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  /* ── 1.3 SOFT-ORGANIC · `open-air` — `edge: soft` ───────────────────────
+     Tell: no border anywhere, pill controls, and a shadow you have to look for.
+
+     Keyed ONLY on `edge: soft`. This look shares four axes with candlelit
+     (`align: center`, `density: airy`, `width: text`, `motion: drift`) and a
+     bare rule on any of them would restyle the one preset that works;
+     `edge: soft` is open-air's and nobody else's, and candlelit is `edge: none`.
+
+     Measured on the base: the pills are genuinely there. "No border anywhere"
+     was not, and the reason is that `.guide__fact`, `.guide__tag` and
+     `.guide__dur` each spelled their own `var(--border-width) solid …`, which
+     the `edge` axis cannot reach at any value. `--jp-edge-width` is `0px` here
+     and the fact row now reads it. */
+  .guide[data-edge='soft'] {
+    --guide-fact-border: 0 none;
+    /* THE SHADOW YOU HAVE TO LOOK FOR. `--jp-edge-shadow` is `--shadow-lg` at
+       this value: a 10%/5%-alpha, 14px-blur drop — "large, very diffuse, very
+       low opacity". Whole value of its own `box-shadow`, per the note on
+       `.guide__fact`. */
+    --guide-fact-shadow: var(--jp-edge-shadow);
+    --guide-fact-pad: var(--space-2) var(--space-4);
+  }
+
+  .guide[data-edge='soft'] .guide__tag,
+  .guide[data-edge='soft'] .guide__dur {
+    border-color: transparent;
+  }
+
+  /* "Accent as tinted background + accent text. NEVER a hard fill." The
+     quote's hard 2px rule becomes a soft tinted panel at `--radius-xl`, the
+     family's own panel radius.
+
+     The 8% mix sits on `--jp-accent-mark`, which is `--jp-ember-text` at four
+     of five accent values and `--jp-heading` at the fifth — never a pre-mixed
+     value — so this is NOT contract A37's mix-of-a-mix. `--jp-accent-edge`
+     would have been exactly that: it is already a 45% ember mix at
+     `accent: glow`, and 8% of it would be ~3.6% ember. */
+  .guide[data-edge='soft'] .guide__quote {
+    padding: var(--space-6) var(--space-7);
+    border-inline-start: 0;
+    border-radius: var(--radius-xl);
+    background: color-mix(in oklab, var(--jp-accent-mark) 8%, transparent);
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  .guide[data-edge='soft'] .guide__quote::before {
+    inset-inline-start: var(--space-5);
+  }
+
+  /* ── 1.8 PLAYFUL · `full-send` — `edge: heavy` · `motion: stagger` ───────
+     Tell: whole inverted bands, pill CTAs at `--radius-full`, spring easing,
+     and BIG NUMERALS.
+
+     Measured on the base: big numerals were found NOWHERE in the tree. This
+     section's numerals are the fact DETAIL — "2,400" against "Students",
+     "since 2009" against "Practising" — and inside a bordered pill at
+     `max(--text-xs, --guide-meta / 1.2)` they were the quietest thing in the
+     section. They become the loud half of the row and the label demotes to a
+     small tracked cap above them.
+
+     `flex-direction: column`, not `column-reverse`: the visual order then still
+     matches the `<dl>`'s DOM order, so the row reads term-then-description to a
+     screen reader and looks like a stat to everyone else. */
+  .guide[data-edge='heavy'] {
+    --guide-pill-radius: var(--radius-full);
+    --guide-fact-radius: var(--radius-xl);
+    --guide-fact-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --guide-fact-pad: var(--space-4) var(--space-6);
+    --guide-label-size: var(--text-xs);
+    --guide-detail-size: var(--jp-heading-size);
+  }
+
+  .guide[data-edge='heavy'] .guide__fact {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    text-align: center;
+  }
+
+  .guide[data-edge='heavy'] .guide__fact dt {
+    font-size: var(--guide-label-size);
+    letter-spacing: var(--tracking-wider);
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+
+  .guide[data-edge='heavy'] .guide__fact dd {
+    font-family: var(--font-heading);
+    font-weight: var(--heading-weight, var(--font-semibold));
+    line-height: var(--leading-none);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-heading);
+  }
+
+  /* SPRING EASING, made visible. `--jp-reveal-ease` is `--ease-spring` at this
+     motion value and the reveal already rides it, but the one place a viewer
+     can FEEL an easing curve is the control they are pointing at, so the hover
+     overshoots on it. It only ever GROWS the target: a `:active` shrink would
+     take the border box under contract A2's 44px floor mid-press, and A2's
+     floor is a floor in both directions. */
+  .guide[data-motion='stagger'] .guide__play:hover {
+    transform: scale(1.18);
+  }
+
+  /* ── 1.9 CONTEMPORARY · `signal` — `edge: hairline` + `accent: fill` ─────
+     Tell: rounded cards with hairlines and a small neutral shadow; one filled
+     accent button per section.
+
+     ANOTHER COMPOUND BY NECESSITY. `signal` shares all nine of its axis
+     values: `edge: hairline` is also `quiet-studio`, `long-read` and
+     `syllabus`, and `accent: fill` is also `plain-facts` and `full-send` — but
+     those two are `edge: offset` and `edge: heavy`, and the three other
+     hairline looks are `accent: none` / `text` / `edge`. So the PAIR is
+     `signal` alone, and candlelit (`edge: none`, `accent: glow`) matches
+     neither half.
+
+     Measured on the base: `--jp-edge-shadow` reached only `.guide__plate`, so
+     the fact rows were flat hairline pills with no elevation at all — the
+     "vanishing card" research §5.2 predicts for exactly this family. The filled
+     accent button is already right: `.guide__play` reads `--jp-accent-fill`,
+     and it is the only filled control in the section.
+
+     `--jp-edge-shadow` is `--shadow-xs` here — a 1px, 10%-alpha drop, i.e. the
+     "small NEUTRAL shadow" the tell names, not a coloured one. */
+  .guide[data-edge='hairline'][data-accent='fill'] {
+    --guide-fact-radius: var(--radius-card);
+    --guide-fact-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --guide-fact-shadow: var(--jp-edge-shadow);
+    --guide-fact-pad: var(--space-3) var(--space-4);
+  }
+
+  /* ── THE `type` AXIS AS A RELATIONSHIP, not four font sizes ─────────────
+     The base drew the eyebrow at a flat `--text-sm` while `--jp-heading-size`
+     travels 20px → 48px across the four values: at `restrained` the label sat
+     within 6px of the heading it labels, and at `expressive` it had disappeared
+     underneath it. `--guide-label-size` is the axis's third relationship and it
+     moves WITH the heading — `--text-xs` at `restrained` (above),
+     `--text-sm` at `balanced` (the default), `--text-base` here.
+
+     `monumental` is deliberately absent. It is candlelit's own type value,
+     shared with `quiet-studio` and `plain-facts`, and both of those take their
+     label rung from a value that is theirs alone (`density: vast`,
+     `edge: offset`). A bare `type: monumental` rule here is the precise shape
+     that would have restyled the one preset that already works. */
+  .guide[data-type='expressive'] {
+    --guide-label-size: var(--text-base);
+  }
+
   /* ── REDUCED MOTION — INVIOLABLE ─────────────────────────────────────────
      The eleven per-component copies of this block collapse into
      `journey-sections-shared.css`, which stops every keyframe under `.jp-sec`
@@ -1195,6 +1895,22 @@
 
     .guide__play:hover {
       transform: none;
+    }
+
+    /* The two per-look hover states the design-language pass added. Both are
+       transforms OUTSIDE a keyframe, which is the one thing
+       `journey-sections-shared.css`'s `animation: none !important` guard cannot
+       reach — and both out-specify the `.guide__play:hover` rule above (0,4,0
+       against 0,2,0), so neither is covered by it.
+
+       Listed explicitly rather than as a wildcard so the next look that adds a
+       hover transform has to come here and say so. */
+    .guide[data-motion='stagger'] .guide__play:hover {
+      transform: none;
+    }
+
+    .guide[data-edge='offset'] .guide__play:hover {
+      translate: none;
     }
   }
 </style>

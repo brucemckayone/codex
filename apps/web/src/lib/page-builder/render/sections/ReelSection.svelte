@@ -36,6 +36,32 @@
       further above the text — safe by construction, where a second
       `aspect-ratio` is not.
 
+  ── EIGHT DESIGN LANGUAGES, NOT 38 PERMUTATIONS ────────────────────────────
+  The nine axes reach every MAGNITUDE in this file. They do not, on their own,
+  make a look recognisable: a design language is also which elements are boxes,
+  which corner is square, which label is monospaced and which rule is drawn at
+  all — selector-level decisions a properties-only axis file cannot carry and a
+  Svelte-scoped style block cannot select on, because the `data-jp-*` attributes
+  live on the ANCESTOR `.jp-sec`.
+
+  So seven axis values are re-emitted UNMODIFIED as local `data-*` attributes on
+  `.reel` (see `look` in the script; `align` reuses the `data-reel-align` that
+  was already there), the ROLE TABLE at the head of the stylesheet turns each
+  look into a set of VALUES rather than a set of rules, and the PER-LOOK
+  COMMITMENTS block at its foot spends them on each family's documented tell
+  (`00-design-language-research.md` §1).
+
+  READ THAT BLOCK'S OWN HEADER before adding a rule to it. It carries the
+  selector discipline that keeps `candlelit` — the one preset the product owner
+  says already works — out of the blast radius, which is arithmetic rather than
+  convention: candlelit is uniquely identified by four of its nine values
+  (`surface: media`, `edge: none`, `media: bleed`, `accent: glow`) and SHARES the
+  other five, so a bare rule on `type: monumental`, `align: center`,
+  `density: airy`, `width: text` or `motion: drift` restyles it. None of the
+  twelve attribute-constrained selectors emitted from this file matches the
+  candlelit bundle, and every role default is the literal value the declaration
+  it replaced carried.
+
   ── FOUR COMPOSITIONS BUILT, ONE DESCOPED ──────────────────────────────────
   `theatre` (default) · `plain` · `split` · `waveform`. `theatre` is the retired
   `cinema` and `plain` the retired `simple` (`LEGACY_SECTION_VARIANTS` maps both).
@@ -269,6 +295,36 @@
   const showMedia = $derived(design?.media === 'none' ? 'no' : 'yes');
 
   const currentCaption = $derived(captions[captionIndex] ?? captions[0]);
+
+  /**
+   * SEVEN AXIS VALUES RE-EMITTED UNMODIFIED as local `data-*` attributes, so the
+   * PER-LOOK COMMITMENTS block at the foot of the stylesheet can select on them.
+   * Exactly the seam `GuideSection` documents: `journey-design.css` emits nothing
+   * but custom properties, and a design LANGUAGE is also which elements are
+   * boxes, which corner is square, which label is monospaced and which rule is
+   * drawn at all — selector-level statements. A Svelte-scoped style block cannot
+   * reach the ancestor `.jp-sec`'s `data-jp-*`, hence the mirror.
+   *
+   * `align` is NOT here: `data-reel-align` already carries it on the same
+   * element (the editorial-split container query keys on it), and one axis with
+   * two local attributes is one attribute too many — the long-read compound
+   * below reads `data-reel-align` instead. `width` is not mirrored either:
+   * `--jp-content-max` / `--jp-measure` already carry it and nothing in this
+   * file needs to select on it.
+   *
+   * `undefined` when no `design` arrives ⇒ Svelte omits the attribute and every
+   * per-look rule no-ops, which is the honest degradation: a host resolving no
+   * axes gets exactly the CSS this component shipped before the per-look pass.
+   */
+  const look = $derived({
+    surface: design?.surface,
+    edge: design?.edge,
+    type: design?.type,
+    accent: design?.accent,
+    density: design?.density,
+    motion: design?.motion,
+    media: design?.media,
+  });
 
   /**
    * The ambient caption cross-fade is CONTINUOUS motion, so contract A40 applies:
@@ -677,6 +733,13 @@
     data-reel-composition={composition}
     data-reel-overlay={overlay}
     data-reel-align={design?.align ?? 'center'}
+    data-surface={look.surface}
+    data-edge={look.edge}
+    data-type={look.type}
+    data-accent={look.accent}
+    data-density={look.density}
+    data-motion={look.motion}
+    data-media={look.media}
   >
     <div class="reel__inner" use:reveal={{ disabled: editable }}>
       {#if composition === 'split'}
@@ -729,6 +792,100 @@
      the section (pilot lesson 1). `.reel` is that descendant.
      ═══════════════════════════════════════════════════════════════════════ */
   .reel {
+    /* ── THE ROLE TABLE, so a look is a VALUE and not a rule ───────────────
+       The per-look blocks at the foot of this file are keyed on axis values and
+       there are eight of them. Without local roles the same eight blocks would
+       each re-declare the plate's border, the pill radius, the play control's
+       four paint declarations and the audio panel's box — which is how eight
+       looks become forty near-duplicate rules that drift. With roles a look
+       states its VALUES and the paint stays in one place.
+
+       EVERY DEFAULT HERE REPRODUCES THE BASE COMMIT EXACTLY. That is not a
+       courtesy, it is the whole mechanism: candlelit resolves NONE of the
+       per-look selectors below, so it resolves these defaults, and a default
+       that merely looked reasonable would silently restyle the one preset the
+       product owner says already works. Each default is the literal value the
+       declaration it replaced carried, listed against its old spelling:
+
+         --reel-frame-*      was the `theatre`/`split` frame rule's own
+                             1px accent-mix border + `--shadow-xl`
+         --reel-corner-*     was `block` / `--border-width-thick` / a 70%
+                             `--jp-accent-mark` mix
+         --reel-pill-radius  was `--radius-full` on the over-plates and the play
+                             control
+         --reel-plate-*      was 1px `--color-heading` 16% + `--blur-sm`
+         --reel-meta-size    was the inline `max(--text-xs, --jp-body-size/1.5)`
+         --reel-label-*      `inherit` + `calc(--tracking-wider * 5.6)` is the
+                             rec tag exactly as it shipped (0.28em)
+         --reel-num-*        `inherit` / `1em` / `--font-semibold` is the
+                             duration inheriting the meta rung, i.e. no change
+         --reel-dot-*        was `--space-1-5` and `--radius-full`
+         --reel-head-*       `0px` paints no rule at all
+         --reel-caption-*    was `--font-heading` + `italic`, marks at 0.4
+         --reel-play-*       was the glassy 45% background, the full-strength
+                             `--jp-accent-mark` 2px border, `--jp-accent-glow`
+                             as the whole box-shadow, and `--blur-md`
+         --reel-audio-*      was `--color-surface-secondary` at `--radius-card`
+                             with no border and no elevation
+       ────────────────────────────────────────────────────────────────────── */
+
+    /* the letterbox chrome — read only by `theatre` and `split` */
+    --reel-frame-border: var(--border-width) solid
+      color-mix(in oklab, var(--jp-accent-mark) 22%, transparent);
+    --reel-frame-shadow: var(--shadow-xl);
+
+    /* the viewfinder brackets */
+    --reel-corner-display: block;
+    --reel-corner-width: var(--border-width-thick);
+    --reel-corner-color: color-mix(
+      in oklab,
+      var(--jp-accent-mark) 70%,
+      transparent
+    );
+
+    /* pills and plates */
+    --reel-pill-radius: var(--radius-full);
+    --reel-plate-border: var(--border-width) solid
+      color-mix(in oklab, var(--color-heading) 16%, transparent);
+    --reel-plate-blur: var(--blur-sm);
+
+    /* the metadata row */
+    --reel-meta-size: max(var(--text-xs), calc(var(--jp-body-size) / 1.5));
+    --reel-label-font: inherit;
+    --reel-label-tracking: calc(var(--tracking-wider) * 5.6);
+    --reel-num-font: inherit;
+    --reel-num-size: 1em;
+    --reel-num-weight: var(--font-semibold);
+    --reel-dot-size: var(--space-1-5);
+    --reel-dot-radius: var(--radius-full);
+
+    /* the section head's own rule */
+    --reel-head-rule: 0px;
+    --reel-head-gap: 0px;
+
+    /* the whispered caption */
+    --reel-caption-font: var(--font-heading);
+    --reel-caption-style: italic;
+    --reel-caption-mark: 0.4;
+
+    /* the play control */
+    --reel-play-color: var(--color-heading);
+    --reel-play-bg: color-mix(in oklab, var(--color-background) 45%, transparent);
+    --reel-play-bg-hover: color-mix(
+      in oklab,
+      var(--jp-accent-mark) 26%,
+      transparent
+    );
+    --reel-play-border: var(--border-width-thick) solid var(--jp-accent-mark);
+    --reel-play-shadow: var(--jp-accent-glow);
+    --reel-play-blur: var(--blur-md);
+
+    /* the `waveform` composition's panel */
+    --reel-audio-bg: var(--color-surface-secondary);
+    --reel-audio-border: 0 none;
+    --reel-audio-shadow: none;
+    --reel-audio-radius: var(--radius-card);
+
     position: relative;
     isolation: isolate;
     padding-block: var(--jp-sec-pad-block);
@@ -767,6 +924,13 @@
     flex-direction: column;
     align-items: var(--jp-align);
     gap: calc(var(--jp-sec-gap) * 0.5);
+    /* THE HEAD'S OWN HAIRLINE, as a role rather than a rule. `long-read`'s tell
+       is "a hairline under every section head" and `syllabus`'s is "a hairline
+       grid"; both want the same line and neither should re-spell it. `0px`
+       paints nothing, so this is inert everywhere else — a `0px` border-width
+       draws no line regardless of style or colour. */
+    padding-block-end: var(--reel-head-gap);
+    border-block-end: var(--reel-head-rule) solid var(--color-border-subtle);
   }
 
   @container (min-width: 48rem) {
@@ -857,9 +1021,13 @@
      rather than the old `rgba(0, 0, 0, 0.4)`, which broke on a light brand. */
   [data-reel-composition='theatre'] .reel__frame,
   [data-reel-composition='split'] .reel__frame {
-    border: var(--border-width) solid
-      color-mix(in oklab, var(--jp-accent-mark) 22%, transparent);
-    box-shadow: var(--shadow-xl);
+    /* Through the roles, so a LOOK can restate the frame's edge without a
+       composition having to know about it. `box-shadow` takes the role as its
+       WHOLE value (contract A54) because two looks below hand it
+       `--jp-edge-shadow`, which is the keyword `none` at `edge: none` and
+       `edge: heavy`. */
+    border: var(--reel-frame-border);
+    box-shadow: var(--reel-frame-shadow);
   }
 
   /* thin top sheen — reads like the surface of a screen */
@@ -1023,6 +1191,10 @@
 
   /* ── viewfinder corner marks ── */
   .reel__corner {
+    /* A ROLE, not a rule: three looks below have no business drawing viewfinder
+       brackets ("no border anywhere", "one hairline", "hairline rules only"),
+       and `display: none` on a decorative `<span>` is the honest removal. */
+    display: var(--reel-corner-display);
     position: absolute;
     z-index: 4;
     /* `cqw`, not `vw`: the mark should track the frame it sits on, not the
@@ -1033,33 +1205,33 @@
        `--jp-accent-edge` measures below the 3:1 graphic floor on a dark brand
        (1.27 at `glow`, 1.49/2.04/2.04 at text/fill/edge — measured
        independently by both round-3 worktrees). */
-    border: 0 solid color-mix(in oklab, var(--jp-accent-mark) 70%, transparent);
+    border: 0 solid var(--reel-corner-color);
     pointer-events: none;
   }
 
   .reel__corner--tl {
     top: var(--space-5);
     left: var(--space-5);
-    border-top-width: var(--border-width-thick);
-    border-left-width: var(--border-width-thick);
+    border-top-width: var(--reel-corner-width);
+    border-left-width: var(--reel-corner-width);
   }
   .reel__corner--tr {
     top: var(--space-5);
     right: var(--space-5);
-    border-top-width: var(--border-width-thick);
-    border-right-width: var(--border-width-thick);
+    border-top-width: var(--reel-corner-width);
+    border-right-width: var(--reel-corner-width);
   }
   .reel__corner--bl {
     bottom: var(--space-5);
     left: var(--space-5);
-    border-bottom-width: var(--border-width-thick);
-    border-left-width: var(--border-width-thick);
+    border-bottom-width: var(--reel-corner-width);
+    border-left-width: var(--reel-corner-width);
   }
   .reel__corner--br {
     bottom: var(--space-5);
     right: var(--space-5);
-    border-bottom-width: var(--border-width-thick);
-    border-right-width: var(--border-width-thick);
+    border-bottom-width: var(--reel-corner-width);
+    border-right-width: var(--reel-corner-width);
   }
 
   /* ── top meta: rec tag + duration ── */
@@ -1073,7 +1245,7 @@
     /* Metadata one step below the `type` axis's card-scale rung (contract A44),
        derived FROM the rung so `type` reaches it, floored at `--text-xs` which
        research §5.1 permits for metadata only. */
-    font-size: max(var(--text-xs), calc(var(--jp-body-size) / 1.5));
+    font-size: var(--reel-meta-size);
   }
 
   /* AT THE TOP OF THE MEDIA — and `--jp-media-scrim` is bottom-anchored
@@ -1097,14 +1269,21 @@
   .reel__topmeta[data-reel-at='over'] .reel__tag,
   .reel__topmeta[data-reel-at='over'] .reel__dur {
     padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
+    border-radius: var(--reel-pill-radius);
     /* 88%, not a glassy 55%: contract A39 — an alpha low enough to read as faint
-       measures against the poster rather than against the plate. */
+       measures against the poster rather than against the plate.
+
+       SEE THE HANDOFF: a duplicate `.reel__topmeta[data-reel-at='over']
+       .reel__dur` block further down this file re-declares this background at
+       55% and, being later at equal specificity (0,3,0), WINS for the duration
+       pill. So A39's 88% currently reaches only the rec tag. That override is on
+       `media: bleed`, i.e. candlelit's own pill, so it is deliberately left
+       alone here and reported instead — it needs a re-measure, not a
+       sibling-look pass. */
     background: color-mix(in oklab, var(--color-background) 88%, transparent);
-    border: var(--border-width) solid
-      color-mix(in oklab, var(--color-heading) 16%, transparent);
-    -webkit-backdrop-filter: blur(var(--blur-sm));
-    backdrop-filter: blur(var(--blur-sm));
+    border: var(--reel-plate-border);
+    -webkit-backdrop-filter: blur(var(--reel-plate-blur));
+    backdrop-filter: blur(var(--reel-plate-blur));
   }
 
   .reel__topmeta[data-reel-at='below'] {
@@ -1115,19 +1294,21 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
+    font-family: var(--reel-label-font);
     font-weight: var(--font-semibold);
     text-transform: uppercase;
-    /* 0.28em has no token and `--tracking-wider` (0.05em) is the widest one, so
-       the rec tag's deliberately airy tracking is derived from it rather than
-       spelled as a raw value. */
-    letter-spacing: calc(var(--tracking-wider) * 5.6);
+    /* 0.28em has no token; the role's default derives it from `--tracking-wider`
+       (0.05em), which is what this shipped. `--tracking-widest` (0.1em) now
+       exists and the two mono-label looks below take it — 0.28em on a monospaced
+       face reads as spaced-out capitals rather than as a label. */
+    letter-spacing: var(--reel-label-tracking);
     color: var(--color-heading);
   }
 
   .reel__dot {
-    width: var(--space-1-5);
-    height: var(--space-1-5);
-    border-radius: var(--radius-full);
+    width: var(--reel-dot-size);
+    height: var(--reel-dot-size);
+    border-radius: var(--reel-dot-radius);
     /* `--jp-accent-mark`, never `--jp-accent-fill`: the fill is `transparent` at
        `accent: text` and `accent: edge`, so a small brand dot painted with it
        vanishes on two of five values (pilot lesson 4). */
@@ -1150,20 +1331,27 @@
   }
 
   .reel__dur {
-    font-weight: var(--font-semibold);
+    font-family: var(--reel-num-font);
+    font-size: var(--reel-num-size);
+    font-weight: var(--reel-num-weight);
     letter-spacing: var(--tracking-wide);
     font-variant-numeric: tabular-nums;
     color: var(--color-heading);
   }
 
+  /* THE DUPLICATE, LEFT AS IT COMPUTES. Everything here except the background
+     alpha repeats the combined rule above, and the 55% is what actually paints —
+     which is the A39 defect the note up there records and the handoff carries.
+     Its four repeated declarations are routed through the same roles so a look
+     cannot get a half-applied pill, and the background is untouched so candlelit
+     resolves byte-identically to the base commit. */
   .reel__topmeta[data-reel-at='over'] .reel__dur {
     padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-full);
+    border-radius: var(--reel-pill-radius);
     background: color-mix(in oklab, var(--color-background) 55%, transparent);
-    border: var(--border-width) solid
-      color-mix(in oklab, var(--color-heading) 16%, transparent);
-    -webkit-backdrop-filter: blur(var(--blur-sm));
-    backdrop-filter: blur(var(--blur-sm));
+    border: var(--reel-plate-border);
+    -webkit-backdrop-filter: blur(var(--reel-plate-blur));
+    backdrop-filter: blur(var(--reel-plate-blur));
   }
 
   /* ── lower block: caption whisper + player chrome ── */
@@ -1196,12 +1384,19 @@
     background: var(--jp-media-scrim);
   }
 
+  /* THE CAPTION NOW READS THE `align` AXIS instead of pinning centre.
+     `--jp-align` / `--jp-text-align` are `center` / `center` at `align: center`,
+     which is candlelit's value AND the root default, so this resolves
+     byte-identically to the `center` / `center` it replaces — and the four
+     `align: start` looks stop having one centred line in an otherwise
+     left-ranged column, which was the one place this section overrode the axis
+     that exists to delete alignment variants. */
   .reel__caption {
-    align-self: center;
-    text-align: center;
+    align-self: var(--jp-align);
+    text-align: var(--jp-text-align);
     margin: 0;
-    font-family: var(--font-heading);
-    font-style: italic;
+    font-family: var(--reel-caption-font);
+    font-style: var(--reel-caption-style);
     font-weight: var(--font-normal);
     /* Exactly the `type` axis's card-scale rung (contract A44). The old local
        `clamp(--text-base, 2.5vw, --text-2xl)` was an independent invention of
@@ -1215,13 +1410,13 @@
 
   .reel__caption::before {
     content: '\201C';
-    opacity: 0.4;
+    opacity: var(--reel-caption-mark);
     margin-right: 0.06em;
   }
 
   .reel__caption::after {
     content: '\201D';
-    opacity: 0.4;
+    opacity: var(--reel-caption-mark);
     margin-left: 0.06em;
   }
 
@@ -1244,15 +1439,19 @@
        44px floor at every width below 1000px. */
     width: max(var(--tap-target-min), clamp(2.75rem, 4.4cqw, 3.3rem));
     height: max(var(--tap-target-min), clamp(2.75rem, 4.4cqw, 3.3rem));
-    border-radius: var(--radius-full);
+    border-radius: var(--reel-pill-radius);
     display: grid;
     place-items: center;
-    color: var(--color-heading);
-    background: color-mix(in oklab, var(--color-background) 45%, transparent);
+    color: var(--reel-play-color);
+    background: var(--reel-play-bg);
     /* Full-strength `--jp-accent-mark`, not a faint mix: no alpha low enough to
        read as faint clears 3:1 at the dark pole (contract A39), and this border
-       is the control's only boundary. */
-    border: var(--border-width-thick) solid var(--jp-accent-mark);
+       is the control's only boundary — WHICH IS WHY NO LOOK BELOW DELETES IT.
+       `open-air`'s "no border anywhere" is spent on the frame, the brackets and
+       the plates; `signal` swaps it for an opaque accent FILL, which is a
+       stronger boundary than the border it replaces, not a weaker one. A tell is
+       not a licence to drop a control under the 3:1 graphic floor. */
+    border: var(--reel-play-border);
     /* `accent: glow` IS Candlelit, i.e. what all 695 backfilled pages hold, so an
        unconsumed `--jp-accent-glow` would be a bloom that never blooms on every
        published page. This is its only consumer in the section.
@@ -1263,9 +1462,9 @@
        and fall back to the initial `none`. That is contract A54's mechanism,
        which is about the KEYWORD rather than the `--jp-edge-*` family, and it
        also catches `--jp-media-scrim` and `--jp-media-mask`. */
-    box-shadow: var(--jp-accent-glow);
-    -webkit-backdrop-filter: blur(var(--blur-md));
-    backdrop-filter: blur(var(--blur-md));
+    box-shadow: var(--reel-play-shadow);
+    -webkit-backdrop-filter: blur(var(--reel-play-blur));
+    backdrop-filter: blur(var(--reel-play-blur));
     cursor: pointer;
     transition:
       transform var(--duration-fast) var(--ease-out),
@@ -1274,7 +1473,7 @@
 
   .reel__play:hover {
     transform: translateY(calc(var(--space-1) * -0.5));
-    background: color-mix(in oklab, var(--jp-accent-mark) 26%, transparent);
+    background: var(--reel-play-bg-hover);
   }
 
   .reel__play:active {
@@ -1293,12 +1492,11 @@
      still a play glyph, and a course with no preview clip now renders no frame
      rather than a decorative one. `--pending` stays — it stands for a real clip
      that has not resolved yet. */
+  /* Two byte-adjacent blocks on the same selector, merged. Nothing computed
+     changes; the pair was a leftover from splitting the `--empty` branch out. */
   .reel__play--pending {
     cursor: default;
     opacity: 0.65;
-  }
-
-  .reel__play--pending {
     animation: reel-skeleton calc(var(--jp-reveal-duration) * 1.75)
       var(--ease-in-out) infinite;
   }
@@ -1442,8 +1640,17 @@
     flex-direction: column;
     gap: var(--jp-sec-gap);
     padding: var(--jp-sec-gap);
-    border-radius: var(--radius-card);
-    background: var(--color-surface-secondary);
+    border-radius: var(--reel-audio-radius);
+    background: var(--reel-audio-bg);
+    /* Both `0 none` / `none` by default, so this panel is exactly the flat
+       `--radius-card` block it shipped as. The looks whose whole tell is a boxed
+       surface give it a real edge below, and `invert` re-points its background —
+       `--color-surface-secondary` is a GLOBAL token, so under `surface: invert`
+       the panel stayed at pole A inside a pole-B band, which is an un-inverted
+       patch in an inverted section (see the handoff: the generic fix is
+       `--jp-ink-2`, but it would move candlelit's `waveform` panel). */
+    border: var(--reel-audio-border);
+    box-shadow: var(--reel-audio-shadow);
   }
 
   [data-reel-composition='waveform'] .reel__track {
@@ -1456,6 +1663,609 @@
      `journey-sections-shared.css` carry the `motion` axis. The hidden state
      applies only under `.reveal--armed`, which the action adds from JS, so SSR
      and no-JS paint the content fully revealed and can never get stuck. */
+
+  /* ═══ PER-LOOK COMMITMENTS ═══════════════════════════════════════════════
+     Everything above is axis-generic: it consumes magnitudes and paints four
+     arrangements. What follows commits each design LANGUAGE to its documented
+     tell (`00-design-language-research.md` §1), because a tell is a
+     SELECTOR-level statement — which elements are boxes, which corner is
+     square, which label is monospaced, which rule is drawn at all — and
+     `journey-design.css` deliberately emits nothing but custom properties.
+
+     ── WHY THIS SECTION NEEDED THE PASS ─────────────────────────────────────
+     MEASURED ON THE BASE: `--jp-edge-width` / `--jp-edge-color` /
+     `--jp-edge-shadow` had exactly ONE consumer in this file, `.reel` itself.
+     Every box INSIDE the section was edge-blind: the letterbox frame carried a
+     fixed `--jp-accent-mark` 22% hairline and `--shadow-xl` whenever the
+     composition was `theatre`/`split` and nothing otherwise; the over-plates
+     carried a fixed `--color-heading` 16%; and `.reel__audio` — the whole
+     subject of the `waveform` composition — painted `--color-surface-secondary`
+     at `--radius-card` with no border and no elevation on ALL EIGHT looks.
+
+     The visible consequence is that seven of the eight looks rendered as the
+     same cinematic letterbox with different spacing. Candlelit's own tell
+     features (ember bloom, viewfinder brackets, drifting haze, grain, the
+     `--jp-accent-glow` on the control) are all present and all correct; what was
+     missing is any reason to believe the other seven are design languages at
+     all. So every block below ADDS a commitment to a sibling — and the
+     brackets, which are candlelit's signature, are now switched OFF on five of
+     the seven, because differentiating the siblings is the work, not copying the
+     one that already reads.
+
+     ── THE SELECTOR DISCIPLINE, stated once so every block can be checked ───
+     `candlelit` is the one preset that already works and it must come out of
+     this pass byte-identical. It is uniquely identified by FOUR of its nine
+     axis values — `surface: media`, `edge: none`, `media: bleed`,
+     `accent: glow` — and SHARES the other five: `type: monumental` (with
+     quiet-studio, plain-facts), `align: center` (quiet-studio, open-air,
+     full-send), `density: airy` (open-air), `width: text` (long-read,
+     open-air), `motion: drift` (open-air).
+
+     So NO selector below is keyed on any of those five. Every one names one of
+     these twelve, and evaluating each against the candlelit bundle gives zero
+     matches:
+
+       edge: offset                     → plain-facts  only
+       accent: edge                     → syllabus     only
+       type: restrained                 → syllabus     only
+       accent: none                     → quiet-studio only
+       density: vast                    → quiet-studio only
+       motion: fade                     → quiet-studio only
+       edge: soft                       → open-air     only
+       edge: heavy                      → full-send    only
+       motion: stagger                  → full-send    only
+       media: mask                      → open-air + full-send (never candlelit,
+                                          which is `bleed`)
+       surface: bare  + align: start    → long-read    only
+       edge: hairline + accent: fill    → signal       only
+
+     The last two are COMPOUNDS by necessity rather than by taste: `long-read`
+     and `signal` each share all nine of their axis values with some sibling, so
+     neither has a single value to key on. Each is justified in its own block.
+
+     `open-air` is the dangerous one — it shares FOUR axes with candlelit — so
+     every open-air rule is keyed on `edge: soft`, which candlelit (`edge: none`)
+     cannot match.
+
+     THE ALIGN CHANNEL IS `data-reel-align`, not a second `data-align`: it
+     already exists on this element for the editorial-split container query, and
+     one axis with two local attributes is one too many. It defaults to
+     `'center'` when no design resolves, which only ever makes the `align: start`
+     compound fail to match — the safe direction.
+
+     WHAT NO BLOCK BELOW DOES: paint `.cta`. `journey-design.test.ts`
+     ("is the only styler of .cta in the section tree", Codex-kdsuo) reserves the
+     pay button's colours to `CtaLink`, because that contrast is guaranteed in
+     exactly one place. This section has no `.cta` at all; its one control is
+     `.reel__play`, which is a preview affordance and not a purchase. */
+
+  /* ── 1.1 EDITORIAL · `long-read` — `surface: bare` + `align: start` ──────
+     Tell: the eyebrow and the body share a left edge, and there is a hairline
+     under every section head.
+
+     A COMPOUND BY NECESSITY. `surface: bare` is shared with `quiet-studio` and
+     `align: start` with `plain-facts`, `syllabus` and `signal` — but
+     `quiet-studio` is `align: center` and none of the other three is
+     `surface: bare`, so the PAIR is `long-read` alone. Candlelit is
+     `surface: media`, so it matches neither half.
+
+     MEASURED ON THE BASE: the head hairline was found NOWHERE in this file, and
+     the shared left edge was actively BROKEN — the container query above
+     right-aligns `.reel__sub` at `align: start`, which is the correct editorial
+     SPLIT for `plain-facts`/`syllabus`/`signal` but is the one thing this look's
+     tell forbids. A right-ranged deck does not share a left edge with the
+     eyebrow. So this look takes the column and the rule instead of the split,
+     and the counterpart lives inside the same container query below. */
+  .reel[data-surface='bare'][data-reel-align='start'] {
+    --reel-head-rule: var(--border-width);
+    --reel-head-gap: calc(var(--jp-sec-gap) / 3);
+    /* HAIRLINE HORIZONTAL RULES ONLY; NO BOX BORDERS ANYWHERE. The section's
+       own hairline box becomes a single rule beneath it, which is what separates
+       one editorial section from the next. */
+    border: 0 none;
+    border-block-end: var(--jp-edge-width) solid var(--jp-edge-color);
+    /* AND THE SHELL'S ELEVATION WITH IT. `.reel` reads `--jp-edge-shadow`, which
+       is `--shadow-xs` at this look's `edge: hairline`, and a box shadow paints
+       around the border box whether or not the background is transparent — so
+       `surface: bare` plus a shadow is a faint box drawn around nothing, which
+       is the box border this tell forbids, arriving by another route. */
+    box-shadow: none;
+    /* The viewfinder brackets are cinematic chrome and this family draws none;
+       the frame keeps a neutral hairline instead of the accent mix. */
+    --reel-corner-display: none;
+    --reel-frame-border: var(--border-width) solid var(--color-border-subtle);
+    --reel-frame-shadow: none;
+    --reel-plate-border: 0 none;
+    --reel-audio-border: 0 none;
+    --reel-audio-shadow: none;
+    /* THE ACCENT IS TEXT COLOUR AND NOTHING ELSE at this look's `accent: text`,
+       so the opening quote is where it lands — full strength rather than the
+       0.4 whisper the cinematic caption wants. */
+    --reel-caption-mark: 1;
+  }
+
+  @container (min-width: 48rem) {
+    /* (0,4,0) against the split rule's (0,3,0), so these win on specificity
+       wherever both match. Kept inside the same query as the rule they undo, so
+       the pair is readable as a pair. */
+    .reel[data-surface='bare'][data-reel-align='start'] .reel__head {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: calc(var(--jp-sec-gap) * 0.5);
+    }
+    .reel[data-surface='bare'][data-reel-align='start'] .reel__sub {
+      text-align: left;
+      padding-bottom: 0;
+    }
+  }
+
+  /* The caption joins the running measure rather than sitting on its own 32ch
+     display cap — it is body copy in this family, not a cinematic whisper. */
+  .reel[data-surface='bare'][data-reel-align='start'] .reel__caption {
+    max-width: var(--jp-measure);
+  }
+
+  /* The magazine drop-quote. `--jp-accent-text` is `--jp-ember-text` at every
+     value that tints text (13.93 light / 5.40 dark on the golden org), NEVER
+     `--jp-ember`, which measures 2.04:1 dark — the single most likely
+     regression in this programme, per the research. `line-height: 0` keeps the
+     1.6em glyph from opening the line box. */
+  .reel[data-surface='bare'][data-reel-align='start'] .reel__caption::before {
+    color: var(--jp-accent-text);
+    font-size: 1.6em;
+    line-height: 0;
+    vertical-align: -0.3em;
+  }
+
+  /* ── 1.2 BRUTALIST · `plain-facts` — `edge: offset` ──────────────────────
+     Tell: 2px borders with a hard un-blurred offset shadow, mono labels, and
+     radius 0 everywhere.
+
+     MEASURED ON THE BASE: the 2px border was reachable on the shell, but the
+     offset shadow reached NOTHING inside the section and radius 0 reached
+     NOTHING at all — the shell keeps `--radius-card` under `surface: panel`, the
+     pills are `--radius-full`, the play control is `--radius-full` and the
+     waveform bars carry `rx="3"`. Worse, `plain-facts` is `media: none`, so the
+     letterbox does not render and the ONLY boxes it has are the shell, the head
+     and (in `waveform`) the audio panel. That is why this look read as broken
+     rather than as plain: it is a look about boxes with no box to draw on.
+
+     The head becomes that box, so the hard drop has a carrier that always
+     exists — same move `GuideSection` makes with `.guide__body`. */
+  .reel[data-edge='offset'] {
+    /* RADIUS 0, ABSOLUTELY — the tell's own adverb, and the shell has to be
+       squared off too: `--jp-sec-radius` is `--radius-card` under
+       `surface: panel`, which is this look's surface. */
+    border-radius: var(--radius-none);
+    --reel-pill-radius: var(--radius-none);
+    --reel-dot-radius: var(--radius-none);
+    --reel-audio-radius: var(--radius-none);
+    /* MONO LABELS. `--tracking-widest` (0.1em) rather than the rec tag's
+       default 0.28em: on a monospaced face, which already carries its own
+       advance, 0.28em reads as spaced-out capitals and not as a label. */
+    --reel-label-font: var(--font-mono);
+    --reel-label-tracking: var(--tracking-widest);
+    --reel-num-font: var(--font-mono);
+    /* 2px BORDERS AND A HARD, UN-BLURRED DROP. `--jp-edge-shadow` is
+       `var(--space-1) var(--space-1) 0 0 var(--jp-line-strong)` at this value —
+       a 4px offset with a zero blur radius, which is the tell exactly. Taken as
+       the WHOLE value of each `box-shadow` (contract A54). The backdrop blurs go
+       to zero for the same reason the radii do: glass is not a brutalist
+       material. */
+    --reel-plate-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-plate-blur: 0px;
+    --reel-play-blur: 0px;
+    --reel-play-shadow: var(--jp-edge-shadow);
+    --reel-audio-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-audio-shadow: var(--jp-edge-shadow);
+    /* The whispered italic serif caption is the cinematic register; this family
+       states facts. */
+    --reel-caption-style: normal;
+  }
+
+  /* THE BOX THAT ALWAYS EXISTS. `:has()` rather than a bare `.reel__head`
+     because the head element renders even when the section has no copy at all
+     (the `waveform` composition can stand on a clip alone), and a 2px box with
+     `--jp-sec-gap` of padding around nothing is a worse defect than the one this
+     fixes. */
+  .reel[data-edge='offset']
+    .reel__head:has(.reel__eyebrow, .reel__title, .reel__sub) {
+    padding: var(--jp-sec-gap);
+    border: var(--jp-edge-width) solid var(--jp-edge-color);
+    box-shadow: var(--jp-edge-shadow);
+    border-radius: var(--radius-none);
+  }
+
+  /* RADIUS 0 EVERYWHERE reaches the equaliser too. `rx` is an SVG geometry
+     property and is settable from CSS, so the bars square off WITHOUT touching
+     the `rx="3"` attribute the test pins as byte-identical to the 32
+     hand-authored rects. A browser that does not support geometry properties in
+     CSS keeps the rounded bars, which is a graceful floor rather than a break. */
+  .reel[data-edge='offset'] .reel__wave rect {
+    rx: 0;
+  }
+
+  /* The control presses INTO its own offset shadow. `motion: none` is this
+     look's motion value, so `--jp-reveal-duration` is `0ms` and the press is a
+     genuinely INSTANT state change — which is what the family's motion row asks
+     for, not a fast animation. `translate` rather than `transform` so the box
+     does not shrink: contract A2's 44px floor is a floor in both directions. */
+  .reel[data-edge='offset'] .reel__play:hover {
+    transform: none;
+    translate: var(--space-1) var(--space-1);
+    box-shadow: none;
+  }
+
+  /* ── 1.3 SOFT-ORGANIC · `open-air` — `edge: soft` ONLY ───────────────────
+     Tell: no border anywhere, pill controls, and a shadow you have to look for.
+
+     KEYED ONLY ON `edge: soft`. This look shares FOUR axes with candlelit
+     (`align: center`, `density: airy`, `width: text`, `motion: drift`) and a
+     bare rule on any of them would restyle the one preset that works.
+     `edge: soft` is open-air's and nobody else's, and candlelit is `edge: none`.
+
+     MEASURED ON THE BASE: the pills are genuinely there and the arch comes free
+     from `media: mask`. "No border anywhere" was not — the frame's accent-mix
+     hairline and the over-plates' 16% border are both spelled locally, which the
+     `edge` axis cannot reach at any value. And "a shadow you have to look for"
+     reached nothing: `--jp-edge-shadow` is `--shadow-lg` here (a 10%/5%-alpha,
+     14px-blur drop — "large, very diffuse, very low opacity") and had no
+     consumer inside the section, while the frame carried a flat `--shadow-xl`
+     regardless of the axis.
+
+     THE PLAY CONTROL KEEPS ITS 2px BORDER. "No border anywhere" is spent on the
+     frame, the brackets and the plates; the control's border is its only 3:1
+     boundary (contract A39 — no alpha low enough to read as faint clears it at
+     the dark pole), and a tell is not a licence to drop a control under the
+     graphic floor. What the control gains instead is the family's elevation. */
+  .reel[data-edge='soft'] {
+    --reel-frame-border: 0 none;
+    --reel-frame-shadow: var(--jp-edge-shadow);
+    --reel-plate-border: 0 none;
+    --reel-corner-display: none;
+    --reel-play-shadow: var(--jp-edge-shadow);
+    --reel-audio-border: 0 none;
+    --reel-audio-shadow: var(--jp-edge-shadow);
+    --reel-audio-radius: var(--radius-xl);
+  }
+
+  /* "Accent as tinted background + accent text. NEVER a hard fill." The caption
+     becomes a soft tinted panel at `--radius-xl`, the family's own panel radius,
+     carrying the same shadow you have to look for.
+
+     The 8% mix sits on `--jp-accent-mark`, which is `--jp-ember-text` at four of
+     five accent values and `--jp-heading` at the fifth — never a pre-mixed
+     value — so this is NOT contract A37's mix-of-a-mix. `--jp-accent-edge` would
+     have been exactly that: it is already a 45% ember mix at `accent: glow`. */
+  .reel[data-edge='soft'] .reel__caption {
+    padding: var(--space-5) var(--space-7);
+    border-radius: var(--radius-xl);
+    background: color-mix(in oklab, var(--jp-accent-mark) 8%, transparent);
+    box-shadow: var(--jp-edge-shadow);
+  }
+
+  /* AN ARCH CLIPS A BRACKET INTO FRAGMENTS — a geometry fact, not a taste call.
+     `--jp-media-mask` is a wide ellipse across the top two corners, and
+     `.reel__frame` applies it as `clip-path`, so a corner mark inset by
+     `--space-5` lands partly outside the clip. `media: mask` is `open-air` +
+     `full-send` and never candlelit, which is `bleed`. */
+  .reel[data-media='mask'] {
+    --reel-corner-display: none;
+  }
+
+  /* ── 1.4 LUXURY-MINIMAL · `quiet-studio` — `accent: none` · `density: vast`
+        · `motion: fade` ────────────────────────────────────────────────────
+     Tell: three type sizes, ONE hairline, no accent colour, and more empty space
+     than content.
+
+     THIS LOOK GETS WORSE IF ANYTHING IS ADDED, so nearly every rule below
+     REMOVES something.
+
+     MEASURED ON THE BASE: "no accent colour" already holds — at `accent: none`
+     the axis resolves `--jp-accent-mark` to `--jp-heading`, so the brackets and
+     the frame hairline are neutral mixes rather than ember. The two that did NOT
+     hold are arithmetic. THREE TYPE SIZES: the section renders the heading at
+     `--jp-heading-size`, the deck at a flat `--text-base`, the caption at
+     `--jp-body-size`, the eyebrow at `--jp-eyebrow-size` and the meta row at
+     `max(--text-xs, --jp-body-size / 1.5)` — five, of which the last two differ
+     by 2px at this look's `monumental` for no reason anyone can see. ONE
+     HAIRLINE: the section shipped a hairline shell box (`edge: hairline`), a
+     hairline frame, two bordered over-plates and four bracket marks. */
+  .reel[data-accent='none'] {
+    /* THE ONE HAIRLINE is the picture mount's own boundary — at this look's
+       `media: inset` the frame is a 3:2 image on a `--space-12` mount, which is
+       most of what the eye reads, so that is where a single line belongs. Every
+       other boundary in the section goes, starting with the shell's: a hairline
+       box around a `surface: bare` transparent background is a second line
+       drawn around nothing — and its `--shadow-xs` elevation is a third, because
+       a box shadow paints around the border box whether or not the background is
+       transparent. */
+    border: 0 none;
+    box-shadow: none;
+    --reel-frame-border: var(--border-width) solid var(--color-border-subtle);
+    --reel-frame-shadow: none;
+    --reel-corner-display: none;
+    --reel-plate-border: 0 none;
+    --reel-plate-blur: 0px;
+    --reel-audio-border: 0 none;
+    --reel-audio-shadow: none;
+    --reel-audio-radius: var(--radius-none);
+    /* THREE TYPE SIZES, as an arithmetic commitment: heading
+       (`--jp-heading-size`), body (`--jp-body-size`) and meta
+       (`--jp-eyebrow-size`). The meta row folds onto the eyebrow's rung rather
+       than keeping a fourth value 2px away from it. */
+    --reel-meta-size: var(--jp-eyebrow-size);
+  }
+
+  /* The deck joins the body rung, which is the third of the three sizes. */
+  .reel[data-accent='none'] .reel__sub {
+    font-size: var(--jp-body-size);
+  }
+
+  /* The curly quotation ornaments are the cinematic register's decoration, and
+       this family has no decoration. `display: none` rather than opacity, so
+       they take no advance width either. */
+  .reel[data-accent='none'] .reel__caption::before,
+  .reel[data-accent='none'] .reel__caption::after {
+    display: none;
+  }
+
+  /* MORE EMPTY SPACE THAN CONTENT. `density: vast` already multiplies the
+     shared rhythm by 1.6; this is the look going further than the axis, which is
+     the point of the tell — the axis makes it airy, the LOOK makes the emptiness
+     the subject. Keyed on `density: vast`, which is quiet-studio's alone
+     (candlelit is `airy`). */
+  .reel[data-density='vast'] .reel__inner {
+    gap: calc(var(--jp-sec-gap) * 1.5);
+  }
+
+  .reel[data-density='vast'] .reel__lower {
+    gap: calc(var(--jp-sec-gap) * 0.75);
+  }
+
+  /* THE STILLNESS. `motion: fade` is quiet-studio's own motion value and nobody
+     else's. `--jp-reveal-distance` is already `0px` at this value, so the reveal
+     is a pure opacity ramp — but the rec dot's pulse and the play control's
+     invitation ring are CONTINUOUS decorative motion driven from JS, which the
+     axis's distance and duration cannot reach, and a luxury-minimal page does
+     not blink at you. The atmosphere's bloom and haze need no rule: they are
+     inside the `--jp-sec-atmos` gate, which is `0` at every surface but
+     `media`. */
+  .reel[data-motion='fade'] .reel__dot.is-live,
+  .reel[data-motion='fade'] .reel__play.is-armed::after {
+    animation: none;
+  }
+
+  .reel[data-motion='fade'] .reel__play:hover {
+    transform: none;
+  }
+
+  /* ── 1.5 TECHNICAL · `syllabus` — `accent: edge` · `type: restrained` ────
+     Tell: a hairline grid, mono numerals, and a left-border accent stripe rather
+     than a filled badge.
+
+     MEASURED ON THE BASE: none of the three reached this section. The duration
+     carries `font-variant-numeric: tabular-nums` but proportional GLYPHS, which
+     is the half of monospacing that does not show; the rec tag is a
+     `--radius-full` pill — the filled badge the tell names in opposition; and
+     the only rules in the file are the frame's border and the top sheen. The
+     `--radius-sm` corner and the hairline are the family's own two values. */
+  .reel[data-accent='edge'] {
+    --reel-pill-radius: var(--radius-sm);
+    --reel-audio-radius: var(--radius-sm);
+    /* HAIRLINE ON EVERYTHING — including the brackets, which stop being
+       cinematic viewfinder marks at `--border-width` and start reading as the
+       crop marks on a technical drawing. */
+    --reel-corner-width: var(--border-width);
+    /* NEUTRAL crop marks, not dimmed ember ones. `--jp-accent-mark` is
+       `--jp-ember-text` at this value, and an ember bracket is candlelit's
+       signature read faintly — the opposite of a distinct language. A technical
+       drawing's crop marks are drawn in the line colour. */
+    --reel-corner-color: var(--color-border-strong);
+    --reel-frame-border: var(--border-width) solid var(--color-border-subtle);
+    --reel-frame-shadow: none;
+    --reel-plate-border: var(--border-width) solid var(--color-border-subtle);
+    --reel-plate-blur: 0px;
+    --reel-audio-border: var(--border-width) solid var(--color-border-subtle);
+    --reel-audio-shadow: none;
+    /* The hairline under the section head, so the block reads as a table with a
+       header row. Same two roles `long-read` sets — one line, one spelling. */
+    --reel-head-rule: var(--border-width);
+    --reel-head-gap: calc(var(--jp-sec-gap) / 3);
+    /* MONO NUMERALS, and mono labels with them: a dashboard's metadata row is
+       one typeface. */
+    --reel-num-font: var(--font-mono);
+    --reel-label-font: var(--font-mono);
+    --reel-label-tracking: var(--tracking-widest);
+    --reel-dot-radius: var(--radius-none);
+  }
+
+  /* THE LEFT-BORDER ACCENT STRIPE. The tell states it in OPPOSITION to "a
+     filled badge", so the rec tag loses the pill and gains a stripe.
+
+     `--jp-accent-mark`, NOT `--jp-accent-edge`: every accent value of
+     `--jp-accent-edge` measures below the 3:1 graphic floor on a dark brand
+     (2.04:1 at THIS one), which the corner-mark note above already records,
+     while `--jp-accent-mark` measures 5.00 dark / 10.47 light. A stripe that
+     carries the tell has to be seen. Read directly, with no mix on it
+     (contract A37). */
+  .reel[data-accent='edge'] .reel__tag {
+    padding-inline-start: var(--space-3);
+    border-inline-start: var(--border-width-thick) solid var(--jp-accent-mark);
+    border-radius: var(--radius-none);
+  }
+
+  /* THE HAIRLINE GRID, on the two rows that always exist. Scoped to
+     `data-reel-at='below'`, which is where this look's `media: frame` puts them
+     — and which candlelit (`over`) is not, so this is belt and braces on top of
+     the `accent: edge` key. */
+  .reel[data-accent='edge'] .reel__topmeta[data-reel-at='below'] {
+    padding-block-end: calc(var(--jp-sec-gap) / 3);
+    border-block-end: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  .reel[data-accent='edge'] .reel__lower[data-reel-at='below'] {
+    padding-block-start: calc(var(--jp-sec-gap) / 3);
+  }
+
+  /* The equaliser gets a baseline rather than tick marks: a ruled axis is
+     honest about the data it has, and this transport has no progress to report
+     (see the handoff on `.reel__playhead`). */
+  .reel[data-accent='edge'] .reel__track {
+    border-block-end: var(--border-width) solid var(--color-border-subtle);
+  }
+
+  /* `type: restrained` is syllabus's type value and nobody else's, so the
+     dense-dashboard reading rhythm lands here: normal rather than relaxed
+     leading on the deck, and a caption in the body face set upright. An italic
+     serif whisper is the cinematic register; a syllabus annotates. */
+  .reel[data-type='restrained'] {
+    --reel-caption-font: var(--font-body);
+    --reel-caption-style: normal;
+  }
+
+  .reel[data-type='restrained'] .reel__sub {
+    line-height: var(--leading-normal);
+  }
+
+  .reel[data-type='restrained'] .reel__caption::before,
+  .reel[data-type='restrained'] .reel__caption::after {
+    display: none;
+  }
+
+  /* ── 1.8 PLAYFUL · `full-send` — `edge: heavy` · `motion: stagger` ───────
+     Tell: whole inverted bands, pill CTAs at `--radius-full`, spring easing, and
+     BIG NUMERALS.
+
+     MEASURED ON THE BASE: the inverted band comes free from `surface: invert`
+     and the pill control is already `--radius-full`, so two of four hold. BIG
+     NUMERALS were found NOWHERE — this section's numeral is the duration badge
+     ("0:30"), and at `max(--text-xs, --jp-body-size / 1.5)` inside a glassy pill
+     it was the quietest thing in the section. SPRING EASING was found nowhere
+     either: `--jp-reveal-ease` is `--ease-spring` at this motion value and the
+     reveal already rides it, but a reveal happens once, off-screen, and the one
+     place a viewer can FEEL an easing curve is the control they are pointing at.
+
+     `--reel-audio-border` reads `--jp-edge-*`, which is 2px in
+     `--jp-accent-edge` here — a thick accent border around an inverted band,
+     which is the family's edge row exactly. */
+  .reel[data-edge='heavy'] {
+    --reel-frame-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-frame-shadow: none;
+    --reel-plate-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-audio-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-audio-shadow: none;
+    --reel-audio-radius: var(--radius-xl);
+    /* BIG NUMERALS — the duration climbs from the metadata rung to the heading
+       rung and takes the heading face with it, so the tracked rec label reads as
+       the caption to a number rather than as its equal. */
+    --reel-num-font: var(--font-heading);
+    --reel-num-size: var(--jp-heading-size);
+    --reel-num-weight: var(--heading-weight, var(--font-bold));
+    --reel-dot-size: var(--space-2-5);
+  }
+
+  /* `--leading-none` because the numeral now sets the row's height, and a
+     `--leading-snug` line box around a 30px figure opens a gap the tracked label
+     beside it cannot fill. */
+  .reel[data-edge='heavy'] .reel__dur {
+    line-height: var(--leading-none);
+  }
+
+  /* An inverted band must invert WHOLE. `--reel-audio-bg` defaults to
+     `--color-surface-secondary`, a GLOBAL token that knows nothing about the
+     `surface` axis, so at `surface: invert` the `waveform` panel stayed at pole A
+     inside a pole-B section — an un-inverted patch in an inverted band.
+     `--jp-ink-2` re-derives from whichever pole the section resolved, so it
+     follows the flip. Keyed on `surface: invert` (full-send alone) rather than
+     fixed on the base, because the generic form would move candlelit's own
+     `waveform` panel; the base fix is in the handoff. */
+  .reel[data-surface='invert'] {
+    --reel-audio-bg: var(--jp-ink-2);
+  }
+
+  /* SPRING EASING, MADE VISIBLE, on the one element a pointer is ever on.
+     `--jp-reveal-ease` is `--ease-spring` at this motion value, so the curve is
+     read rather than re-spelled. It only ever GROWS the target: a `:active`
+     shrink would take the border box under contract A2's 44px floor mid-press,
+     and A2's floor is a floor in both directions. */
+  .reel[data-motion='stagger'] .reel__play {
+    transition:
+      transform var(--jp-reveal-duration) var(--jp-reveal-ease),
+      background-color var(--duration-normal) var(--ease-out);
+  }
+
+  .reel[data-motion='stagger'] .reel__play:hover {
+    transform: scale(1.14);
+  }
+
+  /* THE EQUALISER ANSWERS THE POINTER. `.reel__wave--fill` ships
+     `clip-path: inset(0 100% 0 0)` and NOTHING ever changes it, so the accent
+     copy of the bars is permanently clipped to zero width on every look — paint
+     that is written and never read (the handoff carries the finding; the test
+     pins the element, so it stays). Here it becomes a real affordance: pointing
+     at the transport sweeps the accent wave across, on the family's own spring.
+
+     `:focus-within` as well as `:hover`, because hover is not a gesture — a
+     keyboard user tabbing to the play button gets the same answer. It sweeps to
+     FULL width, never to a fraction, so it makes no claim about playback
+     position: there is no playback here, only a poster and a modal. */
+  .reel[data-motion='stagger'] .reel__wave--fill {
+    transition: clip-path var(--jp-reveal-duration) var(--jp-reveal-ease);
+  }
+
+  .reel[data-motion='stagger'] .reel__chrome:hover .reel__wave--fill,
+  .reel[data-motion='stagger'] .reel__chrome:focus-within .reel__wave--fill {
+    clip-path: inset(0 0% 0 0);
+  }
+
+  /* ── 1.9 CONTEMPORARY · `signal` — `edge: hairline` + `accent: fill` ─────
+     Tell: rounded cards with hairlines and a small neutral shadow; one filled
+     accent button per section.
+
+     ANOTHER COMPOUND BY NECESSITY. `edge: hairline` is also `quiet-studio`,
+     `long-read` and `syllabus`, and `accent: fill` is also `plain-facts` and
+     `full-send` — but those two are `edge: offset` and `edge: heavy`, and the
+     three other hairline looks are `accent: none` / `text` / `edge`. So the PAIR
+     is `signal` alone, and candlelit (`edge: none`, `accent: glow`) matches
+     neither half.
+
+     MEASURED ON THE BASE: this is the "vanishing card" research §5.2 predicts
+     for exactly this family, and here it is literal — `--jp-edge-shadow` is
+     `--shadow-xs` at this value (a 1px, 10%-alpha drop, i.e. the small NEUTRAL
+     shadow the tell names) and had NO consumer inside the section, so the frame
+     carried a flat `--shadow-xl` and the audio panel carried nothing. And there
+     was no filled accent button anywhere: `.reel__play` is a glassy 45%
+     background behind an accent BORDER, which is the one shape this family does
+     not use.
+
+     THE FILL IS A STRONGER BOUNDARY THAN THE BORDER IT REPLACES, not a weaker
+     one — an opaque `--jp-accent-fill` plate under `--jp-accent-on-fill`, which
+     is the pair the axis guarantees. The 2px border is kept and made
+     transparent so the border box, and therefore contract A2's 44px pointer
+     target, does not move by a pixel. */
+  .reel[data-edge='hairline'][data-accent='fill'] {
+    --reel-frame-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-frame-shadow: var(--jp-edge-shadow);
+    --reel-plate-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-audio-border: var(--jp-edge-width) solid var(--jp-edge-color);
+    --reel-audio-shadow: var(--jp-edge-shadow);
+    --reel-audio-radius: var(--radius-card);
+    /* Viewfinder brackets are candlelit's signature and are not among the three
+       features this tell enumerates; a product look is a rounded card and
+       nothing else on top of it. */
+    --reel-corner-display: none;
+    --reel-play-bg: var(--jp-accent-fill);
+    --reel-play-bg-hover: color-mix(
+      in oklab,
+      var(--jp-accent-fill) 88%,
+      var(--jp-accent-on-fill)
+    );
+    --reel-play-color: var(--jp-accent-on-fill);
+    --reel-play-border: var(--border-width-thick) solid transparent;
+    --reel-play-shadow: var(--jp-edge-shadow);
+    --reel-play-blur: 0px;
+  }
 
   @media (prefers-reduced-motion: reduce) {
     /* Continuous decorative motion STOPS, it does not speed up (research §5.1).
@@ -1475,6 +2285,29 @@
     }
     .reel__play:hover {
       transform: none;
+    }
+
+    /* THE PER-LOOK MOTION THE DESIGN-LANGUAGE PASS ADDED. All of it is
+       transforms and transitions OUTSIDE a keyframe, which is the one thing
+       `journey-sections-shared.css`'s `animation: none !important` guard cannot
+       reach — and each out-specifies the two rules above ((0,3,0)/(0,4,0)
+       against (0,1,0)/(0,2,0)), so none is covered by them.
+
+       Listed explicitly rather than as a wildcard so the next look that adds a
+       hover transform has to come here and say so. */
+    .reel[data-motion='stagger'] .reel__play,
+    .reel[data-motion='stagger'] .reel__wave--fill {
+      transition: none;
+    }
+
+    .reel[data-motion='stagger'] .reel__play:hover {
+      transform: none;
+    }
+
+    /* `plain-facts` presses the control INTO its shadow with `translate`, which
+       is a separate property from `transform` and so needs its own undo. */
+    .reel[data-edge='offset'] .reel__play:hover {
+      translate: none;
     }
   }
 </style>
