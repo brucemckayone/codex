@@ -23,6 +23,7 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
+import type { FeeConfigService } from '@codex/purchase';
 import {
   createMockStripe,
   createTestConnectAccountInput,
@@ -46,7 +47,6 @@ import {
   it,
   vi,
 } from 'vitest';
-import type { FeeConfigService } from '../fee-config-service';
 import { SubscriptionService } from '../subscription-service';
 
 interface FeeConfigShape {

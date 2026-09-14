@@ -26,6 +26,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
+import type { FeeConfigService } from '@codex/purchase';
 import { UnsupportedCurrencyError } from '@codex/service-errors';
 import {
   createMockStripe,
@@ -60,7 +61,6 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
-import type { FeeConfigService } from '../fee-config-service';
 import { SubscriptionService } from '../subscription-service';
 
 describe('SubscriptionService', () => {
