@@ -79,26 +79,62 @@ describe('SECTION_DESIGN_BY_TYPE — the table itself', () => {
     }
   });
 
-  it('states `media` on exactly the four types that resolve it, and on no other', () => {
+  it('states `media` ONLY on types that resolve it — never on one that cannot', () => {
     // `Codex-wqxv4`: a control that cannot change what renders is a mistake this
     // programme has already paid for. `FeelSection.svelte`'s header states the
     // rule for the rest — "`media` is DELIBERATELY unconsumed … there is no
     // image, no video and no aspect ratio for `--jp-media-*` to shape".
+    //
+    // THIS IS A SUBSET ASSERTION, and it used to demand EQUALITY. That was the
+    // same wqxv4 mistake pointing the other way: the four media-consuming types
+    // were the only ones that could express the axis, so pinning all four made
+    // the PAGE LOOK's `media` control unable to change a single pixel. Quiet
+    // Studio's `media: inset` is THE MAT — its one exclusive axis value and its
+    // whole signature — and it could never paint.
+    //
+    // So the invariant is one-directional: a `media` key on a type that reads no
+    // `--jp-media-*` is still a bug, but a media-consuming type is free to
+    // inherit the page look instead of overriding it.
     const withMedia = TABLE_ENTRIES.filter(([, bag]) => 'media' in bag).map(
       ([type]) => type
     );
-    expect(withMedia.sort()).toEqual([...MEDIA_CONSUMING_TYPES].sort());
+    const illegal = withMedia.filter(
+      (t) => !(MEDIA_CONSUMING_TYPES as readonly string[]).includes(t)
+    );
+    expect(illegal, 'media pinned on a type that consumes none').toEqual([]);
+  });
+
+  it('leaves `guide` the ONLY media pin, and for a stated reason', () => {
+    // hero / introVideo / reel all pinned `bleed`, which is what Candlelit's own
+    // page look supplies — a restatement, so dropping it changes nothing there
+    // and frees the axis for the other seven looks. `guide` is different: its
+    // `frame` is a deliberate DEFENCE against a `bleed` page look ("the value
+    // guide's plate WANTS"), so it stays. If a future change removes it, that is
+    // a decision about Candlelit's guide section and should be made knowingly.
+    const withMedia = TABLE_ENTRIES.filter(([, bag]) => 'media' in bag).map(
+      ([type]) => type
+    );
+    expect(withMedia).toEqual(['guide']);
+    expect(SECTION_DESIGN_BY_TYPE.guide.media).toBe('frame');
   });
 
   it('gives the page a rhythm rather than one repeated setting', () => {
     // The defect, restated as an assertion: every section of a real page emitted
     // BYTE-IDENTICAL axis values, so nine axes expressed one setting each.
-    const density = new Set(TABLE_ENTRIES.map(([, bag]) => bag.density));
-    const surface = new Set(TABLE_ENTRIES.map(([, bag]) => bag.surface));
-    const width = new Set(TABLE_ENTRIES.map(([, bag]) => bag.width));
-    expect(density.size).toBeGreaterThanOrEqual(3);
-    expect(surface.size).toBeGreaterThanOrEqual(4);
-    expect(width.size).toBeGreaterThanOrEqual(3);
+    //
+    // STATED VALUES ONLY, and the filter is load-bearing. hero / introVideo /
+    // reel no longer pin `surface`, so a `Set` over the raw column counts their
+    // `undefined` as a member — and this assertion would then be satisfiable by
+    // ABSENCE, which is the opposite of the variety it exists to measure.
+    const stated = (axis: keyof SectionDesign) =>
+      new Set(
+        TABLE_ENTRIES.map(([, bag]) => bag[axis]).filter(
+          (value) => value !== undefined
+        )
+      );
+    expect(stated('density').size).toBeGreaterThanOrEqual(3);
+    expect(stated('surface').size).toBeGreaterThanOrEqual(4);
+    expect(stated('width').size).toBeGreaterThanOrEqual(3);
   });
 
   it('reserves `monumental` for the two ENDS, so the ends read as arrival and departure', () => {
@@ -108,15 +144,54 @@ describe('SECTION_DESIGN_BY_TYPE — the table itself', () => {
     expect(monumental.sort()).toEqual(['hero', 'invite']);
   });
 
-  it('never puts `surface: media` on a type with no media', () => {
-    // Measured on the flat page bag and it looked wrong on the page: `ache` and
-    // `map` were media-backed sections that have never had media.
-    for (const [type, bag] of TABLE_ENTRIES) {
-      if (bag.surface !== 'media') continue;
+  it('never states `surface: media` — the reference look supplies that ground', () => {
+    // This used to read "never on a type with no media", which was the FLAT PAGE
+    // BAG's absurdity (`ache` and `map` media-backed with no media to back them).
+    // The rule is now stronger, because `media` turned out to be wrong on the
+    // three types that DO consume it as well: it is Candlelit's own page value,
+    // so pinning it bought Candlelit nothing and fixed every other look's ground
+    // at Candlelit's on the three sections that carry a page's images. The header
+    // records the measurement and the brief that mandates the eight surfaces.
+    //
+    // Re-adding one is a decision, not a tidy-up, which is why this fails on it.
+    const withSurface = TABLE_ENTRIES.filter(
+      ([, bag]) => bag.surface !== undefined
+    ).map(([type, bag]) => [type, bag.surface] as const);
+    expect(
+      withSurface.filter(([, surface]) => surface === 'media').map(([t]) => t),
+      'a row restating the reference look’s own ground'
+    ).toEqual([]);
+    // ANTI-VACUITY: the assertion above must be reading a populated column, or
+    // deleting the whole `surface` column would satisfy it.
+    expect(withSurface.map(([type]) => type).sort()).toEqual([
+      'ache',
+      'faq',
+      'feel',
+      'guide',
+      'invite',
+      'map',
+      'proof',
+      'turn',
+    ]);
+    expect(new Set(withSurface.map(([, surface]) => surface)).size).toBe(4);
+  });
+
+  it('leaves the reference look’s media-surfaced sections byte-identical', () => {
+    // THE SAFETY ARGUMENT FOR THE `surface` UN-PINNING, asserted rather than
+    // argued. Under a look whose surface IS `media`, `sectionDesignForType`
+    // dropped the key as redundant before the change — so removing it cannot
+    // alter what those three sections STORE, and the attribute they RESOLVE is
+    // the look's own `media` either way. `look-reach.test.ts` owns the
+    // preset-side half (Candlelit declares no signature at all); this half needs
+    // no import from the editor layer, which A20 forbids here.
+    const look = resolveDesign(null, { design: { surface: 'media' } });
+    for (const type of ['hero', 'introVideo', 'reel'] as const) {
+      const bag = sectionDesignForType(type, look);
+      expect(bag?.surface, `${type} must store no surface`).toBeUndefined();
       expect(
-        MEDIA_CONSUMING_TYPES,
-        `${type} is media-surfaced but resolves no media`
-      ).toContain(type);
+        resolveDesign({ type, design: bag }, { design: look }).surface,
+        `${type} must still resolve the look’s ground`
+      ).toBe('media');
     }
   });
 });
@@ -135,8 +210,11 @@ describe('sectionDesignForType — absence means inherited', () => {
     expect(bag).toBeDefined();
     expect(bag?.density).toBeUndefined();
     expect(bag?.width).toBeUndefined();
-    expect(bag?.surface).toBe('media');
+    // …and no `surface`, because the hero states none: the page look's ground is
+    // the whole point of the un-pinning, so there is nothing here to diff.
+    expect(bag?.surface).toBeUndefined();
     expect(bag?.type).toBe('monumental');
+    expect(bag?.accent).toBe('glow');
   });
 
   it('compares against the RESOLVED look, so an axis the page leaves unset still counts', () => {

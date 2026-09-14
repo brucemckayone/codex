@@ -208,7 +208,27 @@
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
 >
-  <div class="journey-page__atmos" aria-hidden="true"></div>
+  <!--
+    `data-jp-surface` is HERE so the page bloom obeys the atmosphere axis.
+
+    It did not. This bloom is page-wide and was gated only by `--jp-atmos-veil`,
+    which tracks the ink's darkness — so it painted the SAME on all eight looks.
+    Observed: with `--jp-sec-atmos` forced to 0 on every section, a warm ember
+    smear still crossed three stacked Plain Facts panels, because this element
+    never read that token. Quiet Studio was worse in principle — it renounces the
+    ember via `accent: none` and got an ember bloom anyway.
+
+    Carrying the page look's own `surface` value lets `journey-design.css` set
+    `--jp-sec-atmos` on this element from the SAME table the sections use, so
+    there is no second copy of the ladder to drift. Candlelit is `surface: media`
+    → 1, i.e. byte-identical to today; the looks that renounce atmosphere finally
+    get none.
+  -->
+  <div
+    class="journey-page__atmos"
+    data-jp-surface={coursePage.page.design?.surface}
+    aria-hidden="true"
+  ></div>
   <!--
     `journey-palette--page` MUST sit on this inner element, not on `.journey-page`
     itself: `--jp-ink` falls back to `--color-background`, so re-pointing
@@ -216,7 +236,38 @@
     custom-property cycle and both would be invalid at computed-value time. Here
     it inherits an already-resolved `--jp-ink`. See `../journey-palette.css`.
   -->
-  <div class="journey-palette--page">
+  <!--
+    `data-jp-accent` FOR THE PILL. `FloatingCta` renders as a sibling of
+    `SectionRenderer` below, so it is not a descendant of any `.jp-sec` — and
+    until the line below there was exactly ONE emitter of `data-jp-accent` in the
+    whole app, `SectionFrame.svelte:139`, on `.jp-sec` itself (grep now returns
+    two: that one and this one). So every `--jp-accent-*` role
+    was UNSET on the pill and `CtaLink`'s fallback chain fired instead:
+    `var(--jp-accent-fill, var(--color-brand-primary))`, i.e. the raw brand
+    colour, with `--jp-accent-edge` falling back to `transparent` and
+    `--jp-accent-glow-mark` to `none`. Measured on the pill: border
+    `rgb(0,0,0)`/transparent and `box-shadow: none`, against `rgb(166,42,11)`
+    and a real glow on the in-section CTA of the same page. `CtaLink`'s own
+    header claims the accent axis "reaches the CTA … in HeroSection,
+    FeelSection, InviteSection and FloatingCta"; it did not reach the fourth.
+
+    This is the same remedy already used for `data-jp-surface` on
+    `.journey-page__atmos` immediately above — publish the PAGE look's axis on an
+    ancestor so an element outside the section tree can still obey it. The pill
+    is a page-level affordance, so the page look is the right source: it must not
+    take its accent from whichever section happens to be on screen.
+
+    Candlelit is unchanged, and the fill is why rather than an assumption: at
+    `accent: glow` `--jp-accent-fill` is `#A62B0C`, and the raw
+    `--color-brand-primary` fallback paints `rgb(166,43,12)` — the SAME pixel,
+    measured through a canvas. So wiring the axis moves neither the fill nor the
+    ink. The two roles that would newly land are held off in `FloatingCta`'s own
+    CSS; see the note there.
+  -->
+  <div
+    class="journey-palette--page"
+    data-jp-accent={coursePage.page.design?.accent}
+  >
     <SectionRenderer
       sections={coursePage.page.sections}
       {context}
@@ -285,6 +336,19 @@
     inset: 0 0 auto 0;
     height: min(90svh, 60rem);
     pointer-events: none;
+    /*
+      OBEYS THE ATMOSPHERE AXIS. `data-jp-surface` on this element (see the
+      markup) makes `journey-design.css` set `--jp-sec-atmos` here from the same
+      table the sections read, so `media` → 1 (Candlelit, unchanged), `invert` →
+      0.7, `tint` → 0.45, and `bare` / `panel` → 0.
+
+      The `, 1` fallback is load-bearing: a page with no stored `design` emits no
+      attribute, and an unset custom property with no fallback would take this
+      whole declaration invalid-at-computed-value-time — which for `opacity`
+      means 1 anyway, but silently and for the wrong reason. Stating it keeps
+      pre-axes pages painting exactly what they paint today.
+    */
+    opacity: var(--jp-sec-atmos, 1);
     background:
       linear-gradient(var(--jp-atmos-veil), var(--jp-atmos-veil)),
       radial-gradient(

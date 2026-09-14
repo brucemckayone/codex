@@ -30,10 +30,13 @@
  * Alternate density and surface so the page breathes; reserve `monumental` for
  * the two ENDS; keep the middle restrained so the ends land. Read the density
  * column top to bottom — vast · airy · regular · regular · regular · airy ·
- * regular · compact · regular · compact · vast — and the surface column — media ·
- * bare · tint · media · media · bare · panel · panel · tint · bare · invert. The
- * page opens big and atmospheric, quiets into a narrow ache, varies through a
- * structured middle, tightens at the FAQ, and closes big and inverted.
+ * regular · compact · regular · compact · vast — and the surface column —
+ * (look) · bare · tint · (look) · (look) · bare · panel · panel · tint · bare ·
+ * invert, where `(look)` is hero / introVideo / reel taking the PAGE LOOK's own
+ * ground (see the un-pinning note below the table). The page opens big in
+ * whatever atmosphere the look asks for — `media`, and so `--jp-sec-atmos: 1`,
+ * under Candlelit — quiets into a narrow ache, varies through a structured
+ * middle, tightens at the FAQ, and closes big and inverted.
  *
  * ── FOUR THINGS THAT ARE LOAD-BEARING, AND WHY ─────────────────────────────
  *
@@ -93,6 +96,53 @@ import type { CourseSectionType, SectionDesign } from '@codex/shared-types';
  * page-level look it is dropped as redundant — it is stated anyway because it is
  * the value guide's plate WANTS, and the page look it must survive is the one
  * that sets `media: bleed`.
+ *
+ * ── WHY hero / introVideo / reel NO LONGER PIN `media` ─────────────────────
+ * They used to, all three at `bleed`, and between them and `guide` that covered
+ * EVERY section which consumes the media axis — Guide reads `--jp-media-*` 20
+ * times, IntroVideo 22, Reel 22, Hero 12, and the other seven types read it
+ * zero times outside prose. So the PAGE LOOK'S `media` VALUE COULD NEVER PAINT
+ * on a template-seeded page: it was overridden on all four sections that could
+ * express it and inherited only by the seven that ignore it.
+ *
+ * That made a whole axis inert for the looks. Quiet Studio's `media: inset` is
+ * THE MAT, its one exclusive axis value and its entire signature; Open Air and
+ * Full Send ride `mask`; Plain Facts rides `none`. None of them could reach a
+ * single pixel.
+ *
+ * Removing the three is a no-op for Candlelit, which is the reason it is safe to
+ * do here rather than behind a decision: Candlelit's page look IS `media:
+ * bleed`, so hero, introVideo and reel now INHERIT the same `bleed` they were
+ * pinned to. `guide` keeps its key for the reason stated above — it is the one
+ * of the four whose pin is a deliberate defence against a `bleed` page look, not
+ * a restatement of it.
+ *
+ * ── AND WHY THE SAME THREE NO LONGER PIN `surface` ─────────────────────────
+ * Same rows, same mechanism, one measurement further on. All three pinned
+ * `surface: media`, which is CANDLELIT'S OWN page value — so the ground of the
+ * three sections that carry a page's images was fixed at Candlelit's under every
+ * look, `--jp-sec-atmos: 1` included. `surface` is a primary axis value for ALL
+ * EIGHT looks in the binding signature brief (`docs/design/look-polish/
+ * 00-signature-brief.md` §3), and each look's mandated value is exactly its own
+ * page-level surface: media · bare · bare · tint · panel · panel · invert ·
+ * panel, in preset order. Measured on Open Air, whose signature is THE WASH:
+ * `surface: tint` and `edge: soft` are both halves of it and they co-occurred on
+ * ONE of eleven sections (`guide`) — never on the hero, the section a creator
+ * judges the look by. The three slots freed here could not vary by look AT ALL
+ * before; `look-reach.test.ts` ratchets the total and this can only raise it.
+ *
+ * No-op for Candlelit by the same construction as `media`: its page look IS
+ * `surface: media`, so `sectionDesignForType` already dropped the key as
+ * redundant on a Candlelit page, and the three now INHERIT the `media` they were
+ * pinned to — same attribute, same atmosphere, byte for byte. The test below
+ * asserts it rather than leaving it to this paragraph.
+ *
+ * `invite: surface 'invert'` IS NOT PART OF THIS and must not be swept in with
+ * it: `invert` is not Candlelit's value, so that key is genuinely stored and
+ * genuinely resolves on a Candlelit page, and deleting it would move the
+ * benchmark. Open Air's closing CTA therefore still resolves `invert` rather
+ * than its own `tint`; the only Candlelit-safe fix for that end of the page is a
+ * `surface` line in the look's own `designByType` (`design-vocabulary.ts`).
  */
 export const SECTION_DESIGN_BY_TYPE: Readonly<
   Record<CourseSectionType, Readonly<SectionDesign>>
@@ -102,13 +152,11 @@ export const SECTION_DESIGN_BY_TYPE: Readonly<
   hero: {
     width: 'full',
     density: 'vast',
-    surface: 'media',
     edge: 'none',
     align: 'center',
     type: 'monumental',
     accent: 'glow',
     motion: 'drift',
-    media: 'bleed',
   },
   // Narrow and bare, straight after the widest and loudest section on the page.
   // `surface: bare` also un-does the measured absurdity of the flat page bag:
@@ -138,24 +186,20 @@ export const SECTION_DESIGN_BY_TYPE: Readonly<
   introVideo: {
     width: 'wide',
     density: 'regular',
-    surface: 'media',
     edge: 'none',
     align: 'center',
     type: 'balanced',
     accent: 'glow',
     motion: 'fade',
-    media: 'bleed',
   },
   reel: {
     width: 'full',
     density: 'regular',
-    surface: 'media',
     edge: 'none',
     align: 'start',
     type: 'expressive',
     accent: 'edge',
     motion: 'drift',
-    media: 'bleed',
   },
   // `motion: stagger` because the map IS a sequence — the choreography carries
   // the same meaning as the composition.
@@ -243,18 +287,43 @@ export const SECTION_DESIGN_BY_TYPE: Readonly<
  */
 export function sectionDesignForType(
   type: string,
-  inherited?: Readonly<SectionDesign> | null
+  inherited?: Readonly<SectionDesign> | null,
+  /**
+   * THE LOOK'S OWN OPINION ABOUT THIS SECTION TYPE, which wins over the shared
+   * rhythm. Without it a page look reaches almost nothing: the rhythm below
+   * states a value for 89 of 99 type/axis slots and a section's value beats the
+   * page's in `resolveAxis`'s source order, so `hero` was `surface: media` +
+   * `accent: glow` under EVERY look. `look-reach.test.ts` measures the
+   * consequence — it was 10 of 99 axis slots varying by look, and all ten were
+   * `media`.
+   *
+   * That is why only one look read well: the absolute values in the table were
+   * chosen for Candlelit, so every look rendered Candlelit's treatment.
+   *
+   * An override is dropped when it equals what the page look already resolves,
+   * by the same rule the rhythm uses, so "inherited" keeps meaning inherited and
+   * the inspector's pill stays honest. A look that passes nothing is unchanged
+   * byte for byte — which is how Candlelit stays the fixed point.
+   */
+  override?: Readonly<Partial<SectionDesign>> | null
 ): SectionDesign | undefined {
   const rhythm = SECTION_DESIGN_BY_TYPE[type as CourseSectionType];
   if (!rhythm) return undefined;
+
+  // The look's opinion layered over the shared rhythm. Spread order IS the
+  // precedence rule: the rhythm gives the page its internal variety, and the
+  // look overrides the axes that carry its signature.
+  const wanted: Readonly<SectionDesign> = override
+    ? { ...rhythm, ...override }
+    : rhythm;
 
   const design: SectionDesign = {};
   let written = 0;
   // Iterating the TABLE's own keys rather than a hand-written axis list: a second
   // list is how an axis ends up selectable in the editor and unstyled on the
   // page, and the annotation above already constrains these keys to the nine.
-  for (const key of Object.keys(rhythm) as (keyof SectionDesign)[]) {
-    const value = rhythm[key];
+  for (const key of Object.keys(wanted) as (keyof SectionDesign)[]) {
+    const value = wanted[key];
     if (value === undefined) continue;
     if (inherited && inherited[key] === value) continue;
     // One assignment per axis would be nine near-identical lines; the cast is

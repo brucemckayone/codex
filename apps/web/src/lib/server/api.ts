@@ -2454,12 +2454,23 @@ export function createServerApi(
       /**
        * Mark upload as complete and trigger transcoding
        */
-      uploadComplete: (id: string) =>
+      /**
+       * `durationSeconds` is the CLIENT's own `loadedmetadata` measurement of
+       * the file it just uploaded. It is sent so the runtime badge exists
+       * immediately instead of only after RunPod calls back; the worker stores
+       * it only when it has none, so the transcoded figure still wins.
+       *
+       * The body is always sent, even when the measurement failed, so the
+       * route has one shape to parse rather than two.
+       */
+      uploadComplete: (id: string, durationSeconds?: number | null) =>
         request<{ success: boolean; status: string }>(
           'content',
           `/api/media/${id}/upload-complete`,
           {
             method: 'POST',
+            body: JSON.stringify(durationSeconds ? { durationSeconds } : {}),
+            headers: { 'Content-Type': 'application/json' },
           }
         ),
 

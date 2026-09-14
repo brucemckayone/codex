@@ -177,7 +177,14 @@ function parseOrgSlug(): string | undefined {
 }
 
 async function main(): Promise<void> {
-  const orgs = parseOrgSlug() ?? FIXTURE_ORGS;
+  // `[slug]`, NOT the bare string. `parseOrgSlug()` returns `string | undefined`
+  // and `FIXTURE_ORGS` is `string[]`, so `?? ` widened to `string | string[]` —
+  // and because `for…of` accepts BOTH, this typechecked and then iterated the
+  // slug one CHARACTER at a time. `--org=of-blood-and-bones` failed with
+  // `No organization with slug "o"`, so the flag had never worked; only the
+  // no-argument path (which gets the real array) did.
+  const parsed = parseOrgSlug();
+  const orgs = parsed ? [parsed] : FIXTURE_ORGS;
   for (const orgSlug of orgs) {
     await seedOrgPortals(orgSlug);
   }

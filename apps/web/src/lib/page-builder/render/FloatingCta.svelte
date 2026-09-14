@@ -127,6 +127,48 @@
 </div>
 
 <style>
+  /* ── HOLDING CANDLELIT'S TWO ACCENT ROLES OFF, DELIBERATELY ────────────────
+     `JourneyRenderer` now publishes the page look's `data-jp-accent` on
+     `.journey-palette--page`, so this pill finally obeys the accent axis — it
+     previously sat outside every `.jp-sec` and fell back to the raw
+     `--color-brand-primary`.
+
+     Wiring it in moves NEITHER the fill nor the ink on Candlelit: at
+     `accent: glow` `--jp-accent-fill` is `#A62B0C` and the old raw fallback
+     painted `rgb(166,43,12)` — the same pixel, measured through a canvas. But
+     two roles WOULD newly land, because the fallback chain was hiding them: a
+     45%-ember `--jp-accent-edge` border and the `--jp-accent-glow-mark` bloom.
+
+     They are pinned back to what the pill renders today so that Candlelit — and
+     the published pages, which carry no page design at all and so match no
+     `[data-jp-accent]` block — are byte-identical across this change. That is a
+     deliberate choice to keep one variable at a time, NOT a judgement that the
+     pill should never glow: giving the page's most persistent affordance
+     Candlelit's own bloom is arguably the axis finally arriving where it
+     matters. Deleting this rule is how you turn it on, and it is an owner call
+     rather than a side effect.
+
+     KEYED ON `glow`, NOT ON THE PILL. The pin was first written on `.floatcta`
+     itself, which took the edge away at all FIVE accent values — and
+     `--jp-accent-fill` is `transparent` at `accent: text` and `accent: edge`
+     (journey-design.css). So on the three looks carrying those at PAGE level —
+     long-read and open-air (`text`), syllabus (`edge`) — the pill's CTA had a
+     transparent fill AND a transparent border: no shape at all, a label
+     indistinguishable from the secondary copy beside it. That is the one thing
+     `CtaLink` is pinned never to do ("an outline needs an edge, or the
+     transparent variants have no shape", journey-design.test.ts). Candlelit is
+     the only preset whose PAGE accent is `glow`, so keying the pin on that
+     value holds the benchmark byte-for-byte and lets the other four values
+     paint the edge their own axis row declares — `--jp-line` at `text`/`none`,
+     ember at `fill`/`edge`, i.e. the same border the in-section CTAs of that
+     look already carry. The glow half never bit anywhere else either: the
+     `text`/`fill`/`edge`/`none` blocks each declare
+     `--jp-accent-glow-mark: none` themselves. */
+  :global([data-jp-accent='glow']) .floatcta {
+    --jp-accent-edge: transparent;
+    --jp-accent-glow-mark: none;
+  }
+
   .floatcta {
     position: fixed;
     left: 50%;
