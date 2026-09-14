@@ -119,6 +119,9 @@
     "infrastructure/runpod/**/*.py": "uvx black"
   },
   "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "better-auth": "1.4.11"
   }
