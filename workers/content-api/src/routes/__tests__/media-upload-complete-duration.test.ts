@@ -182,6 +182,41 @@ describe('upload-complete records the client-measured duration', () => {
     }
   });
 
+  it('accepts a request with NO BODY AT ALL (Codex-bk37r)', async () => {
+    // THE REGRESSION THIS FILE MISSED. `input: { body: uploadCompleteSchema }`
+    // made a JSON body mandatory regardless of the schema, because
+    // `c.req.json()` throws for an absent body exactly as for malformed JSON —
+    // above Zod, so `.catch({})` never ran. This endpoint's prior contract took
+    // no body, and it is idempotent by design so a failed transcode can be
+    // re-triggered; a body-less retry 400'd. E2E API caught it, this suite did
+    // not, because every case here sent a body.
+    const app = new Hono<{ Variables: Record<string, unknown> }>();
+    app.use('*', async (c, next) => {
+      c.set('user', USER);
+      c.set('session', { id: 'sess_test', userId: USER.id });
+      await next();
+    });
+    app.route('/api/media', media);
+    const res = await app.fetch(
+      new Request(
+        `http://content-api.test/api/media/${MEDIA_ID}/upload-complete`,
+        { method: 'POST' } // no body, no Content-Type
+      ),
+      testEnv,
+      createExecutionContext()
+    );
+
+    expect(res.status).toBe(200);
+    // No measurement was sent, so nothing is written — but the upload still
+    // completes, which is the whole point.
+    expect(mediaSpies.update).not.toHaveBeenCalled();
+    expect(mediaSpies.updateStatus).toHaveBeenCalledWith(
+      MEDIA_ID,
+      'uploaded',
+      USER.id
+    );
+  });
+
   it('still advances the status — the duration is a side errand', async () => {
     await post({ durationSeconds: 137 });
     expect(mediaSpies.updateStatus).toHaveBeenCalledWith(

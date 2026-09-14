@@ -108,14 +108,36 @@ export async function validateInput<T extends InputSchema | undefined>(
     rawData.query = c.req.query();
   }
 
-  // Parse body only if schema requires it
+  // Parse body only if schema requires it.
+  //
+  // READ THE RAW TEXT, NOT `c.req.json()`. `c.req.json()` throws for an ABSENT
+  // body exactly as it does for malformed JSON, and that throw happens a layer
+  // ABOVE Zod — so declaring `input.body` made a JSON body MANDATORY no matter
+  // what the schema permitted. An all-optional schema, a `.default()`, or a
+  // `.catch({})` could never be reached. That is how adding one optional field
+  // to `POST /api/media/:id/upload-complete` (9853da40) turned every body-less
+  // caller into a 400 and took E2E API red on main and dev (Codex-bk37r).
+  //
+  // Empty body now means `{}` and THE SCHEMA DECIDES whether that is legal:
+  // an all-optional schema accepts it, and a schema with required fields still
+  // rejects it — with the field error, which is the honest message, rather
+  // than a misleading "must be valid JSON". Genuinely malformed JSON is
+  // unchanged: still a 400 INVALID_JSON.
+  //
+  // Hono re-wraps a cached body, so a later `c.req.json()` elsewhere in the
+  // request still works after this `text()` read.
   if (needsBody && schema.body) {
-    try {
-      rawData.body = await c.req.json();
-    } catch {
-      throw new ValidationError('Request body must be valid JSON', {
-        code: 'INVALID_JSON',
-      });
+    const raw = await c.req.text();
+    if (raw.trim() === '') {
+      rawData.body = {};
+    } else {
+      try {
+        rawData.body = JSON.parse(raw);
+      } catch {
+        throw new ValidationError('Request body must be valid JSON', {
+          code: 'INVALID_JSON',
+        });
+      }
     }
   }
 
