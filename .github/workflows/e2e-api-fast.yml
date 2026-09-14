@@ -36,7 +36,7 @@ jobs:
     environment: test
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate Neon branch name
         id: branch-name
@@ -51,28 +51,28 @@ jobs:
 
       - name: Create Neon branch
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-e2e-api-fast-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -122,7 +122,7 @@ jobs:
 
       - name: Generate worker dev vars for all workers
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -175,7 +175,7 @@ jobs:
       - name: Run E2E API tests
         id: run-tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -192,7 +192,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload E2E API test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: e2e-api-fast-results-${{ github.run_id }}
