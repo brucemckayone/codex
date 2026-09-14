@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { createMedia, completeUpload } from '$lib/remote/media.remote';
+  import { measureMediaDuration } from '$lib/utils/media-duration';
   import { logger } from '$lib/observability';
   import { UploadIcon, XIcon, CheckIcon, AlertTriangleIcon } from '$lib/components/ui/Icon';
   import { browser } from '$app/environment';
@@ -223,9 +224,22 @@
         await uploadViaWorker(item, mediaId);
       }
 
-      // Step 3: Mark upload complete and trigger transcoding
+      // Step 3: Mark upload complete and trigger transcoding.
+      //
+      // The runtime is measured HERE, on the client, because
+      // `media_items.duration_seconds` is otherwise written only by
+      // `markAsReady` from the RunPod webhook — so it stayed NULL for the
+      // minutes a creator spends building the page right after uploading, and
+      // the three journey sections that show a runtime badge rendered nothing
+      // despite their field hint promising "leave blank to use the clip's real
+      // length". `measureMediaDuration` never throws and never rejects; it
+      // returns null when it cannot tell, and the upload proceeds regardless.
       item.status = 'completing';
-      await completeUpload(mediaId);
+      const durationSeconds = await measureMediaDuration(item.file);
+      await completeUpload({
+        id: mediaId,
+        ...(durationSeconds ? { durationSeconds } : {}),
+      });
 
       item.status = 'done';
       item.progress = 100;

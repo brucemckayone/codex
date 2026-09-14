@@ -152,9 +152,23 @@ export const getTranscodingStatus = query(
  *
  * Called after the client finishes uploading to the presigned R2 URL.
  */
-export const completeUpload = command(z.string().uuid(), async (id) => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-
-  return api.media.uploadComplete(id);
+/**
+ * `durationSeconds` is optional because the measurement is allowed to fail: it
+ * comes from a browser `loadedmetadata` read that can time out on a codec the
+ * client cannot parse. A missing duration must never block the upload, so this
+ * validates the value but does not require it.
+ */
+const completeUploadSchema = z.object({
+  id: z.string().uuid(),
+  durationSeconds: z.number().int().min(1).max(86400).optional(),
 });
+
+export const completeUpload = command(
+  completeUploadSchema,
+  async ({ id, durationSeconds }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    return api.media.uploadComplete(id, durationSeconds);
+  }
+);
