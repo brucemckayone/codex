@@ -32,27 +32,35 @@
  * `DatabaseClient` union.
  *
  * Severity: major (drift across 5 declarations, structurally divergent).
+ *
+ * WHY THIS IS A `.type-check.ts` FILE AND NOT A `.test.ts` FILE. It was a
+ * `.test.ts`, and in that form it proved NOTHING, twice over:
+ *   1. `packages/content/tsconfig.json` excludes `**\/*.test.ts`, and vitest
+ *      transpiles without typechecking — so no tool ever evaluated these
+ *      assertions. `expectTypeOf` has no runtime behaviour, so the `it()`
+ *      bodies were empty and the suite went green regardless.
+ *   2. Its import of `ContentDatabase` read `'../types'`, which resolves to
+ *      `src/__tests__/types` and does not exist. Even had it been checked,
+ *      the second assertion compared the canonical union against an error
+ *      type. Found by `fallow dead-code` (`unresolved_imports`).
+ * `.type-check.ts` falls inside `include: ['src/**\/*']` and outside both
+ * exclusions, so `pnpm --filter @codex/content typecheck` reads it, while
+ * vitest's `src/**\/*.{test,spec}.*` pattern does not match it. Same reasoning
+ * as `packages/worker-utils/src/procedure/__tests__/*.type-check.ts`.
  */
 
 import type { DatabaseClient, dbHttp, dbWs } from '@codex/database';
-import { describe, expectTypeOf, it } from 'vitest';
-import type { Database as ContentDatabase } from '../types';
+import { expectTypeOf } from 'vitest';
+import type { Database as ContentDatabase } from '../../types';
 
 type CanonicalDatabaseClient = DatabaseClient;
 type ExpectedUnion = typeof dbHttp | typeof dbWs;
 
-describe('denoise proof: F1 types:type-duplicate-cross-package — Database', () => {
-  it('canonical @codex/database DatabaseClient is the HTTP|WS union', () => {
-    // Anchor: the consolidated canonical union matches the literal
-    // `typeof dbHttp | typeof dbWs` shape that 3 service packages
-    // previously redeclared.
-    expectTypeOf<CanonicalDatabaseClient>().toEqualTypeOf<ExpectedUnion>();
-  });
+// Anchor: the consolidated canonical union matches the literal
+// `typeof dbHttp | typeof dbWs` shape that 3 service packages previously
+// redeclared.
+expectTypeOf<CanonicalDatabaseClient>().toEqualTypeOf<ExpectedUnion>();
 
-  it('service-package Database alias equals the canonical DatabaseClient union', () => {
-    // Proves the redeclarations have been removed: every service
-    // package's `Database` is now a structural alias of the canonical
-    // foundation type.
-    expectTypeOf<ContentDatabase>().toEqualTypeOf<CanonicalDatabaseClient>();
-  });
-});
+// The proof proper: every service package's `Database` is a structural alias
+// of the canonical foundation type, so the redeclarations are really gone.
+expectTypeOf<ContentDatabase>().toEqualTypeOf<CanonicalDatabaseClient>();
