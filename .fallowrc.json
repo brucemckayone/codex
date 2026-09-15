@@ -136,6 +136,12 @@
       "**/*.d.ts"
     ]
   },
+  "overrides": [
+    {
+      "files": ["apps/web/src/routes/_creators/studio/media/+page.server.ts"],
+      "rules": { "unused-load-data-keys": "off" }
+    }
+  ],
   "rules": {
     "duplicate-exports": "off"
   }

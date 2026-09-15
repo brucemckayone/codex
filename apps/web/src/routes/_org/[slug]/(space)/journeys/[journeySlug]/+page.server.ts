@@ -341,7 +341,6 @@ export const load: PageServerLoad = async (event) => {
 
   return {
     coursePage,
-    orgSlug: params.slug,
     enrolled,
     // Rendered by the ROOT layout, once, so the page overrides rather than
     // duplicates. See the derivation above.

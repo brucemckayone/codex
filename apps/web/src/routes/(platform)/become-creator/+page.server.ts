@@ -116,8 +116,14 @@ export const load: PageServerLoad = async ({
       avatarUrl: profile?.image ?? null,
       socialLinks: profile?.socialLinks ?? null,
     },
-    onboarding,
-    connectStatus,
+    // NOTE: `onboarding` and `connectStatus` are deliberately NOT returned. Both
+    // reads above are still load-bearing — `onboarding` drives the finished /
+    // dismissed guard and seeds `currentStep`, `connectStatus` derives
+    // `payoutsEnabled` — but no consumer renders either object, so returning them
+    // only serialised them into the payload. `connectStatus` in particular
+    // carried the Stripe `accountId` and the live `requirements` bag (currently_due,
+    // errors) onto a page that shows neither. Do not "restore" these keys without
+    // a reader; do not delete the reads.
     payoutsEnabled,
     connectReturnBanner,
   };
