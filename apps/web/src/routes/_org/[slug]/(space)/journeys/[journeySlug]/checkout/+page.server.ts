@@ -96,7 +96,6 @@ export const load: PageServerLoad = async (event) => {
   );
 
   return {
-    orgSlug: params.slug,
     course,
     brandOverrides: page.brandOverrides,
     offers,
