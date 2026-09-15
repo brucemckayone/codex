@@ -43,17 +43,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ─── Module mocks (must be declared before route module import) ──────────────
 
-vi.mock('@codex/agreements', async () => {
-  // Service is constructed lazily by the service registry; the route
-  // file consumes it via `ctx.services.agreements`. We bypass the
-  // registry by injecting a hand-built services bag into the procedure
-  // ctx, so the actual `AgreementService` symbol is only needed at
-  // import-resolution time.
-  return {
-    AgreementService: vi.fn(),
-  };
-});
-
 interface ProcedureConfig {
   policy?: {
     auth?: string;
