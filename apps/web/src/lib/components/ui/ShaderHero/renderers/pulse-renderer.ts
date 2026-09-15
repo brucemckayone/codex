@@ -172,8 +172,16 @@ export function createPulseRenderer(): ShaderRenderer {
       }
 
       // Generate SDF from logo mask (synchronous GPU work, <3ms)
+      if (!quad) {
+        // The quad is built during init, so this is unreachable in practice —
+        // but `generateSDF` calls `quad.bind()`, so a null here would fault
+        // inside the GPU pass rather than here, where it can be named.
+        console.warn('[pulse] SDF requested before the quad existed');
+        destroyLogoTexture(gl, logoTex);
+        return;
+      }
       const { generateSDF } = await import('../jfa-sdf');
-      const newSDF = generateSDF(gl, logoTex, SIM_RES, quad!);
+      const newSDF = generateSDF(gl, logoTex, SIM_RES, quad);
 
       // Clean up: logo bitmap no longer needed, only the SDF persists
       destroyLogoTexture(gl, logoTex);
@@ -221,13 +229,13 @@ export function createPulseRenderer(): ShaderRenderer {
     gl.uniform1i(simU.uState, 0);
 
     // TEXTURE1: SDF (if available)
-    const hasLogo = sdfResult != null;
-    if (hasLogo) {
+    const sdf = sdfResult;
+    if (sdf) {
       gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, sdfResult!.sdfTexture);
+      gl.bindTexture(gl.TEXTURE_2D, sdf.sdfTexture);
       gl.uniform1i(simU.uSdf, 1);
     }
-    gl.uniform1f(simU.uHasLogo, hasLogo ? 1.0 : 0.0);
+    gl.uniform1f(simU.uHasLogo, sdf ? 1.0 : 0.0);
     gl.uniform1f(simU.uTime, time);
 
     const tx = 1.0 / SIM_RES;
@@ -384,13 +392,13 @@ export function createPulseRenderer(): ShaderRenderer {
       gl.uniform1i(displayU.uState, 0);
 
       // TEXTURE1: SDF for edge glow (if available)
-      const hasLogo = sdfResult != null;
-      if (hasLogo) {
+      const sdf = sdfResult;
+      if (sdf) {
         gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, sdfResult!.sdfTexture);
+        gl.bindTexture(gl.TEXTURE_2D, sdf.sdfTexture);
         gl.uniform1i(displayU.uSdf, 1);
       }
-      gl.uniform1f(displayU.uHasLogo, hasLogo ? 1.0 : 0.0);
+      gl.uniform1f(displayU.uHasLogo, sdf ? 1.0 : 0.0);
 
       gl.uniform3fv(displayU.uColorPrimary, cfg.colors.primary);
       gl.uniform3fv(displayU.uColorSecondary, cfg.colors.secondary);

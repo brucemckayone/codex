@@ -19,7 +19,7 @@ describe('Content Creation Flow', () => {
     const testEmail = `creator-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const testPassword = 'SecurePassword123!';
 
-    const { user, cookie } = await authFixture.registerUser({
+    const { cookie } = await authFixture.registerUser({
       email: testEmail,
       password: testPassword,
       name: 'Content Creator',
@@ -142,7 +142,7 @@ describe('Content Creation Flow', () => {
   test('should reject publishing content without ready media', async () => {
     // Step 1: Register and login
     const testEmail = `creator-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-    const { user, cookie } = await authFixture.registerUser({
+    const { cookie } = await authFixture.registerUser({
       email: testEmail,
       password: 'SecurePassword123!',
       name: 'Content Creator',

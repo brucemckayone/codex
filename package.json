@@ -49,9 +49,9 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "check": "biome check --write .",
-    "check:ci": "biome check .",
+    "check:ci": "biome check --error-on-warnings .",
     "deadcode": "knip --config knip.json",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck --continue=dependencies-successful",
     "act:list": "act -l",
     "act:test": "act -j test",
     "act:test:verbose": "act -j test --verbose",
@@ -119,6 +119,9 @@
     "infrastructure/runpod/**/*.py": "uvx black"
   },
   "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "better-auth": "1.4.11"
   }

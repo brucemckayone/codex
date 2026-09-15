@@ -145,10 +145,10 @@ jobs:
       # fix is silently never exercised in CI.
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Filter changed packages
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           base: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch || 'main' }}
           filters: |
@@ -251,11 +251,11 @@ jobs:
     environment: test
     strategy:
       matrix:
-        node: [20]
+        node: [22]
     outputs:
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The ephemeral branch name MUST be unique per run AND per attempt.
       #
@@ -275,19 +275,19 @@ jobs:
       # Create Neon branch for unit tests
       - name: Create Neon branch for tests
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       # Install dependencies
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: "pnpm"
@@ -296,7 +296,7 @@ jobs:
 
       # Turborepo local cache - optimized for test job
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-test-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -311,7 +311,7 @@ jobs:
 
       # Database Setup: Apply committed migrations to ephemeral branch
       # Note: Migrations are generated locally and committed; CI only applies them
-      # Note: db_url (direct) is used for migrations — db_url_with_pooler routes
+      # Note: db_url (direct) is used for migrations — db_url_pooled routes
       # through pgbouncer which drops connections mid-DDL on Neon ephemeral
       # branches. Runtime queries can still use the pooled URL.
       - name: Apply migrations to ephemeral branch
@@ -325,12 +325,12 @@ jobs:
       # Save DATABASE_URL for preview deployments
       - name: Save Neon connection details to artifact
         run: |
-          echo "${{ steps.create-branch.outputs.db_url_with_pooler }}" > database-url.txt
+          echo "${{ steps.create-branch.outputs.db_url_pooled }}" > database-url.txt
           echo "${{ steps.create-branch.outputs.branch_id }}" > branch-id.txt
           echo "${{ steps.branch-name.outputs.name }}" > branch-name.txt
 
       - name: Upload Neon connection artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: neon-connection-${{ github.run_id }}
           path: |
@@ -352,7 +352,7 @@ jobs:
       # vitest-pool-workers uses wrangler which reads these files for env vars
       - name: Generate worker dev vars for unit tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -381,7 +381,7 @@ jobs:
           # so a single file like agreement-service.test.ts (82 tests, ~186s)
           # or organization-service.test.ts (~116s) holds ONE WebSocket
           # connection for its whole duration. Routed through pgbouncer
-          # (db_url_with_pooler) that long-lived pooled connection gets
+          # (db_url_pooled) that long-lived pooled connection gets
           # recycled/closed mid-suite, and the next query throws
           # "Connection terminated unexpectedly" — surfacing as a failed seed
           # insert, FK check, or read-back SELECT (the real cause behind the
@@ -412,7 +412,7 @@ jobs:
         continue-on-error: true # Allow artifact upload even if tests fail
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-results-${{ github.run_id }}
@@ -584,32 +584,32 @@ jobs:
             echo "⊘ Skipping ${{ matrix.name }} tests (no relevant changes)"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.should-run.outputs.should_run == 'true'
 
       - name: Create Neon branch
         id: create-branch
         if: steps.should-run.outputs.should_run == 'true'
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           # branch_prefix is a PREFIX, never a usable branch name on its own:
           # run_id + run_attempt are what stop two concurrent runs sharing one
           # database. See "Generate Neon Branch Name" in the `test` job.
           branch_name: ${{ matrix.branch_prefix }}-${{ github.run_id }}-${{ github.run_attempt }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Install pnpm
         if: steps.should-run.outputs.should_run == 'true'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Use Node.js
         if: steps.should-run.outputs.should_run == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: "pnpm"
 
       - name: Install dependencies
@@ -618,7 +618,7 @@ jobs:
 
       - name: Cache Turborepo
         if: steps.should-run.outputs.should_run == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ matrix.turbo_key }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -652,7 +652,7 @@ jobs:
       - name: Generate worker dev vars
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           # Always needed
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
@@ -681,7 +681,7 @@ jobs:
         id: run-tests
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
@@ -696,7 +696,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always() && steps.should-run.outputs.should_run == 'true'
         with:
           name: ${{ matrix.worker }}-test-results-${{ github.run_id }}
@@ -744,7 +744,7 @@ jobs:
     outputs:
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Unique per run AND per attempt — a shared name hands two concurrent
       # runs one database. See the `test` job's equivalent step for the
@@ -755,28 +755,28 @@ jobs:
 
       - name: Create Neon branch for E2E API tests
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-e2e-api-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -806,7 +806,7 @@ jobs:
 
       - name: Generate worker dev vars for all workers
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -859,7 +859,7 @@ jobs:
       - name: Run E2E API tests
         id: run-tests
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -876,7 +876,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload E2E API test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: e2e-api-test-results-${{ github.run_id }}
@@ -924,7 +924,7 @@ jobs:
     outputs:
       branch_id: ${{ steps.create-branch.outputs.branch_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Unique per run AND per attempt — a shared name hands two concurrent
       # runs one database. See the `test` job's equivalent step for the
@@ -936,28 +936,28 @@ jobs:
       # Create Neon branch for E2E tests
       - name: Create Neon branch for E2E
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       # Install dependencies
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: "pnpm"
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       # Turborepo local cache - optimized for E2E job
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-e2e-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -986,7 +986,7 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm build
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: NEON_BRANCH
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
@@ -1008,7 +1008,7 @@ jobs:
       # any checkout test would fail with 422.
       - name: Seed test database
         env:
-          # Use db_url (DIRECT), not db_url_with_pooler. The seed wraps all
+          # Use db_url (DIRECT), not db_url_pooled. The seed wraps all
           # inserts in a single long-lived dbWs.transaction() (seed-data.ts
           # step [3/5]); over the PgBouncer pooler that session connection is
           # recycled mid-transaction, so the content inserts silently roll
@@ -1049,7 +1049,7 @@ jobs:
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           # All Stripe webhook secrets — passthrough ensures generate-dev-vars.sh
@@ -1109,7 +1109,7 @@ jobs:
           # Wait for auth worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Identity API Worker in background
         run: |
@@ -1119,7 +1119,7 @@ jobs:
           # Wait for identity-api worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Ecom API Worker in background
         run: |
@@ -1129,7 +1129,7 @@ jobs:
           # Wait for ecom-api worker to be ready
           timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # The studio +layout.server.ts calls getMyMembership + getMyOrganizations
@@ -1143,7 +1143,7 @@ jobs:
           echo $! > organization-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # Studio layout's draft-count call routes through content-api. Content
@@ -1155,7 +1155,7 @@ jobs:
           echo $! > content-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       # Analytics page calls admin-api for revenue / subscribers / followers /
@@ -1169,7 +1169,7 @@ jobs:
           echo $! > admin-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:42073/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       # Notification preferences + email template specs route through this.
       - name: Start Notifications API Worker in background
@@ -1179,7 +1179,7 @@ jobs:
           echo $! > notifications-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:42075/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       # Media upload + transcoding callback specs route through this. Uses a
       # mock RunPod endpoint per RUNPOD_DIRECT_URL in .dev.vars.test.
@@ -1190,7 +1190,7 @@ jobs:
           echo $! > media-api-worker.pid
           timeout 60 bash -c 'until curl -f http://localhost:4002/health > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Wrangler dev server in background
         run: |
@@ -1201,7 +1201,7 @@ jobs:
           # Wait for server to be ready
           timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Storybook server in background
         run: |
@@ -1229,7 +1229,7 @@ jobs:
       - name: Run E2E tests
         env:
           CI: "true"
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           NODE_ENV: ${{ vars.NODE_ENV }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -1350,7 +1350,7 @@ jobs:
 
       # Upload generated snapshots for committing to repo
       - name: Upload Visual snapshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: visual-snapshots-linux
@@ -1361,7 +1361,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: playwright-report
@@ -1402,26 +1402,26 @@ jobs:
       - name: Delete unit test branch (safety net)
         if: needs.test.result != 'skipped' && needs.test.outputs.branch_id && needs.test.outputs.branch_id != ''
         continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.test.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ needs.test.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
       - name: Delete E2E API test branch (safety net)
         if: needs.e2e-api-tests.result != 'skipped' && needs.e2e-api-tests.outputs.branch_id && needs.e2e-api-tests.outputs.branch_id != ''
         continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.e2e-api-tests.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ needs.e2e-api-tests.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
 
       - name: Delete E2E web test branch (safety net)
         if: needs.e2e-tests.result != 'skipped' && needs.e2e-tests.outputs.branch_id && needs.e2e-tests.outputs.branch_id != ''
         continue-on-error: true
-        uses: neondatabase/delete-branch-action@v3
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch: ${{ needs.e2e-tests.outputs.branch_id }}
-          api_key: ${{ secrets.NEON_API_KEY }}
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ needs.e2e-tests.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

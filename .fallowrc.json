@@ -15,6 +15,7 @@
     "apps/web/src/tests/setup.ts",
     "apps/web/e2e/**/*.spec.ts",
     "**/*.test.ts",
+    "**/*.type-check.ts",
     "**/*.svelte.test.ts"
   ],
   "ignoreDependencies": [

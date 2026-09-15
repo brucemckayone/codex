@@ -147,3 +147,9 @@ apps/web/.*-shot.mjs
 .dolt/
 *.db
 .beads-credential-key
+
+# TypeScript incremental build caches. Shared configs write these to
+# dist/.tsbuildinfo, but a package that extends base.json directly lands one
+# at its own root — where it gets committed and then dirties the tree on
+# every typecheck.
+*.tsbuildinfo

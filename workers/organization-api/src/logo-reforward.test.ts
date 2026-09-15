@@ -39,8 +39,7 @@ function multipartRequest(opts: { withFilename: boolean }): Request {
   const disposition = opts.withFilename
     ? `Content-Disposition: form-data; name="logo"; filename="logo.png"\r\n`
     : `Content-Disposition: form-data; name="logo"\r\n`;
-  const head =
-    `--${boundary}\r\n` + disposition + `Content-Type: image/png\r\n\r\n`;
+  const head = `--${boundary}\r\n${disposition}Content-Type: image/png\r\n\r\n`;
   const tail = `\r\n--${boundary}--\r\n`;
   const body = new Uint8Array([
     ...new TextEncoder().encode(head),

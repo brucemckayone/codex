@@ -33,30 +33,6 @@ export interface SidebarLink extends NavLink {
   icon: SidebarIcon;
 }
 
-/** Platform-level navigation (top header on codex.com) */
-const PLATFORM_NAV: NavLink[] = [
-  { href: '/discover', label: 'Discover' },
-  { href: '/library', label: 'Library' },
-];
-
-/** Organization-level navigation (org subdomain header) */
-function getOrgNav(_slug: string): NavLink[] {
-  // On org subdomains, the slug is in the hostname — paths are relative to root
-  return [
-    { href: '/explore', label: 'Explore' },
-    { href: '/creators', label: 'Creators' },
-    { href: '/pricing', label: 'Pricing' },
-    { href: '/library', label: 'Library' },
-  ];
-}
-
-/** Studio header navigation (mobile menu links) */
-const STUDIO_NAV: NavLink[] = [
-  { href: '/studio', label: 'Dashboard' },
-  { href: '/studio/content', label: 'Content' },
-  { href: '/studio/media', label: 'Media' },
-];
-
 /** Studio sidebar — base links visible to all roles */
 export const SIDEBAR_BASE_LINKS: SidebarLink[] = [
   { href: '/studio', label: 'Dashboard', icon: 'dashboard' },

@@ -28,6 +28,7 @@
  */
 
 import { createExecutionContext, env } from 'cloudflare:test';
+import type { MediaItemService } from '@codex/content';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -44,10 +45,29 @@ let stored: { status: string; durationSeconds: number | null } = {
   durationSeconds: null,
 };
 
+/**
+ * The rest parameters are load-bearing, not decoration. `vi.fn(async () => …)`
+ * infers a ZERO-LENGTH call tuple, so `update.mock.calls[0][2]` is
+ * `TS2493: tuple type '[]' of length '0' has no element at index '2'` and the
+ * creator-scope assertion below cannot be written at all. Deriving each tuple
+ * from the real `MediaItemService` method — rather than hand-writing
+ * `(_id: string, _input: unknown, _creatorId: string)` — also means a
+ * signature change in the service breaks THIS FILE instead of quietly leaving
+ * a stale stub passing.
+ */
+type Svc = MediaItemService;
+
 const mediaSpies = {
-  get: vi.fn(async () => ({ id: MEDIA_ID, ...stored })),
-  update: vi.fn(async () => ({ id: MEDIA_ID })),
-  updateStatus: vi.fn(async () => ({ id: MEDIA_ID })),
+  get: vi.fn(async (..._args: Parameters<Svc['get']>) => ({
+    id: MEDIA_ID,
+    ...stored,
+  })),
+  update: vi.fn(async (..._args: Parameters<Svc['update']>) => ({
+    id: MEDIA_ID,
+  })),
+  updateStatus: vi.fn(async (..._args: Parameters<Svc['updateStatus']>) => ({
+    id: MEDIA_ID,
+  })),
   recordTranscodingTriggerFailure: vi.fn(async () => undefined),
   setCache: vi.fn(),
 };
@@ -84,7 +104,7 @@ const testEnv = {
   WORKER_SHARED_SECRET: 'test-secret',
 } as unknown as typeof env;
 
-function post(body: unknown): Promise<Response> {
+async function post(body: unknown): Promise<Response> {
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
     c.set('user', USER);
@@ -160,6 +180,41 @@ describe('upload-complete records the client-measured duration', () => {
       expect(res.status, JSON.stringify(bad)).toBe(200);
       expect(mediaSpies.update, JSON.stringify(bad)).not.toHaveBeenCalled();
     }
+  });
+
+  it('accepts a request with NO BODY AT ALL (Codex-bk37r)', async () => {
+    // THE REGRESSION THIS FILE MISSED. `input: { body: uploadCompleteSchema }`
+    // made a JSON body mandatory regardless of the schema, because
+    // `c.req.json()` throws for an absent body exactly as for malformed JSON —
+    // above Zod, so `.catch({})` never ran. This endpoint's prior contract took
+    // no body, and it is idempotent by design so a failed transcode can be
+    // re-triggered; a body-less retry 400'd. E2E API caught it, this suite did
+    // not, because every case here sent a body.
+    const app = new Hono<{ Variables: Record<string, unknown> }>();
+    app.use('*', async (c, next) => {
+      c.set('user', USER);
+      c.set('session', { id: 'sess_test', userId: USER.id });
+      await next();
+    });
+    app.route('/api/media', media);
+    const res = await app.fetch(
+      new Request(
+        `http://content-api.test/api/media/${MEDIA_ID}/upload-complete`,
+        { method: 'POST' } // no body, no Content-Type
+      ),
+      testEnv,
+      createExecutionContext()
+    );
+
+    expect(res.status).toBe(200);
+    // No measurement was sent, so nothing is written — but the upload still
+    // completes, which is the whole point.
+    expect(mediaSpies.update).not.toHaveBeenCalled();
+    expect(mediaSpies.updateStatus).toHaveBeenCalledWith(
+      MEDIA_ID,
+      'uploaded',
+      USER.id
+    );
   });
 
   it('still advances the status — the duration is a side errand', async () => {

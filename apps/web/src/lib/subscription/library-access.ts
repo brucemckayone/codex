@@ -125,8 +125,8 @@ export function getLibraryAccessState(
       // Paused is not a stored status today, but if it ever lands we treat
       // it like revoked (no access) — same CTA family.
       return { kind: 'revoked' };
+    // No tier => no subscription to speak of.
     case null:
-    default:
       return { kind: 'revoked' };
   }
 }

@@ -160,7 +160,11 @@ describe('RunPod Webhook Output Schema — Audio Payloads', () => {
   });
 
   it('should accept audio payload with omitted width/height', () => {
-    const { width, height, ...withoutDimensions } = validAudioOutput;
+    const {
+      width: _width,
+      height: _height,
+      ...withoutDimensions
+    } = validAudioOutput;
     const result = runpodWebhookOutputSchema.safeParse(withoutDimensions);
     expect(result.success).toBe(true);
   });

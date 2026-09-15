@@ -29,11 +29,6 @@ import { purgeLocalCollection } from './purge-collection';
 export type LibraryItem = UserLibraryResponse['items'][number];
 
 /**
- * Progress data type for library items
- */
-type LibraryProgress = NonNullable<LibraryItem['progress']>;
-
-/**
  * Library Collection
  *
  * User's content library (purchased + free content).

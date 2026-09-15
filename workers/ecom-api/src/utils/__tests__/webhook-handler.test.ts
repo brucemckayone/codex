@@ -85,6 +85,9 @@ describe('createWebhookHandler', () => {
 
       await handler(context);
 
+      // 500 is the POINT of this branch: Stripe only retries a webhook it was
+      // told failed, so a 200 here would silently drop the event.
+      expect(responseStatus).toBe(500);
       expect(mock._obs.error).toHaveBeenCalledWith(
         expect.stringContaining('transient error'),
         expect.objectContaining({ error: 'ECONNRESET' })

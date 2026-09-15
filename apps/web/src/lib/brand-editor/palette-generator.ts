@@ -26,11 +26,6 @@ export interface FullPalette {
   background: string | null;
 }
 
-interface PaletteResult {
-  secondary: string;
-  accent: string;
-}
-
 const STRATEGY_META: Record<
   PaletteStrategy,
   { label: string; secondaryOffset: number; accentOffset: number }
@@ -52,30 +47,6 @@ const STRATEGY_META: Record<
 /** Wrap hue to 0-360 range. */
 function wrapHue(h: number): number {
   return ((h % 360) + 360) % 360;
-}
-
-/**
- * Generate a palette from a primary hex color (legacy — secondary + accent only).
- */
-function generatePalette(
-  primaryHex: string,
-  strategy: PaletteStrategy
-): PaletteResult {
-  const oklch = hexToOklch(primaryHex);
-  if (!oklch) {
-    return { secondary: '#737373', accent: '#F59E0B' };
-  }
-
-  const { l, c, h } = oklch;
-  const strat = STRATEGY_META[strategy];
-
-  const secOklch = clampToGamut(l, c * 0.8, wrapHue(h + strat.secondaryOffset));
-  const secondary = oklchToHex(secOklch.l, secOklch.c, secOklch.h);
-
-  const accOklch = clampToGamut(l, c, wrapHue(h + strat.accentOffset));
-  const accent = oklchToHex(accOklch.l, accOklch.c, accOklch.h);
-
-  return { secondary, accent };
 }
 
 /**

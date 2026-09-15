@@ -45,7 +45,7 @@ jobs:
     environment: test
     timeout-minutes: 60  # Generous timeout for debugging
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate Neon Branch Name
         id: branch-name
@@ -53,28 +53,28 @@ jobs:
 
       - name: Create Neon branch for tests
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ vars.NEON_PROJECT_ID }}
           branch_name: ${{ steps.branch-name.outputs.name }}
-          parent: production
-          username: neondb_owner
+          parent_branch: production
+          role: neondb_owner
           api_key: ${{ secrets.NEON_API_KEY }}
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: "pnpm"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Cache Turborepo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-e2e-debug-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
@@ -89,7 +89,7 @@ jobs:
 
       - name: Apply migrations
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -97,7 +97,7 @@ jobs:
 
       - name: Build all
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
         run: |
@@ -106,7 +106,7 @@ jobs:
 
       - name: Generate worker dev vars
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
@@ -146,7 +146,7 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
           echo "Auth Worker ready"
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Identity API Worker
         run: |
@@ -156,7 +156,7 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
           echo "Identity API Worker ready"
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Ecom API Worker
         run: |
@@ -166,7 +166,7 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
           echo "Ecom API Worker ready"
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
       - name: Start Wrangler dev server
@@ -178,7 +178,7 @@ jobs:
           timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done'
           echo "Web server ready"
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Wait for workers to stabilize
         run: |
@@ -193,7 +193,7 @@ jobs:
       - name: Run E2E tests (DEBUG MODE)
         env:
           CI: "true"
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           NODE_ENV: ${{ vars.NODE_ENV }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -231,7 +231,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: playwright-report-debug-${{ github.run_id }}
@@ -239,7 +239,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test traces
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: playwright-traces-debug-${{ github.run_id }}
@@ -247,7 +247,7 @@ jobs:
           retention-days: 30
 
       - name: Upload screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: playwright-screenshots-debug-${{ github.run_id }}
@@ -269,7 +269,7 @@ jobs:
           echo "Worker startup completed at $(date)" > debug-logs/timestamp.txt
 
       - name: Upload debug logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: debug-logs-${{ github.run_id }}

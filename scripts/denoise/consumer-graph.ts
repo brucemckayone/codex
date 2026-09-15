@@ -204,7 +204,7 @@ export async function hasConsumerChurn(
 function parseImportedSymbols(importLine: string): string[] {
   // Best-effort parse of `import { a, b, c as d } from '...'`
   const namedMatch = importLine.match(/import\s+(?:type\s+)?\{([^}]*)\}/);
-  if (namedMatch && namedMatch[1]) {
+  if (namedMatch?.[1]) {
     return namedMatch[1]
       .split(',')
       .map((s) =>
@@ -217,12 +217,12 @@ function parseImportedSymbols(importLine: string): string[] {
   }
   // `import * as X from '...'`
   const namespaceMatch = importLine.match(/import\s+\*\s+as\s+(\w+)/);
-  if (namespaceMatch && namespaceMatch[1]) {
+  if (namespaceMatch?.[1]) {
     return [`* as ${namespaceMatch[1]}`];
   }
   // `import X from '...'` (default import; rare for @codex packages)
   const defaultMatch = importLine.match(/import\s+(\w+)\s+from/);
-  if (defaultMatch && defaultMatch[1]) {
+  if (defaultMatch?.[1]) {
     return [defaultMatch[1]];
   }
   return [];
