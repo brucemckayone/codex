@@ -159,7 +159,7 @@ const deny = (reason: DenyReason): AccessDecision => ({
  * `tx` (streaming path). `verifyPurchase` uses the PurchaseService's own db, as
  * in WP-1.
  */
-export async function decideContentAccess(
+async function decideContentAccess(
   deps: { db: AccessQueryClient; purchaseService: PurchaseService },
   userId: string | null,
   contentId: string,

@@ -347,10 +347,13 @@ export async function runAgreementExpiringSweep(
  * from env, validates required env vars (logs and exits cleanly on
  * missing config), and delegates to `runAgreementExpiringSweep`.
  *
- * Exposed as a function so the test suite can drive it without needing
- * the full `scheduled()` Cloudflare interface.
+ * Split out of `dispatchScheduled` so the env-validation and
+ * construction step reads separately from the cron routing. NOT exported:
+ * the docblock here used to claim it was exposed "so the test suite can
+ * drive it", but the suite drives `runAgreementExpiringSweep` with
+ * injected deps instead and never imported this one.
  */
-export async function runScheduledAgreementExpiringSweep(
+async function runScheduledAgreementExpiringSweep(
   env: Bindings,
   deps?: Partial<RunAgreementExpiringSweepDeps>
 ): Promise<ExpiringSweepResult | null> {
