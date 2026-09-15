@@ -48,7 +48,6 @@
 
   @prop {boolean} open - Whether the drawer is open (bindable)
   @prop {CreatorDrawerData | null} creator - Creator data to display
-  @prop {string} orgSlug - Organization slug (for content links)
   @prop {(open: boolean) => void} [onOpenChange] - Callback when open state changes
   @prop {CreateDialogProps['closeFocus']} [closeFocus] - Element/getter to refocus on close
 -->
@@ -76,7 +75,6 @@
   interface Props {
     open?: boolean;
     creator: CreatorDrawerData | null;
-    orgSlug: string;
     onOpenChange?: (open: boolean) => void;
     /**
      * Where focus goes when the drawer closes. This drawer is always opened
@@ -89,7 +87,6 @@
   let {
     open = $bindable(false),
     creator,
-    orgSlug,
     onOpenChange,
     closeFocus,
   }: Props = $props();

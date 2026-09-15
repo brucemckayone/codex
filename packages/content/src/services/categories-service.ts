@@ -33,7 +33,7 @@ import {
   whereNotDeleted,
   withOrgScope,
 } from '@codex/database';
-import type { Category, NewCategory } from '@codex/database/schema';
+import type { Category } from '@codex/database/schema';
 import { categories, content, contentCategories } from '@codex/database/schema';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -463,6 +463,3 @@ export class CategoriesService extends BaseService {
     return `${baseSlug}-${suffix}`;
   }
 }
-
-// Re-export for type callers that want the input shapes alongside the service.
-export type { NewCategory };

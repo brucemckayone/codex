@@ -487,12 +487,10 @@
   {#if !isStudio}
     <MobileBottomNav
       variant="org"
-      user={data.user}
-      org={previewOrg}
       onSearchClick={() => { searchOpen = true; }}
       onMoreClick={() => { moreOpen = true; }}
     />
-    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={previewOrg} />
+    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} />
     <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
 </div>

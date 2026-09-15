@@ -43,7 +43,7 @@ import type { HonoEnv } from '@codex/shared-types';
  * never survived to serve the next one and even 30 min would have covered under
  * half the observed gaps.
  */
-export const PUBLIC_JOURNEYS_CACHE_TTL = 7200;
+const PUBLIC_JOURNEYS_CACHE_TTL = 7200;
 
 /*
  * THE CDN `Cache-Control` FOR THE PORTAL READS NO LONGER LIVES HERE.
