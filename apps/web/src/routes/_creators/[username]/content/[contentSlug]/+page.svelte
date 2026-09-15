@@ -155,7 +155,6 @@
   progress={accessState.progress}
   isAuthenticated={!!data.accessAndProgress}
   formResult={form}
-  {purchasing}
   {creatorName}
   titleSuffix={creatorName}
   requiresSubscription={subscription.subCtx.requiresSubscription}

@@ -320,7 +320,6 @@
             icon={ICON_MAP[link.icon]}
             active={isActive(link.href, page.url.pathname)}
             loading={isLoading(link.href)}
-            {expanded}
             showTooltip={mode === 'desktop' && !expanded}
             index={i}
             badgeCount={link.icon === 'content' ? badgeCounts?.draftContent : undefined}

@@ -199,7 +199,6 @@
   progress={accessState.progress}
   isAuthenticated={!!data.accessAndProgress}
   formResult={form}
-  {purchasing}
   {creatorName}
   {titleSuffix}
   journeyLink={parentCourse}

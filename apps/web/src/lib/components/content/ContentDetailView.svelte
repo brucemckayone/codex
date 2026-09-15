@@ -16,7 +16,6 @@
   @prop {object | null} progress - Playback progress data
   @prop {boolean} isAuthenticated - Whether the user is logged in
   @prop {{ sessionUrl?: string; checkoutError?: string; info?: string; alreadyOwned?: boolean; retryCount?: number } | null} formResult - Form action result
-  @prop {boolean} purchasing - Whether a purchase is in flight
   @prop {string} creatorName - Display name for the creator
   @prop {string} titleSuffix - Suffix for the page title
   @prop {Snippet} [creatorAttribution] - Custom creator attribution line
@@ -119,7 +118,6 @@
     } | null;
     isAuthenticated: boolean;
     formResult: FormResult | null;
-    purchasing: boolean;
     creatorName: string;
     titleSuffix: string;
     /** Whether this content requires a subscription tier */
@@ -165,7 +163,6 @@
     progress,
     isAuthenticated,
     formResult,
-    purchasing: _purchasing,
     creatorName,
     titleSuffix,
     requiresSubscription,

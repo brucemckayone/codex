@@ -81,7 +81,6 @@
 
 <MobileBottomNav
   variant="platform"
-  {user}
   onSearchClick={() => { searchOpen = true; }}
   onMoreClick={() => { moreOpen = true; }}
 />
