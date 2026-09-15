@@ -54,9 +54,18 @@ function makeKv() {
   return {
     store,
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    put: vi.fn(async (key: string, value: string) => {
-      store.set(key, value);
-    }),
+    // The third arg is ignored here but MUST be declared: org-helpers calls
+    // put(key, value, { expirationTtl }), and a 2-param type makes every
+    // assertion on call[2] unreachable.
+    put: vi.fn(
+      async (
+        key: string,
+        value: string,
+        _options?: { expirationTtl?: number }
+      ) => {
+        store.set(key, value);
+      }
+    ),
     delete: vi.fn(async (key: string) => {
       store.delete(key);
     }),
@@ -267,7 +276,9 @@ describe('extractOrganizationFromSubdomain — positive KV cache (defect 1)', ()
     ).toBe(ORG_ID);
 
     expect(findFirst).toHaveBeenCalledTimes(1);
-    const where = findFirst.mock.calls[0][0].where;
+    const firstQuery = findFirst.mock.calls[0];
+    expect(firstQuery).toBeDefined();
+    const where = firstQuery![0].where;
     expect(where).toEqual({
       and: [
         { eq: ['organizations-slug-col-sentinel', 'acme'] },
@@ -656,7 +667,7 @@ describe('cache entries carry a TTL', () => {
 
     expect(kv.put).toHaveBeenCalledTimes(2);
     for (const call of kv.put.mock.calls) {
-      const options = call[2] as { expirationTtl?: number } | undefined;
+      const options = call[2];
       expect(typeof options?.expirationTtl).toBe('number');
       expect(options?.expirationTtl).toBeGreaterThanOrEqual(60);
     }

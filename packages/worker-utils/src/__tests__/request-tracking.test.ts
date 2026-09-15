@@ -179,7 +179,11 @@ describe('Request Tracking Middleware', () => {
     });
 
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as {
+      requestId: string;
+      clientIP: string;
+      userAgent: string;
+    };
 
     expect(data.requestId).toMatch(/^[a-f0-9-]{36}$/);
     expect(data.clientIP).toBe('192.168.1.100');

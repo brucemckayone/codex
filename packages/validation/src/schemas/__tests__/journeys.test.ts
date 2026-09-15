@@ -241,7 +241,7 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
   it('accepts a body whose sections carry design bags', () => {
     const parsed = saveJourneyPageBodySchema.parse(BODY);
     expect(parsed.sections).toHaveLength(2);
-    expect(parsed.sections[1].design).toEqual({ edge: 'soft' });
+    expect(parsed.sections[1]!.design).toEqual({ edge: 'soft' });
   });
 
   it('does not fail the whole page save over one unknown axis value', () => {
@@ -249,9 +249,11 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
       ...BODY,
       sections: [{ ...SECTION, design: { width: 'from-the-future' } }],
     });
-    expect(parsed.sections[0].design?.width).toBeUndefined();
+    const [section] = parsed.sections;
+    expect(section).toBeDefined();
+    expect(section!.design?.width).toBeUndefined();
     // The section's copy — everything the creator actually typed — survives.
-    expect(parsed.sections[0].props).toEqual(SECTION.props);
+    expect(section!.props).toEqual(SECTION.props);
   });
 
   it('accepts the PAGE-level design bundle (F-B2 — the column now exists)', () => {

@@ -135,7 +135,7 @@ describe('Image Validation', () => {
     it('should accept valid PNG upload', async () => {
       const pngBuffer = new Uint8Array([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      ]).buffer;
+      ]);
       const file = new File([pngBuffer], 'test.png', { type: 'image/png' });
       const formData = new FormData();
       formData.append('image', file);
@@ -173,7 +173,7 @@ describe('Image Validation', () => {
     it('should reject disallowed mime type', async () => {
       const pngBuffer = new Uint8Array([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      ]).buffer;
+      ]);
       const file = new File([pngBuffer], 'test.png', { type: 'image/png' });
       const formData = new FormData();
       formData.append('image', file);
@@ -189,7 +189,7 @@ describe('Image Validation', () => {
       // PNG header but claiming to be JPEG
       const pngBuffer = new Uint8Array([
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-      ]).buffer;
+      ]);
       const file = new File([pngBuffer], 'test.jpg', { type: 'image/jpeg' });
       const formData = new FormData();
       formData.append('image', file);
