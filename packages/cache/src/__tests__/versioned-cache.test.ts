@@ -148,9 +148,10 @@ describe('VersionedCache', () => {
 
       // Verify invalidate was called with version key
       expect(freshMock.put).toHaveBeenCalledTimes(1);
-      const calls = freshMock.put.mock.calls;
-      expect(calls[0][0]).toBe('cache:version:user-123');
-      expect(typeof calls[0][1]).toBe('string'); // version timestamp
+      const firstCall = freshMock.put.mock.calls[0];
+      expect(firstCall).toBeDefined();
+      expect(firstCall![0]).toBe('cache:version:user-123');
+      expect(typeof firstCall![1]).toBe('string'); // version timestamp
     });
 
     it('should use custom TTL option', async () => {
@@ -394,13 +395,13 @@ describe('VersionedCache', () => {
       // Mirrors the post-fix shape of the public content endpoint: one
       // version per org, many filter-combo "types" layered on top.
       const fetchers = Array.from({ length: 5 }, (_, i) =>
-        vi.fn().mockResolvedValue({ combo: i })
+        vi.fn(async () => ({ combo: i }))
       );
       const orgId = 'org-1';
       const typeFor = (i: number) => `content:public:newest:20:1:${i}`;
 
-      for (let i = 0; i < fetchers.length; i++) {
-        await cache.get(orgId, typeFor(i), fetchers[i]);
+      for (const [i, fetcher] of fetchers.entries()) {
+        await cache.get(orgId, typeFor(i), fetcher);
       }
 
       // Priming five types creates NO version key at all — reads never mint
@@ -421,9 +422,9 @@ describe('VersionedCache', () => {
         )
       ).toEqual([`cache:version:${orgId}`]);
 
-      for (let i = 0; i < fetchers.length; i++) {
-        await cache.get(orgId, typeFor(i), fetchers[i]);
-        expect(fetchers[i]).toHaveBeenCalledTimes(2);
+      for (const [i, fetcher] of fetchers.entries()) {
+        await cache.get(orgId, typeFor(i), fetcher);
+        expect(fetcher).toHaveBeenCalledTimes(2);
       }
     });
   });

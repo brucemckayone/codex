@@ -149,8 +149,9 @@ describe('VersionedCache data-slot write (Codex-e32xz)', () => {
       store.releaseWrites();
       await ec.drain();
 
-      expect(store.dataKeys()).toHaveLength(1);
-      expect(store.settled.get(store.dataKeys()[0])).toBe(
+      const dataKeys = store.dataKeys();
+      expect(dataKeys).toHaveLength(1);
+      expect(store.settled.get(dataKeys[0]!)).toBe(
         JSON.stringify({ name: 'Ada' })
       );
     });

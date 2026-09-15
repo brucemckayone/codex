@@ -26,7 +26,11 @@
  *      merely constructing the Stripe-backed services must not throw, so
  *      read-only zero-state endpoints keep working.
  */
-import { mapErrorToResponse, ServiceError } from '@codex/service-errors';
+import {
+  mapErrorToResponse,
+  ServiceError,
+  StripeNotConfiguredError,
+} from '@codex/service-errors';
 import type { Bindings } from '@codex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -91,7 +95,7 @@ describe('requireStripeSecretKey (Codex-1g5lh.1)', () => {
         Bindings,
         'STRIPE_SECRET_KEY'
       >)
-    ).toThrow(ServiceError);
+    ).toThrow(StripeNotConfiguredError);
   });
 
   it('returns the key unchanged when it IS configured', () => {

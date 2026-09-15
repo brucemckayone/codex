@@ -20,6 +20,15 @@ describe('sendEmailToWorker', () => {
   } as unknown as Bindings;
 
   const mockWaitUntil = vi.fn();
+
+  /** The promise handed to executionCtx.waitUntil(). Asserted present,
+   * because every test that reaches for it depends on the call having
+   * been made. */
+  function waitUntilPromise(): unknown {
+    const [firstCall] = mockWaitUntil.mock.calls;
+    expect(firstCall).toBeDefined();
+    return firstCall![0];
+  }
   const mockExecutionCtx = {
     waitUntil: mockWaitUntil,
     passThroughOnException: vi.fn(),
@@ -48,7 +57,7 @@ describe('sendEmailToWorker', () => {
     sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
 
     expect(mockWaitUntil).toHaveBeenCalledTimes(1);
-    const waitUntilArg = mockWaitUntil.mock.calls[0][0];
+    const waitUntilArg = waitUntilPromise();
     expect(waitUntilArg).toBeInstanceOf(Promise);
   });
 
@@ -56,7 +65,7 @@ describe('sendEmailToWorker', () => {
     sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
 
     // Wait for the promise inside waitUntil to resolve
-    await mockWaitUntil.mock.calls[0][0];
+    await waitUntilPromise();
 
     expect(workerFetch).toHaveBeenCalledWith(
       'http://localhost:42075/internal/send',
@@ -75,7 +84,7 @@ describe('sendEmailToWorker', () => {
     sendEmailToWorker(mockEnv, mockExecutionCtx, validParams);
 
     // Wait for the promise to settle (the .catch swallows the error)
-    await mockWaitUntil.mock.calls[0][0];
+    await waitUntilPromise();
 
     // If we get here without error, the catch worked
     expect(workerFetch).toHaveBeenCalled();
@@ -101,7 +110,7 @@ describe('sendEmailToWorker', () => {
         ...validParams,
         userId: 'user_abc123',
       });
-      await mockWaitUntil.mock.calls[0][0];
+      await waitUntilPromise();
 
       expect(errorSpy).toHaveBeenCalledTimes(1);
       const payload = JSON.stringify(errorSpy.mock.calls[0]);

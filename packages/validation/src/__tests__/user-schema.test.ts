@@ -81,10 +81,11 @@ describe('Social Links Schema', () => {
       instagram: 'https://instagram.com/user',
     });
 
-    expect(result.website).toBe('https://example.com');
-    expect(result.twitter).toBe('https://twitter.com/user');
-    expect(result.youtube).toBe('https://youtube.com/channel/test');
-    expect(result.instagram).toBe('https://instagram.com/user');
+    expect(result).toBeDefined();
+    expect(result!.website).toBe('https://example.com');
+    expect(result!.twitter).toBe('https://twitter.com/user');
+    expect(result!.youtube).toBe('https://youtube.com/channel/test');
+    expect(result!.instagram).toBe('https://instagram.com/user');
   });
 
   it('should accept partial social links', () => {
@@ -92,8 +93,9 @@ describe('Social Links Schema', () => {
       website: 'https://example.com',
     });
 
-    expect(result.website).toBe('https://example.com');
-    expect(result.twitter).toBeUndefined();
+    expect(result).toBeDefined();
+    expect(result!.website).toBe('https://example.com');
+    expect(result!.twitter).toBeUndefined();
   });
 
   it('should accept empty object', () => {

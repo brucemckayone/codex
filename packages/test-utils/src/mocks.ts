@@ -19,7 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { type MockInstance, vi } from 'vitest';
+import { type Mock, type MockInstance, vi } from 'vitest';
 
 // =============================================================================
 // Types
@@ -125,11 +125,30 @@ export interface MockDatabase {
 
 /** Mock KV namespace with Map-backed storage */
 export interface MockKVNamespace {
-  get: MockInstance;
-  put: MockInstance;
-  delete: MockInstance;
-  list: MockInstance;
-  getWithMetadata: MockInstance;
+  // These are `Mock`, not `MockInstance`: tests CALL them (await mockKV.put(...)),
+  // and only `Mock` carries a call signature — `MockInstance` is assertion-only.
+  get: Mock<(key: string, type?: string) => Promise<unknown>>;
+  // `options` is declared but the Map-backed impl ignores it — production code
+  // (e.g. VersionedCache) calls put() with { expirationTtl }, so the signature
+  // has to accept it or the mock is not callable the way the subject calls it.
+  put: Mock<
+    (
+      key: string,
+      value: unknown,
+      options?: { expirationTtl?: number }
+    ) => Promise<void>
+  >;
+  delete: Mock<(key: string) => Promise<void>>;
+  list: Mock<
+    (options?: { prefix?: string; limit?: number }) => Promise<{
+      keys: Array<{ name: string }>;
+      list_complete: boolean;
+      cursor: string;
+    }>
+  >;
+  getWithMetadata: Mock<
+    (key: string) => Promise<{ value: unknown; metadata: unknown }>
+  >;
   /** Internal storage for functional testing */
   _storage: Map<string, unknown>;
 }
