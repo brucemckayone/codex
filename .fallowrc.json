@@ -140,6 +140,12 @@
     {
       "files": ["apps/web/src/routes/_creators/studio/media/+page.server.ts"],
       "rules": { "unused-load-data-keys": "off" }
+    },
+    {
+      "files": [
+        "apps/web/src/lib/components/ui/HeroLoopVideo/HeroLoopVideo.svelte"
+      ],
+      "rules": { "unrendered-component": "off" }
     }
   ],
   "rules": {
