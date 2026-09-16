@@ -32,6 +32,14 @@
   ],
   "ignoreExports": [
     {
+      "file": "apps/web/src/lib/page-builder/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/page-builder/render/index.ts",
+      "exports": ["*"]
+    },
+    {
       "file": "apps/web/src/lib/components/ui/Table/index.ts",
       "exports": ["*"]
     },
