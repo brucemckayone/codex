@@ -12,6 +12,7 @@ import { schema } from '@codex/database';
 import {
   type Database,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { DEFAULT_CONTACT } from '@codex/validation';
@@ -27,16 +28,18 @@ describe('ContactSettingsService', () => {
     db = setupTestDatabase();
 
     // Create a test organization
-    const [org] = await db
-      .insert(schema.organizations)
-      .values({
-        id: crypto.randomUUID(),
-        name: 'Test Organization',
-        slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(schema.organizations)
+        .values({
+          id: crypto.randomUUID(),
+          name: 'Test Organization',
+          slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+    );
     organizationId = org.id;
   });
 
@@ -129,10 +132,12 @@ describe('ContactSettingsService', () => {
       expect(result.timezone).toBe(DEFAULT_CONTACT.timezone);
 
       // Verify database state
-      const [dbRow] = await db
-        .select()
-        .from(schema.contactSettings)
-        .where(eq(schema.contactSettings.organizationId, organizationId));
+      const dbRow = takeFirst(
+        await db
+          .select()
+          .from(schema.contactSettings)
+          .where(eq(schema.contactSettings.organizationId, organizationId))
+      );
       expect(dbRow.platformName).toBe('New Platform');
     });
 
@@ -230,10 +235,12 @@ describe('ContactSettingsService', () => {
       await service.update({ platformName: 'New Name' });
 
       // Verify hub row exists
-      const [hubRow] = await db
-        .select()
-        .from(schema.platformSettings)
-        .where(eq(schema.platformSettings.organizationId, organizationId));
+      const hubRow = takeFirst(
+        await db
+          .select()
+          .from(schema.platformSettings)
+          .where(eq(schema.platformSettings.organizationId, organizationId))
+      );
       expect(hubRow).toBeDefined();
     });
 
