@@ -6,6 +6,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
@@ -61,7 +62,7 @@ describe('ContentService.uploadThumbnail', () => {
     db = setupTestDatabase();
     mockDb = db; // Set db reference for mock to use
     service = new ContentService({ db, environment: 'test' });
-    [creatorId] = await seedTestUsers(db, 1);
+    [creatorId] = (await seedTestUsers(db, 1)) as [string];
   });
 
   afterAll(async () => {
@@ -70,22 +71,23 @@ describe('ContentService.uploadThumbnail', () => {
 
   it('should upload thumbnail and update content record', async () => {
     // Arrange: Create content
-    const [media] = await db
-      .insert(mediaItems)
-      .values(
-        createTestMediaItemInput(creatorId, {
-          mediaType: 'video',
-          status: 'ready',
-        })
-      )
-      .returning();
+    const media = takeFirst(
+      await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning()
+    );
 
     const input: CreateContentInput = {
       title: 'Thumbnail Test',
       slug: createUniqueSlug('thumb-test'),
       contentType: 'video',
       mediaItemId: media.id,
-      visibility: 'public',
       priceCents: 0,
       tags: [],
     };

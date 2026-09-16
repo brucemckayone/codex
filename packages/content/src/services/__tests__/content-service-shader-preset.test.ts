@@ -49,7 +49,7 @@ describe('ContentService — shader presentation round-trip (Codex-1g5lh.9)', ()
     db = setupTestDatabase();
     service = new ContentService({ db, environment: 'test' });
 
-    const [firstCreator] = await seedTestUsers(db, 1);
+    const [firstCreator] = (await seedTestUsers(db, 1)) as [string];
     if (!firstCreator) throw new Error('failed to seed creator');
     creatorId = firstCreator;
   });

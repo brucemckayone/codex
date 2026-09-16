@@ -26,6 +26,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
@@ -50,7 +51,7 @@ describe('CategoriesService', () => {
     db = setupTestDatabase();
     service = new CategoriesService({ db, environment: 'test' });
 
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [creatorId, otherCreatorId] = userIds;
   });
 
@@ -98,10 +99,12 @@ describe('CategoriesService', () => {
     });
 
     it('scopes slug uniqueness per resolved space (same slug in personal + org)', async () => {
-      const [organization] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const organization = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const token = uniqueToken();
       const name = `Topic ${token}`;
@@ -154,8 +157,8 @@ describe('CategoriesService', () => {
       expect(page1.pagination.total).toBe(3);
       expect(page1.pagination.totalPages).toBe(2);
       expect(page1.items).toHaveLength(2);
-      expect(page1.items[0].name).toBe(`${token} Alpha`);
-      expect(page1.items[1].name).toBe(`${token} Gamma`);
+      expect(page1.items[0]!.name).toBe(`${token} Alpha`);
+      expect(page1.items[1]!.name).toBe(`${token} Gamma`);
 
       const page2 = await service.list({
         creatorId,
@@ -165,7 +168,7 @@ describe('CategoriesService', () => {
       });
 
       expect(page2.items).toHaveLength(1);
-      expect(page2.items[0].name).toBe(`${token} Beta`);
+      expect(page2.items[0]!.name).toBe(`${token} Beta`);
     });
 
     it('does NOT return categories owned by a different creator (IDOR)', async () => {
@@ -178,15 +181,17 @@ describe('CategoriesService', () => {
       );
 
       // A REAL category owned by a DIFFERENT creator, seeded directly.
-      const [foreign] = await db
-        .insert(categories)
-        .values({
-          creatorId: otherCreatorId,
-          organizationId: null,
-          name: `${token} Theirs`,
-          slug: `${token}-theirs`,
-        })
-        .returning();
+      const foreign = takeFirst(
+        await db
+          .insert(categories)
+          .values({
+            creatorId: otherCreatorId,
+            organizationId: null,
+            name: `${token} Theirs`,
+            slug: `${token}-theirs`,
+          })
+          .returning()
+      );
 
       const result = await service.list({
         creatorId,
@@ -221,15 +226,17 @@ describe('CategoriesService', () => {
 
     it('returns null for a category owned by a different creator (IDOR)', async () => {
       const token = uniqueToken();
-      const [foreign] = await db
-        .insert(categories)
-        .values({
-          creatorId: otherCreatorId,
-          organizationId: null,
-          name: `${token} Foreign`,
-          slug: `${token}-foreign`,
-        })
-        .returning();
+      const foreign = takeFirst(
+        await db
+          .insert(categories)
+          .values({
+            creatorId: otherCreatorId,
+            organizationId: null,
+            name: `${token} Foreign`,
+            slug: `${token}-foreign`,
+          })
+          .returning()
+      );
 
       const result = await service.get(foreign.id, { creatorId });
 
@@ -262,15 +269,17 @@ describe('CategoriesService', () => {
 
     it('throws CategoryNotFoundError when updating a different creator category', async () => {
       const token = uniqueToken();
-      const [foreign] = await db
-        .insert(categories)
-        .values({
-          creatorId: otherCreatorId,
-          organizationId: null,
-          name: `${token} Foreign`,
-          slug: `${token}-foreign`,
-        })
-        .returning();
+      const foreign = takeFirst(
+        await db
+          .insert(categories)
+          .values({
+            creatorId: otherCreatorId,
+            organizationId: null,
+            name: `${token} Foreign`,
+            slug: `${token}-foreign`,
+          })
+          .returning()
+      );
 
       await expect(
         service.update(foreign.id, { name: 'Hacked' }, { creatorId })
@@ -291,24 +300,28 @@ describe('CategoriesService', () => {
       expect(result).toBeNull();
 
       // Row still exists with deletedAt set (soft delete, not hard delete).
-      const [row] = await db
-        .select({ deletedAt: categories.deletedAt })
-        .from(categories)
-        .where(eq(categories.id, created.id));
+      const row = takeFirst(
+        await db
+          .select({ deletedAt: categories.deletedAt })
+          .from(categories)
+          .where(eq(categories.id, created.id))
+      );
       expect(row.deletedAt).not.toBeNull();
     });
 
     it('throws CategoryNotFoundError when deleting a different creator category', async () => {
       const token = uniqueToken();
-      const [foreign] = await db
-        .insert(categories)
-        .values({
-          creatorId: otherCreatorId,
-          organizationId: null,
-          name: `${token} Foreign`,
-          slug: `${token}-foreign`,
-        })
-        .returning();
+      const foreign = takeFirst(
+        await db
+          .insert(categories)
+          .values({
+            creatorId: otherCreatorId,
+            organizationId: null,
+            name: `${token} Foreign`,
+            slug: `${token}-foreign`,
+          })
+          .returning()
+      );
 
       await expect(
         service.softDelete(foreign.id, { creatorId })
@@ -318,14 +331,18 @@ describe('CategoriesService', () => {
 
   describe('organization space (org-owned taxonomy)', () => {
     it('isolates list by organization and rejects cross-org mutation', async () => {
-      const [orgA] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const token = uniqueToken();
       const inA = await service.create(
@@ -359,10 +376,12 @@ describe('CategoriesService', () => {
     });
 
     it('shares org categories across creators (authored by X, visible to Y)', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const token = uniqueToken();
       // Authored by creatorId (X).
@@ -383,10 +402,12 @@ describe('CategoriesService', () => {
     });
 
     it('lets a different org actor update/reorder/softDelete an org category', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const token = uniqueToken();
       // Both authored by X.
@@ -434,10 +455,12 @@ describe('CategoriesService', () => {
       // into the personal space and violate idx_unique_category_slug_personal
       // (Postgres 23505). This assertion is unconditional and fails without the
       // cascade fix.
-      const [org] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const token = uniqueToken();
       const name = `Topic ${token}`;
@@ -475,8 +498,8 @@ describe('CategoriesService', () => {
         .from(categories)
         .where(eq(categories.id, personal.id));
       expect(personalRows).toHaveLength(1);
-      expect(personalRows[0].organizationId).toBeNull();
-      expect(personalRows[0].deletedAt).toBeNull();
+      expect(personalRows[0]!.organizationId).toBeNull();
+      expect(personalRows[0]!.deletedAt).toBeNull();
     });
   });
 
