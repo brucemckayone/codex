@@ -28,6 +28,16 @@ import type {
 export class AdminContentManagementService extends BaseService {
   private cache?: VersionedCache;
 
+  /**
+   * Injected by the service registry, not by a route: see
+   * packages/worker-utils/src/procedure/service-registry.ts:1151
+   * (`_adminContent.setCache(buildTrackedCache(env.CACHE_KV))`). The receiver
+   * there is a module-scope `let` of type `AdminContentManagementService |
+   * undefined`, which dead-code detection cannot resolve to this class.
+   * ContentService and ConnectAccountService take the same call at :431 and
+   * :1014.
+   */
+  // fallow-ignore-next-line unused-class-member
   setCache(cache: VersionedCache): void {
     this.cache = cache;
   }
