@@ -69,7 +69,7 @@ describe('FeeConfigService — real-DB write integration', () => {
 
     // seedTestUsers returns user IDs usable as `changedBy` (FK to users.id
     // with onDelete: 'restrict' in fee_config_audit_log).
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [adminId, creatorId] = userIds as [string, string];
 
     const [org] = await db
@@ -77,7 +77,6 @@ describe('FeeConfigService — real-DB write integration', () => {
       .values({
         name: 'Fee Config Write Test Org',
         slug: createUniqueSlug('fee-config-write-test-org'),
-        ownerId: creatorId,
       })
       .returning();
     if (!org) throw new Error('Failed to create test organization');

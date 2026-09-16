@@ -58,7 +58,6 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
       .values({
         name: `Test Org ${label}`,
         slug: createUniqueSlug(label),
-        ownerId,
       })
       .returning();
     if (!org) throw new Error('Failed to create test organization');
@@ -66,7 +65,10 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   }
 
   it('skips a removed founder and settles on the active owner', async () => {
-    const [removedFounderId, activeOwnerId] = await seedTestUsers(db, 2);
+    const [removedFounderId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!removedFounderId || !activeOwnerId) throw new Error('seed failed');
 
     const org = await makeOrg(activeOwnerId, 'removed-founder');
@@ -101,7 +103,10 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('resolves to nothing when the only owner has been removed', async () => {
-    const [removedFounderId, bystanderId] = await seedTestUsers(db, 2);
+    const [removedFounderId, bystanderId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!removedFounderId || !bystanderId) throw new Error('seed failed');
 
     // ownerId on the org row is vestigial for this path; membership is what counts.
@@ -133,7 +138,10 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('still honours an explicit primary-connect pin', async () => {
-    const [pinnedUserId, activeOwnerId] = await seedTestUsers(db, 2);
+    const [pinnedUserId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!pinnedUserId || !activeOwnerId) throw new Error('seed failed');
 
     const org = await makeOrg(activeOwnerId, 'pin-wins');
