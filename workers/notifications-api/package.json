@@ -23,7 +23,6 @@
     "@codex/database": "workspace:*",
     "@codex/notifications": "workspace:*",
     "@codex/observability": "workspace:*",
-    "@codex/platform-settings": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/urls": "workspace:*",

@@ -36,7 +36,6 @@
   "dependencies": {
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
-    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",
