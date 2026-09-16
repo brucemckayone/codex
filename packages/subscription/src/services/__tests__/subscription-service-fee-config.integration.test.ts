@@ -33,6 +33,7 @@ import {
   createUniqueSlug,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
@@ -109,15 +110,16 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
   });
 
   async function seed(label: string) {
-    const [org] = await db
-      .insert(organizations)
-      .values(
-        createTestOrganizationInput({
-          slug: createUniqueSlug(label),
-          creatorId,
-        })
-      )
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug(label),
+          })
+        )
+        .returning()
+    );
 
     const stripeAccountId = `acct_fc_${createUniqueSlug('a')}`;
     await db.insert(stripeConnectAccounts).values(
@@ -135,20 +137,24 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       .set({ primaryConnectAccountUserId: payoutUserId })
       .where(eq(organizations.id, org.id));
 
-    const [tier] = await db
-      .insert(subscriptionTiers)
-      .values(createTestTierInput(org.id, { name: `T-${label}` }))
-      .returning();
+    const tier = takeFirst(
+      await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(org.id, { name: `T-${label}` }))
+        .returning()
+    );
 
-    const [sub] = await db
-      .insert(subscriptions)
-      .values(
-        createTestSubscriptionInput(payoutUserId, org.id, tier.id, {
-          status: 'active',
-          stripeSubscriptionId: `sub_fc_${createUniqueSlug('s')}`,
-        })
-      )
-      .returning();
+    const sub = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(payoutUserId, org.id, tier.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_fc_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning()
+    );
 
     return { org, sub, stripeAccountId };
   }
@@ -180,19 +186,21 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     );
 
     // Seed one payout BELOW the floor.
-    const [row] = await db
-      .insert(payoutsTable)
-      .values({
-        userId: payoutUserId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 50,
-        currency: 'gbp',
-        reason: 'connect_not_ready',
-        status: 'pending',
-        payoutType: 'creator_payout',
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(payoutsTable)
+        .values({
+          userId: payoutUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 50,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning()
+    );
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
@@ -203,11 +211,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(transferSpy).not.toHaveBeenCalled();
     expect(result).toEqual({ resolved: 0, failed: 0 });
 
-    const [reread] = await db
-      .select()
-      .from(payoutsTable)
-      .where(eq(payoutsTable.id, row.id))
-      .limit(1);
+    const reread = takeFirst(
+      await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, row.id))
+        .limit(1)
+    );
     expect(reread.resolvedAt).toBeNull();
     expect(reread.stripeTransferId).toBeNull();
   });
@@ -238,19 +248,21 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       stripe
     );
 
-    const [row] = await db
-      .insert(payoutsTable)
-      .values({
-        userId: payoutUserId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 50,
-        currency: 'gbp',
-        reason: 'connect_not_ready',
-        status: 'pending',
-        payoutType: 'creator_payout',
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(payoutsTable)
+        .values({
+          userId: payoutUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 50,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning()
+    );
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
@@ -267,11 +279,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(result.resolved).toBe(1);
     expect(transferSpy).toHaveBeenCalledTimes(1);
 
-    const [reread] = await db
-      .select()
-      .from(payoutsTable)
-      .where(eq(payoutsTable.id, row.id))
-      .limit(1);
+    const reread = takeFirst(
+      await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, row.id))
+        .limit(1)
+    );
     expect(reread.resolvedAt).not.toBeNull();
     expect(reread.stripeTransferId).toBe('tr_fc_clear');
   });
@@ -342,16 +356,20 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     const [smallRow] = inserted.filter((r) => r.amountCents === 50);
     const [largeRow] = inserted.filter((r) => r.amountCents === 500);
 
-    const [smallAfter] = await db
-      .select()
-      .from(payoutsTable)
-      .where(eq(payoutsTable.id, smallRow.id))
-      .limit(1);
-    const [largeAfter] = await db
-      .select()
-      .from(payoutsTable)
-      .where(eq(payoutsTable.id, largeRow.id))
-      .limit(1);
+    const smallAfter = takeFirst(
+      await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, smallRow.id))
+        .limit(1)
+    );
+    const largeAfter = takeFirst(
+      await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, largeRow.id))
+        .limit(1)
+    );
 
     // Both rows reach status='paid' once the GROUP SUM clears the floor.
     expect(smallAfter.resolvedAt).not.toBeNull();
@@ -687,20 +705,22 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       stripe
     );
 
-    const [row] = await db
-      .insert(payoutsTable)
-      .values({
-        userId: payoutUserId,
-        organizationId: org.id,
-        sourceType: 'purchase',
-        stripeChargeId: `ch_${createUniqueSlug('p')}`,
-        amountCents: 500,
-        currency: 'gbp',
-        reason: 'connect_not_ready',
-        status: 'pending',
-        payoutType: 'creator_payout',
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(payoutsTable)
+        .values({
+          userId: payoutUserId,
+          organizationId: org.id,
+          sourceType: 'purchase',
+          stripeChargeId: `ch_${createUniqueSlug('p')}`,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning()
+    );
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
@@ -715,11 +735,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(result).toEqual({ resolved: 1, failed: 0 });
     expect(transferSpy).toHaveBeenCalledTimes(1);
 
-    const [reread] = await db
-      .select()
-      .from(payoutsTable)
-      .where(eq(payoutsTable.id, row.id))
-      .limit(1);
+    const reread = takeFirst(
+      await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, row.id))
+        .limit(1)
+    );
     expect(reread.status).toBe('paid');
     expect(reread.resolvedAt).not.toBeNull();
   });

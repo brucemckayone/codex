@@ -123,7 +123,10 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId, otherCreatorId] = await seedTestUsers(db, 2);
+    [creatorId, otherCreatorId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
 
     orgId = await seedOrg('Plan Mgmt Org', creatorId, true);
     foreignOrgId = await seedOrg('Foreign Org', otherCreatorId, true);

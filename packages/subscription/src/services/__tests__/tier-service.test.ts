@@ -25,6 +25,7 @@ import {
   createUniqueSlug,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
@@ -56,7 +57,7 @@ describe('TierService', () => {
     db = setupTestDatabase();
     await validateDatabaseConnection(db);
     const userIds = await seedTestUsers(db, 1);
-    [creatorId] = userIds;
+    [creatorId] = userIds as [string];
   });
 
   beforeEach(async () => {
@@ -79,15 +80,16 @@ describe('TierService', () => {
 
   /** Helper: create an org with an active Connect account */
   async function createOrgWithConnect(slug?: string) {
-    const [org] = await db
-      .insert(organizations)
-      .values(
-        createTestOrganizationInput({
-          slug: createUniqueSlug(slug ?? 'tier'),
-          creatorId,
-        })
-      )
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug(slug ?? 'tier'),
+          })
+        )
+        .returning()
+    );
     // Upsert on userId (uq_stripe_connect_user, Codex-69t7c) so scoping tests
     // that build two orgs for the same creator reuse the one account.
     await db
@@ -119,15 +121,16 @@ describe('TierService', () => {
 
   /** Helper: create an org WITHOUT a Connect account */
   async function createOrgWithoutConnect(slug?: string) {
-    const [org] = await db
-      .insert(organizations)
-      .values(
-        createTestOrganizationInput({
-          slug: createUniqueSlug(slug ?? 'no-connect'),
-          creatorId,
-        })
-      )
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug(slug ?? 'no-connect'),
+          })
+        )
+        .returning()
+    );
     return org;
   }
 
@@ -190,15 +193,16 @@ describe('TierService', () => {
     });
 
     it('should throw ConnectAccountNotReadyError when charges disabled', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('no-charges'),
-            creatorId,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('no-charges'),
+            })
+          )
+          .returning()
+      );
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(org.id, creatorId, {
           chargesEnabled: false,
@@ -225,8 +229,8 @@ describe('TierService', () => {
 
       const pricesCalls = (stripe.prices.create as ReturnType<typeof vi.fn>)
         .mock.calls;
-      expect(pricesCalls[0][0]).toMatchObject({ currency: 'gbp' });
-      expect(pricesCalls[1][0]).toMatchObject({ currency: 'gbp' });
+      expect(pricesCalls[0]![0]).toMatchObject({ currency: 'gbp' });
+      expect(pricesCalls[1]![0]).toMatchObject({ currency: 'gbp' });
     });
 
     it('should resolve Connect via organizations.primary_connect_account_user_id (T10/X8)', async () => {
@@ -239,15 +243,16 @@ describe('TierService', () => {
       const userIds = await seedTestUsers(db, 2);
       const [primaryUser, secondaryUser] = userIds;
 
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('primary-connect'),
-            creatorId: primaryUser,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('primary-connect'),
+            })
+          )
+          .returning()
+      );
 
       // Primary owner: Connect NOT ready
       await db.insert(stripeConnectAccounts).values(
@@ -473,33 +478,39 @@ describe('TierService', () => {
       });
 
       // Two content rows gated by this tier, plus one unrelated row.
-      const [gatedA] = await db
-        .insert(content)
-        .values(
-          createTestContentInput(creatorId, {
-            organizationId: org.id,
-            includedInTierId: tier.id,
-          })
-        )
-        .returning();
-      const [gatedB] = await db
-        .insert(content)
-        .values(
-          createTestContentInput(creatorId, {
-            organizationId: org.id,
-            includedInTierId: tier.id,
-          })
-        )
-        .returning();
-      const [ungated] = await db
-        .insert(content)
-        .values(
-          createTestContentInput(creatorId, {
-            organizationId: org.id,
-            includedInTierId: null,
-          })
-        )
-        .returning();
+      const gatedA = takeFirst(
+        await db
+          .insert(content)
+          .values(
+            createTestContentInput(creatorId, {
+              organizationId: org.id,
+              includedInTierId: tier.id,
+            })
+          )
+          .returning()
+      );
+      const gatedB = takeFirst(
+        await db
+          .insert(content)
+          .values(
+            createTestContentInput(creatorId, {
+              organizationId: org.id,
+              includedInTierId: tier.id,
+            })
+          )
+          .returning()
+      );
+      const ungated = takeFirst(
+        await db
+          .insert(content)
+          .values(
+            createTestContentInput(creatorId, {
+              organizationId: org.id,
+              includedInTierId: null,
+            })
+          )
+          .returning()
+      );
 
       await service.deleteTier(tier.id, org.id);
 
@@ -527,22 +538,26 @@ describe('TierService', () => {
 
       // Content in org B that shares includedInTierId = tierA.id (contrived,
       // would not happen normally but guards against the sweep over-reaching).
-      const [orgBContent] = await db
-        .insert(content)
-        .values(
-          createTestContentInput(creatorId, {
-            organizationId: orgB.id,
-            includedInTierId: tierA.id,
-          })
-        )
-        .returning();
+      const orgBContent = takeFirst(
+        await db
+          .insert(content)
+          .values(
+            createTestContentInput(creatorId, {
+              organizationId: orgB.id,
+              includedInTierId: tierA.id,
+            })
+          )
+          .returning()
+      );
 
       await service.deleteTier(tierA.id, orgA.id);
 
-      const [row] = await db
-        .select({ includedInTierId: content.includedInTierId })
-        .from(content)
-        .where(eq(content.id, orgBContent.id));
+      const row = takeFirst(
+        await db
+          .select({ includedInTierId: content.includedInTierId })
+          .from(content)
+          .where(eq(content.id, orgBContent.id))
+      );
       expect(row.includedInTierId).toBe(tierA.id);
     });
   });
@@ -566,7 +581,7 @@ describe('TierService', () => {
 
       const tiers = await service.listTiers(org.id);
       expect(tiers).toHaveLength(1);
-      expect(tiers[0].name).toBe('Active');
+      expect(tiers[0]!.name).toBe('Active');
     });
 
     it('should return empty array for org with no tiers', async () => {
@@ -591,7 +606,7 @@ describe('TierService', () => {
 
       const tiersA = await service.listTiers(orgA.id);
       expect(tiersA).toHaveLength(1);
-      expect(tiersA[0].name).toBe('A Tier');
+      expect(tiersA[0]!.name).toBe('A Tier');
     });
   });
 
@@ -622,7 +637,7 @@ describe('TierService', () => {
       const allTiers = await service.listAllTiers(org.id);
       // Should include the deactivated tier but not the deleted one
       expect(allTiers).toHaveLength(1);
-      expect(allTiers[0].id).toBe(active.id);
+      expect(allTiers[0]!.id).toBe(active.id);
     });
   });
 
@@ -730,7 +745,7 @@ describe('TierService', () => {
       // would leave Stripe in a potentially inconsistent state.
       // This documents the known limitation.
       const refetchedTier = await service.listTiers(org.id);
-      expect(refetchedTier[0].priceMonthly).toBe(499);
+      expect(refetchedTier[0]!.priceMonthly).toBe(499);
     });
   });
 
@@ -759,12 +774,12 @@ describe('TierService', () => {
       await service.reorderTiers(org.id, [c.id, a.id, b.id]);
 
       const tiers = await service.listTiers(org.id);
-      expect(tiers[0].name).toBe('C');
-      expect(tiers[0].sortOrder).toBe(1);
-      expect(tiers[1].name).toBe('A');
-      expect(tiers[1].sortOrder).toBe(2);
-      expect(tiers[2].name).toBe('B');
-      expect(tiers[2].sortOrder).toBe(3);
+      expect(tiers[0]!.name).toBe('C');
+      expect(tiers[0]!.sortOrder).toBe(1);
+      expect(tiers[1]!.name).toBe('A');
+      expect(tiers[1]!.sortOrder).toBe(2);
+      expect(tiers[2]!.name).toBe('B');
+      expect(tiers[2]!.sortOrder).toBe(3);
     });
 
     it('should throw TierNotFoundError if ID does not belong to org', async () => {
@@ -882,13 +897,15 @@ describe('TierService', () => {
         changed: true,
       });
 
-      const [row] = await db
-        .select({
-          name: subscriptionTiers.name,
-          description: subscriptionTiers.description,
-        })
-        .from(subscriptionTiers)
-        .where(eq(subscriptionTiers.id, tier.id));
+      const row = takeFirst(
+        await db
+          .select({
+            name: subscriptionTiers.name,
+            description: subscriptionTiers.description,
+          })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.id, tier.id))
+      );
       expect(row.name).toBe('Pro (renamed)');
       expect(row.description).toBe('Brand new description');
     });
@@ -1010,15 +1027,17 @@ describe('TierService', () => {
         changed: true,
       });
 
-      const [row] = await db
-        .select({
-          priceMonthly: subscriptionTiers.priceMonthly,
-          priceAnnual: subscriptionTiers.priceAnnual,
-          stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
-          stripePriceAnnualId: subscriptionTiers.stripePriceAnnualId,
-        })
-        .from(subscriptionTiers)
-        .where(eq(subscriptionTiers.id, tier.id));
+      const row = takeFirst(
+        await db
+          .select({
+            priceMonthly: subscriptionTiers.priceMonthly,
+            priceAnnual: subscriptionTiers.priceAnnual,
+            stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
+            stripePriceAnnualId: subscriptionTiers.stripePriceAnnualId,
+          })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.id, tier.id))
+      );
       expect(row.priceMonthly).toBe(1500);
       expect(row.stripePriceMonthlyId).toBe('price_new_month_1500');
       // Annual must remain untouched.
