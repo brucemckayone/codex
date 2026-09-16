@@ -159,9 +159,9 @@ The prototype's `fresh.css` (warm brand tones) and neutral `--st-*` studio chrom
 **Share as-is:** `BrandStudioLayout` (pass different rail/canvas snippets), `BrandStudioCanvas`
 (stable same-origin `<iframe>` of the real page + the `onframeload` bridge seam — `src` derives
 from route+slug only, never editor state, so edits never reload it), the `createBrandPreviewSender`
-bridge mechanics, `css-injection` helpers, all `rail/*` primitives (`RailGroup`, `RailControl`,
-`ChangeLedger`), the generic field primitives (`BrandSliderField`, OKLCH color pickers, `FontPicker`),
-and all `ui/*`.
+bridge mechanics, `css-injection` helpers, the live `rail/*` primitives (`ChangeLedger`,
+`EditingThemeContrast`, `rail-model.ts`, `contrast.ts`), the generic field primitives
+(`BrandSliderField`, OKLCH color pickers, `FontPicker`), and all `ui/*`.
 
 **Clone (page-builder-specific):** the store (section list + per-section props, mirroring the
 `saved`/`pending` spine), a **section-model** (`rail-model.ts` analog), section-config editors
