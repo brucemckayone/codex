@@ -250,8 +250,8 @@ function buildService(
       // The service types db as `ServiceDatabase` from @codex/database;
       // our mock implements the subset the methods exercise. Cast is
       // narrow and localised — no `as any`.
-      db: db as unknown as Parameters<
-        typeof SubscriptionService.prototype.constructor
+      db: db as unknown as ConstructorParameters<
+        typeof SubscriptionService
       >[0]['db'],
       environment: 'test',
       ...(options.noCache
@@ -404,8 +404,8 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
 
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
         cache,
@@ -528,8 +528,8 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
     } as unknown as Stripe;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
       },
@@ -819,8 +819,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionCreated', 
     const cache = { invalidate: vi.fn() } as unknown as VersionedCache;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
         cache,
@@ -878,8 +878,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionCreated', 
     };
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
       },
@@ -1028,8 +1028,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
     const cache = { invalidate: vi.fn() } as unknown as VersionedCache;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
         cache,
@@ -1084,8 +1084,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionDeleted', 
     };
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
       },
@@ -1176,8 +1176,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionPaused', (
     const cache = { invalidate: vi.fn() } as unknown as VersionedCache;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
         cache,
@@ -1208,8 +1208,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionPaused', (
     void calls;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
       },
@@ -1306,8 +1306,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionResumed', 
     const cache = { invalidate: vi.fn() } as unknown as VersionedCache;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
         cache,
@@ -1338,8 +1338,8 @@ describe('SubscriptionService orchestrator hook — handleSubscriptionResumed', 
     void calls;
     const service = new SubscriptionService(
       {
-        db: db as unknown as Parameters<
-          typeof SubscriptionService.prototype.constructor
+        db: db as unknown as ConstructorParameters<
+          typeof SubscriptionService
         >[0]['db'],
         environment: 'test',
       },

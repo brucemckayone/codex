@@ -241,7 +241,7 @@ describe('TierService', () => {
       // service should refuse (primary is not ready) rather than
       // silently succeed against the secondary account.
       const userIds = await seedTestUsers(db, 2);
-      const [primaryUser, secondaryUser] = userIds;
+      const [primaryUser, secondaryUser] = userIds as [string, string];
 
       const org = takeFirst(
         await db

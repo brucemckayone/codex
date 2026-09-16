@@ -1856,7 +1856,7 @@ describe('SubscriptionService', () => {
         stripe.subscriptions.update as unknown as {
           mock: { calls: unknown[][] };
         }
-      ).mock.calls[0];
+      ).mock.calls[0]!;
       const params = updateCall[1] as {
         items: Array<{ id: string; price: string }>;
         proration_behavior: string;
@@ -1922,7 +1922,7 @@ describe('SubscriptionService', () => {
         stripe.subscriptions.update as unknown as {
           mock: { calls: unknown[][] };
         }
-      ).mock.calls[0];
+      ).mock.calls[0]!;
       const params = updateCall[1] as Record<string, unknown>;
       expect(params.proration_behavior).toBe('create_prorations');
       expect(params.payment_behavior).toBeUndefined();
@@ -2076,7 +2076,7 @@ describe('SubscriptionService', () => {
         stripe.subscriptions.update as unknown as {
           mock: { calls: unknown[][] };
         }
-      ).mock.calls[0];
+      ).mock.calls[0]!;
       const params = updateCall[1] as {
         items: Array<{ id: string; price: string }>;
         proration_date: number;
@@ -2791,7 +2791,7 @@ describe('SubscriptionService', () => {
     it('should return paginated list', async () => {
       const { org, tier1 } = await createFullOrg('list-subs');
       // Insert 3 subscriptions from different users
-      const users = await seedTestUsers(db, 3);
+      const users = (await seedTestUsers(db, 3)) as [string, string, string];
       for (const uid of users) {
         await db
           .insert(subscriptions)
@@ -2809,7 +2809,7 @@ describe('SubscriptionService', () => {
 
     it('flattens user + tier joins into SubscriberListItem shape', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-shape');
-      const [uid] = await seedTestUsers(db, 1);
+      const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
       await db
         .insert(subscriptions)
         .values(createTestSubscriptionInput(uid, org.id, tier1.id));
@@ -2832,7 +2832,10 @@ describe('SubscriptionService', () => {
 
     it('excludes cancelled by default (BUG-023 regression guard)', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-cancel-default');
-      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
+      const [activeUid, cancelledUid] = (await seedTestUsers(db, 2)) as [
+        string,
+        string,
+      ];
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(activeUid, org.id, tier1.id, {
           status: 'active',
@@ -2853,7 +2856,10 @@ describe('SubscriptionService', () => {
 
     it('includes cancelled when includeCancelled=true', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-cancel-on');
-      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
+      const [activeUid, cancelledUid] = (await seedTestUsers(db, 2)) as [
+        string,
+        string,
+      ];
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(activeUid, org.id, tier1.id, {
           status: 'active',
@@ -2874,7 +2880,7 @@ describe('SubscriptionService', () => {
 
     it('filters by tierId', async () => {
       const { org, tier1, tier2 } = await createFullOrg('list-subs-tier');
-      const [u1, u2] = await seedTestUsers(db, 2);
+      const [u1, u2] = (await seedTestUsers(db, 2)) as [string, string];
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(u1, org.id, tier1.id, {
           status: 'active',
@@ -2895,7 +2901,7 @@ describe('SubscriptionService', () => {
 
     it('search filters by user email (case-insensitive ILIKE)', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-search');
-      const [uid] = await seedTestUsers(db, 1);
+      const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
       await db
         .insert(subscriptions)
         .values(createTestSubscriptionInput(uid, org.id, tier1.id));
@@ -2916,7 +2922,7 @@ describe('SubscriptionService', () => {
   describe('getSubscriptionStats', () => {
     it('should return correct totals and per-tier breakdown', async () => {
       const { org, tier1, tier2 } = await createFullOrg('stats');
-      const users = await seedTestUsers(db, 2);
+      const users = (await seedTestUsers(db, 2)) as [string, string];
 
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(users[0], org.id, tier1.id, {
@@ -3602,7 +3608,7 @@ describe('SubscriptionService', () => {
      * userId.
      */
     async function seedCreatorWithConnect(orgId: string): Promise<string> {
-      const [userId] = await seedTestUsers(db, 1);
+      const userId = takeFirst(await seedTestUsers(db, 1), 'user id');
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(orgId, userId, {
           chargesEnabled: true,
@@ -3731,7 +3737,7 @@ describe('SubscriptionService', () => {
           .returning()
       );
 
-      const [xorgCreatorId] = await seedTestUsers(db, 1);
+      const xorgCreatorId = takeFirst(await seedTestUsers(db, 1), 'user id');
       const creatorConnect = createTestConnectAccountInput(
         orgB.id,
         xorgCreatorId,
@@ -5493,7 +5499,7 @@ describe('SubscriptionService', () => {
           )
           .returning(),
       ]);
-      const seeded = seed.map(([row]) => row);
+      const seeded = seed.map((rows) => takeFirst(rows));
 
       const result = await service.propagateTierPriceToActiveSubscriptions(
         tier1.id,
@@ -5564,7 +5570,7 @@ describe('SubscriptionService', () => {
           )
           .returning(),
       ]);
-      const [failRow] = seed[1];
+      const failRow = takeFirst(seed[1]);
 
       updateSpy.mockImplementation((stripeSubId: string) => {
         if (stripeSubId === failRow.stripeSubscriptionId) {
@@ -5846,15 +5852,17 @@ describe('SubscriptionService', () => {
         const newUsers = await seedTestUsers(db, 4);
         const seeded: Array<{ stripeSubscriptionId: string }> = [];
         for (const [idx, uid] of newUsers.entries()) {
-          const [row] = await db
-            .insert(subscriptions)
-            .values(
-              createTestSubscriptionInput(uid, org.id, tier1.id, {
-                status: 'active',
-                stripeSubscriptionId: `sub_mail_partial_${Date.now()}_${idx}`,
-              })
-            )
-            .returning();
+          const row = takeFirst(
+            await db
+              .insert(subscriptions)
+              .values(
+                createTestSubscriptionInput(uid, org.id, tier1.id, {
+                  status: 'active',
+                  stripeSubscriptionId: `sub_mail_partial_${Date.now()}_${idx}`,
+                })
+              )
+              .returning()
+          );
           seeded.push(row);
         }
         // Fail the 2nd sub — the rest should still mail.
@@ -5888,7 +5896,7 @@ describe('SubscriptionService', () => {
         wireStripeSubSpies(stripe);
         const { serviceWithMailer, mailer } = buildServiceWithMailer();
 
-        const [uid] = await seedTestUsers(db, 1);
+        const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(uid, org.id, tier1.id, {
             status: 'active',
@@ -5930,7 +5938,7 @@ describe('SubscriptionService', () => {
           stripe
         );
 
-        const [uid] = await seedTestUsers(db, 1);
+        const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(uid, org.id, tier1.id, {
             status: 'active',
@@ -5965,7 +5973,7 @@ describe('SubscriptionService', () => {
         wireStripeSubSpies(stripe);
         const { serviceWithMailer, mailer } = buildServiceWithMailer();
 
-        const [uid] = await seedTestUsers(db, 1);
+        const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(uid, org.id, tier1.id, {
             status: 'active',
@@ -5982,7 +5990,7 @@ describe('SubscriptionService', () => {
 
         expect(result).toEqual({ total: 1, updated: 1, failed: 0 });
         expect(mailer).toHaveBeenCalledOnce();
-        const [params] = mailer.mock.calls[0];
+        const [params] = mailer.mock.calls[0]!;
         // The invariant: `to` is never empty / null / undefined.
         expect(typeof params.to).toBe('string');
         expect((params.to as string).length).toBeGreaterThan(0);
@@ -5995,7 +6003,7 @@ describe('SubscriptionService', () => {
         // `service` above in beforeEach is constructed WITHOUT a
         // mailer — use it directly to verify the no-op degrade.
 
-        const [uid] = await seedTestUsers(db, 1);
+        const uid = takeFirst(await seedTestUsers(db, 1), 'user id');
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(uid, org.id, tier1.id, {
             status: 'active',
@@ -6506,7 +6514,7 @@ describe('SubscriptionService', () => {
     it('surfaces subscriberName + subscriberEmail via the aliased subscriber join', async () => {
       const { org, tier1 } = await createFullOrg('05vp8-subscriber-join');
       // The subscriber is a separate user from the creator beneficiary.
-      const [subscriberUid] = await seedTestUsers(db, 1);
+      const subscriberUid = takeFirst(await seedTestUsers(db, 1), 'user id');
       const { eq } = await import('drizzle-orm');
       const [subscriberRow] = await db
         .select({ name: users.name, email: users.email })
@@ -7213,7 +7221,7 @@ describe('SubscriptionService', () => {
 
       const result = await service.getPayoutsByCreatorBreakdown(org.id);
       expect(result).toHaveLength(1);
-      const c = result[0];
+      const c = takeFirst(result);
       expect(c.totalPaidCents).toBe(1000); // 700 + 300 only
       expect(c.subscriptionPaidCents).toBe(700);
       expect(c.purchasePaidCents).toBe(300);
@@ -7871,7 +7879,7 @@ describe('SubscriptionService', () => {
               ?.pending_payout_id === row.id
         );
         expect(match, `no transfer for payout ${row.id}`).toBeDefined();
-        const [params] = match as [Record<string, unknown>];
+        const [params] = match as unknown as [Record<string, unknown>];
         expect(params).toMatchObject({
           amount: row.amountCents,
           currency: 'gbp',
@@ -7947,21 +7955,19 @@ describe('SubscriptionService', () => {
 
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
-      transferSpy.mockImplementation(
-        (params: Record<string, unknown>): unknown => {
-          const metadata = params.metadata as { pending_payout_id?: string };
-          if (metadata?.pending_payout_id === failingPayoutId) {
-            return Promise.reject(new Error('Stripe transfer rejected (test)'));
-          }
-          return Promise.resolve({
-            id: `tr_ok_${createUniqueSlug('t')}`,
-            amount: params.amount,
-            currency: params.currency,
-            destination: params.destination,
-            metadata,
-          });
+      transferSpy.mockImplementation((params) => {
+        const metadata = params.metadata as { pending_payout_id?: string };
+        if (metadata?.pending_payout_id === failingPayoutId) {
+          return Promise.reject(new Error('Stripe transfer rejected (test)'));
         }
-      );
+        return Promise.resolve({
+          id: `tr_ok_${createUniqueSlug('t')}`,
+          amount: params.amount,
+          currency: params.currency,
+          destination: params.destination,
+          metadata,
+        }) as ReturnType<typeof transferSpy>;
+      });
 
       const result = await service.resolvePendingPayouts(
         org.id,
@@ -8235,14 +8241,14 @@ describe('SubscriptionService', () => {
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
       transferSpy.mockImplementationOnce(
-        (params: Record<string, unknown>): unknown =>
+        (params) =>
           Promise.resolve({
             id: replayedTransferId,
             amount: params.amount,
             currency: params.currency,
             destination: params.destination,
             metadata: params.metadata ?? {},
-          })
+          }) as ReturnType<typeof transferSpy>
       );
 
       const result = await service.resolvePendingPayouts(
@@ -8252,7 +8258,7 @@ describe('SubscriptionService', () => {
 
       expect(result).toEqual({ resolved: 1, failed: 0 });
       expect(transferSpy).toHaveBeenCalledTimes(1);
-      const [, options] = transferSpy.mock.calls[0] as [
+      const [, options] = transferSpy.mock.calls[0] as unknown as [
         unknown,
         { idempotencyKey?: string } | undefined,
       ];
@@ -8321,14 +8327,14 @@ describe('SubscriptionService', () => {
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
       transferSpy.mockImplementationOnce(
-        (params: Record<string, unknown>): unknown =>
+        (params) =>
           Promise.resolve({
             id: replayedTransferId,
             amount: params.amount, // echo: dedupe → identical response
             currency: params.currency,
             destination: params.destination,
             metadata: params.metadata ?? {},
-          })
+          }) as ReturnType<typeof transferSpy>
       );
 
       const result = await service.resolvePendingPayouts(
@@ -8345,7 +8351,7 @@ describe('SubscriptionService', () => {
       // Transferred amount equals the row's amountCents (the params our
       // service passed to Stripe). Stripe-side dedupe is only safe under
       // this invariant — different params with the same key would 400.
-      const [params] = transferSpy.mock.calls[0] as [
+      const [params] = transferSpy.mock.calls[0] as unknown as [
         Record<string, unknown>,
         { idempotencyKey?: string } | undefined,
       ];
@@ -8366,7 +8372,7 @@ describe('SubscriptionService', () => {
           )
         );
       expect(rowsAfter).toHaveLength(1);
-      const [after] = rowsAfter;
+      const after = takeFirst(rowsAfter);
       expect(after.id).toBe(row.id);
       expect(after.resolvedAt).not.toBeNull();
       expect(after.stripeTransferId).toBe(replayedTransferId);
@@ -8555,7 +8561,7 @@ describe('SubscriptionService', () => {
         expect(result.resolved).toBe(2);
         // Notification fires ONCE (not per-row)
         expect(payoutMailer).toHaveBeenCalledOnce();
-        const [params] = payoutMailer.mock.calls[0];
+        const [params] = payoutMailer.mock.calls[0]!;
         expect(params.templateName).toBe('payout-released');
         expect(params.category).toBe('transactional');
         expect(params.data.payoutCount).toBe(2);
@@ -8744,7 +8750,7 @@ describe('SubscriptionService', () => {
         expect(result.resolved).toBe(2);
         // Notification fires once.
         expect(payoutMailer).toHaveBeenCalledOnce();
-        const [params] = payoutMailer.mock.calls[0];
+        const [params] = payoutMailer.mock.calls[0]!;
         expect(params.templateName).toBe('payout-released');
         // Amount = creator_payout ONLY (1200 pence = £12.00), NOT 1700 (1200+500).
         expect(params.data.amountFormatted).toBe('£12.00');
@@ -9361,7 +9367,7 @@ describe('SubscriptionService', () => {
 
       // Two DISTINCT connect-account owners (Codex-69t7c: one account per
       // user) so one account can fail retrieve while the other succeeds.
-      const [okOwnerId] = await seedTestUsers(db, 1);
+      const okOwnerId = takeFirst(await seedTestUsers(db, 1), 'user id');
       const failOrg = await seedConnectAndSubscription('vv77x-fail', creatorId);
       const okOrg = await seedConnectAndSubscription('vv77x-ok', okOwnerId);
 
@@ -9588,7 +9594,9 @@ describe('SubscriptionService', () => {
       expect(result).toEqual({ resolved: 1, failed: 0 });
       expect(transferSpy).toHaveBeenCalledTimes(1);
 
-      const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+      const [params] = transferSpy.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+      ];
       expect(params).toMatchObject({
         amount: 5000,
         currency: 'gbp',
@@ -9661,7 +9669,9 @@ describe('SubscriptionService', () => {
 
       expect(result).toEqual({ resolved: 1, failed: 0 });
       expect(transferSpy).toHaveBeenCalledTimes(1);
-      const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+      const [params] = transferSpy.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+      ];
       expect(params).toMatchObject({
         amount: 2750,
         destination: stripeAccountId,
@@ -9726,7 +9736,7 @@ describe('SubscriptionService', () => {
 
       const amounts = [1100, 2200, 3300];
       for (let i = 0; i < creators.length; i++) {
-        const userId = creators[i];
+        const userId = creators[i]!;
         const stripeAccountId = `acct_aq58x_multi_${createUniqueSlug(`c${i}`)}`;
 
         await db.insert(stripeConnectAccounts).values(
@@ -9770,7 +9780,7 @@ describe('SubscriptionService', () => {
               userId,
               organizationId: org.id,
               subscriptionId: sub.id,
-              amountCents: amounts[i],
+              amountCents: amounts[i]!,
               currency: 'gbp',
               reason: 'connect_not_ready',
               status: 'pending',
@@ -9783,7 +9793,7 @@ describe('SubscriptionService', () => {
           userId,
           stripeAccountId,
           payoutId: payout.id,
-          amountCents: amounts[i],
+          amountCents: amounts[i]!,
         });
       }
 
@@ -9800,7 +9810,9 @@ describe('SubscriptionService', () => {
 
         expect(result).toEqual({ resolved: 1, failed: 0 });
         expect(transferSpy).toHaveBeenCalledTimes(1);
-        const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+        const [params] = transferSpy.mock.calls[0] as unknown as [
+          Record<string, unknown>,
+        ];
         expect(params).toMatchObject({
           amount: row.amountCents,
           destination: row.stripeAccountId,
@@ -10165,7 +10177,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
     orgId: string,
     sharePercent: number
   ): Promise<string> {
-    const [userId] = await seedTestUsers(db, 1);
+    const userId = takeFirst(await seedTestUsers(db, 1), 'user id');
     await db.insert(stripeConnectAccounts).values(
       createTestConnectAccountInput(orgId, userId, {
         chargesEnabled: true,
@@ -10235,7 +10247,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         );
 
       expect(rows).toHaveLength(1);
-      const [row] = rows;
+      const row = takeFirst(rows);
       expect(row.status).toBe('paid');
       expect(row.userId).toBe(creatorId); // Connect account owner
       expect(row.subscriptionId).toBe(sub.id);
@@ -10278,7 +10290,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         );
 
       expect(rows).toHaveLength(1);
-      const [row] = rows;
+      const row = takeFirst(rows);
       expect(row.status).toBe('paid');
       expect(row.userId).toBe(creatorId); // org owner
       expect(row.subscriptionId).toBe(sub.id);
@@ -10364,7 +10376,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       const transferSpy = vi.mocked(stripe.transfers.create);
       const byKey = new Map<string, string>();
       transferSpy.mockImplementation(
-        (params: Record<string, unknown>, opts) => {
+        (params: Stripe.TransferCreateParams, opts) => {
           const o = opts as { idempotencyKey?: string } | undefined;
           const key = o?.idempotencyKey ?? '';
           let id = byKey.get(key);
@@ -10758,7 +10770,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       // Seed three rows: one paid (terminal-success), one failed
       // (terminal-failure), one pending (sweep target). The sweep
       // should only touch the pending row.
-      const [paid, failed, pending] = await db
+      const [paid, failed, pending] = (await db
         .insert(payoutsTable)
         .values([
           {
@@ -10797,7 +10809,11 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
             attemptedAt: longAgo,
           },
         ])
-        .returning();
+        .returning()) as [
+        typeof payoutsTable.$inferSelect,
+        typeof payoutsTable.$inferSelect,
+        typeof payoutsTable.$inferSelect,
+      ];
 
       stubAccountsRetrieve(true);
 

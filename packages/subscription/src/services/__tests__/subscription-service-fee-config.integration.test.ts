@@ -78,7 +78,7 @@ function makeUniqueTransferIdMock(prefix: string) {
   let idx = 0;
   return () =>
     Promise.resolve({ id: `${prefix}_${idx++}` }) as ReturnType<
-      typeof stripe.transfers.create
+      Stripe['transfers']['create']
     >;
 }
 
@@ -91,7 +91,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     await validateDatabaseConnection(db);
-    const [a, b] = await seedTestUsers(db, 2);
+    const [a, b] = (await seedTestUsers(db, 2)) as [string, string];
     creatorId = a;
     payoutUserId = b;
   });
@@ -266,7 +266,9 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
-    transferSpy.mockResolvedValue({ id: 'tr_fc_clear' } as Stripe.Transfer);
+    transferSpy.mockResolvedValue({
+      id: 'tr_fc_clear',
+    } as Stripe.Response<Stripe.Transfer>);
 
     // First pass — skipped.
     let result = await service.resolvePendingPayouts(org.id, stripeAccountId);
@@ -353,8 +355,14 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(result.resolved).toBe(2);
     expect(transferSpy).toHaveBeenCalledTimes(2);
 
-    const [smallRow] = inserted.filter((r) => r.amountCents === 50);
-    const [largeRow] = inserted.filter((r) => r.amountCents === 500);
+    const smallRow = takeFirst(
+      inserted.filter((r) => r.amountCents === 50),
+      'payout row'
+    );
+    const largeRow = takeFirst(
+      inserted.filter((r) => r.amountCents === 500),
+      'payout row'
+    );
 
     const smallAfter = takeFirst(
       await db
@@ -531,7 +539,9 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
-    transferSpy.mockResolvedValue({ id: 'tr_fc_nofee' } as Stripe.Transfer);
+    transferSpy.mockResolvedValue({
+      id: 'tr_fc_nofee',
+    } as Stripe.Response<Stripe.Transfer>);
 
     const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
     expect(result.resolved).toBe(1);

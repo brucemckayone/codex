@@ -960,7 +960,10 @@ describe('ConnectAccountService', () => {
 
       // The access-path tier read MUST still resolve the tier so the existing
       // subscriber's content access keeps working.
-      const tierService = new TierService({ db, environment: 'test' }, stripe);
+      const tierService = new TierService(
+        { db, dbWs: db, environment: 'test' },
+        stripe
+      );
       const accessTier = await tierService.getTierForAccessCheck(tier.id);
       expect(accessTier).not.toBeNull();
       expect(accessTier!.id).toBe(tier.id);
@@ -1442,7 +1445,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       const cachedService = new ConnectAccountService(
@@ -1505,7 +1510,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       vi.spyOn(cache, 'invalidate').mockRejectedValueOnce(
@@ -1560,7 +1567,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       const cachedService = new ConnectAccountService(

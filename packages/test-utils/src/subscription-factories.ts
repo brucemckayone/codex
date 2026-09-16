@@ -74,7 +74,7 @@ export function createTestSubscriptionInput(
  * Create a test Stripe Connect account for DB insertion.
  */
 export function createTestConnectAccountInput(
-  orgId: string,
+  orgId: string | null,
   userId: string,
   overrides: Partial<NewStripeConnectAccount> = {}
 ): NewStripeConnectAccount {
