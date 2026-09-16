@@ -32,6 +32,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -123,7 +124,10 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId, otherCreatorId] = await seedTestUsers(db, 2);
+    [creatorId, otherCreatorId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
 
     orgId = await seedOrg('Plan Mgmt Org', creatorId, true);
     foreignOrgId = await seedOrg('Foreign Org', otherCreatorId, true);
@@ -256,7 +260,7 @@ describe('CourseSubscriptionService plan management (Codex-2pryk.2.4.1)', () => 
   });
 
   it('6. Connect not ready → 422, and no half-built plan is left behind', async () => {
-    const [strandedOwner] = await seedTestUsers(db, 1);
+    const strandedOwner = takeFirst(await seedTestUsers(db, 1), 'user id');
     if (!strandedOwner) throw new Error('failed to seed user');
     const noConnectOrgId = await seedOrg(
       'No Connect Org',
