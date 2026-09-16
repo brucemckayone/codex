@@ -366,7 +366,7 @@ describe('isReservedSubdomain covers the R2 infrastructure config', () => {
   /** Adds the first DNS label of every `<label>.revelations.studio` host in `text`. */
   function collectLabels(text: string, labels: Set<string>): void {
     for (const match of text.matchAll(PROD_HOST_IN_ANY_STRING)) {
-      labels.add(match[1].toLowerCase());
+      labels.add(match[1]!.toLowerCase());
     }
   }
 

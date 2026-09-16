@@ -27,7 +27,15 @@
  */
 
 import { ENV_HOSTS } from '@codex/urls';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type Mock,
+  vi,
+} from 'vitest';
 import { DevDomainService } from '../dev-domain-service';
 
 interface MockObs {
@@ -36,7 +44,7 @@ interface MockObs {
   error: ReturnType<typeof vi.fn>;
 }
 
-function mockFetchOk(body: unknown): ReturnType<typeof vi.fn> {
+function mockFetchOk(body: unknown): Mock {
   return vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
@@ -45,10 +53,7 @@ function mockFetchOk(body: unknown): ReturnType<typeof vi.fn> {
   } as unknown as Response);
 }
 
-function mockFetchFail(
-  status: number,
-  body: string = '{}'
-): ReturnType<typeof vi.fn> {
+function mockFetchFail(status: number, body: string = '{}'): Mock {
   return vi.fn().mockResolvedValue({
     ok: false,
     status,

@@ -31,7 +31,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
       0x0a, // PNG signature (8 bytes)
       ...new Array(100).fill(0), // Padding to make file realistic
     ]).buffer;
-    return new File([pngBuffer], filename, { type: mimeType });
+    return new File([new Uint8Array(pngBuffer)], filename, { type: mimeType });
   }
 
   if (mimeType === 'image/svg+xml') {
@@ -50,7 +50,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
       0x61, // GIF89a signature
       ...new Array(100).fill(0), // Padding
     ]).buffer;
-    return new File([gifBuffer], filename, { type: mimeType });
+    return new File([new Uint8Array(gifBuffer)], filename, { type: mimeType });
   }
 
   if (mimeType === 'image/webp') {
@@ -69,7 +69,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
       0x50, // WEBP
       ...new Array(100).fill(0), // Padding
     ]).buffer;
-    return new File([webpBuffer], filename, { type: mimeType });
+    return new File([new Uint8Array(webpBuffer)], filename, { type: mimeType });
   }
 
   // Fallback JPEG signature (must be at least 4 bytes)
@@ -80,7 +80,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
     0xe0, // JPEG signature (4 bytes minimum)
     ...new Array(100).fill(0), // Padding to make file realistic
   ]).buffer;
-  return new File([jpegBuffer], filename, { type: mimeType });
+  return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
 // Base mock implementations (will be recreated in beforeEach)
@@ -493,7 +493,7 @@ describe('ImageProcessingService', () => {
       it('should reject files larger than 5MB', async () => {
         // Create a file larger than 5MB (5 * 1024 * 1024 bytes)
         const largeBuffer = new ArrayBuffer(5 * 1024 * 1024 + 1);
-        const largeFile = new File([largeBuffer], 'large.jpg', {
+        const largeFile = new File([new Uint8Array(largeBuffer)], 'large.jpg', {
           type: 'image/jpeg',
         });
 
@@ -510,9 +510,13 @@ describe('ImageProcessingService', () => {
         combinedBuffer.set(jpegSignature, 0);
         combinedBuffer.set(padding, jpegSignature.length);
 
-        const file = new File([combinedBuffer], 'exactly5mb.jpg', {
-          type: 'image/jpeg',
-        });
+        const file = new File(
+          [new Uint8Array(combinedBuffer)],
+          'exactly5mb.jpg',
+          {
+            type: 'image/jpeg',
+          }
+        );
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
           sm: new Uint8Array([1]),
@@ -528,7 +532,7 @@ describe('ImageProcessingService', () => {
 
     describe('MIME Type Validation', () => {
       it('should reject unsupported MIME types', async () => {
-        const file = new File([new ArrayBuffer(100)], 'test.bmp', {
+        const file = new File([new Uint8Array(100)], 'test.bmp', {
           type: 'image/bmp',
         });
 
@@ -538,7 +542,7 @@ describe('ImageProcessingService', () => {
       });
 
       it('should reject non-image MIME types', async () => {
-        const file = new File([new ArrayBuffer(100)], 'test.pdf', {
+        const file = new File([new Uint8Array(100)], 'test.pdf', {
           type: 'application/pdf',
         });
 
@@ -556,7 +560,7 @@ describe('ImageProcessingService', () => {
           0x00,
           0x00, // Invalid signature
         ]).buffer;
-        const file = new File([invalidPngBuffer], 'fake.png', {
+        const file = new File([new Uint8Array(invalidPngBuffer)], 'fake.png', {
           type: 'image/png',
         });
 
@@ -573,7 +577,7 @@ describe('ImageProcessingService', () => {
           0x00, // Invalid signature (needs at least 4 bytes)
           ...new Array(100).fill(0), // Padding
         ]).buffer;
-        const file = new File([invalidJpegBuffer], 'fake.jpg', {
+        const file = new File([new Uint8Array(invalidJpegBuffer)], 'fake.jpg', {
           type: 'image/jpeg',
         });
 
@@ -590,7 +594,7 @@ describe('ImageProcessingService', () => {
           0xe0, // JPEG magic bytes
           ...new Array(100).fill(0), // Padding
         ]).buffer;
-        const file = new File([jpegBuffer], 'fake.png', {
+        const file = new File([new Uint8Array(jpegBuffer)], 'fake.png', {
           type: 'image/png', // Claims PNG but has JPEG magic bytes
         });
 
@@ -869,7 +873,7 @@ describe('ImageProcessingService', () => {
 
       it('should reject files smaller than minimum magic byte length', async () => {
         const tinyBuffer = new Uint8Array([0xff]).buffer; // Only 1 byte
-        const tinyFile = new File([tinyBuffer], 'tiny.jpg', {
+        const tinyFile = new File([new Uint8Array(tinyBuffer)], 'tiny.jpg', {
           type: 'image/jpeg',
         });
 
@@ -918,7 +922,7 @@ describe('ImageProcessingService', () => {
 
         // Verify the uploaded content was sanitized (no script tag)
         const putCall = vi.mocked(testMockR2Service.put).mock.calls[0];
-        const uploadedBytes = putCall[1] as Uint8Array;
+        const uploadedBytes = putCall![1] as Uint8Array;
         const uploadedSvg = new TextDecoder().decode(uploadedBytes);
         expect(uploadedSvg).not.toContain('<script');
         expect(uploadedSvg).toContain('rect');
@@ -974,7 +978,7 @@ describe('ImageProcessingService', () => {
         // GIF89a magic bytes
         const gifBuffer = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
           .buffer;
-        const file = new File([gifBuffer], 'animated.gif', {
+        const file = new File([new Uint8Array(gifBuffer)], 'animated.gif', {
           type: 'image/gif',
         });
 
@@ -1010,7 +1014,7 @@ describe('ImageProcessingService', () => {
           0x42,
           0x50, // WEBP
         ]).buffer;
-        const file = new File([webpBuffer], 'image.webp', {
+        const file = new File([new Uint8Array(webpBuffer)], 'image.webp', {
           type: 'image/webp',
         });
 

@@ -27,7 +27,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
       0x0a, // PNG signature
       ...new Array(100).fill(0),
     ]).buffer;
-    return new File([pngBuffer], filename, { type: mimeType });
+    return new File([new Uint8Array(pngBuffer)], filename, { type: mimeType });
   }
 
   // Fallback JPEG signature
@@ -38,7 +38,7 @@ function createTestImageFile(mimeType: string, filename: string): File {
     0xe0, // JPEG signature
     ...new Array(100).fill(0),
   ]).buffer;
-  return new File([jpegBuffer], filename, { type: mimeType });
+  return new File([new Uint8Array(jpegBuffer)], filename, { type: mimeType });
 }
 
 // Mock processor

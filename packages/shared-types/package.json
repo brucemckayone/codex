@@ -18,7 +18,7 @@
   "scripts": {
     "build": "vite build --config vite.config.shared-types",
     "dev": "vite build --config vite.config.shared-types --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "biome lint --write .",
     "format": "biome format --write ."
   },

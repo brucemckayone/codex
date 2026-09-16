@@ -15,7 +15,7 @@ vi.mock('../notification-preferences-service', () => ({
 }));
 
 // Mock dependencies
-const mockDb = {
+const mockDbRaw = {
   query: {
     emailTemplates: {
       findFirst: vi.fn(),
@@ -31,7 +31,9 @@ const mockDb = {
   set: vi.fn().mockReturnThis(),
   where: vi.fn().mockResolvedValue([{ id: 'audit-log-1' }]),
   transaction: vi.fn().mockImplementation((cb) => cb(mockDb)),
-} as unknown as Database;
+};
+
+const mockDb = mockDbRaw as unknown as Database;
 
 const mockEmailProvider = {
   name: 'mock',
@@ -322,7 +324,7 @@ describe('NotificationsService', () => {
     expect(calls.length).toBe(1); // Single query verification
 
     // Verify limit constraint
-    expect(calls[0][0].limit).toBe(3);
+    expect(calls[0]![0].limit).toBe(3);
   });
 
   // ===========================================================================
@@ -483,7 +485,7 @@ describe('NotificationsService', () => {
 
       // Verify audit log was written via db.insert().values()
       expect(mockDb.insert).toHaveBeenCalled();
-      expect(mockDb.values).toHaveBeenCalledWith(
+      expect(mockDbRaw.values).toHaveBeenCalledWith(
         expect.objectContaining({
           templateName: 'newsletter',
           recipientEmail: 'user@example.com',
@@ -495,8 +497,7 @@ describe('NotificationsService', () => {
       );
 
       // Verify metadata contains category and preserves original data
-      const valuesCall = (mockDb.values as ReturnType<typeof vi.fn>).mock
-        .calls[0][0];
+      const valuesCall = mockDbRaw.values.mock.calls[0]![0];
       const parsedMetadata = JSON.parse(valuesCall.metadata);
       expect(parsedMetadata.skipReason).toBe('opted_out');
       expect(parsedMetadata.category).toBe('marketing');
