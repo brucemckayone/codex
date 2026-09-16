@@ -43,7 +43,7 @@ function runpodUrlAssignments(source: string): string[] {
     const match = bare.match(/^(RUNPOD_[A-Z_]*URL)\s*[:=]\s*(.+)$/);
     if (!match) continue;
     // Shell default expansion: RUNPOD_DIRECT_URL=${RUNPOD_DIRECT_URL:-<url>}
-    const value = match[2].replace(/^\$\{[A-Z_]+:-/, '').replace(/\}$/, '');
+    const value = match[2]!.replace(/^\$\{[A-Z_]+:-/, '').replace(/\}$/, '');
     found.push(`${match[1]}=${value.trim()}`);
   }
   return found;

@@ -122,7 +122,7 @@ describe('cron wake alignment', () => {
   )('$worker/$env "$expression" fires on the shared wake minute', ({
     expression,
   }) => {
-    const minute = expression.trim().split(/\s+/)[0];
+    const minute = expression.trim().split(/\s+/)[0]!;
     expect(
       minute,
       `every cron must fire on minute ${SHARED_WAKE_MINUTE} so the wakes overlap into ONE autosuspend window. A cron on its own minute adds a separate 5-minute Neon wake, every hour, silently.`
@@ -132,7 +132,7 @@ describe('cron wake alignment', () => {
   it.each(crons)('$worker/$env "$expression" does not run sub-hourly', ({
     expression,
   }) => {
-    const minute = expression.trim().split(/\s+/)[0];
+    const minute = expression.trim().split(/\s+/)[0]!;
     // A step or a list in the MINUTE field is the expensive shape: `*/15`
     // is 96 wakes/day = 8.0 h/day awake. Anything hourly-or-slower is 24
     // wakes/day = 2.0 h/day. If a sub-hourly cron is ever genuinely needed,

@@ -99,7 +99,7 @@ describe('Unsubscribe Token Utility', () => {
         TEST_SECRET
       );
 
-      const [payloadB64, sigB64] = token.split('.');
+      const [payloadB64, sigB64] = token.split('.') as [string, string];
       // Flip a character in the payload portion
       const tampered =
         payloadB64.charAt(0) === 'A'
@@ -119,7 +119,7 @@ describe('Unsubscribe Token Utility', () => {
         TEST_SECRET
       );
 
-      const [payloadB64, sigB64] = token.split('.');
+      const [payloadB64, sigB64] = token.split('.') as [string, string];
       // Flip a character in the signature portion
       const tampered =
         sigB64.charAt(0) === 'A'
