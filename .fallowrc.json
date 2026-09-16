@@ -154,6 +154,26 @@
         "apps/web/src/lib/components/ui/HeroLoopVideo/HeroLoopVideo.svelte"
       ],
       "rules": { "unrendered-component": "off" }
+    },
+    {
+      "files": [
+        "packages/access/src/services/course-journey-service.ts",
+        "packages/agreements/src/services/agreement-service.ts",
+        "packages/cloudflare-clients/src/r2/services/r2-service.ts",
+        "packages/content/src/services/content-service.ts",
+        "packages/content/src/services/media-service.ts",
+        "packages/identity/src/services/identity-service.ts",
+        "packages/image-processing/src/service.ts",
+        "packages/notifications/src/services/template-service.ts",
+        "packages/organization/src/services/organization-service.ts",
+        "packages/platform-settings/src/services/platform-settings-service.ts",
+        "packages/purchase/src/services/fee-config-service.ts",
+        "packages/purchase/src/services/purchase-service.ts",
+        "packages/subscription/src/services/connect-account-service.ts",
+        "packages/subscription/src/services/course-subscription-service.ts",
+        "packages/transcoding/src/services/transcoding-service.ts"
+      ],
+      "rules": { "unused-class-member": "off" }
     }
   ],
   "rules": {
