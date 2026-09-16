@@ -36,6 +36,42 @@ jobs:
       - name: Biome Check (Lint & Format)
         run: pnpm check:ci
 
+      # Codex-2g7jj: the workflow setup-order gate.
+      #
+      # `actions/setup-node` v5 added `package-manager-cache` (default: true),
+      # which resolves the pnpm store INSIDE the action and therefore needs pnpm
+      # already on PATH. PR #505's Node 24 action bump left two workflows still
+      # running `pnpm/action-setup` AFTER setup-node, and Production Deployment
+      # #722 failed at step 2 with "Unable to locate executable file: pnpm" —
+      # migrations, secrets and all 9 worker deploys skipped.
+      #
+      # The two that broke, deploy-production.yml and seed-dev-db.yml, are
+      # exactly the two workflows NO CI job executes (workflow_run and
+      # workflow_dispatch). The seven that survived set `cache: 'pnpm'`, which
+      # v4 already required, and that had forced the ordering by side effect.
+      # So the invariant was held by an unrelated input, in the files CI happens
+      # to run. This gate asserts it directly, over every workflow file
+      # including the unexecuted ones.
+      #
+      # Not actionlint's job (option 2 on the bead): the broken form is valid
+      # YAML with valid inputs, so a schema linter passes it. This is a
+      # SEMANTIC ordering rule.
+      #
+      # Belongs in THIS job: zero dependencies, no database, ~50ms. Neither
+      # caller of this reusable workflow (testing.yml, main-gate.yml) applies a
+      # path filter to it, so a diff touching only .github/workflows cannot
+      # skip the gate that validates .github/workflows.
+      #
+      # Self-test first, so a regression that breaks the gate itself surfaces
+      # before we trust its verdict — same reasoning as the two gates below.
+      # Its must-catch cases are anchored on the real pre-fix bytes from
+      # ded82d70^, not a synthetic approximation, and it is mutation-tested.
+      - name: Workflow setup-order gate self-test
+        run: node --test scripts/checks/check-workflow-setup-order.test.mjs
+
+      - name: Workflow setup-order gate (pnpm before setup-node)
+        run: node scripts/checks/check-workflow-setup-order.mjs
+
       # Codex-cijzb WP-0.2 / Codex-2pryk.1.4: the heavy editor UIs
       # ($lib/components/brand-editor, $lib/components/page-builder) must never
       # be statically imported by public-bundle code — any public route file OR
