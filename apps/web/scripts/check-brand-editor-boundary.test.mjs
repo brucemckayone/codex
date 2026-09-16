@@ -46,6 +46,13 @@ function scanFixture() {
   return collectViolations({
     requiredRoots: [join(root, 'routes')],
     optionalRoots: [join(root, 'lib/page-builder'), join(root, 'lib/brand-editor')],
+    // The banned DIRECTORIES must be fixture-relative, or a relative specifier
+    // would resolve into the temp tree and be compared against the real repo's
+    // editor paths — i.e. the relative-crossing cases would pass vacuously.
+    bannedDirs: [
+      join(root, 'lib/components/brand-editor'),
+      join(root, 'lib/components/page-builder'),
+    ],
     cwd: root,
   });
 }
@@ -157,6 +164,103 @@ test('skips commented-out example imports', () => {
 });
 
 // --- Optional roots & fail-closed guard -----------------------------------
+
+// --- Closed holes (Codex-1x6lu) ------------------------------------------
+//
+// Both were reachable by ordinary tooling, not deliberate evasion: an IDE
+// auto-import writes RELATIVE paths by default, and a re-export is a static
+// dependency that reads nothing like an import.
+
+test('CATCHES a RELATIVE-path crossing into the editor (the IDE auto-import shape)', () => {
+  writeFixture(
+    'lib/page-builder/render/frame.ts',
+    "import Editor from '../../components/page-builder/Editor.svelte';\nexport const x = Editor;\n"
+  );
+  writeFixture('lib/components/page-builder/Editor.svelte', '<div></div>\n');
+
+  const { violations } = scanFixture();
+  assert.equal(violations.length, 1, 'a relative specifier must be resolved, not pattern-matched');
+  assert.match(violations[0].text, /\.\.\/\.\.\/components\/page-builder/);
+});
+
+test('CATCHES a shallower relative crossing too — depth must not matter', () => {
+  writeFixture(
+    'lib/page-builder/render.ts',
+    "import { Panel } from '../components/brand-editor/Panel.svelte';\nexport const p = Panel;\n"
+  );
+  writeFixture('lib/components/brand-editor/Panel.svelte', '<div></div>\n');
+
+  assert.equal(scanFixture().violations.length, 1);
+});
+
+test('CATCHES `export … from` an editor UI — a re-export is a static dependency', () => {
+  writeFixture(
+    'lib/page-builder/index.ts',
+    "export { Editor } from '$lib/components/page-builder/Editor.svelte';\n"
+  );
+
+  const { violations } = scanFixture();
+  assert.equal(violations.length, 1);
+  assert.match(violations[0].text, /^export/);
+});
+
+test('CATCHES `export * from` an editor UI', () => {
+  writeFixture('lib/page-builder/index.ts', "export * from '$lib/components/page-builder';\n");
+  assert.equal(scanFixture().violations.length, 1);
+});
+
+test('CATCHES a MULTI-LINE re-export of the editor', () => {
+  // The clause spans newlines, which the matcher's character class admits
+  // while still stopping at a quote or semicolon so it cannot run past its own
+  // statement. A single-line-only matcher misses this and it is the form
+  // prettier produces once the clause is long enough.
+  writeFixture(
+    'lib/page-builder/index.ts',
+    'export {\n  Editor,\n  Panel,\n} from \'$lib/components/page-builder\';\n'
+  );
+  const { violations } = scanFixture();
+  assert.equal(violations.length, 1);
+  assert.match(violations[0].text, /^export/);
+});
+
+test('does NOT treat an exported string that merely NAMES an editor path as a dependency', () => {
+  // A sanity case, NOT a discriminating one: mutation-testing showed that
+  // relaxing the re-export matcher's `from` clause to optional changes no
+  // verdict here, because a specifier's quote must follow `export` directly
+  // either way. Kept because these strings do occur (docs, error messages),
+  // and their appearing in a violation list would be a real false alarm.
+  writeFixture(
+    'lib/page-builder/tokens.ts',
+    [
+      "export const banned = '$lib/components/page-builder';",
+      "export const note = 'see ../components/brand-editor for the editor';",
+      "export const v = 'plain';",
+    ].join('\n') + '\n'
+  );
+  assert.deepEqual(scanFixture().violations, []);
+});
+
+test('does NOT flag a relative import that resolves OUTSIDE the editor dirs', () => {
+  writeFixture(
+    'lib/page-builder/render/frame.ts',
+    "import { helper } from '../helpers';\nimport { near } from '../../page-builder/shared';\nexport const x = [helper, near];\n"
+  );
+  writeFixture('lib/page-builder/helpers.ts', 'export const helper = 1;\n');
+  writeFixture('lib/page-builder/shared.ts', 'export const near = 2;\n');
+  writeFixture('lib/components/page-builder/Editor.svelte', '<div></div>\n');
+
+  assert.deepEqual(scanFixture().violations, [], 'containment, not prefix matching');
+});
+
+test('does NOT flag a DYNAMIC relative import of the editor (lazy chunk)', () => {
+  writeFixture(
+    'lib/page-builder/render.ts',
+    "export const load = () => import('../components/page-builder/Editor.svelte');\n"
+  );
+  writeFixture('lib/components/page-builder/Editor.svelte', '<div></div>\n');
+
+  assert.deepEqual(scanFixture().violations, []);
+});
 
 test('tolerates an absent optional root (page-builder not built yet)', () => {
   // Only brand-editor exists; page-builder root is absent → skipped, no throw.
