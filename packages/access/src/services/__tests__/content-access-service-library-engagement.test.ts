@@ -68,14 +68,14 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     const obs = new ObservabilityClient('relationship-library-test', 'test');
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs,
       purchaseService: {
         verifyPurchase: vi.fn(async () => false),
       } as unknown as PurchaseService,
     });
 
-    const [creator] = await seedTestUsers(db, 1);
+    const [creator] = (await seedTestUsers(db, 1)) as [string];
     creatorUserId = creator;
 
     const [primary] = await db
@@ -138,7 +138,6 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
         slug: createUniqueSlug(slugSuffix),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       },
@@ -185,7 +184,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
 
   describe('free bucket — relationship gate', () => {
     it('returns free content for a follower (no engagement required)', async () => {
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       await db
         .insert(organizationFollowers)
         .values({ userId: follower, organizationId });
@@ -209,7 +208,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('returns free content for an active subscriber (no follower row)', async () => {
-      const [subscriber] = await seedTestUsers(db, 1);
+      const [subscriber] = (await seedTestUsers(db, 1)) as [string];
       await seedActiveSubscription(subscriber, organizationId);
 
       const item = await createContentWithAccessType(
@@ -234,7 +233,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('does NOT return free content for a stranger (no follow, no sub)', async () => {
-      const [stranger] = await seedTestUsers(db, 1);
+      const [stranger] = (await seedTestUsers(db, 1)) as [string];
       const item = await createContentWithAccessType('free', 'stranger-free-1');
 
       const result = await accessService.listUserLibrary(stranger, {
@@ -254,7 +253,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('respects organizationId scoping (other-org free content excluded)', async () => {
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       // Follow primary; create free content on the OTHER org.
       await db
         .insert(organizationFollowers)
@@ -283,7 +282,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('returns only free-tagged rows when accessType=free', async () => {
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       await db
         .insert(organizationFollowers)
         .values({ userId: follower, organizationId });
@@ -324,7 +323,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
 
   describe('followers bucket — relationship gate', () => {
     it('returns followers content for a follower (no engagement required)', async () => {
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       await db
         .insert(organizationFollowers)
         .values({ userId: follower, organizationId });
@@ -351,7 +350,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('returns followers content for an active subscriber (no follower row)', async () => {
-      const [subscriber] = await seedTestUsers(db, 1);
+      const [subscriber] = (await seedTestUsers(db, 1)) as [string];
       await seedActiveSubscription(subscriber, organizationId);
 
       const item = await createContentWithAccessType(
@@ -376,7 +375,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('does NOT return followers content for a stranger', async () => {
-      const [stranger] = await seedTestUsers(db, 1);
+      const [stranger] = (await seedTestUsers(db, 1)) as [string];
       const item = await createContentWithAccessType(
         'followers',
         'stranger-followers-1'
@@ -402,7 +401,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       // Mirrors the real-world bug: a user who follows + subscribes with no
       // videoPlayback rows previously saw an empty library because the engagement
       // gate suppressed everything. Confirms the gate has been removed.
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       await db
         .insert(organizationFollowers)
         .values({ userId: follower, organizationId });
@@ -441,7 +440,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('returns only followers-tagged rows when accessType=followers', async () => {
-      const [follower] = await seedTestUsers(db, 1);
+      const [follower] = (await seedTestUsers(db, 1)) as [string];
       await db
         .insert(organizationFollowers)
         .values({ userId: follower, organizationId });
@@ -478,7 +477,7 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     });
 
     it('does NOT return followers content for a cancelled (expired) subscriber', async () => {
-      const [exSubscriber] = await seedTestUsers(db, 1);
+      const [exSubscriber] = (await seedTestUsers(db, 1)) as [string];
       // Seed a subscription that has expired (currentPeriodEnd in past).
       const [tier] = await db
         .insert(subscriptionTiers)

@@ -99,8 +99,8 @@ describe('ContentAccessService Integration', () => {
     const obs = new ObservabilityClient('content-access-test', 'test');
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs,
       purchaseService: mockPurchaseService as unknown as PurchaseService,
       // WP-14: getStreamingUrl now returns a master-playlist PROXY URL on this
       // origin (signed with hlsTokenSecret) rather than a direct presigned
@@ -109,7 +109,7 @@ describe('ContentAccessService Integration', () => {
       hlsTokenSecret: 'test-worker-shared-secret',
     });
 
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [userId, otherUserId] = userIds;
 
     // ContentService.publish now gates monetised content (paid w/ price>0 or
@@ -176,7 +176,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('free-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0, // Free!
           tags: [],
         },
@@ -238,7 +237,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('premium-course'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 1999, // $19.99
           tags: [],
@@ -305,7 +303,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('exclusive'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 4999, // $49.99
           tags: [],
@@ -367,7 +364,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('org-exclusive'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 2999, // $29.99
           tags: [],
@@ -437,7 +433,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('draft'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -467,7 +462,6 @@ describe('ContentAccessService Integration', () => {
       new ContentAccessService({
         db,
         environment: 'test',
-        obs: new ObservabilityClient('content-access-test', 'test'),
         purchaseService: mockPurchaseService as unknown as PurchaseService,
         contentApiBaseUrl: 'https://api.revelations.studio',
         hlsTokenSecret: 'test-worker-shared-secret',
@@ -476,7 +470,7 @@ describe('ContentAccessService Integration', () => {
             return `https://r2.cloudflarestorage.com/${key}?X-Amz-Signature=stub`;
           },
           async getObjectText(key: string) {
-            return key in objects ? objects[key] : null;
+            return objects[key] ?? null;
           },
         },
       });
@@ -575,7 +569,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('progress-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -632,7 +625,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('upsert-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -697,7 +689,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('completion-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -752,7 +743,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('no-progress'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -772,7 +762,7 @@ describe('ContentAccessService Integration', () => {
   describe('listUserLibrary', () => {
     it('should return empty list for user with no purchases', async () => {
       // Create a fresh user with no purchases
-      const userIds = await seedTestUsers(db, 1);
+      const userIds = (await seedTestUsers(db, 1)) as [string];
       const freshUserId = userIds[0];
 
       const result = await accessService.listUserLibrary(freshUserId, {
@@ -780,6 +770,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'all',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(result.items).toHaveLength(0);
@@ -820,7 +813,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('library-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 999,
           tags: [],
@@ -857,6 +849,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'all',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(result.items.length).toBeGreaterThan(0);
@@ -869,14 +864,14 @@ describe('ContentAccessService Integration', () => {
       // filter by org on subdomain library pages. organizationSlug alone
       // was nullable and allowed null-org entries to slip through.
       expect(item?.content.organizationId).toBe(organizationId);
-      expect(item?.purchase.priceCents).toBe(999);
+      expect(item?.purchase?.priceCents).toBe(999);
       expect(item?.progress?.positionSeconds).toBe(300);
       expect(item?.progress?.percentComplete).toBe(50);
     });
 
     it('should filter by in-progress content', async () => {
       // Create multiple content items
-      const userIds = await seedTestUsers(db, 1);
+      const userIds = (await seedTestUsers(db, 1)) as [string];
       const testUserId = userIds[0];
 
       const media1 = await mediaService.create(
@@ -907,7 +902,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('in-progress'),
           contentType: 'video',
           mediaItemId: media1.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 500,
           tags: [],
@@ -942,6 +936,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'in_progress',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(
@@ -958,7 +955,10 @@ describe('ContentAccessService Integration', () => {
     describe('Subscription library coverage', () => {
       /** Seed an org, a tier, and an active subscriber. */
       async function seedOrgWithTierAndSubscriber() {
-        const [creatorUserId, subscriberUserId] = await seedTestUsers(db, 2);
+        const [creatorUserId, subscriberUserId] = (await seedTestUsers(
+          db,
+          2
+        )) as [string, string];
 
         const [subOrg] = await db
           .insert(organizations)
@@ -1041,7 +1041,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(opts.slugPrefix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1082,6 +1081,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
@@ -1103,6 +1105,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
@@ -1124,6 +1129,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(false);
@@ -1153,11 +1161,14 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         const matches = result.items.filter((i) => i.content.id === item.id);
         expect(matches).toHaveLength(1);
-        expect(matches[0].accessType).toBe('purchased');
+        expect(matches[0]!.accessType).toBe('purchased');
       });
 
       it('excludes an item with a PENDING purchase from the subscription arm (race-window dedup)', async () => {
@@ -1195,7 +1206,6 @@ describe('ContentAccessService Integration', () => {
           currency: 'GBP',
           status: 'pending',
           stripePaymentIntentId: `pi_pending_${Date.now()}`,
-          stripeSessionId: `cs_pending_${Date.now()}`,
         });
 
         const result = await accessService.listUserLibrary(subscriberUserId, {
@@ -1203,6 +1213,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         // Pending purchase is neither in purchased (requires completed) nor
@@ -1246,7 +1259,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('exact-95'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1301,7 +1313,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('below-95'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1360,7 +1371,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('zero-duration'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1415,7 +1425,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('overflow'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1477,7 +1486,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('long-video'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1539,7 +1547,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('special-chars'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1592,7 +1599,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('spaces'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1644,7 +1650,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('unicode'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1694,7 +1699,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('to-delete'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1747,7 +1751,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('free'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0, // Explicitly free
             tags: [],
           },
@@ -1773,7 +1776,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockClear();
 
         // Create fresh user without org membership to ensure access is denied
-        const [freshUserId] = await seedTestUsers(db, 1);
+        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
 
         const media = await mediaService.create(
           {
@@ -1803,7 +1806,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('expensive'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 9999999, // $99,999.99 (max allowed is $100,000)
             tags: [],
@@ -1839,6 +1841,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items).toHaveLength(0);
@@ -1851,6 +1856,9 @@ describe('ContentAccessService Integration', () => {
           limit: 1,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.length).toBeLessThanOrEqual(1);
@@ -1863,6 +1871,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.length).toBeLessThanOrEqual(100);
@@ -1885,7 +1896,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         // For now, verify the denial path works without subscription
-        const [freshUserId] = await seedTestUsers(db, 1);
+        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
         const media = await mediaService.create(
           {
             title: 'Sub Access Video',
@@ -1918,7 +1929,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('sub-access'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 999,
             tags: [],
@@ -2025,7 +2035,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 1999,
             includedInTierId: minimumTierId,
@@ -2050,7 +2059,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-anon'
         );
 
-        const [freshUserId] = await seedTestUsers(db, 1);
+        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
 
         await expect(
           accessService.getStreamingUrl(freshUserId, {
@@ -2072,7 +2081,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-at-tier'
         );
 
-        const [subUserId] = await seedTestUsers(db, 1);
+        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
 
         // Active subscription AT the minimum tier (proTier)
         await db.insert(subscriptions).values(
@@ -2104,7 +2113,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-above-tier'
         );
 
-        const [subUserId] = await seedTestUsers(db, 1);
+        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
 
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subUserId, org.id, proTier.id, {
@@ -2134,7 +2143,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-below-tier'
         );
 
-        const [subUserId] = await seedTestUsers(db, 1);
+        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
 
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subUserId, org.id, basicTier.id, {
@@ -2161,7 +2170,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-purchase'
         );
 
-        const [purchaserUserId] = await seedTestUsers(db, 1);
+        const [purchaserUserId] = (await seedTestUsers(db, 1)) as [string];
 
         // No subscription — user bought it outright. PurchaseService is the
         // authority for purchase state in this suite.
@@ -2223,7 +2232,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2258,7 +2266,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-owner');
 
-        const [ownerUser] = await seedTestUsers(db, 1);
+        const [ownerUser] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: ownerUser,
           organizationId,
@@ -2280,7 +2288,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-admin');
 
-        const [adminUser] = await seedTestUsers(db, 1);
+        const [adminUser] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: adminUser,
           organizationId,
@@ -2302,7 +2310,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-deny-sub');
 
-        const [subUser] = await seedTestUsers(db, 1);
+        const [subUser] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: subUser,
           organizationId,
@@ -2327,7 +2335,7 @@ describe('ContentAccessService Integration', () => {
           'team-deny-follower'
         );
 
-        const [followerUser] = await seedTestUsers(db, 1);
+        const [followerUser] = (await seedTestUsers(db, 1)) as [string];
         await db
           .insert(organizationFollowers)
           .values({ userId: followerUser, organizationId });
@@ -2378,7 +2386,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2414,7 +2421,7 @@ describe('ContentAccessService Integration', () => {
           'follow-grant'
         );
 
-        const [followerUser] = await seedTestUsers(db, 1);
+        const [followerUser] = (await seedTestUsers(db, 1)) as [string];
         await db
           .insert(organizationFollowers)
           .values({ userId: followerUser, organizationId });
@@ -2436,7 +2443,7 @@ describe('ContentAccessService Integration', () => {
           'follow-deny'
         );
 
-        const [freshUser] = await seedTestUsers(db, 1);
+        const [freshUser] = (await seedTestUsers(db, 1)) as [string];
 
         await expect(
           accessService.getStreamingUrl(freshUser, {
@@ -2455,7 +2462,7 @@ describe('ContentAccessService Integration', () => {
           'follow-mgmt'
         );
 
-        const [creatorUser] = await seedTestUsers(db, 1);
+        const [creatorUser] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: creatorUser,
           organizationId,
@@ -2509,7 +2516,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('owner-bypass'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 4999,
             tags: [],
@@ -2520,7 +2526,7 @@ describe('ContentAccessService Integration', () => {
         await contentService.publish(content.id, userId);
 
         // Create owner membership
-        const [ownerUserId] = await seedTestUsers(db, 1);
+        const [ownerUserId] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: ownerUserId,
           organizationId,
@@ -2569,7 +2575,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('sub-deny'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 2999,
             tags: [],
@@ -2580,7 +2585,7 @@ describe('ContentAccessService Integration', () => {
         await contentService.publish(content.id, userId);
 
         // Create subscriber membership (not owner/admin/creator)
-        const [subUserId] = await seedTestUsers(db, 1);
+        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: subUserId,
           organizationId,
@@ -2636,7 +2641,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('no-access-edge'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 999,
             tags: [],
@@ -2646,7 +2650,7 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(content.id, userId);
 
-        const [freshUserId] = await seedTestUsers(db, 1);
+        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
 
         await expect(
           accessService.getStreamingUrl(freshUserId, {
@@ -2665,6 +2669,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           contentType: 'video',
+          accessType: 'all',
+          search: '',
         });
 
         // All items should be video type
@@ -2680,6 +2686,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           contentType: 'audio',
+          accessType: 'all',
+          search: '',
         });
 
         // All items should be audio type (may be empty if no audio content)
@@ -2696,12 +2704,15 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'all',
           sortBy: 'title',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         // Verify items are sorted by title
         for (let i = 1; i < result.items.length; i++) {
-          const prev = result.items[i - 1].content.title.toLowerCase();
-          const curr = result.items[i].content.title.toLowerCase();
+          const prev = result.items[i - 1]!.content.title.toLowerCase();
+          const curr = result.items[i]!.content.title.toLowerCase();
           expect(prev <= curr).toBe(true);
         }
       });
@@ -2715,6 +2726,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           search: 'Library Test',
+          contentType: 'all',
+          accessType: 'all',
         });
 
         // Items matching search should be returned
@@ -2735,6 +2748,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'completed',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2748,6 +2764,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'not_started',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2764,6 +2783,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'in_progress',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2808,7 +2830,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('concurrent'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2884,7 +2905,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('concurrent-stream'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3004,7 +3024,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(opts.slugPrefix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3039,7 +3058,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
         const { tierId } = await seedOrgAndTier('paid-purchaser');
-        const [viewerId] = await seedTestUsers(db, 1);
+        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-paid-purchaser',
@@ -3065,7 +3084,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         const { tierId } = await seedOrgAndTier('subs');
-        const [viewerId] = await seedTestUsers(db, 1);
+        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-subs',
@@ -3088,7 +3107,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
         const { tierId } = await seedOrgAndTier('has-access');
-        const [viewerId] = await seedTestUsers(db, 1);
+        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-has-access',
@@ -3109,7 +3128,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockClear();
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
-        const [viewerId] = await seedTestUsers(db, 1);
+        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
 
         const media = await mediaService.create(
           {
@@ -3140,7 +3159,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('orgless-no-tier'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3175,7 +3193,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         const { tierOrgId, tierId } = await seedOrgAndTier('org-scoped-ok');
-        const [subUserId] = await seedTestUsers(db, 1);
+        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
 
         const media = await mediaService.create(
           {
@@ -3207,7 +3225,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('org-scoped-tier'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3304,7 +3321,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug(opts.slug),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -3435,12 +3451,12 @@ describe('ContentAccessService Integration', () => {
         });
 
         // NEGATIVE — no subscription.
-        const [outsider] = await seedTestUsers(db, 1);
+        const [outsider] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canView(outsider, contentId)).toBe(false);
         await expectStreamDenied(outsider, contentId);
 
         // POSITIVE — active subscription at the tier.
-        const [subscriber] = await seedTestUsers(db, 1);
+        const [subscriber] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subscriber, organizationId, tierId, {
             status: 'active',
@@ -3464,12 +3480,12 @@ describe('ContentAccessService Integration', () => {
         await linkPractice(stageId, contentId);
 
         // NEGATIVE — user holds no entitlement over the containing course.
-        const [outsider] = await seedTestUsers(db, 1);
+        const [outsider] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canView(outsider, contentId)).toBe(false);
         await expectStreamDenied(outsider, contentId);
 
         // POSITIVE — a course purchase reaches the shared practice.
-        const [owner] = await seedTestUsers(db, 1);
+        const [owner] = (await seedTestUsers(db, 1)) as [string];
         await grantCourse(owner, organizationId, courseId, 'course_purchase');
         expect(await accessService.canView(owner, contentId)).toBe(true);
         await expectStreamGranted(owner, contentId);
@@ -3485,11 +3501,11 @@ describe('ContentAccessService Integration', () => {
           policy: { isFollowerGated: true },
         });
 
-        const [stranger] = await seedTestUsers(db, 1);
+        const [stranger] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canView(stranger, contentId)).toBe(false);
         await expectStreamDenied(stranger, contentId);
 
-        const [follower] = await seedTestUsers(db, 1);
+        const [follower] = (await seedTestUsers(db, 1)) as [string];
         await db
           .insert(organizationFollowers)
           .values({ userId: follower, organizationId });
@@ -3509,7 +3525,7 @@ describe('ContentAccessService Integration', () => {
         const { stageId } = await makeCourse(organizationId);
         await linkPractice(stageId, contentId);
 
-        const [manager] = await seedTestUsers(db, 1);
+        const [manager] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(organizationMemberships).values({
           userId: manager,
           organizationId,
@@ -3533,7 +3549,7 @@ describe('ContentAccessService Integration', () => {
           organizationId: null,
           policy: { isPurchasable: true, priceCents: 1500 },
         });
-        const [buyer] = await seedTestUsers(db, 1);
+        const [buyer] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canView(buyer, contentId)).toBe(false);
         await expectStreamDenied(buyer, contentId);
 
@@ -3558,7 +3574,7 @@ describe('ContentAccessService Integration', () => {
           policy: { includedInTierId: tierId },
         });
 
-        const [holder] = await seedTestUsers(db, 1);
+        const [holder] = (await seedTestUsers(db, 1)) as [string];
         // No subscription, no purchase — denied first (baseline).
         expect(await accessService.canView(holder, contentId)).toBe(false);
 
@@ -3579,7 +3595,7 @@ describe('ContentAccessService Integration', () => {
     describe('canEnterCourse', () => {
       it('grants entry on a course_purchase entitlement', async () => {
         const { courseId } = await makeCourse(organizationId);
-        const [buyer] = await seedTestUsers(db, 1);
+        const [buyer] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canEnterCourse(buyer, courseId)).toBe(false);
         await grantCourse(buyer, organizationId, courseId, 'course_purchase');
         expect(await accessService.canEnterCourse(buyer, courseId)).toBe(true);
@@ -3595,7 +3611,7 @@ describe('ContentAccessService Integration', () => {
           .values({ courseId, tierId, organizationId });
 
         // Subscriber to the granting tier — derived, no stored row.
-        const [subscriber] = await seedTestUsers(db, 1);
+        const [subscriber] = (await seedTestUsers(db, 1)) as [string];
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subscriber, organizationId, tierId, {
             status: 'active',
@@ -3606,7 +3622,7 @@ describe('ContentAccessService Integration', () => {
         );
 
         // A user with no subscription to that tier is denied.
-        const [outsider] = await seedTestUsers(db, 1);
+        const [outsider] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canEnterCourse(outsider, courseId)).toBe(
           false
         );
@@ -3614,7 +3630,7 @@ describe('ContentAccessService Integration', () => {
 
       it('denies entry with no entitlement, and denies anonymous (null user)', async () => {
         const { courseId } = await makeCourse(organizationId);
-        const [stranger] = await seedTestUsers(db, 1);
+        const [stranger] = (await seedTestUsers(db, 1)) as [string];
         expect(await accessService.canEnterCourse(stranger, courseId)).toBe(
           false
         );
@@ -3624,7 +3640,7 @@ describe('ContentAccessService Integration', () => {
       it('denies entry on a revoked or expired grant (instant revocation)', async () => {
         const { courseId: revokedCourse } = await makeCourse(organizationId);
         const { courseId: expiredCourse } = await makeCourse(organizationId);
-        const [user] = await seedTestUsers(db, 1);
+        const [user] = (await seedTestUsers(db, 1)) as [string];
 
         await grantCourse(
           user,
@@ -3668,7 +3684,7 @@ describe('ContentAccessService Integration', () => {
           organizationId,
         });
 
-        const [user] = await seedTestUsers(db, 1);
+        const [user] = (await seedTestUsers(db, 1)) as [string];
         await grantCourse(
           user,
           organizationId,
@@ -3692,7 +3708,7 @@ describe('ContentAccessService Integration', () => {
       });
 
       it('empty input and anonymous user return all-false without querying', async () => {
-        const [user] = await seedTestUsers(db, 1);
+        const [user] = (await seedTestUsers(db, 1)) as [string];
         const empty = await accessService.canEnterCoursesBatch(user, []);
         expect(empty.size).toBe(0);
         const anon = await accessService.canEnterCoursesBatch(null, [
@@ -3724,11 +3740,10 @@ describe('ContentAccessService Integration', () => {
           db: countingDb,
           environment: 'test',
           r2: r2Client,
-          obs: new ObservabilityClient('content-access-test', 'test'),
           purchaseService: mockPurchaseService as unknown as PurchaseService,
         });
 
-        const [user] = await seedTestUsers(db, 1);
+        const [user] = (await seedTestUsers(db, 1)) as [string];
         const many = Array.from({ length: 25 }, () => crypto.randomUUID());
 
         counts.select = 0;

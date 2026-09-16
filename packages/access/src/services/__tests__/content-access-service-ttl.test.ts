@@ -13,7 +13,7 @@
 
 import type { PurchaseService } from '@codex/purchase';
 import type { ServiceConfig } from '@codex/service-errors';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, type Mock, vi } from 'vitest';
 import {
   ContentAccessService,
   DEFAULT_STREAMING_URL_TTL_SECONDS,
@@ -22,8 +22,8 @@ import {
 type StubDb = ServiceConfig['db'];
 
 interface StubbedSigner {
-  generateSignedUrl: ReturnType<typeof vi.fn>;
-  getObjectText: ReturnType<typeof vi.fn>;
+  generateSignedUrl: Mock;
+  getObjectText: Mock;
 }
 
 interface TxReturn {

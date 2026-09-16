@@ -76,14 +76,14 @@ describe('listUserLibrary — course purchase + portal provenance', () => {
 
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs: new ObservabilityClient('library-course-purchase-test', 'test'),
       purchaseService: {
         verifyPurchase: vi.fn(async () => false),
       } as unknown as PurchaseService,
     });
 
-    const [owner] = await seedTestUsers(db, 1);
+    const [owner] = (await seedTestUsers(db, 1)) as [string];
     if (!owner) throw new Error('Failed to seed user');
     ownerUserId = owner;
 
@@ -166,7 +166,6 @@ describe('listUserLibrary — course purchase + portal provenance', () => {
         slug: createUniqueSlug(slugSuffix),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       },
