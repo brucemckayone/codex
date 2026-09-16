@@ -31,7 +31,6 @@ import {
   subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createTestSubscriptionInput,
@@ -65,7 +64,6 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     mediaService = new MediaItemService(config);
     r2Client = createR2SigningClientFromEnv();
 
-    const obs = new ObservabilityClient('relationship-library-test', 'test');
     accessService = new ContentAccessService({
       db,
       environment: 'test',

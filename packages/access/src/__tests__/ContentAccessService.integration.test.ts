@@ -37,7 +37,6 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createTestConnectAccountInput,
@@ -96,7 +95,6 @@ describe('ContentAccessService Integration', () => {
       verifyPurchase: vi.fn(),
     };
 
-    const obs = new ObservabilityClient('content-access-test', 'test');
     accessService = new ContentAccessService({
       db,
       environment: 'test',

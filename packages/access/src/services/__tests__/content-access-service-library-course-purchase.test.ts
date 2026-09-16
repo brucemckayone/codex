@@ -37,7 +37,6 @@ import {
   purchases,
   stagePractices,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createUniqueSlug,
