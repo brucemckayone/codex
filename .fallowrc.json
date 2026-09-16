@@ -130,7 +130,7 @@
     "apps/web/src/paraglide/**",
     "apps/web/src/lib/styles/tokens/breakpoints.css"
   ],
-  "usedClassMembers": ["recoverStuckTranscoding"],
+  "usedClassMembers": [],
   "duplicates": {
     "enabled": true,
     "mode": "mild",

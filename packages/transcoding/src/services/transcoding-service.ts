@@ -708,7 +708,15 @@ export class TranscodingService extends BaseService {
    *
    * @param maxAgeMinutes - How long to wait before considering stuck (default: 120)
    * @returns Number of media items recovered
+   *
+   * Reachable only through the media-api hourly cron, which is why dead-code
+   * detection flags it. Proven chain: workers/media-api/wrangler.jsonc
+   * `crons: ["0 * * * *"]` -> src/index.ts:284 `export default { scheduled }`
+   * -> :293 `ctx.waitUntil(runRecoverStuckTranscoding(env, ctx))` -> :261
+   * `service.recoverStuckTranscoding(STUCK_MAX_AGE_MINUTES)`. Verify the chain
+   * before deleting; a cron NAME is not evidence of a wired cron.
    */
+  // fallow-ignore-next-line unused-class-member
   async recoverStuckTranscoding(maxAgeMinutes: number = 120): Promise<number> {
     const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
 

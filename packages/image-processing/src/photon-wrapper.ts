@@ -50,7 +50,13 @@ export class SafePhotonImage {
 
   /**
    * Get WebP bytes
+   *
+   * Called at processor.ts:56 on `resized`, the return value of `.resize()`.
+   * fallow cannot resolve a receiver whose type comes from a method return,
+   * so it reports this unused; `get_width`/`get_height`, called on a directly
+   * initialised local in the same function, resolve fine and are not flagged.
    */
+  // fallow-ignore-next-line unused-class-member
   getBytesWebP(): Uint8Array {
     this.checkFreed();
     return this.inner.get_bytes_webp();
@@ -59,7 +65,13 @@ export class SafePhotonImage {
   /**
    * Free the underlying Wasm memory.
    * Must be called exactly once.
+   *
+   * Called at processor.ts:71 as `allocated[i]?.free()` in the `finally` that
+   * guarantees cleanup. fallow cannot resolve an optional-chained array
+   * element as the receiver, so it reports this unused. Deleting it would
+   * remove the wasm memory guard this class exists to provide.
    */
+  // fallow-ignore-next-line unused-class-member
   free() {
     if (!this._isFreed) {
       this.inner.free();
