@@ -10,29 +10,9 @@
  * (store, bridge, section catalogue) — the allowed direction.
  */
 
-export { default as AddSectionPicker } from './AddSectionPicker.svelte';
 // Design axes — the section-scope control (one axis, with its inheritance state).
-export { default as DesignAxisControl } from './DesignAxisControl.svelte';
-export {
-  AXIS_HINTS,
-  AXIS_LABELS,
-  AXIS_VALUE_LABELS,
-  axesForSectionType,
-  axisOptions,
-  DEFAULT_PRESET_ID,
-  findDesignPreset,
-  isAxisValue,
-  MEDIA_AWARE_SECTION_TYPES,
-  SECTION_DESIGN_PRESETS,
-  type SectionDesignPreset,
-} from './design-vocabulary';
 // Canvas (INLINE WYSIWYG render of the section components + block toolbar).
 export { default as JourneyBuilderCanvas } from './JourneyBuilderCanvas.svelte';
-export {
-  JOURNEY_PREVIEW_DEVICES,
-  type JourneyPreviewDevice,
-  type JourneyPreviewDeviceId,
-} from './journey-preview-canvas';
 // Page-mode settings panels (Look / Pricing / Media / Brand / SEO).
 export { default as PageBrandPanel } from './PageBrandPanel.svelte';
 export { default as PageDesignPanel } from './PageDesignPanel.svelte';
@@ -41,14 +21,7 @@ export { default as PagePricingPanel } from './PagePricingPanel.svelte';
 export { default as PageSeoPanel } from './PageSeoPanel.svelte';
 export { default as SectionEditor } from './SectionEditor.svelte';
 export { default as SectionList } from './SectionList.svelte';
-export {
-  fieldsForSectionType,
-  SECTION_FIELDS,
-  type SectionFieldControl,
-  type SectionFieldDef,
-  type SectionFieldOption,
-} from './section-fields';
-export { default as VariantPicker } from './VariantPicker.svelte';
+export { fieldsForSectionType } from './section-fields';
 /*
   THE DESIGN-AXIS EDITOR UI — what F-B2 landed, against what F-B reserved.
 
