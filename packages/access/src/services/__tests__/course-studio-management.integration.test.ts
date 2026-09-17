@@ -61,7 +61,7 @@ describe('Studio journey management (Codex-isr02)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId] = await seedTestUsers(db, 1);
+    [creatorId] = (await seedTestUsers(db, 1)) as [string];
 
     const [orgA] = await db
       .insert(organizations)

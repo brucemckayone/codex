@@ -13,6 +13,7 @@ import { schema } from '@codex/database';
 import {
   type Database,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import {
@@ -61,16 +62,18 @@ describe('PlatformSettingsFacade', () => {
     db = setupTestDatabase();
 
     // Create a test organization
-    const [org] = await db
-      .insert(schema.organizations)
-      .values({
-        id: crypto.randomUUID(),
-        name: 'Test Organization',
-        slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(schema.organizations)
+        .values({
+          id: crypto.randomUUID(),
+          name: 'Test Organization',
+          slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+    );
     organizationId = org.id;
   });
 

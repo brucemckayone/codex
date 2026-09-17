@@ -39,14 +39,14 @@ describe('stripe-customer-integrity', () => {
   describe('findUsersByStripeCustomerId', () => {
     it('returns the single user pointing at the given customer id', async () => {
       const customerId = `cus_single_${createUniqueSlug()}`;
-      const [userId] = await seedTestUsers(db, 1, {
+      const [userId] = (await seedTestUsers(db, 1, {
         stripeCustomerId: customerId,
-      });
+      })) as [string];
 
       const rows = await findUsersByStripeCustomerId(db, customerId);
       expect(rows).toHaveLength(1);
-      expect(rows[0].userId).toBe(userId);
-      expect(rows[0].stripeCustomerId).toBe(customerId);
+      expect(rows[0]!.userId).toBe(userId);
+      expect(rows[0]!.stripeCustomerId).toBe(customerId);
     });
 
     it('returns an empty array when the id is unknown to Codex', async () => {
@@ -63,7 +63,7 @@ describe('stripe-customer-integrity', () => {
       // surfaces both rows, then clean up. Uses a raw SQL update to set
       // the same id on two rows, skirting Drizzle's usual write path.
       const customerId = `cus_drift_${createUniqueSlug()}`;
-      const [userA, userB] = await seedTestUsers(db, 2);
+      const [userA, userB] = (await seedTestUsers(db, 2)) as [string, string];
 
       // Temporarily drop the unique index to allow the collision insert.
       await db.execute(
@@ -111,7 +111,12 @@ describe('stripe-customer-integrity', () => {
     it('surfaces a collision sorted by count descending', async () => {
       const collisionId = `cus_coll_${createUniqueSlug()}`;
       const loneId = `cus_lone_${createUniqueSlug()}`;
-      const [u1, u2, u3, u4] = await seedTestUsers(db, 4);
+      const [u1, u2, u3, u4] = (await seedTestUsers(db, 4)) as [
+        string,
+        string,
+        string,
+        string,
+      ];
 
       // u4 is a solo non-colliding user (still-NULL default works; explicit
       // set keeps the row out of the collision bucket while exercising

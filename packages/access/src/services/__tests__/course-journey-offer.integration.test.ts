@@ -132,7 +132,7 @@ describe('CourseJourneyService.updateJourneyOffer (journey pricing write path)',
   beforeAll(async () => {
     db = setupTestDatabase();
     svc = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId] = await seedTestUsers(db, 1);
+    [creatorId] = (await seedTestUsers(db, 1)) as [string];
 
     const [orgA] = await db
       .insert(organizations)

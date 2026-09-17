@@ -83,7 +83,8 @@ describe('AccessRevocation', () => {
       await revocation.revoke(userId, orgId, 'subscription_deleted');
 
       expect(mock.putSpy).toHaveBeenCalledTimes(1);
-      const [calledKey, calledValue, calledOptions] = mock.putSpy.mock.calls[0];
+      const [calledKey, calledValue, calledOptions] =
+        mock.putSpy.mock.calls[0]!;
       expect(calledKey).toBe(expectedKey);
       expect(calledOptions).toEqual({ expirationTtl: REVOCATION_TTL_SECONDS });
       expect(REVOCATION_TTL_SECONDS).toBe(1200);
@@ -202,7 +203,7 @@ describe('AccessRevocation', () => {
   describe('keyspace isolation', () => {
     it('uses the revoked: prefix — never collides with cache: keyspace', async () => {
       await revocation.revoke(userId, orgId, 'subscription_deleted');
-      const [calledKey] = mock.putSpy.mock.calls[0];
+      const [calledKey] = mock.putSpy.mock.calls[0]!;
       expect(calledKey).toMatch(/^revoked:user:/);
       expect(calledKey).not.toMatch(/^cache:/);
     });

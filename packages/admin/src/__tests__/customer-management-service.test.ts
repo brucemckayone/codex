@@ -29,6 +29,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { and, eq } from 'drizzle-orm';
@@ -46,14 +47,16 @@ describe('AdminCustomerManagementService', () => {
     service = new AdminCustomerManagementService({ db, environment: 'test' });
 
     // Create test users
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [creatorId] = userIds;
 
     // Create organization
-    const [org] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgId = org.id;
   });
 
@@ -64,10 +67,12 @@ describe('AdminCustomerManagementService', () => {
   describe('listCustomers', () => {
     it('should return empty list for organization with no customers', async () => {
       // Create a new org with no purchases
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const result = await service.listCustomers(emptyOrg.id);
 
@@ -78,38 +83,46 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should list customers with aggregated purchase stats', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create test customers
-      const [customer1, customer2] = await seedTestUsers(db, 2);
+      const [customer1, customer2] = (await seedTestUsers(db, 2)) as [
+        string,
+        string,
+      ];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Customer Test Content',
+            slug: createUniqueSlug('customer-list-test'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Customer Test Content',
-          slug: createUniqueSlug('customer-list-test'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Customer 1: 2 purchases totaling $20
       await db.insert(purchases).values([
@@ -159,48 +172,53 @@ describe('AdminCustomerManagementService', () => {
       expect(result.pagination.total).toBe(2);
 
       // Customer 2 should be first (higher total spent)
-      expect(result.items[0].userId).toBe(customer2);
-      expect(result.items[0].totalPurchases).toBe(1);
-      expect(result.items[0].totalSpentCents).toBe(5000);
+      expect(result.items[0]!.userId).toBe(customer2);
+      expect(result.items[0]!.totalPurchases).toBe(1);
+      expect(result.items[0]!.totalSpentCents).toBe(5000);
 
       // Customer 1 second
-      expect(result.items[1].userId).toBe(customer1);
-      expect(result.items[1].totalPurchases).toBe(2);
-      expect(result.items[1].totalSpentCents).toBe(2000);
+      expect(result.items[1]!.userId).toBe(customer1);
+      expect(result.items[1]!.totalPurchases).toBe(2);
+      expect(result.items[1]!.totalSpentCents).toBe(2000);
     });
 
     it('should only count completed purchases', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Status Filter Test',
+            slug: createUniqueSlug('status-filter'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Status Filter Test',
-          slug: createUniqueSlug('status-filter'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Mix of statuses
       await db.insert(purchases).values([
@@ -243,43 +261,54 @@ describe('AdminCustomerManagementService', () => {
       const result = await service.listCustomers(testOrg.id);
 
       expect(result.items).toHaveLength(1);
-      expect(result.items[0].totalPurchases).toBe(1); // Only completed
-      expect(result.items[0].totalSpentCents).toBe(1000);
+      expect(result.items[0]!.totalPurchases).toBe(1); // Only completed
+      expect(result.items[0]!.totalSpentCents).toBe(1000);
     });
 
     it('should paginate customers correctly', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create 5 customers
-      const customerIds = await seedTestUsers(db, 5);
+      const customerIds = (await seedTestUsers(db, 5)) as [
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Pagination Test',
+            slug: createUniqueSlug('pagination-test'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 100,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Pagination Test',
-          slug: createUniqueSlug('pagination-test'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 100,
-        })
-        .returning();
+          .returning()
+      );
 
       // Create purchases for all customers
       const purchaseValues = customerIds.map((cid, idx) => ({
@@ -315,61 +344,72 @@ describe('AdminCustomerManagementService', () => {
       expect(page2.pagination.page).toBe(2);
 
       // Different customers on different pages
-      expect(page1.items[0].userId).not.toBe(page2.items[0].userId);
+      expect(page1.items[0]!.userId).not.toBe(page2.items[0]!.userId);
     });
 
     it('should scope to specific organization only', async () => {
-      const [org1] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [org2] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org1 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer1, customer2] = await seedTestUsers(db, 2);
+      const [customer1, customer2] = (await seedTestUsers(db, 2)) as [
+        string,
+        string,
+      ];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Content for each org
-      const [content1] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org1.id,
-          mediaItemId: media.id,
-          title: 'Org1 Content',
-          slug: createUniqueSlug('org1-scoping'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+      const content1 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org1.id,
+            mediaItemId: media.id,
+            title: 'Org1 Content',
+            slug: createUniqueSlug('org1-scoping'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+          })
+          .returning()
+      );
 
-      const [content2] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org2.id,
-          mediaItemId: media.id,
-          title: 'Org2 Content',
-          slug: createUniqueSlug('org2-scoping'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const content2 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org2.id,
+            mediaItemId: media.id,
+            title: 'Org2 Content',
+            slug: createUniqueSlug('org2-scoping'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       // Customer1 purchases from org1
       await db.insert(purchases).values({
@@ -402,12 +442,12 @@ describe('AdminCustomerManagementService', () => {
       // Org1 should only see customer1
       const org1Result = await service.listCustomers(org1.id);
       expect(org1Result.items).toHaveLength(1);
-      expect(org1Result.items[0].userId).toBe(customer1);
+      expect(org1Result.items[0]!.userId).toBe(customer1);
 
       // Org2 should only see customer2
       const org2Result = await service.listCustomers(org2.id);
       expect(org2Result.items).toHaveLength(1);
-      expect(org2Result.items[0].userId).toBe(customer2);
+      expect(org2Result.items[0]!.userId).toBe(customer2);
     });
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)
@@ -416,52 +456,58 @@ describe('AdminCustomerManagementService', () => {
 
   describe('getCustomerDetails', () => {
     it('should return customer details with purchase history', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content1 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Content A',
+            slug: createUniqueSlug('details-a'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
+          .returning()
+      );
 
-      const [content1] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Content A',
-          slug: createUniqueSlug('details-a'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
-
-      const [content2] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Content B',
-          slug: createUniqueSlug('details-b'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const content2 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Content B',
+            slug: createUniqueSlug('details-b'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       const now = new Date();
       const yesterday = new Date(now);
@@ -503,44 +549,49 @@ describe('AdminCustomerManagementService', () => {
       expect(details.purchaseHistory).toHaveLength(2);
 
       // Purchase history should be ordered by date descending (newest first)
-      expect(details.purchaseHistory[0].contentTitle).toBe('Content B');
-      expect(details.purchaseHistory[0].amountPaidCents).toBe(2000);
-      expect(details.purchaseHistory[1].contentTitle).toBe('Content A');
-      expect(details.purchaseHistory[1].amountPaidCents).toBe(1000);
+      expect(details.purchaseHistory[0]!.contentTitle).toBe('Content B');
+      expect(details.purchaseHistory[0]!.amountPaidCents).toBe(2000);
+      expect(details.purchaseHistory[1]!.contentTitle).toBe('Content A');
+      expect(details.purchaseHistory[1]!.amountPaidCents).toBe(1000);
     });
 
     it('should only include completed purchases in stats and history', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Details Status Test',
+            slug: createUniqueSlug('details-status'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Details Status Test',
-          slug: createUniqueSlug('details-status'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       await db.insert(purchases).values([
         {
@@ -588,13 +639,15 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should throw NotFoundError for customer with no purchases from this org', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Customer exists but has no purchases from this org
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
       await expect(
         service.getCustomerDetails(testOrg.id, customer)
@@ -604,37 +657,42 @@ describe('AdminCustomerManagementService', () => {
 
   describe('grantContentAccess', () => {
     it('should grant complimentary access successfully', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Grant Access Content',
+            slug: createUniqueSlug('grant-access'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Grant Access Content',
-          slug: createUniqueSlug('grant-access'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Create a purchase to establish relationship with org
       await db.insert(purchases).values({
@@ -651,20 +709,21 @@ describe('AdminCustomerManagementService', () => {
       });
 
       // Create another content to grant access to
-      const [newContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'New Content for Access',
-          slug: createUniqueSlug('new-access'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const newContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'New Content for Access',
+            slug: createUniqueSlug('new-access'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       const result = await service.grantContentAccess(
         testOrg.id,
@@ -688,37 +747,42 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should be idempotent (return success if access already exists)', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Idempotent Content',
+            slug: createUniqueSlug('idempotent-access'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Idempotent Content',
-          slug: createUniqueSlug('idempotent-access'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Create relationship via purchase
       await db.insert(purchases).values({
@@ -735,20 +799,21 @@ describe('AdminCustomerManagementService', () => {
       });
 
       // Create another content and pre-create access
-      const [newContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Pre-existing Access Content',
-          slug: createUniqueSlug('pre-existing'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const newContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Pre-existing Access Content',
+            slug: createUniqueSlug('pre-existing'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       // Pre-create access record
       await db.insert(contentAccess).values({
@@ -782,12 +847,14 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should grant access to users with org membership (no purchase required)', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
       // Create membership instead of purchase
       await db.insert(organizationMemberships).values({
@@ -797,30 +864,33 @@ describe('AdminCustomerManagementService', () => {
         status: 'active',
       });
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Member Access Content',
-          slug: createUniqueSlug('member-access'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'members_only',
-          priceCents: 0,
-        })
-        .returning();
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Member Access Content',
+            slug: createUniqueSlug('member-access'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
+          })
+          .returning()
+      );
 
       const result = await service.grantContentAccess(
         testOrg.id,
@@ -846,35 +916,40 @@ describe('AdminCustomerManagementService', () => {
     // Service trusts that organizationId is valid when passed from authenticated context
 
     it('should throw NotFoundError for non-existent customer', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'No Customer Content',
+            slug: createUniqueSlug('no-customer'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'No Customer Content',
-          slug: createUniqueSlug('no-customer'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       await expect(
         service.grantContentAccess(
@@ -886,38 +961,43 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should throw NotFoundError for customer without relationship to org', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Customer exists but has no purchases or membership with org
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'No Relationship Content',
+            slug: createUniqueSlug('no-relationship'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'No Relationship Content',
-          slug: createUniqueSlug('no-relationship'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       await expect(
         service.grantContentAccess(testOrg.id, customer, testContent.id)
@@ -925,58 +1005,66 @@ describe('AdminCustomerManagementService', () => {
     });
 
     it('should throw NotFoundError for content not in this organization', async () => {
-      const [org1] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [org2] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org1 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [customer] = await seedTestUsers(db, 1);
+      const [customer] = (await seedTestUsers(db, 1)) as [string];
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Content in org1
-      const [org1Content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org1.id,
-          mediaItemId: media.id,
-          title: 'Org1 Content',
-          slug: createUniqueSlug('org1-content'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+      const org1Content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org1.id,
+            mediaItemId: media.id,
+            title: 'Org1 Content',
+            slug: createUniqueSlug('org1-content'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+          })
+          .returning()
+      );
 
       // Content in org2
-      const [org2Content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org2.id,
-          mediaItemId: media.id,
-          title: 'Org2 Content',
-          slug: createUniqueSlug('org2-content'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const org2Content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org2.id,
+            mediaItemId: media.id,
+            title: 'Org2 Content',
+            slug: createUniqueSlug('org2-content'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       // Create relationship with org1 via purchase
       await db.insert(purchases).values({

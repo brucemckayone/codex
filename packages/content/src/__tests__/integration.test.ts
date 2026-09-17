@@ -46,7 +46,7 @@ describe('Integration Tests', () => {
     mediaService = new MediaItemService(config);
     orgService = new OrganizationService(config);
 
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [creatorId, otherCreatorId] = userIds;
 
     // Publishing monetised content now requires a payout-ready Connect account
@@ -121,7 +121,6 @@ describe('Integration Tests', () => {
           organizationId: org.id,
           category: 'corporate',
           tags: ['intro', 'company', 'about'],
-          visibility: 'public',
           priceCents: 0,
         },
         creatorId
@@ -171,7 +170,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           // No organizationId
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -238,8 +236,6 @@ describe('Integration Tests', () => {
           slug: createUniqueSlug('tutorial'),
           contentType: 'video',
           mediaItemId: ready.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
           tags: [],
         },
@@ -289,7 +285,6 @@ describe('Integration Tests', () => {
           slug: createUniqueSlug('not-ready'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -333,7 +328,6 @@ describe('Integration Tests', () => {
           slug: createUniqueSlug('creator1'),
           contentType: 'video',
           mediaItemId: media1.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -372,7 +366,6 @@ describe('Integration Tests', () => {
           slug: createUniqueSlug('creator2'),
           contentType: 'video',
           mediaItemId: media2.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -451,7 +444,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org1.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -465,7 +457,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org2.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -516,7 +507,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -532,7 +522,6 @@ describe('Integration Tests', () => {
             contentType: 'video',
             mediaItemId: media.id,
             organizationId: org.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -591,7 +580,6 @@ describe('Integration Tests', () => {
           slug: createUniqueSlug('lifecycle'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -647,7 +635,6 @@ describe('Integration Tests', () => {
             contentType: 'video',
             mediaItemId: media.id,
             organizationId: org.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -704,7 +691,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -719,7 +705,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           // No organizationId
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -792,7 +777,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -852,7 +836,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media1.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -892,7 +875,6 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: media2.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
