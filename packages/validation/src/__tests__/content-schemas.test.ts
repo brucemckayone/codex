@@ -667,6 +667,59 @@ describe('Content Schemas', () => {
         })
       ).not.toThrow();
     });
+
+    // ── A PRICE IS A GATE, in BOTH directions (Codex-al9ft) ──────────────
+    // Every case above pairs `priceCents` with `isPurchasable`, so price-ALONE
+    // was never exercised in either direction. It needed to be: `@codex/access`
+    // gates on `(priceCents ?? 0) > 0` and never reads `isFree`/`isPurchasable`,
+    // so a price alone IS the paywall. Two consequences the old schema got
+    // wrong — it accepted the dangerous row and rejected the legitimate one:
+    //   - priced + isFree:true  slipped through (every other refinement here is
+    //     guarded by `if (isPurchasable)` or `if (isFree !== false)`), and
+    //     apps/web then served its body to anonymous visitors; and
+    //   - priced + isFree:false with no FLAG was rejected as "no access gate",
+    //     even though the message has always named price as one.
+    it('rejects priced content explicitly marked free (the al9ft leak)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: true,
+          priceCents: 1999,
+        })
+      ).toThrow(/priced content cannot be free/i);
+    });
+
+    it('rejects an update marking priced content free', () => {
+      expect(() =>
+        updateContentSchema.parse({ isFree: true, priceCents: 1999 })
+      ).toThrow(/priced content cannot be free/i);
+    });
+
+    it('accepts non-free content gated by a price ALONE (no isPurchasable)', () => {
+      // The legitimate row the old zero-gate refinement wrongly rejected.
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          priceCents: 1999,
+        })
+      ).not.toThrow();
+    });
+
+    it('treats a null or zero price as NOT a gate, so free stays valid', () => {
+      // Mirrors @codex/access's `(priceCents ?? 0) > 0` — only a POSITIVE
+      // price gates. A free row may carry priceCents null/0 unchanged.
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: true,
+          priceCents: null,
+        })
+      ).not.toThrow();
+      expect(() =>
+        updateContentSchema.parse({ isFree: true, priceCents: 0 })
+      ).not.toThrow();
+    });
   });
 
   describe('orgless content cannot be tier-gated (Codex-up7bx)', () => {

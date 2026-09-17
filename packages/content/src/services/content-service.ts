@@ -298,10 +298,19 @@ export class ContentService extends BaseService {
             // turns free off unless isFree was set explicitly; the resolver
             // checks isFree first (SPEC §6.3), so this defaulting is
             // access-relevant. [WP-1 conductor note: verify at scoping review.]
+            //
+            // A PRICE IS A GATE (Codex-al9ft). `@codex/access`'s paid arm is
+            // `(priceCents ?? 0) > 0` and never reads isFree/isPurchasable
+            // (access-decision.ts), so a price-only payload used to derive
+            // `isFree: true` on content the gate DENIES — and apps/web's
+            // `isPublicContent(isFree)` then rendered the full body into the
+            // anonymous SSR payload. Keep this list in sync with `effHasGate`
+            // in update() below; they must recognise the same gates.
             isFree:
               validated.isFree ??
               !(
                 (validated.isPurchasable ?? false) ||
+                (validated.priceCents ?? 0) > 0 ||
                 (validated.isFollowerGated ?? false) ||
                 (validated.isTeamOnly ?? false) ||
                 (validated.courseOnly ?? false) ||
@@ -489,8 +498,19 @@ export class ContentService extends BaseService {
           : 'includedInTierId' in restValidated
             ? restValidated.includedInTierId
             : existing.includedInTierId;
+        // A PRICE IS A GATE (Codex-al9ft) — and omitting it here was worse than
+        // in create(): because the clamp at the `.set()` below FORCES
+        // `isFree: true` when it sees no gate, a PATCH that unset
+        // `isPurchasable` while leaving `priceCents` intact rewrote a correctly
+        // gated row to PUBLIC, which is the exact failure this clamp exists to
+        // prevent. Mirrors create()'s derivation — keep the two in sync.
+        const effPriceCents =
+          'priceCents' in restValidated
+            ? restValidated.priceCents
+            : existing.priceCents;
         const effHasGate =
           (restValidated.isPurchasable ?? existing.isPurchasable) ||
+          (effPriceCents ?? 0) > 0 ||
           (restValidated.isFollowerGated ?? existing.isFollowerGated) ||
           (restValidated.isTeamOnly ?? existing.isTeamOnly) ||
           (restValidated.courseOnly ?? existing.courseOnly) ||

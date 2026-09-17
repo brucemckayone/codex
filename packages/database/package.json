@@ -28,6 +28,7 @@
     "db:seed:journey-content": "pnpm exec tsx scripts/seed-journey-content.ts",
     "db:seed:creators": "pnpm exec tsx scripts/seed-creators.ts",
     "backfill:stripe-customer-ids": "pnpm exec tsx scripts/backfill-stripe-customer-ids.ts",
+    "audit:priced-but-free": "pnpm exec tsx scripts/audit-priced-but-free.ts",
     "db:dry-run": "pnpm exec tsx scripts/neon-dry-run.ts",
     "db:studio": "pnpm exec tsx scripts/db-commands.ts studio",
     "db:push": "pnpm exec tsx scripts/db-commands.ts push",

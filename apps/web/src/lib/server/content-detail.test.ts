@@ -27,19 +27,67 @@ import {
 type StreamResult = NonNullable<Parameters<typeof resolveAccessGranted>[0]>;
 
 describe('isPublicContent', () => {
-  it('treats free content (isFree=true) as publicly readable', () => {
-    expect(isPublicContent(true)).toBe(true);
+  it('treats free content (isFree=true, no gate) as publicly readable', () => {
+    expect(isPublicContent({ isFree: true })).toBe(true);
   });
 
   it('gates non-free content (isFree=false) behind the access check', () => {
     // Purchasable / follower / tier / team content all report isFree=false and
     // must fall through to the authenticated access check (WP-1 §6.1).
-    expect(isPublicContent(false)).toBe(false);
+    expect(isPublicContent({ isFree: false })).toBe(false);
   });
 
   it('is not public for null / undefined isFree', () => {
-    expect(isPublicContent(null)).toBe(false);
-    expect(isPublicContent(undefined)).toBe(false);
+    expect(isPublicContent({ isFree: null })).toBe(false);
+    expect(isPublicContent({ isFree: undefined })).toBe(false);
+    expect(isPublicContent({})).toBe(false);
+  });
+
+  // ── Codex-al9ft: the predicate reads the WHOLE policy, and fails CLOSED ──
+  // `isFree` alone used to decide whether `renderContentBody()` runs
+  // UNAUTHENTICATED. A row carrying a gate AND `isFree: true` is a contradiction
+  // that `@codex/access` resolves as DENIED, so this must resolve it the same
+  // way. These are not hypothetical shapes: `priceCents` was absent from both
+  // `ContentService.create`'s isFree derivation and `update`'s `effHasGate`
+  // clamp, so a price-only payload persisted exactly the first row below, and a
+  // PATCH clearing `isPurchasable` rewrote a correct row into it.
+  describe('a gate present alongside isFree:true is NOT public', () => {
+    it('a priced row is not public (the al9ft leak)', () => {
+      expect(isPublicContent({ isFree: true, priceCents: 1999 })).toBe(false);
+    });
+
+    it('a purchasable row is not public', () => {
+      expect(isPublicContent({ isFree: true, isPurchasable: true })).toBe(
+        false
+      );
+    });
+
+    it('a tier-gated row is not public', () => {
+      expect(
+        isPublicContent({ isFree: true, includedInTierId: 'tier-1' })
+      ).toBe(false);
+    });
+
+    it('a follower-gated row is not public', () => {
+      expect(isPublicContent({ isFree: true, isFollowerGated: true })).toBe(
+        false
+      );
+    });
+
+    it('a team-only row is not public', () => {
+      expect(isPublicContent({ isFree: true, isTeamOnly: true })).toBe(false);
+    });
+
+    it('a course-only row is not public', () => {
+      expect(isPublicContent({ isFree: true, courseOnly: true })).toBe(false);
+    });
+
+    it('priceCents of 0 or null is not a gate', () => {
+      // Only a POSITIVE price gates — mirrors @codex/access's
+      // `(priceCents ?? 0) > 0`. A zero/null price on free content is normal.
+      expect(isPublicContent({ isFree: true, priceCents: 0 })).toBe(true);
+      expect(isPublicContent({ isFree: true, priceCents: null })).toBe(true);
+    });
   });
 });
 

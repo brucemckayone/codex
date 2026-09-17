@@ -11,10 +11,14 @@
  *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
  *
  * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
- * content.isFree)` in both of its branches — streamed on the free
- * fast-path, awaited on the gated path — so there are four call sites but a
- * single signature. Neither `+page.server.ts` may add its own grant/deny
- * logic; keeping the decision here is what stops the two routes diverging.
+ * content)` in both of its branches — streamed on the free fast-path, awaited
+ * on the gated path — so there are four call sites but a single signature.
+ * Neither `+page.server.ts` may add its own grant/deny logic; keeping the
+ * decision here is what stops the two routes diverging.
+ *
+ * The fourth argument is the whole policy ROW, not a bare `isFree` boolean:
+ * passing one derived flag let a priced row read as public and served its body
+ * anonymously (Codex-al9ft). See {@link isPublicContent}.
  *
  * ## WP-2 swap point (Codex-2pryk journeys)
  *
@@ -152,18 +156,58 @@ export const DENIED_ACCESS_RESULT: AccessAndProgress = {
 };
 
 /**
+ * The policy fields publicness depends on. Structural subset, every field
+ * optional/nullable, so a full `ContentWithRelations` row satisfies it without
+ * a cast. Mirrors `ContentAccessPolicyRow` in
+ * `packages/access/src/services/content-access/access-decision.ts` — the two
+ * MUST recognise the same gates.
+ */
+export interface ContentPublicnessPolicy {
+  isFree?: boolean | null;
+  isPurchasable?: boolean | null;
+  priceCents?: number | null;
+  includedInTierId?: string | null;
+  isFollowerGated?: boolean | null;
+  isTeamOnly?: boolean | null;
+  courseOnly?: boolean | null;
+}
+
+/**
  * Free content is publicly readable — the body and metadata render for
  * everyone regardless of auth. The media stream still requires an
  * authenticated user (because signed R2 URLs are issued per-user), but the
  * page shell should not be gated behind that.
  *
- * Gated content (`isFree=false` — purchasable / follower / tier / team) keeps
- * the body behind the authenticated access check: anonymous visitors see the
- * paywall teaser, signed-in users fall through to `loadAccessAndProgress`
- * which asks the backend authoritatively.
+ * Gated content keeps the body behind the authenticated access check:
+ * anonymous visitors see the paywall teaser, signed-in users fall through to
+ * `loadAccessAndProgress` which asks the backend authoritatively.
+ *
+ * # Why this reads the WHOLE policy and not just `isFree` (Codex-al9ft)
+ *
+ * This predicate decides whether `renderContentBody()` runs UNAUTHENTICATED, so
+ * a false positive puts the full article body in the anonymous SSR payload and
+ * in view-source. It used to be `isFree === true` alone, which trusted a single
+ * derived boolean to summarise six gates. It did not: `@codex/access`'s paid arm
+ * is `(priceCents ?? 0) > 0` and never reads `isFree`, while
+ * `ContentService.create`/`update` derived `isFree` from the FLAG gates only —
+ * omitting `priceCents`. A price-only row therefore came back `isFree: true`
+ * and its body was served publicly while the gate denied every stream request.
+ *
+ * Those derivations are fixed, but this predicate deliberately does NOT rely on
+ * that: it requires `isFree` to be true AND no gate to be present, so a row
+ * already in the database with the divergent shape — which a code fix upstream
+ * cannot reach — still reads as non-public here. Fail CLOSED on disagreement.
  */
-export function isPublicContent(isFree: boolean | null | undefined): boolean {
-  return isFree === true;
+export function isPublicContent(policy: ContentPublicnessPolicy): boolean {
+  if (policy.isFree !== true) return false;
+  return !(
+    policy.isPurchasable === true ||
+    (policy.priceCents ?? 0) > 0 ||
+    policy.includedInTierId != null ||
+    policy.isFollowerGated === true ||
+    policy.isTeamOnly === true ||
+    policy.courseOnly === true
+  );
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -221,16 +265,20 @@ export function resolveAccessGranted(
  * access-grant decision is isolated in {@link resolveAccessGranted} — the
  * single WP-2 swap point; everything else here is response assembly.
  *
- * `isFree` short-circuits the result for free content: `hasAccess` is forced
- * to `true` even if the stream fetch fails, so the body stays visible when the
- * stream worker is degraded. Authenticated streaming still runs so we can
- * render the player when the URL is available.
+ * A PUBLIC `policy` short-circuits the result: `hasAccess` is forced to `true`
+ * even if the stream fetch fails, so the body stays visible when the stream
+ * worker is degraded. Authenticated streaming still runs so we can render the
+ * player when the URL is available.
+ *
+ * Takes the whole policy rather than a bare `isFree` boolean (Codex-al9ft) — a
+ * fail-OPEN short-circuit must not be keyed on one derived flag that the
+ * authoritative gate never reads. See {@link isPublicContent}.
  */
 export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  isFree?: boolean | null
+  policy?: ContentPublicnessPolicy
 ): Promise<AccessAndProgress> {
   const api = createServerApi(platform, cookies);
 
@@ -259,7 +307,7 @@ export async function loadAccessAndProgress(
   // Single access-grant seam — WP-2 swaps `resolveAccessGranted` for an
   // explicit `@codex/access` canView resolver (see its doc block).
   const accessGranted = resolveAccessGranted(streamResult);
-  const hasAccess = isPublicContent(isFree) || accessGranted;
+  const hasAccess = isPublicContent(policy ?? {}) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =

@@ -68,7 +68,7 @@ export const load: PageServerLoad = async ({
   // (followers / subscribers / paid / team) waits for the authenticated
   // access check below — this is what prevents a non-follower from reading
   // the article text through view-source or the SvelteKit load payload.
-  const isPublic = isPublicContent(content.isFree);
+  const isPublic = isPublicContent(content);
   const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
@@ -140,7 +140,7 @@ export const load: PageServerLoad = async ({
         content.id,
         platform,
         cookies,
-        content.isFree
+        content
       ).catch(() => ({ ...DENIED_ACCESS_RESULT, hasAccess: isPublic })),
       subscriptionContext,
       relatedContent: relatedPromise,
@@ -156,7 +156,7 @@ export const load: PageServerLoad = async ({
     content.id,
     platform,
     cookies,
-    content.isFree
+    content
   ).catch(() => DENIED_ACCESS_RESULT);
 
   const gatedBodyHtml = accessResult.hasAccess
