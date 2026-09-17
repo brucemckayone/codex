@@ -486,6 +486,10 @@ export const createContentSchema = baseContentSchema
       if (data.isFree !== false) return true;
       return (
         !!data.isPurchasable ||
+        // A PRICE IS A GATE (Codex-al9ft). Omitting it here also made this
+        // refinement REJECT a legitimately priced non-free row, while the
+        // message below has always named price as a gate.
+        (data.priceCents ?? 0) > 0 ||
         !!data.isFollowerGated ||
         !!data.isTeamOnly ||
         !!data.courseOnly ||
@@ -496,6 +500,25 @@ export const createContentSchema = baseContentSchema
       message:
         'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
       path: ['includedInTierId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // THE INVERSE INVARIANT (Codex-al9ft): a priced row may never be FREE.
+      // `@codex/access`'s paid arm is `(priceCents ?? 0) > 0` and it never reads
+      // `isFree`, so a row carrying both a price and `isFree:true` is DENIED by
+      // the gate while apps/web's `isPublicContent(isFree)` renders the full
+      // body into the anonymous SSR payload (the leak that bead documents).
+      // Every other refinement in this chain is guarded by
+      // `if (data.isPurchasable)` or `if (data.isFree !== false)`, so a
+      // price-only payload tripped NONE of them and reached the DB.
+      if ((data.priceCents ?? 0) <= 0) return true;
+      return data.isFree !== true;
+    },
+    {
+      message:
+        'Priced content cannot be free — a price is an access gate, so isFree must not be true.',
+      path: ['isFree'],
     }
   );
 
@@ -554,6 +577,8 @@ export const updateContentSchema = baseContentSchema
       if (data.isFree !== false) return true;
       return (
         !!data.isPurchasable ||
+        // A PRICE IS A GATE (Codex-al9ft) — mirrors the create schema.
+        (data.priceCents ?? 0) > 0 ||
         !!data.isFollowerGated ||
         !!data.isTeamOnly ||
         !!data.courseOnly ||
@@ -564,6 +589,22 @@ export const updateContentSchema = baseContentSchema
       message:
         'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
       path: ['includedInTierId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // Mirror of the create-schema inverse invariant (Codex-al9ft): a priced
+      // row may never be FREE. Only fires when the partial carries BOTH fields;
+      // a price-only or flag-only partial is clamped defensively in
+      // `ContentService.update()`'s `effHasGate`, which was itself blind to
+      // `priceCents` and so rewrote correctly-gated rows to public.
+      if ((data.priceCents ?? 0) <= 0) return true;
+      return data.isFree !== true;
+    },
+    {
+      message:
+        'Priced content cannot be free — a price is an access gate, so isFree must not be true.',
+      path: ['isFree'],
     }
   );
 

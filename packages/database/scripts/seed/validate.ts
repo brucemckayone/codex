@@ -65,6 +65,22 @@ export async function validateContentSeed(db: typeof DbClient) {
     );
   }
 
+  // ── Invariant 1b: a priced row is never FREE (Codex-al9ft) ──
+  // The INVERSE of invariant 1, which was the only direction checked. A price
+  // IS a gate to `@codex/access` (its paid arm is `(priceCents ?? 0) > 0` and
+  // never reads `isFree`), so a row carrying both a price and `isFree` is
+  // denied by the gate while apps/web's `isPublicContent(isFree)` renders the
+  // full body into the anonymous SSR payload. Checking only "purchasable needs
+  // a price" left the dangerous direction — "priced but marked free" — silent.
+  const pricedButFree = rows.filter(
+    (r) => r.priceCents !== null && r.priceCents > 0 && r.isFree
+  );
+  for (const r of pricedButFree) {
+    errors.push(
+      `  - row "${r.slug}" has priceCents=${r.priceCents} but isFree=true — a price is an access gate, so this row is denied by @codex/access while apps/web serves its body publicly`
+    );
+  }
+
   // ── Invariant 2: follower / team gates are standalone in the seed ──
   // The seed authors follower-gated and team-only content as pure gates — they
   // must not also carry a tier gate or a price (a nonsensical combination that
