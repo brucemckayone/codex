@@ -52,13 +52,12 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
     await teardownTestDatabase();
   });
 
-  async function makeOrg(ownerId: string, label: string) {
+  async function makeOrg(label: string) {
     const [org] = await db
       .insert(organizations)
       .values({
         name: `Test Org ${label}`,
         slug: createUniqueSlug(label),
-        ownerId,
       })
       .returning();
     if (!org) throw new Error('Failed to create test organization');
@@ -66,10 +65,13 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   }
 
   it('skips a removed founder and settles on the active owner', async () => {
-    const [removedFounderId, activeOwnerId] = await seedTestUsers(db, 2);
+    const [removedFounderId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!removedFounderId || !activeOwnerId) throw new Error('seed failed');
 
-    const org = await makeOrg(activeOwnerId, 'removed-founder');
+    const org = await makeOrg('removed-founder');
 
     // The founder joined FIRST and was later removed: role survives, status does not.
     await db.insert(organizationMemberships).values([
@@ -101,11 +103,14 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('resolves to nothing when the only owner has been removed', async () => {
-    const [removedFounderId, bystanderId] = await seedTestUsers(db, 2);
+    const [removedFounderId, bystanderId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!removedFounderId || !bystanderId) throw new Error('seed failed');
 
     // ownerId on the org row is vestigial for this path; membership is what counts.
-    const org = await makeOrg(removedFounderId, 'only-owner-removed');
+    const org = await makeOrg('only-owner-removed');
 
     await db.insert(organizationMemberships).values([
       createTestMembershipInput(org.id, removedFounderId, {
@@ -133,10 +138,13 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('still honours an explicit primary-connect pin', async () => {
-    const [pinnedUserId, activeOwnerId] = await seedTestUsers(db, 2);
+    const [pinnedUserId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
+      string,
+      string,
+    ];
     if (!pinnedUserId || !activeOwnerId) throw new Error('seed failed');
 
-    const org = await makeOrg(activeOwnerId, 'pin-wins');
+    const org = await makeOrg('pin-wins');
 
     await db.insert(organizationMemberships).values(
       createTestMembershipInput(org.id, activeOwnerId, {

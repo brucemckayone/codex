@@ -105,7 +105,7 @@ describe('CourseJourneyService.getContentCourses (Codex-2pryk.3.10)', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId] = await seedTestUsers(db, 1);
+    [creatorId] = (await seedTestUsers(db, 1)) as [string];
 
     orgSlug = createUniqueSlug('org-cc');
     const [org] = await db

@@ -30,6 +30,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -54,17 +55,21 @@ describe('ContentService.listPublic — category filter', () => {
     content_service = new ContentService({ db, environment: 'test' });
     categoriesService = new CategoriesService({ db, environment: 'test' });
 
-    const [firstCreator] = await seedTestUsers(db, 1);
+    const [firstCreator] = (await seedTestUsers(db, 1)) as [string];
     creatorId = firstCreator;
 
-    const [orgA] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
-    const [orgB] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const orgA = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const orgB = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgAId = orgA.id;
     orgBId = orgB.id;
   });
@@ -78,19 +83,20 @@ describe('ContentService.listPublic — category filter', () => {
     organizationId: string;
     title: string;
   }): Promise<string> {
-    const [row] = await db
-      .insert(content)
-      .values({
-        creatorId,
-        organizationId: params.organizationId,
-        title: params.title,
-        slug: createUniqueSlug('cat-filter'),
-        contentType: 'written',
-        accessType: 'free',
-        status: 'published',
-        publishedAt: new Date(),
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(content)
+        .values({
+          creatorId,
+          organizationId: params.organizationId,
+          title: params.title,
+          slug: createUniqueSlug('cat-filter'),
+          contentType: 'written',
+          status: 'published',
+          publishedAt: new Date(),
+        })
+        .returning()
+    );
     return row.id;
   }
 

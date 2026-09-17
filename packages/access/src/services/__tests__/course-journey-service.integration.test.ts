@@ -34,7 +34,7 @@ describe('CourseJourneyService.listPublishedCourses (SPEC §8.5)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     svc = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId] = await seedTestUsers(db, 1);
+    [creatorId] = (await seedTestUsers(db, 1)) as [string];
 
     const [orgA] = await db
       .insert(organizations)
@@ -109,7 +109,7 @@ describe('CourseJourneyService.listPublishedCourses (SPEC §8.5)', () => {
         publishedAt: new Date('2026-06-10T00:00:00.000Z'),
         priceCents: 4900,
       },
-    ]);
+    ] as (typeof courses.$inferInsert)[]);
   });
 
   afterAll(async () => {

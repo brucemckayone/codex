@@ -58,7 +58,7 @@ describe('Member discovery (Codex-oi2w4)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId, otherUserId] = await seedTestUsers(db, 2);
+    [creatorId, otherUserId] = (await seedTestUsers(db, 2)) as [string, string];
   });
 
   afterAll(async () => {
@@ -194,7 +194,7 @@ describe('Member discovery (Codex-oi2w4)', () => {
 
       const list = await service.listPublishedJourneys(orgId);
       expect(list).toHaveLength(1);
-      const card = list[0];
+      const card = list[0]!;
       expect(card.pageId).toBe(pageId);
       expect(card.slug).toBe(slug);
       expect(card.courseId).toBe(courseId);
@@ -306,11 +306,11 @@ describe('Member discovery (Codex-oi2w4)', () => {
         }
       );
       await enrol(creatorId, courseId);
-      await complete(creatorId, practiceIds[0]);
+      await complete(creatorId, practiceIds[0]!);
 
       const list = await service.listEnrolledJourneys(creatorId, orgId);
       expect(list).toHaveLength(1);
-      const card = list[0];
+      const card = list[0]!;
       expect(card.pageId).toBe(pageId);
       expect(card.courseId).toBe(courseId);
       expect(card.totalPractices).toBe(2);
@@ -325,7 +325,7 @@ describe('Member discovery (Codex-oi2w4)', () => {
 
       const done = await seedPublishedJourney(orgId, { published: 1 });
       await enrol(creatorId, done.courseId, { completedAt: new Date() });
-      await complete(creatorId, done.practiceIds[0]);
+      await complete(creatorId, done.practiceIds[0]!);
 
       const fresh = await seedPublishedJourney(orgId, { published: 2 });
       await enrol(creatorId, fresh.courseId);
@@ -396,11 +396,11 @@ describe('Member discovery (Codex-oi2w4)', () => {
       expect(draftPractice).toBeDefined();
 
       await enrol(creatorId, courseId);
-      await complete(creatorId, practiceIds[0]); // published → counts
+      await complete(creatorId, practiceIds[0]!); // published → counts
       await complete(creatorId, draftPractice!.contentId); // draft → must NOT count
 
       const list = await service.listEnrolledJourneys(creatorId, orgId);
-      const card = list.find((c) => c.courseId === courseId);
+      const card = list.find((c) => c.courseId === courseId)!;
       expect(card?.totalPractices).toBe(2);
       expect(card?.completedPractices).toBe(1);
       expect(card?.percent).toBe(50);

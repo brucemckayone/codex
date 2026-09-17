@@ -19,6 +19,24 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+/**
+ * Local copy of `takeFirst` from @codex/test-utils. That package depends on
+ * @codex/database, so importing it here would be a circular workspace
+ * dependency. Keep the two in sync.
+ *
+ * `noUncheckedIndexedAccess` is on, so `const [row] = await db...returning()`
+ * types `row` as `T | undefined` (Codex-629bw).
+ */
+function takeFirst<T>(rows: readonly T[], what = 'row'): T {
+  const [row] = rows;
+
+  if (row === undefined) {
+    throw new Error(`Expected at least one ${what}, got none`);
+  }
+
+  return row;
+}
+
 const HAS_DB = ['LOCAL_PROXY', 'NEON_BRANCH'].includes(
   process.env.DB_METHOD || ''
 );
@@ -159,11 +177,13 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
         })
         .onConflictDoNothing();
 
-      const [row] = await dbHttp
-        .select()
-        .from(feeConfigPlatform)
-        .where(eq(feeConfigPlatform.id, 'singleton'))
-        .limit(1);
+      const row = takeFirst(
+        await dbHttp
+          .select()
+          .from(feeConfigPlatform)
+          .where(eq(feeConfigPlatform.id, 'singleton'))
+          .limit(1)
+      );
       // Either freshly inserted (version=1) or previously bumped — version
       // must be >= 1 and integer.
       expect(row).toBeDefined();
@@ -187,16 +207,17 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
         emailVerified: false,
         role: 'creator',
       });
-      const [org] = await dbHttp
-        .insert(organizations)
-        .values({
-          name: `Fee Schema ${label}`,
-          slug: `fee-schema-${label}-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2, 6)}`,
-          ownerId: userId,
-        })
-        .returning();
+      const org = takeFirst(
+        await dbHttp
+          .insert(organizations)
+          .values({
+            name: `Fee Schema ${label}`,
+            slug: `fee-schema-${label}-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 6)}`,
+          })
+          .returning()
+      );
       return org.id;
     }
 
@@ -224,16 +245,18 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
       const { feeConfigOrg } = await import('../schema');
       const orgId = await freshOrg('nulls');
 
-      const [row] = await dbHttp
-        .insert(feeConfigOrg)
-        .values({
-          organizationId: orgId,
-          platformFeePercent: null,
-          orgFeePercent: null,
-          minPlatformFeeCents: null,
-          minTransferCents: null,
-        })
-        .returning();
+      const row = takeFirst(
+        await dbHttp
+          .insert(feeConfigOrg)
+          .values({
+            organizationId: orgId,
+            platformFeePercent: null,
+            orgFeePercent: null,
+            minPlatformFeeCents: null,
+            minTransferCents: null,
+          })
+          .returning()
+      );
       expect(row.platformFeePercent).toBeNull();
       expect(row.orgFeePercent).toBeNull();
     });
@@ -255,10 +278,12 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
       const { dbHttp } = await import('../index');
       const { feeConfigOrg } = await import('../schema');
       const orgId = await freshOrg('ver');
-      const [row] = await dbHttp
-        .insert(feeConfigOrg)
-        .values({ organizationId: orgId, orgFeePercent: 1500 })
-        .returning();
+      const row = takeFirst(
+        await dbHttp
+          .insert(feeConfigOrg)
+          .values({ organizationId: orgId, orgFeePercent: 1500 })
+          .returning()
+      );
       expect(row.version).toBe(1);
     });
   });
@@ -281,16 +306,17 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
         emailVerified: false,
         role: 'creator',
       });
-      const [org] = await dbHttp
-        .insert(organizations)
-        .values({
-          name: 'Override Test Org',
-          slug: `override-org-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2, 6)}`,
-          ownerId: userId,
-        })
-        .returning();
+      const org = takeFirst(
+        await dbHttp
+          .insert(organizations)
+          .values({
+            name: 'Override Test Org',
+            slug: `override-org-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 6)}`,
+          })
+          .returning()
+      );
 
       await dbHttp.insert(feeConfigOrgCreator).values({
         organizationId: org.id,
@@ -327,16 +353,17 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
         emailVerified: false,
         role: 'creator',
       });
-      const [org] = await dbHttp
-        .insert(organizations)
-        .values({
-          name: 'Audit Test Org',
-          slug: `audit-org-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2, 6)}`,
-          ownerId: userId,
-        })
-        .returning();
+      const org = takeFirst(
+        await dbHttp
+          .insert(organizations)
+          .values({
+            name: 'Audit Test Org',
+            slug: `audit-org-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 6)}`,
+          })
+          .returning()
+      );
 
       await expectConstraintError(
         dbHttp.insert(feeConfigAuditLog).values({
@@ -440,18 +467,20 @@ describe.skipIf(!HAS_DB)('Fee Config Schema Constraints', () => {
         role: 'creator',
       });
 
-      const [row] = await dbHttp
-        .insert(feeConfigAuditLog)
-        .values({
-          scope: 'platform',
-          scopeOrgId: null,
-          scopeCreatorId: null,
-          columnName: 'platformFeePercent',
-          oldValue: '1000',
-          newValue: '1100',
-          changedBy: userId,
-        })
-        .returning();
+      const row = takeFirst(
+        await dbHttp
+          .insert(feeConfigAuditLog)
+          .values({
+            scope: 'platform',
+            scopeOrgId: null,
+            scopeCreatorId: null,
+            columnName: 'platformFeePercent',
+            oldValue: '1000',
+            newValue: '1100',
+            changedBy: userId,
+          })
+          .returning()
+      );
       expect(row.id).toBeDefined();
       expect(row.scope).toBe('platform');
 

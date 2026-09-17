@@ -114,7 +114,7 @@ describe('Course monetization round-trip (WP-6)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     [buyerId, buyer2Id, tierSubUserId, creatorId, creatorBId] =
-      await seedTestUsers(db, 5);
+      (await seedTestUsers(db, 5)) as [string, string, string, string, string];
 
     // Creator's Connect account (receives creator + org-fee slices for org A,
     // since the creator is org A's owner → org's primary Connect account).

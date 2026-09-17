@@ -68,20 +68,20 @@ describe('Database Client', () => {
       // Insert a row (id is generated automatically)
       const inserted = await dbHttp.insert(testTable).values({}).returning();
       expect(inserted.length).toBe(1);
-      expect(inserted[0].id).toBeGreaterThan(0);
+      expect(inserted[0]!.id).toBeGreaterThan(0);
 
       // Query it back
       const { eq } = await import('drizzle-orm');
       const queried = await dbHttp
         .select()
         .from(testTable)
-        .where(eq(testTable.id, inserted[0].id));
+        .where(eq(testTable.id, inserted[0]!.id));
 
       expect(queried.length).toBe(1);
-      expect(queried[0].id).toBe(inserted[0].id);
+      expect(queried[0]!.id).toBe(inserted[0]!.id);
 
       // Cleanup
-      await dbHttp.delete(testTable).where(eq(testTable.id, inserted[0].id));
+      await dbHttp.delete(testTable).where(eq(testTable.id, inserted[0]!.id));
     });
   } else {
     // This test runs when the database test is skipped, preventing an empty suite error.

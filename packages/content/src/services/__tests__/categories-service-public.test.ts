@@ -28,6 +28,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -48,17 +49,21 @@ describe('CategoriesService.listPublicForOrg', () => {
     db = setupTestDatabase();
     service = new CategoriesService({ db, environment: 'test' });
 
-    const [firstCreator] = await seedTestUsers(db, 1);
+    const [firstCreator] = (await seedTestUsers(db, 1)) as [string];
     creatorId = firstCreator;
 
-    const [orgA] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
-    const [orgB] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const orgA = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const orgB = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgAId = orgA.id;
     orgBId = orgB.id;
   });
@@ -71,19 +76,20 @@ describe('CategoriesService.listPublicForOrg', () => {
     organizationId: string;
     status: 'draft' | 'published';
   }): Promise<string> {
-    const [row] = await db
-      .insert(content)
-      .values({
-        creatorId,
-        organizationId: params.organizationId,
-        title: `Item ${randomUUID().slice(0, 8)}`,
-        slug: createUniqueSlug('cat-public'),
-        contentType: 'written',
-        accessType: 'free',
-        status: params.status,
-        publishedAt: params.status === 'published' ? new Date() : null,
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(content)
+        .values({
+          creatorId,
+          organizationId: params.organizationId,
+          title: `Item ${randomUUID().slice(0, 8)}`,
+          slug: createUniqueSlug('cat-public'),
+          contentType: 'written',
+          status: params.status,
+          publishedAt: params.status === 'published' ? new Date() : null,
+        })
+        .returning()
+    );
     return row.id;
   }
 

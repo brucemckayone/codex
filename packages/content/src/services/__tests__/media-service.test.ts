@@ -51,7 +51,7 @@ describe('MediaItemService', () => {
     db = setupTestDatabase();
     service = new MediaItemService({ db, environment: 'test' });
 
-    const userIds = await seedTestUsers(db, 2);
+    const userIds = (await seedTestUsers(db, 2)) as [string, string];
     [creatorId, otherCreatorId] = userIds;
   });
 
@@ -674,7 +674,7 @@ describe('MediaItemService', () => {
 
         // HLS prefix listed twice (page 1 + page 2); other prefixes once each
         const hlsCalls = mockR2.list.mock.calls.filter(
-          ([opts]: [{ prefix: string }]) => opts.prefix === prefixes.hls
+          (call) => (call[0] as { prefix: string }).prefix === prefixes.hls
         );
         expect(hlsCalls).toHaveLength(2);
 
@@ -755,7 +755,7 @@ describe('MediaItemService', () => {
       const page2 = await service.list(creatorId, {}, { page: 2, limit: 2 });
 
       expect(page2.items).toHaveLength(2);
-      expect(page1.items[0].id).not.toBe(page2.items[0].id);
+      expect(page1.items[0]!.id).not.toBe(page2.items[0]!.id);
     });
 
     it('should filter by status', async () => {
@@ -813,7 +813,7 @@ describe('MediaItemService', () => {
 
     it('should not return soft-deleted media', async () => {
       // Arrange: Delete one of our created media items
-      const mediaToDelete = createdMediaIds[0];
+      const mediaToDelete = createdMediaIds[0]!;
       await service.delete(mediaToDelete, creatorId);
 
       // Act

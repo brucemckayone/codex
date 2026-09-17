@@ -21,7 +21,7 @@ import {
   feeConfigPlatform,
 } from '@codex/database/schema';
 import { ValidationError } from '@codex/service-errors';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { FeeConfigService } from '../services/fee-config-service';
 
 interface InsertCall {
@@ -86,7 +86,7 @@ function buildMockDb(opts: {
       });
       // Some paths (listCreatorOverrides) terminate with .orderBy() and await
       // the result directly without .limit(). Make orderBy thenable.
-      (chain.orderBy as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (chain.orderBy as unknown as Mock).mockImplementation(() => {
         const thenable = {
           ...chain,
           // biome-ignore lint/suspicious/noThenProperty: deliberate thenable
@@ -132,7 +132,7 @@ function buildMockDb(opts: {
 }
 
 function makeMockCache(): VersionedCache & {
-  invalidateMock: ReturnType<typeof vi.fn>;
+  invalidateMock: Mock;
 } {
   const invalidate = vi.fn(async () => undefined);
   const get = vi.fn(
@@ -144,7 +144,7 @@ function makeMockCache(): VersionedCache & {
     invalidate,
     invalidateMock: invalidate,
   } as unknown as VersionedCache & {
-    invalidateMock: ReturnType<typeof vi.fn>;
+    invalidateMock: Mock;
   };
 }
 

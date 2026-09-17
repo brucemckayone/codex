@@ -18,6 +18,24 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+/**
+ * Local copy of `takeFirst` from @codex/test-utils. That package depends on
+ * @codex/database, so importing it here would be a circular workspace
+ * dependency. Keep the two in sync.
+ *
+ * `noUncheckedIndexedAccess` is on, so `const [row] = await db...returning()`
+ * types `row` as `T | undefined` (Codex-629bw).
+ */
+function takeFirst<T>(rows: readonly T[], what = 'row'): T {
+  const [row] = rows;
+
+  if (row === undefined) {
+    throw new Error(`Expected at least one ${what}, got none`);
+  }
+
+  return row;
+}
+
 const HAS_DB = ['LOCAL_PROXY', 'NEON_BRANCH'].includes(
   process.env.DB_METHOD || ''
 );
@@ -90,13 +108,15 @@ async function freshFixture(
     },
   ]);
 
-  const [org] = await dbHttp
-    .insert(organizations)
-    .values({
-      name: `Agreement Org ${label}`,
-      slug: `agreement-${label}-${suffix}`,
-    })
-    .returning();
+  const org = takeFirst(
+    await dbHttp
+      .insert(organizations)
+      .values({
+        name: `Agreement Org ${label}`,
+        slug: `agreement-${label}-${suffix}`,
+      })
+      .returning()
+  );
 
   if (withOwnerMembership) {
     await dbHttp.insert(organizationMemberships).values({
@@ -126,14 +146,16 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       const { creatorOrganizationAgreements } = await import('../schema');
       const { creatorId, orgId } = await freshFixture('defaults');
 
-      const [row] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 2000,
-        })
-        .returning();
+      const row = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 2000,
+          })
+          .returning()
+      );
 
       expect(row.revenueType).toBe('subscription');
       expect(row.status).toBe('active');
@@ -245,27 +267,31 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       const { creatorOrganizationAgreements } = await import('../schema');
       const { creatorId, orgId } = await freshFixture('two-types');
 
-      const [sub] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 2000,
-          revenueType: 'subscription',
-          effectiveFrom: new Date('2026-01-01T00:00:00Z'),
-        })
-        .returning();
+      const sub = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 2000,
+            revenueType: 'subscription',
+            effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+          })
+          .returning()
+      );
 
-      const [purchase] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 1000,
-          revenueType: 'content_purchase',
-          effectiveFrom: new Date('2026-01-01T00:00:00Z'),
-        })
-        .returning();
+      const purchase = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 1000,
+            revenueType: 'content_purchase',
+            effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+          })
+          .returning()
+      );
 
       expect(sub.revenueType).toBe('subscription');
       expect(purchase.revenueType).toBe('content_purchase');
@@ -328,23 +354,25 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       const { agreementProposals } = await import('../schema');
       const { ownerId, creatorId, orgId } = await freshFixture('initial');
 
-      const [proposal] = await dbHttp
-        .insert(agreementProposals)
-        .values({
-          organizationId: orgId,
-          creatorId,
-          revenueType: 'subscription',
-          parentProposalId: null,
-          roundNumber: 1,
-          proposedByUserId: ownerId,
-          proposedByRole: 'owner',
-          proposedCreatorSharePercent: 7000,
-          proposedTermMonths: 6,
-          proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
-          note: 'Initial offer',
-          status: 'open',
-        })
-        .returning();
+      const proposal = takeFirst(
+        await dbHttp
+          .insert(agreementProposals)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            revenueType: 'subscription',
+            parentProposalId: null,
+            roundNumber: 1,
+            proposedByUserId: ownerId,
+            proposedByRole: 'owner',
+            proposedCreatorSharePercent: 7000,
+            proposedTermMonths: 6,
+            proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
+            note: 'Initial offer',
+            status: 'open',
+          })
+          .returning()
+      );
 
       expect(proposal.parentProposalId).toBeNull();
       expect(proposal.roundNumber).toBe(1);
@@ -357,39 +385,43 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       const { agreementProposals } = await import('../schema');
       const { ownerId, creatorId, orgId } = await freshFixture('counter');
 
-      const [round1] = await dbHttp
-        .insert(agreementProposals)
-        .values({
-          organizationId: orgId,
-          creatorId,
-          revenueType: 'subscription',
-          roundNumber: 1,
-          proposedByUserId: ownerId,
-          proposedByRole: 'owner',
-          proposedCreatorSharePercent: 5000,
-          proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
-          status: 'countered',
-          respondedAt: new Date(),
-          respondedByUserId: creatorId,
-        })
-        .returning();
+      const round1 = takeFirst(
+        await dbHttp
+          .insert(agreementProposals)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            revenueType: 'subscription',
+            roundNumber: 1,
+            proposedByUserId: ownerId,
+            proposedByRole: 'owner',
+            proposedCreatorSharePercent: 5000,
+            proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
+            status: 'countered',
+            respondedAt: new Date(),
+            respondedByUserId: creatorId,
+          })
+          .returning()
+      );
 
-      const [round2] = await dbHttp
-        .insert(agreementProposals)
-        .values({
-          organizationId: orgId,
-          creatorId,
-          revenueType: 'subscription',
-          parentProposalId: round1.id,
-          roundNumber: 2,
-          proposedByUserId: creatorId,
-          proposedByRole: 'creator',
-          proposedCreatorSharePercent: 6500,
-          proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
-          note: 'Counter — bump share',
-          status: 'open',
-        })
-        .returning();
+      const round2 = takeFirst(
+        await dbHttp
+          .insert(agreementProposals)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            revenueType: 'subscription',
+            parentProposalId: round1.id,
+            roundNumber: 2,
+            proposedByUserId: creatorId,
+            proposedByRole: 'creator',
+            proposedCreatorSharePercent: 6500,
+            proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
+            note: 'Counter — bump share',
+            status: 'open',
+          })
+          .returning()
+      );
 
       expect(round2.parentProposalId).toBe(round1.id);
       expect(round2.roundNumber).toBe(2);
@@ -511,33 +543,37 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
         await import('../schema');
       const { ownerId, creatorId, orgId } = await freshFixture('linked');
 
-      const [proposal] = await dbHttp
-        .insert(agreementProposals)
-        .values({
-          organizationId: orgId,
-          creatorId,
-          revenueType: 'subscription',
-          roundNumber: 1,
-          proposedByUserId: ownerId,
-          proposedByRole: 'owner',
-          proposedCreatorSharePercent: 7000,
-          proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
-          status: 'accepted',
-          respondedAt: new Date(),
-          respondedByUserId: creatorId,
-        })
-        .returning();
+      const proposal = takeFirst(
+        await dbHttp
+          .insert(agreementProposals)
+          .values({
+            organizationId: orgId,
+            creatorId,
+            revenueType: 'subscription',
+            roundNumber: 1,
+            proposedByUserId: ownerId,
+            proposedByRole: 'owner',
+            proposedCreatorSharePercent: 7000,
+            proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
+            status: 'accepted',
+            respondedAt: new Date(),
+            respondedByUserId: creatorId,
+          })
+          .returning()
+      );
 
-      const [agreement] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 10000 - 7000,
-          revenueType: 'subscription',
-          currentProposalId: proposal.id,
-        })
-        .returning();
+      const agreement = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 10000 - 7000,
+            revenueType: 'subscription',
+            currentProposalId: proposal.id,
+          })
+          .returning()
+      );
 
       expect(agreement.currentProposalId).toBe(proposal.id);
 
@@ -551,7 +587,7 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
             isNotNull(creatorOrganizationAgreements.currentProposalId)
           )
         );
-      expect(rows[0].currentProposalId).toBe(proposal.id);
+      expect(rows[0]!.currentProposalId).toBe(proposal.id);
     });
   });
 
@@ -590,16 +626,18 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       const { ownerId, creatorId, orgId } = await freshFixture('reactivate');
 
       // First active agreement.
-      const [first] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 2000,
-          revenueType: 'subscription',
-          effectiveFrom: new Date('2026-01-01T00:00:00Z'),
-        })
-        .returning();
+      const first = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 2000,
+            revenueType: 'subscription',
+            effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+          })
+          .returning()
+      );
 
       // Terminate it.
       await dbHttp
@@ -614,16 +652,18 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
 
       // A NEW active row on the same (org, creator, revenue_type) MUST be
       // allowed — the partial unique only constrains active rows.
-      const [second] = await dbHttp
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId,
-          organizationId: orgId,
-          organizationFeePercentage: 1500,
-          revenueType: 'subscription',
-          effectiveFrom: new Date('2026-03-01T00:00:00Z'),
-        })
-        .returning();
+      const second = takeFirst(
+        await dbHttp
+          .insert(creatorOrganizationAgreements)
+          .values({
+            creatorId,
+            organizationId: orgId,
+            organizationFeePercentage: 1500,
+            revenueType: 'subscription',
+            effectiveFrom: new Date('2026-03-01T00:00:00Z'),
+          })
+          .returning()
+      );
 
       expect(second.status).toBe('active');
 
