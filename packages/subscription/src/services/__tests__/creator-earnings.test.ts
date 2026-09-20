@@ -40,10 +40,7 @@ describe('SubscriptionService — creator earnings (WP7)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     await validateDatabaseConnection(db);
-    [creatorId, otherCreatorId] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
+    [creatorId, otherCreatorId] = await seedTestUsers(db, 2);
 
     const stripe = createMockStripe() as unknown as Stripe;
     service = new SubscriptionService({ db, environment: 'test' }, stripe);

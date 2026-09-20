@@ -82,7 +82,7 @@ describe('listUserLibrary — course purchase + portal provenance', () => {
       } as unknown as PurchaseService,
     });
 
-    const [owner] = (await seedTestUsers(db, 1)) as [string];
+    const [owner] = await seedTestUsers(db, 1);
     if (!owner) throw new Error('Failed to seed user');
     ownerUserId = owner;
 

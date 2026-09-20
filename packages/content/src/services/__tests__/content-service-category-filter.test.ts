@@ -55,7 +55,7 @@ describe('ContentService.listPublic — category filter', () => {
     content_service = new ContentService({ db, environment: 'test' });
     categoriesService = new CategoriesService({ db, environment: 'test' });
 
-    const [firstCreator] = (await seedTestUsers(db, 1)) as [string];
+    const [firstCreator] = await seedTestUsers(db, 1);
     creatorId = firstCreator;
 
     const orgA = takeFirst(

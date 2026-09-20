@@ -91,7 +91,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     await validateDatabaseConnection(db);
-    const [a, b] = (await seedTestUsers(db, 2)) as [string, string];
+    const [a, b] = await seedTestUsers(db, 2);
     creatorId = a;
     payoutUserId = b;
   });

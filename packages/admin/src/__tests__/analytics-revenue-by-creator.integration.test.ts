@@ -54,7 +54,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     service = new AdminAnalyticsService({ db, environment: 'test' });
     // Single customer reused across tests — purchases are scoped by content
     // and org, not customer, so a shared row is safe.
-    const [c] = (await seedTestUsers(db, 1)) as [string];
+    const [c] = await seedTestUsers(db, 1);
     customerId = c;
   });
 

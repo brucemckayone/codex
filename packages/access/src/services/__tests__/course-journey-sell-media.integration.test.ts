@@ -194,11 +194,7 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
   beforeAll(async () => {
     db = setupTestDatabase();
     svc = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId, outsiderId, invitedId] = (await seedTestUsers(db, 3)) as [
-      string,
-      string,
-      string,
-    ];
+    [creatorId, outsiderId, invitedId] = await seedTestUsers(db, 3);
     if (!creatorId || !outsiderId || !invitedId) {
       throw new Error('failed to seed test users');
     }

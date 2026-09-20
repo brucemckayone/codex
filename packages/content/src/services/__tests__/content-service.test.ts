@@ -72,7 +72,7 @@ describe('ContentService', () => {
     service = new ContentService({ db, environment: 'test' });
 
     // Create test users
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId, otherCreatorId] = userIds;
   });
 

@@ -46,7 +46,7 @@ describe('Integration Tests', () => {
     mediaService = new MediaItemService(config);
     orgService = new OrganizationService(config);
 
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId, otherCreatorId] = userIds;
 
     // Publishing monetised content now requires a payout-ready Connect account

@@ -49,7 +49,7 @@ describe('CategoriesService.listPublicForOrg', () => {
     db = setupTestDatabase();
     service = new CategoriesService({ db, environment: 'test' });
 
-    const [firstCreator] = (await seedTestUsers(db, 1)) as [string];
+    const [firstCreator] = await seedTestUsers(db, 1);
     creatorId = firstCreator;
 
     const orgA = takeFirst(

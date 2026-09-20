@@ -79,9 +79,9 @@ describe('resolveOrCreateCustomer', () => {
 
   it('returns cached stripe_customer_id without calling Stripe', async () => {
     const cachedId = `cus_cached_${createUniqueSlug()}`;
-    const [userId] = (await seedTestUsers(db, 1, {
+    const [userId] = await seedTestUsers(db, 1, {
       stripeCustomerId: cachedId,
-    })) as [string];
+    });
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
@@ -96,7 +96,7 @@ describe('resolveOrCreateCustomer', () => {
   // ── Reuse-existing path ──────────────────────────────────────
 
   it('reuses existing Stripe Customer and persists id when email matches', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -128,7 +128,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('picks the oldest Customer when multiple email matches exist', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -165,7 +165,7 @@ describe('resolveOrCreateCustomer', () => {
   // ── Create-new path ──────────────────────────────────────────
 
   it('creates a new Stripe Customer with deterministic idempotency key', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -211,7 +211,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('always stamps codex_user_id in metadata even when caller provides none', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -243,9 +243,9 @@ describe('resolveOrCreateCustomer', () => {
     // DB persist — the fastest way in a single-process test is to pre-stamp
     // it and assert the helper's fallback re-read returns that value.
     const winnerId = `cus_winner_${createUniqueSlug()}`;
-    const [userId] = (await seedTestUsers(db, 1, {
+    const [userId] = await seedTestUsers(db, 1, {
       stripeCustomerId: winnerId,
-    })) as [string];
+    });
     // Clear then re-set to mimic "winner just wrote" state without going
     // through Stripe twice: set back to NULL first to enter the Stripe branch,
     // then stamp winnerId after the mock returns but before the conditional
@@ -303,7 +303,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('throws NotFoundError when user is soft-deleted', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     await db
       .update(schema.users)
       .set({ deletedAt: new Date() })
@@ -320,7 +320,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('wraps Stripe list failures in PaymentProcessingError', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -342,7 +342,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('wraps Stripe create failures in PaymentProcessingError', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })
@@ -368,7 +368,7 @@ describe('resolveOrCreateCustomer', () => {
   });
 
   it('re-throws non-Stripe errors unchanged (no wrapping)', async () => {
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     const user = takeFirst(
       await db
         .select({ email: schema.users.email })

@@ -52,10 +52,7 @@ describe('CourseSubscriptionService lifecycle (WP-6)', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [subscriberId, creatorId] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
+    [subscriberId, creatorId] = await seedTestUsers(db, 2);
 
     await db
       .insert(stripeConnectAccounts)

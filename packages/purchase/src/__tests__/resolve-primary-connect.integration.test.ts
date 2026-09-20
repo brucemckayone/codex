@@ -65,10 +65,7 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   }
 
   it('skips a removed founder and settles on the active owner', async () => {
-    const [removedFounderId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
+    const [removedFounderId, activeOwnerId] = await seedTestUsers(db, 2);
     if (!removedFounderId || !activeOwnerId) throw new Error('seed failed');
 
     const org = await makeOrg('removed-founder');
@@ -103,10 +100,7 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('resolves to nothing when the only owner has been removed', async () => {
-    const [removedFounderId, bystanderId] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
+    const [removedFounderId, bystanderId] = await seedTestUsers(db, 2);
     if (!removedFounderId || !bystanderId) throw new Error('seed failed');
 
     // ownerId on the org row is vestigial for this path; membership is what counts.
@@ -138,10 +132,7 @@ describe('resolvePrimaryConnect — removed owners must not receive the org fee'
   });
 
   it('still honours an explicit primary-connect pin', async () => {
-    const [pinnedUserId, activeOwnerId] = (await seedTestUsers(db, 2)) as [
-      string,
-      string,
-    ];
+    const [pinnedUserId, activeOwnerId] = await seedTestUsers(db, 2);
     if (!pinnedUserId || !activeOwnerId) throw new Error('seed failed');
 
     const org = await makeOrg('pin-wins');

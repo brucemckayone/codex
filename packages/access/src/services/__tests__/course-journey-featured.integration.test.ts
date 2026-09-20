@@ -122,7 +122,7 @@ describe('CourseJourneyService.setJourneyFeatured (journey featured write path)'
   beforeAll(async () => {
     db = setupTestDatabase();
     svc = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId] = (await seedTestUsers(db, 1)) as [string];
+    [creatorId] = await seedTestUsers(db, 1);
 
     const [orgA] = await db
       .insert(organizations)

@@ -69,7 +69,7 @@ describe('FeeConfigService — real-DB write integration', () => {
 
     // seedTestUsers returns user IDs usable as `changedBy` (FK to users.id
     // with onDelete: 'restrict' in fee_config_audit_log).
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [adminId, creatorId] = userIds as [string, string];
 
     const [org] = await db

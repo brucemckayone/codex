@@ -107,7 +107,7 @@ describe('ContentAccessService Integration', () => {
       hlsTokenSecret: 'test-worker-shared-secret',
     });
 
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [userId, otherUserId] = userIds;
 
     // ContentService.publish now gates monetised content (paid w/ price>0 or
@@ -760,7 +760,7 @@ describe('ContentAccessService Integration', () => {
   describe('listUserLibrary', () => {
     it('should return empty list for user with no purchases', async () => {
       // Create a fresh user with no purchases
-      const userIds = (await seedTestUsers(db, 1)) as [string];
+      const userIds = await seedTestUsers(db, 1);
       const freshUserId = userIds[0];
 
       const result = await accessService.listUserLibrary(freshUserId, {
@@ -869,7 +869,7 @@ describe('ContentAccessService Integration', () => {
 
     it('should filter by in-progress content', async () => {
       // Create multiple content items
-      const userIds = (await seedTestUsers(db, 1)) as [string];
+      const userIds = await seedTestUsers(db, 1);
       const testUserId = userIds[0];
 
       const media1 = await mediaService.create(
@@ -953,10 +953,7 @@ describe('ContentAccessService Integration', () => {
     describe('Subscription library coverage', () => {
       /** Seed an org, a tier, and an active subscriber. */
       async function seedOrgWithTierAndSubscriber() {
-        const [creatorUserId, subscriberUserId] = (await seedTestUsers(
-          db,
-          2
-        )) as [string, string];
+        const [creatorUserId, subscriberUserId] = await seedTestUsers(db, 2);
 
         const [subOrg] = await db
           .insert(organizations)
@@ -1774,7 +1771,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockClear();
 
         // Create fresh user without org membership to ensure access is denied
-        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [freshUserId] = await seedTestUsers(db, 1);
 
         const media = await mediaService.create(
           {
@@ -1894,7 +1891,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         // For now, verify the denial path works without subscription
-        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [freshUserId] = await seedTestUsers(db, 1);
         const media = await mediaService.create(
           {
             title: 'Sub Access Video',
@@ -2057,7 +2054,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-anon'
         );
 
-        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [freshUserId] = await seedTestUsers(db, 1);
 
         await expect(
           accessService.getStreamingUrl(freshUserId, {
@@ -2079,7 +2076,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-at-tier'
         );
 
-        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [subUserId] = await seedTestUsers(db, 1);
 
         // Active subscription AT the minimum tier (proTier)
         await db.insert(subscriptions).values(
@@ -2111,7 +2108,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-above-tier'
         );
 
-        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [subUserId] = await seedTestUsers(db, 1);
 
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subUserId, org.id, proTier.id, {
@@ -2141,7 +2138,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-below-tier'
         );
 
-        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [subUserId] = await seedTestUsers(db, 1);
 
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subUserId, org.id, basicTier.id, {
@@ -2168,7 +2165,7 @@ describe('ContentAccessService Integration', () => {
           'hybrid-purchase'
         );
 
-        const [purchaserUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [purchaserUserId] = await seedTestUsers(db, 1);
 
         // No subscription — user bought it outright. PurchaseService is the
         // authority for purchase state in this suite.
@@ -2264,7 +2261,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-owner');
 
-        const [ownerUser] = (await seedTestUsers(db, 1)) as [string];
+        const [ownerUser] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: ownerUser,
           organizationId,
@@ -2286,7 +2283,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-admin');
 
-        const [adminUser] = (await seedTestUsers(db, 1)) as [string];
+        const [adminUser] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: adminUser,
           organizationId,
@@ -2308,7 +2305,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-deny-sub');
 
-        const [subUser] = (await seedTestUsers(db, 1)) as [string];
+        const [subUser] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: subUser,
           organizationId,
@@ -2333,7 +2330,7 @@ describe('ContentAccessService Integration', () => {
           'team-deny-follower'
         );
 
-        const [followerUser] = (await seedTestUsers(db, 1)) as [string];
+        const [followerUser] = await seedTestUsers(db, 1);
         await db
           .insert(organizationFollowers)
           .values({ userId: followerUser, organizationId });
@@ -2419,7 +2416,7 @@ describe('ContentAccessService Integration', () => {
           'follow-grant'
         );
 
-        const [followerUser] = (await seedTestUsers(db, 1)) as [string];
+        const [followerUser] = await seedTestUsers(db, 1);
         await db
           .insert(organizationFollowers)
           .values({ userId: followerUser, organizationId });
@@ -2441,7 +2438,7 @@ describe('ContentAccessService Integration', () => {
           'follow-deny'
         );
 
-        const [freshUser] = (await seedTestUsers(db, 1)) as [string];
+        const [freshUser] = await seedTestUsers(db, 1);
 
         await expect(
           accessService.getStreamingUrl(freshUser, {
@@ -2460,7 +2457,7 @@ describe('ContentAccessService Integration', () => {
           'follow-mgmt'
         );
 
-        const [creatorUser] = (await seedTestUsers(db, 1)) as [string];
+        const [creatorUser] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: creatorUser,
           organizationId,
@@ -2524,7 +2521,7 @@ describe('ContentAccessService Integration', () => {
         await contentService.publish(content.id, userId);
 
         // Create owner membership
-        const [ownerUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [ownerUserId] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: ownerUserId,
           organizationId,
@@ -2583,7 +2580,7 @@ describe('ContentAccessService Integration', () => {
         await contentService.publish(content.id, userId);
 
         // Create subscriber membership (not owner/admin/creator)
-        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [subUserId] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: subUserId,
           organizationId,
@@ -2648,7 +2645,7 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(content.id, userId);
 
-        const [freshUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [freshUserId] = await seedTestUsers(db, 1);
 
         await expect(
           accessService.getStreamingUrl(freshUserId, {
@@ -3056,7 +3053,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
         const { tierId } = await seedOrgAndTier('paid-purchaser');
-        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
+        const [viewerId] = await seedTestUsers(db, 1);
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-paid-purchaser',
@@ -3082,7 +3079,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         const { tierId } = await seedOrgAndTier('subs');
-        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
+        const [viewerId] = await seedTestUsers(db, 1);
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-subs',
@@ -3105,7 +3102,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
         const { tierId } = await seedOrgAndTier('has-access');
-        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
+        const [viewerId] = await seedTestUsers(db, 1);
 
         const item = await seedOrglessTierGatedContent({
           slugPrefix: 'orgless-has-access',
@@ -3126,7 +3123,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockClear();
         mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
-        const [viewerId] = (await seedTestUsers(db, 1)) as [string];
+        const [viewerId] = await seedTestUsers(db, 1);
 
         const media = await mediaService.create(
           {
@@ -3191,7 +3188,7 @@ describe('ContentAccessService Integration', () => {
         mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
         const { tierOrgId, tierId } = await seedOrgAndTier('org-scoped-ok');
-        const [subUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [subUserId] = await seedTestUsers(db, 1);
 
         const media = await mediaService.create(
           {
@@ -3449,12 +3446,12 @@ describe('ContentAccessService Integration', () => {
         });
 
         // NEGATIVE — no subscription.
-        const [outsider] = (await seedTestUsers(db, 1)) as [string];
+        const [outsider] = await seedTestUsers(db, 1);
         expect(await accessService.canView(outsider, contentId)).toBe(false);
         await expectStreamDenied(outsider, contentId);
 
         // POSITIVE — active subscription at the tier.
-        const [subscriber] = (await seedTestUsers(db, 1)) as [string];
+        const [subscriber] = await seedTestUsers(db, 1);
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subscriber, organizationId, tierId, {
             status: 'active',
@@ -3478,12 +3475,12 @@ describe('ContentAccessService Integration', () => {
         await linkPractice(stageId, contentId);
 
         // NEGATIVE — user holds no entitlement over the containing course.
-        const [outsider] = (await seedTestUsers(db, 1)) as [string];
+        const [outsider] = await seedTestUsers(db, 1);
         expect(await accessService.canView(outsider, contentId)).toBe(false);
         await expectStreamDenied(outsider, contentId);
 
         // POSITIVE — a course purchase reaches the shared practice.
-        const [owner] = (await seedTestUsers(db, 1)) as [string];
+        const [owner] = await seedTestUsers(db, 1);
         await grantCourse(owner, organizationId, courseId, 'course_purchase');
         expect(await accessService.canView(owner, contentId)).toBe(true);
         await expectStreamGranted(owner, contentId);
@@ -3499,11 +3496,11 @@ describe('ContentAccessService Integration', () => {
           policy: { isFollowerGated: true },
         });
 
-        const [stranger] = (await seedTestUsers(db, 1)) as [string];
+        const [stranger] = await seedTestUsers(db, 1);
         expect(await accessService.canView(stranger, contentId)).toBe(false);
         await expectStreamDenied(stranger, contentId);
 
-        const [follower] = (await seedTestUsers(db, 1)) as [string];
+        const [follower] = await seedTestUsers(db, 1);
         await db
           .insert(organizationFollowers)
           .values({ userId: follower, organizationId });
@@ -3523,7 +3520,7 @@ describe('ContentAccessService Integration', () => {
         const { stageId } = await makeCourse(organizationId);
         await linkPractice(stageId, contentId);
 
-        const [manager] = (await seedTestUsers(db, 1)) as [string];
+        const [manager] = await seedTestUsers(db, 1);
         await db.insert(organizationMemberships).values({
           userId: manager,
           organizationId,
@@ -3547,7 +3544,7 @@ describe('ContentAccessService Integration', () => {
           organizationId: null,
           policy: { isPurchasable: true, priceCents: 1500 },
         });
-        const [buyer] = (await seedTestUsers(db, 1)) as [string];
+        const [buyer] = await seedTestUsers(db, 1);
         expect(await accessService.canView(buyer, contentId)).toBe(false);
         await expectStreamDenied(buyer, contentId);
 
@@ -3572,7 +3569,7 @@ describe('ContentAccessService Integration', () => {
           policy: { includedInTierId: tierId },
         });
 
-        const [holder] = (await seedTestUsers(db, 1)) as [string];
+        const [holder] = await seedTestUsers(db, 1);
         // No subscription, no purchase — denied first (baseline).
         expect(await accessService.canView(holder, contentId)).toBe(false);
 
@@ -3593,7 +3590,7 @@ describe('ContentAccessService Integration', () => {
     describe('canEnterCourse', () => {
       it('grants entry on a course_purchase entitlement', async () => {
         const { courseId } = await makeCourse(organizationId);
-        const [buyer] = (await seedTestUsers(db, 1)) as [string];
+        const [buyer] = await seedTestUsers(db, 1);
         expect(await accessService.canEnterCourse(buyer, courseId)).toBe(false);
         await grantCourse(buyer, organizationId, courseId, 'course_purchase');
         expect(await accessService.canEnterCourse(buyer, courseId)).toBe(true);
@@ -3609,7 +3606,7 @@ describe('ContentAccessService Integration', () => {
           .values({ courseId, tierId, organizationId });
 
         // Subscriber to the granting tier — derived, no stored row.
-        const [subscriber] = (await seedTestUsers(db, 1)) as [string];
+        const [subscriber] = await seedTestUsers(db, 1);
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(subscriber, organizationId, tierId, {
             status: 'active',
@@ -3620,7 +3617,7 @@ describe('ContentAccessService Integration', () => {
         );
 
         // A user with no subscription to that tier is denied.
-        const [outsider] = (await seedTestUsers(db, 1)) as [string];
+        const [outsider] = await seedTestUsers(db, 1);
         expect(await accessService.canEnterCourse(outsider, courseId)).toBe(
           false
         );
@@ -3628,7 +3625,7 @@ describe('ContentAccessService Integration', () => {
 
       it('denies entry with no entitlement, and denies anonymous (null user)', async () => {
         const { courseId } = await makeCourse(organizationId);
-        const [stranger] = (await seedTestUsers(db, 1)) as [string];
+        const [stranger] = await seedTestUsers(db, 1);
         expect(await accessService.canEnterCourse(stranger, courseId)).toBe(
           false
         );
@@ -3638,7 +3635,7 @@ describe('ContentAccessService Integration', () => {
       it('denies entry on a revoked or expired grant (instant revocation)', async () => {
         const { courseId: revokedCourse } = await makeCourse(organizationId);
         const { courseId: expiredCourse } = await makeCourse(organizationId);
-        const [user] = (await seedTestUsers(db, 1)) as [string];
+        const [user] = await seedTestUsers(db, 1);
 
         await grantCourse(
           user,
@@ -3682,7 +3679,7 @@ describe('ContentAccessService Integration', () => {
           organizationId,
         });
 
-        const [user] = (await seedTestUsers(db, 1)) as [string];
+        const [user] = await seedTestUsers(db, 1);
         await grantCourse(
           user,
           organizationId,
@@ -3706,7 +3703,7 @@ describe('ContentAccessService Integration', () => {
       });
 
       it('empty input and anonymous user return all-false without querying', async () => {
-        const [user] = (await seedTestUsers(db, 1)) as [string];
+        const [user] = await seedTestUsers(db, 1);
         const empty = await accessService.canEnterCoursesBatch(user, []);
         expect(empty.size).toBe(0);
         const anon = await accessService.canEnterCoursesBatch(null, [
@@ -3741,7 +3738,7 @@ describe('ContentAccessService Integration', () => {
           purchaseService: mockPurchaseService as unknown as PurchaseService,
         });
 
-        const [user] = (await seedTestUsers(db, 1)) as [string];
+        const [user] = await seedTestUsers(db, 1);
         const many = Array.from({ length: 25 }, () => crypto.randomUUID());
 
         counts.select = 0;

@@ -47,7 +47,7 @@ describe('AdminCustomerManagementService', () => {
     service = new AdminCustomerManagementService({ db, environment: 'test' });
 
     // Create test users
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId] = userIds;
 
     // Create organization
@@ -91,10 +91,7 @@ describe('AdminCustomerManagementService', () => {
       );
 
       // Create test customers
-      const [customer1, customer2] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [customer1, customer2] = await seedTestUsers(db, 2);
 
       const media = takeFirst(
         await db
@@ -190,7 +187,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -274,13 +271,7 @@ describe('AdminCustomerManagementService', () => {
       );
 
       // Create 5 customers
-      const customerIds = (await seedTestUsers(db, 5)) as [
-        string,
-        string,
-        string,
-        string,
-        string,
-      ];
+      const customerIds = await seedTestUsers(db, 5);
 
       const media = takeFirst(
         await db
@@ -361,10 +352,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer1, customer2] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [customer1, customer2] = await seedTestUsers(db, 2);
 
       const media = takeFirst(
         await db
@@ -463,7 +451,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -563,7 +551,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -647,7 +635,7 @@ describe('AdminCustomerManagementService', () => {
       );
 
       // Customer exists but has no purchases from this org
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       await expect(
         service.getCustomerDetails(testOrg.id, customer)
@@ -664,7 +652,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -754,7 +742,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -854,7 +842,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       // Create membership instead of purchase
       await db.insert(organizationMemberships).values({
@@ -969,7 +957,7 @@ describe('AdminCustomerManagementService', () => {
       );
 
       // Customer exists but has no purchases or membership with org
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db
@@ -1018,7 +1006,7 @@ describe('AdminCustomerManagementService', () => {
           .returning()
       );
 
-      const [customer] = (await seedTestUsers(db, 1)) as [string];
+      const [customer] = await seedTestUsers(db, 1);
 
       const media = takeFirst(
         await db

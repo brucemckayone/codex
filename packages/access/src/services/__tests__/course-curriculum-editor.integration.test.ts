@@ -195,7 +195,7 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId] = (await seedTestUsers(db, 1)) as [string];
+    [creatorId] = await seedTestUsers(db, 1);
     service = new CourseJourneyService({ db, environment: 'test' });
 
     const [orgA] = await db
