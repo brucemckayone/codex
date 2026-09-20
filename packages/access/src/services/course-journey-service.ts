@@ -3200,8 +3200,21 @@ export class CourseJourneyService extends BaseService {
         // `courseOnly` is the existing fix that was never applied: the resolver
         // checks it FIRST and suppresses every standalone path regardless of the
         // other flags (schema/content.ts:270), so setting it alone is sufficient
-        // — `isFree` is deliberately left untouched (it still drives display
-        // badges, and it can no longer grant access once `courseOnly` wins).
+        // for the RESOLVER — `isFree` is deliberately left untouched, because it
+        // still drives display badges.
+        //
+        // THAT WAS NOT SUFFICIENT FOR THE WHOLE SYSTEM (Codex-al9ft). This
+        // comment used to add "and it can no longer grant access once
+        // `courseOnly` wins", which is true of the resolver and was FALSE of
+        // apps/web: `isPublicContent(isFree)` never read `courseOnly`, so a
+        // practice gated here came back PUBLIC there and had its full body
+        // rendered into the anonymous SSR payload. This write closed the stream
+        // door and left the body door open, and a production row
+        // (`embodiement-meditation`, isFree=true + courseOnly=true) was in
+        // exactly that state until #524. `isPublicContent` now reads the whole
+        // policy and fails closed, which is what makes leaving `isFree` alone
+        // safe — so do not restore the old claim: the safety lives in the
+        // CONSUMER, not in `courseOnly` winning.
         //
         // SURGICAL BY DESIGN — the predicate gates ONLY content with no
         // deliberately-configured standalone path. Content that is independently
