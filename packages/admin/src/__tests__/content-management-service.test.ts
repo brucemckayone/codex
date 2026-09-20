@@ -28,6 +28,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -48,10 +49,12 @@ describe('AdminContentManagementService', () => {
     [creatorId] = userIds;
 
     // Create organization
-    const [org] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgId = org.id;
   });
 
@@ -61,10 +64,12 @@ describe('AdminContentManagementService', () => {
 
   describe('listAllContent', () => {
     it('should return empty list for organization with no content', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const result = await service.listAllContent(emptyOrg.id);
 
@@ -75,20 +80,24 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should list all non-deleted content for organization', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create multiple content items
       for (let i = 0; i < 5; i++) {
@@ -100,7 +109,6 @@ describe('AdminContentManagementService', () => {
           slug: createUniqueSlug(`list-test-${i}`),
           contentType: 'video',
           status: i % 2 === 0 ? CONTENT_STATUS.DRAFT : CONTENT_STATUS.PUBLISHED,
-          visibility: 'public',
           priceCents: 0,
         });
       }
@@ -112,20 +120,24 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should paginate content correctly', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create 10 content items
       for (let i = 0; i < 10; i++) {
@@ -137,7 +149,6 @@ describe('AdminContentManagementService', () => {
           slug: createUniqueSlug(`paginate-${i}`),
           contentType: 'video',
           status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
           priceCents: 0,
         });
       }
@@ -156,24 +167,28 @@ describe('AdminContentManagementService', () => {
       expect(page2.items).toHaveLength(3);
       expect(page2.pagination.page).toBe(2);
       // Ensure different items on different pages
-      expect(page1.items[0].id).not.toBe(page2.items[0].id);
+      expect(page1.items[0]!.id).not.toBe(page2.items[0]!.id);
     });
 
     it('should filter by status', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create draft and published content
       await db.insert(contentTable).values([
@@ -185,7 +200,6 @@ describe('AdminContentManagementService', () => {
           slug: createUniqueSlug('draft-filter'),
           contentType: 'video',
           status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
           priceCents: 0,
         },
         {
@@ -197,7 +211,6 @@ describe('AdminContentManagementService', () => {
           contentType: 'video',
           status: CONTENT_STATUS.PUBLISHED,
           publishedAt: new Date(),
-          visibility: 'public',
           priceCents: 0,
         },
       ]);
@@ -220,52 +233,58 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should exclude soft-deleted content', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create one normal and one deleted content
-      const [normalContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Normal Content',
-          slug: createUniqueSlug('normal'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+      const normalContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Normal Content',
+            slug: createUniqueSlug('normal'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
+          })
+          .returning()
+      );
 
-      const [deletedContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Deleted Content',
-          slug: createUniqueSlug('deleted'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-          deletedAt: new Date(),
-        })
-        .returning();
+      const deletedContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Deleted Content',
+            slug: createUniqueSlug('deleted'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
+            deletedAt: new Date(),
+          })
+          .returning()
+      );
 
       const result = await service.listAllContent(testOrg.id);
 
@@ -280,35 +299,40 @@ describe('AdminContentManagementService', () => {
 
   describe('publishContent', () => {
     it('should publish draft content', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const draft = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Draft to Publish',
+            slug: createUniqueSlug('publish-test'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [draft] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Draft to Publish',
-          slug: createUniqueSlug('publish-test'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const published = await service.publishContent(testOrg.id, draft.id);
 
@@ -317,36 +341,41 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should be idempotent (publishing already published content)', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Already Published',
+            slug: createUniqueSlug('idempotent-publish'),
+            contentType: 'video',
+            status: CONTENT_STATUS.PUBLISHED,
+            publishedAt: new Date(),
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Already Published',
-          slug: createUniqueSlug('idempotent-publish'),
-          contentType: 'video',
-          status: CONTENT_STATUS.PUBLISHED,
-          publishedAt: new Date(),
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const result = await service.publishContent(testOrg.id, content.id);
 
@@ -354,35 +383,40 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should throw BusinessLogicError for video content without ready media', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'transcoding', // Not ready
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'transcoding', // Not ready
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Not Ready Content',
+            slug: createUniqueSlug('not-ready'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Not Ready Content',
-          slug: createUniqueSlug('not-ready'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       await expect(
         service.publishContent(testOrg.id, content.id)
@@ -390,25 +424,28 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should publish written content without media', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          title: 'Written Content',
-          slug: createUniqueSlug('written-publish'),
-          contentType: 'written',
-          contentBody: 'This is written content',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            title: 'Written Content',
+            slug: createUniqueSlug('written-publish'),
+            contentType: 'written',
+            contentBody: 'This is written content',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
+          })
+          .returning()
+      );
 
       const published = await service.publishContent(testOrg.id, content.id);
 
@@ -416,39 +453,46 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should throw NotFoundError for content from different organization', async () => {
-      const [org1] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [org2] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org1 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org1.id,
+            mediaItemId: media.id,
+            title: 'Org1 Content',
+            slug: createUniqueSlug('cross-org'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org1.id,
-          mediaItemId: media.id,
-          title: 'Org1 Content',
-          slug: createUniqueSlug('cross-org'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       // Try to publish content from org1 using org2
       await expect(service.publishContent(org2.id, content.id)).rejects.toThrow(
@@ -459,36 +503,41 @@ describe('AdminContentManagementService', () => {
 
   describe('unpublishContent', () => {
     it('should unpublish published content', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Published Content',
+            slug: createUniqueSlug('unpublish-test'),
+            contentType: 'video',
+            status: CONTENT_STATUS.PUBLISHED,
+            publishedAt: new Date(),
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Published Content',
-          slug: createUniqueSlug('unpublish-test'),
-          contentType: 'video',
-          status: CONTENT_STATUS.PUBLISHED,
-          publishedAt: new Date(),
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const unpublished = await service.unpublishContent(
         testOrg.id,
@@ -499,35 +548,40 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should be idempotent (unpublishing already draft content)', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Already Draft',
+            slug: createUniqueSlug('idempotent-unpublish'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Already Draft',
-          slug: createUniqueSlug('idempotent-unpublish'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const result = await service.unpublishContent(testOrg.id, content.id);
 
@@ -543,35 +597,40 @@ describe('AdminContentManagementService', () => {
 
   describe('deleteContent', () => {
     it('should soft delete content', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'To Delete',
+            slug: createUniqueSlug('delete-test'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'To Delete',
-          slug: createUniqueSlug('delete-test'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const result = await service.deleteContent(testOrg.id, content.id);
 
@@ -583,39 +642,46 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should throw NotFoundError for content from different organization', async () => {
-      const [org1] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [org2] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org1 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org1.id,
+            mediaItemId: media.id,
+            title: 'Cross Org Delete',
+            slug: createUniqueSlug('cross-org-delete'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org1.id,
-          mediaItemId: media.id,
-          title: 'Cross Org Delete',
-          slug: createUniqueSlug('cross-org-delete'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       // Try to delete content from org1 using org2
       await expect(service.deleteContent(org2.id, content.id)).rejects.toThrow(
@@ -624,36 +690,41 @@ describe('AdminContentManagementService', () => {
     });
 
     it('should throw NotFoundError for already deleted content', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const content = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Already Deleted',
+            slug: createUniqueSlug('already-deleted'),
+            contentType: 'video',
+            status: CONTENT_STATUS.DRAFT,
+            priceCents: 0,
+            deletedAt: new Date(),
           })
-        )
-        .returning();
-
-      const [content] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Already Deleted',
-          slug: createUniqueSlug('already-deleted'),
-          contentType: 'video',
-          status: CONTENT_STATUS.DRAFT,
-          visibility: 'public',
-          priceCents: 0,
-          deletedAt: new Date(),
-        })
-        .returning();
+          .returning()
+      );
 
       await expect(
         service.deleteContent(testOrg.id, content.id)

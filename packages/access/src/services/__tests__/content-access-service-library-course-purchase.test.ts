@@ -37,7 +37,6 @@ import {
   purchases,
   stagePractices,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createUniqueSlug,
@@ -76,8 +75,8 @@ describe('listUserLibrary — course purchase + portal provenance', () => {
 
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs: new ObservabilityClient('library-course-purchase-test', 'test'),
       purchaseService: {
         verifyPurchase: vi.fn(async () => false),
       } as unknown as PurchaseService,
@@ -166,7 +165,6 @@ describe('listUserLibrary — course purchase + portal provenance', () => {
         slug: createUniqueSlug(slugSuffix),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       },

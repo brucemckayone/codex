@@ -26,6 +26,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
@@ -37,6 +38,7 @@ import {
   describe,
   expect,
   it,
+  type Mock,
   vi,
 } from 'vitest';
 import {
@@ -63,7 +65,7 @@ describe('PurchaseService Integration', () => {
   function createMockCheckoutSession(
     sessionId: string,
     paymentIntentId: string
-  ): Stripe.Checkout.Session {
+  ): Stripe.Response<Stripe.Checkout.Session> {
     return {
       id: sessionId,
       object: 'checkout.session',
@@ -73,7 +75,7 @@ describe('PurchaseService Integration', () => {
       currency: 'gbp',
       metadata: {},
       status: 'complete',
-    } as Stripe.Checkout.Session;
+    } as unknown as Stripe.Response<Stripe.Checkout.Session>;
   }
 
   beforeAll(async () => {
@@ -118,7 +120,6 @@ describe('PurchaseService Integration', () => {
       .values({
         name: 'Test Organization',
         slug: createUniqueSlug('test-org'),
-        ownerId: userId,
       })
       .returning();
 
@@ -139,11 +140,12 @@ describe('PurchaseService Integration', () => {
   // cache-hit / reuse-existing / failure branches override these defaults
   // via .mockResolvedValueOnce / .mockRejectedValue locally.
   beforeEach(async () => {
+    vi.mocked(mockStripe.customers.list as unknown as Mock).mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
     vi.mocked(
-      (mockStripe.customers as ReturnType<typeof vi.fn>).list
-    ).mockResolvedValue({ data: [], has_more: false });
-    vi.mocked(
-      (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      mockStripe.customers.create as unknown as Mock
     ).mockImplementation((params: Record<string, unknown>) => ({
       id: `cus_default_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       email: (params.email as string) ?? 'default@example.com',
@@ -216,9 +218,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('premium-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -304,9 +305,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('premium-tutorial-resolve'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -321,11 +321,11 @@ describe('PurchaseService Integration', () => {
         .where(eq(schema.users.id, otherUserId));
 
       const createdCustomerId = `cus_created_${Date.now()}`;
+      vi.mocked(mockStripe.customers.list as unknown as Mock).mockResolvedValue(
+        { data: [], has_more: false }
+      );
       vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockResolvedValue({ data: [], has_more: false });
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+        mockStripe.customers.create as unknown as Mock
       ).mockResolvedValue({
         id: createdCustomerId,
         email: 'x@example.com',
@@ -399,9 +399,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('premium-tutorial-cache'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -417,12 +416,8 @@ describe('PurchaseService Integration', () => {
         .where(eq(schema.users.id, otherUserId));
 
       // Reset mocks so we can assert neither list nor create is called.
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockClear();
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
-      ).mockClear();
+      vi.mocked(mockStripe.customers.list as unknown as Mock).mockClear();
+      vi.mocked(mockStripe.customers.create as unknown as Mock).mockClear();
 
       vi.mocked(mockStripe.checkout.sessions.create).mockResolvedValue(
         createMockCheckoutSession('cs_cache_hit', 'pi_cache_hit')
@@ -475,9 +470,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('premium-tutorial-fail'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -493,9 +487,9 @@ describe('PurchaseService Integration', () => {
       const stripeErr = Object.assign(new Error('Stripe API unreachable'), {
         type: 'StripeConnectionError',
       });
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockRejectedValue(stripeErr);
+      vi.mocked(mockStripe.customers.list as unknown as Mock).mockRejectedValue(
+        stripeErr
+      );
 
       await expect(
         purchaseService.createCheckoutSession(
@@ -539,9 +533,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('premium-tutorial-missing'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -596,8 +589,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('free-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0, // Free!
+          tags: [],
         },
         userId
       );
@@ -645,9 +638,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('draft-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -694,9 +686,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('already-owned-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 4999,
+          tags: [],
         },
         userId
       );
@@ -760,9 +751,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('revenue-split-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -832,9 +822,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('idempotent-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -901,9 +890,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('access-grant-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 999,
+          tags: [],
         },
         userId
       );
@@ -967,9 +955,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug(opts.title.toLowerCase().replace(/\s+/g, '-')),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: opts.priceCents,
+          tags: [],
         },
         userId
       );
@@ -1197,17 +1184,18 @@ describe('PurchaseService Integration', () => {
       // Seed a SECOND organization owned by otherUserId so we can configure
       // a Connect account with chargesEnabled=false without interfering with
       // the shared org used by other tests.
-      const [org2] = await db
-        .insert(organizations)
-        .values({
-          name: 'Connect Disabled Org',
-          slug: createUniqueSlug('connect-disabled'),
-          ownerId: otherUserId,
-          // Pin so resolvePrimaryConnect resolves the org's (offline) account
-          // by userId (Codex-69t7c) — an onboarding org is pinned in production.
-          primaryConnectAccountUserId: otherUserId,
-        })
-        .returning();
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Connect Disabled Org',
+            slug: createUniqueSlug('connect-disabled'),
+            // Pin so resolvePrimaryConnect resolves the org's (offline) account
+            // by userId (Codex-69t7c) — an onboarding org is pinned in production.
+            primaryConnectAccountUserId: otherUserId,
+          })
+          .returning()
+      );
 
       const stripeAccountId = `acct_disabled_${Date.now()}`;
       await db.insert(schema.stripeConnectAccounts).values({
@@ -1267,9 +1255,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('connect-offline'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 10000,
+          tags: [],
         },
         otherUserId
       );
@@ -1402,14 +1389,15 @@ describe('PurchaseService Integration', () => {
     // in the platform balance with no ledger row (the bug this locks).
     it('Codex-ed446: org owner with no Connect account still gets a non-null-userId pending org_fee row (no 23514 strand)', async () => {
       const [ownerUserId] = await seedTestUsers(db, 1);
-      const [org2] = await db
-        .insert(organizations)
-        .values({
-          name: 'No-Connect Owner Org',
-          slug: createUniqueSlug('no-connect-owner'),
-          ownerId: ownerUserId,
-        })
-        .returning();
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'No-Connect Owner Org',
+            slug: createUniqueSlug('no-connect-owner'),
+          })
+          .returning()
+      );
       // resolveOrgOwnerId reads organizationMemberships(role='owner'), NOT
       // organizations.ownerId — seed the membership explicitly.
       await db
@@ -1463,9 +1451,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('no-connect-owner-content'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 10000,
+          tags: [],
         },
         ownerUserId
       );
@@ -1524,14 +1511,15 @@ describe('PurchaseService Integration', () => {
       async function setupDisconnectedContent(titleSuffix: string) {
         // Create a fresh org per test so there are no conflicts on the
         // stripeConnectAccounts unique constraint.
-        const [localOrg] = await db
-          .insert(organizations)
-          .values({
-            name: `WP10 Org ${titleSuffix}`,
-            slug: createUniqueSlug(`wp10-org-${titleSuffix}`),
-            ownerId: otherUserId,
-          })
-          .returning();
+        const localOrg = takeFirst(
+          await db
+            .insert(organizations)
+            .values({
+              name: `WP10 Org ${titleSuffix}`,
+              slug: createUniqueSlug(`wp10-org-${titleSuffix}`),
+            })
+            .returning()
+        );
         await db.insert(schema.stripeConnectAccounts).values({
           userId: otherUserId,
           organizationId: localOrg.id,
@@ -1566,9 +1554,8 @@ describe('PurchaseService Integration', () => {
             slug: createUniqueSlug(`wp10-${titleSuffix}`),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
-            accessType: 'paid',
             priceCents: 5000,
+            tags: [],
           },
           otherUserId
         );
@@ -1622,7 +1609,7 @@ describe('PurchaseService Integration', () => {
 
         // Notification fires once for the creator_payout row.
         expect(mailer).toHaveBeenCalledOnce();
-        const [params] = mailer.mock.calls[0];
+        const [params] = mailer.mock.calls[0]!;
         expect(params.templateName).toBe('creator-connect-needed');
         expect(params.category).toBe('transactional');
         expect(params.data.amountFormatted).toMatch(/£/);
@@ -1691,7 +1678,7 @@ describe('PurchaseService Integration', () => {
 
         // Only ONE notification — for creator_payout only.
         expect(mailer).toHaveBeenCalledOnce();
-        expect(mailer.mock.calls[0][0].templateName).toBe(
+        expect(mailer.mock.calls[0]![0].templateName).toBe(
           'creator-connect-needed'
         );
       });
@@ -1812,25 +1799,29 @@ describe('PurchaseService Integration', () => {
 
       // New org with `userId` as the canonical Connect owner. The pin
       // is the production mechanism resolvePrimaryConnect honours.
-      const [multiOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Multi-creator Org',
-          slug: createUniqueSlug('multi-creator'),
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const multiOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Multi-creator Org',
+            slug: createUniqueSlug('multi-creator'),
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
 
       // Insert MEMBER's Connect row FIRST. Production `.limit(1)` will
       // pick this without an ORDER BY clause.
-      const [memberUser] = await db
-        .insert(schema.users)
-        .values({
-          id: crypto.randomUUID(),
-          email: `co-creator-${Date.now()}@test.com`,
-          name: 'Co-Creator',
-        })
-        .returning();
+      const memberUser = takeFirst(
+        await db
+          .insert(schema.users)
+          .values({
+            id: crypto.randomUUID(),
+            email: `co-creator-${Date.now()}@test.com`,
+            name: 'Co-Creator',
+          })
+          .returning()
+      );
       const MEMBER_STRIPE_ACCT = `acct_member_${Date.now()}`;
       await db.insert(schema.stripeConnectAccounts).values({
         userId: memberUser.id,
@@ -1908,9 +1899,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('multi-creator'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1000,
+          tags: [],
         },
         userId
       );
@@ -2038,9 +2028,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug(opts.title.toLowerCase().replace(/\s+/g, '-')),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: opts.priceCents,
+          tags: [],
         },
         userId
       );
@@ -2253,17 +2242,18 @@ describe('PurchaseService Integration', () => {
       // Seed a fresh org for this test so the Connect account state is
       // controllable. owner = userId, distinct from the shared org seeded
       // in beforeAll.
-      const [refundOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Refund Reversal Org',
-          slug: createUniqueSlug('refund-reversal'),
-          ownerId: userId,
-          // Pin so resolvePrimaryConnect resolves the org's account by userId
-          // (Codex-69t7c) — onboarded orgs are pinned in production.
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const refundOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Refund Reversal Org',
+            slug: createUniqueSlug('refund-reversal'),
+            // Pin so resolvePrimaryConnect resolves the org's account by userId
+            // (Codex-69t7c) — onboarded orgs are pinned in production.
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: refundOrg.id,
@@ -2329,9 +2319,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('refund-reversal'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 10000,
+          tags: [],
         },
         userId
       );
@@ -2432,9 +2421,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('idempotent-reversal'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1000,
+          tags: [],
         },
         userId
       );
@@ -2481,17 +2469,18 @@ describe('PurchaseService Integration', () => {
         }),
       };
 
-      const [partialOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Partial Refund Org',
-          slug: createUniqueSlug('partial-refund'),
-          ownerId: userId,
-          // Pin so resolvePrimaryConnect resolves the org's account by userId
-          // (Codex-69t7c) — onboarded orgs are pinned in production.
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const partialOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Partial Refund Org',
+            slug: createUniqueSlug('partial-refund'),
+            // Pin so resolvePrimaryConnect resolves the org's account by userId
+            // (Codex-69t7c) — onboarded orgs are pinned in production.
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: partialOrg.id,
@@ -2556,9 +2545,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('partial-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2000,
+          tags: [],
         },
         userId
       );
@@ -2615,14 +2603,16 @@ describe('PurchaseService Integration', () => {
         }),
       };
 
-      const [sentinelOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Sentinel Refund Org',
-          slug: createUniqueSlug('sentinel-refund'),
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const sentinelOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Sentinel Refund Org',
+            slug: createUniqueSlug('sentinel-refund'),
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: sentinelOrg.id,
@@ -2692,9 +2682,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('sentinel-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1000,
+          tags: [],
         },
         userId
       );
@@ -2743,7 +2732,7 @@ describe('PurchaseService Integration', () => {
         resolution: null,
         resolvedAt: null,
       });
-      expect(reviews[0].attemptedReversalCents).toBeGreaterThan(0);
+      expect(reviews[0]!.attemptedReversalCents).toBeGreaterThan(0);
     });
 
     // REGRESSION (PR #203 deep-review F-2, bead Codex-92ej7, DQ-9) — when a
@@ -2774,17 +2763,18 @@ describe('PurchaseService Integration', () => {
       };
 
       // New org whose Connect account is NOT ready — pending path triggers.
-      const [pendingOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Pending Refund Org',
-          slug: createUniqueSlug('pending-refund'),
-          ownerId: userId,
-          // Pin so resolvePrimaryConnect resolves the org's (not-ready) account
-          // by userId (Codex-69t7c) so the org-fee pending row is written.
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const pendingOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Pending Refund Org',
+            slug: createUniqueSlug('pending-refund'),
+            // Pin so resolvePrimaryConnect resolves the org's (not-ready) account
+            // by userId (Codex-69t7c) so the org-fee pending row is written.
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: pendingOrg.id,
@@ -2837,9 +2827,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('pending-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1000,
+          tags: [],
         },
         userId
       );
@@ -2941,9 +2930,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('verify-purchase-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1499,
+          tags: [],
         },
         userId
       );
@@ -2996,9 +2984,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('no-purchase-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2499,
+          tags: [],
         },
         userId
       );
@@ -3043,9 +3030,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('other-customer-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -3106,9 +3092,8 @@ describe('PurchaseService Integration', () => {
             slug: createUniqueSlug(`history-tutorial-${i}`),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
-            accessType: 'paid',
             priceCents: 999 + i * 100,
+            tags: [],
           },
           userId
         );
@@ -3183,7 +3168,6 @@ describe('PurchaseService Integration', () => {
         .values({
           name: 'Sales Test Org',
           slug: createUniqueSlug('sales-test-org'),
-          ownerId: userId,
         })
         .returning();
       const [otherOrg] = await db
@@ -3191,7 +3175,6 @@ describe('PurchaseService Integration', () => {
         .values({
           name: 'Other Sales Org',
           slug: createUniqueSlug('other-sales-org'),
-          ownerId: userId,
         })
         .returning();
       if (!salesOrg || !otherOrg) throw new Error('Failed to seed orgs');
@@ -3229,9 +3212,8 @@ describe('PurchaseService Integration', () => {
             slug: createUniqueSlug(slug),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
-            accessType: 'paid',
             priceCents,
+            tags: [],
           },
           userId
         );
@@ -3431,7 +3413,6 @@ describe('PurchaseService Integration', () => {
         .values({
           name: 'Stats Test Org',
           slug: createUniqueSlug('stats-test-org'),
-          ownerId: userId,
         })
         .returning();
       if (!org) throw new Error('Failed to seed stats org');
@@ -3462,9 +3443,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('stats-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1000,
+          tags: [],
         },
         userId
       );
@@ -3524,7 +3504,6 @@ describe('PurchaseService Integration', () => {
         .values({
           name: 'Empty Org',
           slug: createUniqueSlug('empty-stats-org'),
-          ownerId: userId,
         })
         .returning();
       const stats = await purchaseService.getSalesStats(emptyOrg!.id, {});
@@ -3575,9 +3554,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('get-purchase-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -3635,9 +3613,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('forbidden-purchase-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -3691,16 +3668,12 @@ describe('PurchaseService Integration', () => {
 
       const portalUrl = 'https://billing.stripe.com/session/cached';
       vi.mocked(
-        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+        mockStripe.billingPortal.sessions.create as unknown as Mock
       ).mockResolvedValue({ url: portalUrl } as Stripe.BillingPortal.Session);
 
       // Clear defaults set by beforeEach so we can assert the cache-hit path.
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockClear();
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
-      ).mockClear();
+      vi.mocked(mockStripe.customers.list as unknown as Mock).mockClear();
+      vi.mocked(mockStripe.customers.create as unknown as Mock).mockClear();
 
       const result = await purchaseService.createPortalSession(
         'test@example.com',
@@ -3712,7 +3685,7 @@ describe('PurchaseService Integration', () => {
       expect(mockStripe.customers.list).not.toHaveBeenCalled();
       expect(mockStripe.customers.create).not.toHaveBeenCalled();
       expect(
-        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+        mockStripe.billingPortal.sessions.create as unknown as Mock
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           customer: cachedId,
@@ -3724,7 +3697,7 @@ describe('PurchaseService Integration', () => {
     it('resolves and persists a Customer id when the user has none cached', async () => {
       const createdId = `cus_portal_new_${Date.now()}`;
       vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+        mockStripe.customers.create as unknown as Mock
       ).mockResolvedValueOnce({
         id: createdId,
         email: 'newuser@example.com',
@@ -3734,7 +3707,7 @@ describe('PurchaseService Integration', () => {
 
       const portalUrl = 'https://billing.stripe.com/session/resolved';
       vi.mocked(
-        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+        mockStripe.billingPortal.sessions.create as unknown as Mock
       ).mockResolvedValue({ url: portalUrl } as Stripe.BillingPortal.Session);
 
       await purchaseService.createPortalSession(
@@ -3744,7 +3717,7 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+        mockStripe.customers.create as unknown as Mock
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'newuser@example.com',
@@ -3755,7 +3728,7 @@ describe('PurchaseService Integration', () => {
         })
       );
       expect(
-        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+        mockStripe.billingPortal.sessions.create as unknown as Mock
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           customer: createdId,
@@ -3777,7 +3750,7 @@ describe('PurchaseService Integration', () => {
         type: 'StripeAPIError',
       });
       vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+        mockStripe.customers.list as unknown as Mock
       ).mockRejectedValueOnce(stripeError);
 
       await expect(
@@ -3791,7 +3764,7 @@ describe('PurchaseService Integration', () => {
 
     it('validates return URL with domain whitelist', async () => {
       vi.mocked(
-        (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
+        mockStripe.billingPortal.sessions.create as unknown as Mock
       ).mockResolvedValue({
         url: 'https://billing.stripe.com/session/test_789',
       } as Stripe.BillingPortal.Session);
@@ -3837,9 +3810,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('refund-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -3900,9 +3872,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('idempotent-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 999,
+          tags: [],
         },
         userId
       );
@@ -3960,9 +3931,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('refund-metadata'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -4046,9 +4016,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('rollback-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1499,
+          tags: [],
         },
         userId
       );
@@ -4173,9 +4142,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('access-revoke'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1499,
+          tags: [],
         },
         userId
       );
@@ -4242,9 +4210,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('atomic-refund'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 999,
+          tags: [],
         },
         userId
       );
@@ -4324,9 +4291,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('dispute-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 1999,
+          tags: [],
         },
         userId
       );
@@ -4405,9 +4371,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('idempotent-dispute'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 999,
+          tags: [],
         },
         userId
       );
@@ -4484,7 +4449,6 @@ describe('PurchaseService Integration', () => {
         .values({
           name: 'Verify Test Org',
           slug: createUniqueSlug('verify-test-org'),
-          ownerId: verifyUserId,
         })
         .returning();
 
@@ -4519,9 +4483,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('verify-test-content'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 999,
+          tags: [],
         },
         verifyUserId
       );
@@ -4543,7 +4506,7 @@ describe('PurchaseService Integration', () => {
           organizationId: verifyOrgId,
           creatorId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
     });
 
     it('should return session status when session belongs to user', async () => {
@@ -4582,7 +4545,7 @@ describe('PurchaseService Integration', () => {
           organizationId: verifyOrgId,
           creatorId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       const result = await purchaseService.verifyCheckoutSession(
         sessionId,
@@ -4608,7 +4571,7 @@ describe('PurchaseService Integration', () => {
           contentId: verifyContentId,
           customerId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       const result = await purchaseService.verifyCheckoutSession(
         openSessionId,
@@ -4631,7 +4594,7 @@ describe('PurchaseService Integration', () => {
           contentId: verifyContentId,
           customerId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       const result = await purchaseService.verifyCheckoutSession(
         expiredSessionId,
@@ -4654,7 +4617,7 @@ describe('PurchaseService Integration', () => {
           organizationId: verifyOrgId,
           creatorId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       await expect(
         purchaseService.verifyCheckoutSession(otherUserSessionId, verifyUserId)
@@ -4697,7 +4660,7 @@ describe('PurchaseService Integration', () => {
           organizationId: verifyOrgId,
           creatorId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       // Should NOT throw ForbiddenError
       const result = await purchaseService.verifyCheckoutSession(
@@ -4724,7 +4687,7 @@ describe('PurchaseService Integration', () => {
           organizationId: verifyOrgId,
           creatorId: verifyUserId,
         },
-      } as Stripe.Checkout.Session);
+      } as unknown as Stripe.Response<Stripe.Checkout.Session>);
 
       // With correct implementation, customer_id (undefined) !== userId
       // so this should throw ForbiddenError
@@ -4769,10 +4732,15 @@ describe('PurchaseService Integration', () => {
   describe('resolvePrimaryConnect — org→account resolution (Codex-69t7c)', () => {
     it('falls back to the org owner account when no primary pin is set', async () => {
       const [ownerUserId] = await seedTestUsers(db, 1);
-      const [org] = await db
-        .insert(organizations)
-        .values({ name: 'RPC Owner Org', slug: createUniqueSlug('rpc-owner') })
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'RPC Owner Org',
+            slug: createUniqueSlug('rpc-owner'),
+          })
+          .returning()
+      );
       await db
         .insert(schema.organizationMemberships)
         .values(
@@ -4795,13 +4763,15 @@ describe('PurchaseService Integration', () => {
 
     it('picks the earliest-joined owner deterministically for a multi-owner org (Codex-rjwdm)', async () => {
       const [olderOwnerId, newerOwnerId] = await seedTestUsers(db, 2);
-      const [org] = await db
-        .insert(organizations)
-        .values({
-          name: 'RPC Multi-Owner Org',
-          slug: createUniqueSlug('rpc-multi-owner'),
-        })
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'RPC Multi-Owner Org',
+            slug: createUniqueSlug('rpc-multi-owner'),
+          })
+          .returning()
+      );
       // Two owners with distinct join times. Insert the NEWER one FIRST so a
       // resolver without a deterministic ORDER BY would tend to return it
       // (insertion order) — the test then proves the `.orderBy(asc(createdAt))`
@@ -4846,10 +4816,15 @@ describe('PurchaseService Integration', () => {
     });
 
     it('returns undefined when the org has neither a primary pin nor an owner', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values({ name: 'RPC Empty Org', slug: createUniqueSlug('rpc-empty') })
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'RPC Empty Org',
+            slug: createUniqueSlug('rpc-empty'),
+          })
+          .returning()
+      );
 
       const account = await resolvePrimaryConnect(db, org.id);
       expect(account).toBeUndefined();
@@ -4910,9 +4885,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug(title.toLowerCase().replace(/\s+/g, '-')),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents,
+          tags: [],
         },
         creatorUserId
       );
@@ -5297,10 +5271,8 @@ describe('PurchaseService Integration', () => {
 
       expect(result.sessionUrl).toBeTruthy();
       expect(sessionsCreate).toHaveBeenCalledTimes(1);
-      const passedMetadata = sessionsCreate.mock.calls[0][0].metadata as Record<
-        string,
-        string
-      >;
+      const passedMetadata = sessionsCreate.mock.calls[0]![0]
+        .metadata as Record<string, string>;
       // organizationId MUST be absent (not present, not the string "null").
       expect(passedMetadata).not.toHaveProperty('organizationId');
       expect(passedMetadata.contentId).toBe(content.id);
@@ -5409,9 +5381,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('orgless-draft'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -5455,8 +5426,7 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('orgless-free'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
-          accessType: 'free',
+          tags: [],
         },
         userId
       );
@@ -5575,15 +5545,16 @@ describe('PurchaseService Integration', () => {
       // Creator = userId. Seed an org owned by userId + the creator's single
       // Connect (one account, used for BOTH the orgless creator slice AND, via
       // the org pin, the org slice).
-      const [mixedOrg] = await db
-        .insert(organizations)
-        .values({
-          name: 'Mixed Flow Org',
-          slug: createUniqueSlug('mixed-flow'),
-          ownerId: userId,
-          primaryConnectAccountUserId: userId,
-        })
-        .returning();
+      const mixedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values({
+            name: 'Mixed Flow Org',
+            slug: createUniqueSlug('mixed-flow'),
+            primaryConnectAccountUserId: userId,
+          })
+          .returning()
+      );
       await db
         .insert(schema.stripeConnectAccounts)
         .values({
@@ -5651,9 +5622,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug('mixed-org-leg'),
           contentType: 'video',
           mediaItemId: orgMedia.id,
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 10000,
+          tags: [],
         },
         userId
       );
@@ -5723,9 +5693,8 @@ describe('PurchaseService Integration', () => {
           slug: createUniqueSlug(slugPrefix),
           contentType: 'written',
           contentBody: 'Refund-race test body.',
-          visibility: 'purchased_only',
-          accessType: 'paid',
           priceCents: 2999,
+          tags: [],
         },
         userId
       );
@@ -5739,7 +5708,7 @@ describe('PurchaseService Integration', () => {
       // No purchase row yet — checkout.session.completed hasn't arrived. The
       // session exists in Stripe carrying the metadata + amount.
       (
-        mockStripe.checkout.sessions.list as ReturnType<typeof vi.fn>
+        mockStripe.checkout.sessions.list as unknown as Mock
       ).mockResolvedValueOnce({
         data: [
           {
@@ -5764,10 +5733,12 @@ describe('PurchaseService Integration', () => {
         refundReason: 'requested_by_customer',
       });
 
-      const [row] = await db
-        .select()
-        .from(schema.purchases)
-        .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId));
+      const row = takeFirst(
+        await db
+          .select()
+          .from(schema.purchases)
+          .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId))
+      );
       expect(row).toBeDefined();
       expect(row.customerId).toBe(customerId);
       expect(row.contentId).toBe(content.id);
@@ -5793,7 +5764,7 @@ describe('PurchaseService Integration', () => {
     it('returns void without inserting when no checkout session exists for the payment_intent', async () => {
       const paymentIntentId = `pi_no_session_${Date.now()}`;
       (
-        mockStripe.checkout.sessions.list as ReturnType<typeof vi.fn>
+        mockStripe.checkout.sessions.list as unknown as Mock
       ).mockResolvedValueOnce({ data: [] });
 
       const result = await purchaseService.processRefund(paymentIntentId, {
@@ -5834,10 +5805,12 @@ describe('PurchaseService Integration', () => {
 
       // Fast path: row already present → NO Stripe session lookup.
       expect(listSpy).not.toHaveBeenCalled();
-      const [row] = await db
-        .select()
-        .from(schema.purchases)
-        .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId));
+      const row = takeFirst(
+        await db
+          .select()
+          .from(schema.purchases)
+          .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId))
+      );
       expect(row.status).toBe('refunded');
       expect(result?.userId).toBe(otherUserId);
     });

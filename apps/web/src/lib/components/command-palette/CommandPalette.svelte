@@ -4,9 +4,6 @@
   Studio-only command palette triggered by Cmd/Ctrl+K.
   Provides fast access to pages, content, and actions.
   Positioned in top-third of viewport as an overlay.
-
-  @prop {Array<{ label: string; href: string; icon?: string; group: string }>} pages - Static page links
-  @prop {string} orgSlug - Current org slug for content search
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
@@ -30,12 +27,6 @@
     group: string;
     action?: () => void;
   }
-
-  interface Props {
-    orgSlug?: string;
-  }
-
-  const { orgSlug }: Props = $props();
 
   let isOpen = $state(false);
   let query = $state('');

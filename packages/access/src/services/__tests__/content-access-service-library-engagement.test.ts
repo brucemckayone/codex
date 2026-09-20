@@ -31,7 +31,6 @@ import {
   subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createTestSubscriptionInput,
@@ -65,11 +64,10 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
     mediaService = new MediaItemService(config);
     r2Client = createR2SigningClientFromEnv();
 
-    const obs = new ObservabilityClient('relationship-library-test', 'test');
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs,
       purchaseService: {
         verifyPurchase: vi.fn(async () => false),
       } as unknown as PurchaseService,
@@ -138,7 +136,6 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
         slug: createUniqueSlug(slugSuffix),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       },

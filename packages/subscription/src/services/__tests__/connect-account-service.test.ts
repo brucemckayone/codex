@@ -31,6 +31,7 @@ import {
   createUniqueSlug,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
@@ -66,14 +67,15 @@ describe('ConnectAccountService', () => {
     db = setupTestDatabase();
     await validateDatabaseConnection(db);
     const userIds = await seedTestUsers(db, 2);
-    [creatorId, otherCreatorId] = userIds;
+    [creatorId, otherCreatorId] = userIds as [string, string];
 
     // Create a test org
     const orgInput = createTestOrganizationInput({
       slug: createUniqueSlug('connect-test'),
-      creatorId,
     });
-    const [org] = await db.insert(organizations).values(orgInput).returning();
+    const org = takeFirst(
+      await db.insert(organizations).values(orgInput).returning()
+    );
     orgId = org.id;
   });
 
@@ -104,15 +106,16 @@ describe('ConnectAccountService', () => {
   describe('createAccount', () => {
     it('should create Express account + onboarding URL with DB record', async () => {
       // Fresh org to avoid leftover data from previous test runs
-      const [freshOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('create-new'),
-            creatorId,
-          })
-        )
-        .returning();
+      const freshOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('create-new'),
+            })
+          )
+          .returning()
+      );
 
       const result = await service.createAccount(
         freshOrg.id,
@@ -158,15 +161,16 @@ describe('ConnectAccountService', () => {
 
     it('should resume onboarding if account exists but not complete', async () => {
       // Fresh org to avoid leftover data
-      const [resumeOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('resume'),
-            creatorId,
-          })
-        )
-        .returning();
+      const resumeOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('resume'),
+            })
+          )
+          .returning()
+      );
 
       // Insert incomplete account
       await db.insert(stripeConnectAccounts).values(
@@ -193,15 +197,16 @@ describe('ConnectAccountService', () => {
 
     it('should return returnUrl if already fully onboarded', async () => {
       // Create a new org for isolation
-      const [isolatedOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('onboarded'),
-            creatorId,
-          })
-        )
-        .returning();
+      const isolatedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('onboarded'),
+            })
+          )
+          .returning()
+      );
 
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(isolatedOrg.id, creatorId, {
@@ -225,15 +230,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should store correct metadata on Stripe account', async () => {
-      const [metaOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('meta'),
-            creatorId,
-          })
-        )
-        .returning();
+      const metaOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('meta'),
+            })
+          )
+          .returning()
+      );
 
       await service.createAccount(
         metaOrg.id,
@@ -257,15 +263,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should create account with GB country and correct capabilities', async () => {
-      const [gbOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('gb'),
-            creatorId,
-          })
-        )
-        .returning();
+      const gbOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('gb'),
+            })
+          )
+          .returning()
+      );
 
       await service.createAccount(
         gbOrg.id,
@@ -291,15 +298,16 @@ describe('ConnectAccountService', () => {
     // ─── hardening: orphan prevention + platform-config error mapping ───
 
     it('persists the account row BEFORE the onboarding link, so a link failure is recoverable without a duplicate account', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('orphan'),
-            creatorId,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('orphan'),
+            })
+          )
+          .returning()
+      );
 
       // Attempt 1: Stripe account + DB row are created, then link generation
       // fails. The account row must survive the throw.
@@ -341,28 +349,31 @@ describe('ConnectAccountService', () => {
     });
 
     it('resolves a concurrent race to a single row via onConflictDoNothing', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('race'),
-            creatorId,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('race'),
+            })
+          )
+          .returning()
+      );
 
       // The winner of a concurrent race: a row already committed for this user
       // by the time our insert runs.
-      const [winner] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(org.id, creatorId, {
-            status: 'onboarding',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const winner = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(org.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
 
       // Force our call PAST the existing-check (as if the winner committed
       // after we looked) so it reaches the insert and hits uq_stripe_connect_user.
@@ -389,15 +400,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('maps Stripe "not signed up for Connect" to ConnectPlatformNotConfiguredError', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('noconnect'),
-            creatorId,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('noconnect'),
+            })
+          )
+          .returning()
+      );
 
       const stripeErr = Object.assign(
         new Error(
@@ -426,15 +438,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('does NOT map unrelated invalid-request errors to the platform-not-configured error', async () => {
-      const [org] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('otherinvalid'),
-            creatorId,
-          })
-        )
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('otherinvalid'),
+            })
+          )
+          .returning()
+      );
 
       // A different StripeInvalidRequestError (bad param) must NOT be swallowed
       // as "platform not configured" — the discriminator is deliberately narrow.
@@ -460,15 +473,16 @@ describe('ConnectAccountService', () => {
 
   describe('getAccount', () => {
     it('should return account for matching org', async () => {
-      const [getOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('get'),
-            creatorId,
-          })
-        )
-        .returning();
+      const getOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('get'),
+            })
+          )
+          .returning()
+      );
 
       await db
         .insert(stripeConnectAccounts)
@@ -484,15 +498,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should return null when no account exists', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('empty'),
-            creatorId,
-          })
-        )
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('empty'),
+            })
+          )
+          .returning()
+      );
 
       const account = await service.getAccount(emptyOrg.id);
       expect(account).toBeNull();
@@ -503,15 +518,16 @@ describe('ConnectAccountService', () => {
 
   describe('refreshOnboardingLink', () => {
     it('should generate new link for existing account', async () => {
-      const [refreshOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('refresh'),
-            creatorId,
-          })
-        )
-        .returning();
+      const refreshOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('refresh'),
+            })
+          )
+          .returning()
+      );
 
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(refreshOrg.id, creatorId, {
@@ -533,15 +549,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should throw ConnectAccountNotFoundError when none exists', async () => {
-      const [missingOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('missing'),
-            creatorId,
-          })
-        )
-        .returning();
+      const missingOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('missing'),
+            })
+          )
+          .returning()
+      );
 
       await expect(
         service.refreshOnboardingLink(
@@ -558,26 +575,29 @@ describe('ConnectAccountService', () => {
 
   describe('handleAccountUpdated', () => {
     it('should set status to active when charges and payouts enabled', async () => {
-      const [activeOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('active'),
-            creatorId,
-          })
-        )
-        .returning();
+      const activeOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('active'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(activeOrg.id, creatorId, {
-            status: 'onboarding',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(activeOrg.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
 
       await service.handleAccountUpdated({
         id: inserted.stripeAccountId,
@@ -594,20 +614,23 @@ describe('ConnectAccountService', () => {
     });
 
     it('should set status to disabled when disabled_reason present', async () => {
-      const [disOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('disabled'),
-            creatorId,
-          })
-        )
-        .returning();
+      const disOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('disabled'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(disOrg.id, creatorId))
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(disOrg.id, creatorId))
+          .returning()
+      );
 
       await service.handleAccountUpdated({
         id: inserted.stripeAccountId,
@@ -624,20 +647,23 @@ describe('ConnectAccountService', () => {
     });
 
     it('should set status to restricted when currently_due has items', async () => {
-      const [resOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('restricted'),
-            creatorId,
-          })
-        )
-        .returning();
+      const resOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('restricted'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(resOrg.id, creatorId))
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(resOrg.id, creatorId))
+          .returning()
+      );
 
       await service.handleAccountUpdated({
         id: inserted.stripeAccountId,
@@ -654,26 +680,29 @@ describe('ConnectAccountService', () => {
     });
 
     it('should set status to onboarding when still in progress', async () => {
-      const [obOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('onboard'),
-            creatorId,
-          })
-        )
-        .returning();
+      const obOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('onboard'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(obOrg.id, creatorId, {
-            status: 'onboarding',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(obOrg.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
 
       await service.handleAccountUpdated({
         id: inserted.stripeAccountId,
@@ -708,27 +737,30 @@ describe('ConnectAccountService', () => {
     // checkouts against a broken Connect account.
 
     it('should flip status active → restricted when charges_enabled drops with currently_due', async () => {
-      const [lossOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('capability-loss-restricted'),
-            creatorId,
-          })
-        )
-        .returning();
+      const lossOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('capability-loss-restricted'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(lossOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            onboardingCompletedAt: new Date(),
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(lossOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+              onboardingCompletedAt: new Date(),
+            })
+          )
+          .returning()
+      );
 
       // Stripe fires account.updated with capabilities revoked and new
       // requirements (e.g. updated KYC info needed).
@@ -752,27 +784,30 @@ describe('ConnectAccountService', () => {
     });
 
     it('should flip status active → disabled when charges_enabled drops with disabled_reason', async () => {
-      const [lossOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('capability-loss-disabled'),
-            creatorId,
-          })
-        )
-        .returning();
+      const lossOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('capability-loss-disabled'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(lossOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            onboardingCompletedAt: new Date(),
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(lossOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+              onboardingCompletedAt: new Date(),
+            })
+          )
+          .returning()
+      );
 
       await service.handleAccountUpdated({
         id: inserted.stripeAccountId,
@@ -794,31 +829,36 @@ describe('ConnectAccountService', () => {
     it('should cause SubscriptionService.createCheckoutSession to throw ConnectAccountNotReadyError after capability loss', async () => {
       // Bootstrap: a fully active org with a tier, then strip the
       // capability via the production webhook path.
-      const [crossOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('capability-loss-checkout'),
-            creatorId,
-          })
-        )
-        .returning();
+      const crossOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('capability-loss-checkout'),
+            })
+          )
+          .returning()
+      );
 
-      const [connectRow] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(crossOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const connectRow = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(crossOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
 
-      const [tier] = await db
-        .insert(subscriptionTiers)
-        .values(createTestTierInput(crossOrg.id))
-        .returning();
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(crossOrg.id))
+          .returning()
+      );
 
       // Capability flips true → false via the same handler the live
       // account.updated webhook calls.
@@ -865,31 +905,36 @@ describe('ConnectAccountService', () => {
       // crucial distinction: capability loss stops NEW transfers; it does NOT
       // retroactively revoke active subscriptions or the tier metadata they
       // join against.
-      const [accessOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('capability-loss-access'),
-            creatorId,
-          })
-        )
-        .returning();
+      const accessOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('capability-loss-access'),
+            })
+          )
+          .returning()
+      );
 
-      const [connectRow] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(accessOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const connectRow = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(accessOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
 
-      const [tier] = await db
-        .insert(subscriptionTiers)
-        .values(createTestTierInput(accessOrg.id))
-        .returning();
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(accessOrg.id))
+          .returning()
+      );
 
       // Existing paid subscriber on this tier.
       await db.insert(subscriptions).values(
@@ -915,7 +960,10 @@ describe('ConnectAccountService', () => {
 
       // The access-path tier read MUST still resolve the tier so the existing
       // subscriber's content access keeps working.
-      const tierService = new TierService({ db, environment: 'test' }, stripe);
+      const tierService = new TierService(
+        { db, dbWs: db, environment: 'test' },
+        stripe
+      );
       const accessTier = await tierService.getTierForAccessCheck(tier.id);
       expect(accessTier).not.toBeNull();
       expect(accessTier!.id).toBe(tier.id);
@@ -933,26 +981,29 @@ describe('ConnectAccountService', () => {
 
   describe('handleAccountDeauthorized', () => {
     it('should flip status to disabled and clear capability flags', async () => {
-      const [deauthOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('deauth-disable'),
-            creatorId,
-          })
-        )
-        .returning();
+      const deauthOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('deauth-disable'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(deauthOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(deauthOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
 
       await service.handleAccountDeauthorized(inserted.stripeAccountId);
 
@@ -963,31 +1014,36 @@ describe('ConnectAccountService', () => {
     });
 
     it('should cause SubscriptionService.createCheckoutSession to throw ConnectAccountNotReadyError after deauthorization', async () => {
-      const [deauthOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('deauth-checkout'),
-            creatorId,
-          })
-        )
-        .returning();
+      const deauthOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('deauth-checkout'),
+            })
+          )
+          .returning()
+      );
 
-      const [connectRow] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(deauthOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const connectRow = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(deauthOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
 
-      const [tier] = await db
-        .insert(subscriptionTiers)
-        .values(createTestTierInput(deauthOrg.id))
-        .returning();
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(deauthOrg.id))
+          .returning()
+      );
 
       await service.handleAccountDeauthorized(connectRow.stripeAccountId);
 
@@ -1028,15 +1084,16 @@ describe('ConnectAccountService', () => {
 
   describe('createDashboardLink', () => {
     it('should return Express dashboard URL', async () => {
-      const [dashOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('dash'),
-            creatorId,
-          })
-        )
-        .returning();
+      const dashOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('dash'),
+            })
+          )
+          .returning()
+      );
 
       await db
         .insert(stripeConnectAccounts)
@@ -1052,15 +1109,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should throw ConnectAccountNotFoundError when none exists', async () => {
-      const [noAccOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('noacc'),
-            creatorId,
-          })
-        )
-        .returning();
+      const noAccOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('noacc'),
+            })
+          )
+          .returning()
+      );
 
       await expect(service.createDashboardLink(noAccOrg.id)).rejects.toThrow(
         ConnectAccountNotFoundError
@@ -1072,15 +1130,16 @@ describe('ConnectAccountService', () => {
 
   describe('isReady', () => {
     it('should return true when both charges and payouts enabled', async () => {
-      const [readyOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('ready'),
-            creatorId,
-          })
-        )
-        .returning();
+      const readyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('ready'),
+            })
+          )
+          .returning()
+      );
 
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(readyOrg.id, creatorId, {
@@ -1099,15 +1158,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should return false when charges disabled', async () => {
-      const [notReadyOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('notready'),
-            creatorId,
-          })
-        )
-        .returning();
+      const notReadyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('notready'),
+            })
+          )
+          .returning()
+      );
 
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(notReadyOrg.id, creatorId, {
@@ -1121,15 +1181,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('should return false when no account exists', async () => {
-      const [noOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('noexist'),
-            creatorId,
-          })
-        )
-        .returning();
+      const noOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('noexist'),
+            })
+          )
+          .returning()
+      );
 
       const ready = await service.isReady(noOrg.id);
       expect(ready).toBe(false);
@@ -1140,15 +1201,16 @@ describe('ConnectAccountService', () => {
 
   describe('getStatus', () => {
     it('returns disconnected sentinel when no DB row exists', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('status-empty'),
-            creatorId,
-          })
-        )
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-empty'),
+            })
+          )
+          .returning()
+      );
 
       const result = await service.getStatus(emptyOrg.id);
 
@@ -1166,26 +1228,29 @@ describe('ConnectAccountService', () => {
     });
 
     it('returns full requirements payload when account exists', async () => {
-      const [reqOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('status-req'),
-            creatorId,
-          })
-        )
-        .returning();
+      const reqOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-req'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(reqOrg.id, creatorId, {
-            status: 'restricted',
-            chargesEnabled: true,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(reqOrg.id, creatorId, {
+              status: 'restricted',
+              chargesEnabled: true,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
       await db
         .update(organizations)
         .set({ primaryConnectAccountUserId: creatorId })
@@ -1226,7 +1291,7 @@ describe('ConnectAccountService', () => {
       expect(result.requirements?.eventuallyDue).toEqual(['company.tax_id']);
       expect(result.requirements?.currentDeadline).toBe(deadline);
       expect(result.requirements?.errors).toHaveLength(1);
-      expect(result.requirements?.errors[0].requirement).toBe(
+      expect(result.requirements?.errors[0]?.requirement).toBe(
         'business_profile.url'
       );
       // Successful Stripe retrieve → not a fetch failure (Codex-y2htq).
@@ -1234,15 +1299,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('flags requirementsFetchFailed=true when the Stripe retrieve fails (Codex-y2htq)', async () => {
-      const [failOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('status-fail'),
-            creatorId,
-          })
-        )
-        .returning();
+      const failOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-fail'),
+            })
+          )
+          .returning()
+      );
       await db.insert(stripeConnectAccounts).values(
         createTestConnectAccountInput(failOrg.id, creatorId, {
           status: 'active',
@@ -1273,20 +1339,23 @@ describe('ConnectAccountService', () => {
     });
 
     it('normalises null arrays to [] so the UI can iterate without guards', async () => {
-      const [normOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('status-norm'),
-            creatorId,
-          })
-        )
-        .returning();
+      const normOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-norm'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(normOrg.id, creatorId))
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(normOrg.id, creatorId))
+          .returning()
+      );
       await db
         .update(organizations)
         .set({ primaryConnectAccountUserId: creatorId })
@@ -1320,26 +1389,29 @@ describe('ConnectAccountService', () => {
     });
 
     it('degrades gracefully when Stripe is unreachable — returns status without requirements', async () => {
-      const [degOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('status-deg'),
-            creatorId,
-          })
-        )
-        .returning();
+      const degOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('status-deg'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(degOrg.id, creatorId, {
-            status: 'restricted',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(degOrg.id, creatorId, {
+              status: 'restricted',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
       await db
         .update(organizations)
         .set({ primaryConnectAccountUserId: creatorId })
@@ -1373,7 +1445,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       const cachedService = new ConnectAccountService(
@@ -1381,20 +1455,23 @@ describe('ConnectAccountService', () => {
         stripe
       );
 
-      const [invOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('cache-inv'),
-            creatorId,
-          })
-        )
-        .returning();
+      const invOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('cache-inv'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(invOrg.id, creatorId))
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(invOrg.id, creatorId))
+          .returning()
+      );
 
       const invalidateSpy = vi.spyOn(cache, 'invalidate');
 
@@ -1433,7 +1510,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       vi.spyOn(cache, 'invalidate').mockRejectedValueOnce(
@@ -1445,20 +1524,23 @@ describe('ConnectAccountService', () => {
         stripe
       );
 
-      const [failOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('cache-fail'),
-            creatorId,
-          })
-        )
-        .returning();
+      const failOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('cache-fail'),
+            })
+          )
+          .returning()
+      );
 
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(failOrg.id, creatorId))
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(failOrg.id, creatorId))
+          .returning()
+      );
 
       // MUST resolve — DB write already happened, cache failure is logged
       await expect(
@@ -1485,7 +1567,9 @@ describe('ConnectAccountService', () => {
       const cache = new VersionedCache({
         kv: kv as unknown as KVNamespace,
         prefix: 'cache',
-        obs,
+        obs: obs as unknown as ConstructorParameters<
+          typeof VersionedCache
+        >[0]['obs'],
       });
 
       const cachedService = new ConnectAccountService(
@@ -1494,17 +1578,19 @@ describe('ConnectAccountService', () => {
       );
 
       // Orgless account — organizationId deliberately NULL.
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values({
-          userId: creatorId,
-          organizationId: null,
-          stripeAccountId: `acct_orgless_inv_${createUniqueSlug('a')}`,
-          status: 'onboarding',
-          chargesEnabled: false,
-          payoutsEnabled: false,
-        })
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values({
+            userId: creatorId,
+            organizationId: null,
+            stripeAccountId: `acct_orgless_inv_${createUniqueSlug('a')}`,
+            status: 'onboarding',
+            chargesEnabled: false,
+            payoutsEnabled: false,
+          })
+          .returning()
+      );
 
       const invalidateSpy = vi.spyOn(cache, 'invalidate');
 
@@ -1524,24 +1610,26 @@ describe('ConnectAccountService', () => {
   // ─── Schema invariants (Codex-69t7c WP1) ─────────────────────────────
   describe('schema invariants (Codex-69t7c WP1)', () => {
     it('enforces one Connect account per user (uq_stripe_connect_user)', async () => {
-      const [orgA] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('uq-a'),
-            creatorId,
-          })
-        )
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('uq-b'),
-            creatorId,
-          })
-        )
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('uq-a'),
+            })
+          )
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('uq-b'),
+            })
+          )
+          .returning()
+      );
 
       await db
         .insert(stripeConnectAccounts)
@@ -1557,17 +1645,19 @@ describe('ConnectAccountService', () => {
     });
 
     it('allows a Connect account with a null organizationId (orgless creator)', async () => {
-      const [row] = await db
-        .insert(stripeConnectAccounts)
-        .values({
-          userId: creatorId,
-          organizationId: null,
-          stripeAccountId: `acct_orgless_${createUniqueSlug('a')}`,
-          status: 'active',
-          chargesEnabled: true,
-          payoutsEnabled: true,
-        })
-        .returning();
+      const row = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values({
+            userId: creatorId,
+            organizationId: null,
+            stripeAccountId: `acct_orgless_${createUniqueSlug('a')}`,
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+          .returning()
+      );
       expect(row.organizationId).toBeNull();
       expect(row.userId).toBe(creatorId);
     });
@@ -1577,19 +1667,22 @@ describe('ConnectAccountService', () => {
 
   describe('getAccountForUser', () => {
     it('resolves the account for a userId (self-account resolution)', async () => {
-      const [selfOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('self-acct'),
-            creatorId,
-          })
-        )
-        .returning();
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(selfOrg.id, creatorId))
-        .returning();
+      const selfOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('self-acct'),
+            })
+          )
+          .returning()
+      );
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(selfOrg.id, creatorId))
+          .returning()
+      );
 
       const account = await service.getAccountForUser(creatorId);
       expect(account).not.toBeNull();
@@ -1607,15 +1700,16 @@ describe('ConnectAccountService', () => {
 
   describe('getAccount org resolution', () => {
     it('resolves org → owner account via fallback when the pin is unset', async () => {
-      const [fbOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('owner-fallback'),
-            creatorId,
-          })
-        )
-        .returning();
+      const fbOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('owner-fallback'),
+            })
+          )
+          .returning()
+      );
       // Owner membership but NO pin — resolvePrimaryConnect falls back to owner.
       await db.insert(organizationMemberships).values({
         organizationId: fbOrg.id,
@@ -1633,15 +1727,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('returns null when the org has neither a pin nor an owner account', async () => {
-      const [noneOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('no-resolution'),
-            creatorId,
-          })
-        )
-        .returning();
+      const noneOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('no-resolution'),
+            })
+          )
+          .returning()
+      );
       const account = await service.getAccount(noneOrg.id);
       expect(account).toBeNull();
     });
@@ -1665,16 +1760,18 @@ describe('ConnectAccountService', () => {
     });
 
     it('returns the status payload for a connected user', async () => {
-      const [inserted] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(orgId, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const inserted = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(orgId, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: inserted.stripeAccountId,
         charges_enabled: true,
@@ -1722,31 +1819,34 @@ describe('ConnectAccountService', () => {
       } as unknown as Stripe.Account);
 
     it('pins owned orgs whose pin is unset to the activating user', async () => {
-      const [ownedOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-owned'),
-            creatorId,
-          })
-        )
-        .returning();
+      const ownedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-owned'),
+            })
+          )
+          .returning()
+      );
       await db.insert(organizationMemberships).values({
         organizationId: ownedOrg.id,
         userId: creatorId,
         role: 'owner',
         status: 'active',
       });
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(ownedOrg.id, creatorId, {
-            status: 'onboarding',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(ownedOrg.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
 
       expect(await readPin(ownedOrg.id)).toBeNull();
       await activate(acct.stripeAccountId);
@@ -1754,15 +1854,16 @@ describe('ConnectAccountService', () => {
     });
 
     it('does NOT overwrite an existing (non-null) pin', async () => {
-      const [pinnedOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-existing'),
-            creatorId,
-          })
-        )
-        .returning();
+      const pinnedOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-existing'),
+            })
+          )
+          .returning()
+      );
       // creatorId is the owner, but the org is already pinned to a DIFFERENT
       // user (e.g. a future "designate payout account" feature).
       await db.insert(organizationMemberships).values({
@@ -1775,10 +1876,12 @@ describe('ConnectAccountService', () => {
         .update(organizations)
         .set({ primaryConnectAccountUserId: otherCreatorId })
         .where(eq(organizations.id, pinnedOrg.id));
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(pinnedOrg.id, creatorId))
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(pinnedOrg.id, creatorId))
+          .returning()
+      );
 
       await activate(acct.stripeAccountId);
 
@@ -1789,25 +1892,28 @@ describe('ConnectAccountService', () => {
     it('pins nothing when the activating user owns no orgs', async () => {
       // Org owned by otherCreatorId; the account belongs to creatorId, who is
       // NOT an owner — a creator-slice account, not the org's payout owner.
-      const [foreignOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-nonowner'),
-            creatorId: otherCreatorId,
-          })
-        )
-        .returning();
+      const foreignOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-nonowner'),
+            })
+          )
+          .returning()
+      );
       await db.insert(organizationMemberships).values({
         organizationId: foreignOrg.id,
         userId: otherCreatorId,
         role: 'owner',
         status: 'active',
       });
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(foreignOrg.id, creatorId))
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(foreignOrg.id, creatorId))
+          .returning()
+      );
 
       await activate(acct.stripeAccountId);
 
@@ -1815,25 +1921,28 @@ describe('ConnectAccountService', () => {
     });
 
     it('is idempotent across duplicate webhook deliveries', async () => {
-      const [idemOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-idem'),
-            creatorId,
-          })
-        )
-        .returning();
+      const idemOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-idem'),
+            })
+          )
+          .returning()
+      );
       await db.insert(organizationMemberships).values({
         organizationId: idemOrg.id,
         userId: creatorId,
         role: 'owner',
         status: 'active',
       });
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(idemOrg.id, creatorId))
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(idemOrg.id, creatorId))
+          .returning()
+      );
 
       await activate(acct.stripeAccountId);
       await activate(acct.stripeAccountId);
@@ -1844,31 +1953,34 @@ describe('ConnectAccountService', () => {
     it('pins the org even on a non-active (onboarding) account.updated', async () => {
       // The pin records the owner regardless of payability — payability is
       // gated at transfer time, not by pin existence (Codex-69t7c.2).
-      const [obPinOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-onboarding'),
-            creatorId,
-          })
-        )
-        .returning();
+      const obPinOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-onboarding'),
+            })
+          )
+          .returning()
+      );
       await db.insert(organizationMemberships).values({
         organizationId: obPinOrg.id,
         userId: creatorId,
         role: 'owner',
         status: 'active',
       });
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(obPinOrg.id, creatorId, {
-            status: 'onboarding',
-            chargesEnabled: false,
-            payoutsEnabled: false,
-          })
-        )
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(obPinOrg.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
 
       // account.updated arrives still in onboarding (NOT active).
       await service.handleAccountUpdated({
@@ -1888,15 +2000,16 @@ describe('ConnectAccountService', () => {
       // Deliberate: the pin stays so resolvePrimaryConnect surfaces the
       // now-disabled account, which transfer-time active-checks block — rather
       // than silently rerouting the org slice to a different owner.
-      const [deauthOrg] = await db
-        .insert(organizations)
-        .values(
-          createTestOrganizationInput({
-            slug: createUniqueSlug('pin-deauth'),
-            creatorId,
-          })
-        )
-        .returning();
+      const deauthOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('pin-deauth'),
+            })
+          )
+          .returning()
+      );
       await db.insert(organizationMemberships).values({
         organizationId: deauthOrg.id,
         userId: creatorId,
@@ -1907,16 +2020,18 @@ describe('ConnectAccountService', () => {
         .update(organizations)
         .set({ primaryConnectAccountUserId: creatorId })
         .where(eq(organizations.id, deauthOrg.id));
-      const [acct] = await db
-        .insert(stripeConnectAccounts)
-        .values(
-          createTestConnectAccountInput(deauthOrg.id, creatorId, {
-            status: 'active',
-            chargesEnabled: true,
-            payoutsEnabled: true,
-          })
-        )
-        .returning();
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(deauthOrg.id, creatorId, {
+              status: 'active',
+              chargesEnabled: true,
+              payoutsEnabled: true,
+            })
+          )
+          .returning()
+      );
 
       await service.handleAccountDeauthorized(acct.stripeAccountId);
 

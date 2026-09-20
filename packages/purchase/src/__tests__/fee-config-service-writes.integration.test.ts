@@ -77,7 +77,6 @@ describe('FeeConfigService — real-DB write integration', () => {
       .values({
         name: 'Fee Config Write Test Org',
         slug: createUniqueSlug('fee-config-write-test-org'),
-        ownerId: creatorId,
       })
       .returning();
     if (!org) throw new Error('Failed to create test organization');

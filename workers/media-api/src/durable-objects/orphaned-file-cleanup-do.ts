@@ -70,7 +70,13 @@ export class OrphanedFileCleanupDO implements DurableObject {
    * GET /status - Get cleanup stats
    * POST /trigger - Manually trigger cleanup
    * POST /schedule - Reschedule next alarm
+   *
+   * Invoked by workerd when a request is routed to this DO stub, never called
+   * statically, so every dead-code detector flags it. Suppressed by
+   * construction rather than by name in .fallowrc.json, which would silence
+   * `fetch` on every class in the repo.
    */
+  // fallow-ignore-next-line unused-class-member
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -100,7 +106,11 @@ export class OrphanedFileCleanupDO implements DurableObject {
 
   /**
    * Alarm handler - runs periodically to clean up orphaned files
+   *
+   * The workerd alarm callback. Scheduled via `state.storage.setAlarm` and
+   * self-rescheduling; no call site exists or can exist.
    */
+  // fallow-ignore-next-line unused-class-member
   async alarm(): Promise<void> {
     const obs = new ObservabilityClient(
       'OrphanedFileCleanupDO',

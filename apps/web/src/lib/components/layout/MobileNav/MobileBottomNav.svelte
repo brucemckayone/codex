@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { LayoutUser, LayoutOrganization } from '$lib/types';
 	import { PLATFORM_MOBILE_NAV, getOrgMobileNav } from '$lib/config/navigation';
 	import { RAIL_ICON_MAP } from '$lib/config/rail-icons';
 	import { SearchIcon, MoreHorizontalIcon } from '$lib/components/ui/Icon';
@@ -7,13 +6,11 @@
 
 	interface Props {
 		variant: 'platform' | 'org';
-		user: LayoutUser | null;
-		org?: LayoutOrganization;
 		onSearchClick: () => void;
 		onMoreClick: () => void;
 	}
 
-	const { variant, user, org, onSearchClick, onMoreClick }: Props = $props();
+	const { variant, onSearchClick, onMoreClick }: Props = $props();
 
 	const navItems = $derived(
 		variant === 'platform' ? PLATFORM_MOBILE_NAV : getOrgMobileNav()

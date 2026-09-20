@@ -33,6 +33,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
@@ -68,10 +69,12 @@ describe('AdminAnalyticsService', () => {
   describe('getRevenueStats', () => {
     it('should return zero stats for organization with no purchases', async () => {
       // Create a new org with no purchases
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getRevenueStats(emptyOrg.id);
 
@@ -86,36 +89,41 @@ describe('AdminAnalyticsService', () => {
 
     it('should calculate revenue stats with completed purchases', async () => {
       // Create test org with purchases
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create media and content
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Test Content',
-          slug: createUniqueSlug('revenue-test'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2999,
-        })
-        .returning();
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Test Content',
+            slug: createUniqueSlug('revenue-test'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2999,
+          })
+          .returning()
+      );
 
       // Create completed purchases
       await db.insert(purchases).values([
@@ -156,35 +164,40 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should exclude pending/failed/refunded purchases from revenue', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Test Content',
+            slug: createUniqueSlug('exclude-test'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Test Content',
-          slug: createUniqueSlug('exclude-test'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Create mixed status purchases
       await db.insert(purchases).values([
@@ -232,35 +245,40 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should filter by date range', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Date Range Test',
+            slug: createUniqueSlug('date-range'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Date Range Test',
-          slug: createUniqueSlug('date-range'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 500,
-        })
-        .returning();
+          .returning()
+      );
 
       const now = new Date();
       const yesterday = new Date(now);
@@ -311,56 +329,64 @@ describe('AdminAnalyticsService', () => {
 
     it('should scope revenue to specific organization only', async () => {
       // Create two organizations
-      const [org1] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [org2] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org1 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const org2 = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Content for org1
-      const [content1] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org1.id,
-          mediaItemId: media.id,
-          title: 'Org1 Content',
-          slug: createUniqueSlug('org1'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+      const content1 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org1.id,
+            mediaItemId: media.id,
+            title: 'Org1 Content',
+            slug: createUniqueSlug('org1'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+          })
+          .returning()
+      );
 
       // Content for org2
-      const [content2] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: org2.id,
-          mediaItemId: media.id,
-          title: 'Org2 Content',
-          slug: createUniqueSlug('org2'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+      const content2 = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: org2.id,
+            mediaItemId: media.id,
+            title: 'Org2 Content',
+            slug: createUniqueSlug('org2'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
+          })
+          .returning()
+      );
 
       // Purchases for different orgs
       await db.insert(purchases).values([
@@ -406,35 +432,40 @@ describe('AdminAnalyticsService', () => {
       // last TREND_DAYS_DEFAULT (30 days) and ignored options.startDate/endDate,
       // so aggregate totals and the daily rows drifted apart. After the fix
       // both must reflect the same window.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Daily Range',
+            slug: createUniqueSlug('daily-range'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1500,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Daily Range',
-          slug: createUniqueSlug('daily-range'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1500,
-        })
-        .returning();
+          .returning()
+      );
 
       const today = new Date();
       const tenDaysAgo = new Date(today);
@@ -483,42 +514,47 @@ describe('AdminAnalyticsService', () => {
       // Daily rows must reflect the same window — no row older than start
       expect(stats.revenueByDay.length).toBe(1);
       expect(
-        new Date(stats.revenueByDay[0].date).getTime()
+        new Date(stats.revenueByDay[0]!.date).getTime()
       ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
       );
     });
 
     it('should include a previous block when compareFrom and compareTo are provided', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Compare',
+            slug: createUniqueSlug('compare-range'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 2000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Compare',
-          slug: createUniqueSlug('compare-range'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 2000,
-        })
-        .returning();
+          .returning()
+      );
 
       const now = new Date();
       const sevenDaysAgo = new Date(now);
@@ -587,10 +623,12 @@ describe('AdminAnalyticsService', () => {
     it('should omit previous block when compareFrom or compareTo is missing', async () => {
       // Backward-compat: callers that don't opt into comparison should see the
       // original RevenueStats shape (no `previous` key).
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const onlyFrom = await service.getRevenueStats(testOrg.id, {
         compareFrom: new Date(),
@@ -609,16 +647,18 @@ describe('AdminAnalyticsService', () => {
   describe('getSubscriberStats', () => {
     // Helper: insert a tier for a given org
     async function insertTier(orgId: string, label: string) {
-      const [tier] = await db
-        .insert(subscriptionTiers)
-        .values({
-          organizationId: orgId,
-          name: `Tier-${label}`,
-          sortOrder: 1,
-          priceMonthly: 1000,
-          priceAnnual: 10000,
-        })
-        .returning();
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values({
+            organizationId: orgId,
+            name: `Tier-${label}`,
+            sortOrder: 1,
+            priceMonthly: 1000,
+            priceAnnual: 10000,
+          })
+          .returning()
+      );
       return tier;
     }
 
@@ -655,10 +695,12 @@ describe('AdminAnalyticsService', () => {
     }
 
     it('should return zero stats for organization with no subscriptions', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getSubscriberStats(emptyOrg.id);
 
@@ -670,10 +712,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should count active, new, and churned correctly across mixed statuses in and out of the range', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const tier = await insertTier(testOrg.id, 'mixed');
       const [u1, u2, u3, u4, u5] = await seedTestUsers(db, 5);
@@ -765,14 +809,18 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should scope subscriber stats to the given organization only', async () => {
-      const [orgA] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const tierA = await insertTier(orgA.id, 'scope-a');
       const tierB = await insertTier(orgB.id, 'scope-b');
@@ -811,10 +859,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should include a previous block when compareFrom and compareTo are provided, and omit it otherwise', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const tier = await insertTier(testOrg.id, 'compare');
       const [u1, u2, u3] = await seedTestUsers(db, 3);
@@ -890,10 +940,12 @@ describe('AdminAnalyticsService', () => {
       // Regression guard against the revenue bug fixed in BE-1: the daily
       // breakdown must use the same window as aggregates, not a hardcoded
       // TREND_DAYS_DEFAULT window.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const tier = await insertTier(testOrg.id, 'daily-range');
       const [uIn, uOut] = await seedTestUsers(db, 2);
@@ -935,19 +987,21 @@ describe('AdminAnalyticsService', () => {
       // Daily rows reflect the same window — no row older than start
       expect(stats.subscribersByDay).toHaveLength(1);
       expect(
-        new Date(stats.subscribersByDay[0].date).getTime()
+        new Date(stats.subscribersByDay[0]!.date).getTime()
       ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
       );
     });
   });
 
   describe('getFollowerStats', () => {
     it('should return zero stats for organization with no followers', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getFollowerStats(emptyOrg.id);
 
@@ -958,10 +1012,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should count total and new correctly when followers were created before, during, and after the range', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Three users: one pre-range, one in-range, one post-range
       const [uBefore, uIn, uAfter] = await seedTestUsers(db, 3);
@@ -1004,18 +1060,22 @@ describe('AdminAnalyticsService', () => {
       expect(stats.newFollowers).toBe(1);
       expect(stats.totalFollowers).toBe(2);
       expect(stats.followersByDay).toHaveLength(1);
-      expect(stats.followersByDay[0].newFollowers).toBe(1);
+      expect(stats.followersByDay[0]!.newFollowers).toBe(1);
     });
 
     it('should scope follower stats to the given organization only', async () => {
-      const [orgA] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const [ua, ub] = await seedTestUsers(db, 2);
       const now = new Date();
@@ -1045,10 +1105,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should include a previous block when compareFrom and compareTo are provided, and omit it otherwise', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const [u1, u2, u3] = await seedTestUsers(db, 3);
 
@@ -1114,10 +1176,12 @@ describe('AdminAnalyticsService', () => {
       // Regression guard against the revenue bug fixed in BE-1: the daily
       // breakdown must use the same window as aggregates, not a hardcoded
       // TREND_DAYS_DEFAULT window.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const [uIn, uOut] = await seedTestUsers(db, 2);
 
@@ -1152,19 +1216,21 @@ describe('AdminAnalyticsService', () => {
       // Daily rows reflect the same window — no row older than start
       expect(stats.followersByDay).toHaveLength(1);
       expect(
-        new Date(stats.followersByDay[0].date).getTime()
+        new Date(stats.followersByDay[0]!.date).getTime()
       ).toBeGreaterThanOrEqual(
-        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+        new Date(fiveDaysAgo.toISOString().split('T')[0]!).getTime()
       );
     });
   });
 
   describe('getCustomerStats', () => {
     it('should return zero stats for organization with no customers', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getCustomerStats(emptyOrg.id);
 
@@ -1173,38 +1239,43 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should count distinct customers with completed purchases', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create additional test users
       const [customer1, customer2] = await seedTestUsers(db, 2);
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Customer Stats Test',
-          slug: createUniqueSlug('customer-stats'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 500,
-        })
-        .returning();
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Customer Stats Test',
+            slug: createUniqueSlug('customer-stats'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
+          })
+          .returning()
+      );
 
       // Multiple purchases from two customers
       await db.insert(purchases).values([
@@ -1259,10 +1330,12 @@ describe('AdminAnalyticsService', () => {
 
   describe('getTopContent', () => {
     it('should return empty array for organization with no purchases', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const topContent = await service.getTopContent(emptyOrg.id);
 
@@ -1271,51 +1344,57 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should rank content by revenue in descending order', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create multiple content items
-      const [lowRevenue] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Low Revenue Content',
-          slug: createUniqueSlug('low-revenue'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 100,
-        })
-        .returning();
+      const lowRevenue = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Low Revenue Content',
+            slug: createUniqueSlug('low-revenue'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 100,
+          })
+          .returning()
+      );
 
-      const [highRevenue] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'High Revenue Content',
-          slug: createUniqueSlug('high-revenue'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 5000,
-        })
-        .returning();
+      const highRevenue = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'High Revenue Content',
+            slug: createUniqueSlug('high-revenue'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 5000,
+          })
+          .returning()
+      );
 
       // Create purchases
       await db.insert(purchases).values([
@@ -1350,49 +1429,54 @@ describe('AdminAnalyticsService', () => {
       });
 
       expect(topContent.items).toHaveLength(2);
-      expect(topContent.items[0].contentId).toBe(highRevenue.id);
-      expect(topContent.items[0].revenueCents).toBe(5000);
-      expect(topContent.items[1].contentId).toBe(lowRevenue.id);
-      expect(topContent.items[1].revenueCents).toBe(100);
+      expect(topContent.items[0]!.contentId).toBe(highRevenue.id);
+      expect(topContent.items[0]!.revenueCents).toBe(5000);
+      expect(topContent.items[1]!.contentId).toBe(lowRevenue.id);
+      expect(topContent.items[1]!.revenueCents).toBe(100);
       // New default-shape fields: views zero (no playback), trendDelta null
       // when no compare window is requested.
-      expect(topContent.items[0].viewsInPeriod).toBe(0);
-      expect(topContent.items[0].trendDelta).toBeNull();
-      expect(topContent.items[0].thumbnailUrl).toBeNull();
+      expect(topContent.items[0]!.viewsInPeriod).toBe(0);
+      expect(topContent.items[0]!.trendDelta).toBeNull();
+      expect(topContent.items[0]!.thumbnailUrl).toBeNull();
     });
 
     it('should respect limit parameter', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create 5 content items with purchases
       for (let i = 0; i < 5; i++) {
-        const [c] = await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: `Content ${i}`,
-            slug: createUniqueSlug(`limit-test-${i}`),
-            contentType: 'video',
-            status: 'published',
-            visibility: 'purchased_only',
-            priceCents: (i + 1) * 100,
-          })
-          .returning();
+        const c = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: testOrg.id,
+              mediaItemId: media.id,
+              title: `Content ${i}`,
+              slug: createUniqueSlug(`limit-test-${i}`),
+              contentType: 'video',
+              status: 'published',
+              priceCents: (i + 1) * 100,
+            })
+            .returning()
+        );
 
         await db.insert(purchases).values({
           customerId,
@@ -1418,35 +1502,41 @@ describe('AdminAnalyticsService', () => {
       // contribute to viewsInPeriod. Each (user, content) pair is a single row
       // due to the composite unique — so "views" here is "distinct users
       // engaged in the window", not total impressions.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Views Test Content',
+            slug: createUniqueSlug('views-test'),
+            contentType: 'video',
+            status: 'published',
+            thumbnailUrl: 'https://cdn.example/thumb.jpg',
+            priceCents: 500,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Views Test Content',
-          slug: createUniqueSlug('views-test'),
-          contentType: 'video',
-          status: 'published',
-          thumbnailUrl: 'https://cdn.example/thumb.jpg',
-          priceCents: 500,
-        })
-        .returning();
+          .returning()
+      );
 
       // Need a completed purchase so the content surfaces in the top list.
       await db.insert(purchases).values({
@@ -1516,48 +1606,56 @@ describe('AdminAnalyticsService', () => {
       // Same content has purchases in both windows. Delta is current-period
       // revenue minus previous-period revenue, scoped per contentId. A missing
       // previous-period match must resolve to delta = current (prev defaults 0).
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const growing = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Growing Content',
+            slug: createUniqueSlug('trend-growing'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
+          .returning()
+      );
 
-      const [growing] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Growing Content',
-          slug: createUniqueSlug('trend-growing'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 1000,
-        })
-        .returning();
-
-      const [newcomer] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Newcomer Content',
-          slug: createUniqueSlug('trend-newcomer'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 500,
-        })
-        .returning();
+      const newcomer = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Newcomer Content',
+            slug: createUniqueSlug('trend-newcomer'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
+          })
+          .returning()
+      );
 
       const now = new Date();
       const threeDaysAgo = new Date(now);
@@ -1638,52 +1736,62 @@ describe('AdminAnalyticsService', () => {
       // both orgs have purchases at the same priceCents. This guards the
       // `eq(purchases.organizationId, organizationId)` predicate against
       // regressions that would otherwise leak cross-org figures.
-      const [orgA] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const contentA = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: orgA.id,
+            mediaItemId: media.id,
+            title: 'Org A Content',
+            slug: createUniqueSlug('org-a-scope'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
           })
-        )
-        .returning();
+          .returning()
+      );
 
-      const [contentA] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: orgA.id,
-          mediaItemId: media.id,
-          title: 'Org A Content',
-          slug: createUniqueSlug('org-a-scope'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 500,
-        })
-        .returning();
-
-      const [contentB] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: orgB.id,
-          mediaItemId: media.id,
-          title: 'Org B Content',
-          slug: createUniqueSlug('org-b-scope'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 500,
-        })
-        .returning();
+      const contentB = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: orgB.id,
+            mediaItemId: media.id,
+            title: 'Org B Content',
+            slug: createUniqueSlug('org-b-scope'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
+          })
+          .returning()
+      );
 
       await db.insert(purchases).values([
         {
@@ -1727,10 +1835,12 @@ describe('AdminAnalyticsService', () => {
 
   describe('getContentPerformance', () => {
     it('should return zero rows for an organization with no content', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getContentPerformance(emptyOrg.id);
 
@@ -1742,34 +1852,40 @@ describe('AdminAnalyticsService', () => {
       // LEFT JOIN semantics — content without any in-window playback should
       // still surface so the studio UI can communicate "no engagement yet"
       // rather than silently hiding the row.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const quiet = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Quiet Content',
+            slug: createUniqueSlug('cp-quiet'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [quiet] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Quiet Content',
-          slug: createUniqueSlug('cp-quiet'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const stats = await service.getContentPerformance(testOrg.id);
 
@@ -1782,34 +1898,40 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should aggregate watch time and compute average completion from playback', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const feature = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Feature Content',
+            slug: createUniqueSlug('cp-feature'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [feature] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Feature Content',
-          slug: createUniqueSlug('cp-feature'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const [viewer1, viewer2] = await seedTestUsers(db, 2);
 
@@ -1857,48 +1979,56 @@ describe('AdminAnalyticsService', () => {
       // Defends the GREATEST/LEAST clamp + NULLIF: a row with
       // position > duration, or duration = 0, must not blow the average
       // past 100 or crash on divide-by-zero.
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const corruptContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Corrupt Position Content',
+            slug: createUniqueSlug('cp-corrupt'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
           })
-        )
-        .returning();
+          .returning()
+      );
 
-      const [corruptContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Corrupt Position Content',
-          slug: createUniqueSlug('cp-corrupt'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
-
-      const [healthy] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Healthy Clamp Content',
-          slug: createUniqueSlug('cp-healthy-clamp'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
+      const healthy = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Healthy Clamp Content',
+            slug: createUniqueSlug('cp-healthy-clamp'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
+          })
+          .returning()
+      );
 
       const [viewer1, viewer2, viewer3] = await seedTestUsers(db, 3);
 
@@ -1955,34 +2085,40 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should populate trendDelta as current-vs-previous watch-time when compare dates are provided', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const contentRow = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Trending Content',
+            slug: createUniqueSlug('cp-trend'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
           })
-        )
-        .returning();
-
-      const [contentRow] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Trending Content',
-          slug: createUniqueSlug('cp-trend'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
+          .returning()
+      );
 
       const [u1, u2, u3] = await seedTestUsers(db, 3);
 
@@ -2050,52 +2186,62 @@ describe('AdminAnalyticsService', () => {
       // Cross-org guard: orgA's call must exclude orgB content entirely, even
       // when orgB content has playback rows. Protects the
       // `eq(content.organizationId, organizationId)` predicate.
-      const [orgA] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [orgB] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const orgA = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const orgB = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const aContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: orgA.id,
+            mediaItemId: media.id,
+            title: 'Org A Engagement',
+            slug: createUniqueSlug('cp-org-a'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
           })
-        )
-        .returning();
+          .returning()
+      );
 
-      const [aContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: orgA.id,
-          mediaItemId: media.id,
-          title: 'Org A Engagement',
-          slug: createUniqueSlug('cp-org-a'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
-
-      const [bContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: orgB.id,
-          mediaItemId: media.id,
-          title: 'Org B Engagement',
-          slug: createUniqueSlug('cp-org-b'),
-          contentType: 'video',
-          status: 'published',
-          priceCents: 0,
-        })
-        .returning();
+      const bContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: orgB.id,
+            mediaItemId: media.id,
+            title: 'Org B Engagement',
+            slug: createUniqueSlug('cp-org-b'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 0,
+          })
+          .returning()
+      );
 
       const [viewer] = await seedTestUsers(db, 1);
 
@@ -2126,10 +2272,12 @@ describe('AdminAnalyticsService', () => {
 
   describe('getDashboardStats', () => {
     it('should return zero stats for organization with no data', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getDashboardStats(emptyOrg.id);
 
@@ -2142,35 +2290,40 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should return combined stats for organization with data', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Dashboard Test Content',
+            slug: createUniqueSlug('dashboard-test'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Dashboard Test Content',
-          slug: createUniqueSlug('dashboard-test'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-        })
-        .returning();
+          .returning()
+      );
 
       // Create purchases
       await db.insert(purchases).values([
@@ -2208,39 +2361,44 @@ describe('AdminAnalyticsService', () => {
       expect(stats.customers.totalCustomers).toBe(1);
       expect(stats.customers.newCustomersLast30Days).toBe(1);
       expect(stats.topContent.items).toHaveLength(1);
-      expect(stats.topContent.items[0].contentId).toBe(testContent.id);
+      expect(stats.topContent.items[0]!.contentId).toBe(testContent.id);
     });
 
     it('should respect date range filter for revenue', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Date Filter Dashboard Test',
+            slug: createUniqueSlug('dashboard-date-filter'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 500,
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Date Filter Dashboard Test',
-          slug: createUniqueSlug('dashboard-date-filter'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 500,
-        })
-        .returning();
+          .returning()
+      );
 
       const now = new Date();
       const yesterday = new Date(now);
@@ -2274,37 +2432,42 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should respect top content limit parameter', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create 5 content items with purchases
       for (let i = 0; i < 5; i++) {
-        const [c] = await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: `Dashboard Content ${i}`,
-            slug: createUniqueSlug(`dashboard-limit-${i}`),
-            contentType: 'video',
-            status: 'published',
-            visibility: 'purchased_only',
-            priceCents: (i + 1) * 100,
-          })
-          .returning();
+        const c = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: testOrg.id,
+              mediaItemId: media.id,
+              title: `Dashboard Content ${i}`,
+              slug: createUniqueSlug(`dashboard-limit-${i}`),
+              contentType: 'video',
+              status: 'published',
+              priceCents: (i + 1) * 100,
+            })
+            .returning()
+        );
 
         await db.insert(purchases).values({
           customerId,
@@ -2328,10 +2491,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should use default limit when topContentLimit not provided', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const stats = await service.getDashboardStats(testOrg.id);
 
@@ -2344,12 +2509,17 @@ describe('AdminAnalyticsService', () => {
 
   describe('getRecentActivity', () => {
     it('should return empty activity feed for organization with no activity', async () => {
-      const [emptyOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const emptyOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const result = await service.getRecentActivity(emptyOrg.id, {});
+      const result = await service.getRecentActivity(emptyOrg.id, {
+        page: 1,
+        limit: 20,
+      });
 
       expect(result.items).toEqual([]);
       expect(result.pagination.total).toBe(0);
@@ -2358,40 +2528,45 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should return combined feed with purchases, content_published, and member_joined', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create additional users for different activity types
       const [memberUser] = await seedTestUsers(db, 1);
 
       // Create media and content for purchase activity
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Test Content for Activity',
-          slug: createUniqueSlug('activity-content'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-          publishedAt: new Date(),
-        })
-        .returning();
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Test Content for Activity',
+            slug: createUniqueSlug('activity-content'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+            publishedAt: new Date(),
+          })
+          .returning()
+      );
 
       // Create a purchase
       await db.insert(purchases).values({
@@ -2416,7 +2591,10 @@ describe('AdminAnalyticsService', () => {
         invitedBy: creatorId,
       });
 
-      const result = await service.getRecentActivity(testOrg.id, {});
+      const result = await service.getRecentActivity(testOrg.id, {
+        page: 1,
+        limit: 20,
+      });
 
       // Should have 3 items: purchase, content_published, member_joined
       expect(result.items).toHaveLength(3);
@@ -2433,44 +2611,49 @@ describe('AdminAnalyticsService', () => {
         new Date(item.timestamp).getTime()
       );
       for (let i = 1; i < timestamps.length; i++) {
-        expect(timestamps[i - 1]).toBeGreaterThanOrEqual(timestamps[i]);
+        expect(timestamps[i - 1]!).toBeGreaterThanOrEqual(timestamps[i]!);
       }
     });
 
     it('should support pagination', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       // Create media and content
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create multiple published content items
       for (let i = 0; i < 5; i++) {
-        const [contentItem] = await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: `Content ${i}`,
-            slug: createUniqueSlug(`content-${i}`),
-            contentType: 'video',
-            status: 'published',
-            visibility: 'purchased_only',
-            priceCents: 100,
-            publishedAt: new Date(),
-          })
-          .returning();
+        const contentItem = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: testOrg.id,
+              mediaItemId: media.id,
+              title: `Content ${i}`,
+              slug: createUniqueSlug(`content-${i}`),
+              contentType: 'video',
+              status: 'published',
+              priceCents: 100,
+              publishedAt: new Date(),
+            })
+            .returning()
+        );
 
         await db.insert(purchases).values({
           customerId,
@@ -2515,36 +2698,41 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should filter by activity type: purchase', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
+
+      const testContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Test Content',
+            slug: createUniqueSlug('filter-purchase'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+            publishedAt: new Date(),
           })
-        )
-        .returning();
-
-      const [testContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Test Content',
-          slug: createUniqueSlug('filter-purchase'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-          publishedAt: new Date(),
-        })
-        .returning();
+          .returning()
+      );
 
       // Create purchase
       await db.insert(purchases).values({
@@ -2562,6 +2750,8 @@ describe('AdminAnalyticsService', () => {
 
       const result = await service.getRecentActivity(testOrg.id, {
         type: 'purchase',
+        page: 1,
+        limit: 20,
       });
 
       // Should only return purchase type (content_published excluded, member_joined excluded)
@@ -2571,20 +2761,24 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should filter by activity type: content_published', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create published content
       await db
@@ -2597,7 +2791,6 @@ describe('AdminAnalyticsService', () => {
           slug: createUniqueSlug('filter-published'),
           contentType: 'video',
           status: 'published',
-          visibility: 'purchased_only',
           priceCents: 1000,
           publishedAt: new Date(),
         })
@@ -2614,7 +2807,6 @@ describe('AdminAnalyticsService', () => {
           slug: createUniqueSlug('draft-content'),
           contentType: 'video',
           status: 'draft',
-          visibility: 'purchased_only',
           priceCents: 1000,
           publishedAt: null,
         })
@@ -2622,6 +2814,8 @@ describe('AdminAnalyticsService', () => {
 
       const result = await service.getRecentActivity(testOrg.id, {
         type: 'content_published',
+        page: 1,
+        limit: 20,
       });
 
       // Should only return content_published type
@@ -2633,10 +2827,12 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should filter by activity type: member_joined', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const [memberUser] = await seedTestUsers(db, 1);
 
@@ -2651,6 +2847,8 @@ describe('AdminAnalyticsService', () => {
 
       const result = await service.getRecentActivity(testOrg.id, {
         type: 'member_joined',
+        page: 1,
+        limit: 20,
       });
 
       // Should only return member_joined type
@@ -2662,37 +2860,42 @@ describe('AdminAnalyticsService', () => {
     });
 
     it('should exclude deleted content from activity feed', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create published content then delete it
-      const [deletedContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'Deleted Content',
-          slug: createUniqueSlug('deleted-content'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-          publishedAt: new Date(),
-        })
-        .returning();
+      const deletedContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'Deleted Content',
+            slug: createUniqueSlug('deleted-content'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+            publishedAt: new Date(),
+          })
+          .returning()
+      );
 
       // Create active content
       await db
@@ -2705,7 +2908,6 @@ describe('AdminAnalyticsService', () => {
           slug: createUniqueSlug('active-content'),
           contentType: 'video',
           status: 'published',
-          visibility: 'purchased_only',
           priceCents: 1000,
           publishedAt: new Date(),
         })
@@ -2719,29 +2921,35 @@ describe('AdminAnalyticsService', () => {
 
       const result = await service.getRecentActivity(testOrg.id, {
         type: 'content_published',
+        page: 1,
+        limit: 20,
       });
 
       // Should only return active content (deleted content excluded)
       expect(result.items).toHaveLength(1);
-      expect(result.items[0].title).toBe('Active Content');
+      expect(result.items[0]!.title).toBe('Active Content');
       expect(result.pagination.total).toBe(1);
     });
 
     it('should sort activity by timestamp DESC', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const now = Date.now();
 
@@ -2759,27 +2967,27 @@ describe('AdminAnalyticsService', () => {
           slug: createUniqueSlug('old-content'),
           contentType: 'video',
           status: 'published',
-          visibility: 'purchased_only',
           priceCents: 1000,
           publishedAt: twoHoursAgo,
         })
         .returning();
 
-      const [newContent] = await db
-        .insert(contentTable)
-        .values({
-          creatorId,
-          organizationId: testOrg.id,
-          mediaItemId: media.id,
-          title: 'New Content',
-          slug: createUniqueSlug('new-content'),
-          contentType: 'video',
-          status: 'published',
-          visibility: 'purchased_only',
-          priceCents: 1000,
-          publishedAt: oneHourAgo,
-        })
-        .returning();
+      const newContent = takeFirst(
+        await db
+          .insert(contentTable)
+          .values({
+            creatorId,
+            organizationId: testOrg.id,
+            mediaItemId: media.id,
+            title: 'New Content',
+            slug: createUniqueSlug('new-content'),
+            contentType: 'video',
+            status: 'published',
+            priceCents: 1000,
+            publishedAt: oneHourAgo,
+          })
+          .returning()
+      );
 
       // Create purchase at a specific time
       await db.insert(purchases).values({
@@ -2795,30 +3003,37 @@ describe('AdminAnalyticsService', () => {
         purchasedAt: new Date(now), // Most recent
       });
 
-      const result = await service.getRecentActivity(testOrg.id, {});
+      const result = await service.getRecentActivity(testOrg.id, {
+        page: 1,
+        limit: 20,
+      });
 
       expect(result.items).toHaveLength(3);
 
       // Most recent should be first
-      expect(result.items[0].type).toBe('purchase');
-      expect(result.items[0].timestamp).toBeDefined();
+      expect(result.items[0]!.type).toBe('purchase');
+      expect(result.items[0]!.timestamp).toBeDefined();
     });
 
     it('should correctly count total items across all activity types', async () => {
-      const [testOrg] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const testOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create 2 published content (non-purchase)
       for (let i = 0; i < 2; i++) {
@@ -2832,7 +3047,6 @@ describe('AdminAnalyticsService', () => {
             slug: createUniqueSlug(`count-content-${i}`),
             contentType: 'video',
             status: 'published',
-            visibility: 'purchased_only',
             priceCents: 1000,
             publishedAt: new Date(),
           })
@@ -2841,21 +3055,22 @@ describe('AdminAnalyticsService', () => {
 
       // Create 3 purchases
       for (let i = 0; i < 3; i++) {
-        const [contentItem] = await db
-          .insert(contentTable)
-          .values({
-            creatorId,
-            organizationId: testOrg.id,
-            mediaItemId: media.id,
-            title: `Purchase Content ${i}`,
-            slug: createUniqueSlug(`purchase-content-${i}`),
-            contentType: 'video',
-            status: 'published',
-            visibility: 'purchased_only',
-            priceCents: 1000,
-            publishedAt: new Date(),
-          })
-          .returning();
+        const contentItem = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId,
+              organizationId: testOrg.id,
+              mediaItemId: media.id,
+              title: `Purchase Content ${i}`,
+              slug: createUniqueSlug(`purchase-content-${i}`),
+              contentType: 'video',
+              status: 'published',
+              priceCents: 1000,
+              publishedAt: new Date(),
+            })
+            .returning()
+        );
 
         await db.insert(purchases).values({
           customerId,
@@ -2884,6 +3099,7 @@ describe('AdminAnalyticsService', () => {
       // Total should be 5 (2 content + 3 content from purchase loop) + 3 (purchases) + 1 (membership) = 9
       const result = await service.getRecentActivity(testOrg.id, {
         limit: 100, // Get all items
+        page: 1,
       });
 
       expect(result.pagination.total).toBe(9);

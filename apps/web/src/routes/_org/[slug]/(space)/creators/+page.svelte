@@ -208,7 +208,6 @@
 <CreatorProfileDrawer
   bind:open={drawerOpen}
   creator={selectedCreator}
-  orgSlug={data.org?.slug ?? ''}
   closeFocus={() => drawerTrigger}
 />
 

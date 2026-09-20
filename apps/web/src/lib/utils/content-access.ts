@@ -33,8 +33,9 @@ export type ContentAccessKind =
 /**
  * Structural subset of the SPEC §6.1 policy flags read by the display helpers.
  * Every field is optional/nullable so both the full `ContentWithRelations` row
- * and the narrower landing-page item shapes (AudioWall/ArticleEditorial) satisfy
- * it without a cast.
+ * and the narrower landing-page / section item shapes satisfy it without a cast.
+ * (Deliberately not naming callers: the two it used to name, AudioWall and
+ * ArticleEditorial, were deleted with the landing redesign.)
  */
 export interface ContentAccessPolicyLike {
   isFree?: boolean | null;

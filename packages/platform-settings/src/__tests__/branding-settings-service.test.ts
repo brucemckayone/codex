@@ -17,6 +17,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { DEFAULT_BRANDING } from '@codex/validation';
@@ -107,16 +108,18 @@ describe('BrandingSettingsService', () => {
     db = setupTestDatabase();
 
     // Create a test organization
-    const [org] = await db
-      .insert(schema.organizations)
-      .values({
-        id: crypto.randomUUID(),
-        name: 'Test Organization',
-        slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(schema.organizations)
+        .values({
+          id: crypto.randomUUID(),
+          name: 'Test Organization',
+          slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+    );
     organizationId = org.id;
   });
 
@@ -196,10 +199,12 @@ describe('BrandingSettingsService', () => {
       expect(result.logoUrl).toBeNull();
 
       // Verify database state
-      const [dbRow] = await db
-        .select()
-        .from(schema.brandingSettings)
-        .where(eq(schema.brandingSettings.organizationId, organizationId));
+      const dbRow = takeFirst(
+        await db
+          .select()
+          .from(schema.brandingSettings)
+          .where(eq(schema.brandingSettings.organizationId, organizationId))
+      );
       expect(dbRow.primaryColorHex).toBe('#123456');
     });
 
@@ -241,10 +246,12 @@ describe('BrandingSettingsService', () => {
       await service.update({ primaryColorHex: '#ABCDEF' });
 
       // Verify hub row exists
-      const [hubRow] = await db
-        .select()
-        .from(schema.platformSettings)
-        .where(eq(schema.platformSettings.organizationId, organizationId));
+      const hubRow = takeFirst(
+        await db
+          .select()
+          .from(schema.platformSettings)
+          .where(eq(schema.platformSettings.organizationId, organizationId))
+      );
       expect(hubRow).toBeDefined();
     });
   });
@@ -391,7 +398,8 @@ describe('BrandingSettingsService', () => {
         '<script>alert(document.cookie)</script>' +
         '<circle cx="50" cy="50" r="40" fill="red"/>' +
         '</svg>';
-      const maliciousBuffer = new TextEncoder().encode(malicious).buffer;
+      const maliciousBuffer = new TextEncoder().encode(malicious)
+        .buffer as ArrayBuffer;
 
       await service.uploadLogo({
         buffer: maliciousBuffer,
@@ -401,7 +409,7 @@ describe('BrandingSettingsService', () => {
 
       // Capture the buffer that was actually written to R2
       expect(mockR2.put).toHaveBeenCalled();
-      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const [, writtenBuffer] = mockR2.put.mock.calls[0]!;
       const writtenSvg = new TextDecoder().decode(
         new Uint8Array(writtenBuffer as ArrayBuffer)
       );
@@ -421,7 +429,7 @@ describe('BrandingSettingsService', () => {
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" onload="alert(1)">' +
         '<circle cx="50" cy="50" r="40" onclick="alert(2)"/>' +
         '</svg>';
-      const buffer = new TextEncoder().encode(malicious).buffer;
+      const buffer = new TextEncoder().encode(malicious).buffer as ArrayBuffer;
 
       await service.uploadLogo({
         buffer,
@@ -429,7 +437,7 @@ describe('BrandingSettingsService', () => {
         size: buffer.byteLength,
       });
 
-      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const [, writtenBuffer] = mockR2.put.mock.calls[0]!;
       const writtenSvg = new TextDecoder().decode(
         new Uint8Array(writtenBuffer as ArrayBuffer)
       );
@@ -445,7 +453,7 @@ describe('BrandingSettingsService', () => {
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
         '<path d="M12 2L2 7l10 5 10-5-10-5z" fill="currentColor"/>' +
         '</svg>';
-      const buffer = new TextEncoder().encode(cleanSvg).buffer;
+      const buffer = new TextEncoder().encode(cleanSvg).buffer as ArrayBuffer;
 
       await service.uploadLogo({
         buffer,
@@ -453,7 +461,7 @@ describe('BrandingSettingsService', () => {
         size: buffer.byteLength,
       });
 
-      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const [, writtenBuffer] = mockR2.put.mock.calls[0]!;
       const writtenSvg = new TextDecoder().decode(
         new Uint8Array(writtenBuffer as ArrayBuffer)
       );
@@ -473,7 +481,7 @@ describe('BrandingSettingsService', () => {
 
       const svg =
         '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>';
-      const buffer = new TextEncoder().encode(svg).buffer;
+      const buffer = new TextEncoder().encode(svg).buffer as ArrayBuffer;
 
       await service.uploadLogo({
         buffer,
@@ -587,10 +595,12 @@ describe('BrandingSettingsService', () => {
       // Insert in `uploaded` state so we don't trigger the
       // `status_ready_requires_keys` check constraint. deleteIntroVideo()
       // only reads creatorId; the media's status is irrelevant for cleanup.
-      const [media] = await db
-        .insert(schema.mediaItems)
-        .values(createTestMediaItemInput(creatorId, { status: 'uploaded' }))
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(schema.mediaItems)
+          .values(createTestMediaItemInput(creatorId, { status: 'uploaded' }))
+          .returning()
+      );
 
       await db.insert(schema.platformSettings).values({ organizationId });
       await db.insert(schema.brandingSettings).values({
@@ -621,10 +631,12 @@ describe('BrandingSettingsService', () => {
       expect(result.introVideoUrl).toBeNull();
 
       // Media item soft-deleted
-      const [media] = await db
-        .select()
-        .from(schema.mediaItems)
-        .where(eq(schema.mediaItems.id, mediaItemId));
+      const media = takeFirst(
+        await db
+          .select()
+          .from(schema.mediaItems)
+          .where(eq(schema.mediaItems.id, mediaItemId))
+      );
       expect(media.deletedAt).not.toBeNull();
     });
 
@@ -711,10 +723,12 @@ describe('BrandingSettingsService', () => {
       expect(result.introVideoUrl).toBeNull();
 
       // Soft-delete still happened despite R2 failure
-      const [media] = await db
-        .select()
-        .from(schema.mediaItems)
-        .where(eq(schema.mediaItems.id, mediaItemId));
+      const media = takeFirst(
+        await db
+          .select()
+          .from(schema.mediaItems)
+          .where(eq(schema.mediaItems.id, mediaItemId))
+      );
       expect(media.deletedAt).not.toBeNull();
     });
 

@@ -173,6 +173,27 @@ comments. The reasoning for its settings lives here.
   `**/*.test.ts` (their tsconfig drives the `dist` build too). Workers and
   apps/web do include theirs. Tracked in Codex-629bw — until it lands, a broken
   package test only surfaces at runtime.
+- **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
+  here too.
+  - **Never suppress a class member by name in `usedClassMembers`.** A name
+    there applies to EVERY class in the repo and carries no reason — which is
+    how 54 entries vanished in a JSON-dedup (PR #176, three duplicate blocks,
+    last-wins) and stayed gone unnoticed for four months. Suppress at the
+    definition site with a one-line `// fallow-ignore-next-line
+    unused-class-member` and the reason in the docblock above it. The array is
+    `[]` because every entry was adjudicated (Codex-ycr38), not because it is
+    unused — keep it that way.
+  - **`unused-class-member` is OFF for the 15 registry-dispatched service
+    files** (an `overrides` entry). fallow cannot resolve
+    `ctx.services.<svc>.<member>()` — the receiver is a property chain through a
+    lazy getter — and `ctx.services.*` is the dispatch pattern this file
+    MANDATES, so 45 live service methods were reported dead. 60 of 65 findings
+    (92%) had real call sites and the category was 46% of the whole backlog.
+    The trade is real: a genuinely dead member in those 15 files is now
+    invisible, so file it before muting further (Codex-j4gxo, Codex-3wzpl).
+  - **Re-run fallow after committing a suppression.** lint-staged runs
+    `biome check --write`, and an autofix that reformats the comment silently
+    un-suppresses it — the same failure mode as a wrapped `biome-ignore` reason.
 
 ---
 

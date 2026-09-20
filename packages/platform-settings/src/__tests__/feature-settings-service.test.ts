@@ -12,6 +12,7 @@ import { schema } from '@codex/database';
 import {
   type Database,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { DEFAULT_FEATURES } from '@codex/validation';
@@ -27,16 +28,18 @@ describe('FeatureSettingsService', () => {
     db = setupTestDatabase();
 
     // Create a test organization
-    const [org] = await db
-      .insert(schema.organizations)
-      .values({
-        id: crypto.randomUUID(),
-        name: 'Test Organization',
-        slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(schema.organizations)
+        .values({
+          id: crypto.randomUUID(),
+          name: 'Test Organization',
+          slug: `test-org-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning()
+    );
     organizationId = org.id;
   });
 
@@ -121,10 +124,12 @@ describe('FeatureSettingsService', () => {
       expect(result.enablePurchases).toBe(DEFAULT_FEATURES.enablePurchases);
 
       // Verify database state
-      const [dbRow] = await db
-        .select()
-        .from(schema.featureSettings)
-        .where(eq(schema.featureSettings.organizationId, organizationId));
+      const dbRow = takeFirst(
+        await db
+          .select()
+          .from(schema.featureSettings)
+          .where(eq(schema.featureSettings.organizationId, organizationId))
+      );
       expect(dbRow.enableSignups).toBe(false);
     });
 
@@ -193,10 +198,12 @@ describe('FeatureSettingsService', () => {
       await service.update({ enableSignups: false });
 
       // Verify hub row exists
-      const [hubRow] = await db
-        .select()
-        .from(schema.platformSettings)
-        .where(eq(schema.platformSettings.organizationId, organizationId));
+      const hubRow = takeFirst(
+        await db
+          .select()
+          .from(schema.platformSettings)
+          .where(eq(schema.platformSettings.organizationId, organizationId))
+      );
       expect(hubRow).toBeDefined();
     });
 

@@ -38,6 +38,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -69,39 +70,44 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
   async function seedScenario(creatorCount: number) {
     const creators =
       creatorCount > 0 ? await seedTestUsers(db, creatorCount) : [];
-    const [org] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const org = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
 
     const contentByCreator = new Map<string, string>();
     if (creators.length > 0) {
       // Shared media item — one is enough since contents reference different creators.
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creators[0], {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creators[0]!, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       for (const cid of creators) {
-        const [row] = await db
-          .insert(contentTable)
-          .values({
-            creatorId: cid,
-            organizationId: org.id,
-            mediaItemId: media.id,
-            title: `Content ${cid.slice(-4)}`,
-            slug: createUniqueSlug(`mtv-${cid.slice(-4)}`),
-            contentType: 'video',
-            status: 'published',
-            visibility: 'purchased_only',
-            priceCents: 1000,
-          })
-          .returning();
+        const row = takeFirst(
+          await db
+            .insert(contentTable)
+            .values({
+              creatorId: cid,
+              organizationId: org.id,
+              mediaItemId: media.id,
+              title: `Content ${cid.slice(-4)}`,
+              slug: createUniqueSlug(`mtv-${cid.slice(-4)}`),
+              contentType: 'video',
+              status: 'published',
+              priceCents: 1000,
+            })
+            .returning()
+        );
         contentByCreator.set(cid, row.id);
       }
     }
@@ -117,14 +123,18 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     orgId: string,
     userId: string
   ): Promise<string> {
-    const [tier] = await db
-      .insert(subscriptionTiers)
-      .values(createTestTierInput(orgId))
-      .returning();
-    const [sub] = await db
-      .insert(subscriptions)
-      .values(createTestSubscriptionInput(userId, orgId, tier.id))
-      .returning();
+    const tier = takeFirst(
+      await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(orgId))
+        .returning()
+    );
+    const sub = takeFirst(
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(userId, orgId, tier.id))
+        .returning()
+    );
     return sub.id;
   }
 
@@ -139,7 +149,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
   it('aggregates purchase revenue per active creator and converts bps→%', async () => {
     const { orgId, creators, contentByCreator } = await seedScenario(2);
-    const [creatorA, creatorB] = creators;
+    const [creatorA, creatorB] = creators as [string, string];
 
     // 75/25 split (bps).
     await db.insert(creatorOrganizationAgreements).values([
@@ -200,7 +210,8 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
     expect(result.items).toHaveLength(2);
     // Ordered by totalRevenueCents DESC.
-    const [first, second] = result.items;
+    const first = result.items[0]!;
+    const second = result.items[1]!;
     expect(first.creatorId).toBe(creatorA);
     expect(first.totalRevenueCents).toBe(3600);
     expect(first.splitPercent).toBe(75);
@@ -211,7 +222,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
   it('excludes agreements whose effectiveUntil has elapsed', async () => {
     const { orgId, creators } = await seedScenario(2);
-    const [active, expired] = creators;
+    const [active, expired] = creators as [string, string];
 
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -232,12 +243,12 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const result = await service.getRevenueByCreator(orgId);
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].creatorId).toBe(active);
+    expect(result.items[0]!.creatorId).toBe(active);
   });
 
   it('reports lastPayoutAt from resolved payouts and pending from unresolved', async () => {
     const { orgId, creators } = await seedScenario(1);
-    const [creatorId] = creators;
+    const [creatorId] = creators as [string];
 
     await db.insert(creatorOrganizationAgreements).values({
       creatorId,
@@ -298,7 +309,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const result = await service.getRevenueByCreator(orgId);
 
     expect(result.items).toHaveLength(1);
-    const [row] = result.items;
+    const row = result.items[0]!;
     expect(row.pendingPayoutCents).toBe(1250); // 250 + 1000
     expect(row.lastPayoutAt).not.toBeNull();
     expect(new Date(row.lastPayoutAt!).toISOString()).toBe(
@@ -308,7 +319,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
   it("does NOT include another org's pending payouts (multi-org safety)", async () => {
     const { orgId: orgA, creators } = await seedScenario(1);
-    const [creatorId] = creators;
+    const [creatorId] = creators as [string];
     const { orgId: orgB } = await seedScenario(0);
 
     await db.insert(creatorOrganizationAgreements).values({
@@ -335,12 +346,12 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const result = await service.getRevenueByCreator(orgA);
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].pendingPayoutCents).toBe(0);
+    expect(result.items[0]!.pendingPayoutCents).toBe(0);
   });
 
   it('respects startDate / endDate filter on revenue aggregation', async () => {
     const { orgId, creators, contentByCreator } = await seedScenario(1);
-    const [creatorId] = creators;
+    const [creatorId] = creators as [string];
 
     await db.insert(creatorOrganizationAgreements).values({
       creatorId,
@@ -384,12 +395,12 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     });
 
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].totalRevenueCents).toBe(900);
+    expect(result.items[0]!.totalRevenueCents).toBe(900);
   });
 
   it('does NOT leak revenue from another org', async () => {
     const { orgId: orgA, creators } = await seedScenario(1);
-    const [creatorId] = creators;
+    const [creatorId] = creators as [string];
     const { orgId: orgB } = await seedScenario(0);
 
     await db.insert(creatorOrganizationAgreements).values({
@@ -399,29 +410,32 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     });
 
     // Set up a content row in orgB for the SAME creator and a paid purchase.
-    const [media] = await db
-      .insert(mediaItems)
-      .values(
-        createTestMediaItemInput(creatorId, {
-          mediaType: 'video',
-          status: 'ready',
+    const media = takeFirst(
+      await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning()
+    );
+    const contentB = takeFirst(
+      await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: orgB,
+          mediaItemId: media.id,
+          title: 'Cross-org content',
+          slug: createUniqueSlug('mtv-cross'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 1000,
         })
-      )
-      .returning();
-    const [contentB] = await db
-      .insert(contentTable)
-      .values({
-        creatorId,
-        organizationId: orgB,
-        mediaItemId: media.id,
-        title: 'Cross-org content',
-        slug: createUniqueSlug('mtv-cross'),
-        contentType: 'video',
-        status: 'published',
-        visibility: 'purchased_only',
-        priceCents: 1000,
-      })
-      .returning();
+        .returning()
+    );
     await db.insert(purchases).values({
       customerId,
       contentId: contentB.id,
@@ -440,7 +454,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     // Creator has an agreement in orgA but no purchases in orgA — must be 0,
     // not the orgB revenue (cross-org leak guard).
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].totalRevenueCents).toBe(0);
+    expect(result.items[0]!.totalRevenueCents).toBe(0);
   });
 
   // ───────────────────────────────────────────────────────────────────
@@ -456,7 +470,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
   // ───────────────────────────────────────────────────────────────────
   it('pendingPayoutCents sums BOTH status=pending AND status=failed rows', async () => {
     const { orgId, creators } = await seedScenario(1);
-    const [creatorId] = creators;
+    const [creatorId] = creators as [string];
 
     await db.insert(creatorOrganizationAgreements).values({
       creatorId,
@@ -510,6 +524,6 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     // be summed (it's already disbursed). Regression on widening this
     // back to `resolvedAt IS NULL` would also return 750 — but a
     // regression that DROPS the failed shape would return 250.
-    expect(result.items[0].pendingPayoutCents).toBe(750);
+    expect(result.items[0]!.pendingPayoutCents).toBe(750);
   });
 });

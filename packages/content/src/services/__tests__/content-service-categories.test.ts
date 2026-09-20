@@ -34,6 +34,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
@@ -63,14 +64,18 @@ describe('ContentService — category tagging (WP-5)', () => {
     const [firstCreator] = await seedTestUsers(db, 1);
     creatorId = firstCreator;
 
-    const [orgA] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
-    const [orgB] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const orgA = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const orgB = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgAId = orgA.id;
     orgBId = orgB.id;
   });
@@ -88,6 +93,7 @@ describe('ContentService — category tagging (WP-5)', () => {
         contentType: 'written',
         contentBody: 'This is the written content body.',
         organizationId: orgAId,
+        tags: [],
         ...(categoryIds ? { categoryIds } : {}),
       },
       creatorId
@@ -223,6 +229,7 @@ describe('ContentService — category tagging (WP-5)', () => {
           contentType: 'written',
           contentBody: 'This is the written content body.',
           organizationId: orgAId,
+          tags: [],
           categoryIds: [foreign.id],
         },
         creatorId

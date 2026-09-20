@@ -17,7 +17,6 @@
     icon: Component<Record<string, unknown>>;
     active: boolean;
     loading: boolean;
-    expanded: boolean;
     /** When true, tooltip registers; skipped in mobile mode or when expanded. */
     showTooltip: boolean;
     index: number;
@@ -30,7 +29,6 @@
     icon: Icon,
     active,
     loading,
-    expanded,
     showTooltip,
     index,
     badgeCount,

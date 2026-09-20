@@ -30,6 +30,7 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -57,14 +58,18 @@ describe('ContentService.listPublic — category filter', () => {
     const [firstCreator] = await seedTestUsers(db, 1);
     creatorId = firstCreator;
 
-    const [orgA] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
-    const [orgB] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput())
-      .returning();
+    const orgA = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
+    const orgB = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning()
+    );
     orgAId = orgA.id;
     orgBId = orgB.id;
   });
@@ -78,19 +83,20 @@ describe('ContentService.listPublic — category filter', () => {
     organizationId: string;
     title: string;
   }): Promise<string> {
-    const [row] = await db
-      .insert(content)
-      .values({
-        creatorId,
-        organizationId: params.organizationId,
-        title: params.title,
-        slug: createUniqueSlug('cat-filter'),
-        contentType: 'written',
-        accessType: 'free',
-        status: 'published',
-        publishedAt: new Date(),
-      })
-      .returning();
+    const row = takeFirst(
+      await db
+        .insert(content)
+        .values({
+          creatorId,
+          organizationId: params.organizationId,
+          title: params.title,
+          slug: createUniqueSlug('cat-filter'),
+          contentType: 'written',
+          status: 'published',
+          publishedAt: new Date(),
+        })
+        .returning()
+    );
     return row.id;
   }
 

@@ -8,9 +8,6 @@
 export { default as BrandStudioCanvas } from './BrandStudioCanvas.svelte';
 export { default as BrandStudioLayout } from './BrandStudioLayout.svelte';
 export { default as BrandStudioRail } from './BrandStudioRail.svelte';
-export { default as CanvasToolbar } from './CanvasToolbar.svelte';
-export { applyMix, currentPalette } from './guided/apply-mix';
-export { default as BrandMixer } from './guided/BrandMixer.svelte';
 export { default as BrandStudioGuided } from './guided/BrandStudioGuided.svelte';
 export {
   type BrandStudioMode,
@@ -19,17 +16,5 @@ export {
   resolveInitialMode,
   writeStoredMode,
 } from './guided/brand-studio-mode';
-export { default as PreviewFrame } from './PreviewFrame.svelte';
-export {
-  PREVIEW_DEVICES,
-  PREVIEW_ROUTES,
-  type PreviewDevice,
-  type PreviewDeviceId,
-  type PreviewFrameLoad,
-  type PreviewFrameTheme,
-  type PreviewRoute,
-  type PreviewRouteId,
-  type PreviewThemeMode,
-  resolvePreviewPath,
-} from './preview-canvas';
-export { createPreviewWiring, type PreviewWiring } from './preview-wiring';
+export type { PreviewFrameLoad } from './preview-canvas';
+export { createPreviewWiring } from './preview-wiring';

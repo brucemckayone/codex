@@ -249,7 +249,6 @@ describe('journey checkout +page.server load', () => {
     const data = (await load(event)) as LoadData;
 
     expect(getCoursePageMock).toHaveBeenCalledWith({ slug: 'rootwork' });
-    expect(data.orgSlug).toBe('acme');
     expect(data.summary.bullets[0]).toBe('5 practices across 2 stages');
     // Three PATHS, four cards — the note counts ways in.
     expect(data.headNote).toBe('One course. Three ways in.');

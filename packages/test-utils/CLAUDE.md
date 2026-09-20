@@ -10,7 +10,7 @@ Integration testing helpers: database setup, entity factories, mock factories, S
 |---|---|
 | `setupTestDatabase()` | Returns the shared `dbWs` (WebSocket) client — supports transactions |
 | `teardownTestDatabase()` | Closes the DB pool so the test process exits cleanly |
-| `seedTestUsers(db, count)` | Creates N users, returns array of user IDs |
+| `seedTestUsers(db, count)` | Creates N users. Returns a **tuple** for a literal `count` of 1-7, `string[]` otherwise — see below |
 | `cleanupDatabase(db)` | Deletes content/media/org/membership rows — KEEPS users |
 | `cleanupDatabaseComplete(db)` | Deletes everything including users |
 | `cleanupTables(db, tables)` | Delete specific tables (`'content' \| 'mediaItems' \| 'organizations' \| 'users'`) |
@@ -18,6 +18,29 @@ Integration testing helpers: database setup, entity factories, mock factories, S
 | `withTransaction(db, testFn)` | Wraps test in a transaction — auto-rollback on throw |
 | `executeRawSQL(db, query)` | Run raw SQL for complex test setup |
 | `type Database` | Re-export of `DatabaseWs` type |
+
+#### `seedTestUsers` returns a TUPLE for literal counts (Codex-gghrn)
+
+`noUncheckedIndexedAccess` is on, so destructuring a `string[]` gives
+`string | undefined` — which then poisons every fixture built from the id.
+Overloads for arities **1-7** return a tuple instead, and indexing a tuple
+within bounds is *not* widened:
+
+```ts
+const [userId] = await seedTestUsers(db, 1);        // string          ✅
+const [a, b]   = await seedTestUsers(db, 2);        // string, string  ✅
+const ids      = await seedTestUsers(db, userCount); // string[] — variable count
+```
+
+**Do NOT add `as [string, string]` at the call site.** 151 such casts existed
+before the overloads landed and were all removed with them; removing the
+overloads again puts 289 type errors back. The tuples are sound because the
+function pushes exactly `count` rows, inserts with no `ON CONFLICT`, and returns
+one id per inserted row — so it yields exactly `count` ids or it throws.
+
+A count above 7, or a variable count, still returns `string[]`; destructure it
+and you are back to `string | undefined`, so index it inside a loop or add the
+next overload.
 
 ### `factories.ts` — Entity Factories
 

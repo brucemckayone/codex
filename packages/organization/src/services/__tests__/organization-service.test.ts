@@ -448,7 +448,7 @@ describe('OrganizationService', () => {
       expect(page1.pagination.totalPages).toBe(3);
 
       expect(page2.items).toHaveLength(2);
-      expect(page1.items[0].id).not.toBe(page2.items[0].id);
+      expect(page1.items[0]!.id).not.toBe(page2.items[0]!.id);
 
       // Verify all returned items are from our test data
       const allReturnedIds = [...page1.items, ...page2.items].map((o) => o.id);
@@ -482,20 +482,22 @@ describe('OrganizationService', () => {
 
     it('should not return soft-deleted organizations', async () => {
       // Get the organization before deletion
-      const orgBefore = await service.get(createdOrgIds[0]);
+      const orgBefore = await service.get(createdOrgIds[0]!);
       expect(orgBefore).toBeDefined();
       expect(orgBefore?.deletedAt).toBeNull();
 
       // Delete the organization
-      await service.delete(createdOrgIds[0]);
+      await service.delete(createdOrgIds[0]!);
 
       // Verify it's gone
-      const orgAfter = await service.get(createdOrgIds[0]);
+      const orgAfter = await service.get(createdOrgIds[0]!);
       expect(orgAfter).toBeNull();
 
       // Verify it doesn't appear in list
       const list = await service.list();
-      expect(list.items.some((org) => org.id === createdOrgIds[0])).toBe(false);
+      expect(list.items.some((org) => org.id === createdOrgIds[0]!)).toBe(
+        false
+      );
     });
   });
 
@@ -654,7 +656,7 @@ describe('OrganizationService', () => {
    */
   describe('member management', () => {
     let memberMgmtTestOrgId: string;
-    let memberMgmtTestUserIds: string[];
+    let memberMgmtTestUserIds: [string, string, string, string];
     let memberMgmtInviterUserId: string;
 
     beforeEach(async () => {
@@ -729,7 +731,7 @@ describe('OrganizationService', () => {
         });
 
         expect(result.items).toHaveLength(1);
-        expect(result.items[0].role).toBe('admin');
+        expect(result.items[0]!.role).toBe('admin');
       });
 
       it('should filter members by status', async () => {
@@ -771,8 +773,8 @@ describe('OrganizationService', () => {
 
         expect(result.items).toHaveLength(1);
         expect(result.pagination.total).toBe(1);
-        expect(result.items[0].role).toBe('owner');
-        expect(result.items[0].userId).toBe(newUserId);
+        expect(result.items[0]!.role).toBe('owner');
+        expect(result.items[0]!.userId).toBe(newUserId);
       });
 
       it('should include user details in response', async () => {
@@ -1136,13 +1138,13 @@ describe('OrganizationService', () => {
       const userIds = await seedTestUsers(db, 5);
       creatorsTestUserIds.push(...userIds);
 
-      // Create test organization — auto-creates owner membership for creatorsTestUserIds[0]
+      // Create test organization — auto-creates owner membership for creatorsTestUserIds[0]!
       const org = await service.create(
         {
           name: 'Test Creators Org',
           slug: createUniqueSlug('test-creators'),
         },
-        creatorsTestUserIds[0]
+        creatorsTestUserIds[0]!
       );
       creatorsTestOrgId = org.id;
       creatorsTestOrgSlug = org.slug;
@@ -1151,25 +1153,25 @@ describe('OrganizationService', () => {
       await db.insert(schema.organizationMemberships).values([
         {
           organizationId: creatorsTestOrgId,
-          userId: creatorsTestUserIds[1],
+          userId: creatorsTestUserIds[1]!,
           role: 'admin',
           status: 'active',
         },
         {
           organizationId: creatorsTestOrgId,
-          userId: creatorsTestUserIds[2],
+          userId: creatorsTestUserIds[2]!,
           role: 'creator',
           status: 'active',
         },
         {
           organizationId: creatorsTestOrgId,
-          userId: creatorsTestUserIds[3],
+          userId: creatorsTestUserIds[3]!,
           role: 'subscriber',
           status: 'active',
         },
         {
           organizationId: creatorsTestOrgId,
-          userId: creatorsTestUserIds[4],
+          userId: creatorsTestUserIds[4]!,
           role: 'creator',
           status: 'inactive',
         },
@@ -1178,31 +1180,28 @@ describe('OrganizationService', () => {
       // Add some published content for testing contentCount
       await db.insert(schema.content).values([
         {
-          creatorId: creatorsTestUserIds[0],
+          creatorId: creatorsTestUserIds[0]!,
           organizationId: creatorsTestOrgId,
           title: 'Published Content 1',
           slug: `pub-content-${Date.now()}-1`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
         },
         {
-          creatorId: creatorsTestUserIds[0],
+          creatorId: creatorsTestUserIds[0]!,
           organizationId: creatorsTestOrgId,
           title: 'Published Content 2',
           slug: `pub-content-${Date.now()}-2`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
         },
         {
-          creatorId: creatorsTestUserIds[1],
+          creatorId: creatorsTestUserIds[1]!,
           organizationId: creatorsTestOrgId,
           title: 'Admin Published Content',
           slug: `pub-content-${Date.now()}-3`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
         },
         // Draft content should not count — covers the status='draft' filter
         // path. The previous "Private Content" seed (visibility='private') was
@@ -1210,7 +1209,7 @@ describe('OrganizationService', () => {
         // creator[2] should remain at zero counted items so the contentCount
         // assertion below holds.
         {
-          creatorId: creatorsTestUserIds[2],
+          creatorId: creatorsTestUserIds[2]!,
           organizationId: creatorsTestOrgId,
           title: 'Draft Content',
           slug: `draft-content-${Date.now()}`,
@@ -1273,7 +1272,7 @@ describe('OrganizationService', () => {
         result.items.every((item) => typeof item.joinedAt === 'string')
       ).toBe(true);
       // Should be a valid ISO date string
-      expect(() => new Date(result.items[0].joinedAt)).not.toThrow();
+      expect(() => new Date(result.items[0]!.joinedAt)).not.toThrow();
     });
 
     it('should support pagination', async () => {
@@ -1350,13 +1349,13 @@ describe('OrganizationService', () => {
       const userIds = await seedTestUsers(db, 6);
       membersTestUserIds.push(...userIds);
 
-      // Create test organization — auto-creates owner membership for membersTestUserIds[0]
+      // Create test organization — auto-creates owner membership for membersTestUserIds[0]!
       const org = await service.create(
         {
           name: 'Test Members Org',
           slug: createUniqueSlug('test-members'),
         },
-        membersTestUserIds[0]
+        membersTestUserIds[0]!
       );
       membersTestOrgId = org.id;
       membersTestOrgSlug = org.slug;
@@ -1365,31 +1364,31 @@ describe('OrganizationService', () => {
       await db.insert(schema.organizationMemberships).values([
         {
           organizationId: membersTestOrgId,
-          userId: membersTestUserIds[1],
+          userId: membersTestUserIds[1]!,
           role: 'admin',
           status: 'active',
         },
         {
           organizationId: membersTestOrgId,
-          userId: membersTestUserIds[2],
+          userId: membersTestUserIds[2]!,
           role: 'creator',
           status: 'active',
         },
         {
           organizationId: membersTestOrgId,
-          userId: membersTestUserIds[3],
+          userId: membersTestUserIds[3]!,
           role: 'subscriber',
           status: 'active',
         },
         {
           organizationId: membersTestOrgId,
-          userId: membersTestUserIds[4],
+          userId: membersTestUserIds[4]!,
           role: 'member',
           status: 'active',
         },
         {
           organizationId: membersTestOrgId,
-          userId: membersTestUserIds[5],
+          userId: membersTestUserIds[5]!,
           role: 'member',
           status: 'inactive',
         },
@@ -1473,7 +1472,7 @@ describe('OrganizationService', () => {
       });
 
       expect(result.items).toHaveLength(1);
-      expect(result.items[0].role).toBe('subscriber');
+      expect(result.items[0]!.role).toBe('subscriber');
       expect(result.pagination.total).toBe(1);
     });
 
@@ -1530,7 +1529,7 @@ describe('OrganizationService', () => {
 
       expect(result.items).toHaveLength(1);
       expect(result.pagination.total).toBe(1);
-      expect(result.items[0].role).toBe('owner');
+      expect(result.items[0]!.role).toBe('owner');
     });
   });
 });

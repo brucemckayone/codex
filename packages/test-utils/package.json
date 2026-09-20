@@ -19,7 +19,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint --write .",
     "format": "biome format --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@codex/constants": "workspace:*",
@@ -34,7 +34,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
     "@types/ws": "^8.18.1",
-    "neon-testing": "^2.2.0",
     "stripe": "^19.2.0",
     "typescript": "^5.6.3",
     "vitest": "^4.0.2"

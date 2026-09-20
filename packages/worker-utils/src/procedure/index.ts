@@ -78,9 +78,6 @@ export { createServiceRegistry } from './service-registry';
 // Type exports
 export type {
   AuthLevel,
-  CachePolicyRule,
-  CachePolicyViolation,
-  CachePresetForAuth,
   InferInput,
   InputSchema,
   ProcedureConfig,

@@ -396,7 +396,14 @@ export class ContentAccessService
    *
    * @returns Rewritten master playlist text, or `null` when the master object
    *          is absent in R2 (route maps to 404).
+   *
+   * Called at workers/content-api/src/routes/content-access.ts:230 on the
+   * `service` destructured from `createContentAccessService(c.env)` — this
+   * route bypasses procedure() to own its DB lifecycle, so the receiver is a
+   * factory's destructured return value, which dead-code detection cannot
+   * resolve to this class.
    */
+  // fallow-ignore-next-line unused-class-member
   async getHlsMasterPlaylist(input: {
     contentId: string;
     creatorId: string;
@@ -415,7 +422,11 @@ export class ContentAccessService
    *
    * @returns Rewritten variant playlist text, or `null` when the variant
    *          object is absent in R2 (route maps to 404).
+   *
+   * Called at workers/content-api/src/routes/content-access.ts:287, same
+   * destructured-factory receiver as `getHlsMasterPlaylist` above.
    */
+  // fallow-ignore-next-line unused-class-member
   async getHlsVariantPlaylist(input: {
     creatorId: string;
     mediaId: string;

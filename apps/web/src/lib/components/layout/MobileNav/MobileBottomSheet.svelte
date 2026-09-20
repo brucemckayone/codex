@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LayoutUser, LayoutOrganization } from '$lib/types';
+	import type { LayoutUser } from '$lib/types';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { fade, fly } from 'svelte/transition';
@@ -26,10 +26,9 @@
 		open: boolean;
 		variant: 'platform' | 'org';
 		user: LayoutUser | null;
-		org?: LayoutOrganization;
 	}
 
-	let { open = $bindable(false), variant, user, org }: Props = $props();
+	let { open = $bindable(false), variant, user }: Props = $props();
 
 	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
 	// Svelte JS transitions bypass CSS media queries, so we must gate

@@ -26,7 +26,7 @@
   "scripts": {
     "build": "vite build --config vite.config.admin.ts",
     "dev": "vite build --config vite.config.admin.ts --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run --config vitest.config.admin.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -36,7 +36,6 @@
   "dependencies": {
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
-    "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",
     "@codex/shared-types": "workspace:*",

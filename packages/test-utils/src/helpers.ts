@@ -165,6 +165,37 @@ export async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Narrow a query result to its first row, throwing if there is none.
+ *
+ * `noUncheckedIndexedAccess` is on, so `const [row] = await db...returning()`
+ * types `row` as `T | undefined`. That optionality then fans out through the
+ * inferred return type of every fixture helper built on the destructure — in
+ * @codex/subscription three such destructures in one helper accounted for 941
+ * diagnostics (Codex-629bw). Take the row here instead, so it is non-optional
+ * from the start and an empty result fails where the data is actually missing.
+ *
+ * Usage:
+ * ```typescript
+ * const org = takeFirst(
+ *   await db.insert(organizations).values(input).returning()
+ * );
+ * ```
+ *
+ * @param rows - Query result rows
+ * @param what - Noun used in the failure message (default: 'row')
+ * @throws Error if rows is empty
+ */
+export function takeFirst<T>(rows: readonly T[], what = 'row'): T {
+  const [row] = rows;
+
+  if (row === undefined) {
+    throw new Error(`Expected at least one ${what}, got none`);
+  }
+
+  return row;
+}
+
 // Note: createUniqueSlug is exported from factories.ts
 // Re-export it here for convenience
 export { createUniqueSlug } from './factories';

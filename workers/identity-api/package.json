@@ -18,7 +18,6 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/identity": "workspace:*",
     "@codex/image-processing": "workspace:*",

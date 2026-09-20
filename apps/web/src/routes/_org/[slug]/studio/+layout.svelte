@@ -126,7 +126,7 @@
 
 <!-- CommandPalette lives at layout root, independent of the chrome it used
      to live next to. Cmd/Ctrl-K hotkey is self-wired inside the component. -->
-<CommandPalette orgSlug={data.org.slug} />
+<CommandPalette />
 
 <style>
   .studio-layout {

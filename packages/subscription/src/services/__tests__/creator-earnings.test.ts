@@ -20,6 +20,7 @@ import {
   createUniqueSlug,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
@@ -44,14 +45,18 @@ describe('SubscriptionService — creator earnings (WP7)', () => {
     const stripe = createMockStripe() as unknown as Stripe;
     service = new SubscriptionService({ db, environment: 'test' }, stripe);
 
-    const [orgA] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput({ slug: createUniqueSlug('wp7a') }))
-      .returning();
-    const [orgB] = await db
-      .insert(organizations)
-      .values(createTestOrganizationInput({ slug: createUniqueSlug('wp7b') }))
-      .returning();
+    const orgA = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput({ slug: createUniqueSlug('wp7a') }))
+        .returning()
+    );
+    const orgB = takeFirst(
+      await db
+        .insert(organizations)
+        .values(createTestOrganizationInput({ slug: createUniqueSlug('wp7b') }))
+        .returning()
+    );
     orgAId = orgA.id;
     orgBId = orgB.id;
   });

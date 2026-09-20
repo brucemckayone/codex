@@ -333,11 +333,72 @@ export interface SeedTestUsersOptions {
  * Creates test users in the auth.users table.
  * Returns user IDs for use in tests.
  *
+ * # Why the tuple overloads (Codex-gghrn)
+ *
+ * `noUncheckedIndexedAccess` is on (`config/tsconfig/base.json:10`), so
+ * indexing or destructuring a `string[]` yields `string | undefined`. That
+ * single looseness propagated into ~380 call sites and every fixture built from
+ * them — `createTestSubscriptionInput(uid, …)`, `userId: ids[n]` inside
+ * `.values()`, plain assignment to a `let x: string` — and was being papered
+ * over with `as [string, string]` casts at the call site.
+ *
+ * The tuples are SOUND, not a convenient lie: the body pushes exactly `count`
+ * rows, inserts them with no `ON CONFLICT`, and returns one id per inserted
+ * row — so it yields exactly `count` ids or it throws. And indexing a tuple
+ * WITHIN BOUNDS is not widened by `noUncheckedIndexedAccess`, which is where the
+ * win comes from.
+ *
+ * Overloads cover arities 1-7, which is 288 of the measured call sites. The
+ * variadic signature still serves `seedTestUsers(db, userCount)` (48 sites,
+ * where the count is a variable and cannot be tupled) and the single
+ * `count: 25` site. A tuple is assignable to `string[]`, so adding these cannot
+ * break a caller that wants the array.
+ *
  * @param db - Database client
  * @param count - Number of users to create
  * @param options - Optional per-batch overrides (e.g. stripeCustomerId)
- * @returns Array of user IDs
+ * @returns Exactly `count` user IDs — as a tuple for a literal count of 1-7
  */
+export async function seedTestUsers(
+  db: Database,
+  count: 1,
+  options?: SeedTestUsersOptions
+): Promise<[string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 2,
+  options?: SeedTestUsersOptions
+): Promise<[string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 3,
+  options?: SeedTestUsersOptions
+): Promise<[string, string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 4,
+  options?: SeedTestUsersOptions
+): Promise<[string, string, string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 5,
+  options?: SeedTestUsersOptions
+): Promise<[string, string, string, string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 6,
+  options?: SeedTestUsersOptions
+): Promise<[string, string, string, string, string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count: 7,
+  options?: SeedTestUsersOptions
+): Promise<[string, string, string, string, string, string, string]>;
+export async function seedTestUsers(
+  db: Database,
+  count?: number,
+  options?: SeedTestUsersOptions
+): Promise<string[]>;
 export async function seedTestUsers(
   db: Database,
   count: number = 1,

@@ -372,7 +372,6 @@ describe('journey sales +page.server load', () => {
 
     expect(getCoursePageMock).toHaveBeenCalledWith({ slug: 'rootwork' });
     expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
-    expect(data.orgSlug).toBe('acme');
   });
 
   it('registers the version-cache dependency and locks the PRIVATE (never shared-cacheable) header', async () => {

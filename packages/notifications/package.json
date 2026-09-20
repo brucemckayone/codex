@@ -26,7 +26,7 @@
   "scripts": {
     "build": "vite build --config vite.config.notifications.ts",
     "dev": "vite build --config vite.config.notifications.ts --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run --config vitest.config.notifications.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -44,7 +44,6 @@
     "resend": "^6.6.0"
   },
   "devDependencies": {
-    "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3",
     "vite": "^7.2.2",

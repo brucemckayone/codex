@@ -351,9 +351,7 @@ export interface ProcedurePolicy {
  * exactly `'optional'` lands on `'private' | 'fresh'` — so an auth level the
  * compiler cannot pin down gets the safe answer instead of every answer.
  */
-export type CachePresetForAuth<TAuth extends AuthLevel> = [TAuth] extends [
-  'none',
-]
+type CachePresetForAuth<TAuth extends AuthLevel> = [TAuth] extends ['none']
   ? CachePresetName
   : [TAuth] extends ['optional']
     ? 'per-viewer' | 'private' | 'fresh'
@@ -449,7 +447,7 @@ type AssertsSessionInvariant<TPolicy> = TPolicy extends {
  * prints `TMessage` in the error, so the message names the rule that was
  * broken.
  */
-export interface CachePolicyViolation<TMessage extends string> {
+interface CachePolicyViolation<TMessage extends string> {
   readonly __cachePolicyViolation: TMessage;
 }
 

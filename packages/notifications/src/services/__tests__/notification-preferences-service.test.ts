@@ -5,10 +5,12 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Database } from '../../types';
 import { NotificationPreferencesService } from '../notification-preferences-service';
 
-// Mock DB - properly typed to match NotificationPreferencesServiceConfig
-const mockDb = {
+// Mock DB, cast at the boundary: it implements only the drizzle chain the
+// service exercises, not the whole DatabaseClient surface.
+const mockDbRaw = {
   query: {
     notificationPreferences: {
       findFirst: vi.fn(),
@@ -23,8 +25,10 @@ const mockDb = {
   delete: vi.fn().mockReturnThis(),
 };
 
+const mockDb = mockDbRaw as unknown as Database;
+
 // Mock the database module before importing service
-vi.mock('@codex/database', () => ({ schema: mockDb }));
+vi.mock('@codex/database', () => ({ schema: mockDbRaw }));
 vi.unmock('@codex/database');
 
 describe('NotificationPreferencesService', () => {
@@ -49,7 +53,7 @@ describe('NotificationPreferencesService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(
         mockPrefs
       );
 
@@ -65,7 +69,7 @@ describe('NotificationPreferencesService', () => {
     });
 
     it('should create defaults when no preferences exist', async () => {
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(null);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(null);
 
       const newPrefs = {
         userId: 'user-1',
@@ -76,7 +80,7 @@ describe('NotificationPreferencesService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.insert.mockReturnValue({
+      mockDbRaw.insert.mockReturnValue({
         values: vi.fn().mockReturnValue({
           onConflictDoNothing: vi.fn().mockReturnValue({
             returning: vi.fn().mockResolvedValue([newPrefs]),
@@ -103,7 +107,7 @@ describe('NotificationPreferencesService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(
         existing
       );
 
@@ -113,7 +117,7 @@ describe('NotificationPreferencesService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.update.mockReturnValue({
+      mockDbRaw.update.mockReturnValue({
         set: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
             returning: vi.fn().mockResolvedValue([updated]),
@@ -129,7 +133,7 @@ describe('NotificationPreferencesService', () => {
     });
 
     it('should create preferences when none exist', async () => {
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(null);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(null);
 
       const newPrefs = {
         userId: 'user-1',
@@ -140,7 +144,7 @@ describe('NotificationPreferencesService', () => {
         updatedAt: new Date(),
       };
 
-      mockDb.insert.mockReturnValue({
+      mockDbRaw.insert.mockReturnValue({
         values: vi.fn().mockReturnValue({
           returning: vi.fn().mockResolvedValue([newPrefs]),
         }),
@@ -164,7 +168,9 @@ describe('NotificationPreferencesService', () => {
         emailDigest: true,
       };
 
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(prefs);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(
+        prefs
+      );
 
       const result = await service.hasOptedOut('user-1', 'marketing');
       expect(result).toBe(true);
@@ -177,7 +183,9 @@ describe('NotificationPreferencesService', () => {
         emailDigest: true,
       };
 
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(prefs);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(
+        prefs
+      );
 
       const result = await service.hasOptedOut('user-1', 'marketing');
       expect(result).toBe(false);
@@ -190,14 +198,16 @@ describe('NotificationPreferencesService', () => {
         emailDigest: true,
       };
 
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(prefs);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(
+        prefs
+      );
 
       const result = await service.hasOptedOut('user-1', 'transactional');
       expect(result).toBe(true);
     });
 
     it('should return false when no preferences exist (defaults)', async () => {
-      mockDb.query.notificationPreferences.findFirst.mockResolvedValue(null);
+      mockDbRaw.query.notificationPreferences.findFirst.mockResolvedValue(null);
 
       const result = await service.hasOptedOut('user-1', 'marketing');
       expect(result).toBe(false); // defaults to true

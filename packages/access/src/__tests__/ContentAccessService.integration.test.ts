@@ -37,7 +37,6 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
   createTestConnectAccountInput,
@@ -96,11 +95,10 @@ describe('ContentAccessService Integration', () => {
       verifyPurchase: vi.fn(),
     };
 
-    const obs = new ObservabilityClient('content-access-test', 'test');
     accessService = new ContentAccessService({
       db,
+      environment: 'test',
       r2: r2Client,
-      obs,
       purchaseService: mockPurchaseService as unknown as PurchaseService,
       // WP-14: getStreamingUrl now returns a master-playlist PROXY URL on this
       // origin (signed with hlsTokenSecret) rather than a direct presigned
@@ -176,7 +174,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('free-tutorial'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0, // Free!
           tags: [],
         },
@@ -238,7 +235,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('premium-course'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 1999, // $19.99
           tags: [],
@@ -305,7 +301,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('exclusive'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 4999, // $49.99
           tags: [],
@@ -367,7 +362,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('org-exclusive'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 2999, // $29.99
           tags: [],
@@ -437,7 +431,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('draft'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -467,7 +460,6 @@ describe('ContentAccessService Integration', () => {
       new ContentAccessService({
         db,
         environment: 'test',
-        obs: new ObservabilityClient('content-access-test', 'test'),
         purchaseService: mockPurchaseService as unknown as PurchaseService,
         contentApiBaseUrl: 'https://api.revelations.studio',
         hlsTokenSecret: 'test-worker-shared-secret',
@@ -476,7 +468,7 @@ describe('ContentAccessService Integration', () => {
             return `https://r2.cloudflarestorage.com/${key}?X-Amz-Signature=stub`;
           },
           async getObjectText(key: string) {
-            return key in objects ? objects[key] : null;
+            return objects[key] ?? null;
           },
         },
       });
@@ -575,7 +567,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('progress-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -632,7 +623,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('upsert-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -697,7 +687,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('completion-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -752,7 +741,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('no-progress'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -780,6 +768,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'all',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(result.items).toHaveLength(0);
@@ -820,7 +811,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('library-test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 999,
           tags: [],
@@ -857,6 +847,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'all',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(result.items.length).toBeGreaterThan(0);
@@ -869,7 +862,7 @@ describe('ContentAccessService Integration', () => {
       // filter by org on subdomain library pages. organizationSlug alone
       // was nullable and allowed null-org entries to slip through.
       expect(item?.content.organizationId).toBe(organizationId);
-      expect(item?.purchase.priceCents).toBe(999);
+      expect(item?.purchase?.priceCents).toBe(999);
       expect(item?.progress?.positionSeconds).toBe(300);
       expect(item?.progress?.percentComplete).toBe(50);
     });
@@ -907,7 +900,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug('in-progress'),
           contentType: 'video',
           mediaItemId: media1.id,
-          visibility: 'purchased_only',
           isPurchasable: true,
           priceCents: 500,
           tags: [],
@@ -942,6 +934,9 @@ describe('ContentAccessService Integration', () => {
         limit: 20,
         filter: 'in_progress',
         sortBy: 'recent',
+        contentType: 'all',
+        accessType: 'all',
+        search: '',
       });
 
       expect(
@@ -1041,7 +1036,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(opts.slugPrefix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1082,6 +1076,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
@@ -1103,6 +1100,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
@@ -1124,6 +1124,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.some((i) => i.content.id === item.id)).toBe(false);
@@ -1153,11 +1156,14 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         const matches = result.items.filter((i) => i.content.id === item.id);
         expect(matches).toHaveLength(1);
-        expect(matches[0].accessType).toBe('purchased');
+        expect(matches[0]!.accessType).toBe('purchased');
       });
 
       it('excludes an item with a PENDING purchase from the subscription arm (race-window dedup)', async () => {
@@ -1195,7 +1201,6 @@ describe('ContentAccessService Integration', () => {
           currency: 'GBP',
           status: 'pending',
           stripePaymentIntentId: `pi_pending_${Date.now()}`,
-          stripeSessionId: `cs_pending_${Date.now()}`,
         });
 
         const result = await accessService.listUserLibrary(subscriberUserId, {
@@ -1203,6 +1208,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         // Pending purchase is neither in purchased (requires completed) nor
@@ -1246,7 +1254,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('exact-95'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1301,7 +1308,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('below-95'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1360,7 +1366,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('zero-duration'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1415,7 +1420,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('overflow'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1477,7 +1481,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('long-video'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1539,7 +1542,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('special-chars'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1592,7 +1594,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('spaces'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1644,7 +1645,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('unicode'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1694,7 +1694,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('to-delete'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1747,7 +1746,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('free'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0, // Explicitly free
             tags: [],
           },
@@ -1803,7 +1801,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('expensive'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 9999999, // $99,999.99 (max allowed is $100,000)
             tags: [],
@@ -1839,6 +1836,9 @@ describe('ContentAccessService Integration', () => {
           limit: 20,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items).toHaveLength(0);
@@ -1851,6 +1851,9 @@ describe('ContentAccessService Integration', () => {
           limit: 1,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.length).toBeLessThanOrEqual(1);
@@ -1863,6 +1866,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'all',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         expect(result.items.length).toBeLessThanOrEqual(100);
@@ -1918,7 +1924,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('sub-access'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 999,
             tags: [],
@@ -2025,7 +2030,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 1999,
             includedInTierId: minimumTierId,
@@ -2223,7 +2227,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2378,7 +2381,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(slugSuffix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2509,7 +2511,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('owner-bypass'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 4999,
             tags: [],
@@ -2569,7 +2570,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('sub-deny'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 2999,
             tags: [],
@@ -2636,7 +2636,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('no-access-edge'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'purchased_only',
             isPurchasable: true,
             priceCents: 999,
             tags: [],
@@ -2665,6 +2664,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           contentType: 'video',
+          accessType: 'all',
+          search: '',
         });
 
         // All items should be video type
@@ -2680,6 +2681,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           contentType: 'audio',
+          accessType: 'all',
+          search: '',
         });
 
         // All items should be audio type (may be empty if no audio content)
@@ -2696,12 +2699,15 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'all',
           sortBy: 'title',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         // Verify items are sorted by title
         for (let i = 1; i < result.items.length; i++) {
-          const prev = result.items[i - 1].content.title.toLowerCase();
-          const curr = result.items[i].content.title.toLowerCase();
+          const prev = result.items[i - 1]!.content.title.toLowerCase();
+          const curr = result.items[i]!.content.title.toLowerCase();
           expect(prev <= curr).toBe(true);
         }
       });
@@ -2715,6 +2721,8 @@ describe('ContentAccessService Integration', () => {
           filter: 'all',
           sortBy: 'recent',
           search: 'Library Test',
+          contentType: 'all',
+          accessType: 'all',
         });
 
         // Items matching search should be returned
@@ -2735,6 +2743,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'completed',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2748,6 +2759,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'not_started',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2764,6 +2778,9 @@ describe('ContentAccessService Integration', () => {
           limit: 100,
           filter: 'in_progress',
           sortBy: 'recent',
+          contentType: 'all',
+          accessType: 'all',
+          search: '',
         });
 
         for (const item of result.items) {
@@ -2808,7 +2825,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('concurrent'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -2884,7 +2900,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('concurrent-stream'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3004,7 +3019,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug(opts.slugPrefix),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3140,7 +3154,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('orgless-no-tier'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3207,7 +3220,6 @@ describe('ContentAccessService Integration', () => {
             slug: createUniqueSlug('org-scoped-tier'),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -3304,7 +3316,6 @@ describe('ContentAccessService Integration', () => {
           slug: createUniqueSlug(opts.slug),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -3724,7 +3735,6 @@ describe('ContentAccessService Integration', () => {
           db: countingDb,
           environment: 'test',
           r2: r2Client,
-          obs: new ObservabilityClient('content-access-test', 'test'),
           purchaseService: mockPurchaseService as unknown as PurchaseService,
         });
 

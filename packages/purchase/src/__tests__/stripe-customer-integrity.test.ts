@@ -45,8 +45,8 @@ describe('stripe-customer-integrity', () => {
 
       const rows = await findUsersByStripeCustomerId(db, customerId);
       expect(rows).toHaveLength(1);
-      expect(rows[0].userId).toBe(userId);
-      expect(rows[0].stripeCustomerId).toBe(customerId);
+      expect(rows[0]!.userId).toBe(userId);
+      expect(rows[0]!.stripeCustomerId).toBe(customerId);
     });
 
     it('returns an empty array when the id is unknown to Codex', async () => {

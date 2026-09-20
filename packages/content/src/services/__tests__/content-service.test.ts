@@ -35,11 +35,20 @@ import {
   type Database,
   seedTestUsers,
   setupTestDatabase,
+  takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
 import type { CreateContentInput } from '@codex/validation';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import {
   ContentNotFoundError,
   ContentTypeMismatchError,
@@ -77,15 +86,17 @@ describe('ContentService', () => {
     describe('valid content creation', () => {
       it('should create video content with media item', async () => {
         // Arrange: Create ready media item
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Test Video Content',
@@ -93,7 +104,6 @@ describe('ContentService', () => {
           description: 'Test description',
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -119,15 +129,17 @@ describe('ContentService', () => {
 
       it('should create audio content with media item', async () => {
         // Arrange
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'audio',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'audio',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Test Audio Content',
@@ -135,7 +147,6 @@ describe('ContentService', () => {
           description: 'Test audio',
           contentType: 'audio',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -156,7 +167,6 @@ describe('ContentService', () => {
           description: 'Test written content',
           contentType: 'written',
           contentBody: 'This is the written content body.',
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -172,20 +182,24 @@ describe('ContentService', () => {
 
       it('should create content with organization', async () => {
         // Arrange: Create organization
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Org Content',
@@ -193,7 +207,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -207,22 +220,23 @@ describe('ContentService', () => {
 
       it('should create personal content (no organization)', async () => {
         // Arrange
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Personal Content',
           slug: createUniqueSlug('personal'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -237,15 +251,17 @@ describe('ContentService', () => {
       it('rejects orgless content with a minimumTierId set (Codex-up7bx)', async () => {
         // subscription_tiers is org-scoped, so a tier on orgless content is
         // a semantically invalid row. The write schema rejects it at create().
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input = {
           title: 'Orgless Tier Content',
@@ -269,42 +285,50 @@ describe('ContentService', () => {
         // Seed org-scoped subscriber content WITH a real tier, then move it
         // out of the org via update. The service must clamp the now-dangling
         // tier to null so the access layer never has to fail closed on it.
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [tier] = await db
-          .insert(subscriptionTiers)
-          .values(createTestTierInput(org.id, { sortOrder: 1 }))
-          .returning();
+        const tier = takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(org.id, { sortOrder: 1 }))
+            .returning()
+        );
 
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         // Insert a valid org-scoped tier-gated row directly (bypasses the
         // create schema, mirroring how legitimate subscriber content lands).
-        const [seeded] = await db
-          .insert(content)
-          .values({
-            creatorId,
-            organizationId: org.id,
-            mediaItemId: media.id,
-            title: 'Org Tier Content',
-            slug: createUniqueSlug('org-tier'),
-            contentType: 'video',
-            isFree: false,
-            includedInTierId: tier.id,
-            status: 'draft',
-          })
-          .returning();
+        const seeded = takeFirst(
+          await db
+            .insert(content)
+            .values({
+              creatorId,
+              organizationId: org.id,
+              mediaItemId: media.id,
+              title: 'Org Tier Content',
+              slug: createUniqueSlug('org-tier'),
+              contentType: 'video',
+              isFree: false,
+              includedInTierId: tier.id,
+              status: 'draft',
+            })
+            .returning()
+        );
 
         // Update to orgless WITHOUT touching minimumTierId in the payload —
         // the schema can't reason here; the service clamp must clear the tier.
@@ -320,15 +344,17 @@ describe('ContentService', () => {
 
       it('should create content with tags and category', async () => {
         // Arrange
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Tagged Content',
@@ -337,7 +363,6 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           category: 'tutorials',
           tags: ['vitest', 'testing', 'typescript'],
-          visibility: 'public',
           priceCents: 0,
         };
 
@@ -351,15 +376,17 @@ describe('ContentService', () => {
 
       it('should create paid content with paid access type', async () => {
         // Arrange
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Paid Content',
@@ -388,7 +415,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: '00000000-0000-0000-0000-000000000000', // Non-existent
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -401,22 +427,23 @@ describe('ContentService', () => {
 
       it('should throw MediaNotFoundError if media belongs to different creator', async () => {
         // Arrange: Create media for different creator
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(otherCreatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(otherCreatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Content',
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -429,22 +456,23 @@ describe('ContentService', () => {
 
       it('should allow creating draft content with non-ready media', async () => {
         // Arrange: Create media in uploading status
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'uploading', // Not ready
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'uploading', // Not ready
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Content',
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -460,22 +488,23 @@ describe('ContentService', () => {
 
       it('should throw ContentTypeMismatchError if video content uses audio media', async () => {
         // Arrange: Create audio media
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'audio',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'audio',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Video Content',
           slug: createUniqueSlug('test'),
           contentType: 'video', // Mismatch: video content with audio media
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -488,22 +517,23 @@ describe('ContentService', () => {
 
       it('should throw ContentTypeMismatchError if audio content uses video media', async () => {
         // Arrange: Create video media
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const input: CreateContentInput = {
           title: 'Audio Content',
           slug: createUniqueSlug('test'),
           contentType: 'audio', // Mismatch: audio content with video media
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -518,15 +548,17 @@ describe('ContentService', () => {
     describe('slug uniqueness', () => {
       it('should throw SlugConflictError for duplicate personal content slug', async () => {
         // Arrange: Create first content
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const slug = createUniqueSlug('duplicate');
         const input: CreateContentInput = {
@@ -534,7 +566,6 @@ describe('ContentService', () => {
           slug,
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -547,7 +578,6 @@ describe('ContentService', () => {
           slug, // Same slug
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -559,20 +589,24 @@ describe('ContentService', () => {
 
       it('should throw SlugConflictError for duplicate organization content slug', async () => {
         // Arrange: Create organization and media
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const slug = createUniqueSlug('org-duplicate');
         const input: CreateContentInput = {
@@ -581,7 +615,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -595,7 +628,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id, // Same org
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -607,25 +639,31 @@ describe('ContentService', () => {
 
       it('should allow same slug in different organizations', async () => {
         // Arrange: Create two organizations
-        const [org1] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org1 = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [org2] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org2 = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const slug = createUniqueSlug('same-slug');
 
@@ -636,7 +674,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org1.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -647,7 +684,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org2.id, // Different org
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -663,20 +699,24 @@ describe('ContentService', () => {
 
       it('should allow same slug for personal and organization content', async () => {
         // Arrange
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
 
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
-            })
-          )
-          .returning();
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
 
         const slug = createUniqueSlug('shared-slug');
 
@@ -687,7 +727,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           // No organizationId = personal
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -699,7 +738,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         };
@@ -719,22 +757,23 @@ describe('ContentService', () => {
   describe('get', () => {
     it('should retrieve content by id', async () => {
       // Arrange: Create content
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const input: CreateContentInput = {
         title: 'Test Content',
         slug: createUniqueSlug('get-test'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       };
@@ -765,22 +804,23 @@ describe('ContentService', () => {
 
     it('should return null if content belongs to different creator', async () => {
       // Arrange: Create content for other creator
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(otherCreatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(otherCreatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const input: CreateContentInput = {
         title: 'Other Creator Content',
         slug: createUniqueSlug('other'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       };
@@ -796,22 +836,23 @@ describe('ContentService', () => {
 
     it('should return null for soft-deleted content', async () => {
       // Arrange: Create and delete content
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const input: CreateContentInput = {
         title: 'To Delete',
         slug: createUniqueSlug('delete'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       };
@@ -830,22 +871,23 @@ describe('ContentService', () => {
   describe('update', () => {
     it('should update content title', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const input: CreateContentInput = {
         title: 'Original Title',
         slug: createUniqueSlug('update'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
         priceCents: 0,
         tags: [],
       };
@@ -868,15 +910,17 @@ describe('ContentService', () => {
 
     it('should update content description', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -885,7 +929,6 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           description: 'Old description',
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -905,15 +948,17 @@ describe('ContentService', () => {
 
     it('should update content access type and price', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -956,15 +1001,17 @@ describe('ContentService', () => {
 
     it('should throw ContentNotFoundError if updating other creator content', async () => {
       // Arrange: Create content for other creator
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(otherCreatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(otherCreatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -972,7 +1019,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1003,40 +1049,48 @@ describe('ContentService', () => {
         includedInTierId?: string | null;
         organizationId?: string | null;
       }): Promise<string> {
-        const [media] = await db
-          .insert(mediaItems)
-          .values(
-            createTestMediaItemInput(creatorId, {
-              mediaType: 'video',
-              status: 'ready',
+        const media = takeFirst(
+          await db
+            .insert(mediaItems)
+            .values(
+              createTestMediaItemInput(creatorId, {
+                mediaType: 'video',
+                status: 'ready',
+              })
+            )
+            .returning()
+        );
+        const row = takeFirst(
+          await db
+            .insert(content)
+            .values({
+              creatorId,
+              mediaItemId: media.id,
+              title: 'Gated Content',
+              slug: createUniqueSlug('gated'),
+              contentType: 'video',
+              isFree: false,
+              status: 'draft',
+              ...flags,
             })
-          )
-          .returning();
-        const [row] = await db
-          .insert(content)
-          .values({
-            creatorId,
-            mediaItemId: media.id,
-            title: 'Gated Content',
-            slug: createUniqueSlug('gated'),
-            contentType: 'video',
-            isFree: false,
-            status: 'draft',
-            ...flags,
-          })
-          .returning();
+            .returning()
+        );
         return row.id;
       }
 
       it('clearing a subscriber tier makes the row FREE, not a zero-gate public row', async () => {
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
-        const [tier] = await db
-          .insert(subscriptionTiers)
-          .values(createTestTierInput(org.id, { sortOrder: 1 }))
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
+        const tier = takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(org.id, { sortOrder: 1 }))
+            .returning()
+        );
         const id = await seedGated({
           organizationId: org.id,
           includedInTierId: tier.id,
@@ -1090,14 +1144,18 @@ describe('ContentService', () => {
       });
 
       it('does NOT clamp when another gate remains (hybrid drops price, keeps tier)', async () => {
-        const [org] = await db
-          .insert(organizations)
-          .values(createTestOrganizationInput())
-          .returning();
-        const [tier] = await db
-          .insert(subscriptionTiers)
-          .values(createTestTierInput(org.id, { sortOrder: 1 }))
-          .returning();
+        const org = takeFirst(
+          await db
+            .insert(organizations)
+            .values(createTestOrganizationInput())
+            .returning()
+        );
+        const tier = takeFirst(
+          await db
+            .insert(subscriptionTiers)
+            .values(createTestTierInput(org.id, { sortOrder: 1 }))
+            .returning()
+        );
         const id = await seedGated({
           organizationId: org.id,
           isPurchasable: true,
@@ -1121,15 +1179,17 @@ describe('ContentService', () => {
   describe('publish', () => {
     it('should publish draft content', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1137,7 +1197,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('publish'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1157,15 +1216,17 @@ describe('ContentService', () => {
 
     it('should be idempotent (publishing already published content)', async () => {
       // Arrange: Create and publish
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1173,7 +1234,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('idempotent'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1198,15 +1258,17 @@ describe('ContentService', () => {
 
     it('should throw MediaNotReadyError if media is not ready', async () => {
       // Arrange: Create content with ready media, then manually update media to uploading
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1214,7 +1276,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('not-ready'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1241,7 +1302,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('written'),
           contentType: 'written',
           contentBody: 'Content body',
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1291,7 +1351,7 @@ describe('ContentService', () => {
 
       // Content must remain a draft — the block is a hard gate, not a warning.
       const stillDraft = await service.get(id, creatorId);
-      expect(stillDraft.status).toBe('draft');
+      expect(stillDraft?.status).toBe('draft');
     });
 
     it('blocks publishing PAID content when Connect exists but is not payout-ready', async () => {
@@ -1343,28 +1403,34 @@ describe('ContentService', () => {
     it('blocks publishing SUBSCRIBER-gated content without a ready Connect account', async () => {
       // Subscriber content must be org-scoped; seed the draft row directly
       // (service.create rejects orgless tier-gated content).
-      const [org] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
-      const [tier] = await db
-        .insert(subscriptionTiers)
-        .values(createTestTierInput(org.id, { sortOrder: 1 }))
-        .returning();
-      const [seeded] = await db
-        .insert(content)
-        .values({
-          creatorId,
-          organizationId: org.id,
-          title: 'Subscriber Article',
-          slug: createUniqueSlug('sub-no-connect'),
-          contentType: 'written',
-          contentBody: 'Members only',
-          isFree: false,
-          includedInTierId: tier.id,
-          status: 'draft',
-        })
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
+      const tier = takeFirst(
+        await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(org.id, { sortOrder: 1 }))
+          .returning()
+      );
+      const seeded = takeFirst(
+        await db
+          .insert(content)
+          .values({
+            creatorId,
+            organizationId: org.id,
+            title: 'Subscriber Article',
+            slug: createUniqueSlug('sub-no-connect'),
+            contentType: 'written',
+            contentBody: 'Members only',
+            isFree: false,
+            includedInTierId: tier.id,
+            status: 'draft',
+          })
+          .returning()
+      );
 
       await expect(
         service.publish(seeded.id, creatorId)
@@ -1378,7 +1444,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('free-no-connect'),
           contentType: 'written',
           contentBody: 'Free body',
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1394,15 +1459,17 @@ describe('ContentService', () => {
   describe('unpublish', () => {
     it('should unpublish published content', async () => {
       // Arrange: Create and publish
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1410,7 +1477,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('unpublish'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1439,15 +1505,17 @@ describe('ContentService', () => {
   describe('delete', () => {
     it('should soft delete content', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1455,7 +1523,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('delete'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1479,15 +1546,17 @@ describe('ContentService', () => {
 
     it('should throw ContentNotFoundError if deleting other creator content', async () => {
       // Arrange
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(otherCreatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(otherCreatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       const created = await service.create(
         {
@@ -1495,7 +1564,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1517,15 +1585,17 @@ describe('ContentService', () => {
       createdContentIds = [];
 
       // Create test content for list tests
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       // Create 5 content items and track their IDs
       for (let i = 0; i < 5; i++) {
@@ -1535,7 +1605,6 @@ describe('ContentService', () => {
             slug: createUniqueSlug(`list-${i}`),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
             priceCents: 0,
             tags: [],
           },
@@ -1580,12 +1649,12 @@ describe('ContentService', () => {
       expect(page2.pagination.page).toBe(2);
 
       // Assert different items
-      expect(page1.items[0].id).not.toBe(page2.items[0].id);
+      expect(page1.items[0]!.id).not.toBe(page2.items[0]!.id);
     });
 
     it('should filter by status', async () => {
       // Arrange: Publish one of our created content items
-      const contentToPublish = createdContentIds[0];
+      const contentToPublish = createdContentIds[0]!;
       await service.publish(contentToPublish, creatorId);
 
       // Act: Filter by published
@@ -1648,15 +1717,17 @@ describe('ContentService', () => {
 
     it('should not return other creator content', async () => {
       // Arrange: Create content for other creator
-      const [media] = await db
-        .insert(mediaItems)
-        .values(
-          createTestMediaItemInput(otherCreatorId, {
-            mediaType: 'video',
-            status: 'ready',
-          })
-        )
-        .returning();
+      const media = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(otherCreatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning()
+      );
 
       await service.create(
         {
@@ -1664,7 +1735,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
           priceCents: 0,
           tags: [],
         },
@@ -1686,7 +1756,7 @@ describe('ContentService', () => {
 
     it('should not return soft-deleted content', async () => {
       // Arrange: Delete one of our created content items
-      const contentToDelete = createdContentIds[0];
+      const contentToDelete = createdContentIds[0]!;
       await service.delete(contentToDelete, creatorId);
 
       // Act
@@ -1713,17 +1783,18 @@ describe('ContentService', () => {
     it('strips body columns from non-free content and preserves them for free', async () => {
       // Arrange: follower-gated content requires an organizationId, so we
       // need an org before creating the gated article.
-      const [org] = await db
-        .insert(organizations)
-        .values(createTestOrganizationInput())
-        .returning();
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning()
+      );
 
       const freeArticle = await service.create(
         {
           title: 'Free Article',
           slug: createUniqueSlug('free-article'),
           contentType: 'written',
-          visibility: 'public',
           priceCents: 0,
           tags: [],
           contentBody: 'This is the freely readable article body.',
@@ -1737,7 +1808,6 @@ describe('ContentService', () => {
           title: 'Followers Only Article',
           slug: createUniqueSlug('followers-article'),
           contentType: 'written',
-          visibility: 'public',
           isFollowerGated: true,
           organizationId: org.id,
           priceCents: 0,

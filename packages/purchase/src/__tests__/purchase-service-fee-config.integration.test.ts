@@ -85,7 +85,6 @@ describe('PurchaseService × FeeConfigService integration', () => {
       .values({
         name: 'Fee Config Test Org',
         slug: createUniqueSlug('fee-config-test-org'),
-        ownerId: creatorId,
       })
       .returning();
     if (!org) throw new Error('Failed to create test organization');
@@ -123,9 +122,8 @@ describe('PurchaseService × FeeConfigService integration', () => {
         slug: createUniqueSlug(label),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'purchased_only',
-        accessType: 'paid',
         priceCents,
+        tags: [],
       },
       creatorId
     );

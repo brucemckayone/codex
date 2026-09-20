@@ -109,7 +109,7 @@ describe('CourseJourneyService.listPublishedCourses (SPEC §8.5)', () => {
         publishedAt: new Date('2026-06-10T00:00:00.000Z'),
         priceCents: 4900,
       },
-    ]);
+    ] as (typeof courses.$inferInsert)[]);
   });
 
   afterAll(async () => {

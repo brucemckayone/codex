@@ -3,7 +3,7 @@ import type { Database } from '../../types';
 import { TemplateService } from '../template-service';
 
 // Mock DB
-const mockDb = {
+const mockDbRaw = {
   query: {
     emailTemplates: {
       findMany: vi.fn(),
@@ -24,7 +24,9 @@ const mockDb = {
   update: vi.fn().mockReturnThis(),
   set: vi.fn().mockReturnThis(),
   transaction: vi.fn().mockImplementation((cb) => cb(mockDb)),
-} as unknown as Database;
+};
+
+const mockDb = mockDbRaw as unknown as Database;
 
 describe('TemplateService API Format', () => {
   let service: TemplateService;
@@ -51,7 +53,7 @@ describe('TemplateService API Format', () => {
       // The paginatedQuery helper runs db.select({ total: count() }).from(...).where(...)
       // Since we mock the chain, we need to make the last call return the value
       const mockWhere = vi.fn().mockResolvedValue([{ total: 10 }]);
-      (mockDb.from as ReturnType<typeof vi.fn>).mockReturnValue({
+      mockDbRaw.from.mockReturnValue({
         where: mockWhere,
       });
 

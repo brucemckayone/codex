@@ -34,8 +34,8 @@ describe('InMemoryEmailProvider', () => {
 
     const emails = provider.getSentEmails();
     expect(emails).toHaveLength(2);
-    expect(emails[0].message.to).toBe('a@test.com');
-    expect(emails[1].message.to).toBe('b@test.com');
+    expect(emails[0]!.message.to).toBe('a@test.com');
+    expect(emails[1]!.message.to).toBe('b@test.com');
   });
 
   it('getLastEmail returns most recent email', async () => {
@@ -73,8 +73,8 @@ describe('InMemoryEmailProvider', () => {
 
     const aliceEmails = provider.getEmailsTo('alice@test.com');
     expect(aliceEmails).toHaveLength(2);
-    expect(aliceEmails[0].message.subject).toBe('To Alice');
-    expect(aliceEmails[1].message.subject).toBe('Again Alice');
+    expect(aliceEmails[0]!.message.subject).toBe('To Alice');
+    expect(aliceEmails[1]!.message.subject).toBe('Again Alice');
   });
 
   it('getEmailsWithSubject filters by subject', async () => {
