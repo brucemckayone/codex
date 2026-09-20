@@ -67,10 +67,10 @@ async function seedOrgFixture(
   db: Database,
   options: { ownerActive?: boolean } = {}
 ): Promise<OrgFixture> {
-  const [ownerId, creatorAId, creatorBId, outsiderId] = (await seedTestUsers(
+  const [ownerId, creatorAId, creatorBId, outsiderId] = await seedTestUsers(
     db,
     4
-  )) as [string, string, string, string];
+  );
 
   const [org] = await db
     .insert(schema.organizations)

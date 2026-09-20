@@ -2791,7 +2791,7 @@ describe('SubscriptionService', () => {
     it('should return paginated list', async () => {
       const { org, tier1 } = await createFullOrg('list-subs');
       // Insert 3 subscriptions from different users
-      const users = (await seedTestUsers(db, 3)) as [string, string, string];
+      const users = await seedTestUsers(db, 3);
       for (const uid of users) {
         await db
           .insert(subscriptions)
@@ -2832,10 +2832,7 @@ describe('SubscriptionService', () => {
 
     it('excludes cancelled by default (BUG-023 regression guard)', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-cancel-default');
-      const [activeUid, cancelledUid] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(activeUid, org.id, tier1.id, {
           status: 'active',
@@ -2856,10 +2853,7 @@ describe('SubscriptionService', () => {
 
     it('includes cancelled when includeCancelled=true', async () => {
       const { org, tier1 } = await createFullOrg('list-subs-cancel-on');
-      const [activeUid, cancelledUid] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(activeUid, org.id, tier1.id, {
           status: 'active',
@@ -2880,7 +2874,7 @@ describe('SubscriptionService', () => {
 
     it('filters by tierId', async () => {
       const { org, tier1, tier2 } = await createFullOrg('list-subs-tier');
-      const [u1, u2] = (await seedTestUsers(db, 2)) as [string, string];
+      const [u1, u2] = await seedTestUsers(db, 2);
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(u1, org.id, tier1.id, {
           status: 'active',
@@ -2922,7 +2916,7 @@ describe('SubscriptionService', () => {
   describe('getSubscriptionStats', () => {
     it('should return correct totals and per-tier breakdown', async () => {
       const { org, tier1, tier2 } = await createFullOrg('stats');
-      const users = (await seedTestUsers(db, 2)) as [string, string];
+      const users = await seedTestUsers(db, 2);
 
       await db.insert(subscriptions).values([
         createTestSubscriptionInput(users[0], org.id, tier1.id, {

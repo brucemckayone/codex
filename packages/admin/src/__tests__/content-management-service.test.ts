@@ -45,7 +45,7 @@ describe('AdminContentManagementService', () => {
     service = new AdminContentManagementService({ db, environment: 'test' });
 
     // Create test user
-    const userIds = (await seedTestUsers(db, 1)) as [string];
+    const userIds = await seedTestUsers(db, 1);
     [creatorId] = userIds;
 
     // Create organization

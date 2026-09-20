@@ -272,15 +272,7 @@ describe('Round-D read services (Codex-776gg)', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId, u1, u2, u3, u4, u5, u6] = (await seedTestUsers(db, 7)) as [
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-      string,
-    ];
+    [creatorId, u1, u2, u3, u4, u5, u6] = await seedTestUsers(db, 7);
 
     const [orgA] = await db
       .insert(organizations)

@@ -111,7 +111,7 @@ describe('PurchaseService Integration', () => {
     purchaseService = new PurchaseService(config, mockStripe);
 
     // Seed test users
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [userId, otherUserId] = userIds;
 
     // Create test organization
@@ -1388,7 +1388,7 @@ describe('PurchaseService Integration', () => {
     // that violates check_payouts_user_required (23514) and strands the slice
     // in the platform balance with no ledger row (the bug this locks).
     it('Codex-ed446: org owner with no Connect account still gets a non-null-userId pending org_fee row (no 23514 strand)', async () => {
-      const [ownerUserId] = (await seedTestUsers(db, 1)) as [string];
+      const [ownerUserId] = await seedTestUsers(db, 1);
       const org2 = takeFirst(
         await db
           .insert(organizations)
@@ -4440,7 +4440,7 @@ describe('PurchaseService Integration', () => {
 
     beforeAll(async () => {
       // Setup: Create separate users and organization for verify tests
-      const userIds = (await seedTestUsers(db, 2)) as [string, string];
+      const userIds = await seedTestUsers(db, 2);
       [verifyUserId, verifyOtherUserId] = userIds;
 
       // Create organization
@@ -4731,7 +4731,7 @@ describe('PurchaseService Integration', () => {
   // org-fee slice) can't ship green.
   describe('resolvePrimaryConnect — org→account resolution (Codex-69t7c)', () => {
     it('falls back to the org owner account when no primary pin is set', async () => {
-      const [ownerUserId] = (await seedTestUsers(db, 1)) as [string];
+      const [ownerUserId] = await seedTestUsers(db, 1);
       const org = takeFirst(
         await db
           .insert(organizations)
@@ -4762,10 +4762,7 @@ describe('PurchaseService Integration', () => {
     });
 
     it('picks the earliest-joined owner deterministically for a multi-owner org (Codex-rjwdm)', async () => {
-      const [olderOwnerId, newerOwnerId] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [olderOwnerId, newerOwnerId] = await seedTestUsers(db, 2);
       const org = takeFirst(
         await db
           .insert(organizations)

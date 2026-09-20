@@ -51,7 +51,7 @@ describe('Journey publish/unpublish cascade (Codex-xzwl5)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId] = (await seedTestUsers(db, 1)) as [string];
+    [creatorId] = await seedTestUsers(db, 1);
   });
 
   afterAll(async () => {

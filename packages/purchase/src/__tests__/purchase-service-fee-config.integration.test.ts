@@ -68,7 +68,7 @@ describe('PurchaseService × FeeConfigService integration', () => {
       billingPortal: { sessions: { create: vi.fn() } },
     } as unknown as Stripe;
 
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId, customerId] = userIds;
 
     // ContentService.publish now gates monetised content behind a payout-ready

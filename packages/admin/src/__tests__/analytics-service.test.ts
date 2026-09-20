@@ -52,7 +52,7 @@ describe('AdminAnalyticsService', () => {
     service = new AdminAnalyticsService({ db, environment: 'test' });
 
     // Create test users
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId, customerId] = userIds;
 
     // Create organization (result not needed beyond creation)
@@ -720,13 +720,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       const tier = await insertTier(testOrg.id, 'mixed');
-      const [u1, u2, u3, u4, u5] = (await seedTestUsers(db, 5)) as [
-        string,
-        string,
-        string,
-        string,
-        string,
-      ];
+      const [u1, u2, u3, u4, u5] = await seedTestUsers(db, 5);
 
       const now = new Date();
       const tenDaysAgo = new Date(now);
@@ -831,7 +825,7 @@ describe('AdminAnalyticsService', () => {
       const tierA = await insertTier(orgA.id, 'scope-a');
       const tierB = await insertTier(orgB.id, 'scope-b');
 
-      const [ua, ub] = (await seedTestUsers(db, 2)) as [string, string];
+      const [ua, ub] = await seedTestUsers(db, 2);
       const now = new Date();
       const twoDaysAgo = new Date(now);
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
@@ -873,11 +867,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       const tier = await insertTier(testOrg.id, 'compare');
-      const [u1, u2, u3] = (await seedTestUsers(db, 3)) as [
-        string,
-        string,
-        string,
-      ];
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const sevenDaysAgo = new Date(now);
@@ -958,7 +948,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       const tier = await insertTier(testOrg.id, 'daily-range');
-      const [uIn, uOut] = (await seedTestUsers(db, 2)) as [string, string];
+      const [uIn, uOut] = await seedTestUsers(db, 2);
 
       const today = new Date();
       const twoDaysAgo = new Date(today);
@@ -1030,11 +1020,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       // Three users: one pre-range, one in-range, one post-range
-      const [uBefore, uIn, uAfter] = (await seedTestUsers(db, 3)) as [
-        string,
-        string,
-        string,
-      ];
+      const [uBefore, uIn, uAfter] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const fortyDaysAgo = new Date(now);
@@ -1091,7 +1077,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [ua, ub] = (await seedTestUsers(db, 2)) as [string, string];
+      const [ua, ub] = await seedTestUsers(db, 2);
       const now = new Date();
       const twoDaysAgo = new Date(now);
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
@@ -1126,11 +1112,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [u1, u2, u3] = (await seedTestUsers(db, 3)) as [
-        string,
-        string,
-        string,
-      ];
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const sevenDaysAgo = new Date(now);
@@ -1201,7 +1183,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [uIn, uOut] = (await seedTestUsers(db, 2)) as [string, string];
+      const [uIn, uOut] = await seedTestUsers(db, 2);
 
       const today = new Date();
       const twoDaysAgo = new Date(today);
@@ -1265,10 +1247,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       // Create additional test users
-      const [customer1, customer2] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [customer1, customer2] = await seedTestUsers(db, 2);
 
       const media = takeFirst(
         await db
@@ -1574,10 +1553,7 @@ describe('AdminAnalyticsService', () => {
       });
 
       // Three viewers, one with playback that falls outside the window.
-      const [viewerIn1, viewerIn2, viewerOut] = (await seedTestUsers(
-        db,
-        3
-      )) as [string, string, string];
+      const [viewerIn1, viewerIn2, viewerOut] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const twoDaysAgo = new Date(now);
@@ -1957,10 +1933,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [viewer1, viewer2] = (await seedTestUsers(db, 2)) as [
-        string,
-        string,
-      ];
+      const [viewer1, viewer2] = await seedTestUsers(db, 2);
 
       const now = new Date();
       const oneDayAgo = new Date(now);
@@ -2057,11 +2030,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [viewer1, viewer2, viewer3] = (await seedTestUsers(db, 3)) as [
-        string,
-        string,
-        string,
-      ];
+      const [viewer1, viewer2, viewer3] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const oneDayAgo = new Date(now);
@@ -2151,11 +2120,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [u1, u2, u3] = (await seedTestUsers(db, 3)) as [
-        string,
-        string,
-        string,
-      ];
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
 
       const now = new Date();
       const threeDaysAgo = new Date(now);
@@ -2278,7 +2243,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [viewer] = (await seedTestUsers(db, 1)) as [string];
+      const [viewer] = await seedTestUsers(db, 1);
 
       const now = new Date();
       const oneDayAgo = new Date(now);
@@ -2571,7 +2536,7 @@ describe('AdminAnalyticsService', () => {
       );
 
       // Create additional users for different activity types
-      const [memberUser] = (await seedTestUsers(db, 1)) as [string];
+      const [memberUser] = await seedTestUsers(db, 1);
 
       // Create media and content for purchase activity
       const media = takeFirst(
@@ -2869,7 +2834,7 @@ describe('AdminAnalyticsService', () => {
           .returning()
       );
 
-      const [memberUser] = (await seedTestUsers(db, 1)) as [string];
+      const [memberUser] = await seedTestUsers(db, 1);
 
       // Create membership
       await db.insert(organizationMemberships).values({
@@ -3122,7 +3087,7 @@ describe('AdminAnalyticsService', () => {
       }
 
       // Create 1 membership
-      const [memberUser] = (await seedTestUsers(db, 1)) as [string];
+      const [memberUser] = await seedTestUsers(db, 1);
       await db.insert(organizationMemberships).values({
         organizationId: testOrg.id,
         userId: memberUser,

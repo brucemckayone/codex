@@ -51,7 +51,7 @@ describe('MediaItemService', () => {
     db = setupTestDatabase();
     service = new MediaItemService({ db, environment: 'test' });
 
-    const userIds = (await seedTestUsers(db, 2)) as [string, string];
+    const userIds = await seedTestUsers(db, 2);
     [creatorId, otherCreatorId] = userIds;
   });
 

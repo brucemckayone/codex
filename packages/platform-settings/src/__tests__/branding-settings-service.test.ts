@@ -591,7 +591,7 @@ describe('BrandingSettingsService', () => {
      * Returns { creatorId, mediaItemId, hlsPrefix }.
      */
     async function seedLinkedIntroVideo() {
-      const [creatorId] = (await seedTestUsers(db, 1)) as [string];
+      const [creatorId] = await seedTestUsers(db, 1);
       // Insert in `uploaded` state so we don't trigger the
       // `status_ready_requires_keys` check constraint. deleteIntroVideo()
       // only reads creatorId; the media's status is irrelevant for cleanup.

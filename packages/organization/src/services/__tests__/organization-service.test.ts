@@ -63,7 +63,7 @@ describe('OrganizationService', () => {
     service = new OrganizationService({ db, environment: 'test' });
 
     // Seed a default test user for create() calls that need a userId
-    const [userId] = (await seedTestUsers(db, 1)) as [string];
+    const [userId] = await seedTestUsers(db, 1);
     defaultTestUserId = userId;
   });
 
@@ -661,12 +661,7 @@ describe('OrganizationService', () => {
 
     beforeEach(async () => {
       // Create test users first (needed for org creation's auto-owner membership)
-      memberMgmtTestUserIds = (await seedTestUsers(db, 4)) as [
-        string,
-        string,
-        string,
-        string,
-      ];
+      memberMgmtTestUserIds = await seedTestUsers(db, 4);
       memberMgmtInviterUserId = memberMgmtTestUserIds[0];
 
       // Create test organization — auto-creates owner membership for inviter
@@ -762,7 +757,7 @@ describe('OrganizationService', () => {
       });
 
       it('should have only the auto-created owner for a new organization', async () => {
-        const [newUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [newUserId] = await seedTestUsers(db, 1);
         const newOrg = await service.create(
           {
             name: `New Org ${Date.now()}`,
@@ -815,7 +810,7 @@ describe('OrganizationService', () => {
 
       beforeEach(async () => {
         // Create a user to invite
-        [newUserId] = (await seedTestUsers(db, 1)) as [string];
+        [newUserId] = await seedTestUsers(db, 1);
       });
 
       it('should create membership with valid email', async () => {
@@ -1097,7 +1092,7 @@ describe('OrganizationService', () => {
         // Negative control for the filter predicate: it must exclude the
         // 'inactive' tombstone WITHOUT allow-listing only 'active', because
         // MemberTable renders pending invites as ordinary rows.
-        const [invitedUserId] = (await seedTestUsers(db, 1)) as [string];
+        const [invitedUserId] = await seedTestUsers(db, 1);
         await db.insert(schema.organizationMemberships).values({
           organizationId: memberMgmtTestOrgId,
           userId: invitedUserId,
@@ -1521,7 +1516,7 @@ describe('OrganizationService', () => {
     });
 
     it('should have only the auto-created owner for a new organization', async () => {
-      const [newUserId] = (await seedTestUsers(db, 1)) as [string];
+      const [newUserId] = await seedTestUsers(db, 1);
       const newOrg = await service.create(
         {
           name: 'New Org',

@@ -195,11 +195,7 @@ describe('CourseInsightsService.getOrgJourneyRevenue (Codex-9p47t)', () => {
 
   beforeAll(async () => {
     db = setupTestDatabase();
-    [creatorId, buyer, subscriber] = (await seedTestUsers(db, 3)) as [
-      string,
-      string,
-      string,
-    ];
+    [creatorId, buyer, subscriber] = await seedTestUsers(db, 3);
 
     const [orgA] = await db
       .insert(organizations)

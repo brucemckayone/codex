@@ -62,7 +62,7 @@ describe('ContentService.uploadThumbnail', () => {
     db = setupTestDatabase();
     mockDb = db; // Set db reference for mock to use
     service = new ContentService({ db, environment: 'test' });
-    [creatorId] = (await seedTestUsers(db, 1)) as [string];
+    [creatorId] = await seedTestUsers(db, 1);
   });
 
   afterAll(async () => {

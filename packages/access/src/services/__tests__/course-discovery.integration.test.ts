@@ -58,7 +58,7 @@ describe('Member discovery (Codex-oi2w4)', () => {
   beforeAll(async () => {
     db = setupTestDatabase();
     service = new CourseJourneyService({ db, environment: 'test' });
-    [creatorId, otherUserId] = (await seedTestUsers(db, 2)) as [string, string];
+    [creatorId, otherUserId] = await seedTestUsers(db, 2);
   });
 
   afterAll(async () => {
