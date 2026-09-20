@@ -26,20 +26,21 @@
  * evidence (Stripe prices, `purchases`, `subscription_tiers` references), never
  * a mechanical backfill.
  *
- * ── CHECK 2 · priced but free (Codex-al9ft) ───────────────────────────────
+ * ── CHECK 2 · isFree=true alongside ANY gate (Codex-al9ft) ────────────────
  *
- * `@codex/access`'s paid arm is `(priceCents ?? 0) > 0` and never reads
- * `isFree`, while apps/web decided publicness from `isFree`. Four places that
- * computed or validated `isFree` omitted `priceCents`, so a price-only create
- * persisted `{ isFree: true, priceCents: > 0 }` and — worse — a PATCH clearing
- * `isPurchasable` REWROTE a correctly-gated row into that shape. Those paths are
- * fixed, but a code fix cannot reach rows already written.
+ * `@codex/access` never reads `isFree` — it branches on the gates — while
+ * apps/web decided publicness from `isFree` alone. So a row with `isFree` AND a
+ * gate is denied by one and advertised as public by the other. Four places that
+ * computed or validated `isFree` omitted `priceCents`; a fifth
+ * (`course-journey-service.ts`) sets `courseOnly` and leaves `isFree` alone on
+ * purpose. Those paths are fixed or now fail closed, but a code fix cannot reach
+ * rows already written — which is what this checks.
  *
- * Usage (read-only, no flags):
- *   pnpm --filter @codex/database audit:content-flags
- *
- * Reads DATABASE_URL from ../../../.env.dev like the other scripts here; point
- * it at whichever environment you are auditing.
+ * Usage — DB_METHOD is REQUIRED, because the client routes on it and not on
+ * DATABASE_URL (see {@link assertTargetIsExplicit}; getting this wrong silently
+ * audits the wrong database):
+ *   DB_METHOD=PRODUCTION DATABASE_URL=<url> pnpm --filter @codex/database audit:content-flags
+ *   DB_METHOD=LOCAL_PROXY                   pnpm --filter @codex/database audit:content-flags
  *
  * Exit codes: 0 = both checks clean, 1 = findings, 2 = could not run.
  */
@@ -47,7 +48,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { and, eq, gt, isNotNull, isNull, lt } from 'drizzle-orm';
+import { and, eq, isNull, lt } from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +76,9 @@ const POLICY_COLUMNS = {
   isPurchasable: schema.content.isPurchasable,
   priceCents: schema.content.priceCents,
   includedInTierId: schema.content.includedInTierId,
+  isFollowerGated: schema.content.isFollowerGated,
+  isTeamOnly: schema.content.isTeamOnly,
+  courseOnly: schema.content.courseOnly,
   organizationId: schema.content.organizationId,
 } as const;
 
@@ -137,60 +141,175 @@ async function checkResetSignature(): Promise<number> {
   return 1;
 }
 
-/** CHECK 2 — a positive price on a row marked free. */
-async function checkPricedButFree(): Promise<number> {
-  console.log('── CHECK 2 · priced but marked free (Codex-al9ft) ──');
+/**
+ * CHECK 2 — `isFree = true` alongside ANY gate. That is a contradiction: the
+ * gate denies the content while `isFree` advertises it as public.
+ *
+ * Originally this looked only for `priceCents > 0 AND isFree`, which is the
+ * shape Codex-al9ft was filed for. Too narrow — the first production run
+ * reported clean while `embodiement-meditation` sat there published with
+ * `isFree = true` AND `courseOnly = true`, reaching the identical divergence
+ * through a different flag. `courseOnly` is checked FIRST by the resolver and
+ * suppresses every standalone path, so the row was denied by the gate and
+ * simultaneously served its full body to anonymous visitors by the old
+ * `isPublicContent(isFree)`.
+ *
+ * It is produced deliberately: `course-journey-service.ts:3188-3230` gates
+ * default-policy practices by setting `courseOnly` and leaving `isFree`
+ * untouched, reasoning that `isFree` "can no longer grant access once
+ * `courseOnly` wins" — true of the resolver, false of the body-render path.
+ *
+ * So this now asserts the whole invariant `isPublicContent()` encodes, rather
+ * than the one instance of it that happened to get filed.
+ */
+async function checkFreeWithAGate(): Promise<number> {
+  console.log('── CHECK 2 · isFree=true alongside a gate (Codex-al9ft) ──');
 
   // Soft-deleted rows excluded here: this check is about what is being SERVED,
   // and a deleted row serves no page. Drafts ARE included — a draft published
   // later carries the same flags, so it is the same latent leak.
-  const rows = await dbHttp
+  // (Check 1 deliberately does NOT filter deletedAt; see its comment.)
+  const free = await dbHttp
     .select(POLICY_COLUMNS)
     .from(schema.content)
     .where(
-      and(
-        eq(schema.content.isFree, true),
-        isNotNull(schema.content.priceCents),
-        gt(schema.content.priceCents, 0),
-        isNull(schema.content.deletedAt)
-      )
+      and(eq(schema.content.isFree, true), isNull(schema.content.deletedAt))
     );
 
-  if (rows.length === 0) {
-    console.log('✓ No rows with priceCents > 0 AND isFree = true.\n');
+  // Mirrors isPublicContent() in apps/web/src/lib/server/content-detail.ts —
+  // keep the two in step, and keep both in step with decideContentAccess.
+  const gateOf = (r: (typeof free)[number]): string | null => {
+    if (r.isPurchasable) return 'isPurchasable';
+    if ((r.priceCents ?? 0) > 0) return `priceCents=${r.priceCents}`;
+    if (r.includedInTierId !== null) return 'includedInTierId';
+    if (r.isFollowerGated) return 'isFollowerGated';
+    if (r.isTeamOnly) return 'isTeamOnly';
+    if (r.courseOnly) return 'courseOnly';
+    return null;
+  };
+
+  const contradictory = free
+    .map((r) => ({ row: r, gate: gateOf(r) }))
+    .filter((x): x is { row: (typeof free)[number]; gate: string } =>
+      Boolean(x.gate)
+    );
+
+  if (contradictory.length === 0) {
+    console.log(
+      `✓ ${free.length} row(s) have isFree=true and none carries a gate.\n`
+    );
     return 0;
   }
 
-  const published = rows.filter((r) => r.status === 'published');
+  const published = contradictory.filter((x) => x.row.status === 'published');
   console.error(
-    `\n✗ ${rows.length} row(s) are PRICED but marked FREE (${published.length} published):\n`
+    `\n✗ ${contradictory.length} row(s) are isFree=true WITH a gate set (${published.length} published) — denied by @codex/access, advertised as public by isFree:\n`
   );
-  for (const r of rows) {
+  for (const { row, gate } of contradictory) {
     console.error(
-      `  - ${r.status.padEnd(9)} "${r.slug}" price=${r.priceCents} isPurchasable=${r.isPurchasable} org=${r.organizationId ?? 'none'} id=${r.id}`
+      `  - ${row.status.padEnd(9)} "${row.slug}" gate=${gate} org=${row.organizationId ?? 'none'} id=${row.id}`
     );
   }
   console.error(
-    '\nRemediation is a judgement call per row, which is why this script does NOT write:\n' +
-      '  - meant to be PAID -> set isFree = false (and isPurchasable = true to match the price)\n' +
-      '  - meant to be FREE -> set priceCents = NULL\n' +
-      'Both shapes are now rejected at the input boundary, so neither can be re-created.\n'
+    '\nSince #524 these are no longer SERVED publicly — isPublicContent() reads the whole\n' +
+      'policy and fails closed — so this is a data-hygiene finding, not a live leak.\n' +
+      'Remediation is a judgement call per row, which is why this script does NOT write:\n' +
+      '  - the gate is intended  -> set isFree = false\n' +
+      '  - the content is free   -> clear the gate (priceCents = NULL, or the flag)\n' +
+      'A priced-and-free row can no longer be created; a courseOnly-and-free one still can,\n' +
+      'by design — see course-journey-service.ts.\n'
   );
   return 1;
 }
 
-async function main(): Promise<number> {
-  if (!process.env.DATABASE_URL) {
-    console.error(
-      'DATABASE_URL is not set — cannot audit. Populate .env.dev or export it.'
+/**
+ * Refuse to run unless the caller has said, explicitly, WHICH database this is.
+ *
+ * `@codex/database`'s client does NOT route on `DATABASE_URL` — it routes on
+ * `DB_METHOD` (`DbEnvConfig.getDbUrl` + `applyNeonConfig`, client.ts). In
+ * `LOCAL_PROXY` mode it returns `DATABASE_URL_LOCAL_PROXY` and repoints
+ * `neonConfig`'s fetch endpoint at the local proxy, so a `DATABASE_URL` passed
+ * on the command line is SILENTLY IGNORED. `.env.dev` — which this script loads
+ * — sets `DB_METHOD=LOCAL_PROXY`.
+ *
+ * That bit me: two runs against production quietly targeted `db.localtest.me`.
+ * They only *failed* because the local proxy happened to be down. Had it been
+ * up, this script would have audited the local dev database and printed a clean
+ * bill of health about production — a false negative on a security audit,
+ * caused by a precondition that checked a different variable than its consumer
+ * reads. (Which is, with some irony, the exact defect class this script audits.)
+ *
+ * So: require DB_METHOD, and echo the host actually resolved, so the operator
+ * can see which database the verdict is about.
+ */
+function assertTargetIsExplicit(): string | null {
+  const method = process.env.DB_METHOD;
+
+  // THE ACTUAL FOOTGUN, and it is not an unset DB_METHOD. `.env.dev` — loaded
+  // above, before this runs — sets `DB_METHOD=LOCAL_PROXY` and
+  // `DATABASE_URL_LOCAL_PROXY`, but NOT `DATABASE_URL`. So:
+  //   - DB_METHOD is never observably "unset" in this repo, and
+  //   - a set `DATABASE_URL` can ONLY have come from the caller's command line.
+  // Which means `DATABASE_URL=<prod> pnpm … audit:content-flags`, the obvious
+  // way to run this, is ALSO the broken way: LOCAL_PROXY wins, the caller's URL
+  // is discarded, and the script audits db.localtest.me while the caller
+  // believes it audited production. Verified: that combination reports
+  // `host=db.localtest.me:5432`. It failed here only because the local proxy was
+  // down; with it up, the output would have been a clean bill of health about the
+  // wrong database. Refuse the contradiction rather than rely on the host echo
+  // being read.
+  if (method === 'LOCAL_PROXY' && process.env.DATABASE_URL) {
+    return (
+      'CONTRADICTION: DATABASE_URL is set but DB_METHOD=LOCAL_PROXY, so the client will\n' +
+      'IGNORE your DATABASE_URL and query DATABASE_URL_LOCAL_PROXY instead — auditing the\n' +
+      'local dev database while reporting on it as though it were yours.\n' +
+      '  Meant production? add DB_METHOD=PRODUCTION.\n' +
+      '  Meant local dev?  drop DATABASE_URL.\n' +
+      '(DB_METHOD=LOCAL_PROXY most likely came from .env.dev, not from you.)'
     );
+  }
+
+  if (!method) {
+    return (
+      'DB_METHOD is not set and this script will NOT guess:\n' +
+      '  production: DB_METHOD=PRODUCTION DATABASE_URL=<url> pnpm --filter @codex/database audit:content-flags\n' +
+      '  local dev:  DB_METHOD=LOCAL_PROXY pnpm --filter @codex/database audit:content-flags'
+    );
+  }
+  if (method !== 'LOCAL_PROXY' && !process.env.DATABASE_URL) {
+    return `DB_METHOD=${method} requires DATABASE_URL, which is not set.`;
+  }
+  return null;
+}
+
+/** Host of the URL the client will actually use — reported, never the credentials. */
+function resolvedHost(): string {
+  const url =
+    process.env.DB_METHOD === 'LOCAL_PROXY'
+      ? process.env.DATABASE_URL_LOCAL_PROXY
+      : process.env.DATABASE_URL;
+  if (!url) return '(unresolved)';
+  try {
+    return new URL(url).host;
+  } catch {
+    return '(unparseable)';
+  }
+}
+
+async function main(): Promise<number> {
+  const problem = assertTargetIsExplicit();
+  if (problem) {
+    console.error(problem);
     return 2;
   }
+  console.log(
+    `Auditing DB_METHOD=${process.env.DB_METHOD} host=${resolvedHost()}\n`
+  );
 
   // Both checks always run, so one invocation gives the whole picture; the exit
   // code is the max so a finding in either fails the run.
   const one = await checkResetSignature();
-  const two = await checkPricedButFree();
+  const two = await checkFreeWithAGate();
   return Math.max(one, two);
 }
 
