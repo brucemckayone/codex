@@ -78,11 +78,17 @@ function createFormFake() {
             setCalls.push(next);
             field.thumbnailUrl = next;
           },
-          as: () => ({
-            type: 'text',
-            name: 'thumbnailUrl',
-            value: field.thumbnailUrl,
-          }),
+          // Deliberately THROWS (Codex-1g5lh.3). ThumbnailUpload must never
+          // bind `thumbnailUrl` as a free-text input again: an arbitrary
+          // creator-supplied URL bypasses the R2 + image-processing pipeline and
+          // makes every viewer's browser fetch a third-party host. If a future
+          // change re-adds `form.fields.thumbnailUrl.as(...)`, this fails loudly
+          // here rather than shipping the hole back in.
+          as: () => {
+            throw new Error(
+              'thumbnailUrl must not be bound as a free-text input (Codex-1g5lh.3)'
+            );
+          },
           issues: () => [],
         },
       },
@@ -239,5 +245,146 @@ describe('ThumbnailUpload — stale form() result on a fresh mount', () => {
 
     expect(successSpy).toHaveBeenCalledTimes(1);
     expect(fake.setCalls).toEqual(['/fresh/uploaded.webp']);
+  });
+});
+
+/**
+ * No free-text URL escape hatch. (Codex-1g5lh.3)
+ *
+ * The form used to offer "Enter URL" / "Enter URL instead" beside the uploader,
+ * writing an arbitrary creator-supplied string straight into `thumbnailUrl`.
+ * That bypasses the R2 + `@codex/image-processing` pipeline every other image in
+ * the product goes through, and makes every viewer's browser fetch a
+ * third-party host — handing it their IP and referrer.
+ *
+ * `thumbnailUrl` itself is NOT gone: it still carries values the PLATFORM
+ * produced (an upload result, or a media auto-extract). These tests pin the
+ * distinction, so the field keeps working while the free-text path stays shut.
+ *
+ * SCOPE, stated plainly: this is the CLIENT half. The server still accepts any
+ * http(s) URL for this field (`content-schemas.ts` -> `urlSchema`), so a direct
+ * API call can still set one. Closing that is tracked separately — do not read
+ * these tests as proof the hole is shut end to end.
+ */
+describe('ThumbnailUpload — no free-text URL escape hatch (Codex-1g5lh.3)', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  beforeEach(() => {
+    resetResult();
+    const stubToast = {} as ReturnType<typeof toast.success>;
+    vi.spyOn(toast, 'success').mockReturnValue(stubToast);
+    vi.spyOn(toast, 'error').mockReturnValue(stubToast);
+  });
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    vi.restoreAllMocks();
+    resetResult();
+    document.body.innerHTML = '';
+  });
+
+  function mountWith(
+    fake: ReturnType<typeof createFormFake>,
+    contentId: string | null,
+    mediaThumbnailUrl: string | null = null
+  ) {
+    component = mount(ThumbnailUpload, {
+      target: document.body,
+      // biome-ignore lint/suspicious/noExplicitAny: narrow test double for the form() field API
+      props: { form: fake.form as any, contentId, mediaThumbnailUrl },
+    });
+    flushSync();
+  }
+
+  /**
+   * Every input that could carry a typed URL. `type` defaults to "text" when
+   * absent, so a bare <input> counts — checking only [type="url"] would miss
+   * the exact shape this bead removed, which was a plain text field.
+   */
+  function typeableInputs() {
+    return Array.from(
+      document.querySelectorAll<HTMLInputElement>('input')
+    ).filter((el) => {
+      const t = (el.getAttribute('type') ?? 'text').toLowerCase();
+      return t !== 'hidden' && t !== 'file';
+    });
+  }
+
+  test('create mode offers no typeable input and no URL affordance', () => {
+    const fake = createFormFake();
+    mountWith(fake, null);
+
+    expect(typeableInputs()).toEqual([]);
+    expect(document.body.textContent).not.toMatch(/enter url/i);
+  });
+
+  test('edit mode offers no typeable input and no URL affordance', () => {
+    // Edit mode is where the drop zone renders; its action row used to carry
+    // "Enter URL instead" right next to the media button.
+    const fake = createFormFake();
+    mountWith(fake, 'content-1');
+
+    expect(document.querySelector('.drop-zone')).not.toBeNull();
+    expect(typeableInputs()).toEqual([]);
+    expect(document.body.textContent).not.toMatch(/enter url/i);
+  });
+
+  test('an existing thumbnail in create mode exposes Remove but no Change', () => {
+    // "Change" had two implementations: a file picker in edit mode, and a URL
+    // panel in create mode. Only the file picker survived, so create mode must
+    // not offer a Change it cannot honour.
+    const fake = createFormFake();
+    fake.form.fields.thumbnailUrl.set('/uploads/existing/md.webp');
+    mountWith(fake, null);
+
+    const labels = Array.from(document.querySelectorAll('.overlay-btn')).map(
+      (el) => el.textContent?.trim()
+    );
+
+    expect(labels).toContain('Remove');
+    expect(labels).not.toContain('Change');
+    expect(typeableInputs()).toEqual([]);
+  });
+
+  test('an existing thumbnail in EDIT mode still exposes Change (control)', () => {
+    // Control for the test above: proves Change vanished because of the mode,
+    // not because the removal deleted the file-picker path too.
+    const fake = createFormFake();
+    fake.form.fields.thumbnailUrl.set('/uploads/existing/md.webp');
+    mountWith(fake, 'content-1');
+
+    const labels = Array.from(document.querySelectorAll('.overlay-btn')).map(
+      (el) => el.textContent?.trim()
+    );
+
+    expect(labels).toContain('Change');
+    expect(labels).toContain('Remove');
+  });
+
+  test('the platform-produced value still submits, via the hidden input', () => {
+    // The hidden input used to be suppressed while the URL panel was open. It is
+    // now unconditional, and it is the ONLY way the value reaches the form.
+    const fake = createFormFake();
+    fake.form.fields.thumbnailUrl.set('/uploads/from-r2/md.webp');
+    mountWith(fake, 'content-1');
+
+    const hidden = document.querySelector<HTMLInputElement>(
+      'input[type="hidden"][name="thumbnailUrl"]'
+    );
+    expect(hidden).not.toBeNull();
+    expect(hidden!.value).toBe('/uploads/from-r2/md.webp');
+  });
+
+  test('media auto-extract remains the one create-mode way to set a thumbnail', () => {
+    // The constructive half: removing the URL field must not leave create mode
+    // with no option at all when media has already yielded a poster frame.
+    const fake = createFormFake();
+    mountWith(fake, null, '/media/extracted/poster.webp');
+
+    expect(document.body.textContent).toMatch(/use media thumbnail/i);
+    expect(typeableInputs()).toEqual([]);
   });
 });
