@@ -157,15 +157,36 @@ export class ImageProcessingService extends BaseService {
       lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
     };
 
+    // Use LG variant as determining URL for DB
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
+
+    // Did the row ALREADY address these exact keys? Decides whether a failed
+    // DB update may clean up the objects about to be written (Codex-r85jo.2).
+    //
+    // Compared against the URL rather than tested for mere presence: a row
+    // holding a legacy EXTERNAL thumbnail URL has a prior image but does NOT
+    // reference these keys, so the new objects would be unreferenced orphans
+    // and the cleanup is correct there. The predicate mirrors the update's own
+    // WHERE clause so the read describes exactly the row the write targets.
+    //
+    // Read BEFORE the puts, so a failing read costs nothing: reading after
+    // would leave three freshly-written objects with no decision recorded
+    // about whether anything may reclaim them.
+    const existing = await this.db.query.content.findFirst({
+      where: and(
+        eq(schema.content.id, contentId),
+        eq(schema.content.creatorId, creatorId)
+      ),
+      columns: { thumbnailUrl: true },
+    });
+
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Thumbnail',
+      obs: this.obs,
     });
-
-    // Use LG variant as determining URL for DB
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update content record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -178,6 +199,7 @@ export class ImageProcessingService extends BaseService {
         obs: this.obs,
         orphanedFileService: this.orphanedFileService,
         warnContext: 'content-thumbnail',
+        keysAlreadyReferenced: existing?.thumbnailUrl === url,
         warnExtras: { creatorId },
       },
       async () => {
@@ -246,6 +268,7 @@ export class ImageProcessingService extends BaseService {
       variants,
       r2: this.r2Service,
       failureLabel: 'Category cover',
+      obs: this.obs,
     });
 
     return {
@@ -305,6 +328,7 @@ export class ImageProcessingService extends BaseService {
       variants,
       r2: this.r2Service,
       failureLabel: 'Course cover',
+      obs: this.obs,
     });
 
     return {
@@ -388,6 +412,7 @@ export class ImageProcessingService extends BaseService {
       variants,
       r2: this.r2Service,
       failureLabel: 'Course hero',
+      obs: this.obs,
     });
 
     return {
@@ -480,6 +505,7 @@ export class ImageProcessingService extends BaseService {
       variants,
       r2: this.r2Service,
       failureLabel: 'Course signature',
+      obs: this.obs,
     });
 
     return {
@@ -512,14 +538,22 @@ export class ImageProcessingService extends BaseService {
       lg: getUserAvatarKey(userId, 'lg'),
     };
 
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
+
+    // See processContentThumbnail for why this compares the URL rather than
+    // testing for presence, and why it reads before the puts (Codex-r85jo.2).
+    const existing = await this.db.query.users.findFirst({
+      where: eq(schema.users.id, userId),
+      columns: { avatarUrl: true },
+    });
+
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Avatar',
+      obs: this.obs,
     });
-
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update user record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -532,6 +566,7 @@ export class ImageProcessingService extends BaseService {
         obs: this.obs,
         orphanedFileService: this.orphanedFileService,
         warnContext: 'user-avatar',
+        keysAlreadyReferenced: existing?.avatarUrl === url,
       },
       async () => {
         await this.db

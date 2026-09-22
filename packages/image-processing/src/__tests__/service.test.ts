@@ -601,8 +601,20 @@ describe('ImageProcessingService', () => {
       });
     });
 
+    /**
+     * These two cases previously asserted the OPPOSITE — "should cleanup all
+     * variants", `expect(delete).toHaveBeenCalledTimes(3)` — and were green for
+     * months while encoding the retired "variants get unique filenames per
+     * upload" premise as a requirement. On deterministic keys that cleanup
+     * deletes the object the content row still addresses (Codex-r85jo.2), so
+     * the assertion is inverted rather than relaxed.
+     *
+     * The property version of this — a Map-backed bucket proving every prior
+     * key stays READABLE — lives in
+     * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
+     */
     describe('Partial Upload Failures', () => {
-      it('should cleanup all variants when one R2 upload fails', async () => {
+      it('should delete nothing when one R2 upload fails', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
@@ -620,13 +632,14 @@ describe('ImageProcessingService', () => {
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*1 variant.*failed/i);
+        ).rejects.toThrow(/upload failed.*1 of 3 variant/i);
 
-        // All three variants should be deleted in cleanup
-        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+        // The rejected key still holds the PREVIOUS image; the succeeded ones
+        // hold the new bytes at URLs the row already points at. Nothing 404s.
+        expect(testMockR2Service.delete).not.toHaveBeenCalled();
       });
 
-      it('should cleanup all variants when two R2 uploads fail', async () => {
+      it('should delete nothing when two R2 uploads fail', async () => {
         const file = createTestImageFile('image/png', 'test.png');
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
@@ -644,16 +657,53 @@ describe('ImageProcessingService', () => {
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*2 variant.*failed/i);
+        ).rejects.toThrow(/upload failed.*2 of 3 variant/i);
 
-        // All three variants should be deleted in cleanup
-        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+        expect(testMockR2Service.delete).not.toHaveBeenCalled();
+      });
+
+      it('should report an R2 put failure as a 500, not a 400', async () => {
+        const file = createTestImageFile('image/jpeg', 'test.jpg');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        testMockR2Service.put = vi
+          .fn()
+          .mockRejectedValue(new Error('R2 quota exceeded'));
+
+        // By `statusCode`, not class name — names minify in the worker bundle.
+        // A ValidationError here tells the creator their IMAGE was bad and
+        // keeps the R2 outage out of 5xx-rate alerting.
+        const error = await service
+          .processContentThumbnail('content-1', 'user-1', file)
+          .then(() => null)
+          .catch((e: unknown) => e as { statusCode?: number });
+
+        expect(error?.statusCode).toBe(500);
       });
     });
 
     describe('Orphan Recording on Cleanup Failure', () => {
+      /**
+       * Both cases below are FIRST uploads (`thumbnailUrl: null`), which is the
+       * only shape where the post-DB-failure cleanup is correct: the puts
+       * landed, the row never recorded them, so the objects are unreferenced.
+       *
+       * On a REPLACEMENT the row still addresses these deterministic keys, the
+       * cleanup is suppressed, and there are no orphans to record — covered in
+       * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
+       * Before Codex-r85jo.2 these tests passed with the harness default (a
+       * prior URL present), which is exactly the destructive case.
+       */
       it('should record orphans when R2 cleanup fails after DB error', async () => {
         const file = createTestImageFile('image/png', 'test.png');
+        mockDbQuery.content.findFirst.mockResolvedValue({
+          thumbnailUrl: null,
+        });
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
           sm: new Uint8Array([1]),
@@ -718,6 +768,9 @@ describe('ImageProcessingService', () => {
 
       it('should log warning when orphanedFileService not provided and cleanup fails', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
+        mockDbQuery.content.findFirst.mockResolvedValue({
+          thumbnailUrl: null,
+        });
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
           sm: new Uint8Array([1]),
