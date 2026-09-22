@@ -1,6 +1,18 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import PageContainer from './PageContainer.svelte';
   import * as m from '$paraglide/messages';
+  import { buildPlatformUrl } from '$lib/utils/subdomain';
+
+  // These three routes live ONLY in the (platform) group, and this footer
+  // renders on every page — including org subdomains. A relative `/terms` there
+  // is rerouted by `hooks.ts` to `/_org/<slug>/terms`, which does not exist, so
+  // all three 404'd on every tenant host (Codex-6wkr1). `buildPlatformUrl`
+  // pins them to the apex, preserving protocol and port, so there is exactly
+  // one canonical URL per legal document rather than one per tenant.
+  const aboutUrl = $derived(buildPlatformUrl(page.url, '/about'));
+  const termsUrl = $derived(buildPlatformUrl(page.url, '/terms'));
+  const privacyUrl = $derived(buildPlatformUrl(page.url, '/privacy'));
 </script>
 
 <footer class="footer">
@@ -10,9 +22,9 @@
     </p>
 
     <nav class="links" aria-label="Footer">
-      <a href="/about" class="footer-link">{m.footer_about()}</a>
-      <a href="/terms" class="footer-link">{m.footer_terms()}</a>
-      <a href="/privacy" class="footer-link">{m.footer_privacy()}</a>
+      <a href={aboutUrl} class="footer-link">{m.footer_about()}</a>
+      <a href={termsUrl} class="footer-link">{m.footer_terms()}</a>
+      <a href={privacyUrl} class="footer-link">{m.footer_privacy()}</a>
     </nav>
   </PageContainer>
 </footer>
