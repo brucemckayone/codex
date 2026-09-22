@@ -16,6 +16,7 @@
   import { browser } from '$app/environment';
   import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
+  import { buildPlatformUrl } from '$lib/utils/subdomain';
   import type { LayoutData } from './$types';
   import { SidebarRail } from '$lib/components/layout/SidebarRail';
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
@@ -42,6 +43,16 @@
   // Landing page needs mix-blend-mode to reach the shader canvas,
   // which requires dropping view-transition-name (it creates isolation)
   const isLanding = $derived(page.url.pathname === '/');
+
+  // /about, /terms and /privacy exist ONLY in the (platform) route group. This
+  // layout renders on a TENANT host, where hooks.ts rewrites a relative
+  // `/terms` to `/_org/<slug>/terms` — a route that does not exist — so all
+  // three 404'd on every org subdomain (Codex-6wkr1). Pinned to the apex, which
+  // is a different origin, so an absolute URL is required exactly as it is for
+  // buildOrgUrl. One canonical document per legal page, not one per tenant.
+  const platformAboutUrl = $derived(buildPlatformUrl(page.url, '/about'));
+  const platformTermsUrl = $derived(buildPlatformUrl(page.url, '/terms'));
+  const platformPrivacyUrl = $derived(buildPlatformUrl(page.url, '/privacy'));
   let searchOpen = $state(false);
   let moreOpen = $state(false);
 
@@ -475,9 +486,9 @@
           {m.footer_powered_by({ platform: m.footer_powered_by_platform() })}
         </p>
         <nav class="footer-links">
-          <a href="/about">{m.footer_about()}</a>
-          <a href="/terms">{m.footer_terms()}</a>
-          <a href="/privacy">{m.footer_privacy()}</a>
+          <a href={platformAboutUrl}>{m.footer_about()}</a>
+          <a href={platformTermsUrl}>{m.footer_terms()}</a>
+          <a href={platformPrivacyUrl}>{m.footer_privacy()}</a>
         </nav>
         <p class="copyright">&copy; {new Date().getFullYear()} Codex. All rights reserved.</p>
       </div>
