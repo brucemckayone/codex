@@ -27,7 +27,12 @@ import {
   organizations,
   users,
 } from '@codex/database/schema';
-import { BaseService, InternalServiceError } from '@codex/service-errors';
+import type { ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  InternalServiceError,
+  ValidationError,
+} from '@codex/service-errors';
 import type {
   OrganizationPublicStatsResponse,
   PaginatedListResponse,
@@ -38,6 +43,8 @@ import type {
 } from '@codex/validation';
 import {
   createOrganizationSchema,
+  createPlatformImageUrlSchema,
+  PLATFORM_IMAGE_URL_MESSAGE,
   updateOrganizationSchema,
 } from '@codex/validation';
 import {
@@ -75,7 +82,60 @@ import type {
  * - Delete organizations (soft delete)
  * - List organizations with filters
  */
+/**
+ * OrganizationService configuration.
+ *
+ * Adds the public asset CDN base to the standard `ServiceConfig` so the
+ * write paths can reject an externally-hosted `logoUrl` (Codex-8so68).
+ * Optional because the binding itself is optional in `HonoEnv`; when it is
+ * absent the logo gate FAILS CLOSED (no base ⇒ no URL can be
+ * platform-produced).
+ */
+export interface OrganizationServiceConfig extends ServiceConfig {
+  /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
+  r2PublicUrlBase?: string;
+}
+
 export class OrganizationService extends BaseService {
+  /**
+   * Narrowed `logoUrl` schema, bound to this worker's asset CDN base.
+   * Built once per instance — the base never changes within a request.
+   */
+  private readonly logoUrlSchema: ReturnType<
+    typeof createPlatformImageUrlSchema
+  >;
+
+  constructor(config: OrganizationServiceConfig) {
+    super(config);
+    this.logoUrlSchema = createPlatformImageUrlSchema(config.r2PublicUrlBase);
+  }
+
+  /**
+   * Reject an externally-hosted organisation logo (Codex-8so68).
+   *
+   * `createOrganizationSchema`/`updateOrganizationSchema` only prove the
+   * value is an http(s) URL, so a direct API call could aim the logo — which
+   * renders on every public org page — at a third-party host, leaking every
+   * visitor's IP and referrer and bypassing the R2 upload pipeline. The
+   * allowed base is the `R2_PUBLIC_URL_BASE` binding, unreachable from a Zod
+   * schema in `@codex/validation`, so the gate lives here on the write path.
+   *
+   * `websiteUrl`, which sits next to `logoUrl` in the same schema, is a
+   * legitimate external link and is deliberately NOT checked.
+   *
+   * MUST be called from BOTH create() and update(), and BEFORE the
+   * transaction opens. No grandfather clause: an update that re-submits a
+   * legacy external URL is rejected (owner decision).
+   */
+  private assertPlatformLogoUrl(logoUrl: string | null | undefined): void {
+    if (logoUrl == null) return;
+    if (this.logoUrlSchema.safeParse(logoUrl).success) return;
+
+    throw new ValidationError(PLATFORM_IMAGE_URL_MESSAGE, {
+      field: 'logoUrl',
+    });
+  }
+
   /**
    * Create new organization
    *
@@ -93,6 +153,10 @@ export class OrganizationService extends BaseService {
   ): Promise<Organization> {
     // Validate input with Zod
     const validated = createOrganizationSchema.parse(input);
+
+    // Zod only proved the logo is an http(s) URL — reject any host other than
+    // the platform asset CDN (Codex-8so68). Mirrored in update().
+    this.assertPlatformLogoUrl(validated.logoUrl);
 
     try {
       return await this.db.transaction(async (tx) => {
@@ -195,6 +259,11 @@ export class OrganizationService extends BaseService {
   ): Promise<Organization> {
     // Validate input
     const validated = updateOrganizationSchema.parse(input);
+
+    // Same external-host gate as create() (Codex-8so68). The schema is a
+    // partial, so an absent `logoUrl` is a no-op and an explicit null clears
+    // it; only a string is checked.
+    this.assertPlatformLogoUrl(validated.logoUrl);
 
     try {
       return await this.db.transaction(async (tx) => {

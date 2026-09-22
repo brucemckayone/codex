@@ -14,8 +14,13 @@ import { OrganizationNotFoundError, ConflictError, LastOwnerError, MemberNotFoun
 ### Constructor
 
 ```typescript
-const service = new OrganizationService({ db, environment });
+const service = new OrganizationService({ db, environment, r2PublicUrlBase });
 ```
+
+`r2PublicUrlBase` (the `R2_PUBLIC_URL_BASE` binding) is the ONLY host accepted
+for `logoUrl` on `create`/`update` — an external image URL is rejected with
+`ValidationError` (Codex-8so68). `websiteUrl` is unaffected. Omit the base and
+the gate fails closed: no logo can be set at all.
 
 ### Core CRUD
 

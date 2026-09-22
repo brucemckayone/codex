@@ -30,8 +30,13 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 ### Constructor
 
 ```typescript
-const service = new ContentService({ db, environment });
+const service = new ContentService({ db, environment, r2PublicUrlBase });
 ```
+
+`r2PublicUrlBase` (the `R2_PUBLIC_URL_BASE` binding) is the ONLY host accepted
+for `thumbnailUrl` on `create`/`update` — an external image URL is rejected with
+`ValidationError` (Codex-8so68). Omit it and the gate fails closed: no thumbnail
+can be set at all.
 
 ## `MediaItemService`
 

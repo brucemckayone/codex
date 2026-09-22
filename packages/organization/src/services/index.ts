@@ -11,4 +11,7 @@ export {
   DevDomainService,
   type DevDomainServiceConfig,
 } from './dev-domain-service';
-export { OrganizationService } from './organization-service';
+export {
+  OrganizationService,
+  type OrganizationServiceConfig,
+} from './organization-service';

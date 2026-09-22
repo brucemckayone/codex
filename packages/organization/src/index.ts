@@ -60,6 +60,7 @@ export {
   DevDomainService,
   type DevDomainServiceConfig,
   OrganizationService,
+  type OrganizationServiceConfig,
 } from './services';
 
 // ============================================================================

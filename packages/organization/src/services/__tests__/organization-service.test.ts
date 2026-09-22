@@ -38,6 +38,12 @@ import {
 } from '../../errors';
 import { OrganizationService } from '../organization-service';
 
+/**
+ * Stands in for the `R2_PUBLIC_URL_BASE` binding (Codex-8so68). Mirrors the
+ * value in `workers/organization-api/wrangler.jsonc`.
+ */
+const ASSET_CDN_BASE = 'https://cdn-assets.revelations.studio';
+
 // Uses workflow-level Neon branch in CI, LOCAL_PROXY locally
 
 describe('OrganizationService', () => {
@@ -60,7 +66,15 @@ describe('OrganizationService', () => {
       throw error; // Re-throw to fail the test suite if database is expected but not available
     }
 
-    service = new OrganizationService({ db, environment: 'test' });
+    // Codex-8so68: `logoUrl` must resolve to the asset CDN named by the
+    // worker's `R2_PUBLIC_URL_BASE` binding. Without a base the logo gate
+    // fails closed, so the service under test needs one — and every logo
+    // fixture below must sit under it.
+    service = new OrganizationService({
+      db,
+      environment: 'test',
+      r2PublicUrlBase: ASSET_CDN_BASE,
+    });
 
     // Seed a default test user for create() calls that need a userId
     const [userId] = await seedTestUsers(db, 1);
@@ -79,7 +93,7 @@ describe('OrganizationService', () => {
         name: 'Test Organization',
         slug: createUniqueSlug('test-org'),
         description: 'A test organization',
-        logoUrl: 'https://example.com/logo.png',
+        logoUrl: `${ASSET_CDN_BASE}/logos/test-org/lg.webp`,
         websiteUrl: 'https://example.com',
       };
 
@@ -332,13 +346,15 @@ describe('OrganizationService', () => {
       const updated = await service.update(created.id, {
         name: 'New Name',
         description: 'New Description',
-        logoUrl: 'https://example.com/new-logo.png',
+        logoUrl: `${ASSET_CDN_BASE}/logos/test-org/new-lg.webp`,
         websiteUrl: 'https://example.com/new-site',
       });
 
       expect(updated.name).toBe('New Name');
       expect(updated.description).toBe('New Description');
-      expect(updated.logoUrl).toBe('https://example.com/new-logo.png');
+      expect(updated.logoUrl).toBe(
+        `${ASSET_CDN_BASE}/logos/test-org/new-lg.webp`
+      );
       expect(updated.websiteUrl).toBe('https://example.com/new-site');
     });
   });

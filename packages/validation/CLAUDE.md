@@ -117,6 +117,8 @@ app.get('/content/:id',
 | `createSlugParamsSchema(maxLength?)` | `{ slug: slugSchema }` for route params |
 | `urlSchema` | HTTP/HTTPS only — blocks `javascript:`, `data:` |
 | `optionalUrlSchema(message?)` | Optional URL — coerces empty string to undefined |
+| `createPlatformImageUrlSchema(base)` | **Image URLs only** — narrows `urlSchema` to the asset CDN `base` (`R2_PUBLIC_URL_BASE`). Fails closed when `base` is missing |
+| `PLATFORM_IMAGE_URL_MESSAGE` | Canonical rejection message for the above (services reuse it in `ValidationError`) |
 | `emailSchema` | Email validation |
 | `createSanitizedStringSchema(min, max, field)` | Trimmed string with length limits |
 | `createOptionalTextSchema(max, field)` | Nullable optional text |
@@ -157,6 +159,12 @@ const safeSvg = await sanitizeSvgContent(userUploadedSvg);
 - **MUST** use existing primitives (`uuidSchema`, `urlSchema`, `emailSchema`) — NEVER write ad-hoc regex
 - **MUST** use `sanitizeSvgContent()` for ALL SVG uploads
 - **MUST** use `urlSchema` for ALL user-provided URLs — blocks dangerous protocols
+- **MUST** narrow user-provided IMAGE URLs with `createPlatformImageUrlSchema(base)` at the write path (Codex-8so68) —
+  `urlSchema` alone lets a caller hotlink a third-party host, leaking every viewer's IP/referrer and bypassing
+  R2 + `@codex/image-processing`. The base is a worker binding, so this CANNOT live in the schema; enforcement is in
+  `ContentService.create/update` (`thumbnailUrl`) and `OrganizationService.create/update` (`logoUrl`)
+- **NEVER** tighten `urlSchema` itself, or any non-image URL field — `websiteUrl`, social links, contact URLs and
+  rich-text hyperlinks are legitimately external
 - **NEVER** define ad-hoc schemas in route handlers — add them to this package
 
 ## Reference Files
