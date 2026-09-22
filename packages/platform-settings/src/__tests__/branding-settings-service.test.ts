@@ -299,14 +299,20 @@ describe('BrandingSettingsService', () => {
         size: 1024,
       });
 
-      // Verify R2 was called
+      // Verify R2 was called.
+      //
+      // `logos/{orgId}/logo.{ext}` is deterministic and overwritten in place,
+      // so the stored header may not license a cache to reuse the bytes
+      // without asking. This pinned `public, max-age=31536000` until
+      // Codex-p3rre — a year in which a replaced logo kept serving the old
+      // image, with no version query in the URL and no purge path.
       expect(mockR2.put).toHaveBeenCalledWith(
         expect.stringContaining(`logos/${organizationId}/logo.png`),
         fileData,
         undefined,
         expect.objectContaining({
           contentType: MIME_TYPES.IMAGE.PNG,
-          cacheControl: 'public, max-age=31536000',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         })
       );
 
@@ -473,9 +479,11 @@ describe('BrandingSettingsService', () => {
       expect(writtenSvg).toContain('M12 2L2 7l10 5 10-5-10-5z');
     });
 
-    it('uses 1-hour cache-control for SVG (not 1-year)', async () => {
-      // SVGs are stored at a fixed key (logos/{orgId}/logo.svg); a 1-year
-      // cache would trap re-uploads behind CDN for a year. Match ImageProcessingService.
+    it('gives SVG a revalidating one-hour window', async () => {
+      // SVGs are stored at a fixed key (logos/{orgId}/logo.svg); a long window
+      // would trap re-uploads behind the CDN. This was the ONLY branch that got
+      // it right until Codex-p3rre gave raster the same policy — the key shape
+      // is identical for both, so one decision covers both.
       const mockR2 = createMockR2();
       const service = createService(mockR2);
 
@@ -495,12 +503,21 @@ describe('BrandingSettingsService', () => {
         undefined,
         expect.objectContaining({
           contentType: MIME_TYPES.IMAGE.SVG,
-          cacheControl: 'public, max-age=3600',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         })
       );
     });
 
-    it('keeps 1-year cache-control for raster (regression guard)', async () => {
+    it('gives raster the same revalidating window, not a year', async () => {
+      // THIS TEST USED TO ENFORCE THE DEFECT. It was
+      // "keeps 1-year cache-control for raster (regression guard)", guarding
+      // `public, max-age=31536000` on the grounds that a distinct file
+      // extension per MIME type prevented stale reads. It does not: replacing a
+      // PNG with a PNG overwrites `logos/{orgId}/logo.png` in place, and the
+      // URL carries no version or hash, so the viewer kept the superseded logo
+      // for up to a year with no purge path (Codex-p3rre). What is guarded now
+      // is the inverse — that the raster branch may not drift back to a long or
+      // unrevalidatable window.
       const mockR2 = createMockR2();
       const service = createService(mockR2);
 
@@ -515,7 +532,7 @@ describe('BrandingSettingsService', () => {
         expect.anything(),
         undefined,
         expect.objectContaining({
-          cacheControl: 'public, max-age=31536000',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         })
       );
     });
@@ -562,6 +579,41 @@ describe('BrandingSettingsService', () => {
       // Should not throw, just return defaults
       expect(result.logoUrl).toBeNull();
       expect(mockR2.delete).not.toHaveBeenCalled();
+    });
+
+    // ── Upload/delete round-trip (Codex-z520h) ──────────────────────────────
+    //
+    // THE INVARIANT: `deleteLogo()` removes EXACTLY the set of R2 objects
+    // `uploadLogo()` wrote, for every MIME branch. It holds today only because
+    // `uploadLogo` writes ONE object per org and stores that whole key in
+    // `logoR2Path`, so `r2.delete(logoR2Path)` is complete — and nothing said
+    // so. `r2.delete` is a SINGLE-object delete with no prefix form, so the day
+    // someone adds a size ladder to `uploadLogo` (which the removed
+    // `ImageProcessingService.processOrgLogo` had, writing sm/md/lg) the extra
+    // variants would be stranded in R2 forever with no orphan record. These two
+    // cases compare the delete set against the put set rather than against a
+    // hard-coded key, so that change fails here instead of leaking silently.
+    it.each([
+      ['raster', MIME_TYPES.IMAGE.PNG],
+      ['SVG', MIME_TYPES.IMAGE.SVG],
+    ])('deleteLogo removes every object uploadLogo wrote (%s)', async (_label, mimeType) => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      await service.uploadLogo({
+        buffer: createValidImageBuffer(mimeType, 256),
+        mimeType,
+        size: 256,
+      });
+
+      const written = mockR2.put.mock.calls.map((call) => call[0] as string);
+      expect(written.length).toBeGreaterThan(0);
+
+      mockR2.delete.mockClear();
+      await service.deleteLogo();
+
+      const removed = mockR2.delete.mock.calls.map((call) => call[0] as string);
+      expect([...removed].sort()).toEqual([...written].sort());
     });
 
     it('should continue if R2 delete fails', async () => {

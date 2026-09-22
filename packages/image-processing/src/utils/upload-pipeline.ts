@@ -1,9 +1,11 @@
 /**
  * Upload Pipeline Helpers
  *
- * Shared building blocks for the three near-identical raster image pipelines
- * (`processContentThumbnail`, `processUserAvatar`, `processOrgLogo`) inside
- * `ImageProcessingService`, plus the SVG branch of `processOrgLogo`.
+ * Shared building blocks for the near-identical raster image pipelines inside
+ * `ImageProcessingService` — `processContentThumbnail`, `processUserAvatar`,
+ * `processCategoryCover`, `processCourseCover`, `processCourseHero` and
+ * `processCourseSignature`. (A seventh, `processOrgLogo`, was removed in
+ * Codex-z520h: it was a second org-logo implementation with no call sites.)
  *
  * Two helpers:
  *
@@ -20,6 +22,7 @@
  * Behavior is preserved bit-for-bit from the previous inline implementations.
  */
 import type { R2Service } from '@codex/cloudflare-clients';
+import { R2_OVERWRITTEN_OBJECT_CACHE_CONTROL } from '@codex/constants';
 import type { OrphanedEntityType, OrphanedImageType } from '@codex/database';
 import type { Logger } from '@codex/observability';
 import { ValidationError } from '@codex/service-errors';
@@ -42,15 +45,22 @@ interface VariantBuffers {
 }
 
 /**
- * Canonical R2 put options for raster image variants.
+ * Canonical R2 put options for raster (WebP) image variants.
  *
- * Variants get unique filenames per upload (sm/md/lg under a per-entity
- * folder) so they are safe to mark immutable for 1 year. SVG logos use a
- * different (shorter) cache policy because their filename is fixed.
+ * The `Cache-Control` is `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from
+ * `@codex/constants`, NOT a value written here. Every key this package builds
+ * is a pure function of `(entityId, size)` and is overwritten in place on
+ * re-upload — `processContentThumbnail`'s own docblock states that as a
+ * deliberate invariant — so the object cannot claim to be immutable, which it
+ * did (`public, max-age=31536000, immutable`) until Codex-p3rre. The full
+ * reasoning for the chosen directives, and for the deliberately absent
+ * `s-maxage`, lives beside the constant in `packages/constants/src/limits.ts`,
+ * where it is shared with the org-logo path in `@codex/platform-settings` —
+ * the same invariant held two hand-written strings in two packages before.
  */
 const IMAGE_VARIANT_PUT_OPTIONS = {
   contentType: 'image/webp',
-  cacheControl: 'public, max-age=31536000, immutable',
+  cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
 } as const;
 
 /**
@@ -95,10 +105,11 @@ export async function uploadImageVariants(params: {
  * `OrphanedFileService` for deferred batch cleanup. When no orphan service is
  * configured, a single `obs.warn('R2 cleanup failed after DB error', ...)` is
  * emitted with the supplied `warnContext` (e.g. "content-thumbnail",
- * "org-logo-raster", "org-logo-svg").
+ * "user-avatar").
  *
- * `keys` is `string[]` to support both the raster (3 variants) and SVG (1
- * key) flows. Caller passes `[keys.sm, keys.md, keys.lg]` for raster.
+ * `keys` is `string[]` rather than `VariantKeys` because it once served a
+ * 1-key SVG flow as well; every surviving caller passes
+ * `[keys.sm, keys.md, keys.lg]`.
  */
 export async function withDbUpdateOrphanCleanup<T>(
   params: {

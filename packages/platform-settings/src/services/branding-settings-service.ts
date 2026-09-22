@@ -6,7 +6,10 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { MIME_TYPES } from '@codex/constants';
+import {
+  MIME_TYPES,
+  R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
+} from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import {
   BaseService,
@@ -305,7 +308,9 @@ export class BrandingSettingsService extends BaseService {
     // SVG sanitization — strip <script>, on-*, javascript:, foreignObject, etc.
     // Required per packages/image-processing/CLAUDE.md: "MUST sanitize ALL SVG
     // uploads with sanitizeSvgContent() — unsanitized SVGs are XSS vectors"
-    // Pattern mirrors ImageProcessingService.processOrgLogo() (service.ts:360-366).
+    // (This used to cite ImageProcessingService.processOrgLogo as the pattern
+    // it mirrors. That method was a second, unreachable org-logo implementation
+    // and was removed in Codex-z520h — THIS is the only org-logo path.)
     if (mimeType === 'image/svg+xml') {
       const { sanitizeSvgContent } = await import('@codex/validation');
       const svgText = new TextDecoder().decode(new Uint8Array(buffer));
@@ -327,15 +332,25 @@ export class BrandingSettingsService extends BaseService {
     const oldLogoPath = currentResult[0]?.logoR2Path;
 
     // Step 1: Upload new logo to R2 first.
-    // SVG uses 1-hour cache (fixed filename, must propagate updates).
-    // Raster uses 1-year immutable cache (mime-distinct keys prevent stale reads).
-    const cacheControl =
-      mimeType === 'image/svg+xml'
-        ? 'public, max-age=3600' // 1 hour — SVG
-        : 'public, max-age=31536000'; // 1 year — raster
+    //
+    // ONE POLICY FOR BOTH MIME BRANCHES, and it is not written here — it is
+    // `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from `@codex/constants`, shared
+    // with the image pipeline in `@codex/image-processing`. `r2Path` above is
+    // `logos/{organizationId}/logo.{ext}` for both branches: deterministic,
+    // and overwritten in place on every re-upload of the same file type, which
+    // is exactly the invariant that constant encodes.
+    //
+    // The raster branch used to declare `public, max-age=31536000` on the
+    // grounds that "mime-distinct keys prevent stale reads" — but distinct MIME
+    // types are the only case the extension distinguishes, and replacing a PNG
+    // with a PNG writes new bytes at the identical key. A viewer could then be
+    // served the superseded logo for up to a year, with no version query and no
+    // content hash in the URL to break the tie, and no purge path (Codex-p3rre).
+    // The SVG branch was the only one that had the right shape, and the two
+    // hand-written strings are now one central decision.
     await this.r2.put(r2Path, buffer, undefined, {
       contentType: mimeType,
-      cacheControl,
+      cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
     });
 
     // Build public URL

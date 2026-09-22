@@ -44,7 +44,7 @@ In `procedure()` handlers, access via `ctx.services.settings` — `organizationI
 | `ContactSettingsService` | `contact_settings` table | Per org |
 | `FeatureSettingsService` | `feature_settings` table | Per org |
 
-Logo R2 key: `logos/{orgId}/logo.{ext}` — 1-year immutable cache for raster, 1-hour for SVG.
+Logo R2 key: `logos/{orgId}/logo.{ext}` — ONE object per org, and `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` (from `@codex/constants`, shared with `@codex/image-processing`) for every MIME type. The key is deterministic and overwritten in place, so a longer or unrevalidatable window would serve the replaced logo (this was a 1-year window for raster until Codex-p3rre). `deleteLogo()` removes exactly the key held in `logoR2Path`, which is the whole of what `uploadLogo()` wrote — there are no size variants on this path.
 
 ## How Settings Flow Through the Platform
 
