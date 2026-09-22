@@ -413,6 +413,73 @@ export const CACHE_PRESETS = {
 /** The six preset names, as authors write them in a route declaration. */
 export type CachePresetName = keyof typeof CACHE_PRESETS;
 
+/**
+ * `Cache-Control` STORED ON an R2 object whose key is overwritten in place.
+ *
+ * DELIBERATELY NOT A `CACHE_PRESETS` ENTRY, and the distinction is the whole
+ * point of it living here separately. `CACHE_PRESETS` is a vocabulary of
+ * PER-REQUEST RESPONSE policies, indexed by viewer-variance: `CachePresetName`
+ * is what a route declares as `procedure({ policy: { cache } })`, it is
+ * type-gated per auth level by `AllowedCache` in worker-utils, and
+ * `selectHyperdriveBinding` branches on it. This value is none of those things
+ * — it is metadata written at PUT time onto a stored blob by
+ * `r2.put(key, body, {}, { cacheControl })`, on an object that no auth level
+ * can declare and no request resolves. Adding it to `CACHE_PRESETS` would make
+ * an object-metadata string declarable as a route's response policy and would
+ * put it in front of the Hyperdrive selector, which is a widening of that
+ * vocabulary, not a use of it. `scripts/checks/check-data-access-contract.mjs`
+ * RULE 3 makes the same distinction from the other side: its subject-exclusion
+ * (c) is "R2 STORED-OBJECT METADATA … the presets, every one of which is about
+ * viewer-variance, cannot express it".
+ *
+ * THE INVARIANT IT ENCODES: the key is REWRITTEN IN PLACE and is not
+ * content-addressed. Every image key on this platform is a pure function of
+ * `(entityId, size)` — `getContentThumbnailKey`, `getUserAvatarKey`,
+ * `getOrgLogoKey`, `categories/{id}/cover/{size}.webp`,
+ * `courses/{id}/{cover,hero,signature}/{size}.webp`, and
+ * `logos/{orgId}/logo.{ext}`. No timestamp, no uuid, no content hash, and the
+ * public URL is `${r2PublicUrlBase}/${key}` with no version query. Re-uploading
+ * writes NEW BYTES AT THE SAME URL.
+ *
+ * WHY EACH DIRECTIVE, given that:
+ *
+ * - NOT `immutable`, ever. This was `public, max-age=31536000, immutable` in
+ *   `@codex/image-processing` and `public, max-age=31536000` in
+ *   `@codex/platform-settings` until Codex-p3rre. Under RFC 8246 `immutable`
+ *   tells a cache it MUST NOT revalidate for the whole window — not even on a
+ *   user-initiated reload — so a replaced image kept serving the superseded
+ *   bytes for up to a year, with no purge path. Both sites justified it with a
+ *   claim about unique-per-upload filenames that the key builders contradict.
+ * - `must-revalidate` is the exact inverse: past the window a cache MUST ask
+ *   R2 before reusing a stored copy. R2 answers a conditional GET with a 304,
+ *   so an unchanged image costs headers rather than bytes, and a replaced one
+ *   is picked up on the first request after the window. The superseded bytes
+ *   stop being SERVABLE rather than merely becoming "stale".
+ * - `max-age=3600` is the browser window this platform has already chosen
+ *   twice for these same bytes: `CACHE_PRESETS.asset` (the response the R2
+ *   proxies emit over them) declares `max-age=3600`, and the production assets
+ *   bucket declares `browserTtl: 3600` in
+ *   `.github/config/r2-infrastructure.json`.
+ * - NO `s-maxage`, deliberately. `CACHE_PRESETS.asset` pairs its 3600s browser
+ *   window with 24h at the edge, and its stated licence for that asymmetry is
+ *   that the bytes are CONTENT-ADDRESSED — "the key encodes the bytes, so a
+ *   stored copy is never stale". That is precisely what is FALSE here, so the
+ *   longer shared window is not available to these objects. With no `s-maxage`
+ *   a shared cache falls back to `max-age`, so one hour bounds EVERY cache and
+ *   not merely the browser.
+ *
+ * `public` is correct and is not the risk: these objects are viewer-invariant,
+ * so no viewer can be served another's bytes. What is bounded here is how long
+ * a SUPERSEDED image stays servable.
+ *
+ * OUT OF REACH FROM HERE: the production assets bucket also carries a
+ * Cloudflare cache rule (`cacheEverything`, `edgeTtl: 86400`) that can override
+ * what an object declares at the edge. That is bucket infrastructure, not
+ * object metadata, and no value written at PUT time can constrain it.
+ */
+export const R2_OVERWRITTEN_OBJECT_CACHE_CONTROL =
+  'public, max-age=3600, must-revalidate';
+
 export const TIMEOUTS = {
   DEFAULT_TEST: 10000,
   LONG_TEST: 60000,

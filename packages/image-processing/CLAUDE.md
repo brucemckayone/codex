@@ -41,15 +41,17 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
 1. **Validation**: size ≤ 5MB, MIME type must be in `SUPPORTED_IMAGE_MIME_TYPES` (PNG, JPEG, WebP, GIF — no SVG, no opt-out), magic bytes verified against MIME
 2. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales.
 3. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
-   - Raster variants: `Cache-Control: public, max-age=3600, must-revalidate`
+   - Raster variants: `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from
+     `@codex/constants` — **never a string written in this package.**
    - **NEVER `immutable`, and NEVER a multi-hour window.** Every key this
      package writes is a pure function of `(entityId, size)` and is overwritten
      in place on re-upload, and the public URL carries no version or hash — so a
      cache told not to revalidate keeps serving the REPLACED image with no purge
-     path. This was `max-age=31536000, immutable` (one year) until Codex-p3rre;
-     the full reasoning for the value, and for the deliberately absent
-     `s-maxage`, is on `IMAGE_VARIANT_PUT_OPTIONS` in
-     `src/utils/upload-pipeline.ts`, and the invariant is pinned by
+     path. This was `max-age=31536000, immutable` (one year) until Codex-p3rre.
+     The reasoning for the directives, and for the deliberately absent
+     `s-maxage`, lives beside the constant in `packages/constants/src/limits.ts`
+     (shared with the org-logo path in `@codex/platform-settings`); the
+     invariant is pinned by
      `src/__tests__/deterministic-key-cache-control.test.ts`.
 4. **DB update**: writes URL to content/user/org record
 
@@ -81,7 +83,7 @@ R2 key builders come from `@codex/transcoding`:
 
 ## Integration
 
-- **Depends on**: `@codex/database`, `@codex/cloudflare-clients` (R2), `@codex/validation` (image validation), `@codex/transcoding` (key builders), `@cf-wasm/photon`
+- **Depends on**: `@codex/database`, `@codex/cloudflare-clients` (R2), `@codex/constants` (`R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`), `@codex/validation` (image validation), `@codex/transcoding` (key builders), `@cf-wasm/photon`
 - **Used by**: content-api (thumbnails, category covers, course stills), identity-api (avatars) — via `ctx.services.imageProcessing` in `procedure()` handlers. NOT organization-api: its `POST/DELETE /branding/logo` routes go to `ctx.services.settings` (`@codex/platform-settings`), which owns org logos end to end.
 
 ## Reference Files

@@ -26,6 +26,7 @@
   "dependencies": {
     "@cf-wasm/photon": "^0.3.4",
     "@codex/cloudflare-clients": "workspace:*",
+    "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/service-errors": "workspace:*",

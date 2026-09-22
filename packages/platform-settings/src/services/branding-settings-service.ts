@@ -6,7 +6,10 @@
  */
 
 import type { R2Service } from '@codex/cloudflare-clients';
-import { MIME_TYPES } from '@codex/constants';
+import {
+  MIME_TYPES,
+  R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
+} from '@codex/constants';
 import { type dbHttp, type dbWs, schema } from '@codex/database';
 import {
   BaseService,
@@ -330,29 +333,24 @@ export class BrandingSettingsService extends BaseService {
 
     // Step 1: Upload new logo to R2 first.
     //
-    // ONE POLICY FOR BOTH MIME BRANCHES, because `r2Path` above is
-    // `logos/{organizationId}/logo.{ext}` for both: deterministic, and
-    // overwritten in place on every re-upload of the same file type. The
-    // raster branch used to declare `public, max-age=31536000` on the grounds
-    // that "mime-distinct keys prevent stale reads" — but distinct MIME types
-    // are the only case the extension distinguishes, and replacing a PNG with
-    // a PNG writes new bytes at the identical key. A viewer could then be
-    // served the superseded logo for up to a year; there is no version query
-    // and no content hash in the URL to break the tie, and no purge path
-    // (Codex-p3rre — same defect, same reasoning as
-    // `IMAGE_VARIANT_PUT_OPTIONS` in
-    // `packages/image-processing/src/utils/upload-pipeline.ts`, which carries
-    // the full justification for the number and for the absent `s-maxage`).
+    // ONE POLICY FOR BOTH MIME BRANCHES, and it is not written here — it is
+    // `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` from `@codex/constants`, shared
+    // with the image pipeline in `@codex/image-processing`. `r2Path` above is
+    // `logos/{organizationId}/logo.{ext}` for both branches: deterministic,
+    // and overwritten in place on every re-upload of the same file type, which
+    // is exactly the invariant that constant encodes.
     //
-    // `must-revalidate` is what the invariant needs: past the window a cache
-    // MUST ask R2 rather than reuse a stored copy, and R2 answers a
-    // conditional GET with a 304 so an unchanged logo costs headers, not
-    // bytes. 3600s matches `CACHE_PRESETS.asset`'s browser window and the
-    // production assets bucket's declared `browserTtl`.
-    const cacheControl = 'public, max-age=3600, must-revalidate';
+    // The raster branch used to declare `public, max-age=31536000` on the
+    // grounds that "mime-distinct keys prevent stale reads" — but distinct MIME
+    // types are the only case the extension distinguishes, and replacing a PNG
+    // with a PNG writes new bytes at the identical key. A viewer could then be
+    // served the superseded logo for up to a year, with no version query and no
+    // content hash in the URL to break the tie, and no purge path (Codex-p3rre).
+    // The SVG branch was the only one that had the right shape, and the two
+    // hand-written strings are now one central decision.
     await this.r2.put(r2Path, buffer, undefined, {
       contentType: mimeType,
-      cacheControl,
+      cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL,
     });
 
     // Build public URL

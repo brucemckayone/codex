@@ -26,7 +26,7 @@ Wraps `R2Bucket` binding with retry logic and optional presigned URL generation.
 ```ts
 // Basic usage (no signing needed)
 const r2 = new R2Service(env.MEDIA_BUCKET);
-await r2.put('images/logo.png', buffer, {}, { contentType: 'image/png', cacheControl: 'public, max-age=3600, must-revalidate' });
+await r2.put('images/logo.png', buffer, {}, { contentType: 'image/png', cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL });
 
 // With signing (for presigned URLs)
 const r2 = new R2Service(env.MEDIA_BUCKET, {}, {
@@ -77,7 +77,10 @@ Key builders are in `@codex/transcoding` (`getContentThumbnailKey`, `getOrgLogoK
 ## Strict Rules
 
 - **MUST** use `R2Service` for all R2 operations in Workers — NEVER use raw `R2Bucket` directly (misses retry)
-- **MUST** set `Cache-Control` on uploads, and the window is set by whether the KEY can be overwritten, not by what kind of file it is. A key that is a pure function of an entity id (every image key in `@codex/image-processing`, and `logos/{orgId}/logo.{ext}`) is rewritten in place, so it gets `public, max-age=3600, must-revalidate` — `immutable` on such a key serves the REPLACED bytes until the window expires, with no purge path (Codex-p3rre; this rule said `public, max-age=31536000, immutable` for "immutable content (images, media)" and that is what licensed the defect). `public, max-age=31536000, immutable` is available only to a key that encodes its own content — a content hash or a per-upload token in the key itself — so that new bytes are a new key
+- **MUST** set `cacheControl` on uploads from a NAMED CONSTANT, never a string written at the call site. The window is set by whether the KEY can be overwritten, not by what kind of file it is:
+  - A key that is a pure function of an entity id — every image key in `@codex/image-processing`, and `logos/{orgId}/logo.{ext}` — is rewritten in place. Use **`R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`** from `@codex/constants`, whose docblock carries the reasoning. `immutable` on such a key serves the REPLACED bytes until the window expires, with no purge path (Codex-p3rre; this rule used to prescribe `max-age=31536000, immutable` for "immutable content (images, media)", and that is what licensed the defect).
+  - A year-long `immutable` window is available only to a key that encodes its own content — a content hash or a per-upload token in the key itself, so that new bytes are a new key. No key on this platform does that today, so there is no constant for it; add one, with its reasoning, next to the other in `packages/constants/src/limits.ts` if that ever changes.
+  - These are R2 STORED-OBJECT metadata, deliberately NOT `CACHE_PRESETS` entries — those are per-request response policies indexed by viewer-variance, type-gated per auth level and read by the Hyperdrive selector. `scripts/checks/check-data-access-contract.mjs` RULE 3 draws the same line in its subject-exclusion (c).
 - **MUST** use `generateSignedUrl()` for client-facing stream/download URLs
 - **NEVER** expose `R2SigningConfig` credentials in responses or logs
 - **NEVER** use `R2SigningClient` inside the Workers runtime — use `R2Service` with `signingConfig` instead
