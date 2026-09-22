@@ -299,14 +299,20 @@ describe('BrandingSettingsService', () => {
         size: 1024,
       });
 
-      // Verify R2 was called
+      // Verify R2 was called.
+      //
+      // `logos/{orgId}/logo.{ext}` is deterministic and overwritten in place,
+      // so the stored header may not license a cache to reuse the bytes
+      // without asking. This pinned `public, max-age=31536000` until
+      // Codex-p3rre — a year in which a replaced logo kept serving the old
+      // image, with no version query in the URL and no purge path.
       expect(mockR2.put).toHaveBeenCalledWith(
         expect.stringContaining(`logos/${organizationId}/logo.png`),
         fileData,
         undefined,
         expect.objectContaining({
           contentType: MIME_TYPES.IMAGE.PNG,
-          cacheControl: 'public, max-age=31536000',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         })
       );
 
@@ -515,7 +521,7 @@ describe('BrandingSettingsService', () => {
         expect.anything(),
         undefined,
         expect.objectContaining({
-          cacheControl: 'public, max-age=31536000',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         })
       );
     });

@@ -567,9 +567,12 @@ export class ImageProcessingService extends BaseService {
       const sanitized = await sanitizeSvgContent(svgText);
       const sanitizedBuffer = new TextEncoder().encode(sanitized);
 
-      // SVG uses shorter cache (1 hour) because filename is fixed.
-      // This allows logo updates to propagate within reasonable time.
-      // Raster images use immutable cache since they have unique filenames per upload.
+      // One hour, because this filename is fixed and the object is overwritten
+      // in place. The trailing clause this comment used to carry ("raster
+      // images use immutable cache since they have unique filenames per
+      // upload") was false — raster keys are equally deterministic, which is
+      // Codex-p3rre; see IMAGE_VARIANT_PUT_OPTIONS in utils/upload-pipeline.ts
+      // for the policy both branches now share the reasoning for.
       await this.r2Service.put(
         key,
         sanitizedBuffer,

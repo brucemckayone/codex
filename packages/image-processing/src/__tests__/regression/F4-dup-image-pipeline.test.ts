@@ -71,7 +71,12 @@ const SERVICE_PATH = resolve(
 describe('denoise proof: F4 simplification:dup-image-pipeline', () => {
   it('image-variant cacheControl is declared at most once', () => {
     const src = readFileSync(SERVICE_PATH, 'utf8');
-    const literal = `cacheControl: 'public, max-age=31536000, immutable'`;
+    // The literal tracks the LIVE value, not the one this proof was written
+    // against. It was `public, max-age=31536000, immutable' until Codex-p3rre
+    // retired that header (the keys are deterministic and overwritten, so
+    // `immutable` was false); a guard left pointing at the retired string
+    // would be permanently green for a reason unrelated to duplication.
+    const literal = `cacheControl: 'public, max-age=3600, must-revalidate'`;
     const occurrences = src.split(literal).length - 1;
     // Pre-fix: 9 occurrences (3 pipelines × 3 variants).
     // Post-fix: ≤1 (a const, or pulled to a sibling helper module).

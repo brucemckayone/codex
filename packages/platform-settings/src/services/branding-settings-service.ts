@@ -327,12 +327,27 @@ export class BrandingSettingsService extends BaseService {
     const oldLogoPath = currentResult[0]?.logoR2Path;
 
     // Step 1: Upload new logo to R2 first.
-    // SVG uses 1-hour cache (fixed filename, must propagate updates).
-    // Raster uses 1-year immutable cache (mime-distinct keys prevent stale reads).
-    const cacheControl =
-      mimeType === 'image/svg+xml'
-        ? 'public, max-age=3600' // 1 hour — SVG
-        : 'public, max-age=31536000'; // 1 year — raster
+    //
+    // ONE POLICY FOR BOTH MIME BRANCHES, because `r2Path` above is
+    // `logos/{organizationId}/logo.{ext}` for both: deterministic, and
+    // overwritten in place on every re-upload of the same file type. The
+    // raster branch used to declare `public, max-age=31536000` on the grounds
+    // that "mime-distinct keys prevent stale reads" — but distinct MIME types
+    // are the only case the extension distinguishes, and replacing a PNG with
+    // a PNG writes new bytes at the identical key. A viewer could then be
+    // served the superseded logo for up to a year; there is no version query
+    // and no content hash in the URL to break the tie, and no purge path
+    // (Codex-p3rre — same defect, same reasoning as
+    // `IMAGE_VARIANT_PUT_OPTIONS` in
+    // `packages/image-processing/src/utils/upload-pipeline.ts`, which carries
+    // the full justification for the number and for the absent `s-maxage`).
+    //
+    // `must-revalidate` is what the invariant needs: past the window a cache
+    // MUST ask R2 rather than reuse a stored copy, and R2 answers a
+    // conditional GET with a 304 so an unchanged logo costs headers, not
+    // bytes. 3600s matches `CACHE_PRESETS.asset`'s browser window and the
+    // production assets bucket's declared `browserTtl`.
+    const cacheControl = 'public, max-age=3600, must-revalidate';
     await this.r2.put(r2Path, buffer, undefined, {
       contentType: mimeType,
       cacheControl,

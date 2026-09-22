@@ -42,15 +42,66 @@ interface VariantBuffers {
 }
 
 /**
- * Canonical R2 put options for raster image variants.
+ * `Cache-Control` stored on every image object this package writes.
  *
- * Variants get unique filenames per upload (sm/md/lg under a per-entity
- * folder) so they are safe to mark immutable for 1 year. SVG logos use a
- * different (shorter) cache policy because their filename is fixed.
+ * EVERY KEY THIS PACKAGE WRITES IS DETERMINISTIC AND IS OVERWRITTEN IN PLACE.
+ * `getContentThumbnailKey(creatorId, contentId, size)`,
+ * `getUserAvatarKey(userId, size)`, `getOrgLogoKey(orgId, size)` and the
+ * inline `categories/{id}/cover/{size}.webp`,
+ * `courses/{id}/{cover,hero,signature}/{size}.webp` keys are all a pure
+ * function of the entity id and the size — no timestamp, no uuid, no content
+ * hash anywhere in the package. Re-uploading writes NEW BYTES AT THE SAME KEY,
+ * which `processContentThumbnail`'s own docblock states as a deliberate
+ * invariant ("re-uploading a thumbnail OVERWRITES at the same keys"), and the
+ * public URL is `${r2PublicUrlBase}/${key}` with no version query and no hash.
+ *
+ * SO THE OBJECT IS NOT IMMUTABLE AND MUST NOT SAY IT IS. This value used to be
+ * `public, max-age=31536000, immutable`, justified by a comment claiming
+ * "variants get unique filenames per upload" — the opposite of what the key
+ * builders do. Under RFC 8246 `immutable` tells a cache it MUST NOT revalidate
+ * for the whole freshness window, not even on a user-initiated reload, so a
+ * replaced image kept serving the OLD bytes for up to a year with no purge
+ * path (Codex-p3rre). It was latent only because production had no uploaded
+ * images yet.
+ *
+ * WHY `max-age=3600, must-revalidate` AND DELIBERATELY NO `s-maxage`:
+ *
+ * - `must-revalidate` is the exact inverse of the directive removed: past one
+ *   hour a cache MUST ask R2 before reusing a stored copy. R2 answers a
+ *   conditional GET with a 304, so an unchanged image costs headers rather
+ *   than bytes and a replaced one is picked up on the first request after the
+ *   window. This is the directive the invariant actually needs — the old bytes
+ *   stop being servable, rather than merely becoming "stale".
+ * - 3600s is the browser window this platform has already chosen twice for the
+ *   same bytes: `CACHE_PRESETS.asset` (the worker/proxy path over these
+ *   objects) declares `max-age=3600`, and the production assets bucket
+ *   declares `browserTtl: 3600` in `.github/config/r2-infrastructure.json`.
+ *   Matching it keeps the stored header and the infrastructure in agreement
+ *   instead of contradicting each other.
+ * - NO `s-maxage`. `CACHE_PRESETS.asset` pairs its 3600s browser window with a
+ *   24h shared one, and its stated licence for the asymmetry is that the bytes
+ *   are CONTENT-ADDRESSED ("the key encodes the bytes, so a stored copy is
+ *   never stale"). That argument is precisely what is false here, so the
+ *   longer shared window is not available to these objects. With no
+ *   `s-maxage`, a shared cache falls back to `max-age`, so one hour bounds
+ *   every cache rather than just the browser.
+ *
+ * The objects are public and viewer-invariant, so `public` is correct and no
+ * viewer can be served another's bytes; what is bounded here is how long a
+ * SUPERSEDED image stays servable, not who may see it.
+ *
+ * OUT OF SCOPE HERE: the production assets bucket also carries a Cloudflare
+ * cache rule (`cacheEverything`, `edgeTtl: 86400`) which can override what an
+ * object declares at the edge. That is bucket infrastructure, not R2 object
+ * metadata, and this constant cannot reach it.
  */
+const DETERMINISTIC_IMAGE_CACHE_CONTROL =
+  'public, max-age=3600, must-revalidate';
+
+/** Canonical R2 put options for raster (WebP) image variants. */
 const IMAGE_VARIANT_PUT_OPTIONS = {
   contentType: 'image/webp',
-  cacheControl: 'public, max-age=31536000, immutable',
+  cacheControl: DETERMINISTIC_IMAGE_CACHE_CONTROL,
 } as const;
 
 /**

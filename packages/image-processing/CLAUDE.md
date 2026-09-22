@@ -39,8 +39,17 @@ Returns `ImageProcessingResult: { url: string, size: number, mimeType: string }`
 1. **Validation**: size ≤ 5MB, MIME type must be in `SUPPORTED_IMAGE_MIME_TYPES` (PNG, JPEG, WebP, GIF — SVG only for logos), magic bytes verified against MIME
 2. **Processing**: `@cf-wasm/photon` (Cloudflare-compatible WASM) — Lanczos3 resize, WebP conversion. NEVER upscales.
 3. **Storage** → R2 via `ASSETS_BUCKET` (falls back to `MEDIA_BUCKET`):
-   - Raster variants: `Cache-Control: public, max-age=31536000` (immutable, 1 year)
+   - Raster variants: `Cache-Control: public, max-age=3600, must-revalidate`
    - SVG logos: sanitized via `sanitizeSvgContent()`, `Cache-Control: public, max-age=3600`
+   - **NEVER `immutable`, and NEVER a multi-hour window.** Every key this
+     package writes is a pure function of `(entityId, size)` and is overwritten
+     in place on re-upload, and the public URL carries no version or hash — so a
+     cache told not to revalidate keeps serving the REPLACED image with no purge
+     path. This was `max-age=31536000, immutable` (one year) until Codex-p3rre;
+     the full reasoning for the value, and for the deliberately absent
+     `s-maxage`, is on `IMAGE_VARIANT_PUT_OPTIONS` in
+     `src/utils/upload-pipeline.ts`, and the invariant is pinned by
+     `src/__tests__/deterministic-key-cache-control.test.ts`.
 4. **DB update**: writes URL to content/user/org record
 
 ## R2 Key Format

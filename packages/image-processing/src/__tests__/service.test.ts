@@ -189,7 +189,7 @@ describe('ImageProcessingService', () => {
         {}, // Empty metadata object (not undefined)
         {
           contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         }
       );
     });
@@ -272,7 +272,7 @@ describe('ImageProcessingService', () => {
         {},
         {
           contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         }
       );
     });
