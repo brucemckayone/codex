@@ -1,9 +1,15 @@
 <!--
   @component ThumbnailUpload
 
-  Content thumbnail with drag-and-drop file upload, media auto-extract, or URL fallback.
+  Content thumbnail with drag-and-drop file upload or media auto-extract.
   File upload uses native FormData via form() remote function (edit mode only — needs content ID).
-  In create mode, only URL / media-thumbnail are available; saving the draft
+
+  There is deliberately NO free-text URL input (Codex-1g5lh.3). An arbitrary
+  creator-supplied URL bypasses the R2 + image-processing pipeline every other
+  image goes through, and every viewer's browser would then fetch a third-party
+  host — handing it their IP and referrer. `thumbnailUrl` now only ever holds a
+  value the PLATFORM produced: an upload result, or a media auto-extract.
+  In create mode only media auto-extract is available; saving the draft
   redirects to edit mode (Codex-ko8ko) where file upload unlocks.
 
   @prop {ContentForm} form - The active form instance
@@ -30,7 +36,6 @@
 
   const { form, mediaThumbnailUrl = null, contentId = null }: Props = $props();
 
-  let showUrlInput = $state(false);
   let uploading = $state(false);
   let validationError = $state<string | null>(null);
   let fileInput: HTMLInputElement | undefined = $state();
@@ -139,16 +144,13 @@
       }
     }
     form.fields.thumbnailUrl.set('');
-    showUrlInput = false;
   }
 </script>
 
 <section class="form-card">
   <h3 class="card-title">Thumbnail <span class="optional-hint">Optional</span></h3>
   <!-- Always submit the thumbnailUrl value -->
-  {#if !showUrlInput}
-    <input type="hidden" name="thumbnailUrl" value={thumbnailValue} />
-  {/if}
+  <input type="hidden" name="thumbnailUrl" value={thumbnailValue} />
 
   <div class="thumbnail-zone">
     {#if hasCustomThumbnail}
@@ -158,10 +160,6 @@
         <div class="thumbnail-overlay">
           {#if canUploadFile}
             <button type="button" class="overlay-btn" onclick={handleBrowseClick}>
-              Change
-            </button>
-          {:else}
-            <button type="button" class="overlay-btn" onclick={() => (showUrlInput = true)}>
               Change
             </button>
           {/if}
@@ -193,50 +191,30 @@
         <UploadIcon size={32} />
         <span class="drop-text">Drop image or click to upload</span>
         <span class="drop-hint">PNG, JPEG, or WebP. Max 10MB.</span>
-        <div class="drop-actions">
-          {#if mediaThumbnailUrl}
+        {#if mediaThumbnailUrl}
+          <div class="drop-actions">
             <Button type="button" variant="secondary" size="sm" onclick={(e: MouseEvent) => { e.stopPropagation(); useMediaThumbnail(); }}>
               Use media thumbnail
             </Button>
-          {/if}
-          <Button type="button" variant="ghost" size="sm" onclick={(e: MouseEvent) => { e.stopPropagation(); showUrlInput = true; }}>
-            Enter URL instead
-          </Button>
-        </div>
+          </div>
+        {/if}
       </div>
     {:else}
-      <!-- URL-only placeholder (create mode) -->
+      <!-- Create mode: no content ID yet, so no file upload target -->
       <div class="thumbnail-placeholder">
         <ImageIcon size={32} />
         <span class="placeholder-text">No thumbnail set</span>
-        <span class="placeholder-hint">Save this draft to upload an image file — or set one now:</span>
-        <div class="placeholder-actions">
-          {#if mediaThumbnailUrl}
+        <span class="placeholder-hint">Save this draft to upload an image file.</span>
+        {#if mediaThumbnailUrl}
+          <div class="placeholder-actions">
             <Button type="button" variant="primary" size="sm" onclick={useMediaThumbnail}>
               Use media thumbnail
             </Button>
-          {/if}
-          <Button type="button" variant="ghost" size="sm" onclick={() => (showUrlInput = true)}>
-            Enter URL
-          </Button>
-        </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
-
-  {#if showUrlInput}
-    <div class="url-input-row">
-      <input
-        {...form.fields.thumbnailUrl.as('text')}
-        id="thumbnailUrl"
-        class="field-input"
-        placeholder="https://example.com/thumbnail.jpg"
-      />
-      <Button type="button" variant="primary" size="sm" onclick={() => (showUrlInput = false)}>
-        Done
-      </Button>
-    </div>
-  {/if}
 
   <!-- Uploading indicator -->
   {#if uploading}
@@ -445,18 +423,6 @@
     display: flex;
     gap: var(--space-2);
     margin-top: var(--space-1);
-  }
-
-  /* ── URL input ──────────────────────────────────────────────────── */
-
-  .url-input-row {
-    display: flex;
-    gap: var(--space-2);
-    margin-top: var(--space-3);
-  }
-
-  .url-input-row :global(.field-input) {
-    flex: 1;
   }
 
   /* ── Status / errors ────────────────────────────────────────────── */
