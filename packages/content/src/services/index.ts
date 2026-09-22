@@ -20,6 +20,9 @@ export {
   type WaitUntilFn,
 } from './content-invalidation';
 // Content Service
-export { ContentService } from './content-service';
+export {
+  ContentService,
+  type ContentServiceConfig,
+} from './content-service';
 // Media Item Service
 export { MediaItemService } from './media-service';

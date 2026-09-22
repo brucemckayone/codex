@@ -425,6 +425,12 @@ export async function createServiceRegistry(
         _content = new ContentService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          // Codex-8so68: the allowed host for `thumbnailUrl`. Not thrown on
+          // when absent (unlike imageProcessing below, which cannot function
+          // without it) — the service fails the thumbnail check CLOSED, so a
+          // missing binding costs the ability to set a thumbnail, never an
+          // open hotlink.
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
 
         if (env.CACHE_KV) {
@@ -639,6 +645,9 @@ export async function createServiceRegistry(
         _organization = new OrganizationService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          // Codex-8so68: the allowed host for `logoUrl`. Fails closed when
+          // the binding is absent (see the content getter above).
+          r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
         });
       }
       return _organization;

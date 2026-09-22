@@ -40,10 +40,16 @@ import {
   type ImageProcessingResult,
   ImageProcessingService,
 } from '@codex/image-processing';
+import type { ServiceConfig } from '@codex/service-errors';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
-import { createContentSchema, updateContentSchema } from '@codex/validation';
+import {
+  createContentSchema,
+  createPlatformImageUrlSchema,
+  PLATFORM_IMAGE_URL_MESSAGE,
+  updateContentSchema,
+} from '@codex/validation';
 import {
   and,
   asc,
@@ -85,11 +91,70 @@ import type {
  * - Delete content (soft delete)
  * - List content with filters
  */
+/**
+ * ContentService configuration.
+ *
+ * Adds the public asset CDN base to the standard `ServiceConfig` so the
+ * write paths can reject an externally-hosted `thumbnailUrl` (Codex-8so68).
+ * Optional because the binding itself is optional in `HonoEnv`; when it is
+ * absent the thumbnail gate FAILS CLOSED (no base ⇒ no URL can be
+ * platform-produced), so the only effect is that a caller cannot set a
+ * thumbnail at all on a mis-configured deployment.
+ */
+export interface ContentServiceConfig extends ServiceConfig {
+  /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
+  r2PublicUrlBase?: string;
+}
+
 export class ContentService extends BaseService {
   private cache?: VersionedCache;
 
+  /**
+   * Narrowed `thumbnailUrl` schema, bound to this worker's asset CDN base.
+   * Built once per instance — the base never changes within a request.
+   */
+  private readonly thumbnailUrlSchema: ReturnType<
+    typeof createPlatformImageUrlSchema
+  >;
+
+  constructor(config: ContentServiceConfig) {
+    super(config);
+    this.thumbnailUrlSchema = createPlatformImageUrlSchema(
+      config.r2PublicUrlBase
+    );
+  }
+
   setCache(cache: VersionedCache): void {
     this.cache = cache;
+  }
+
+  /**
+   * Reject an externally-hosted content thumbnail (Codex-8so68).
+   *
+   * `createContentSchema`/`updateContentSchema` only prove the value is an
+   * http(s) URL, so a direct API call could aim a thumbnail at a third-party
+   * host — bypassing the R2 + `@codex/image-processing` pipeline and making
+   * every viewer's browser fetch that host (leaking IP and referrer). The
+   * allowed base is the `R2_PUBLIC_URL_BASE` binding, which the Zod schema
+   * in `@codex/validation` cannot read, so the gate lives here, on the write
+   * path, where the registry has injected it.
+   *
+   * MUST be called from BOTH create() and update(), and BEFORE the
+   * transaction opens — keeping it ahead of any DB work is also what makes
+   * it unit-testable without a database.
+   *
+   * There is no grandfather clause: an update that re-submits a legacy
+   * external URL is rejected (owner decision).
+   */
+  private assertPlatformThumbnailUrl(
+    thumbnailUrl: string | null | undefined
+  ): void {
+    if (thumbnailUrl == null) return;
+    if (this.thumbnailUrlSchema.safeParse(thumbnailUrl).success) return;
+
+    throw new ValidationError(PLATFORM_IMAGE_URL_MESSAGE, {
+      field: 'thumbnailUrl',
+    });
   }
 
   /**
@@ -231,6 +296,11 @@ export class ContentService extends BaseService {
   async create(input: CreateContentInput, creatorId: string): Promise<Content> {
     // Step 1: Validate input with Zod schema
     const validated = createContentSchema.parse(input);
+
+    // Step 1b: Zod only proved the thumbnail is an http(s) URL — reject any
+    // host other than the platform asset CDN (Codex-8so68). Mirrored in
+    // update(); a fix applied to only one of the two leaves the hole open.
+    this.assertPlatformThumbnailUrl(validated.thumbnailUrl);
 
     try {
       // Step 2: Use transaction for atomicity
@@ -444,6 +514,11 @@ export class ContentService extends BaseService {
   ): Promise<Content> {
     // Validate input
     const validated = updateContentSchema.parse(input);
+
+    // Same external-host gate as create() (Codex-8so68). `updateContentSchema`
+    // is a partial, so an absent `thumbnailUrl` is a no-op and an explicit
+    // null clears it; only a string is checked.
+    this.assertPlatformThumbnailUrl(validated.thumbnailUrl);
 
     try {
       const result = await this.db.transaction(async (tx) => {

@@ -122,6 +122,98 @@ export const optionalUrlSchema = (message?: string) =>
     .transform((val) => (val === '' ? undefined : val))
     .pipe(z.string().url(message).optional());
 
+/**
+ * Rejection message for an image URL that is not platform-hosted.
+ * Exported so services can reuse the exact wording in their
+ * `ValidationError` (this package must not depend on @codex/service-errors).
+ */
+export const PLATFORM_IMAGE_URL_MESSAGE =
+  'Image URL must be hosted on the platform asset CDN — upload the image instead of linking an external host';
+
+/**
+ * Whether `url` addresses an asset under `allowedBase`.
+ *
+ * Deliberately NOT a string prefix test. `startsWith(base)` accepts
+ * `https://cdn-assets.revelations.studio.evil.com/x` and
+ * `https://cdn-assets.revelations.studio@evil.com/x` — both fetch from
+ * `evil.com`, which is the exact leak this gate exists to stop. So both
+ * sides are parsed and compared on `origin` (scheme + host + port, host
+ * already lowercased by the URL parser), which makes a lookalike host, a
+ * userinfo trick, a scheme downgrade and a port swap all fail.
+ *
+ * Embedded credentials are rejected even when the host matches: a
+ * platform-produced URL never carries them, so their presence means the
+ * value did not come from the upload pipeline.
+ *
+ * A bare base with no key (`https://cdn.../`) is rejected — it addresses no
+ * asset.
+ */
+function isPlatformHostedUrl(
+  url: string,
+  allowedBase: string | null | undefined
+): boolean {
+  if (!allowedBase) return false;
+
+  let candidate: URL;
+  let base: URL;
+  try {
+    candidate = new URL(url);
+    base = new URL(allowedBase);
+  } catch {
+    return false;
+  }
+
+  if (!['http:', 'https:'].includes(candidate.protocol)) return false;
+  if (candidate.username !== '' || candidate.password !== '') return false;
+  if (candidate.origin !== base.origin) return false;
+
+  // The base normally has no path (`https://cdn-assets.revelations.studio`),
+  // but tolerate one so a future path-prefixed CDN still scopes correctly.
+  const basePath = base.pathname.replace(/\/+$/, '');
+  if (basePath === '') return candidate.pathname.length > 1;
+  return (
+    candidate.pathname === basePath ||
+    candidate.pathname.startsWith(`${basePath}/`)
+  );
+}
+
+/**
+ * Platform-hosted image URL factory (Codex-8so68).
+ *
+ * `urlSchema` allows ANY http(s) host, which let a direct API call point a
+ * content thumbnail or an org logo at a third-party server: every viewer's
+ * browser then fetched that host, leaking their IP and referrer, and the
+ * R2 + `@codex/image-processing` pipeline was bypassed entirely.
+ *
+ * The allowed base is the per-environment `R2_PUBLIC_URL_BASE` binding
+ * (`http://localhost:4100` in dev, `https://cdn-assets.revelations.studio`
+ * in production), which a schema in this package cannot read — hence a
+ * FACTORY, called from the layer that holds the binding. Both legitimate
+ * producers emit `${R2_PUBLIC_URL_BASE}/${key}`
+ * (`ImageProcessingService.processContentThumbnail` and the transcoding
+ * pipeline's `media-thumbnails/{mediaId}/...` poster frames), so both pass.
+ *
+ * Do NOT retrofit this onto `urlSchema` or onto non-image URL fields —
+ * `websiteUrl`, social links and rich-text hyperlinks are legitimately
+ * external and must stay permissive.
+ *
+ * @param allowedBase - Public asset CDN base. Missing/empty rejects every
+ *   URL (fail closed): a platform-produced URL cannot exist without it.
+ *
+ * @example
+ * ```typescript
+ * const schema = createPlatformImageUrlSchema(env.R2_PUBLIC_URL_BASE);
+ * schema.safeParse('https://cdn-assets.revelations.studio/u/c/lg.webp'); // ok
+ * schema.safeParse('https://evil.example.com/tracker.png');              // fails
+ * ```
+ */
+export const createPlatformImageUrlSchema = (
+  allowedBase: string | null | undefined
+) =>
+  urlSchema.refine((url) => isPlatformHostedUrl(url, allowedBase), {
+    message: PLATFORM_IMAGE_URL_MESSAGE,
+  });
+
 // ============================================================================
 // Numbers
 // ============================================================================
