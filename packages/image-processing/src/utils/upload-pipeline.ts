@@ -1,9 +1,11 @@
 /**
  * Upload Pipeline Helpers
  *
- * Shared building blocks for the three near-identical raster image pipelines
- * (`processContentThumbnail`, `processUserAvatar`, `processOrgLogo`) inside
- * `ImageProcessingService`, plus the SVG branch of `processOrgLogo`.
+ * Shared building blocks for the near-identical raster image pipelines inside
+ * `ImageProcessingService` — `processContentThumbnail`, `processUserAvatar`,
+ * `processCategoryCover`, `processCourseCover`, `processCourseHero` and
+ * `processCourseSignature`. (A seventh, `processOrgLogo`, was removed in
+ * Codex-z520h: it was a second org-logo implementation with no call sites.)
  *
  * Two helpers:
  *
@@ -146,10 +148,11 @@ export async function uploadImageVariants(params: {
  * `OrphanedFileService` for deferred batch cleanup. When no orphan service is
  * configured, a single `obs.warn('R2 cleanup failed after DB error', ...)` is
  * emitted with the supplied `warnContext` (e.g. "content-thumbnail",
- * "org-logo-raster", "org-logo-svg").
+ * "user-avatar").
  *
- * `keys` is `string[]` to support both the raster (3 variants) and SVG (1
- * key) flows. Caller passes `[keys.sm, keys.md, keys.lg]` for raster.
+ * `keys` is `string[]` rather than `VariantKeys` because it once served a
+ * 1-key SVG flow as well; every surviving caller passes
+ * `[keys.sm, keys.md, keys.lg]`.
  */
 export async function withDbUpdateOrphanCleanup<T>(
   params: {

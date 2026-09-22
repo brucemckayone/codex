@@ -305,7 +305,9 @@ export class BrandingSettingsService extends BaseService {
     // SVG sanitization — strip <script>, on-*, javascript:, foreignObject, etc.
     // Required per packages/image-processing/CLAUDE.md: "MUST sanitize ALL SVG
     // uploads with sanitizeSvgContent() — unsanitized SVGs are XSS vectors"
-    // Pattern mirrors ImageProcessingService.processOrgLogo() (service.ts:360-366).
+    // (This used to cite ImageProcessingService.processOrgLogo as the pattern
+    // it mirrors. That method was a second, unreachable org-logo implementation
+    // and was removed in Codex-z520h — THIS is the only org-logo path.)
     if (mimeType === 'image/svg+xml') {
       const { sanitizeSvgContent } = await import('@codex/validation');
       const svgText = new TextDecoder().decode(new Uint8Array(buffer));
