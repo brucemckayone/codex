@@ -1124,3 +1124,91 @@ describe('Security Validations', () => {
     });
   });
 });
+
+/**
+ * Codex-moyu5 — a PATCH that omits `tags` must not wipe the tag array.
+ *
+ * `tagsSchema` ends `.optional().default([])`, which is correct for a create:
+ * an absent value legitimately means "no tags". `updateContentSchema` is
+ * `baseContentSchema.partial()`, and `.partial()` makes a key optional WITHOUT
+ * removing an inner default — a `ZodOptional<ZodDefault<…>>` still fills the
+ * key in. So an update payload that never mentioned tags parsed to
+ * `tags: []`, indistinguishable from a deliberate clear, and
+ * `ContentService.update()` spreads the validated partial straight into
+ * `.set()`.
+ *
+ * These cases live at the schema layer deliberately: that is where the defect
+ * is, and it is the only layer that can be verified without the database
+ * (Codex-bsbf8). `tags` was the only field in `baseContentSchema` carrying a
+ * default, so the blast radius is exactly this one field.
+ */
+describe('Codex-moyu5: updateContentSchema tag preservation', () => {
+  describe('an omitted key must stay omitted', () => {
+    it('does NOT materialise tags when the payload omits them', () => {
+      const parsed = updateContentSchema.parse({ title: 'Updated title' });
+
+      // The KEY must be absent, not merely empty: `update()` spreads the
+      // parsed object into `.set()`, so a present key is a written column.
+      expect('tags' in parsed).toBe(false);
+      expect(parsed.tags).toBeUndefined();
+    });
+
+    it('omits tags for an empty patch too', () => {
+      expect('tags' in updateContentSchema.parse({})).toBe(false);
+    });
+  });
+
+  describe('explicit values still round-trip', () => {
+    it('keeps an explicit tag array', () => {
+      const parsed = updateContentSchema.parse({ tags: ['alpha', 'beta'] });
+      expect(parsed.tags).toEqual(['alpha', 'beta']);
+    });
+
+    it('an explicit empty array still CLEARS — that is a real intent', () => {
+      const parsed = updateContentSchema.parse({ tags: [] });
+
+      // The distinction this fix restores: `[]` present means clear, absent
+      // means leave alone. Before the fix both produced `tags: []`.
+      expect('tags' in parsed).toBe(true);
+      expect(parsed.tags).toEqual([]);
+    });
+
+    it('still enforces the tag constraints it validated before', () => {
+      expect(() =>
+        updateContentSchema.parse({ tags: Array(21).fill('x') })
+      ).toThrow();
+      expect(() => updateContentSchema.parse({ tags: [''] })).toThrow();
+      expect(() =>
+        updateContentSchema.parse({ tags: ['x'.repeat(51)] })
+      ).toThrow();
+    });
+  });
+
+  describe('create keeps its default — the fix is update-only', () => {
+    it('createContentSchema still defaults tags to an empty array', () => {
+      const parsed = createContentSchema.parse({
+        title: 'A written post',
+        slug: 'a-written-post',
+        contentType: 'written' as const,
+        contentBody: 'Body copy for the post, long enough to be valid.',
+        isFree: true,
+        priceCents: null,
+      });
+
+      // On a create, "no tags given" genuinely means "no tags", and the
+      // column is NOT NULL-friendly only because of this default. Removing it
+      // here as well would have been the wrong fix.
+      expect(parsed.tags).toEqual([]);
+    });
+  });
+
+  describe('CALIBRATION', () => {
+    it('the assertion can tell a present key from an absent one', () => {
+      // `toBeUndefined()` alone passes for both `{}` and `{ tags: undefined }`,
+      // and only one of those survives a spread into `.set()`. This confirms
+      // the `in` check is what discriminates.
+      expect('tags' in { tags: undefined }).toBe(true);
+      expect('tags' in ({} as { tags?: string[] })).toBe(false);
+    });
+  });
+});

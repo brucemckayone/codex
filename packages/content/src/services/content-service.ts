@@ -601,9 +601,20 @@ export class ContentService extends BaseService {
             // spread above — this only normalises an explicit EMPTY selection
             // to NULL so an update matches create()'s `|| null` and reads back
             // as "no shader" rather than the empty string. The `in` guard is
-            // load-bearing: `.partial()` omits absent keys entirely (verified),
-            // so an update that never mentions the preset must not clobber the
-            // stored one, and only a key the caller actually sent is rewritten.
+            // load-bearing: `.partial()` omits an absent `shaderPreset`, so an
+            // update that never mentions the preset must not clobber the stored
+            // one, and only a key the caller actually sent is rewritten.
+            //
+            // That holds for THIS field, and the earlier "(verified)" note here
+            // claimed it of `.partial()` in general — which is false, and cost
+            // Codex-moyu5. `.partial()` makes a key optional but does NOT strip
+            // an inner `.default()`, so a field declared `.default([])` is
+            // still MATERIALISED when the payload omits it and then written by
+            // the spread above. `tags` was exactly that, and every PATCH that
+            // did not mention tags wiped them. Fixed in the schema rather than
+            // here: `updateContentSchema` now overrides `tags` without the
+            // default. Before adding a defaulted field to `baseContentSchema`,
+            // check whether the update path needs the same override.
             ...('shaderPreset' in restValidated
               ? { shaderPreset: restValidated.shaderPreset || null }
               : {}),
