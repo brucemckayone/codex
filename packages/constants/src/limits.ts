@@ -421,7 +421,7 @@ export type CachePresetName = keyof typeof CACHE_PRESETS;
  * PER-REQUEST RESPONSE policies, indexed by viewer-variance: `CachePresetName`
  * is what a route declares as `procedure({ policy: { cache } })`, it is
  * type-gated per auth level by `AllowedCache` in worker-utils, and
- * `selectHyperdriveBinding` branches on it. This value is none of those things
+ * `selectHyperdrive` branches on it. This value is none of those things
  * — it is metadata written at PUT time onto a stored blob by
  * `r2.put(key, body, {}, { cacheControl })`, on an object that no auth level
  * can declare and no request resolves. Adding it to `CACHE_PRESETS` would make

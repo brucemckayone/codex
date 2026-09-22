@@ -214,7 +214,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - **MUST** use `RESERVED_SUBDOMAINS_SET` for org slug validation
 - **MUST** use `getCookieConfig(env)` for cookie configuration
 - **MUST** name a `CACHE_PRESETS` preset for any RESPONSE `Cache-Control` — NEVER hand-write the value; add a preset here instead
-- **MUST** use `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` for `r2.put(..., { cacheControl })` on a key that is rewritten in place, and NEVER add it to `CACHE_PRESETS`. Object metadata written at PUT time is not a per-request policy: `CachePresetName` is what a route declares, is type-gated per auth level by `AllowedCache`, and is read by `selectHyperdriveBinding` — none of which an R2 blob participates in. `check-data-access-contract.mjs` RULE 3 makes the same split in its subject-exclusion (c)
+- **MUST** use `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` for `r2.put(..., { cacheControl })` on a key that is rewritten in place, and NEVER add it to `CACHE_PRESETS`. Object metadata written at PUT time is not a per-request policy: `CachePresetName` is what a route declares, is type-gated per auth level by `AllowedCache`, and is read by `selectHyperdrive` — none of which an R2 blob participates in. `check-data-access-contract.mjs` RULE 3 makes the same split in its subject-exclusion (c)
 - **NEVER** put an `s-maxage` on a preset whose body can vary by viewer
 - **NEVER** add side effects to this package — it must be pure constants/functions
 
