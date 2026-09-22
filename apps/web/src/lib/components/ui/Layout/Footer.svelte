@@ -1,19 +1,30 @@
 <script lang="ts">
-  import { page } from '$app/state';
   import PageContainer from './PageContainer.svelte';
   import * as m from '$paraglide/messages';
-  import { buildPlatformUrl } from '$lib/utils/subdomain';
-
-  // These three routes live ONLY in the (platform) group, and this footer
-  // renders on every page — including org subdomains. A relative `/terms` there
-  // is rerouted by `hooks.ts` to `/_org/<slug>/terms`, which does not exist, so
-  // all three 404'd on every tenant host (Codex-6wkr1). `buildPlatformUrl`
-  // pins them to the apex, preserving protocol and port, so there is exactly
-  // one canonical URL per legal document rather than one per tenant.
-  const aboutUrl = $derived(buildPlatformUrl(page.url, '/about'));
-  const termsUrl = $derived(buildPlatformUrl(page.url, '/terms'));
-  const privacyUrl = $derived(buildPlatformUrl(page.url, '/privacy'));
 </script>
+
+<!--
+  The legal links below are RELATIVE, deliberately, and must stay that way.
+
+  This footer is mounted ONLY by routes/(platform)/+layout.svelte, and the
+  (platform) group is reachable on exactly two host classes: the apex, and a
+  RESERVED subdomain. `hooks.ts` returns the pathname UNREWRITTEN for a reserved
+  subdomain (`if (isReservedSubdomain(subdomain)) return pathname`), so
+  `staging.revelations.studio/terms` renders `(platform)/terms` in place and a
+  relative href resolves correctly there.
+
+  An absolute apex URL here is a REGRESSION: `buildPlatformUrl` collapses
+  `staging.revelations.studio` to `revelations.studio`, sending a staging viewer
+  to PRODUCTION. Verified — `isReservedSubdomain('staging')` and
+  `isReservedSubdomain('codex-staging')` are both true via a suffix rule, not
+  list membership, so grepping STATIC_RESERVED_SUBDOMAINS gives the wrong answer.
+
+  The tenant-host 404 this looked like it should fix is NOT here: org subdomains
+  never render this component. They have their own inline footer in
+  routes/_org/[slug]/+layout.svelte, which DOES need buildPlatformUrl because a
+  tenant host IS rewritten to /_org/<slug>/…. The two footers need opposite
+  treatments because they render on different host classes. (Codex-6wkr1)
+-->
 
 <footer class="footer">
   <PageContainer class="footer-inner">
@@ -22,9 +33,9 @@
     </p>
 
     <nav class="links" aria-label="Footer">
-      <a href={aboutUrl} class="footer-link">{m.footer_about()}</a>
-      <a href={termsUrl} class="footer-link">{m.footer_terms()}</a>
-      <a href={privacyUrl} class="footer-link">{m.footer_privacy()}</a>
+      <a href="/about" class="footer-link">{m.footer_about()}</a>
+      <a href="/terms" class="footer-link">{m.footer_terms()}</a>
+      <a href="/privacy" class="footer-link">{m.footer_privacy()}</a>
     </nav>
   </PageContainer>
 </footer>
