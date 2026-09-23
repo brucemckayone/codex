@@ -94,7 +94,12 @@ EOF
         echo "${key}=${!key}" >> "${VARS_FILE}"
       fi
     done
-    echo "RUNPOD_DIRECT_URL=${RUNPOD_DIRECT_URL:-http://127.0.0.1:4101/run}" >> "${VARS_FILE}"
+    # Always written (it has a default), and kept as a bare `KEY=` line:
+    # packages/constants mock-runpod-port.test.ts reads this file to prove CI
+    # points media-api at the mock RunPod stub.
+    cat >> "${VARS_FILE}" << EOF
+RUNPOD_DIRECT_URL=${RUNPOD_DIRECT_URL:-http://127.0.0.1:4101/run}
+EOF
     ;;
 esac
 
