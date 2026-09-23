@@ -551,6 +551,40 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
     expect(read.coverImageUrl).toBeNull();
   });
 
+  // ── getCourseStillImageKeys (Codex-29fs0) ──────────────────────────────────
+  // The still-upload routes read this BEFORE writing R2. Its keys decide whether
+  // a failed key write may delete the just-uploaded objects, so a stale or
+  // wrong-column read here would 404 a live image on a replacement.
+
+  it('getCourseStillImageKeys returns the stored key of each still, per column', async () => {
+    const cover = `courses/${courseId}/cover`;
+    const hero = `courses/${courseId}/hero`;
+    await svc.setCourseCoverImageKey(orgAId, pageId, cover);
+    await svc.setCourseHeroImageKey(orgAId, pageId, hero);
+    await svc.setCourseSignatureImageKey(orgAId, pageId, null);
+
+    try {
+      await expect(
+        svc.getCourseStillImageKeys(orgAId, pageId)
+      ).resolves.toEqual({
+        courseId,
+        coverImageKey: cover,
+        heroImageKey: hero,
+        signatureImageKey: null,
+      });
+    } finally {
+      // The course is shared across this file; a leftover hero key outranks
+      // the heroMediaId poster that the sell-preview tests below assert on.
+      await svc.setCourseHeroImageKey(orgAId, pageId, null);
+    }
+  });
+
+  it('getCourseStillImageKeys refuses a foreign org’s page', async () => {
+    await expect(
+      svc.getCourseStillImageKeys(orgAId, foreignPageId)
+    ).rejects.toThrow(NotFoundError);
+  });
+
   it('refuses to set a cover on a foreign org’s page', async () => {
     await expect(
       svc.setCourseCoverImageKey(orgAId, foreignPageId, 'courses/x/cover')

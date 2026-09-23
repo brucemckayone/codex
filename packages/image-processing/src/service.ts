@@ -108,6 +108,27 @@ function variantKeyList(keys: VariantKeys): string[] {
 }
 
 /**
+ * The three variant keys under a still's BASE key (`categories/{id}/cover`,
+ * `courses/{id}/hero`, ...). One definition, so the upload that writes the
+ * objects and the cleanup that may delete them can never disagree on a key.
+ */
+function stillVariantKeys(baseKey: string): VariantKeys {
+  return {
+    sm: `${baseKey}/sm.webp`,
+    md: `${baseKey}/md.webp`,
+    lg: `${baseKey}/lg.webp`,
+  };
+}
+
+/** Orphan classification for the four stills whose DB write the caller owns. */
+type CallerOwnedStill =
+  | { imageType: 'category_cover'; entityType: 'category' }
+  | {
+      imageType: 'course_cover' | 'course_hero' | 'course_signature';
+      entityType: 'course';
+    };
+
+/**
  * Image Processing Service
  * Coordinates image validation, R2 upload, and database updates
  */
@@ -224,6 +245,49 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Run the CALLER's DB write for a still produced by `processCategoryCover` /
+   * `processCourseCover` / `processCourseHero` / `processCourseSignature`, with
+   * the same failure cleanup `processContentThumbnail` gets (Codex-29fs0).
+   *
+   * Those four methods only upload: the scoped DB write lives in the
+   * space/org-aware service that owns the row, so this cannot be done inside
+   * them. Without it, a write that fails after the puts strands sm/md/lg with
+   * nothing able to name them.
+   *
+   * `storedBaseKey` is the key column as read BEFORE the upload, and it is
+   * what decides `withDbUpdateOrphanCleanup`'s `keysAlreadyReferenced`
+   * (Codex-r85jo.2): equal to `baseKey` means a REPLACEMENT (the deterministic
+   * keys are still addressed and now hold the new bytes, so deleting them would
+   * 404 a live image and nothing is cleaned); `null`, or anything else, means
+   * nothing addresses the new objects and they are cleaned up. Taking the
+   * stored value rather than a boolean keeps that one comparison here, instead
+   * of re-derived at four call sites.
+   */
+  async persistStillWithOrphanCleanup<T>(
+    params: CallerOwnedStill & {
+      baseKey: string;
+      storedBaseKey: string | null;
+      entityId: string;
+    },
+    dbWrite: () => Promise<T>
+  ): Promise<T> {
+    return withDbUpdateOrphanCleanup(
+      {
+        keys: variantKeyList(stillVariantKeys(params.baseKey)),
+        imageType: params.imageType,
+        entityId: params.entityId,
+        entityType: params.entityType,
+        r2: this.r2Service,
+        obs: this.obs,
+        orphanedFileService: this.orphanedFileService,
+        warnContext: params.imageType,
+        keysAlreadyReferenced: params.storedBaseKey === params.baseKey,
+      },
+      dbWrite
+    );
+  }
+
+  /**
    * Process and store a category cover image (org landing "Browse by topic").
    *
    * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg WebP →
@@ -258,11 +322,7 @@ export class ImageProcessingService extends BaseService {
     const variants = processImageVariants(inputBuffer);
 
     const coverImageKey = `categories/${categoryId}/cover`;
-    const keys: VariantKeys = {
-      sm: `${coverImageKey}/sm.webp`,
-      md: `${coverImageKey}/md.webp`,
-      lg: `${coverImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(coverImageKey);
 
     await uploadImageVariants({
       keys,
@@ -318,11 +378,7 @@ export class ImageProcessingService extends BaseService {
     const variants = processImageVariants(inputBuffer);
 
     const coverImageKey = `courses/${courseId}/cover`;
-    const keys: VariantKeys = {
-      sm: `${coverImageKey}/sm.webp`,
-      md: `${coverImageKey}/md.webp`,
-      lg: `${coverImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(coverImageKey);
 
     await uploadImageVariants({
       keys,
@@ -402,11 +458,7 @@ export class ImageProcessingService extends BaseService {
     const variants = processImageVariants(inputBuffer);
 
     const heroImageKey = `courses/${courseId}/hero`;
-    const keys: VariantKeys = {
-      sm: `${heroImageKey}/sm.webp`,
-      md: `${heroImageKey}/md.webp`,
-      lg: `${heroImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(heroImageKey);
 
     await uploadImageVariants({
       keys,
@@ -495,11 +547,7 @@ export class ImageProcessingService extends BaseService {
     const variants = processImageVariants(inputBuffer);
 
     const signatureImageKey = `courses/${courseId}/signature`;
-    const keys: VariantKeys = {
-      sm: `${signatureImageKey}/sm.webp`,
-      md: `${signatureImageKey}/md.webp`,
-      lg: `${signatureImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(signatureImageKey);
 
     await uploadImageVariants({
       keys,

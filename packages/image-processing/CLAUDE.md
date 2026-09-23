@@ -33,6 +33,7 @@ new ImageProcessingService({
 | `processUserAvatar(userId, file)` | Validate → resize → upload | 3 WebP variants |
 | `processCategoryCover(categoryId, file)` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
 | `processCourseCover(courseId, file)` / `processCourseHero` / `processCourseSignature` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
+| `persistStillWithOrphanCleanup({ baseKey, storedBaseKey, imageType, entityType, entityId }, dbWrite)` | Run the CALLER's key write for one of the four stills above | On failure, cleans up the new variants unless `storedBaseKey === baseKey` (a replacement), then rethrows. **Every caller of the four `process*` stills MUST wrap its DB write in this** (Codex-29fs0), with `storedBaseKey` read BEFORE the upload |
 | `deleteContentThumbnail(contentId, userId)` | Delete R2 files + clear DB field | |
 | `deleteUserAvatar(userId)` | Delete R2 files + clear DB field | |
 
