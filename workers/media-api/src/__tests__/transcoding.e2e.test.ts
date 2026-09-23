@@ -27,7 +27,6 @@ describe('Transcoding E2E Tests', () => {
   let otherUserId: string;
 
   beforeAll(async () => {
-    console.log('Test Environment Vars:', JSON.stringify(env, null, 2));
     // Create DB client with environment variables from cloudflare:test
     const db = createDbClient(env);
 
@@ -656,6 +655,9 @@ describe('Transcoding E2E Tests', () => {
           status: 'ready', // Already done
           runpodJobId: 'race-job-123',
           hlsMasterPlaylistKey: `${testUserId}/hls/${testMediaId}/master.m3u8`,
+          // A ready VIDEO must carry a thumbnail (status_ready_requires_keys,
+          // migration 0025) — without it this setup write is rejected.
+          thumbnailKey: `${testUserId}/thumbnails/${testMediaId}.jpg`,
           durationSeconds: 100,
         })
         .where(eq(schema.mediaItems.id, testMediaId));
@@ -712,9 +714,10 @@ describe('Transcoding E2E Tests', () => {
         console.log('Webhook Failure Response:', await webhookResponse.text());
       }
 
-      // Should return 200 (idempotent, no error)
-      // The atomic WHERE clause prevents duplicate updates
-      expect([200, 500]).toContain(webhookResponse.status);
+      // A duplicate completion is idempotent: the atomic WHERE clause makes
+      // it a no-op, so it must be a clean 200. A 500 would tell RunPod to
+      // retry a job that already succeeded.
+      expect(webhookResponse.status).toBe(200);
 
       // Verify media still in 'ready' state (no corruption)
       const media = await db.query.mediaItems.findFirst({

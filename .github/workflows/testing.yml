@@ -139,6 +139,7 @@ jobs:
       organization-api: ${{ steps.filter.outputs.organization-api }}
       notifications-api: ${{ steps.filter.outputs.notifications-api }}
       admin-api: ${{ steps.filter.outputs.admin-api }}
+      media-api: ${{ steps.filter.outputs.media-api }}
       # CI infrastructure changes (workflow yaml, generate-dev-vars script,
       # seed steps, worker startup blocks). When this is true the test jobs
       # MUST run even when no source file changed — otherwise a workflow
@@ -240,6 +241,8 @@ jobs:
               - 'workers/notifications-api/**'
             admin-api:
               - 'workers/admin-api/**'
+            media-api:
+              - 'workers/media-api/**'
             workflows:
               - '.github/workflows/testing.yml'
               - '.github/scripts/generate-dev-vars.sh'
@@ -454,13 +457,13 @@ jobs:
       # caps this project at 10 branches total (`production` is permanent, so 9
       # ephemeral slots). Shared branch names used to cap branch usage by
       # accident: any number of concurrent runs reused the same 7 names. Now
-      # that names are per-run, 7 matrix jobs from two overlapping runs would
-      # want 14 slots. Capping parallelism keeps two concurrent runs inside the
+      # that names are per-run, 8 matrix jobs from two overlapping runs would
+      # want 16 slots. Capping parallelism keeps two concurrent runs inside the
       # budget: 4 + 4 + production = 9.
       #
       # Three simultaneous runs that ALL fire the whole matrix would still
       # exceed 9 — but that needs three concurrent pushes each touching
-      # worker-utils/database/security (the only filters that fan out to all 7),
+      # worker-utils/database/security (the only filters that fan out to all 8),
       # and the failure mode is now LOUD and correctly attributed: the action's
       # `elif [[ $(cat branch_err) == *"ERROR:"* ]]` branch exits 1 in the job
       # that could not get a database, rather than silently handing it someone
@@ -531,6 +534,20 @@ jobs:
             needs_r2: false
             needs_stripe: false
 
+          # Absent until Codex-sb1j7: media-api was the one worker suite CI
+          # never ran, so transcoding.e2e.test.ts only ever ran locally against
+          # a dev DB carrying a stale CHECK constraint, and a test that could
+          # not pass on a migrated database went unnoticed. RunPod is never
+          # called — the suite's RUNPOD_* values are wrangler env.test fakes.
+          - name: Media API
+            worker: media-api
+            dir: workers/media-api
+            branch_prefix: ci-media-api-tests
+            turbo_key: media-api-test
+            # Secrets: WORKER_SHARED_SECRET only (RUNPOD_* are env.test fakes)
+            needs_r2: false
+            needs_stripe: false
+
     # Note: Each matrix job cleans up its own Neon branch inline (no outputs needed)
 
     steps:
@@ -570,6 +587,9 @@ jobs:
               ;;
             notifications-api)
               WORKER_CHANGED="${{ needs.changes.outputs.notifications-api == 'true' }}"
+              ;;
+            media-api)
+              WORKER_CHANGED="${{ needs.changes.outputs.media-api == 'true' }}"
               ;;
             *)
               WORKER_CHANGED="false"
