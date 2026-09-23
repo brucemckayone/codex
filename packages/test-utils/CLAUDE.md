@@ -133,13 +133,13 @@ test('creates content', async () => {
 
 | Environment | DB | Notes |
 |---|---|---|
-| **Local** | `DATABASE_URL_LOCAL_PROXY` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Shared DB, use `createUniqueSlug()` to avoid conflicts. **Currently points at the DEV database — see the guard below** |
+| **Local** | `DATABASE_URL_LOCAL_PROXY` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Disposable `main_test` on the local Postgres container (`pnpm db:test:setup`), shared by every local suite — use `createUniqueSlug()` to avoid conflicts. **Must NOT be `main`, the dev database — see below** |
 | **CI** | Workflow-created Neon branch per domain | `DATABASE_URL` injected by GitHub Actions; branch `neondb`, deleted after run |
 
 Note the variable name: under `DB_METHOD=LOCAL_PROXY` the resolver reads
 **`DATABASE_URL_LOCAL_PROXY`**, not `DATABASE_URL`
-(`packages/database/src/config/env.config.ts`). Both currently hold the same
-value, so the distinction is easy to miss until you change one of them.
+(`packages/database/src/config/env.config.ts`). Set BOTH to the same value —
+changing only `DATABASE_URL` changes nothing under `LOCAL_PROXY`.
 
 ## The destructive-cleanup guard (Codex-bsbf8)
 
@@ -188,17 +188,53 @@ none**: edit `.env.test` to say `main_test` while the proxy still routes to
 `main`, and the guard would read `main_test`, permit the deletes, and they
 would land on `main` anyway.
 
+Measured since (Codex-1ggzd, 2026-09-23): that proxy's `PG_CONNECTION_STRING`
+is only its auth/control-plane endpoint. It routes each client to the database
+named in the **client's** URL — a `…/main_test` URL reported
+`current_database() = main_test` over both HTTP (`/sql`) and WebSocket (`/v1`).
+So the `.env.test` edit below IS sufficient, and `pnpm db:test:setup` re-checks
+that routing every time it runs. The guard still keys on the live session
+because the proxy is a third-party image whose routing this repo does not
+control.
+
 ### Running DB-backed tests locally
 
-Not yet possible, and that is deliberate — the guard refuses rather than
-wiping your dev data. Making it possible needs a **disposable `main_test`
-database with its own proxy target**, because the Neon proxy binds one
-database, so pointing `.env.test` at a different database name is not enough
-on its own. Tracked on `Codex-bsbf8`.
+One-time setup, then one command per migration:
 
-Until then, DB-backed package suites run in CI only. The suites that are safe
-locally are the ones that do not touch the database at all (for example
-`pnpm --filter web test`, `pnpm --filter @codex/validation test`).
+1. Start the local stack: `pnpm docker:up` (Postgres on `:5432`, Neon HTTP
+   proxy on `:4444`, from `infrastructure/neon/docker-compose.dev.local.yml`).
+2. `pnpm db:test:setup` — creates the disposable database `main_test` on that
+   same Postgres if it is missing, applies every migration to it, and fails
+   unless the proxy routes a `main_test` URL to `current_database() =
+   main_test`. Idempotent; it never drops, truncates or deletes anything, and
+   never migrates `main`. **Re-run it after pulling new migrations** — the
+   suites fail on missing columns otherwise.
+3. In `.env.test` (gitignored, so this is a local edit every developer makes
+   once), change the database name at the end of BOTH lines from `/main` to
+   `/main_test`:
+
+   ```
+   DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main_test
+   DATABASE_URL=postgres://postgres:postgres@db.localtest.me:5432/main_test
+   ```
+
+   Leave `.env.dev` on `/main` — that is the dev database `pnpm dev` serves.
+
+Then run a suite as usual, e.g. `pnpm --filter @codex/agreements test`.
+
+To try it without editing `.env.test`, override both variables in the shell —
+dotenv never overrides a variable that is already set:
+
+```
+DATABASE_URL=postgres://postgres:postgres@db.localtest.me:5432/main_test \
+DATABASE_URL_LOCAL_PROXY=postgres://postgres:postgres@db.localtest.me:5432/main_test \
+pnpm --filter @codex/agreements test
+```
+
+`main_test` is shared by every local suite and wiped by the cleanup helpers,
+so treat its contents as garbage. Run packages one at a time
+(`--concurrency=1`, which the root `test` scripts already set) — two suites
+cleaning the same database concurrently delete each other's fixtures.
 
 ## Strict Rules
 
