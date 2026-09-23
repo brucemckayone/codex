@@ -140,14 +140,14 @@
         "ENVIRONMENT": "test",
         "WEB_APP_URL": "http://lvh.me:3000",
         "API_URL": "http://localhost:8787",
-        "DATABASE_URL": "postgres://postgres:postgres@db.localtest.me:5432/main",
+        "DATABASE_URL": "postgres://postgres:postgres@db.localtest.me:5432/main_test",
         "RUNPOD_API_KEY": "test-api-key",
         "RUNPOD_ENDPOINT_ID": "test-endpoint-id",
         "RUNPOD_WEBHOOK_SECRET": "test-webhook-secret",
         "RUNPOD_DIRECT_URL": "http://localhost:8000/runsync",
         "WORKER_SHARED_SECRET": "test-worker-shared-secret",
         "DB_METHOD": "LOCAL_PROXY",
-        "DATABASE_URL_LOCAL_PROXY": "postgres://postgres:postgres@db.localtest.me:5432/main"
+        "DATABASE_URL_LOCAL_PROXY": "postgres://postgres:postgres@db.localtest.me:5432/main_test"
       },
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [

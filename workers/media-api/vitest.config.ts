@@ -1,4 +1,7 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { assertWorkerTestDatabase } from '../../config/vitest/worker-test-database';
+
+assertWorkerTestDatabase(import.meta.dirname);
 
 export default defineWorkersConfig({
   // Cache buster: 1
