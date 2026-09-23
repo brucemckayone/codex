@@ -1412,12 +1412,50 @@ jobs:
             rm workers/media-api/media-api-worker.pid
           fi
 
-      # Every background worker's stdout+stderr (see the Start steps). Uploaded
-      # AFTER the Stop steps so each log is complete. always(), not failure():
-      # a worker that crashed and recovered is still worth reading (Codex-kkc8j).
+      # This repo is PUBLIC, so any signed-in user can download its artifacts,
+      # and `::add-mask::` only masks the job log, never an uploaded file. Scrub
+      # every secret this job injects, plus credentials in any URL (a Neon
+      # branch inherits its parent's role password), BEFORE the upload below.
+      # Fail-closed: the upload only runs if this step succeeded (Codex-kkc8j).
+      - name: Scrub secrets from worker logs
+        id: scrub-worker-logs
+        if: failure()
+        run: |
+          [ -d worker-logs ] || exit 0
+          perl -pi -e '
+            BEGIN { @s = sort { length($b) <=> length($a) } grep { length($_) >= 6 } map { $ENV{$_} } grep { /^REDACT_/ } keys %ENV }
+            for my $v (@s) { s/\Q$v\E/***/g }
+            s#(://[^:/\s"\x27@]+:)[^@\s"\x27]+@#${1}***@#g;
+          ' worker-logs/*.log
+        env:
+          REDACT_DB_URL: ${{ steps.create-branch.outputs.db_url }}
+          REDACT_DB_URL_POOLED: ${{ steps.create-branch.outputs.db_url_pooled }}
+          REDACT_NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          REDACT_BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          REDACT_WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          REDACT_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          REDACT_STRIPE_WH_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          REDACT_STRIPE_WH_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          REDACT_STRIPE_WH_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          REDACT_STRIPE_WH_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
+          REDACT_STRIPE_WH_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          REDACT_STRIPE_WH_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          REDACT_R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          REDACT_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          REDACT_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          REDACT_B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          REDACT_B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          REDACT_RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          REDACT_RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          REDACT_TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+
+      # Every background worker's stdout+stderr (see the Start steps), uploaded
+      # AFTER the Stop steps so each log is complete. failure() only, since this
+      # repo is public; a dead worker trips the pre-E2E liveness check, so it
+      # always lands here (Codex-kkc8j).
       - name: Upload worker logs
         uses: actions/upload-artifact@v6
-        if: always()
+        if: failure() && steps.scrub-worker-logs.outcome == 'success'
         with:
           name: e2e-web-worker-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: worker-logs/
