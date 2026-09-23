@@ -122,7 +122,14 @@ function objectResponse(
   headers.set('etag', object.httpEtag);
   headers.set('accept-ranges', 'bytes');
   headers.set('access-control-allow-origin', '*');
-  if (cacheControl) headers.set('cache-control', cacheControl);
+  // Fill-only, mirroring the production proxy (apps/web/src/lib/server/
+  // cdn-proxy.ts). `writeHttpMetadata` has already copied any Cache-Control
+  // stored on the object; an unconditional `set` would REPLACE it, so a
+  // stored directive (e.g. must-revalidate) would be invisible locally and a
+  // manual curl could not tell a working fix from a reverted one.
+  if (cacheControl && !headers.has('cache-control')) {
+    headers.set('cache-control', cacheControl);
+  }
 
   const body = method === 'HEAD' ? null : object.body;
 
