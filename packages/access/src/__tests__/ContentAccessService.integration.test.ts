@@ -402,7 +402,7 @@ describe('ContentAccessService Integration', () => {
       expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw CONTENT_NOT_FOUND for unpublished content', async () => {
+    it('still DENIES streaming an unpublished item to its own creator (Codex-p3m5j)', async () => {
       const media = await mediaService.create(
         {
           title: 'Draft Video',
@@ -437,14 +437,23 @@ describe('ContentAccessService Integration', () => {
         userId
       );
 
-      // Don't publish - stays in draft
-
+      // Don't publish - stays in draft.
+      //
+      // This used to assert 'Content not found'. Codex-p3m5j stopped filtering
+      // unpublished rows at fetch time so a one-off BUYER keeps playback after
+      // the item is withdrawn; publication is now a rule applied to whatever
+      // the access branches decided. The caller here is the draft's own
+      // CREATOR, i.e. a *_management arm, and those deliberately do NOT survive
+      // unpublication — so the OUTCOME is unchanged (staff still cannot stream
+      // a draft through this path; they preview in the studio). Only the SHAPE
+      // moved: denied, not missing. What must never happen is that it SUCCEEDS,
+      // so that is what this asserts.
       await expect(
         accessService.getStreamingUrl(userId, {
           contentId: draftContent.id,
           expirySeconds: 3600,
         })
-      ).rejects.toThrow('Content not found');
+      ).rejects.toThrow('User does not have access to this content');
     });
   });
 
