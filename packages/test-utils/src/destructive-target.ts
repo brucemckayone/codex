@@ -33,6 +33,15 @@
  * `SELECT current_database()` is asked of the live session, so it reports what
  * the deletes will actually hit, through any number of rewriting layers.
  *
+ * Measured since (Codex-1ggzd, 2026-09-23): the proxy's `PG_CONNECTION_STRING`
+ * is only its auth/control-plane endpoint, and it routes each client to the
+ * database named in the CLIENT'S URL — `…/main_test` over both `/sql` (HTTP)
+ * and `/v1` (WebSocket) reported `current_database() = main_test`. So editing
+ * `.env.test` IS enough today, and `pnpm db:test:setup` re-checks that routing
+ * every run. That makes the URL correct in practice, not authoritative: the
+ * proxy is a third-party image whose behaviour this repo does not control, so
+ * the verdict stays keyed on the live session.
+ *
  * ## Shape
  *
  * The decision is a PURE function ({@link evaluateDestructiveTarget}) so it is
@@ -47,9 +56,9 @@ import { sql } from 'drizzle-orm';
 /**
  * Database names a destructive test helper is allowed to wipe.
  *
- * - `main_test` — the intended local test database, separate from the dev
- *   `main`. Creating it is tracked separately (see Codex-bsbf8): it needs its
- *   own Neon-proxy target, because the proxy binds one database.
+ * - `main_test` — the local test database, separate from the dev `main`, on
+ *   the same local Postgres container. `pnpm db:test:setup` creates and
+ *   migrates it (Codex-1ggzd); `.env.test` points at it.
  * - `neondb` — Neon's default database name, which is what a CI test branch
  *   created by `neondatabase/create-branch-action` is called. Every CI branch
  *   is per-run and deleted afterwards, so it is disposable by construction.

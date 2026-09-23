@@ -21,6 +21,7 @@
     "db:gen:auth": "dotenv -e ../../.env.dev -- npx @better-auth/cli generate --config ./src/auth.ts --output ./src/migrations",
     "db:gen": "pnpm db:gen:drizzle && pnpm db:gen:auth",
     "db:migrate": "pnpm exec tsx scripts/migrate-direct.ts",
+    "db:test:setup": "pnpm exec tsx scripts/setup-test-db.ts",
     "db:reset": "pnpm exec tsx scripts/reset-data.ts",
     "db:seed": "pnpm exec tsx scripts/seed-data.ts",
     "db:seed:templates": "pnpm exec tsx scripts/seed-email-templates.ts",
