@@ -48,10 +48,40 @@ const CRON_ALIGNED_DELAY_MS = 60_000;
  */
 const CRON_ALIGN_WINDOW_MS = 4 * 60 * 1000;
 
+/**
+ * How much earlier than `orphanedAt` an object may have been written and still
+ * be treated as a re-upload. `orphanedAt` is the database's clock and
+ * `uploaded` is R2's, so the comparison needs slack, and the two errors do not
+ * cost the same. Treating a real orphan as re-used keeps a few KB that nothing
+ * references. Treating a re-upload as an orphan deletes a live image. So the
+ * margin leans towards keeping.
+ */
+const REUPLOAD_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Whether the object now at an orphaned key was written AFTER the key was
+ * orphaned, which means it holds new bytes rather than the orphan
+ * (Codex-r85jo.6).
+ *
+ * Every image key is a pure function of an entity id and is overwritten in
+ * place: a content thumbnail, avatar, cover or logo is re-uploaded to the
+ * SAME key it was deleted from. So an orphan recorded when a delete failed can
+ * be re-occupied by the next upload before the sweep runs, and deleting it
+ * then destroys the image the row now points at.
+ */
+export function wasRewrittenAfterOrphaning(
+  uploaded: Date,
+  orphanedAt: Date
+): boolean {
+  return uploaded.getTime() > orphanedAt.getTime() - REUPLOAD_CLOCK_SKEW_MS;
+}
+
 interface CleanupRunResult {
   success: boolean;
   processed: number;
   deleted: number;
+  /** Keys kept because a later upload re-occupied them (Codex-r85jo.6). */
+  retained: number;
   failed: number;
   errors: string[];
   durationMs: number;
@@ -59,6 +89,12 @@ interface CleanupRunResult {
 
 interface Env {
   DATABASE_URL: string;
+  /**
+   * Read by `createDbClient` under `DB_METHOD=LOCAL_PROXY`. Without it the DO
+   * could not reach a database locally at all, so the sweep was untestable
+   * outside CI (found by Codex-r85jo.6's test).
+   */
+  DATABASE_URL_LOCAL_PROXY?: string;
   DB_METHOD: string;
   /**
    * The bucket the orphans live in. Every producer is an
@@ -157,6 +193,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       obs.info('Orphan cleanup completed', {
         processed: result.processed,
         deleted: result.deleted,
+        retained: result.retained,
         failed: result.failed,
         durationMs: result.durationMs,
       });
@@ -192,6 +229,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
     // Initialize services
     const db = createDbClient({
       DATABASE_URL: this.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: this.env.DATABASE_URL_LOCAL_PROXY,
       DB_METHOD: this.env.DB_METHOD,
     });
 
@@ -204,12 +242,29 @@ export class OrphanedFileCleanupDO implements DurableObject {
     const orphans = await orphanedFileService.getPendingOrphans(BATCH_SIZE);
 
     let deleted = 0;
+    let retained = 0;
     let failed = 0;
 
     // Process each orphan
     for (const orphan of orphans) {
       try {
-        // Attempt to delete from R2
+        // Checked per orphan, immediately before its delete. A batch-wide check
+        // up front would leave the whole run as the window for a re-upload.
+        const current = await r2Service.head(orphan.r2Key);
+        if (
+          current &&
+          wasRewrittenAfterOrphaning(current.uploaded, orphan.orphanedAt)
+        ) {
+          await orphanedFileService.markRetained(
+            orphan.id,
+            'key re-written after it was orphaned; it holds a live upload'
+          );
+          retained++;
+          continue;
+        }
+
+        // An absent object is already gone, and the delete is a no-op, so it
+        // stays on the one path that marks the row deleted.
         await r2Service.delete(orphan.r2Key);
 
         // Mark as deleted in database
@@ -230,6 +285,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       success: failed === 0,
       processed: orphans.length,
       deleted,
+      retained,
       failed,
       errors,
       durationMs: Date.now() - startTime,
@@ -242,6 +298,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
   private async handleStatus(): Promise<Response> {
     const db = createDbClient({
       DATABASE_URL: this.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: this.env.DATABASE_URL_LOCAL_PROXY,
       DB_METHOD: this.env.DB_METHOD,
     });
 

@@ -16,6 +16,7 @@ Wraps `R2Bucket` binding with retry logic and optional presigned URL generation.
 | `put(key, body, metadata?, httpMeta?)` | Upload object | `metadata` = custom metadata, `httpMeta` = `{ contentType, cacheControl, ... }` |
 | `putJson(key, obj, metadata?)` | Upload JSON | Auto-sets `Content-Type: application/json` |
 | `get(key)` | Retrieve object | Returns `R2ObjectBody \| null` |
+| `head(key)` | Object metadata, no body | Returns `R2Object \| null`; `uploaded` is when the key was last written |
 | `delete(key)` | Delete object | |
 | `list(options?)` | List objects | Supports prefix, cursor, limit |
 | `createMultipartUpload(key, options?)` | Start multipart upload | For large files |
