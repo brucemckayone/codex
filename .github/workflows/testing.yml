@@ -1104,30 +1104,42 @@ jobs:
       - name: Start Auth Worker in background
         run: |
           cd workers/auth
-          pnpm wrangler dev --env test --port 42069 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42069 --local > "$GITHUB_WORKSPACE/worker-logs/auth.log" 2>&1 &
           echo $! > auth-worker.pid
           # Wait for auth worker to be ready
-          timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42069/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::auth (:42069) never became healthy. Last 100 lines of worker-logs/auth.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/auth.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Identity API Worker in background
         run: |
           cd workers/identity-api
-          pnpm wrangler dev --env test --port 42074 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42074 --local > "$GITHUB_WORKSPACE/worker-logs/identity-api.log" 2>&1 &
           echo $! > identity-api-worker.pid
           # Wait for identity-api worker to be ready
-          timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42074/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::identity-api (:42074) never became healthy. Last 100 lines of worker-logs/identity-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/identity-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
       - name: Start Ecom API Worker in background
         run: |
           cd workers/ecom-api
-          pnpm wrangler dev --env test --port 42072 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42072 --local > "$GITHUB_WORKSPACE/worker-logs/ecom-api.log" 2>&1 &
           echo $! > ecom-api-worker.pid
           # Wait for ecom-api worker to be ready
-          timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42072/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::ecom-api (:42072) never became healthy. Last 100 lines of worker-logs/ecom-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/ecom-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -1139,9 +1151,13 @@ jobs:
       - name: Start Organization API Worker in background
         run: |
           cd workers/organization-api
-          pnpm wrangler dev --env test --port 42071 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42071 --local > "$GITHUB_WORKSPACE/worker-logs/organization-api.log" 2>&1 &
           echo $! > organization-api-worker.pid
-          timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::organization-api (:42071) never became healthy. Last 100 lines of worker-logs/organization-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/organization-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -1151,9 +1167,13 @@ jobs:
       - name: Start Content API Worker in background
         run: |
           cd workers/content-api
-          pnpm wrangler dev --env test --port 4001 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 4001 --local > "$GITHUB_WORKSPACE/worker-logs/content-api.log" 2>&1 &
           echo $! > content-api-worker.pid
-          timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::content-api (:4001) never became healthy. Last 100 lines of worker-logs/content-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/content-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -1165,9 +1185,13 @@ jobs:
       - name: Start Admin API Worker in background
         run: |
           cd workers/admin-api
-          pnpm wrangler dev --env test --port 42073 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42073 --local > "$GITHUB_WORKSPACE/worker-logs/admin-api.log" 2>&1 &
           echo $! > admin-api-worker.pid
-          timeout 60 bash -c 'until curl -f http://localhost:42073/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42073/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::admin-api (:42073) never became healthy. Last 100 lines of worker-logs/admin-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/admin-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
@@ -1175,9 +1199,13 @@ jobs:
       - name: Start Notifications API Worker in background
         run: |
           cd workers/notifications-api
-          pnpm wrangler dev --env test --port 42075 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 42075 --local > "$GITHUB_WORKSPACE/worker-logs/notifications-api.log" 2>&1 &
           echo $! > notifications-api-worker.pid
-          timeout 60 bash -c 'until curl -f http://localhost:42075/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:42075/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::notifications-api (:42075) never became healthy. Last 100 lines of worker-logs/notifications-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/notifications-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
@@ -1186,9 +1214,13 @@ jobs:
       - name: Start Media API Worker in background
         run: |
           cd workers/media-api
-          pnpm wrangler dev --env test --port 4002 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 4002 --local > "$GITHUB_WORKSPACE/worker-logs/media-api.log" 2>&1 &
           echo $! > media-api-worker.pid
-          timeout 60 bash -c 'until curl -f http://localhost:4002/health > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:4002/health > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::media-api (:4002) never became healthy. Last 100 lines of worker-logs/media-api.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/media-api.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
@@ -1196,10 +1228,14 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           cd apps/web
-          pnpm wrangler dev --env test --port 5173 --local &
+          mkdir -p "$GITHUB_WORKSPACE/worker-logs"
+          # Keep the worker's output: a background job's stdout vanishes once
+          # this step ends, so a later crash would leave no evidence (Codex-kkc8j).
+          pnpm wrangler dev --env test --port 5173 --local > "$GITHUB_WORKSPACE/worker-logs/web.log" 2>&1 &
           echo $! > wrangler.pid
           # Wait for server to be ready
-          timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done' \
+            || { echo "::error::web (:5173) never became healthy. Last 100 lines of worker-logs/web.log:"; tail -n 100 "$GITHUB_WORKSPACE/worker-logs/web.log"; exit 1; }
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_pooled }}
 
@@ -1248,6 +1284,34 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
+          # Liveness re-check, IMMEDIATELY before the suite. A worker that
+          # passed its start-step health check can still be dead by now
+          # (run 35841032600: auth :42069 died, and the suite reported 54
+          # unrelated-looking ECONNREFUSED failures). Fail fast, name every
+          # dead worker, and show the tail of its log (Codex-kkc8j).
+          dead=""
+          check_alive() {
+            # $1 = name (matches worker-logs/<name>.log), $2 = port, $3 = path
+            if ! curl -sf -o /dev/null --max-time 10 "http://localhost:$2$3"; then
+              echo "::error::Worker '$1' (:$2) is DOWN before E2E started. Last 100 lines of worker-logs/$1.log:"
+              tail -n 100 "worker-logs/$1.log" || echo "(no log file at worker-logs/$1.log)"
+              echo "----------------------------------------"
+              dead="$dead $1"
+            fi
+          }
+          check_alive auth 42069 /health
+          check_alive identity-api 42074 /health
+          check_alive ecom-api 42072 /health
+          check_alive organization-api 42071 /health
+          check_alive content-api 4001 /health
+          check_alive admin-api 42073 /health
+          check_alive notifications-api 42075 /health
+          check_alive media-api 4002 /health
+          check_alive web 5173 ""
+          if [ -n "$dead" ]; then
+            echo "::error::Dead worker(s):$dead. Not running E2E; see worker-logs artifact."
+            exit 1
+          fi
           pnpm test:e2e
 
       # Run visual tests with --update-snapshots to generate Linux baselines
@@ -1347,6 +1411,18 @@ jobs:
             kill $(cat workers/media-api/media-api-worker.pid) || true
             rm workers/media-api/media-api-worker.pid
           fi
+
+      # Every background worker's stdout+stderr (see the Start steps). Uploaded
+      # AFTER the Stop steps so each log is complete. always(), not failure():
+      # a worker that crashed and recovered is still worth reading (Codex-kkc8j).
+      - name: Upload worker logs
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e2e-web-worker-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: worker-logs/
+          retention-days: 7
+          if-no-files-found: ignore
 
       # Upload generated snapshots for committing to repo
       - name: Upload Visual snapshots
