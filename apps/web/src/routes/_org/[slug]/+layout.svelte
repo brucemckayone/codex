@@ -50,6 +50,8 @@
   // three 404'd on every org subdomain (Codex-6wkr1). Pinned to the apex, which
   // is a different origin, so an absolute URL is required exactly as it is for
   // buildOrgUrl. One canonical document per legal page, not one per tenant.
+  // The apex is the viewer's OWN environment's: a staging org host resolves to
+  // the staging apex, never production (Codex-a9kn0).
   const platformAboutUrl = $derived(buildPlatformUrl(page.url, '/about'));
   const platformTermsUrl = $derived(buildPlatformUrl(page.url, '/terms'));
   const platformPrivacyUrl = $derived(buildPlatformUrl(page.url, '/privacy'));
