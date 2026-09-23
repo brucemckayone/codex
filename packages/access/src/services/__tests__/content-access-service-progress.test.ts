@@ -163,6 +163,7 @@ const subscribersContent = {
   isPurchasable: false,
   priceCents: null,
   includedInTierId: tierId,
+  status: 'published',
   isFollowerGated: false,
   isTeamOnly: false,
 };
@@ -334,6 +335,7 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
       isPurchasable: false,
       priceCents: null,
       includedInTierId: null,
+      status: 'published',
       isFollowerGated: true,
       isTeamOnly: false,
     };

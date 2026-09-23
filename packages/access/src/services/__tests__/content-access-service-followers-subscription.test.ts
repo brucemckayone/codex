@@ -174,6 +174,7 @@ const followersContentRow = {
   isPurchasable: false,
   priceCents: null,
   includedInTierId: null,
+  status: 'published',
   isFollowerGated: true,
   isTeamOnly: false,
   mediaItem: {
@@ -189,6 +190,7 @@ const followersContentRow = {
 
 const subscribersContentRow = {
   ...followersContentRow,
+  status: 'published',
   isFollowerGated: false,
   includedInTierId: 'tier_pro',
 };
