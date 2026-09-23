@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 4100 --ip 0.0.0.0 --inspector-port 9240 --persist-to ../../.wrangler/state",
+    "test": "vitest run --config vitest.config.dev-cdn.ts",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

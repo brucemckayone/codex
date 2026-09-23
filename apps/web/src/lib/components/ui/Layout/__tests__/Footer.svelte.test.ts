@@ -21,14 +21,16 @@ import {
  *      UNREWRITTEN, so `(platform)/terms` renders in place.
  * A relative `/terms` resolves correctly on both.
  *
- * WHY ABSOLUTE WAS WRONG. `buildPlatformUrl` collapses a subdomain to the apex,
- * so on `staging.revelations.studio` it yields `https://revelations.studio/terms`
- * — sending a staging viewer to PRODUCTION. Measured:
+ * WHY ABSOLUTE WAS WRONG. `buildPlatformUrl` collapsed a subdomain to the apex,
+ * so on `staging.revelations.studio` it yielded `https://revelations.studio/terms`
+ * — sending a staging viewer to PRODUCTION. Measured at the time:
  *   staging.revelations.studio        -> https://revelations.studio/terms
  *   codex-staging.revelations.studio  -> https://revelations.studio/terms
  *   dev.revelations.studio            -> https://dev.revelations.studio/terms
- * `dev` survives only because it is a recognised apex in `parseHost`; `staging`
- * is not, and collapses.
+ * `dev` survived only because it is a recognised apex in `parseHost`; `staging`
+ * is not, and collapsed. Codex-a9kn0 since keeps `buildPlatformUrl` in-env
+ * (staging -> `codex-staging.revelations.studio`), but a relative href is still the
+ * right answer here: it keeps the viewer on the exact host they are on.
  *
  * THE TRAP THAT CAUSED THIS. `isReservedSubdomain('staging')` is TRUE, and so is
  * `isReservedSubdomain('codex-staging')` — via a suffix rule, NOT via membership
