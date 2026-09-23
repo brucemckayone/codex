@@ -21,9 +21,11 @@ new ImageProcessingService({
   environment: 'production',
   r2Service: r2,                   // R2Service instance (ASSETS_BUCKET)
   r2PublicUrlBase: 'https://...',  // Public URL base for constructing image URLs
-  orphanedFileService?: svc,       // Optional — track R2 orphans
+  orphanedFileService?: svc,       // Optional in the type, MANDATORY in production
 })
 ```
+
+**The service registry passes `orphanedFileService` to every ImageProcessingService it builds** — `imageProcessing` directly, `identity` through to `uploadAvatar` (Codex-r85jo.3). Without it, failed R2 deletes are only logged and media-api's `OrphanedFileCleanupDO` drains a table nothing writes. Write orphan records through `recordOrphansOrLog` (`utils/upload-pipeline.ts`), never a bare `recordOrphanedFiles`: every caller is on a failure path, and an unguarded insert rejection replaces the original error or skips the DB clear.
 
 | Method | Purpose | Output |
 |---|---|---|

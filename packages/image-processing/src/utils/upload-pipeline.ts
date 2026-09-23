@@ -7,7 +7,7 @@
  * `processCourseSignature`. (A seventh, `processOrgLogo`, was removed in
  * Codex-z520h: it was a second org-logo implementation with no call sites.)
  *
- * Two helpers:
+ * Three helpers:
  *
  *   - `uploadImageVariants` — `Promise.allSettled` puts of 3 WebP variants with
  *     the canonical R2 options literal; on partial failure, deletes NOTHING,
@@ -19,6 +19,9 @@
  *     referenced them yet, records any failed deletes via `OrphanedFileService`
  *     (or warns when not configured), and rethrows the original error. Works
  *     for both 3-variant raster and 1-key SVG flows.
+ *
+ *   - `recordOrphansOrLog` — the one guarded way to write orphan records from a
+ *     failure path; a failed insert is logged, never thrown (Codex-r85jo.3).
  *
  * ## Why neither helper may roll back by deleting a replaced key (Codex-r85jo.2)
  *
@@ -49,7 +52,10 @@ import { R2_OVERWRITTEN_OBJECT_CACHE_CONTROL } from '@codex/constants';
 import type { OrphanedEntityType, OrphanedImageType } from '@codex/database';
 import type { Logger } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
-import type { OrphanedFileService } from '../orphaned-file-service';
+import type {
+  OrphanedFileService,
+  RecordOrphanInput,
+} from '../orphaned-file-service';
 
 /** R2 keys for the three size variants of a raster image. */
 export interface VariantKeys {
@@ -193,7 +199,7 @@ export async function withDbUpdateOrphanCleanup<T>(
     entityId: string;
     entityType: OrphanedEntityType;
     r2: R2Service;
-    obs: Pick<Logger, 'warn'>;
+    obs: Pick<Required<Logger>, 'warn' | 'error'>;
     orphanedFileService: OrphanedFileService | undefined;
     warnContext: string;
     /**
@@ -237,13 +243,20 @@ export async function withDbUpdateOrphanCleanup<T>(
     );
     if (failedKeys.length > 0) {
       if (orphanedFileService) {
-        await orphanedFileService.recordOrphanedFiles(
+        // Guarded: this insert runs BECAUSE a DB write just failed, so the two
+        // failures are correlated. Unguarded, its rejection would REPLACE
+        // `error` below and the caller would see the bookkeeping fault instead
+        // of the cause (Codex-r85jo.3 F7).
+        await recordOrphansOrLog(
+          orphanedFileService,
           failedKeys.map((r2Key) => ({
             r2Key,
             imageType,
             entityId,
             entityType,
-          }))
+          })),
+          obs,
+          warnContext
         );
       } else {
         obs.warn('R2 cleanup failed after DB error', {
@@ -255,5 +268,37 @@ export async function withDbUpdateOrphanCleanup<T>(
       }
     }
     throw error;
+  }
+}
+
+/**
+ * Record orphaned R2 keys for the `OrphanedFileCleanupDO` sweep, and NEVER
+ * throw.
+ *
+ * Every caller reaches this from a failure path — a DB write that just
+ * rejected, or R2 deletes that just rejected — and each has its own outcome to
+ * deliver: rethrow the original DB error, or carry on and clear the row. The
+ * orphan insert is bookkeeping for that outcome, not part of it, so a rejection
+ * here must never replace it (Codex-r85jo.3 F7). The keys are logged at error
+ * level on failure because that log line is then the ONLY surviving record of
+ * the objects: nothing else can name them.
+ */
+export async function recordOrphansOrLog(
+  orphanedFileService: OrphanedFileService,
+  inputs: RecordOrphanInput[],
+  obs: Pick<Required<Logger>, 'error'>,
+  context: string
+): Promise<void> {
+  try {
+    await orphanedFileService.recordOrphanedFiles(inputs);
+  } catch (recordError) {
+    obs.error('Failed to record orphaned R2 files; keys are untracked', {
+      context,
+      r2Keys: inputs.map((i) => i.r2Key),
+      error:
+        recordError instanceof Error
+          ? recordError.message
+          : String(recordError),
+    });
   }
 }

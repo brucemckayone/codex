@@ -22,6 +22,7 @@ import {
 import type { OrphanedFileService } from './orphaned-file-service';
 import { processImageVariants } from './processor';
 import {
+  recordOrphansOrLog,
   uploadImageVariants,
   type VariantKeys,
   withDbUpdateOrphanCleanup,
@@ -609,13 +610,19 @@ export class ImageProcessingService extends BaseService {
       (_, i) => deleteResults[i]?.status === 'rejected'
     );
     if (failedKeys.length > 0 && this.orphanedFileService) {
-      await this.orphanedFileService.recordOrphanedFiles(
+      // Guarded (Codex-r85jo.3 F7): a failed orphan insert must not stop the
+      // DB field being cleared below, or the row keeps pointing at objects
+      // this call just tried to remove.
+      await recordOrphansOrLog(
+        this.orphanedFileService,
         failedKeys.map((r2Key) => ({
           r2Key,
           imageType: 'content_thumbnail' as const,
           entityId: contentId,
           entityType: 'content' as const,
-        }))
+        })),
+        this.obs,
+        'content-thumbnail-delete'
       );
     } else if (failedKeys.length > 0) {
       this.obs.warn('R2 thumbnail deletion failed, no orphan service', {
@@ -673,13 +680,17 @@ export class ImageProcessingService extends BaseService {
     );
 
     if (failedKeys.length > 0 && this.orphanedFileService) {
-      await this.orphanedFileService.recordOrphanedFiles(
+      // Guarded (Codex-r85jo.3 F7) — see deleteContentThumbnail.
+      await recordOrphansOrLog(
+        this.orphanedFileService,
         failedKeys.map((r2Key) => ({
           r2Key,
           imageType: 'avatar' as const,
           entityId: userId,
           entityType: 'user' as const,
-        }))
+        })),
+        this.obs,
+        'user-avatar-delete'
       );
     } else if (failedKeys.length > 0) {
       this.obs.warn('R2 avatar deletion failed, no orphan service', {
