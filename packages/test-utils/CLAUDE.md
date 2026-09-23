@@ -133,8 +133,72 @@ test('creates content', async () => {
 
 | Environment | DB | Notes |
 |---|---|---|
-| **Local** | `DATABASE_URL` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Shared DB, use `createUniqueSlug()` to avoid conflicts |
-| **CI** | Workflow-created Neon branch per domain | `DATABASE_URL` injected by GitHub Actions; branch deleted after run |
+| **Local** | `DATABASE_URL_LOCAL_PROXY` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Shared DB, use `createUniqueSlug()` to avoid conflicts. **Currently points at the DEV database — see the guard below** |
+| **CI** | Workflow-created Neon branch per domain | `DATABASE_URL` injected by GitHub Actions; branch `neondb`, deleted after run |
+
+Note the variable name: under `DB_METHOD=LOCAL_PROXY` the resolver reads
+**`DATABASE_URL_LOCAL_PROXY`**, not `DATABASE_URL`
+(`packages/database/src/config/env.config.ts`). Both currently hold the same
+value, so the distinction is easy to miss until you change one of them.
+
+## The destructive-cleanup guard (Codex-bsbf8)
+
+`cleanupDatabase`, `cleanupDatabaseComplete` and `cleanupTables` issue
+**unconditional DELETEs** across ~14 tables including `organizations` and
+`users`. Locally `.env.test` has pointed at `db.localtest.me:5432/main` — the
+same database `pnpm dev` uses — so `pnpm test` from the repo root deleted the
+developer's own seeded orgs, content and entitlements out from under a running
+session.
+
+All three helpers now call `assertDestructiveTargetAllowed()` first and
+**throw instead of deleting** unless the live connection is attached to a
+disposable database:
+
+Rules are evaluated in this order — the refusals come first, so no later
+allowance can reach the dev database by another route:
+
+| # | Condition | Verdict |
+|---|---|---|
+| 1 | `NODE_ENV=production` or `DB_METHOD=PRODUCTION` | **refused**, whatever the database is called |
+| 2 | `current_database()` unreadable | **refused** (fails closed) |
+| 3 | database is `main` | **refused** — this is the database `pnpm dev` uses |
+| 4 | `DB_METHOD=NEON_BRANCH` | allowed — an ephemeral per-run CI branch |
+| 5 | database is `main_test` or `neondb` | allowed |
+| 6 | anything else | **refused** |
+
+Rule 4 keys on the **mode**, not on the branch's database name, and rule 3
+is what makes that safe. The reason is that the name is not knowable from this
+repository: the `neondatabase/create-branch-action` step passes no `database`
+input, so a CI branch inherits whatever its parent has. Guessing it would put
+an unverifiable assumption underneath a gate, and guessing wrong would take
+every database-backed CI job red.
+
+### Why it asks the connection, not the URL
+
+The verdict is keyed on `SELECT current_database()`, not on the connection
+string. Under `LOCAL_PROXY` the driver is reconfigured to tunnel through a
+local Neon HTTP proxy — `neonConfig.fetchEndpoint` and `neonConfig.wsProxy`
+rewrite host and port — and that proxy container carries its own hardcoded
+`PG_CONNECTION_STRING=…/main`
+(`infrastructure/neon/docker-compose.dev.local.yml`).
+
+So there are two connection strings and the one in your environment is not the
+one that reaches Postgres. A guard that parsed the URL would be **worse than
+none**: edit `.env.test` to say `main_test` while the proxy still routes to
+`main`, and the guard would read `main_test`, permit the deletes, and they
+would land on `main` anyway.
+
+### Running DB-backed tests locally
+
+Not yet possible, and that is deliberate — the guard refuses rather than
+wiping your dev data. Making it possible needs a **disposable `main_test`
+database with its own proxy target**, because the Neon proxy binds one
+database, so pointing `.env.test` at a different database name is not enough
+on its own. Tracked on `Codex-bsbf8`.
+
+Until then, DB-backed package suites run in CI only. The suites that are safe
+locally are the ones that do not touch the database at all (for example
+`pnpm --filter web test`, `pnpm --filter @codex/validation test`).
 
 ## Strict Rules
 
