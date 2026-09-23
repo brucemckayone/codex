@@ -82,16 +82,19 @@ R2_BUCKET_MEDIA=${R2_BUCKET_MEDIA}
 EOF
     ;;
   "media-api")
-    cat >> "${VARS_FILE}" << EOF
-RUNPOD_API_KEY=${RUNPOD_API_KEY}
-RUNPOD_ENDPOINT_ID=${RUNPOD_ENDPOINT_ID}
-RUNPOD_WEBHOOK_SECRET=${RUNPOD_WEBHOOK_SECRET}
-RUNPOD_DIRECT_URL=${RUNPOD_DIRECT_URL:-http://127.0.0.1:4101/run}
-B2_ENDPOINT=${B2_ENDPOINT}
-B2_KEY_ID=${B2_KEY_ID}
-B2_APP_KEY=${B2_APP_KEY}
-B2_BUCKET=${B2_BUCKET}
-EOF
+    # Written ONLY when set. `.dev.vars.test` overrides wrangler.jsonc
+    # env.test vars key by key, so an unset secret written as `KEY=` does not
+    # fall back to the env.test fake: it REPLACES it with an empty string, and
+    # an empty RUNPOD_WEBHOOK_SECRET / RUNPOD_API_KEY turns every media-api
+    # request into a 500 (Codex-sb1j7: 15 of 32 tests in the suite's first CI
+    # run, whose matrix job passes none of these).
+    for key in RUNPOD_API_KEY RUNPOD_ENDPOINT_ID RUNPOD_WEBHOOK_SECRET \
+               B2_ENDPOINT B2_KEY_ID B2_APP_KEY B2_BUCKET; do
+      if [ -n "${!key:-}" ]; then
+        echo "${key}=${!key}" >> "${VARS_FILE}"
+      fi
+    done
+    echo "RUNPOD_DIRECT_URL=${RUNPOD_DIRECT_URL:-http://127.0.0.1:4101/run}" >> "${VARS_FILE}"
     ;;
 esac
 
