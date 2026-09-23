@@ -144,6 +144,16 @@ describe('Cache-Control on deterministic image keys (Codex-p3rre)', () => {
           where: vi.fn().mockResolvedValue([{ id: 'row-1' }]),
         }),
       }),
+      // The thumbnail and avatar paths read the row's current image URL to
+      // decide whether a failed DB update may clean up the objects just
+      // written (Codex-r85jo.2). These cases only exercise the happy path, so
+      // the value is immaterial — but the accessor must exist.
+      query: {
+        content: {
+          findFirst: vi.fn().mockResolvedValue({ thumbnailUrl: null }),
+        },
+        users: { findFirst: vi.fn().mockResolvedValue({ avatarUrl: null }) },
+      },
     } as unknown as Database;
 
     service = new ImageProcessingService({
