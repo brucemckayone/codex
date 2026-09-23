@@ -637,6 +637,198 @@ describe('BrandingSettingsService', () => {
     });
   });
 
+  // ── A failed R2 delete must leave the key nameable (Codex-r85jo.5) ────────
+  //
+  // Every logo R2 failure used to be logged and dropped. Once the row stopped
+  // naming the key, nothing in the system could, so the object leaked
+  // permanently. The recorder here writes to the REAL orphaned_image_files
+  // table, so its CHECK constraints (image type 'logo', entity type
+  // 'organization') are part of what is asserted.
+  describe('logo R2 failures (Codex-r85jo.5)', () => {
+    const recorder = {
+      recordOrphanedFiles: vi.fn(
+        async (
+          inputs: {
+            r2Key: string;
+            imageType: 'logo';
+            entityId: string;
+            entityType: 'organization';
+          }[]
+        ) =>
+          db
+            .insert(schema.orphanedImageFiles)
+            .values(
+              inputs.map((i) => ({
+                r2Key: i.r2Key,
+                imageType: i.imageType,
+                originalEntityId: i.entityId,
+                originalEntityType: i.entityType,
+              }))
+            )
+            .returning({ id: schema.orphanedImageFiles.id })
+      ),
+    };
+
+    function createRecordingService(
+      r2: ReturnType<typeof createMockR2>,
+      database: Database = db
+    ) {
+      return new BrandingSettingsService({
+        db: database,
+        environment: 'test',
+        organizationId,
+        r2: r2 as unknown as R2Service,
+        r2PublicUrlBase: 'https://cdn.example.com',
+        orphanRecorder: recorder,
+      });
+    }
+
+    async function orphansFor(r2Key: string) {
+      return db
+        .select()
+        .from(schema.orphanedImageFiles)
+        .where(eq(schema.orphanedImageFiles.r2Key, r2Key));
+    }
+
+    async function seedLogo(r2Path: string) {
+      await db.insert(schema.platformSettings).values({ organizationId });
+      await db.insert(schema.brandingSettings).values({
+        organizationId,
+        logoUrl: `https://cdn.example.com/${r2Path}`,
+        logoR2Path: r2Path,
+        primaryColorHex: '#3B82F6',
+      });
+    }
+
+    beforeEach(async () => {
+      recorder.recordOrphanedFiles.mockClear();
+      await db
+        .delete(schema.orphanedImageFiles)
+        .where(eq(schema.orphanedImageFiles.originalEntityId, organizationId));
+    });
+
+    it('deleteLogo records the key when the R2 delete fails, then clears the row', async () => {
+      const key = `logos/${organizationId}/logo.png`;
+      await seedLogo(key);
+      const mockR2 = createMockR2();
+      mockR2.delete.mockRejectedValue(new Error('R2 error'));
+
+      const result = await createRecordingService(mockR2).deleteLogo();
+
+      expect(result.logoUrl).toBeNull();
+      const [orphan] = await orphansFor(key);
+      expect(orphan).toBeDefined();
+      expect(orphan!.status).toBe('pending');
+      expect(orphan!.imageType).toBe('logo');
+      expect(orphan!.originalEntityId).toBe(organizationId);
+      expect(orphan!.originalEntityType).toBe('organization');
+    });
+
+    it('deleteLogo records nothing when the R2 delete succeeds', async () => {
+      const key = `logos/${organizationId}/logo.png`;
+      await seedLogo(key);
+
+      await createRecordingService(createMockR2()).deleteLogo();
+
+      expect(recorder.recordOrphanedFiles).not.toHaveBeenCalled();
+      expect(await orphansFor(key)).toHaveLength(0);
+    });
+
+    it('deleteLogo still clears the row when recording the orphan also fails', async () => {
+      await seedLogo(`logos/${organizationId}/logo.png`);
+      const mockR2 = createMockR2();
+      mockR2.delete.mockRejectedValue(new Error('R2 error'));
+      recorder.recordOrphanedFiles.mockRejectedValueOnce(new Error('db down'));
+
+      const result = await createRecordingService(mockR2).deleteLogo();
+
+      expect(result.logoUrl).toBeNull();
+    });
+
+    it('a replacement records the OLD key when its R2 delete fails', async () => {
+      const oldKey = `logos/${organizationId}/logo.png`;
+      await seedLogo(oldKey);
+      const mockR2 = createMockR2();
+      mockR2.delete.mockRejectedValue(new Error('R2 error'));
+
+      const result = await createRecordingService(mockR2).uploadLogo({
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.JPEG, 256),
+        mimeType: MIME_TYPES.IMAGE.JPEG,
+        size: 256,
+      });
+
+      expect(result.logoUrl).toContain('logo.jpg');
+      expect(await orphansFor(oldKey)).toHaveLength(1);
+    });
+
+    // A db whose branding_settings write rejects, while every other call
+    // (including the platform_settings hub upsert) reaches the real database.
+    function dbFailingBrandingWrite(): Database {
+      return new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'insert') {
+            return (table: unknown) => {
+              if (table === schema.brandingSettings) {
+                const reject = async () => {
+                  throw new Error('db down');
+                };
+                return {
+                  values: () => ({
+                    onConflictDoUpdate: () => ({ returning: reject }),
+                  }),
+                };
+              }
+              return target.insert(table as never);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+    }
+
+    it('a same-type replacement whose DB write fails does NOT delete the key the row still addresses', async () => {
+      // Same MIME type, so the new logo was written to the key the row
+      // already points at. Compensation deleting it would remove the live
+      // logo.
+      const key = `logos/${organizationId}/logo.png`;
+      await seedLogo(key);
+      const mockR2 = createMockR2();
+
+      await expect(
+        createRecordingService(mockR2, dbFailingBrandingWrite()).uploadLogo({
+          buffer: createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 256),
+          mimeType: MIME_TYPES.IMAGE.PNG,
+          size: 256,
+        })
+      ).rejects.toThrow('db down');
+
+      expect(mockR2.put).toHaveBeenCalledWith(
+        key,
+        expect.anything(),
+        undefined,
+        expect.anything()
+      );
+      expect(mockR2.delete).not.toHaveBeenCalled();
+    });
+
+    it('a first upload whose DB write fails compensates, and records the key if that delete fails', async () => {
+      const key = `logos/${organizationId}/logo.png`;
+      const mockR2 = createMockR2();
+      mockR2.delete.mockRejectedValue(new Error('R2 error'));
+
+      await expect(
+        createRecordingService(mockR2, dbFailingBrandingWrite()).uploadLogo({
+          buffer: createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 256),
+          mimeType: MIME_TYPES.IMAGE.PNG,
+          size: 256,
+        })
+      ).rejects.toThrow('db down');
+
+      expect(mockR2.delete).toHaveBeenCalledWith(key);
+      expect(await orphansFor(key)).toHaveLength(1);
+    });
+  });
+
   describe('deleteIntroVideo()', () => {
     /**
      * Helper to seed a media item linked as the org's intro video.

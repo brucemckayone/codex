@@ -24,6 +24,7 @@ import type {
 import {
   type BrandingSettingsConfig,
   BrandingSettingsService,
+  type LogoOrphanRecorder,
 } from './branding-settings-service';
 import { ContactSettingsService } from './contact-settings-service';
 import { FeatureSettingsService } from './feature-settings-service';
@@ -42,6 +43,8 @@ export interface PlatformSettingsFacadeConfig {
   r2?: R2Service;
   /** Public URL base for R2 bucket (optional) */
   r2PublicUrlBase?: string;
+  /** Records logo keys whose R2 delete failed (Codex-r85jo.5). */
+  orphanRecorder?: LogoOrphanRecorder;
 }
 
 /**
@@ -86,6 +89,7 @@ export class PlatformSettingsFacade {
       organizationId: config.organizationId,
       r2: config.r2,
       r2PublicUrlBase: config.r2PublicUrlBase,
+      orphanRecorder: config.orphanRecorder,
     };
 
     this.branding = new BrandingSettingsService(brandingConfig);

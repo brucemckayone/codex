@@ -20,6 +20,7 @@ new PlatformSettingsFacade({
   organizationId: string,    // required — all settings are org-scoped
   r2?: R2Service,            // optional — required for logo uploads
   r2PublicUrlBase?: string,  // optional — required for logo URL construction
+  orphanRecorder?: LogoOrphanRecorder, // optional — the registry passes OrphanedFileService
 })
 ```
 
@@ -45,6 +46,8 @@ In `procedure()` handlers, access via `ctx.services.settings` — `organizationI
 | `FeatureSettingsService` | `feature_settings` table | Per org |
 
 Logo R2 key: `logos/{orgId}/logo.{ext}` — ONE object per org, and `cacheControl: R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` (from `@codex/constants`, shared with `@codex/image-processing`) for every MIME type. The key is deterministic and overwritten in place, so a longer or unrevalidatable window would serve the replaced logo (this was a 1-year window for raster until Codex-p3rre). `deleteLogo()` removes exactly the key held in `logoR2Path`, which is the whole of what `uploadLogo()` wrote — there are no size variants on this path.
+
+**A failed logo R2 delete is recorded, never just logged** (Codex-r85jo.5). `deleteLogo()`, the old-key delete after a replacement, and upload compensation all hand the key to `orphanRecorder`, the orphan sweep's table, before the row stops naming it. `LogoOrphanRecorder` is a structural slice of `@codex/image-processing`'s `OrphanedFileService`, so this package takes no dependency on image-processing. **Compensation skips a key the row still addresses.** A same-type replacement writes to the key the row already points at, so deleting it after a DB failure would remove the live logo.
 
 ## How Settings Flow Through the Platform
 
