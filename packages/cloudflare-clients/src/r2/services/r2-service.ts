@@ -104,6 +104,11 @@ export class R2Service {
     return this.withRetries(() => this.bucket.get(key));
   }
 
+  /** Object metadata without the body, or `null` when the key is absent. */
+  async head(key: string) {
+    return this.withRetries(() => this.bucket.head(key));
+  }
+
   /**
    * Retrieve an object's body decoded as UTF-8 text, or `null` when the object
    * is absent. Used by the HLS playlist proxy to read `.m3u8` files for
