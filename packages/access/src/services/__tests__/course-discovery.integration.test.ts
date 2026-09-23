@@ -363,7 +363,13 @@ describe('Member discovery (Codex-oi2w4)', () => {
       expect(courseIds).not.toContain(bMine.courseId);
     });
 
-    it('excludes an enrolment whose course has been unpublished', async () => {
+    it('KEEPS an enrolment whose course has since been unpublished (Codex-yo4px)', async () => {
+      // This test used to assert the opposite — that an unpublished course
+      // drops off the shelf. That was the defect: the unpublish cascade
+      // writes `courses.status = 'draft'`, so a creator withdrawing the sales
+      // page silently emptied the library of everyone who had already paid.
+      // An enrolment is the authority for an OWNED read; whether the course
+      // is still for sale is a catalogue question.
       const orgId = await makeOrg('enr-unpub');
       const { courseId } = await seedPublishedJourney(orgId);
       await enrol(creatorId, courseId);
@@ -373,7 +379,7 @@ describe('Member discovery (Codex-oi2w4)', () => {
         .where(eq(courses.id, courseId));
 
       const list = await service.listEnrolledJourneys(creatorId, orgId);
-      expect(list.map((c) => c.courseId)).not.toContain(courseId);
+      expect(list.map((c) => c.courseId)).toContain(courseId);
     });
 
     it('counts only PUBLISHED practices as completions (a draft-practice completion never inflates progress)', async () => {
