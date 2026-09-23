@@ -42,6 +42,28 @@ export interface BrandingSettingsConfig {
   r2?: R2Service;
   /** Public URL base for R2 bucket (e.g., https://bucket.r2.cloudflarestorage.com) */
   r2PublicUrlBase?: string;
+  /**
+   * Where a logo key goes when its R2 delete fails, so the orphan sweep can
+   * reclaim it (Codex-r85jo.5). Without it the key survives only in a log line.
+   */
+  orphanRecorder?: LogoOrphanRecorder;
+}
+
+/**
+ * The one method of `@codex/image-processing`'s `OrphanedFileService` this
+ * service needs. It is declared structurally so that platform-settings takes
+ * no dependency on image-processing; the service registry passes the real
+ * service.
+ */
+export interface LogoOrphanRecorder {
+  recordOrphanedFiles(
+    inputs: {
+      r2Key: string;
+      imageType: 'logo';
+      entityId: string;
+      entityType: 'organization';
+    }[]
+  ): Promise<unknown>;
 }
 
 /**
@@ -54,12 +76,68 @@ export class BrandingSettingsService extends BaseService {
   private readonly organizationId: string;
   private readonly r2?: R2Service;
   private readonly r2PublicUrlBase?: string;
+  private readonly orphanRecorder?: LogoOrphanRecorder;
 
   constructor(config: BrandingSettingsConfig) {
     super(config);
     this.organizationId = config.organizationId;
     this.r2 = config.r2;
     this.r2PublicUrlBase = config.r2PublicUrlBase;
+    this.orphanRecorder = config.orphanRecorder;
+  }
+
+  /**
+   * Record a logo key whose R2 delete failed, for the orphan sweep
+   * (Codex-r85jo.5).
+   *
+   * Before this, every such failure was logged and then dropped. Once the row
+   * no longer names the key, nothing in the system could, and the key and the
+   * live logo share the `logos/{orgId}/` prefix, so no scan can tell them
+   * apart. The sweep checks each key before deleting it, so a key a later
+   * upload re-uses is kept (Codex-r85jo.6).
+   *
+   * Never throws. Every caller is already on a failure path with its own
+   * outcome to deliver, and bookkeeping must not replace it. If the record
+   * cannot be written, the key is logged at ERROR, because that line is then
+   * the only thing that can still name the object.
+   */
+  private async recordOrphanedLogo(
+    r2Key: string,
+    context: string,
+    cause: unknown
+  ): Promise<void> {
+    const details = {
+      organizationId: this.organizationId,
+      r2Path: r2Key,
+      context,
+      error: String(cause),
+    };
+    if (!this.orphanRecorder) {
+      this.obs.error(
+        'Logo R2 delete failed with no orphan recorder; the key is untracked',
+        details
+      );
+      return;
+    }
+    try {
+      await this.orphanRecorder.recordOrphanedFiles([
+        {
+          r2Key,
+          imageType: 'logo',
+          entityId: this.organizationId,
+          entityType: 'organization',
+        },
+      ]);
+      this.obs.warn(
+        'Logo R2 delete failed; recorded for the orphan sweep',
+        details
+      );
+    } catch (recordError) {
+      this.obs.error('Failed to record orphaned logo; the key is untracked', {
+        ...details,
+        recordError: String(recordError),
+      });
+    }
   }
 
   /**
@@ -405,31 +483,34 @@ export class BrandingSettingsService extends BaseService {
             r2Path: oldLogoPath,
           });
         } catch (error) {
-          // R2 delete failures are non-blocking. Orphaned files are acceptable
-          // tradeoff vs failing the operation. Background cleanup can handle later.
-          this.obs.warn('Failed to delete old logo', {
-            organizationId: this.organizationId,
-            r2Path: oldLogoPath,
-            error: String(error),
-          });
+          // Non-blocking: the new logo is live, so the upload succeeded. The
+          // old key is recorded so the sweep can reclaim it.
+          await this.recordOrphanedLogo(oldLogoPath, 'logo-replace', error);
         }
       }
 
       return this.mapRow(row);
     } catch (error) {
-      // Step 4: Compensation - delete the new logo we just uploaded
-      try {
-        await this.r2.delete(r2Path);
-        this.obs.info('Compensation: deleted new logo after DB failure', {
-          organizationId: this.organizationId,
-          r2Path,
-        });
-      } catch (cleanupError) {
-        this.obs.error('Failed to cleanup new logo after DB failure', {
-          organizationId: this.organizationId,
-          r2Path,
-          error: String(cleanupError),
-        });
+      // Step 4: Compensation, only for a key the row does NOT already address.
+      // Logo keys are `logos/{orgId}/logo.{ext}`, so replacing a logo with one
+      // of the same type writes to the key the row still points at. The put
+      // has already overwritten the old bytes, so deleting now would remove
+      // the org's LIVE logo. Leaving it is self-healing: the row's URL serves
+      // the new bytes, and a retry converges (Codex-r85jo.5).
+      if (r2Path !== oldLogoPath) {
+        try {
+          await this.r2.delete(r2Path);
+          this.obs.info('Compensation: deleted new logo after DB failure', {
+            organizationId: this.organizationId,
+            r2Path,
+          });
+        } catch (cleanupError) {
+          await this.recordOrphanedLogo(
+            r2Path,
+            'logo-upload-compensation',
+            cleanupError
+          );
+        }
       }
       throw error;
     }
@@ -462,11 +543,14 @@ export class BrandingSettingsService extends BaseService {
           r2Path: currentRow.logoR2Path,
         });
       } catch (error) {
-        this.obs.warn('Failed to delete logo from R2', {
-          organizationId: this.organizationId,
-          r2Path: currentRow.logoR2Path,
-          error: String(error),
-        });
+        // The row is still cleared below: the user asked for the logo to stop
+        // showing, and that does not need R2. The key is recorded first,
+        // because once the row is cleared nothing else can name it.
+        await this.recordOrphanedLogo(
+          currentRow.logoR2Path,
+          'logo-delete',
+          error
+        );
       }
     }
 

@@ -724,6 +724,9 @@ export async function createServiceRegistry(
           r2,
           // Pass R2 public URL base from env (BrandingSettingsService handles undefined gracefully)
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
+          // A logo key whose R2 delete fails is recorded for the sweep, which
+          // deletes from ASSETS_BUCKET, the bucket `r2` above is built over.
+          orphanRecorder: getOrphanedFileService(),
         });
       }
       return _settings;
