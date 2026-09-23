@@ -978,8 +978,15 @@ export class CourseJourneyService extends BaseService {
    * List every course the caller is enrolled in within ONE org — the member
    * library "Your journeys" shelf (SPEC §8.4). STRICTLY scoped to
    * `(userId, organizationId)`: the enrollment join is filtered by `userId` and
-   * the course by `organizationId` + PUBLISHED + non-deleted, so another user's
-   * enrollments and other orgs' / draft courses can never surface (IDOR guard).
+   * the course by `organizationId` + non-deleted, so another user's enrollments
+   * and other orgs' courses can never surface (IDOR guard).
+   *
+   * The IDOR guard is `userId` + `organizationId`. It is NOT publication
+   * status, and this docblock used to name PUBLISHED alongside them as if it
+   * were — which is how a catalogue filter sat in an OWNED read, defended by a
+   * comment about the predicates either side of it (Codex-yo4px). An enrolled
+   * course the creator has since unpublished still belongs to the person who
+   * paid for it, so it still appears here.
    *
    * Each row carries the course chrome (kicker / lede / guide name), the
    * enrollment, its access `source` (→ card badge), and the progress rollup —
@@ -1021,7 +1028,15 @@ export class CourseJourneyService extends BaseService {
           and(
             eq(courseEnrollments.userId, userId),
             eq(courses.organizationId, organizationId),
-            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            // Codex-yo4px: NO `courses.status` predicate. This is an OWNED
+            // read, and an enrollment is sufficient authority — whether the
+            // course is currently FOR SALE is a catalogue question, not an
+            // entitlement one. The `xzwl5` unpublish cascade mirrors a landing
+            // page's status onto `courses.status`, so with that predicate here
+            // a creator unpublishing a sales page silently emptied the shelf of
+            // everyone who had already paid.
+            //
+            // `deletedAt` stays: a soft-deleted course is gone, not withdrawn.
             isNull(courses.deletedAt)
           )
         )
@@ -1293,10 +1308,17 @@ export class CourseJourneyService extends BaseService {
   /**
    * List the journeys the given user is ENROLLED in, within `organizationId`,
    * as enrolled cards with a progress rollup (SPEC §8.4 / §11). Scoped to the
-   * user's `course_enrollments` whose course is a PUBLISHED, non-deleted course
-   * in the org with a PUBLISHED landing page. Progress = completed vs total
-   * PUBLISHED practices; `status` derives from the enrollment's `completedAt`
+   * user's `course_enrollments` whose course is a non-deleted course in the org
+   * with a non-deleted landing page. Progress = completed vs total PUBLISHED
+   * practices; `status` derives from the enrollment's `completedAt`
    * (authoritative) then the completion count. Newest activity first.
+   *
+   * Neither the course nor its page has to be PUBLISHED (Codex-yo4px): an
+   * enrollment is sufficient authority for an owned read, and requiring
+   * publication here emptied the shelf of everyone who had paid the moment a
+   * creator withdrew the sales page. Note the PRACTICE count deliberately
+   * still counts only published practices — that denominator is about the
+   * curriculum currently on offer, and the clamp below depends on it.
    *
    * `userId` is the SESSION user (the route never trusts a client id); the org
    * scopes the shelf to the space being browsed. Returns `[]` for a user with no
@@ -1327,6 +1349,9 @@ export class CourseJourneyService extends BaseService {
           enrolledAt: courseEnrollments.enrolledAt,
           lastActivityAt: courseEnrollments.lastActivityAt,
           completedAt: courseEnrollments.completedAt,
+          // Selected only so the dedupe below can PREFER a published page
+          // (Codex-yo4px); never returned to the caller.
+          pageStatus: landingPages.status,
         })
         .from(courseEnrollments)
         .innerJoin(
@@ -1334,7 +1359,8 @@ export class CourseJourneyService extends BaseService {
           and(
             eq(courses.id, courseEnrollments.courseId),
             eq(courses.organizationId, organizationId),
-            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            // Codex-yo4px: no status predicate on an OWNED read — see
+            // listEnrolledCourses. `deletedAt` stays.
             isNull(courses.deletedAt)
           )
         )
@@ -1344,22 +1370,41 @@ export class CourseJourneyService extends BaseService {
             eq(landingPages.subjectId, courses.id),
             eq(landingPages.subjectType, 'course'),
             eq(landingPages.organizationId, organizationId),
-            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            // Codex-yo4px: this one was the DECISIVE filter, and the bead did
+            // not name it. The cascade unpublishes the LANDING PAGE first and
+            // mirrors that onto `courses.status`, so dropping only the course
+            // predicate would have left this shelf behaving identically — a
+            // filter wearing a join's clothes.
             isNull(landingPages.deletedAt)
           )
         )
         .where(eq(courseEnrollments.userId, userId))
         .orderBy(desc(courseEnrollments.lastActivityAt));
 
-      // Dedupe by courseId — a course is expected to have ONE journey page, but
-      // guard against >1 published page pointing at the same course (keep the
-      // first, i.e. the most-recently-active by the ORDER BY above).
-      const seen = new Set<string>();
-      const unique = rows.filter((r) => {
-        if (seen.has(r.courseId)) return false;
-        seen.add(r.courseId);
-        return true;
-      });
+      // Dedupe by courseId — a course is expected to have ONE journey page.
+      //
+      // Dropping the `landingPages.status` predicate (Codex-yo4px) widened this
+      // from ">1 PUBLISHED page" to ">1 page in any state", so first-wins is no
+      // longer good enough: the rows for one course all share the same
+      // `lastActivityAt`, making the ORDER BY no tiebreak between them, and a
+      // draft page could win and send the card's link to a draft slug. Prefer a
+      // published page, and fall back to whatever exists — which is the case
+      // this fix is FOR, where the only page left is unpublished.
+      //
+      // Insertion order is preserved so the shelf ordering (newest activity
+      // first) is unchanged.
+      const bestByCourse = new Map<string, (typeof rows)[number]>();
+      for (const r of rows) {
+        const held = bestByCourse.get(r.courseId);
+        if (
+          !held ||
+          (held.pageStatus !== CONTENT_STATUS.PUBLISHED &&
+            r.pageStatus === CONTENT_STATUS.PUBLISHED)
+        ) {
+          bestByCourse.set(r.courseId, r);
+        }
+      }
+      const unique = [...bestByCourse.values()];
       if (unique.length === 0) return [];
 
       const courseIds = unique.map((r) => r.courseId);

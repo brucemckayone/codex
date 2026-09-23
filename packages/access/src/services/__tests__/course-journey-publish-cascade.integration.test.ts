@@ -26,7 +26,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { courses, landingPages, organizations } from '@codex/database/schema';
+import {
+  courseEnrollments,
+  courses,
+  landingPages,
+  organizations,
+} from '@codex/database/schema';
 import { ConflictError } from '@codex/service-errors';
 import {
   createUniqueSlug,
@@ -433,6 +438,197 @@ describe('Journey publish/unpublish cascade (Codex-xzwl5)', () => {
       expect(cards).toHaveLength(1);
       expect(cards[0]?.id).toBe(courseId);
       expect(cards[0]?.pageSlug).not.toBeNull();
+    });
+  });
+  /**
+   * Codex-yo4px — the cascade above is CORRECT, and it made a latent bug
+   * reachable: the same `status` predicate that (rightly) hides an unpublished
+   * journey from the PUBLIC surfaces was also sitting in the two PER-USER
+   * enrolled reads, so unpublishing a sales page silently emptied the library
+   * shelf of everyone who had already paid.
+   *
+   * These cases are the counterweight to the `unpublish cascade` block above:
+   * the same action must remove the journey from every PUBLIC surface and leave
+   * it on the BUYER's shelf. They are written here rather than in
+   * course-discovery.integration.test.ts precisely so the two halves of the
+   * invariant sit side by side and a future change cannot satisfy one while
+   * breaking the other.
+   *
+   * Severity was discoverability, not lockout — `canEnterCourse` /
+   * `hasCourseEntitlement` read entitlements only and are NOT status-gated, so
+   * a buyer always kept access by direct URL. What they lost was any way to
+   * FIND it, silently, after paying.
+   */
+  describe("unpublishing must NOT empty a buyer's library (Codex-yo4px)", () => {
+    /** Enrol `userId` in `courseId` as a purchaser. */
+    async function enrol(userId: string, courseId: string): Promise<void> {
+      await db.insert(courseEnrollments).values({
+        userId,
+        courseId,
+        enrolledAt: new Date(),
+        lastActivityAt: new Date(),
+        completedAt: null,
+        source: 'course_purchase',
+      });
+    }
+
+    /** Take the page (and, via the cascade, the course) out of publication. */
+    async function unpublish(
+      orgId: string,
+      pageId: string,
+      title: string,
+      slug: string
+    ): Promise<void> {
+      await service.saveJourneyPage(orgId, {
+        id: pageId,
+        title,
+        slug,
+        status: 'draft',
+        sections: [],
+        brandOverrides: null,
+      });
+    }
+
+    it('keeps an unpublished-but-owned journey on the enrolled shelf', async () => {
+      const orgId = await makeOrg('yo4px-journeys');
+      const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);
+      const [buyerId] = await seedTestUsers(db, 1);
+      await enrol(buyerId, courseId);
+
+      // Pre-condition: it is on the shelf while published. Without this the
+      // post-condition could pass for the wrong reason (a read that returns
+      // everything, or a mis-seeded enrollment).
+      expect(
+        (await service.listEnrolledJourneys(buyerId, orgId)).map(
+          (j) => j.courseId
+        )
+      ).toEqual([courseId]);
+
+      await unpublish(orgId, pageId, title, slug);
+
+      // The cascade DID fire — this is the same action the block above asserts
+      // removes the journey from every public surface.
+      expect((await readCourse(courseId))?.status).toBe('draft');
+      expect(await service.listPublishedJourneys(orgId)).toEqual([]);
+
+      // ...and the buyer still has it.
+      expect(
+        (await service.listEnrolledJourneys(buyerId, orgId)).map(
+          (j) => j.courseId
+        )
+      ).toEqual([courseId]);
+    });
+
+    it('keeps an unpublished-but-owned course on the enrolled-courses shelf', async () => {
+      const orgId = await makeOrg('yo4px-courses');
+      const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);
+      const [buyerId] = await seedTestUsers(db, 1);
+      await enrol(buyerId, courseId);
+
+      expect(
+        (await service.listEnrolledCourses(buyerId, orgId)).map(
+          (c) => c.course.id
+        )
+      ).toEqual([courseId]);
+
+      await unpublish(orgId, pageId, title, slug);
+
+      expect(
+        (await service.listEnrolledCourses(buyerId, orgId)).map(
+          (c) => c.course.id
+        )
+      ).toEqual([courseId]);
+    });
+
+    it('keeps it after the page is ARCHIVED, not just drafted', async () => {
+      const orgId = await makeOrg('yo4px-archived');
+      const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);
+      const [buyerId] = await seedTestUsers(db, 1);
+      await enrol(buyerId, courseId);
+
+      await service.saveJourneyPage(orgId, {
+        id: pageId,
+        title,
+        slug,
+        status: 'archived',
+        sections: [],
+        brandOverrides: null,
+      });
+
+      expect(
+        (await service.listEnrolledJourneys(buyerId, orgId)).map(
+          (j) => j.courseId
+        )
+      ).toEqual([courseId]);
+      expect(
+        (await service.listEnrolledCourses(buyerId, orgId)).map(
+          (c) => c.course.id
+        )
+      ).toEqual([courseId]);
+    });
+
+    it('still shows NOTHING to a user with no enrollment, published or not', async () => {
+      // The whole fix is the removal of a filter, so the negative case is what
+      // proves the remaining scoping still holds. Without it, a read that
+      // returned every course in the org would pass every case above.
+      const orgId = await makeOrg('yo4px-stranger');
+      const { pageId, courseId, slug, title } = await seedLiveJourney(orgId);
+      const [strangerId] = await seedTestUsers(db, 1);
+
+      expect(await service.listEnrolledJourneys(strangerId, orgId)).toEqual([]);
+      expect(await service.listEnrolledCourses(strangerId, orgId)).toEqual([]);
+
+      await unpublish(orgId, pageId, title, slug);
+
+      expect(await service.listEnrolledJourneys(strangerId, orgId)).toEqual([]);
+      expect(await service.listEnrolledCourses(strangerId, orgId)).toEqual([]);
+      expect(courseId).toBeTruthy();
+    });
+
+    it('a soft-DELETED course still leaves the shelf — deleted is not withdrawn', async () => {
+      // `deletedAt` was deliberately KEPT when the status predicate went, so
+      // this pins the distinction rather than leaving it to the comment.
+      const orgId = await makeOrg('yo4px-deleted');
+      const { courseId } = await seedLiveJourney(orgId);
+      const [buyerId] = await seedTestUsers(db, 1);
+      await enrol(buyerId, courseId);
+
+      await db
+        .update(courses)
+        .set({ deletedAt: new Date() })
+        .where(eq(courses.id, courseId));
+
+      expect(await service.listEnrolledJourneys(buyerId, orgId)).toEqual([]);
+      expect(await service.listEnrolledCourses(buyerId, orgId)).toEqual([]);
+    });
+
+    it('prefers the PUBLISHED page when a course has both a draft and a live one', async () => {
+      // Dropping the `landingPages.status` predicate widened the dedupe from
+      // ">1 published page" to ">1 page in any state", and the rows for one
+      // course share `lastActivityAt`, so the ORDER BY is no tiebreak. Without
+      // the explicit preference a DRAFT slug could win and the card would link
+      // to a page the public cannot open.
+      const orgId = await makeOrg('yo4px-pagepref');
+      const { courseId, slug: liveSlug } = await seedLiveJourney(orgId);
+      const [buyerId] = await seedTestUsers(db, 1);
+      await enrol(buyerId, courseId);
+
+      await db.insert(landingPages).values({
+        organizationId: orgId,
+        creatorId,
+        pageType: 'course',
+        slug: createUniqueSlug('yo4px-draft-door'),
+        title: uniqueTitle('Draft door'),
+        status: 'draft',
+        subjectType: 'course',
+        subjectId: courseId,
+        sections: [],
+      });
+
+      const cards = await service.listEnrolledJourneys(buyerId, orgId);
+
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.slug).toBe(liveSlug);
     });
   });
 });
