@@ -164,6 +164,9 @@ app.post('/internal/mock-runpod', async (c) => {
  * - GET /internal/orphan-cleanup/status - Get cleanup stats
  * - POST /internal/orphan-cleanup/trigger - Manually trigger cleanup
  * - POST /internal/orphan-cleanup/schedule - Reschedule next alarm
+ *
+ * (`POST /ensure-scheduled` is reached by `scheduled()` below straight through
+ * the DO binding, not via this route: an in-worker call needs no HMAC.)
  */
 app.all(
   '/internal/orphan-cleanup/*',
@@ -277,6 +280,59 @@ async function runRecoverStuckTranscoding(
   void ctx;
 }
 
+/**
+ * Start (or re-align) the OrphanedFileCleanupDO sweep (Codex-r85jo.3).
+ *
+ * The DO's alarm is only ever set from INSIDE the DO, and the DO is only
+ * instantiated by a request to its stub. Before this, the sole route to it was
+ * `/internal/orphan-cleanup/*`, which nothing in the repo calls, so in
+ * production the alarm never started and the orphan table was never swept.
+ *
+ * Rides the EXISTING hourly production cron rather than adding one: Cloudflare
+ * caps cron triggers per account, and a separate schedule would wake Neon on
+ * its own cadence. `/ensure-scheduled` puts the run ~60s after this cron, inside
+ * the Neon wake that `runRecoverStuckTranscoding` already pays for.
+ *
+ * NEVER throws, the same contract as the other scheduled job.
+ */
+async function runEnsureOrphanCleanupScheduled(
+  env: Bindings & { ORPHAN_CLEANUP_DO?: DurableObjectNamespace }
+): Promise<void> {
+  const obs = new ObservabilityClient(
+    'media-api-cron',
+    env.ENVIRONMENT ?? 'development'
+  );
+
+  if (!env.ORPHAN_CLEANUP_DO) {
+    obs.error('Cron ensureOrphanCleanupScheduled: ORPHAN_CLEANUP_DO not bound');
+    return;
+  }
+
+  try {
+    const stub = env.ORPHAN_CLEANUP_DO.get(
+      env.ORPHAN_CLEANUP_DO.idFromName('singleton')
+    );
+    // A DO stub ignores the host; only the path is routed.
+    const response = await stub.fetch(
+      'https://orphan-cleanup.internal/ensure-scheduled',
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      obs.error('Cron ensureOrphanCleanupScheduled: DO rejected the poke', {
+        status: response.status,
+      });
+      return;
+    }
+    obs.info('Cron ensureOrphanCleanupScheduled completed', {
+      result: await response.json(),
+    });
+  } catch (error) {
+    obs.error('Cron ensureOrphanCleanupScheduled failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 // ============================================================================
 // Export
 // ============================================================================
@@ -291,5 +347,6 @@ export default {
     // Wrap in waitUntil so the cron invocation isn't killed before
     // logging/DB work settles, even if the promise is slow.
     ctx.waitUntil(runRecoverStuckTranscoding(env, ctx));
+    ctx.waitUntil(runEnsureOrphanCleanupScheduled(env));
   },
 };

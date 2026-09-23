@@ -1106,11 +1106,14 @@ app.post(
     },
     handler: async (ctx): Promise<{ coverImageUrl: string }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
-      // non-course page must 404 before any R2 object exists.
-      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+      // non-course page must 404 before any R2 object exists. The stored keys
+      // come back with it: the write below needs to know whether the row
+      // already addressed these deterministic keys (Codex-29fs0).
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
         ctx.organizationId,
         ctx.input.params.pageId
       );
+      const { courseId } = course;
 
       const processed = await ctx.services.imageProcessing.processCourseCover(
         courseId,
@@ -1120,10 +1123,21 @@ app.post(
       );
 
       // The org-aware service owns the DB write (same split as categories).
-      await ctx.services.courseJourney.setCourseCoverImageKey(
-        ctx.organizationId,
-        ctx.input.params.pageId,
-        processed.coverImageKey
+      // Wrapped so a failed write cannot strand the variants (Codex-29fs0).
+      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+        {
+          baseKey: processed.coverImageKey,
+          imageType: 'course_cover',
+          entityType: 'course',
+          entityId: courseId,
+          storedBaseKey: course.coverImageKey,
+        },
+        () =>
+          ctx.services.courseJourney.setCourseCoverImageKey(
+            ctx.organizationId,
+            ctx.input.params.pageId,
+            processed.coverImageKey
+          )
       );
 
       // `coverImageUrl` is on every portal card — without this bump a creator
@@ -1225,11 +1239,13 @@ app.post(
     },
     handler: async (ctx): Promise<{ heroImageUrl: string }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
-      // non-course page must 404 before any R2 object exists.
-      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+      // non-course page must 404 before any R2 object exists. Stored keys come
+      // back with it for the cleanup decision below (Codex-29fs0).
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
         ctx.organizationId,
         ctx.input.params.pageId
       );
+      const { courseId } = course;
 
       const processed = await ctx.services.imageProcessing.processCourseHero(
         courseId,
@@ -1239,10 +1255,20 @@ app.post(
       );
 
       // The org-aware service owns the DB write (same split as the cover).
-      await ctx.services.courseJourney.setCourseHeroImageKey(
-        ctx.organizationId,
-        ctx.input.params.pageId,
-        processed.heroImageKey
+      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+        {
+          baseKey: processed.heroImageKey,
+          imageType: 'course_hero',
+          entityType: 'course',
+          entityId: courseId,
+          storedBaseKey: course.heroImageKey,
+        },
+        () =>
+          ctx.services.courseJourney.setCourseHeroImageKey(
+            ctx.organizationId,
+            ctx.input.params.pageId,
+            processed.heroImageKey
+          )
       );
 
       // BELT AND BRACES, and stated honestly rather than copied from the cover.
@@ -1351,11 +1377,13 @@ app.post(
     },
     handler: async (ctx): Promise<{ signatureImageUrl: string }> => {
       // Resolve (and org-scope) the subject course FIRST — a foreign or
-      // non-course page must 404 before any R2 object exists.
-      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+      // non-course page must 404 before any R2 object exists. Stored keys come
+      // back with it for the cleanup decision below (Codex-29fs0).
+      const course = await ctx.services.courseJourney.getCourseStillImageKeys(
         ctx.organizationId,
         ctx.input.params.pageId
       );
+      const { courseId } = course;
 
       const processed =
         await ctx.services.imageProcessing.processCourseSignature(
@@ -1365,10 +1393,20 @@ app.post(
           })
         );
 
-      await ctx.services.courseJourney.setCourseSignatureImageKey(
-        ctx.organizationId,
-        ctx.input.params.pageId,
-        processed.signatureImageKey
+      await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+        {
+          baseKey: processed.signatureImageKey,
+          imageType: 'course_signature',
+          entityType: 'course',
+          entityId: courseId,
+          storedBaseKey: course.signatureImageKey,
+        },
+        () =>
+          ctx.services.courseJourney.setCourseSignatureImageKey(
+            ctx.organizationId,
+            ctx.input.params.pageId,
+            processed.signatureImageKey
+          )
       );
 
       // NO `bumpOrgJourneysVersion` HERE, and that is a decision rather than an

@@ -20,6 +20,13 @@ export const ORPHANED_IMAGE_TYPES = [
   'logo',
   'content_thumbnail',
   'transcoding_artifact',
+  // The four stills whose DB write the CALLER owns (Codex-29fs0). Without these
+  // the CHECK below rejects their orphan rows, so a failed cleanup would be
+  // logged and never swept.
+  'category_cover',
+  'course_cover',
+  'course_hero',
+  'course_signature',
 ] as const;
 
 export type OrphanedImageType = (typeof ORPHANED_IMAGE_TYPES)[number];
@@ -32,6 +39,8 @@ export const ORPHANED_ENTITY_TYPES = [
   'organization',
   'content',
   'media_item',
+  'category',
+  'course',
 ] as const;
 
 export type OrphanedEntityType = (typeof ORPHANED_ENTITY_TYPES)[number];
@@ -123,11 +132,11 @@ export const orphanedImageFiles = pgTable(
     // CHECK constraints
     check(
       'check_image_type',
-      sql`${table.imageType} IN ('avatar', 'logo', 'content_thumbnail', 'transcoding_artifact')`
+      sql`${table.imageType} IN ('avatar', 'logo', 'content_thumbnail', 'transcoding_artifact', 'category_cover', 'course_cover', 'course_hero', 'course_signature')`
     ),
     check(
       'check_entity_type',
-      sql`${table.originalEntityType} IS NULL OR ${table.originalEntityType} IN ('user', 'organization', 'content', 'media_item')`
+      sql`${table.originalEntityType} IS NULL OR ${table.originalEntityType} IN ('user', 'organization', 'content', 'media_item', 'category', 'course')`
     ),
     check(
       'check_orphan_status',

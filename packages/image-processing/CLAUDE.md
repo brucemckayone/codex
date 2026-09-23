@@ -21,9 +21,11 @@ new ImageProcessingService({
   environment: 'production',
   r2Service: r2,                   // R2Service instance (ASSETS_BUCKET)
   r2PublicUrlBase: 'https://...',  // Public URL base for constructing image URLs
-  orphanedFileService?: svc,       // Optional — track R2 orphans
+  orphanedFileService?: svc,       // Optional in the type, MANDATORY in production
 })
 ```
+
+**The service registry passes `orphanedFileService` to every ImageProcessingService it builds** — `imageProcessing` directly, `identity` through to `uploadAvatar` (Codex-r85jo.3). Without it, failed R2 deletes are only logged and media-api's `OrphanedFileCleanupDO` drains a table nothing writes. Write orphan records through `recordOrphansOrLog` (`utils/upload-pipeline.ts`), never a bare `recordOrphanedFiles`: every caller is on a failure path, and an unguarded insert rejection replaces the original error or skips the DB clear.
 
 | Method | Purpose | Output |
 |---|---|---|
@@ -31,6 +33,7 @@ new ImageProcessingService({
 | `processUserAvatar(userId, file)` | Validate → resize → upload | 3 WebP variants |
 | `processCategoryCover(categoryId, file)` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
 | `processCourseCover(courseId, file)` / `processCourseHero` / `processCourseSignature` | Validate → resize → upload | 3 WebP variants; returns the base key, does NOT write the DB |
+| `persistStillWithOrphanCleanup({ baseKey, storedBaseKey, imageType, entityType, entityId }, dbWrite)` | Run the CALLER's key write for one of the four stills above | On failure, cleans up the new variants unless `storedBaseKey === baseKey` (a replacement), then rethrows. **Every caller of the four `process*` stills MUST wrap its DB write in this** (Codex-29fs0), with `storedBaseKey` read BEFORE the upload |
 | `deleteContentThumbnail(contentId, userId)` | Delete R2 files + clear DB field | |
 | `deleteUserAvatar(userId)` | Delete R2 files + clear DB field | |
 

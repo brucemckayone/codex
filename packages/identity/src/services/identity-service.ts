@@ -15,6 +15,7 @@ import {
 import {
   type ImageProcessingResult,
   ImageProcessingService,
+  type OrphanedFileService,
 } from '@codex/image-processing';
 import {
   BaseService,
@@ -36,18 +37,26 @@ export interface IdentityServiceConfig extends ServiceConfig {
   r2Service: R2Service;
   r2PublicUrlBase: string;
   cache?: VersionedCache;
+  /**
+   * Passed through to the ImageProcessingService `uploadAvatar` builds, so a
+   * failed R2 cleanup after a DB error is recorded for the media-api
+   * OrphanedFileCleanupDO sweep instead of only logged (Codex-r85jo.3).
+   */
+  orphanedFileService?: OrphanedFileService;
 }
 
 export class IdentityService extends BaseService {
   private r2Service: R2Service;
   private r2PublicUrlBase: string;
   private cache?: VersionedCache;
+  private orphanedFileService?: OrphanedFileService;
 
   constructor(config: IdentityServiceConfig) {
     super(config);
     this.r2Service = config.r2Service;
     this.r2PublicUrlBase = config.r2PublicUrlBase;
     this.cache = config.cache;
+    this.orphanedFileService = config.orphanedFileService;
   }
 
   /**
@@ -75,6 +84,7 @@ export class IdentityService extends BaseService {
       environment: this.environment,
       r2Service: this.r2Service,
       r2PublicUrlBase: this.r2PublicUrlBase,
+      orphanedFileService: this.orphanedFileService,
     });
 
     // Process, upload, and update DB (cleanup handled inside ImageProcessingService)

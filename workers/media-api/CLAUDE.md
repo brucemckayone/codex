@@ -24,7 +24,9 @@ Transcoding orchestration via RunPod. Handles the full transcoding lifecycle: tr
 |---|---|---|
 | GET | `/internal/orphan-cleanup/status` | Get cleanup stats from DO |
 | POST | `/internal/orphan-cleanup/trigger` | Manually trigger cleanup |
-| POST | `/internal/orphan-cleanup/schedule` | Reschedule next alarm |
+| POST | `/internal/orphan-cleanup/schedule` | Reschedule next alarm (pushes it to now + 1h — never call this from a cron) |
+
+The DO also answers `POST /ensure-scheduled`, which `scheduled()` calls straight through the binding on the hourly production cron. It only ever moves the alarm EARLIER, to ~60s after the cron.
 
 ## Transcoding Pipeline
 
@@ -59,6 +61,7 @@ Two distinct HMAC mechanisms — do not confuse them:
 | `RATE_LIMIT_STRICT` / `RATE_LIMIT_API` | Yes | Native per-preset rate-limit bindings — `RATE_LIMIT_KV` was removed (Codex-kgrdp.17) |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
 | `ORPHAN_CLEANUP_DO` | No | Durable Object namespace for cleanup DO |
+| `ASSETS_BUCKET` | Yes (for the sweep) | The bucket the cleanup DO deletes from — where every orphan producer writes. NOT `MEDIA_BUCKET` |
 | `ENVIRONMENT` | No | `development` / `production` |
 | `API_URL` | No | Base URL used in RunPod webhook callback config |
 
@@ -76,7 +79,7 @@ Two distinct HMAC mechanisms — do not confuse them:
 - **Webhook is not a `procedure()` endpoint** — RunPod owns the callback contract. Raw body must be read before JSON parsing for HMAC verification. Managed by `verifyRunpodSignature` middleware which stores raw body in context.
 - **Webhook error classification**: `ValidationError` and `ServiceError` (permanent) → return 200 to stop RunPod retries. Transient errors (DB/network) → return 500 to trigger RunPod retry.
 - **`ctx.background()` for dispatch**: `triggerJobInternal` returns `{ dispatchPromise }` — the actual RunPod API call runs via `ctx.background(dispatchPromise)` (NOT `ctx.executionCtx.waitUntil`, which races procedure()'s own `waitUntil(cleanup())` and reliably kills the post-response DB writes) so the HTTP response is returned before RunPod is called.
-- **Orphan cleanup DO**: Singleton instance (`idFromName('singleton')`), alarms run every hour, processes 50 orphans/run, max 3 retries per file.
+- **Orphan cleanup DO**: Singleton instance (`idFromName('singleton')`), alarms run every hour, processes 50 orphans/run, max 3 retries per file. **Nothing starts it but the cron** (Codex-r85jo.3): the alarm is only set from inside the DO, and the DO only exists once a request reaches its stub, so `scheduled()` pokes `/ensure-scheduled` every hour. It sweeps `ASSETS_BUCKET`; sweeping `MEDIA_BUCKET` "succeeds" (deleting an absent key is not an error) and marks every orphan deleted while the objects stay.
 - **Health check runs both DB and KV checks**: `standardDatabaseCheck` (added 2026-05-22) plus `createKvCheck(['AUTH_SESSION_KV'])` — the rate-limit KV is gone.
 
 ## Reference Files

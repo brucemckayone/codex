@@ -387,12 +387,26 @@ app.post(
         })
       );
 
-      // Persist the base key on the row — the space-aware service owns the write.
-      const updated = await ctx.services.categories.update(
-        ctx.input.params.categoryId,
-        { coverImageKey: processed.coverImageKey },
-        space
-      );
+      // Persist the base key on the row — the space-aware service owns the
+      // write. Wrapped so a failed write cannot strand the three variants just
+      // uploaded (Codex-29fs0). `existing` was read BEFORE the upload, so its
+      // key says whether the row already addressed these deterministic keys.
+      const updated =
+        await ctx.services.imageProcessing.persistStillWithOrphanCleanup(
+          {
+            baseKey: processed.coverImageKey,
+            imageType: 'category_cover',
+            entityType: 'category',
+            entityId: ctx.input.params.categoryId,
+            storedBaseKey: existing.coverImageKey,
+          },
+          () =>
+            ctx.services.categories.update(
+              ctx.input.params.categoryId,
+              { coverImageKey: processed.coverImageKey },
+              space
+            )
+        );
 
       invalidateCategories(ctx.env, ctx.executionCtx, space, ctx.obs);
 

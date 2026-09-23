@@ -39,7 +39,10 @@ import {
   createPerRequestDbClient,
 } from '@codex/database';
 import { IdentityService } from '@codex/identity';
-import { ImageProcessingService } from '@codex/image-processing';
+import {
+  ImageProcessingService,
+  OrphanedFileService,
+} from '@codex/image-processing';
 import {
   createEmailProvider,
   NotificationPreferencesService,
@@ -390,6 +393,24 @@ export async function createServiceRegistry(
     return env.ENVIRONMENT || 'development';
   }
 
+  // Orphan-record PRODUCER for the media-api OrphanedFileCleanupDO sweep
+  // (Codex-r85jo.3). Every ImageProcessingService built here — directly, or
+  // inside IdentityService.uploadAvatar — must receive it: without it the
+  // orphan-recording branch in upload-pipeline.ts can only take its warn path,
+  // and the DO drains a table nothing writes. Private to the registry, not a
+  // `ctx.services.*` entry: no route has a reason to call it directly.
+  let _orphanedFiles: OrphanedFileService | undefined;
+
+  function getOrphanedFileService(): OrphanedFileService {
+    if (!_orphanedFiles) {
+      _orphanedFiles = new OrphanedFileService({
+        db: getSharedDb(),
+        environment: getEnvironment(),
+      });
+    }
+    return _orphanedFiles;
+  }
+
   // Shared Stripe client (created once, reused by purchase/subscription/tier/connect)
   let _stripeClient: ReturnType<typeof createStripeClient> | undefined;
 
@@ -631,6 +652,7 @@ export async function createServiceRegistry(
           environment: getEnvironment(),
           r2Service,
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
+          orphanedFileService: getOrphanedFileService(),
         });
       }
       return _imageProcessing;
@@ -1284,6 +1306,7 @@ export async function createServiceRegistry(
           r2Service,
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
           cache,
+          orphanedFileService: getOrphanedFileService(),
         });
       }
       return _identity;

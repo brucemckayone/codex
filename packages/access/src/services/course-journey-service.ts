@@ -3029,6 +3029,55 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * Resolve the page's subject course (org-scoped, exactly as
+   * {@link resolveCourseIdForPage}) AND read the three still keys it holds
+   * right now.
+   *
+   * The still-upload routes call this BEFORE writing R2, for two reasons: a
+   * foreign or non-course page must 404 before any object exists, and the
+   * failure cleanup around the later key write has to know whether the row
+   * ALREADY addressed the deterministic keys (Codex-29fs0). A replacement must
+   * not delete them; a first upload, or one after a clear, must.
+   */
+  async getCourseStillImageKeys(
+    organizationId: string,
+    pageId: string
+  ): Promise<{
+    courseId: string;
+    coverImageKey: string | null;
+    heroImageKey: string | null;
+    signatureImageKey: string | null;
+  }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+      const [row] = await this.db
+        .select({
+          coverImageKey: courses.coverImageKey,
+          heroImageKey: courses.heroImageKey,
+          signatureImageKey: courses.signatureImageKey,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, ...row };
+    } catch (error) {
+      this.handleError(error, 'getCourseStillImageKeys');
+    }
+  }
+
+  /**
    * The admin CURRICULUM for the studio editor. Distinct from
    * {@link loadStages}/{@link loadPublicStages}: the editor must show practices
    * whose linked content is still a DRAFT (a curriculum is built before its

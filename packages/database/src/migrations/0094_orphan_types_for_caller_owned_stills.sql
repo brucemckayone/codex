@@ -1,0 +1,4 @@
+ALTER TABLE "orphaned_image_files" DROP CONSTRAINT "check_image_type";--> statement-breakpoint
+ALTER TABLE "orphaned_image_files" DROP CONSTRAINT "check_entity_type";--> statement-breakpoint
+ALTER TABLE "orphaned_image_files" ADD CONSTRAINT "check_image_type" CHECK ("orphaned_image_files"."image_type" IN ('avatar', 'logo', 'content_thumbnail', 'transcoding_artifact', 'category_cover', 'course_cover', 'course_hero', 'course_signature'));--> statement-breakpoint
+ALTER TABLE "orphaned_image_files" ADD CONSTRAINT "check_entity_type" CHECK ("orphaned_image_files"."original_entity_type" IS NULL OR "orphaned_image_files"."original_entity_type" IN ('user', 'organization', 'content', 'media_item', 'category', 'course'));
