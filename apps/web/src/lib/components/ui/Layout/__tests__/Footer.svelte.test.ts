@@ -29,7 +29,7 @@ import {
  *   dev.revelations.studio            -> https://dev.revelations.studio/terms
  * `dev` survived only because it is a recognised apex in `parseHost`; `staging`
  * is not, and collapsed. Codex-a9kn0 since keeps `buildPlatformUrl` in-env
- * (staging -> `staging.revelations.studio`), but a relative href is still the
+ * (staging -> `codex-staging.revelations.studio`), but a relative href is still the
  * right answer here: it keeps the viewer on the exact host they are on.
  *
  * THE TRAP THAT CAUSED THIS. `isReservedSubdomain('staging')` is TRUE, and so is

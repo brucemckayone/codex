@@ -192,7 +192,8 @@ describe('the org layout builds legal links in-env (Codex-6wkr1, Codex-a9kn0)', 
     ['https://yoga.revelations.studio/', 'https://revelations.studio'],
     [
       'https://yoga-staging.revelations.studio/',
-      'https://staging.revelations.studio',
+      // codex-staging, not the bare staging apex: prod's wildcard serves that.
+      'https://codex-staging.revelations.studio',
     ],
     ['https://yoga.dev.revelations.studio/', 'https://dev.revelations.studio'],
     ['http://yoga.lvh.me:3000/', 'http://lvh.me:3000'],

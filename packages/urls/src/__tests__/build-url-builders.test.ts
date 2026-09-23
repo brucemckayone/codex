@@ -183,17 +183,17 @@ describe('buildPlatformUrl (URL-based)', () => {
       [
         'staging org host',
         'https://yoga-staging.revelations.studio/x',
-        'https://staging.revelations.studio/terms',
+        'https://codex-staging.revelations.studio/terms',
       ],
       [
         'staging platform alias',
         'https://codex-staging.revelations.studio/',
-        'https://staging.revelations.studio/terms',
+        'https://codex-staging.revelations.studio/terms',
       ],
       [
         'staging apex',
         'https://staging.revelations.studio/',
-        'https://staging.revelations.studio/terms',
+        'https://codex-staging.revelations.studio/terms',
       ],
       [
         'deployed dev org host',
@@ -214,15 +214,18 @@ describe('buildPlatformUrl (URL-based)', () => {
       expect(buildPlatformUrl(new URL(current), '/terms')).toBe(expected);
     });
 
-    it('never sends a staging host to the production apex', () => {
+    // "Not the prod apex" is too weak: the bare `staging.revelations.studio`
+    // passes it yet is served by PRODUCTION (it matches only prod's
+    // `*.revelations.studio/*`; staging's `*-staging.revelations.studio/*`
+    // needs the hyphen). Assert the host lands on a staging ROUTE instead.
+    it('sends a staging host to a host a staging route serves', () => {
       const url = new URL(
         buildPlatformUrl(
           new URL('https://yoga-staging.revelations.studio/'),
           '/privacy'
         )
       );
-      expect(url.hostname).not.toBe('revelations.studio');
-      expect(url.hostname.endsWith('.revelations.studio')).toBe(true);
+      expect(url.hostname.endsWith('-staging.revelations.studio')).toBe(true);
     });
   });
 });

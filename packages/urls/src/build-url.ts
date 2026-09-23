@@ -1,4 +1,4 @@
-import { DOMAINS, type Env, validateServiceUrl } from '@codex/constants';
+import { type Env, validateServiceUrl } from '@codex/constants';
 import { ENV_HOSTS } from './env-hosts';
 import { parseHost } from './parse-host';
 import type { EnvName, ServiceName } from './types';
@@ -197,15 +197,23 @@ export function buildOrgUrlFromEnv(
  * `baseDomain: 'revelations.studio'` — the PRODUCTION apex. Using it here sent
  * a staging viewer to production (Codex-a9kn0: the org footer's /terms
  * rendered prod's page with a 200, so nothing surfaced the jump). Staging
- * therefore resolves to its own apex, `DOMAINS.STAGING`.
+ * therefore resolves to its platform host, `codex-staging.revelations.studio`.
+ *
+ * NOT the bare `staging.revelations.studio` (`DOMAINS.STAGING`): no staging
+ * route matches it — `*-staging.revelations.studio/*` needs the hyphen — so it
+ * falls through to PRODUCTION's `*.revelations.studio/*` wildcard and is served
+ * by the prod worker. `codex-staging` is the staging web worker's own route
+ * (apps/web/wrangler.jsonc `env.staging.routes`), and deriving it from
+ * `ENV_HOSTS.staging` keeps it on the same `-staging` suffix scheme.
  *
  * @example
  * buildPlatformUrl(new URL('https://yoga-staging.revelations.studio/'), '/terms')
- * // → 'https://staging.revelations.studio/terms'
+ * // → 'https://codex-staging.revelations.studio/terms'
  */
 export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
   const { env, baseDomain } = parseHost(currentUrl.hostname);
-  const platformHost = env === 'staging' ? DOMAINS.STAGING : baseDomain;
+  const platformHost =
+    env === 'staging' ? ENV_HOSTS.staging.orgHost('codex') : baseDomain;
   const portSuffix = currentUrl.port ? `:${currentUrl.port}` : '';
   return `${currentUrl.protocol}//${platformHost}${portSuffix}${path}`;
 }

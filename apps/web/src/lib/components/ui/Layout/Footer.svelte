@@ -16,8 +16,8 @@
   An absolute apex URL here is a REGRESSION: it moves the viewer off the host
   they are on. `buildPlatformUrl` used to collapse `staging.revelations.studio`
   to `revelations.studio`, sending a staging viewer to PRODUCTION; it now stays
-  in-env (Codex-a9kn0), but still rewrites e.g. `codex-staging` to the staging
-  apex, and relative needs no builder at all. Verified — `isReservedSubdomain('staging')` and
+  in-env (Codex-a9kn0), but still rewrites every staging host to `codex-staging`,
+  and relative needs no builder at all. Verified — `isReservedSubdomain('staging')` and
   `isReservedSubdomain('codex-staging')` are both true via a suffix rule, not
   list membership, so grepping STATIC_RESERVED_SUBDOMAINS gives the wrong answer.
 
