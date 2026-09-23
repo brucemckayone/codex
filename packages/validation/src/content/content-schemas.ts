@@ -276,7 +276,7 @@ export const contentStatusEnum = z.enum([
  * - Max 50 characters per tag
  * - Array max 20 tags
  */
-const tagsSchema = z
+const tagsArraySchema = z
   .array(
     z
       .string()
@@ -284,9 +284,19 @@ const tagsSchema = z
       .min(1, 'Tag cannot be empty')
       .max(50, 'Tag must be 50 characters or less')
   )
-  .max(20, 'Maximum 20 tags allowed')
-  .optional()
-  .default([]);
+  .max(20, 'Maximum 20 tags allowed');
+
+/**
+ * Tags for a CREATE, where an absent value legitimately means "no tags".
+ *
+ * The `.default([])` is what makes this create-only (Codex-moyu5). `.partial()`
+ * does NOT strip an inner default — a `ZodOptional<ZodDefault<…>>` still fills
+ * the key in when the input omits it — so on an update schema this turns "the
+ * caller did not mention tags" into "the caller sent an empty array", which is
+ * indistinguishable from a deliberate clear. `updateContentSchema` therefore
+ * overrides this field with {@link tagsArraySchema}; see the note there.
+ */
+const tagsSchema = tagsArraySchema.optional().default([]);
 
 /**
  * Base content schema (without refinements)
@@ -533,6 +543,19 @@ export type CreateContentInput = z.infer<typeof createContentSchema>;
  */
 export const updateContentSchema = baseContentSchema
   .partial()
+  // Codex-moyu5: drop the `.default([])` that `tagsSchema` carries for create.
+  //
+  // `.partial()` makes a key optional but does NOT remove an inner default, so
+  // `baseContentSchema.partial().parse({ title })` yielded `{ title, tags: [] }`
+  // — key PRESENT, value empty. `ContentService.update()` spreads the validated
+  // partial straight into `.set()`, so every PATCH that did not mention tags
+  // silently wiped the tag array. Verified against zod 4.3.6, and `tags` was
+  // the only field in `baseContentSchema` carrying a default.
+  //
+  // With the default gone the key is omitted entirely when absent, which is
+  // what the spread in `update()` already assumes, so "did not mention tags"
+  // once again means "leave them alone". An explicit `tags: []` still clears.
+  .extend({ tags: tagsArraySchema.optional() })
   .refine(
     (data) => {
       // Codex-up7bx: reject an update that sets `includedInTierId` while
