@@ -38,7 +38,11 @@
 import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
-import { detectImageMimeType } from '@codex/validation';
+import {
+  detectImageMimeType,
+  isSniffableImageMimeType,
+  validateImageSignature,
+} from '@codex/validation';
 import type { Context } from 'hono';
 import { resolveCacheControl, validateInput } from './helpers';
 import type {
@@ -175,6 +179,23 @@ class InvalidFileTypeError extends ValidationError {
   }
 }
 
+/**
+ * The declared raster type is allowed, but the bytes do not carry that
+ * format's signature — e.g. SVG/HTML markup labelled `image/png`. Accepting it
+ * would let unsanitised markup skip the SVG path (Codex-r85jo.4).
+ */
+class FileContentMismatchError extends ValidationError {
+  constructor(
+    public fieldName: string,
+    public declaredType: string
+  ) {
+    super(
+      `File '${fieldName}' content does not match its declared type '${declaredType}'`
+    );
+    this.name = 'FileContentMismatchError';
+  }
+}
+
 class MissingFileError extends ValidationError {
   constructor(public fieldName: string) {
     super(`Required file '${fieldName}' is missing`);
@@ -304,25 +325,40 @@ export async function validateFiles<T extends FileSchema | undefined>(
     // Read file content (size is now bounded by the check above).
     const buffer = await validFile.arrayBuffer();
 
-    // Resolve the effective MIME type against the allowlist. We trust the
-    // declared `File.type`, but when it is missing or the generic multipart
-    // default — `application/octet-stream`, which workerd emits when a File
-    // whose `.type` was empty is serialised across a worker→worker fetch — we
-    // fall back to sniffing the magic bytes. Without this, a valid image whose
-    // Content-Type was stripped upstream (e.g. the SvelteKit→identity avatar
-    // re-forward) is wrongly rejected as an invalid type. Sniffing only
-    // *accepts* a type the caller already allows, so it cannot be used to
-    // smuggle a non-image past the allowlist.
+    // Resolve the effective MIME type against the allowlist. When the declared
+    // `File.type` is missing or the generic multipart default —
+    // `application/octet-stream`, which workerd emits when a File whose `.type`
+    // was empty is serialised across a worker→worker fetch — we fall back to
+    // sniffing the magic bytes. Without this, a valid image whose Content-Type
+    // was stripped upstream (e.g. the SvelteKit→identity avatar re-forward) is
+    // wrongly rejected as an invalid type. Sniffing only *accepts* a type the
+    // caller already allows, so it cannot smuggle a non-image past the
+    // allowlist.
     let effectiveType = validFile.type;
+    const bytes = new Uint8Array(buffer);
     if (
       config.allowedMimeTypes &&
       !config.allowedMimeTypes.includes(effectiveType) &&
       (effectiveType === '' || effectiveType === 'application/octet-stream')
     ) {
-      const sniffedType = detectImageMimeType(new Uint8Array(buffer));
+      const sniffedType = detectImageMimeType(bytes);
       if (sniffedType && config.allowedMimeTypes.includes(sniffedType)) {
         effectiveType = sniffedType;
       }
+    }
+
+    // A declared raster type is a claim the bytes can prove: verify it.
+    // Otherwise SVG/HTML markup labelled `image/png` passes the allowlist,
+    // misses the downstream sanitiser (which dispatches on
+    // `image/svg+xml`) and is stored verbatim (Codex-r85jo.4). A declared
+    // `image/svg+xml` has no reliable signature (BOM, comments, doctype may
+    // precede `<svg`), so it is left to the SVG sanitiser that type selects.
+    if (
+      config.allowedMimeTypes?.includes(effectiveType) &&
+      isSniffableImageMimeType(effectiveType) &&
+      !validateImageSignature(bytes, effectiveType)
+    ) {
+      throw new FileContentMismatchError(fieldName, effectiveType);
     }
 
     // Validate the resolved MIME type against the allowlist.
