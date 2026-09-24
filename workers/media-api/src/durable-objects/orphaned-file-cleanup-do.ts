@@ -8,7 +8,11 @@
  * - Self-rescheduling alarms
  *
  * Cleanup Strategy:
- * - Runs every hour via alarm
+ * - Runs every hour via alarm, STARTED by media-api's hourly production cron
+ *   (`scheduled()` -> POST /ensure-scheduled). Nothing else instantiates this
+ *   object, and the alarm below is only ever set from inside it, so without
+ *   that poke the sweep never runs at all (Codex-r85jo.3).
+ * - Sweeps ASSETS_BUCKET, the bucket every orphan producer writes (see Env)
  * - Processes up to 50 pending orphans per run
  * - Retries failed deletions up to 3 times
  * - Marks permanently failed orphans for manual review
@@ -19,6 +23,7 @@ import { R2Service } from '@codex/cloudflare-clients';
 import { createDbClient } from '@codex/database';
 import { OrphanedFileService } from '@codex/image-processing';
 import { ObservabilityClient } from '@codex/observability';
+import { InternalServiceError } from '@codex/service-errors';
 
 /**
  * Cleanup interval: 1 hour in milliseconds
@@ -30,10 +35,53 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
  */
 const BATCH_SIZE = 50;
 
+/**
+ * Delay before a run the cron has just pulled in. Short, so the sweep lands
+ * inside the Neon wake the cron's own DB work already paid for.
+ */
+const CRON_ALIGNED_DELAY_MS = 60_000;
+
+/**
+ * An existing alarm due within this window of a cron poke is left alone: it
+ * will already fire inside that cron's Neon wake. One further out is pulled in
+ * to CRON_ALIGNED_DELAY_MS. Kept under Neon's default 5-minute autosuspend.
+ */
+const CRON_ALIGN_WINDOW_MS = 4 * 60 * 1000;
+
+/**
+ * How much earlier than `orphanedAt` an object may have been written and still
+ * be treated as a re-upload. `orphanedAt` is the database's clock and
+ * `uploaded` is R2's, so the comparison needs slack, and the two errors do not
+ * cost the same. Treating a real orphan as re-used keeps a few KB that nothing
+ * references. Treating a re-upload as an orphan deletes a live image. So the
+ * margin leans towards keeping.
+ */
+const REUPLOAD_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * Whether the object now at an orphaned key was written AFTER the key was
+ * orphaned, which means it holds new bytes rather than the orphan
+ * (Codex-r85jo.6).
+ *
+ * Every image key is a pure function of an entity id and is overwritten in
+ * place: a content thumbnail, avatar, cover or logo is re-uploaded to the
+ * SAME key it was deleted from. So an orphan recorded when a delete failed can
+ * be re-occupied by the next upload before the sweep runs, and deleting it
+ * then destroys the image the row now points at.
+ */
+export function wasRewrittenAfterOrphaning(
+  uploaded: Date,
+  orphanedAt: Date
+): boolean {
+  return uploaded.getTime() > orphanedAt.getTime() - REUPLOAD_CLOCK_SKEW_MS;
+}
+
 interface CleanupRunResult {
   success: boolean;
   processed: number;
   deleted: number;
+  /** Keys kept because a later upload re-occupied them (Codex-r85jo.6). */
+  retained: number;
   failed: number;
   errors: string[];
   durationMs: number;
@@ -41,8 +89,23 @@ interface CleanupRunResult {
 
 interface Env {
   DATABASE_URL: string;
+  /**
+   * Read by `createDbClient` under `DB_METHOD=LOCAL_PROXY`. Without it the DO
+   * could not reach a database locally at all, so the sweep was untestable
+   * outside CI (found by Codex-r85jo.6's test).
+   */
+  DATABASE_URL_LOCAL_PROXY?: string;
   DB_METHOD: string;
-  MEDIA_BUCKET: R2Bucket;
+  /**
+   * The bucket the orphans live in. Every producer is an
+   * ImageProcessingService built by the service registry over ASSETS_BUCKET
+   * (content-api thumbnails and stills, identity-api avatars). This sweep used
+   * MEDIA_BUCKET, a DIFFERENT bucket — and an R2 delete of a key that does not
+   * exist succeeds, so every orphan would have been marked `deleted` while the
+   * object stayed put (Codex-r85jo.3). Optional in the type so a missing
+   * binding fails the run loudly instead of falling back to the wrong bucket.
+   */
+  ASSETS_BUCKET?: R2Bucket;
   ENVIRONMENT?: string;
 }
 
@@ -70,6 +133,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
    * GET /status - Get cleanup stats
    * POST /trigger - Manually trigger cleanup
    * POST /schedule - Reschedule next alarm
+   * POST /ensure-scheduled - Idempotent start/align poke from the hourly cron
    *
    * Invoked by workerd when a request is routed to this DO stub, never called
    * statically, so every dead-code detector flags it. Suppressed by
@@ -92,6 +156,10 @@ export class OrphanedFileCleanupDO implements DurableObject {
 
       if (request.method === 'POST' && path === '/schedule') {
         return await this.handleReschedule();
+      }
+
+      if (request.method === 'POST' && path === '/ensure-scheduled') {
+        return await this.handleEnsureScheduled();
       }
 
       return new Response('Not Found', { status: 404 });
@@ -125,6 +193,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       obs.info('Orphan cleanup completed', {
         processed: result.processed,
         deleted: result.deleted,
+        retained: result.retained,
         failed: result.failed,
         durationMs: result.durationMs,
       });
@@ -149,9 +218,18 @@ export class OrphanedFileCleanupDO implements DurableObject {
     const startTime = Date.now();
     const errors: string[] = [];
 
+    if (!this.env.ASSETS_BUCKET) {
+      // Checked before any orphan is read, so nothing is marked deleted.
+      throw new InternalServiceError(
+        'ASSETS_BUCKET not bound: the orphan sweep will not run against any other bucket'
+      );
+    }
+    const r2Service = new R2Service(this.env.ASSETS_BUCKET);
+
     // Initialize services
     const db = createDbClient({
       DATABASE_URL: this.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: this.env.DATABASE_URL_LOCAL_PROXY,
       DB_METHOD: this.env.DB_METHOD,
     });
 
@@ -160,18 +238,33 @@ export class OrphanedFileCleanupDO implements DurableObject {
       environment: this.env.ENVIRONMENT ?? 'development',
     });
 
-    const r2Service = new R2Service(this.env.MEDIA_BUCKET);
-
     // Get pending orphans
     const orphans = await orphanedFileService.getPendingOrphans(BATCH_SIZE);
 
     let deleted = 0;
+    let retained = 0;
     let failed = 0;
 
     // Process each orphan
     for (const orphan of orphans) {
       try {
-        // Attempt to delete from R2
+        // Checked per orphan, immediately before its delete. A batch-wide check
+        // up front would leave the whole run as the window for a re-upload.
+        const current = await r2Service.head(orphan.r2Key);
+        if (
+          current &&
+          wasRewrittenAfterOrphaning(current.uploaded, orphan.orphanedAt)
+        ) {
+          await orphanedFileService.markRetained(
+            orphan.id,
+            'key re-written after it was orphaned; it holds a live upload'
+          );
+          retained++;
+          continue;
+        }
+
+        // An absent object is already gone, and the delete is a no-op, so it
+        // stays on the one path that marks the row deleted.
         await r2Service.delete(orphan.r2Key);
 
         // Mark as deleted in database
@@ -192,6 +285,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
       success: failed === 0,
       processed: orphans.length,
       deleted,
+      retained,
       failed,
       errors,
       durationMs: Date.now() - startTime,
@@ -204,6 +298,7 @@ export class OrphanedFileCleanupDO implements DurableObject {
   private async handleStatus(): Promise<Response> {
     const db = createDbClient({
       DATABASE_URL: this.env.DATABASE_URL,
+      DATABASE_URL_LOCAL_PROXY: this.env.DATABASE_URL_LOCAL_PROXY,
       DB_METHOD: this.env.DB_METHOD,
     });
 
@@ -248,6 +343,39 @@ export class OrphanedFileCleanupDO implements DurableObject {
     return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  /**
+   * Handle POST /ensure-scheduled — the cron's idempotent poke.
+   *
+   * Only ever moves the alarm EARLIER, never later. `/schedule` pushes the
+   * alarm to now + 1h unconditionally, so calling it from an hourly cron would
+   * keep postponing a run that is due at about the same moment, and the sweep
+   * would never fire. Here, an alarm already due inside the window is kept, and
+   * a missing or distant one is pulled in to fire shortly after the cron. Once
+   * a run lands there its own +1h reschedule lands inside the next cron's
+   * window, so the two stay aligned and the sweep adds no Neon wake of its own.
+   */
+  private async handleEnsureScheduled(): Promise<Response> {
+    const now = Date.now();
+    const current = await this.state.storage.getAlarm();
+    const pulledIn = current === null || current > now + CRON_ALIGN_WINDOW_MS;
+    const nextAlarm = pulledIn ? now + CRON_ALIGNED_DELAY_MS : current;
+
+    if (pulledIn) {
+      await this.state.storage.setAlarm(nextAlarm);
+    }
+
+    return new Response(
+      JSON.stringify({
+        scheduled: true,
+        pulledIn,
+        nextRun: new Date(nextAlarm).toISOString(),
+      }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   }
 
   /**

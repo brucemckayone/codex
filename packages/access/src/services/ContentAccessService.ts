@@ -1,6 +1,6 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
+import { ENV_NAMES, type Env } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { content } from '@codex/database/schema';
 import {
@@ -324,10 +324,18 @@ export class ContentAccessService
       const target = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
+          // No `status` predicate (Codex-p3m5j). `assertStreamingAccess` runs
+          // the same decision core as the boolean path, whose publication rule
+          // grants unpublished content to a purchase-derived arm only — so a
+          // one-off buyer keeps playback after the creator withdraws the item
+          // from sale, and everyone else still gets AccessDeniedError.
+          //
+          // Filtering here would 404 the buyer before their purchase was
+          // considered, and a 404 is also the WRONG shape: the item exists and
+          // they own it. `deletedAt` STAYS — deleted is gone, not withdrawn.
           const contentRecord = await tx.query.content.findFirst({
             where: and(
               eq(content.id, input.contentId),
-              eq(content.status, CONTENT_STATUS.PUBLISHED),
               isNull(content.deletedAt)
             ),
             with: {

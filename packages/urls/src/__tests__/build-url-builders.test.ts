@@ -164,6 +164,70 @@ describe('buildPlatformUrl (URL-based)', () => {
       'http://lvh.me:3000/'
     );
   });
+
+  // Codex-a9kn0: a staging host's parseHost baseDomain is the PRODUCTION apex,
+  // so the builder must not use it for staging.
+  describe('stays in the caller environment', () => {
+    it.each([
+      // [label, current URL, expected]
+      [
+        'prod org host',
+        'https://yoga-studio.revelations.studio/x',
+        'https://revelations.studio/terms',
+      ],
+      [
+        'prod apex',
+        'https://revelations.studio/',
+        'https://revelations.studio/terms',
+      ],
+      [
+        'staging org host',
+        'https://yoga-staging.revelations.studio/x',
+        'https://codex-staging.revelations.studio/terms',
+      ],
+      [
+        'staging platform alias',
+        'https://codex-staging.revelations.studio/',
+        'https://codex-staging.revelations.studio/terms',
+      ],
+      [
+        'staging apex',
+        'https://staging.revelations.studio/',
+        'https://codex-staging.revelations.studio/terms',
+      ],
+      [
+        'deployed dev org host',
+        'https://yoga.dev.revelations.studio/',
+        'https://dev.revelations.studio/terms',
+      ],
+      [
+        'local lvh.me org host',
+        'http://yoga.lvh.me:3000/',
+        'http://lvh.me:3000/terms',
+      ],
+      [
+        'local nip.io org host',
+        'http://yoga.192.168.1.10.nip.io:3000/',
+        'http://192.168.1.10.nip.io:3000/terms',
+      ],
+    ])('%s', (_label, current, expected) => {
+      expect(buildPlatformUrl(new URL(current), '/terms')).toBe(expected);
+    });
+
+    // "Not the prod apex" is too weak: the bare `staging.revelations.studio`
+    // passes it yet is served by PRODUCTION (it matches only prod's
+    // `*.revelations.studio/*`; staging's `*-staging.revelations.studio/*`
+    // needs the hyphen). Assert the host lands on a staging ROUTE instead.
+    it('sends a staging host to a host a staging route serves', () => {
+      const url = new URL(
+        buildPlatformUrl(
+          new URL('https://yoga-staging.revelations.studio/'),
+          '/privacy'
+        )
+      );
+      expect(url.hostname.endsWith('-staging.revelations.studio')).toBe(true);
+    });
+  });
 });
 
 describe('buildCreatorsUrl (URL-based)', () => {

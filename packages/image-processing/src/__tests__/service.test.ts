@@ -13,7 +13,6 @@ interface MockQueryTable {
 interface MockDbQuery {
   users: MockQueryTable;
   content: MockQueryTable;
-  organizations: MockQueryTable;
 }
 /**
  * Creates a File object with proper ArrayBuffer content for testing
@@ -98,18 +97,6 @@ vi.mock('../processor', () => ({
   processImageVariants: vi.fn(),
 }));
 
-// Mock SVG sanitization from @codex/validation
-vi.mock('@codex/validation', async () => {
-  const actual = await vi.importActual('@codex/validation');
-  return {
-    ...actual,
-    sanitizeSvgContent: vi.fn().mockImplementation(async (svgText: string) => {
-      // Mock implementation that preserves the SVG but would sanitize in real code
-      return svgText;
-    }),
-  };
-});
-
 describe('ImageProcessingService', () => {
   let service: ImageProcessingService;
   let mockDbQuery: MockDbQuery;
@@ -139,11 +126,6 @@ describe('ImageProcessingService', () => {
         findFirst: vi.fn().mockResolvedValue({
           thumbnailUrl:
             'https://test.r2.dev/user-1/content-thumbnails/content-1/lg.webp',
-        }),
-      },
-      organizations: {
-        findFirst: vi.fn().mockResolvedValue({
-          logoUrl: 'https://test.r2.dev/user-1/branding/logo/lg.webp',
         }),
       },
     };
@@ -189,7 +171,7 @@ describe('ImageProcessingService', () => {
         {}, // Empty metadata object (not undefined)
         {
           contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         }
       );
     });
@@ -272,7 +254,7 @@ describe('ImageProcessingService', () => {
         {},
         {
           contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
+          cacheControl: 'public, max-age=3600, must-revalidate',
         }
       );
     });
@@ -354,51 +336,6 @@ describe('ImageProcessingService', () => {
     });
   });
 
-  describe('processOrgLogo', () => {
-    it('should process SVG logo without variants', async () => {
-      const file = createTestImageFile('image/svg+xml', 'logo.svg');
-
-      const result = await service.processOrgLogo('org-1', 'user-1', file);
-
-      // Should NOT call processor for SVG
-      expect(processor.processImageVariants).not.toHaveBeenCalled();
-
-      expect(result.url).toContain('logo.svg');
-      expect(result.url).toContain('test.r2.dev'); // R2 public URL base
-      expect(result.mimeType).toBe('image/svg+xml');
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(1);
-
-      // SVG upload uses 4-param signature (key, body, metadata, httpMetadata)
-      // SVG uses shorter cache (1 hour) because filename is fixed, allowing logo updates to propagate
-      expect(testMockR2Service.put).toHaveBeenCalledWith(
-        expect.stringContaining('logo.svg'),
-        expect.any(Uint8Array),
-        {},
-        {
-          contentType: 'image/svg+xml',
-          cacheControl: 'public, max-age=3600',
-        }
-      );
-    });
-
-    it('should process raster logo with three variants', async () => {
-      const file = createTestImageFile('image/png', 'logo.png');
-
-      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
-        sm: new Uint8Array([1]),
-        md: new Uint8Array([2]),
-        lg: new Uint8Array([3]),
-      });
-
-      const result = await service.processOrgLogo('org-1', 'user-1', file);
-
-      expect(processor.processImageVariants).toHaveBeenCalled();
-      expect(result.url).toContain('user-1/branding/logo');
-      expect(result.url).toContain('lg.webp');
-      expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
-    });
-  });
-
   describe('deleteContentThumbnail', () => {
     it('should delete all three size variants from R2', async () => {
       await service.deleteContentThumbnail('content-1', 'user-1');
@@ -448,41 +385,6 @@ describe('ImageProcessingService', () => {
       mockDbQuery.users.findFirst.mockResolvedValueOnce({ avatarUrl: null });
 
       await service.deleteUserAvatar('user-1');
-
-      expect(testMockR2Service.delete).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('deleteOrgLogo', () => {
-    it('should delete all three size variants for raster logo', async () => {
-      mockDbQuery.organizations.findFirst.mockResolvedValueOnce({
-        logoUrl: 'https://test.r2.dev/organizations/org-1/logo/lg.webp',
-      });
-
-      await service.deleteOrgLogo('org-1', 'user-1');
-
-      expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
-    });
-
-    it('should delete single SVG file', async () => {
-      mockDbQuery.organizations.findFirst.mockResolvedValueOnce({
-        logoUrl: 'https://test.r2.dev/organizations/org-1/logo.svg',
-      });
-
-      await service.deleteOrgLogo('org-1', 'user-1');
-
-      expect(testMockR2Service.delete).toHaveBeenCalledTimes(1);
-      expect(testMockR2Service.delete).toHaveBeenCalledWith(
-        expect.stringContaining('logo.svg')
-      );
-    });
-
-    it('should handle missing logo gracefully', async () => {
-      mockDbQuery.organizations.findFirst.mockResolvedValueOnce({
-        logoUrl: null,
-      });
-
-      await service.deleteOrgLogo('org-1', 'user-1');
 
       expect(testMockR2Service.delete).not.toHaveBeenCalled();
     });
@@ -699,8 +601,20 @@ describe('ImageProcessingService', () => {
       });
     });
 
+    /**
+     * These two cases previously asserted the OPPOSITE — "should cleanup all
+     * variants", `expect(delete).toHaveBeenCalledTimes(3)` — and were green for
+     * months while encoding the retired "variants get unique filenames per
+     * upload" premise as a requirement. On deterministic keys that cleanup
+     * deletes the object the content row still addresses (Codex-r85jo.2), so
+     * the assertion is inverted rather than relaxed.
+     *
+     * The property version of this — a Map-backed bucket proving every prior
+     * key stays READABLE — lives in
+     * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
+     */
     describe('Partial Upload Failures', () => {
-      it('should cleanup all variants when one R2 upload fails', async () => {
+      it('should delete nothing when one R2 upload fails', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
@@ -718,13 +632,14 @@ describe('ImageProcessingService', () => {
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*1 variant.*failed/i);
+        ).rejects.toThrow(/upload failed.*1 of 3 variant/i);
 
-        // All three variants should be deleted in cleanup
-        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+        // The rejected key still holds the PREVIOUS image; the succeeded ones
+        // hold the new bytes at URLs the row already points at. Nothing 404s.
+        expect(testMockR2Service.delete).not.toHaveBeenCalled();
       });
 
-      it('should cleanup all variants when two R2 uploads fail', async () => {
+      it('should delete nothing when two R2 uploads fail', async () => {
         const file = createTestImageFile('image/png', 'test.png');
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
@@ -742,16 +657,53 @@ describe('ImageProcessingService', () => {
 
         await expect(
           service.processContentThumbnail('content-1', 'user-1', file)
-        ).rejects.toThrow(/upload failed.*2 variant.*failed/i);
+        ).rejects.toThrow(/upload failed.*2 of 3 variant/i);
 
-        // All three variants should be deleted in cleanup
-        expect(testMockR2Service.delete).toHaveBeenCalledTimes(3);
+        expect(testMockR2Service.delete).not.toHaveBeenCalled();
+      });
+
+      it('should report an R2 put failure as a 500, not a 400', async () => {
+        const file = createTestImageFile('image/jpeg', 'test.jpg');
+
+        vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+
+        testMockR2Service.put = vi
+          .fn()
+          .mockRejectedValue(new Error('R2 quota exceeded'));
+
+        // By `statusCode`, not class name — names minify in the worker bundle.
+        // A ValidationError here tells the creator their IMAGE was bad and
+        // keeps the R2 outage out of 5xx-rate alerting.
+        const error = await service
+          .processContentThumbnail('content-1', 'user-1', file)
+          .then(() => null)
+          .catch((e: unknown) => e as { statusCode?: number });
+
+        expect(error?.statusCode).toBe(500);
       });
     });
 
     describe('Orphan Recording on Cleanup Failure', () => {
+      /**
+       * Both cases below are FIRST uploads (`thumbnailUrl: null`), which is the
+       * only shape where the post-DB-failure cleanup is correct: the puts
+       * landed, the row never recorded them, so the objects are unreferenced.
+       *
+       * On a REPLACEMENT the row still addresses these deterministic keys, the
+       * cleanup is suppressed, and there are no orphans to record — covered in
+       * `__tests__/regression/r85jo2-partial-upload-preserves-prior-image.test.ts`.
+       * Before Codex-r85jo.2 these tests passed with the harness default (a
+       * prior URL present), which is exactly the destructive case.
+       */
       it('should record orphans when R2 cleanup fails after DB error', async () => {
         const file = createTestImageFile('image/png', 'test.png');
+        mockDbQuery.content.findFirst.mockResolvedValue({
+          thumbnailUrl: null,
+        });
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
           sm: new Uint8Array([1]),
@@ -816,6 +768,9 @@ describe('ImageProcessingService', () => {
 
       it('should log warning when orphanedFileService not provided and cleanup fails', async () => {
         const file = createTestImageFile('image/jpeg', 'test.jpg');
+        mockDbQuery.content.findFirst.mockResolvedValue({
+          thumbnailUrl: null,
+        });
 
         vi.mocked(processor.processImageVariants).mockReturnValueOnce({
           sm: new Uint8Array([1]),
@@ -880,66 +835,6 @@ describe('ImageProcessingService', () => {
         await expect(
           service.processUserAvatar('user-1', tinyFile)
         ).rejects.toThrow(/invalid.*signature|too small/i);
-      });
-    });
-
-    describe('SVG Special Cases', () => {
-      it('should handle very small SVG files', async () => {
-        const minimalSvg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
-        const encoder = new TextEncoder();
-        const file = new File([encoder.encode(minimalSvg)], 'minimal.svg', {
-          type: 'image/svg+xml',
-        });
-
-        const result = await service.processOrgLogo('org-1', 'user-1', file);
-
-        expect(result.mimeType).toBe('image/svg+xml');
-        expect(testMockR2Service.put).toHaveBeenCalledTimes(1);
-      });
-
-      it('should sanitize SVG by removing script tags', async () => {
-        // Mock sanitizeSvgContent to simulate real sanitization (strips <script>)
-        const { sanitizeSvgContent: mockedSanitize } = await import(
-          '@codex/validation'
-        );
-        vi.mocked(mockedSanitize).mockImplementationOnce(
-          async (svgText: string) => {
-            // Simulate DOMPurify stripping <script> tags
-            return svgText.replace(/<script[^>]*>.*?<\/script>/gi, '');
-          }
-        );
-
-        const maliciousSvg =
-          '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect width="10" height="10"/></svg>';
-        const encoder = new TextEncoder();
-        const file = new File([encoder.encode(maliciousSvg)], 'evil.svg', {
-          type: 'image/svg+xml',
-        });
-
-        const result = await service.processOrgLogo('org-1', 'user-1', file);
-
-        expect(result.mimeType).toBe('image/svg+xml');
-
-        // Verify the uploaded content was sanitized (no script tag)
-        const putCall = vi.mocked(testMockR2Service.put).mock.calls[0];
-        const uploadedBytes = putCall![1] as Uint8Array;
-        const uploadedSvg = new TextDecoder().decode(uploadedBytes);
-        expect(uploadedSvg).not.toContain('<script');
-        expect(uploadedSvg).toContain('rect');
-      });
-
-      it('should handle SVG with complex content', async () => {
-        const complexSvg =
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/><path d="M10,10 L90,90"/></svg>';
-        const encoder = new TextEncoder();
-        const file = new File([encoder.encode(complexSvg)], 'complex.svg', {
-          type: 'image/svg+xml',
-        });
-
-        const result = await service.processOrgLogo('org-1', 'user-1', file);
-
-        expect(result.mimeType).toBe('image/svg+xml');
-        expect(result.url).toContain('logo.svg');
       });
     });
 

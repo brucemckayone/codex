@@ -12,21 +12,17 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import {
-  getContentThumbnailKey,
-  getOrgLogoKey,
-  getUserAvatarKey,
-} from '@codex/transcoding';
+import { getContentThumbnailKey, getUserAvatarKey } from '@codex/transcoding';
 import {
   extractMimeType,
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
-  sanitizeSvgContent,
   validateImageSignature,
 } from '@codex/validation';
 import type { OrphanedFileService } from './orphaned-file-service';
 import { processImageVariants } from './processor';
 import {
+  recordOrphansOrLog,
   uploadImageVariants,
   type VariantKeys,
   withDbUpdateOrphanCleanup,
@@ -45,12 +41,22 @@ interface ImageProcessingServiceConfig extends ServiceConfig {
 }
 
 /**
- * Validates image file before processing
+ * Validates image file before processing.
+ *
+ * RASTER ONLY, with no opt-out. This took an `allowSvg` flag until Codex-z520h
+ * removed `processOrgLogo`, the only caller that ever passed `true`; every
+ * other caller feeds `processImageVariants`, which decodes via Photon and
+ * cannot rasterise SVG, so an SVG would have failed inside the Wasm decoder
+ * rather than at this boundary. A flag no caller can set is an unreachable
+ * branch in a security validator, so it is gone rather than defaulted. SVG
+ * uploads now live only on the org-logo path in `@codex/platform-settings`
+ * `BrandingSettingsService.uploadLogo`, which stores sanitized markup verbatim
+ * instead of producing variants.
+ *
  * @throws ValidationError if file is invalid
  */
 async function validateImageFile(
-  file: File,
-  allowSvg: boolean = false
+  file: File
 ): Promise<{ buffer: ArrayBuffer; mimeType: string }> {
   // 1. Check file is not empty
   if (file.size === 0) {
@@ -69,12 +75,8 @@ async function validateImageFile(
   const mimeType = extractMimeType(file.type || 'image/jpeg');
 
   // Check if MIME type is supported
-  const isSupportedRaster = SUPPORTED_IMAGE_MIME_TYPES.has(mimeType);
-  const isSvg = mimeType === 'image/svg+xml';
-
-  if (!isSupportedRaster && !(isSvg && allowSvg)) {
+  if (!SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     const allowed = Array.from(SUPPORTED_IMAGE_MIME_TYPES);
-    if (allowSvg) allowed.push('image/svg+xml');
     throw new ValidationError(
       `Unsupported MIME type: ${mimeType}. Allowed: ${allowed.join(', ')}`
     );
@@ -104,6 +106,27 @@ async function validateImageFile(
 function variantKeyList(keys: VariantKeys): string[] {
   return [keys.sm, keys.md, keys.lg];
 }
+
+/**
+ * The three variant keys under a still's BASE key (`categories/{id}/cover`,
+ * `courses/{id}/hero`, ...). One definition, so the upload that writes the
+ * objects and the cleanup that may delete them can never disagree on a key.
+ */
+function stillVariantKeys(baseKey: string): VariantKeys {
+  return {
+    sm: `${baseKey}/sm.webp`,
+    md: `${baseKey}/md.webp`,
+    lg: `${baseKey}/lg.webp`,
+  };
+}
+
+/** Orphan classification for the four stills whose DB write the caller owns. */
+type CallerOwnedStill =
+  | { imageType: 'category_cover'; entityType: 'category' }
+  | {
+      imageType: 'course_cover' | 'course_hero' | 'course_signature';
+      entityType: 'course';
+    };
 
 /**
  * Image Processing Service
@@ -144,7 +167,7 @@ export class ImageProcessingService extends BaseService {
     file: File
   ): Promise<ImageProcessingResult> {
     // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file);
 
     // Process variants (HEAD logic)
     const inputBuffer = new Uint8Array(buffer);
@@ -156,15 +179,36 @@ export class ImageProcessingService extends BaseService {
       lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
     };
 
+    // Use LG variant as determining URL for DB
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
+
+    // Did the row ALREADY address these exact keys? Decides whether a failed
+    // DB update may clean up the objects about to be written (Codex-r85jo.2).
+    //
+    // Compared against the URL rather than tested for mere presence: a row
+    // holding a legacy EXTERNAL thumbnail URL has a prior image but does NOT
+    // reference these keys, so the new objects would be unreferenced orphans
+    // and the cleanup is correct there. The predicate mirrors the update's own
+    // WHERE clause so the read describes exactly the row the write targets.
+    //
+    // Read BEFORE the puts, so a failing read costs nothing: reading after
+    // would leave three freshly-written objects with no decision recorded
+    // about whether anything may reclaim them.
+    const existing = await this.db.query.content.findFirst({
+      where: and(
+        eq(schema.content.id, contentId),
+        eq(schema.content.creatorId, creatorId)
+      ),
+      columns: { thumbnailUrl: true },
+    });
+
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Thumbnail',
+      obs: this.obs,
     });
-
-    // Use LG variant as determining URL for DB
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update content record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -177,6 +221,7 @@ export class ImageProcessingService extends BaseService {
         obs: this.obs,
         orphanedFileService: this.orphanedFileService,
         warnContext: 'content-thumbnail',
+        keysAlreadyReferenced: existing?.thumbnailUrl === url,
         warnExtras: { creatorId },
       },
       async () => {
@@ -197,6 +242,49 @@ export class ImageProcessingService extends BaseService {
       size: variants.lg.byteLength,
       mimeType: 'image/webp',
     };
+  }
+
+  /**
+   * Run the CALLER's DB write for a still produced by `processCategoryCover` /
+   * `processCourseCover` / `processCourseHero` / `processCourseSignature`, with
+   * the same failure cleanup `processContentThumbnail` gets (Codex-29fs0).
+   *
+   * Those four methods only upload: the scoped DB write lives in the
+   * space/org-aware service that owns the row, so this cannot be done inside
+   * them. Without it, a write that fails after the puts strands sm/md/lg with
+   * nothing able to name them.
+   *
+   * `storedBaseKey` is the key column as read BEFORE the upload, and it is
+   * what decides `withDbUpdateOrphanCleanup`'s `keysAlreadyReferenced`
+   * (Codex-r85jo.2): equal to `baseKey` means a REPLACEMENT (the deterministic
+   * keys are still addressed and now hold the new bytes, so deleting them would
+   * 404 a live image and nothing is cleaned); `null`, or anything else, means
+   * nothing addresses the new objects and they are cleaned up. Taking the
+   * stored value rather than a boolean keeps that one comparison here, instead
+   * of re-derived at four call sites.
+   */
+  async persistStillWithOrphanCleanup<T>(
+    params: CallerOwnedStill & {
+      baseKey: string;
+      storedBaseKey: string | null;
+      entityId: string;
+    },
+    dbWrite: () => Promise<T>
+  ): Promise<T> {
+    return withDbUpdateOrphanCleanup(
+      {
+        keys: variantKeyList(stillVariantKeys(params.baseKey)),
+        imageType: params.imageType,
+        entityId: params.entityId,
+        entityType: params.entityType,
+        r2: this.r2Service,
+        obs: this.obs,
+        orphanedFileService: this.orphanedFileService,
+        warnContext: params.imageType,
+        keysAlreadyReferenced: params.storedBaseKey === params.baseKey,
+      },
+      dbWrite
+    );
   }
 
   /**
@@ -228,23 +316,20 @@ export class ImageProcessingService extends BaseService {
     mimeType: string;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const coverImageKey = `categories/${categoryId}/cover`;
-    const keys: VariantKeys = {
-      sm: `${coverImageKey}/sm.webp`,
-      md: `${coverImageKey}/md.webp`,
-      lg: `${coverImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(coverImageKey);
 
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Category cover',
+      obs: this.obs,
     });
 
     return {
@@ -287,23 +372,20 @@ export class ImageProcessingService extends BaseService {
     mimeType: string;
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
-    const { buffer } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const coverImageKey = `courses/${courseId}/cover`;
-    const keys: VariantKeys = {
-      sm: `${coverImageKey}/sm.webp`,
-      md: `${coverImageKey}/md.webp`,
-      lg: `${coverImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(coverImageKey);
 
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Course cover',
+      obs: this.obs,
     });
 
     return {
@@ -364,28 +446,26 @@ export class ImageProcessingService extends BaseService {
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
-    // `allowSvg: false` matches every other variant-ladder caller and is not an
-    // oversight: `processImageVariants` decodes through Photon, which cannot
-    // rasterise SVG, so an SVG here would fail in the Wasm decoder rather than at
-    // the boundary. The one path that DOES accept SVG (`processOrgLogo`) stores
-    // the sanitized markup verbatim instead of producing variants.
-    const { buffer } = await validateImageFile(file, false);
+    // Raster-only is not an oversight: `processImageVariants` decodes through
+    // Photon, which cannot rasterise SVG, so an SVG here would fail in the Wasm
+    // decoder rather than at the boundary. The one path on this platform that
+    // DOES accept SVG — `BrandingSettingsService.uploadLogo` in
+    // `@codex/platform-settings` — stores the sanitized markup verbatim instead
+    // of producing variants.
+    const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const heroImageKey = `courses/${courseId}/hero`;
-    const keys: VariantKeys = {
-      sm: `${heroImageKey}/sm.webp`,
-      md: `${heroImageKey}/md.webp`,
-      lg: `${heroImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(heroImageKey);
 
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Course hero',
+      obs: this.obs,
     });
 
     return {
@@ -453,31 +533,28 @@ export class ImageProcessingService extends BaseService {
   }> {
     // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
     //
-    // `allowSvg: false` matches every other variant-ladder caller, and here it
-    // costs something real worth naming: a signature is exactly the kind of mark
-    // that is often an SVG. It still cannot come through this path, because
-    // `processImageVariants` decodes via Photon, which cannot rasterise SVG — an
-    // SVG would fail inside the Wasm decoder rather than at this boundary. The
-    // one path that DOES accept SVG (`processOrgLogo`) stores the sanitized
-    // markup verbatim instead of producing variants, and that is the shape a
-    // future vector signature would have to take.
-    const { buffer } = await validateImageFile(file, false);
+    // Raster-only costs something real worth naming here: a signature is exactly
+    // the kind of mark that is often an SVG. It still cannot come through this
+    // path, because `processImageVariants` decodes via Photon, which cannot
+    // rasterise SVG — an SVG would fail inside the Wasm decoder rather than at
+    // this boundary. The one path on this platform that DOES accept SVG —
+    // `BrandingSettingsService.uploadLogo` in `@codex/platform-settings` —
+    // stores the sanitized markup verbatim instead of producing variants, and
+    // that is the shape a future vector signature would have to take.
+    const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
     const signatureImageKey = `courses/${courseId}/signature`;
-    const keys: VariantKeys = {
-      sm: `${signatureImageKey}/sm.webp`,
-      md: `${signatureImageKey}/md.webp`,
-      lg: `${signatureImageKey}/lg.webp`,
-    };
+    const keys = stillVariantKeys(signatureImageKey);
 
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Course signature',
+      obs: this.obs,
     });
 
     return {
@@ -499,7 +576,7 @@ export class ImageProcessingService extends BaseService {
     file: File
   ): Promise<ImageProcessingResult> {
     // Validate image (MIME type, size, magic bytes)
-    const { buffer } = await validateImageFile(file, false);
+    const { buffer } = await validateImageFile(file);
 
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
@@ -510,14 +587,22 @@ export class ImageProcessingService extends BaseService {
       lg: getUserAvatarKey(userId, 'lg'),
     };
 
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
+
+    // See processContentThumbnail for why this compares the URL rather than
+    // testing for presence, and why it reads before the puts (Codex-r85jo.2).
+    const existing = await this.db.query.users.findFirst({
+      where: eq(schema.users.id, userId),
+      columns: { avatarUrl: true },
+    });
+
     await uploadImageVariants({
       keys,
       variants,
       r2: this.r2Service,
       failureLabel: 'Avatar',
+      obs: this.obs,
     });
-
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update user record — cleanup R2 if DB fails
     await withDbUpdateOrphanCleanup(
@@ -530,132 +615,13 @@ export class ImageProcessingService extends BaseService {
         obs: this.obs,
         orphanedFileService: this.orphanedFileService,
         warnContext: 'user-avatar',
+        keysAlreadyReferenced: existing?.avatarUrl === url,
       },
       async () => {
         await this.db
           .update(schema.users)
           .set({ avatarUrl: url })
           .where(eq(schema.users.id, userId));
-      }
-    );
-
-    return {
-      url,
-      size: variants.lg.byteLength,
-      mimeType: 'image/webp',
-    };
-  }
-
-  /**
-   * Process and store organization logo
-   * Uploads to R2 and updates organization record
-   */
-  async processOrgLogo(
-    organizationId: string,
-    creatorId: string,
-    file: File
-  ): Promise<ImageProcessingResult> {
-    // Validate image (MIME type, size, magic bytes) - allow SVG for logos
-    const { buffer, mimeType } = await validateImageFile(file, true);
-
-    // Special handling for SVG
-    if (mimeType === 'image/svg+xml') {
-      const key = `${creatorId}/branding/logo/logo.svg`;
-
-      // Sanitize SVG to remove XSS vectors (script tags, event handlers, etc.)
-      const svgText = new TextDecoder().decode(new Uint8Array(buffer));
-      const sanitized = await sanitizeSvgContent(svgText);
-      const sanitizedBuffer = new TextEncoder().encode(sanitized);
-
-      // SVG uses shorter cache (1 hour) because filename is fixed.
-      // This allows logo updates to propagate within reasonable time.
-      // Raster images use immutable cache since they have unique filenames per upload.
-      await this.r2Service.put(
-        key,
-        sanitizedBuffer,
-        {},
-        {
-          contentType: 'image/svg+xml',
-          cacheControl: 'public, max-age=3600',
-        }
-      );
-      const url = `${this.r2PublicUrlBase}/${key}`;
-
-      try {
-        await this.db
-          .update(schema.organizations)
-          .set({ logoUrl: url })
-          .where(eq(schema.organizations.id, organizationId));
-      } catch (error) {
-        const cleanupResult = await this.r2Service
-          .delete(key)
-          .then(() => ({ success: true as const }))
-          .catch((e) => ({ success: false as const, error: e }));
-
-        if (!cleanupResult.success) {
-          if (this.orphanedFileService) {
-            await this.orphanedFileService.recordOrphanedFile({
-              r2Key: key,
-              imageType: 'logo',
-              entityId: organizationId,
-              entityType: 'organization',
-            });
-          } else {
-            this.obs.warn('R2 cleanup failed after DB error', {
-              context: 'org-logo-svg',
-              resourceId: organizationId,
-              creatorId,
-              r2Keys: [key],
-            });
-          }
-        }
-        throw error;
-      }
-
-      return {
-        url,
-        size: sanitizedBuffer.byteLength,
-        mimeType,
-      };
-    }
-
-    // Raster processing
-    const inputBuffer = new Uint8Array(buffer);
-    const variants = processImageVariants(inputBuffer);
-
-    const keys: VariantKeys = {
-      sm: getOrgLogoKey(creatorId, 'sm'),
-      md: getOrgLogoKey(creatorId, 'md'),
-      lg: getOrgLogoKey(creatorId, 'lg'),
-    };
-
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Logo',
-    });
-
-    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
-
-    // Update organization record — cleanup R2 if DB fails
-    await withDbUpdateOrphanCleanup(
-      {
-        keys: variantKeyList(keys),
-        imageType: 'logo',
-        entityId: organizationId,
-        entityType: 'organization',
-        r2: this.r2Service,
-        obs: this.obs,
-        orphanedFileService: this.orphanedFileService,
-        warnContext: 'org-logo-raster',
-        warnExtras: { creatorId },
-      },
-      async () => {
-        await this.db
-          .update(schema.organizations)
-          .set({ logoUrl: url })
-          .where(eq(schema.organizations.id, organizationId));
       }
     );
 
@@ -692,13 +658,19 @@ export class ImageProcessingService extends BaseService {
       (_, i) => deleteResults[i]?.status === 'rejected'
     );
     if (failedKeys.length > 0 && this.orphanedFileService) {
-      await this.orphanedFileService.recordOrphanedFiles(
+      // Guarded (Codex-r85jo.3 F7): a failed orphan insert must not stop the
+      // DB field being cleared below, or the row keeps pointing at objects
+      // this call just tried to remove.
+      await recordOrphansOrLog(
+        this.orphanedFileService,
         failedKeys.map((r2Key) => ({
           r2Key,
           imageType: 'content_thumbnail' as const,
           entityId: contentId,
           entityType: 'content' as const,
-        }))
+        })),
+        this.obs,
+        'content-thumbnail-delete'
       );
     } else if (failedKeys.length > 0) {
       this.obs.warn('R2 thumbnail deletion failed, no orphan service', {
@@ -756,13 +728,17 @@ export class ImageProcessingService extends BaseService {
     );
 
     if (failedKeys.length > 0 && this.orphanedFileService) {
-      await this.orphanedFileService.recordOrphanedFiles(
+      // Guarded (Codex-r85jo.3 F7) — see deleteContentThumbnail.
+      await recordOrphansOrLog(
+        this.orphanedFileService,
         failedKeys.map((r2Key) => ({
           r2Key,
           imageType: 'avatar' as const,
           entityId: userId,
           entityType: 'user' as const,
-        }))
+        })),
+        this.obs,
+        'user-avatar-delete'
       );
     } else if (failedKeys.length > 0) {
       this.obs.warn('R2 avatar deletion failed, no orphan service', {
@@ -777,74 +753,5 @@ export class ImageProcessingService extends BaseService {
       .update(schema.users)
       .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
-  }
-
-  /**
-   * Delete all size variants for an organization logo
-   * Called by DELETE endpoint
-   *
-   * On R2 failure: Records orphans for deferred cleanup instead of throwing
-   */
-  async deleteOrgLogo(
-    organizationId: string,
-    creatorId: string
-  ): Promise<void> {
-    // Get current logo URL
-    const org = await this.db.query.organizations.findFirst({
-      where: eq(schema.organizations.id, organizationId),
-      columns: { logoUrl: true },
-    });
-
-    if (!org?.logoUrl) {
-      return; // Nothing to delete
-    }
-
-    // Determine if SVG or WebP
-    const isSvg = org.logoUrl.includes('.svg');
-
-    let keys: string[];
-    if (isSvg) {
-      keys = [`${creatorId}/branding/logo/logo.svg`];
-    } else {
-      keys = [
-        getOrgLogoKey(creatorId, 'sm'),
-        getOrgLogoKey(creatorId, 'md'),
-        getOrgLogoKey(creatorId, 'lg'),
-      ];
-    }
-
-    // Try to delete from R2, track failures as orphans
-    const deleteResults = await Promise.allSettled(
-      keys.map((key) => this.r2Service.delete(key))
-    );
-
-    // Record any failed deletions as orphans
-    const failedKeys = keys.filter(
-      (_, i) => deleteResults[i]?.status === 'rejected'
-    );
-
-    if (failedKeys.length > 0 && this.orphanedFileService) {
-      await this.orphanedFileService.recordOrphanedFiles(
-        failedKeys.map((r2Key) => ({
-          r2Key,
-          imageType: 'logo' as const,
-          entityId: organizationId,
-          entityType: 'organization' as const,
-        }))
-      );
-    } else if (failedKeys.length > 0) {
-      this.obs.warn('R2 logo deletion failed, no orphan service', {
-        context: 'org-logo-delete',
-        organizationId,
-        creatorId,
-        failedKeys,
-      });
-    }
-
-    // Clear database field regardless of R2 result
-    await this.db
-      .update(schema.organizations)
-      .set({ logoUrl: null })
-      .where(eq(schema.organizations.id, organizationId));
   }
 }

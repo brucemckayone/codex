@@ -680,9 +680,13 @@ describe('Round-D read services (Codex-776gg)', () => {
         sortOrder: 2,
       });
 
-      // Enrollments that MUST be excluded: a draft course (org A) and a
-      // published course in ORG B — seeded as real foreign rows so the test
-      // fails if either scope regresses.
+      // `draft` is a PAID enrolment in a course that is now `draft` — which is
+      // exactly what the unpublish cascade leaves behind (it writes
+      // `courses.status = 'draft'`, so "withdrawn after purchase" and "draft"
+      // are the SAME row value). Since Codex-yo4px it must be KEPT: an
+      // enrolment is the authority for an owned read. `foreign` is a published
+      // course in ORG B and must still be excluded — the org scope is the IDOR
+      // guard, and it is unchanged.
       const draft = await createCourse(db, orgAId, creatorId, {
         status: 'draft',
       });
@@ -715,7 +719,7 @@ describe('Round-D read services (Codex-776gg)', () => {
       const list = await journey.listEnrolledCourses(u5, orgAId);
       const ids = list.map((e) => e.course.id);
       expect(ids).toContain(course.id);
-      expect(ids).not.toContain(draft.id); // draft excluded (published-only)
+      expect(ids).toContain(draft.id); // paid, since withdrawn -> KEPT (Codex-yo4px)
       expect(ids).not.toContain(foreign.id); // org B excluded (org scope)
 
       const entry = list.find((e) => e.course.id === course.id);

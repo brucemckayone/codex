@@ -109,7 +109,8 @@ import type { Database, DatabaseWs } from '@codex/database';
 ## Migrations
 
 - Generate: `pnpm db:gen` (root) or `pnpm db:generate` (from `packages/database`)
-- Apply: `pnpm db:local:migrate` (root) or `pnpm db:migrate` (from `packages/database`)
+- Apply: `pnpm db:local:migrate` (root) or `pnpm db:migrate` (from `packages/database`) — migrates the database named in the URL (`.env.dev`: `main`)
+- Test database: `pnpm db:test:setup` (root) creates + migrates the disposable local `main_test` that `.env.test` should point at; re-run after new migrations. See `packages/test-utils/CLAUDE.md` → "Running DB-backed tests locally"
 - Files: `packages/database/src/migrations/`
 
 ## Reference Files

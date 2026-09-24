@@ -38,6 +38,7 @@ export {
 export {
   type BrandingSettingsConfig,
   BrandingSettingsService,
+  type LogoOrphanRecorder,
 } from './services/branding-settings-service';
 export { ContactSettingsService } from './services/contact-settings-service';
 export { FeatureSettingsService } from './services/feature-settings-service';

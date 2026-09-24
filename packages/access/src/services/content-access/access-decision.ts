@@ -86,6 +86,12 @@ const MANAGEMENT_ROLES: string[] = [
 /** The per-content access-policy flags the decision core reads (SPEC §6.1). */
 export interface ContentAccessPolicyRow {
   organizationId: string | null;
+  /**
+   * `content.status`. Read by the publication rule in `decideContentAccess`
+   * (Codex-p3m5j) — a one-off PURCHASE outlives unpublication, a relationship
+   * does not — so the access layer needs it, not just the fetch predicate.
+   */
+  status: string;
   isFree: boolean;
   isPurchasable: boolean;
   priceCents: number | null;
@@ -113,7 +119,9 @@ type DenyReason =
   | 'subscribers_only'
   | 'subscribers_only_requires_org'
   | 'paid'
-  | 'paid_requires_purchase';
+  | 'paid_requires_purchase'
+  /** Content is not published and the grant was not one someone paid for. */
+  | 'unpublished_requires_purchase';
 
 /**
  * Which arm granted — the streaming adapter maps this to the WP-1 grant log
@@ -159,7 +167,7 @@ const deny = (reason: DenyReason): AccessDecision => ({
  * `tx` (streaming path). `verifyPurchase` uses the PurchaseService's own db, as
  * in WP-1.
  */
-async function decideContentAccess(
+async function decidePolicyAccess(
   deps: { db: AccessQueryClient; purchaseService: PurchaseService },
   userId: string | null,
   contentId: string,
@@ -315,6 +323,85 @@ async function decideContentAccess(
 }
 
 /**
+ * Does this grant arm outlive UNPUBLICATION of the content? (Codex-p3m5j)
+ *
+ * Owner decision, 2026-09-23: **someone who purchased a one-off keeps it.**
+ * The principle that separates the two columns below is ownership vs
+ * relationship — a one-off payment (or a per-person grant standing in for one)
+ * BUYS that item, whereas a subscription, a follow, a free listing or a staff
+ * role grants access *while the item is on offer*. Unpublishing withdraws the
+ * offer; it does not undo a sale.
+ *
+ * Deliberately a `Record<GrantVia, boolean>` and not a `Set`: it is
+ * exhaustiveness-checked, so adding a grant arm to {@link GrantVia} FAILS THE
+ * BUILD until someone classifies it. A `Set` would silently default a new arm
+ * to "does not survive", which is the safe direction but also the silent one —
+ * and this table is a commercial commitment, not an implementation detail.
+ *
+ * Note what is deliberately `false`: every `*_management` arm. Streaming an
+ * unpublished item already 404s for staff today (the status predicate applied
+ * to everyone), so keeping them out preserves existing behaviour rather than
+ * quietly widening it. Creators preview drafts through the studio, not here.
+ */
+const GRANT_SURVIVES_UNPUBLICATION: Record<GrantVia, boolean> = {
+  // ── PURCHASED: a one-off payment, or a per-person entitlement row. Both
+  // `purchases` and `content_access` are written per (user, content) — by
+  // PurchaseService on checkout, and by admin customer-management as a comp or
+  // refund stand-in. Neither recurs, so both are "they own this".
+  paid_purchase: true,
+  paid_entitlement: true,
+  subscribers_purchase: true,
+  subscribers_entitlement: true,
+
+  // ── PURCHASED A CONTAINER: they bought the course this item sits in. The
+  // course-level equivalent of this rule is Codex-yo4px, which stopped an
+  // unpublished course leaving the buyer's shelf; this is the same promise one
+  // level down, for an individual practice withdrawn from a bought curriculum.
+  course: true,
+  paid_course: true,
+  subscribers_course: true,
+
+  // ── RELATIONSHIP: access for as long as the item is on offer. A cancelled
+  // subscriber does not keep the back catalogue, and unpublishing is the
+  // creator withdrawing the offer.
+  free: false,
+  followers_subscription: false,
+  followers_follower: false,
+  subscribers_subscription: false,
+
+  // ── STAFF: publication state is theirs to manage; see the docblock.
+  management: false,
+  team_management: false,
+  followers_management: false,
+  subscribers_management: false,
+  paid_management: false,
+};
+
+/**
+ * THE decision — the policy branches, then the publication rule.
+ *
+ * Both adapters route through here, so the rule has exactly one home. The
+ * branch body ({@link decidePolicyAccess}) is untouched by it: publication is
+ * not another access branch, it is a question asked of whatever the branches
+ * decided.
+ */
+async function decideContentAccess(
+  deps: { db: AccessQueryClient; purchaseService: PurchaseService },
+  userId: string | null,
+  contentId: string,
+  policy: ContentAccessPolicyRow
+): Promise<AccessDecision> {
+  const decision = await decidePolicyAccess(deps, userId, contentId, policy);
+
+  if (!decision.granted) return decision;
+  if (policy.status === CONTENT_STATUS.PUBLISHED) return decision;
+
+  return GRANT_SURVIVES_UNPUBLICATION[decision.via]
+    ? decision
+    : deny('unpublished_requires_purchase');
+}
+
+/**
  * Map a grant `via` to the WP-1 streaming grant log. Only the two follower
  * messages are asserted by the observability suite (analytics distinguishes the
  * community-signal paths); every other arm logs a single generic grant line.
@@ -345,6 +432,7 @@ function logGrant(
 const POLICY_COLUMNS = {
   id: true,
   organizationId: true,
+  status: true,
   isFree: true,
   isPurchasable: true,
   priceCents: true,
@@ -357,9 +445,15 @@ const POLICY_COLUMNS = {
 /**
  * BOOLEAN adapter — backs `ContentAccessService.canView` / `hasContentAccess`.
  * Answers "may this (userId, contentId) pair open this content ANYWHERE?"
- * without throwing or signing URLs. Returns `false` for missing / unpublished /
- * soft-deleted content (the distinction is not leaked at this layer). `userId`
- * is `null` for anonymous visitors.
+ * without throwing or signing URLs. Returns `false` for missing / soft-deleted
+ * content (the distinction is not leaked at this layer). `userId` is `null` for
+ * anonymous visitors.
+ *
+ * UNPUBLISHED content is no longer a flat `false` (Codex-p3m5j): it is granted
+ * to a purchase-derived arm and denied to every other, by the publication rule
+ * in `decideContentAccess`. An anonymous caller is unaffected — every
+ * user-scoped arm evaluates to no-grant, leaving only `free`, which does not
+ * survive unpublication, so a draft stays unreadable to the public.
  *
  * Not run inside a transaction — progress saves and public reads don't need a
  * snapshot across the access read + a follow-on write; a race where access is
@@ -377,12 +471,14 @@ export async function resolveHasContentAccess(
 ): Promise<boolean> {
   const { db, purchaseService, obs } = deps;
 
+  // No `status` predicate (Codex-p3m5j). Unpublished content is fetched and
+  // then adjudicated by the publication rule inside `decideContentAccess`,
+  // which grants it only to a purchase-derived arm. Filtering here instead
+  // would deny a buyer before their purchase was ever considered.
+  //
+  // `deletedAt` STAYS: a soft-deleted item is gone, not withdrawn from sale.
   const contentRecord = await db.query.content.findFirst({
-    where: and(
-      eq(content.id, contentId),
-      eq(content.status, CONTENT_STATUS.PUBLISHED),
-      isNull(content.deletedAt)
-    ),
+    where: and(eq(content.id, contentId), isNull(content.deletedAt)),
     columns: POLICY_COLUMNS,
   });
 

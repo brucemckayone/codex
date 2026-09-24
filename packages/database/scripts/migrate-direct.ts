@@ -43,8 +43,12 @@ const convertNeonUrlToPostgres = (neonUrl: string): string => {
   const url = new URL(neonUrl);
   // For local proxy pointing to postgres, we connect directly to localhost
   if (url.hostname === 'db.localtest.me') {
-    // Connect to the local PostgreSQL instance (Docker exposed on localhost)
-    return `postgres://postgres:postgres@localhost:5432/main`;
+    // Connect to the local PostgreSQL instance (Docker exposed on localhost).
+    // The database NAME is taken from the URL, not hardcoded: this used to
+    // say `/main` unconditionally, so migrating the disposable test database
+    // (`main_test`, Codex-1ggzd) silently migrated the dev database instead.
+    const database = url.pathname.replace(/^\//, '') || 'main';
+    return `postgres://postgres:postgres@localhost:5432/${database}`;
   }
   // For real Neon connections, use the original URL
   return neonUrl;

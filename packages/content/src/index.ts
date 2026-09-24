@@ -71,6 +71,7 @@ export type {
 export {
   CategoriesService,
   ContentService,
+  type ContentServiceConfig,
   DEFAULT_MAX_LIBRARY_FANOUT,
   invalidateContentAccess,
   invalidateOrgMembership,

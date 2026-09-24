@@ -61,6 +61,7 @@ import * as schema from '@codex/database/schema';
 import { neonConfig } from '@neondatabase/serverless';
 import { sql as sqlOperator } from 'drizzle-orm';
 import ws from 'ws';
+import { assertDestructiveTargetAllowed } from './destructive-target';
 
 // Configure Neon serverless WebSocket for Node.js environment
 // This is required for @neondatabase/serverless in Node.js v21 and earlier
@@ -202,6 +203,10 @@ export function setupTestDatabase(): Database {
  * @param db - Database client
  */
 export async function cleanupDatabase(db: Database): Promise<void> {
+  // Codex-bsbf8: refuse outright unless THIS connection is attached to a
+  // disposable database. Everything below is an unconditional DELETE.
+  await assertDestructiveTargetAllowed(db, 'cleanupDatabase');
+
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
   // refund_reviews references purchases AND payouts with onDelete: 'restrict' —
@@ -241,6 +246,10 @@ export async function cleanupDatabase(db: Database): Promise<void> {
  * @param db - Database client
  */
 export async function cleanupDatabaseComplete(db: Database): Promise<void> {
+  // Codex-bsbf8: see cleanupDatabase. This variant also deletes USERS, so it
+  // is the most destructive helper in the package.
+  await assertDestructiveTargetAllowed(db, 'cleanupDatabaseComplete');
+
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
   await db.delete(schema.refundReviews);
@@ -293,6 +302,11 @@ export async function cleanupTables(
   db: Database,
   tables: ('content' | 'mediaItems' | 'organizations' | 'users')[]
 ): Promise<void> {
+  // Codex-bsbf8: guarded too, though the bead only named cleanupDatabase.
+  // `tables` can include 'organizations' and 'users', so a targeted call is
+  // narrower in TABLES but no narrower in which DATABASE it destroys.
+  await assertDestructiveTargetAllowed(db, 'cleanupTables');
+
   const tableMap = {
     content: schema.content,
     mediaItems: schema.mediaItems,

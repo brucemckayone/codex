@@ -100,6 +100,8 @@ table lived in `apps/web/src/lib/server/cache.ts`, which imports
 ```ts
 CACHE_PRESETS   // { public, static, asset, per-viewer, private, fresh }
 type CachePresetName
+
+R2_OVERWRITTEN_OBJECT_CACHE_CONTROL  // stored ON an object, not sent per request
 ```
 
 Presets are named by **who may store the body**, not by window length. The test an
@@ -211,7 +213,8 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - **MUST** use `buildServiceUrl(service, env)` from `@codex/urls` — NEVER hardcode URLs or port numbers
 - **MUST** use `RESERVED_SUBDOMAINS_SET` for org slug validation
 - **MUST** use `getCookieConfig(env)` for cookie configuration
-- **MUST** name a `CACHE_PRESETS` preset for any `Cache-Control` — NEVER hand-write the value; add a preset here instead
+- **MUST** name a `CACHE_PRESETS` preset for any RESPONSE `Cache-Control` — NEVER hand-write the value; add a preset here instead
+- **MUST** use `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL` for `r2.put(..., { cacheControl })` on a key that is rewritten in place, and NEVER add it to `CACHE_PRESETS`. Object metadata written at PUT time is not a per-request policy: `CachePresetName` is what a route declares, is type-gated per auth level by `AllowedCache`, and is read by `selectHyperdrive` — none of which an R2 blob participates in. `check-data-access-contract.mjs` RULE 3 makes the same split in its subject-exclusion (c)
 - **NEVER** put an `s-maxage` on a preset whose body can vary by viewer
 - **NEVER** add side effects to this package — it must be pure constants/functions
 
@@ -220,7 +223,7 @@ INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
 - `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
 - `packages/constants/src/env.ts` — `ENV_NAMES`, `isDev`, `isDevRemote`, `validateServiceUrl`, `INFRA_KEYS` (URL building moved to `@codex/urls`)
 - `packages/constants/src/cookies.ts` — `COOKIES`, `CookieConfig` (`getCookieConfig` moved to `@codex/urls`)
-- `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`
+- `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`, `CACHE_PRESETS`, `CachePresetName`, `R2_OVERWRITTEN_OBJECT_CACHE_CONTROL`
 - `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
 - `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`
 - `packages/constants/src/mime.ts` — `MIME_TYPES`, `HEADERS`, `SUPPORTED_*_MIME_TYPES`

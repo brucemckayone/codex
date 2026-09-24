@@ -70,7 +70,7 @@ Utilities (used by Workers and Services):
   cloudflare-clients → constants, observability, service-errors (+ AWS SDK)
   cache           → observability (KV only otherwise)
   observability   → constants
-  image-processing→ cloudflare-clients, validation, transcoding (key builders), @cf-wasm/photon
+  image-processing→ constants, cloudflare-clients, validation, transcoding (key builders), @cf-wasm/photon
   platform-settings→ database, cloudflare-clients, service-errors, shared-types, validation
   test-utils      → database
 ```

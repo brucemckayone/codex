@@ -69,7 +69,6 @@ describe('ImageProcessingService - Security', () => {
       query: {
         content: { findFirst: vi.fn() },
         users: { findFirst: vi.fn() },
-        organizations: { findFirst: vi.fn() },
       },
     } as unknown as Database;
 
@@ -109,19 +108,6 @@ describe('ImageProcessingService - Security', () => {
       // Verify R2 keys include the userId
       expect(mockR2Service.put).toHaveBeenCalledWith(
         expect.stringContaining('user-123'),
-        expect.any(Uint8Array),
-        expect.anything(),
-        expect.anything()
-      );
-    });
-
-    it('should include creatorId in R2 key path for org logos', async () => {
-      const file = createTestImageFile('image/png', 'logo.png');
-      await service.processOrgLogo('org-1', 'creator-abc', file);
-
-      // Verify R2 keys include the creatorId as prefix
-      expect(mockR2Service.put).toHaveBeenCalledWith(
-        expect.stringContaining('creator-abc/branding/logo/'),
         expect.any(Uint8Array),
         expect.anything(),
         expect.anything()
@@ -191,57 +177,6 @@ describe('ImageProcessingService - Security', () => {
 
       // R2 delete should NOT be called
       expect(mockR2Service.delete).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Organization Logo Handling', () => {
-    it('should update organization by ID', async () => {
-      const file = createTestImageFile('image/png', 'logo.png');
-      await service.processOrgLogo('org-1', 'user-1', file);
-
-      // Verify update was called
-      expect(updateMock).toHaveBeenCalled();
-      expect(whereMock).toHaveBeenCalled();
-    });
-
-    it('should check org exists before deleting logo', async () => {
-      // Mock org exists with logo
-      (mockDb.query.organizations.findFirst as Mock).mockResolvedValueOnce({
-        logoUrl: 'https://cdn.test.com/creator/branding/logo/lg.webp',
-      });
-
-      await service.deleteOrgLogo('org-1', 'creator-1');
-
-      // Verify org lookup was performed
-      expect(mockDb.query.organizations.findFirst).toHaveBeenCalled();
-      // Verify R2 delete was called
-      expect(mockR2Service.delete).toHaveBeenCalled();
-    });
-
-    it('should skip R2 delete when org has no logo', async () => {
-      // Mock org exists but no logo
-      (mockDb.query.organizations.findFirst as Mock).mockResolvedValueOnce({
-        logoUrl: null,
-      });
-
-      await service.deleteOrgLogo('org-1', 'creator-1');
-
-      // R2 delete should NOT be called
-      expect(mockR2Service.delete).not.toHaveBeenCalled();
-    });
-
-    it('should handle SVG logo deletion correctly', async () => {
-      // Mock org with SVG logo
-      (mockDb.query.organizations.findFirst as Mock).mockResolvedValueOnce({
-        logoUrl: 'https://cdn.test.com/creator/branding/logo/logo.svg',
-      });
-
-      await service.deleteOrgLogo('org-1', 'creator-1');
-
-      // Verify SVG-specific delete path
-      expect(mockR2Service.delete).toHaveBeenCalledWith(
-        expect.stringContaining('.svg')
-      );
     });
   });
 });

@@ -92,11 +92,22 @@
   ],
 
   // R2 Buckets
+  //
+  // ASSETS_BUCKET is swept by OrphanedFileCleanupDO (Codex-r85jo.3). Every
+  // orphan it deletes was written by an ImageProcessingService over
+  // ASSETS_BUCKET in content-api / identity-api; sweeping MEDIA_BUCKET instead
+  // "succeeds" (an R2 delete of an absent key is not an error) and marks the
+  // orphan deleted while the object stays. Names mirror content-api per env.
   "r2_buckets": [
     {
       "binding": "MEDIA_BUCKET",
       "bucket_name": "codex-media-production",
       "preview_bucket_name": "codex-media-test"
+    },
+    {
+      "binding": "ASSETS_BUCKET",
+      "bucket_name": "codex-assets-production",
+      "preview_bucket_name": "codex-assets-test"
     }
   ],
 
@@ -129,14 +140,14 @@
         "ENVIRONMENT": "test",
         "WEB_APP_URL": "http://lvh.me:3000",
         "API_URL": "http://localhost:8787",
-        "DATABASE_URL": "postgres://postgres:postgres@db.localtest.me:5432/main",
+        "DATABASE_URL": "postgres://postgres:postgres@db.localtest.me:5432/main_test",
         "RUNPOD_API_KEY": "test-api-key",
         "RUNPOD_ENDPOINT_ID": "test-endpoint-id",
         "RUNPOD_WEBHOOK_SECRET": "test-webhook-secret",
         "RUNPOD_DIRECT_URL": "http://localhost:8000/runsync",
         "WORKER_SHARED_SECRET": "test-worker-shared-secret",
         "DB_METHOD": "LOCAL_PROXY",
-        "DATABASE_URL_LOCAL_PROXY": "postgres://postgres:postgres@db.localtest.me:5432/main"
+        "DATABASE_URL_LOCAL_PROXY": "postgres://postgres:postgres@db.localtest.me:5432/main_test"
       },
       // Bindings are not inherited into a named env — see the default env.
       "ratelimits": [
@@ -169,6 +180,11 @@
           "binding": "MEDIA_BUCKET",
           "bucket_name": "codex-media-production",
           "preview_bucket_name": "codex-media-test"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-production",
+          "preview_bucket_name": "codex-assets-test"
         }
       ]
     },
@@ -208,7 +224,11 @@
           }
         ]
       },
-      // Hourly stuck-transcoding recovery. Defined per-env (NOT top-level) so
+      // Hourly stuck-transcoding recovery, and (Codex-r85jo.3) the poke that
+      // starts and aligns the OrphanedFileCleanupDO sweep — nothing else ever
+      // instantiates that DO. Deliberately NOT a second cron: see the cap below,
+      // and a separate cadence would wake Neon on its own schedule (a */15 cron
+      // once held it awake ~8h/day). Defined per-env (NOT top-level) so
       // it does NOT inherit into dev/staging — Cloudflare's free-plan cap is 5
       // cron triggers per ACCOUNT, shared across prod + dev worker scripts.
       "triggers": {
@@ -256,6 +276,10 @@
         {
           "binding": "MEDIA_BUCKET",
           "bucket_name": "codex-media-production"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-production"
         }
       ],
       "routes": [
