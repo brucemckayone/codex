@@ -95,6 +95,10 @@
   --color-brand-accent: var(--brand-accent, var(--color-warning));
   --color-brand-accent-hover: oklch(from var(--brand-accent, var(--color-warning)) calc(l - 0.08) c h);
   --color-brand-accent-subtle: oklch(from var(--brand-accent, var(--color-warning)) 0.96 calc(c * 0.2) h);
+  /* Ink for text ON a --color-brand-accent fill (Codex-1g5lh.18). Keyed to the
+     accent actually painted, like --color-on-interactive. THE FALLBACK — the
+     live rule is the relative-luminance step in the @supports block below. */
+  --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* ─── MEDIA COVER TREATMENTS (ContentCard shape system) ─────────────── */
   /* Scrim darkens the media bottom for legible overlaid text; glyph is a
@@ -395,6 +399,9 @@
   /* Dark secondary/accent overrides */
   --color-brand-secondary: var(--brand-secondary-dark, var(--brand-secondary, var(--color-neutral-400)));
   --color-brand-accent: var(--brand-accent-dark, var(--brand-accent, var(--color-warning)));
+  /* Re-derived because --color-brand-accent is re-declared from the dark accent
+     one line up; a single copy would freeze the light reading. */
+  --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments re-derive under the dark accent (scrim uses the
      dark --color-background from the [data-org-bg] rule below). */
@@ -635,6 +642,12 @@
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
     );
+    --color-text-on-accent: rgb(
+      from var(--color-brand-accent)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
   }
 
   /* The dark twin keeps Codex-5wgwf's correction — the ink is derived from the
@@ -657,6 +670,12 @@
     );
     --color-on-interactive: rgb(
       from var(--color-interactive)
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+      calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
+    );
+    --color-text-on-accent: rgb(
+      from var(--color-brand-accent)
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
       calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))
