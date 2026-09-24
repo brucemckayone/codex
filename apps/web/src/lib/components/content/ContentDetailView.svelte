@@ -1274,13 +1274,21 @@
     justify-content: center;
     gap: var(--space-1);
     padding: var(--space-6) var(--space-4);
-    color: var(--color-text-inverse);
+    /* The scrim is always dark, so the ink is the player's, not
+       --color-text-inverse (which flips with the PAGE surface and went
+       near-black-on-black on dark brands — Codex-1g5lh.18). */
+    color: var(--color-player-text);
     text-align: center;
+    /* The ladder's floor is --color-player-overlay everywhere. It used to rise
+       to --color-player-surface-hover (WHITE at 20%) at the top, so on a light
+       surface or bright thumbnail the upper half of the text block sat on a
+       near-white scrim, and where that half fell depended on the card's aspect
+       ratio. A black-60% floor keeps the player ink >= 4.5:1 even over pure
+       white (Codex-1g5lh.18). */
     background: linear-gradient(
       to top,
       var(--color-player-overlay-heavy) 0%,
-      var(--color-player-overlay) 50%,
-      var(--color-player-surface-hover) 100%
+      var(--color-player-overlay) 100%
     );
   }
 
@@ -1303,11 +1311,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Same floor as the audio lock overlay above. */
     background: linear-gradient(
       to top,
       var(--color-player-overlay-heavy) 0%,
-      var(--color-player-overlay) 50%,
-      var(--color-player-surface-hover) 100%
+      var(--color-player-overlay) 100%
     );
   }
 
@@ -1316,7 +1324,7 @@
     flex-direction: column;
     align-items: center;
     gap: var(--space-2);
-    color: var(--color-text-inverse);
+    color: var(--color-player-text);
     text-align: center;
     padding: var(--space-6);
   }
@@ -1346,7 +1354,7 @@
 
   .content-detail__cta-subtext {
     font-size: var(--text-sm);
-    opacity: var(--opacity-80);
+    color: var(--color-player-text-secondary);
     margin: 0;
     max-width: 280px;
   }
@@ -1625,7 +1633,7 @@
     transition: var(--transition-colors);
     font-family: inherit;
     background: var(--color-brand-accent);
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-accent);
     text-decoration: none;
     width: 100%;
   }
@@ -1760,13 +1768,13 @@
   /* Free variant: the CTA is the filled invitation, matching the purchase CTA. */
   .content-detail__journey--free .content-detail__journey-cta {
     background: var(--color-brand-accent);
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-accent);
     border-color: transparent;
   }
 
   .content-detail__journey--free .content-detail__journey-cta:hover {
     background: var(--color-brand-accent-hover);
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-accent);
   }
 
   .content-detail__journey-arrow {
