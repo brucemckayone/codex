@@ -15,9 +15,15 @@
  *   pnpm db:seed does not create duplicates
  * - Existing objects are found by metadata tag (codex_seed_user_id,
  *   codex_seed_subscription_id) before attempting to create new ones
+ * - Every lookup, idempotency key and created object is scoped to the seed
+ *   env id (`codex_seed_env`, see stripe-cleanup.ts). The Stripe test account
+ *   is shared by every environment, so an unscoped lookup made one
+ *   environment reuse — and its E2E cancel flows mutate — another
+ *   environment's customers and subscriptions (Codex-1ilxl).
  */
 
 import type Stripe from 'stripe';
+import { SEED_ENV_METADATA_KEY } from './stripe-cleanup';
 
 /**
  * Synthetic fallback IDs used when STRIPE_SECRET_KEY is not set.
@@ -106,11 +112,12 @@ interface SeedSubscriptionResult {
  */
 export async function createOrFindStripeCustomer(
   stripe: Stripe,
-  user: SeedStripeUser
+  user: SeedStripeUser,
+  seedEnv: string
 ): Promise<Stripe.Customer> {
   // Step 1 — metadata search (durable across idempotency key expiry)
   const existing = await stripe.customers.search({
-    query: `metadata['codex_seed_user_id']:'${user.id}' AND metadata['codex_seed']:'true'`,
+    query: `metadata['codex_seed_user_id']:'${user.id}' AND metadata['codex_seed']:'true' AND metadata['${SEED_ENV_METADATA_KEY}']:'${seedEnv}'`,
     limit: 1,
   });
 
@@ -127,10 +134,11 @@ export async function createOrFindStripeCustomer(
         metadata: {
           codex_seed_user_id: user.id,
           [SEED_METADATA_TAG]: 'true',
+          [SEED_ENV_METADATA_KEY]: seedEnv,
         },
       },
       {
-        idempotencyKey: `seed_customer_${user.id}`,
+        idempotencyKey: `seed_customer_${seedEnv}_${user.id}`,
       }
     );
   } catch (error) {
@@ -188,6 +196,8 @@ interface CreateSubscriptionArgs {
   /** Codex subscription id — used as the primary idempotency/metadata key. */
   subscriptionSeedId: string;
   billingInterval: 'month' | 'year';
+  /** Owning environment id — see `resolveSeedEnv` in stripe-cleanup.ts. */
+  seedEnv: string;
 }
 
 /**
@@ -208,17 +218,17 @@ export async function createOrFindStripeSubscription(
   stripe: Stripe,
   args: CreateSubscriptionArgs
 ): Promise<SeedSubscriptionResult> {
-  const { user, tier, subscriptionSeedId, billingInterval } = args;
+  const { user, tier, subscriptionSeedId, billingInterval, seedEnv } = args;
 
   // Ensure the customer exists first (idempotent).
-  const customer = await createOrFindStripeCustomer(stripe, user);
+  const customer = await createOrFindStripeCustomer(stripe, user, seedEnv);
 
   // Ensure a default payment method so subscriptions.create can charge.
   await ensureDefaultPaymentMethod(stripe, customer);
 
   // Step 1 — search for an existing seed subscription by metadata.
   const existing = await stripe.subscriptions.search({
-    query: `metadata['codex_seed_subscription_id']:'${subscriptionSeedId}' AND metadata['codex_seed']:'true'`,
+    query: `metadata['codex_seed_subscription_id']:'${subscriptionSeedId}' AND metadata['codex_seed']:'true' AND metadata['${SEED_ENV_METADATA_KEY}']:'${seedEnv}'`,
     limit: 5,
   });
 
@@ -253,12 +263,13 @@ export async function createOrFindStripeSubscription(
           codex_seed_user_id: user.id,
           codex_seed_tier_id: tier.id,
           [SEED_METADATA_TAG]: 'true',
+          [SEED_ENV_METADATA_KEY]: seedEnv,
         },
         // Payment is charged immediately from default_payment_method attached above.
         payment_behavior: 'allow_incomplete',
       },
       {
-        idempotencyKey: `seed_subscription_${subscriptionSeedId}`,
+        idempotencyKey: `seed_subscription_${seedEnv}_${subscriptionSeedId}`,
       }
     );
 
