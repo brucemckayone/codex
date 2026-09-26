@@ -11,6 +11,7 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext, sampleStages } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import CurriculumBlock from './CurriculumBlock.svelte';
+import { CURRICULUM_COPY } from './copy';
 import { CURRICULUM_EMPTY, curriculumDefinition } from './definition';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -94,10 +95,19 @@ describe('CurriculumBlock', () => {
 
   it('reads a practice’s kind by its icon, and says it to a screen reader', async () => {
     await render(SAMPLE);
-    const [first, , , fourth] = practiceRows();
-    expect(first.querySelector('svg')).not.toBeNull();
-    expect(first.querySelector('.sr-only')?.textContent).toBe(', audio');
-    expect(fourth.querySelector('.sr-only')?.textContent).toBe(', reading');
+    const rows = practiceRows();
+    const practices = STAGES.flatMap((stage) => stage.practices);
+    // The sample must exercise every kind, or this proves nothing.
+    expect(new Set(practices.map((p) => p.contentType))).toEqual(
+      new Set(['video', 'audio', 'written'])
+    );
+    rows.forEach((row, i) => {
+      expect(row.querySelector('svg')).not.toBeNull();
+      expect(row.querySelector('.sr-only')?.textContent).toBe(
+        `, ${CURRICULUM_COPY.type(practices[i].contentType)}`
+      );
+    });
+    expect(CURRICULUM_COPY.type('written')).toBe('reading');
   });
 
   it('orders the stages and their practices as the course does', async () => {
