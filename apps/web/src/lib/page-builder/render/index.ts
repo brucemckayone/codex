@@ -22,34 +22,31 @@ export {
   type BuilderContextInput,
   builderSalesContext,
 } from './builder-context';
-export { default as CtaLink } from './CtaLink.svelte';
-// The prop-coercion layer + the BUILDER→RENDERER key map (Codex-tqr51). Exported
-// so the round-trip guard in `components/page-builder/section-fields.test.ts` can
-// assert every writable key is read — the allowed import direction (editor UI may
-// import the public tree, never the reverse).
+// The prop-coercion layer + the BUILDER→RENDERER key map (Codex-tqr51), trimmed
+// (WP-9a) to the names still read outside this module: `asString` by checkout,
+// `asObjectArray`/`fieldBool`/`fieldString` by `offer-paths.ts`, `asNumberedGroups`
+// by `kit/model/legacy/read-helpers.ts`, and `SECTION_PROP_ALIASES` by both
+// `kit/model/legacy/prop-mappers.ts` and `./editable`.
 export {
-  aliasKeys,
-  asBool,
   asNumberedGroups,
   asObjectArray,
-  asParagraphsFrom,
   asString,
-  asStringArray,
-  asStringFrom,
-  asStringsFrom,
   fieldBool,
   fieldString,
   SECTION_PROP_ALIASES,
 } from './coerce';
 /**
- * THE STUDIO CANVAS'S INLINE-EDIT SEAM, built once for all eleven sections (F38).
+ * THE STUDIO CANVAS'S INLINE-EDIT SEAM (F38).
  *
- * `editFieldLabel` / `editFieldName` are exported for a round-trip guard: the
- * accessible names restate the editor's own field labels, and this module cannot
- * import `components/page-builder/section-fields.ts` to derive them — that is the
- * banned direction under the CE-4 boundary. The EDITOR side may import this tree,
- * so a test in `components/page-builder/section-fields.test.ts` can pin the two
- * vocabularies together. See the handoff.
+ * `editFieldLabel` / `editFieldName` are exported so an accessible name can
+ * restate a field's own label without this module importing the editor's field
+ * definitions — that is the banned direction under the CE-4 boundary. The EDITOR
+ * side may import this tree (never the reverse).
+ *
+ * The legacy nine-axis editor's round-trip guard (`section-fields.test.ts`,
+ * pinning this against `SECTION_FIELDS`) was deleted with the rest of that
+ * editor (WP-9a); the v2 editor's field vocabulary lives in `kit/model/fields.ts`
+ * and has not yet grown an equivalent pin.
  */
 export {
   type EditFieldCommit,
@@ -57,42 +54,6 @@ export {
   editFieldLabel,
   editFieldName,
 } from './editable';
-export { default as JourneyRenderer } from './JourneyRenderer.svelte';
-/**
- * ONE section's wrapper + component invocation. Exported for the studio canvas,
- * which owns its own section loop (it interleaves per-block editing chrome) and
- * so needs the per-section half of the render seam without the array-level half
- * (Codex-eckbx W1-W3).
- */
-export { default as SectionFrame } from './SectionFrame.svelte';
-export { default as SectionRenderer } from './SectionRenderer.svelte';
-export {
-  /**
-   * WHICH section may borrow the course title. Exported for the studio canvas,
-   * which owns its own section loop and must therefore resolve the claim the way
-   * `SectionRenderer` does and pass the result to each `SectionFrame` — otherwise
-   * its sections self-hide a heading the published page shows. It does not do that
-   * yet; see the handoff.
-   */
-  claimTitleFallback,
-  type PageShapeIssue,
-  type RenderableSection,
-  resolveSectionComponent,
-  SECTION_COMPONENTS,
-  type SectionComponent,
-  type SectionComponentProps,
-  selectRenderableSections,
-  /**
-   * A page's SECTION COMPOSITION, validated. Exported for the studio's publish
-   * action, which blocks on the `error` severities — it currently reaches this
-   * function by importing `render/section-registry` directly, because the export
-   * was not here when it was written, and should be pointed at this barrel. Read
-   * {@link PageShapeIssue.severity} first: it records which halves of the
-   * enforcement are wired and which are not.
-   */
-  validatePageShape,
-} from './section-registry';
-
 export type {
   AcheSectionProps,
   FaqEntry,
