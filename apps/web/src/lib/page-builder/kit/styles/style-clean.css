@@ -1,0 +1,36 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — CLEAN
+
+   Image-led and crisp. The boldness is spent on IMAGERY AND AIR: generous
+   section padding, images at a real size with the brand's own radius, and
+   confident but not oversized type. Hairlines instead of fills, alternating
+   page / tint bands.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='clean'] {
+  --lp-size-display: calc(clamp(2.5rem, 0.9rem + 5.6cqi, 5.5rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 2.9cqi, 3.4rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1rem + 0.8cqi, 1.55rem) * var(--lp-scale));
+
+  --lp-leading-display: 1.02;
+  --lp-leading-heading: 1.08;
+  --lp-leading-title: 1.2;
+
+  --lp-tracking-display: -0.022em;
+  --lp-tracking-heading: -0.018em;
+
+  --lp-radius-card: var(--radius-lg);
+  --lp-radius-media: var(--radius-lg);
+  --lp-radius-button: var(--radius-md);
+
+  --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 6cqi, var(--space-32));
+  --lp-pad-spacious: clamp(var(--space-24), var(--space-12) + 9cqi, calc(var(--space-32) * 1.25));
+  --lp-container: 74rem;
+  --lp-measure-lead: 42ch;
+
+  /* The image settles into place while the words rise beside it. */
+  --lp-enter-headline: lp-rise-soft var(--duration-slower) var(--ease-smooth) both;
+  --lp-enter-copy: lp-rise-soft var(--duration-slower) var(--ease-smooth)
+    var(--lp-stagger) both;
+  --lp-enter-media: lp-settle var(--duration-slowest) var(--ease-smooth) both;
+}

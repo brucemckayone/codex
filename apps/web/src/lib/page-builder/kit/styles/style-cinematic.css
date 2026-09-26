@@ -1,0 +1,43 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — CINEMATIC
+
+   Dark and immersive, dark in BOTH themes (the one documented exception to
+   following the viewer's theme, contract §4 — `schemes.css` routes this Style
+   to the dark pole). The boldness is spent on MEDIA: full-bleed imagery behind
+   luminous type, a slow reveal, and a brand-tinted glow where there is no
+   image. Pill buttons; the secondary is a ghost.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='cinematic'] {
+  /* A deep, brand-tinted room — unless the org chose its own dark ground. */
+  --lp-dark-ground-in: var(
+    --brand-bg-dark,
+    oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
+  );
+  --lp-tint-soft: 10%;
+
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale));
+
+  --lp-leading-display: 0.98;
+  --lp-leading-heading: 1.02;
+
+  --lp-tracking-display: -0.02em;
+  --lp-tracking-heading: -0.015em;
+  --lp-tracking-label: 0.04em;
+  --lp-weight-label: var(--font-medium);
+
+  --lp-radius-card: var(--radius-lg);
+  --lp-radius-media: var(--radius-md);
+  --lp-radius-button: var(--radius-full);
+
+  --lp-button-pad: var(--space-7);
+  --lp-atmos-strength: 0.5;
+
+  /* The image arrives slowly behind the words; the words follow it. */
+  --lp-enter-media: lp-reveal calc(var(--duration-slowest) * 2) var(--ease-smooth) both;
+  --lp-enter-headline: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 4) both;
+  --lp-enter-copy: lp-fade var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 6) both;
+}
