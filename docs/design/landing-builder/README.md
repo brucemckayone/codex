@@ -46,10 +46,12 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | WP | State | Notes |
 |---|---|---|
 | 1 | **done** `dd152aaf` | 561 validation + 123 web tests; provenance fix for hero/faq added by orchestrator (falsified) |
-| 2 | running | |
+| 2 | **done** `d193b38a` | 241 kit tests; svelte-check 0 new; visually approved in all 4 Styles, dark brand, dark theme, mobile. Follow-up: centre a lone offer card in Soft `cards` |
 | 10a | **done** | upload route + processing + save-time orphan diff + migration 0095; 98+380+230+24 tests; live upload smoke-tested. Gaps: abandoned uploads not swept (needs a reference-aware sweep check), cdnBase must reach the kit context (WP6/7b), page duplication would share prefixes (WP11) |
 | 7a | **done** | store v2 actions + autosave controller; 311 tests across 13 files; web tsc clean |
-| 3–11 | not started | |
+| 3 | running | video · preview · instructor · stats |
+| 4 | running | problem · transformation · benefits · text |
+| 5, 6, 7b, 8, 9, 10b, 11 | not started | |
 
 ## Resume
 
