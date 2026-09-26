@@ -27,6 +27,7 @@ import {
 } from '$lib/page-builder/autosave.svelte';
 import {
   type PersistedPageOffer,
+  type SavePagePayload,
   saveBuilderDraft,
 } from '$lib/page-builder/builder-save';
 import {
@@ -39,6 +40,7 @@ import {
   type TemplateContext,
   validateKitShape,
 } from '$lib/page-builder/kit';
+import { isSectionTypeId } from '$lib/page-builder/kit/model/ids';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -296,6 +298,23 @@ export function createBuilderSession(options: {
     return sameValue(now, expected);
   }
 
+  /**
+   * The save body accepts only v2 section types (WP-9b). An upgraded page
+   * holds nothing else, so this narrows the TYPE for the remote rather than
+   * changing data — a stray non-v2 section (impossible after `upgradePage`)
+   * is dropped instead of 400-ing the whole save.
+   */
+  function toV2SaveBody(input: SavePagePayload) {
+    return {
+      ...input,
+      sections: input.sections.flatMap((section) =>
+        isSectionTypeId(section.type)
+          ? [{ ...section, type: section.type }]
+          : []
+      ),
+    };
+  }
+
   async function saveNow(): Promise<AutosaveSaveResult> {
     if (!isDirty) return { ok: true };
     const payload = pageBuilder.getSavePayload();
@@ -308,7 +327,7 @@ export function createBuilderSession(options: {
       pageId: rowId,
       payload,
       savedOffer: pageBuilder.saved?.offer,
-      savePage: saveJourneyPage,
+      savePage: (input) => saveJourneyPage(toV2SaveBody(input)),
       saveOffer: updateJourneyOffer,
       monetisation: {
         isDirty: monetisation.isDirty,
@@ -321,7 +340,8 @@ export function createBuilderSession(options: {
       },
       syncOffer: (next) => {
         synced = next;
-        pageBuilder.updateOffer(next);
+        // The server's normalised offer, not a creator edit — no undo step.
+        pageBuilder.updateOffer(next, { record: false });
       },
       markSaved: () => {
         // Autosave is a checkpoint, not a commit point: keep the undo stack.

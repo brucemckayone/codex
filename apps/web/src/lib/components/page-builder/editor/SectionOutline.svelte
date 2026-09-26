@@ -14,6 +14,7 @@
   import {
     EyeIcon,
     EyeOffIcon,
+    GripVerticalIcon,
     MoreHorizontalIcon,
     PlusIcon,
   } from '$lib/components/ui/Icon';
@@ -177,6 +178,7 @@
             onpointerup={handlePointerUp}
             onpointercancel={() => (drag = null)}
           >
+            <span class="outline__grip" aria-hidden="true"><GripVerticalIcon size={14} /></span>
             <span class="outline__icon" aria-hidden="true"><Icon size={16} /></span>
             <span class="outline__label">{label}</span>
             {#if hidden}
@@ -414,6 +416,23 @@
   .outline__add:hover {
     border-style: solid;
     color: var(--color-text);
+  }
+
+  /* The drag affordance: the whole row drags, the grip says so on hover. */
+  .outline__grip {
+    display: grid;
+    flex: none;
+    margin-inline: calc(var(--space-1) * -1);
+    color: var(--color-text-secondary);
+    opacity: 0;
+    cursor: grab;
+    transition: opacity var(--duration-fast) var(--ease-default);
+  }
+
+  .outline__row:hover .outline__grip,
+  .outline__row[data-dragging] .outline__grip,
+  .outline__main:focus-visible .outline__grip {
+    opacity: 1;
   }
 
   .outline__main:focus-visible,

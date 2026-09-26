@@ -1204,6 +1204,15 @@ describe('pageBuilder — page-level edits are part of the history', () => {
     expect(pageBuilder.canUndo).toBe(true);
   });
 
+  it('adopting the server-normalised offer (record: false) adds no undo step', () => {
+    pageBuilder.updateMeta('title', 'Renamed');
+    pageBuilder.updateOffer({ oneOffEnabled: null }, { record: false });
+    expect(pageBuilder.pending?.offer?.oneOffEnabled).toBeNull();
+    pageBuilder.undo();
+    // The one undo reaches the creator's real edit, not the invisible sync.
+    expect(pageBuilder.pending?.title).not.toBe('Renamed');
+  });
+
   it('an undo aimed at the last edit does not destroy the title or the price behind it', () => {
     // The exact sequence from the report: edit a section, then rename the page and
     // set a one-off price, then press Cmd+Z once to take back the last thing.

@@ -988,10 +988,20 @@ function updateSeo(patch: Partial<PageSeo>): void {
  * `syncOffer` calls this with the bag the server just persisted, immediately
  * before `markSaved()` clears the history, so the post-save write costs nothing.
  */
-function updateOffer(patch: Partial<PageOffer>): void {
+/**
+ * `record: false` is for adopting what the SERVER normalised after a save
+ * (e.g. offer flags false → null): it is not a creator edit, so it must not
+ * become an undo step that visibly does nothing.
+ */
+function updateOffer(
+  patch: Partial<PageOffer>,
+  options: { record?: boolean } = {}
+): void {
   if (!state.pending) return;
   if (patchIsNoop(state.pending.offer, patch)) return;
-  snapshotEdit(`offer:${Object.keys(patch).join(',')}`);
+  if (options.record !== false) {
+    snapshotEdit(`offer:${Object.keys(patch).join(',')}`);
+  }
   state.pending.offer = { ...(state.pending.offer ?? {}), ...patch };
 }
 

@@ -49,8 +49,8 @@
   } from './editor-state';
   import Inspector from './Inspector.svelte';
   import { sectionLabel } from './outline';
+  import SectionGallery from './SectionGallery.svelte';
   import SectionOutline from './SectionOutline.svelte';
-  import SectionPicker from './SectionPicker.svelte';
   import type { SectionAction } from './SectionToolbar.svelte';
   import StylePanel from './StylePanel.svelte';
   import TopBar from './TopBar.svelte';
@@ -99,8 +99,8 @@
 
   const sections = $derived(pageBuilder.sections);
   const selectedId = $derived(pageBuilder.selectedSectionId);
-  const selected = $derived(pageBuilder.selectedSection);
-  const styleLabel = $derived(STYLES[resolveStyle(session.page?.design)].label);
+  const pageStyle = $derived(resolveStyle(session.page?.design));
+  const styleLabel = $derived(STYLES[pageStyle].label);
   const theme = $derived(previewTheme ?? themeState.theme);
   const placement = $derived(
     inspectorPlacement({
@@ -320,7 +320,14 @@
           />
         </Tabs.Content>
         <Tabs.Content value="style">
-          <StylePanel {styleLabel} />
+          {#if session.page}
+            <StylePanel
+              page={session.page}
+              context={session.context}
+              brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
+              {theme}
+            />
+          {/if}
         </Tabs.Content>
         <Tabs.Content value="offer">
           <PagePricingPanel />
@@ -423,13 +430,28 @@
         aria-label={m.studio_page_editor_inspector_label()}
         hidden={!inspectorShown}
       >
-        <Inspector sectionLabel={selected ? sectionLabel(selected) : null} />
+        {#if session.page}
+          <Inspector
+            page={session.page}
+            {selectedId}
+            context={session.context}
+            brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
+            {theme}
+            onDuplicate={(id) => reveal(pageBuilder.duplicateSection(id))}
+            onToggle={(id) => pageBuilder.toggleSection(id)}
+            onDelete={remove}
+            onChangeStyle={() => (tab = 'style')}
+          />
+        {/if}
       </aside>
     {/if}
   </Tabs.Root>
 
-  <SectionPicker
+  <SectionGallery
     bind:open={pickerOpen}
+    style={pageStyle}
+    brandOverrides={pageBuilder.pending?.brandOverrides ?? null}
+    {theme}
     afterLabel={pickerAfterLabel}
     {counts}
     onChoose={choose}

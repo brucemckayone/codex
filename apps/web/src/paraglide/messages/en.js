@@ -14519,14 +14519,6 @@ export const studio_page_editor_inspector_close = () => `Close inspector`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_placeholder_tag = () => `Coming next`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_inspector_page_title = () => `This page`
 
 
@@ -14535,15 +14527,7 @@ export const studio_page_editor_inspector_page_title = () => `This page`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_inspector_page_body = () => `Select a section on the page or in the list to work on it.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_inspector_section_body = () => `Layout, colour, spacing and every field for this section will be set here. For now, type straight onto the page.`
+export const studio_page_editor_inspector_page_body = () => `Click any section on the page, or in the list, to change its layout, colour and words.`
 
 
 /**
@@ -14567,4 +14551,356 @@ export const studio_page_editor_style_current = (params) => `This page uses the 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_style_body = () => `Choosing between Bold, Clean, Soft and Cinematic arrives here next — the whole page re-composes when you switch.`
+export const studio_page_editor_style_body = () => `Pick how the whole page looks. Every section follows the Style unless you have chosen something else for it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_change_style = () => `Change style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_section_name = () => `Name in the list`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_section_name_hint = () => `Only you see this name. Leave it empty to use the section type.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_section_hidden = () => `This section is hidden. It is not on your page until you show it again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_section_hide = () => `Hide`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_section_show = () => `Show`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_layout_title = () => `Layout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_default_short = () => `Style default`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_with_default = (params) => `${params.name} (the Style’s default)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_title = () => `Colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_reset = () => `Use the Style’s default`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_base = () => `Page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_soft = () => `Tint`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_contrast = () => `Contrast`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_brand = () => `Brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_accent = () => `Second`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_spacing_title = () => `Spacing`
+
+
+/**
+ * @param {{ size: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_spacing_default = (params) => `${params.size} is the default for this layout.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_spacing_reset = () => `Use the default spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_content_title = () => `Content`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_char_count = (params) => `${params.count} / ${params.max}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_url_unsafe = () => `This link can’t be used on your page. Start it with https://, mailto: or # for a section on this page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_url_incomplete = () => `Start with https:// for another website, or # for a section on this page, like #pricing.`
+
+
+/**
+ * @param {{ field: NonNullable<unknown>, position: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_label = (params) => `${params.field}, item ${params.position}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_add = () => `Add another`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_move = (params) => `Move ${params.item}`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_remove = (params) => `Remove ${params.item}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_hint = () => `Drag to reorder, or press the up and down arrow keys.`
+
+
+/**
+ * @param {{ item: NonNullable<unknown>, position: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_moved = (params) => `${params.item} moved to position ${params.position} of ${params.total}`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_rows_full = (params) => `That’s the most this section shows (${params.max}).`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_media_shared = () => `The same image or clip is used everywhere this journey shows it. You can also change it under Settings.`
+
+
+/**
+ * @param {{ section: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_gallery_add = (params) => `Add ${params.section}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_style_in_use = () => `In use`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_title = () => `Page brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_body = () => `Colours and fonts for this page only. Anything you don’t change follows your organisation’s brand.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_primary = () => `Brand colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_secondary = () => `Second colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_heading_font = () => `Heading font`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_body_font = () => `Body font`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_inherited = () => `From your organisation’s brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_overridden = () => `This page only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_reset = () => `Use organisation brand`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_change = () => `Change`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_brand_close = () => `Done`

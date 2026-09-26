@@ -49,6 +49,22 @@ describe('brandOverridesToCssVars', () => {
     expect(vars['--brand-font-body']).toBe('Inter');
   });
 
+  it('carries a page brand colour into dark mode unless the page sets its own dark value', () => {
+    const carried = brandOverridesToCssVars({
+      primaryColor: '#1f6f5c',
+      backgroundColor: '#fafafa',
+    });
+    expect(carried['--brand-color-dark']).toBe('#1f6f5c');
+    // A light background is never mirrored into dark mode.
+    expect(carried).not.toHaveProperty('--brand-bg-dark');
+
+    const explicit = brandOverridesToCssVars({
+      primaryColor: '#1f6f5c',
+      darkOverrides: { primaryColor: '#7fd1bd' },
+    });
+    expect(explicit['--brand-color-dark']).toBe('#7fd1bd');
+  });
+
   it('emits dark colour variants under the -dark suffix', () => {
     const vars = brandOverridesToCssVars({
       darkOverrides: { primaryColor: '#88aaff', backgroundColor: '#000000' },

@@ -6,15 +6,21 @@
   the small menu at the end, behind a confirmation. Nothing else belongs here.
 -->
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { type Component, tick } from 'svelte';
   import * as Dialog from '$lib/components/ui/Dialog';
   import * as DropdownMenu from '$lib/components/ui/DropdownMenu';
   import {
     ArrowLeftIcon,
     CheckIcon,
+    DesktopIcon,
     ExternalLinkIcon,
+    MobileIcon,
     MoreHorizontalIcon,
+    RedoIcon,
+    TabletIcon,
+    UndoIcon,
   } from '$lib/components/ui/Icon';
+  import type { IconProps } from '$lib/components/ui/Icon/types';
   import * as m from '$paraglide/messages';
   import type { SessionBusy } from './builder-session.svelte';
   import {
@@ -71,6 +77,12 @@
     desktop: () => m.studio_builder_device_desktop(),
     tablet: () => m.studio_builder_device_tablet(),
     mobile: () => m.studio_builder_device_mobile(),
+  };
+
+  const DEVICE_ICONS: Record<Device, Component<IconProps>> = {
+    desktop: DesktopIcon,
+    tablet: TabletIcon,
+    mobile: MobileIcon,
   };
 
   const CHIP_LABELS: Record<StatusChip, () => string> = {
@@ -136,13 +148,16 @@
 
   <div class="topbar__devices" role="group" aria-label={m.studio_builder_device_label()}>
     {#each DEVICES as option (option)}
+      {@const DeviceIcon = DEVICE_ICONS[option]}
       <button
         type="button"
         class="topbar__device"
         aria-pressed={device === option}
+        aria-label={DEVICE_LABELS[option]()}
+        title={DEVICE_LABELS[option]()}
         onclick={() => onDevice(option)}
       >
-        {DEVICE_LABELS[option]()}
+        <DeviceIcon size={16} />
       </button>
     {/each}
   </div>
@@ -151,18 +166,24 @@
     <div class="topbar__history" role="group" aria-label={m.studio_builder_history_label()}>
       <button
         type="button"
-        class="topbar__quiet"
+        class="topbar__quiet topbar__icon"
+        aria-label={m.studio_builder_undo()}
         title={m.studio_builder_undo_title()}
         disabled={!canUndo}
-        onclick={onUndo}>{m.studio_builder_undo()}</button
+        onclick={onUndo}
       >
+        <UndoIcon size={16} />
+      </button>
       <button
         type="button"
-        class="topbar__quiet"
+        class="topbar__quiet topbar__icon"
+        aria-label={m.studio_builder_redo()}
         title={m.studio_builder_redo_title()}
         disabled={!canRedo}
-        onclick={onRedo}>{m.studio_builder_redo()}</button
+        onclick={onRedo}
       >
+        <RedoIcon size={16} />
+      </button>
     </div>
 
     <span class="topbar__save" role="status" data-state={save}>
@@ -361,7 +382,11 @@
   }
 
   .topbar__device {
-    padding: var(--space-1) var(--space-3);
+    display: inline-grid;
+    place-items: center;
+    min-inline-size: var(--space-10);
+    min-block-size: var(--space-8);
+    padding: 0 var(--space-2);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -389,6 +414,14 @@
     color: var(--color-text-secondary);
     font: inherit;
     cursor: pointer;
+  }
+
+  .topbar__icon {
+    display: inline-grid;
+    place-items: center;
+    min-inline-size: var(--space-8);
+    min-block-size: var(--space-8);
+    padding: 0;
   }
 
   .topbar__quiet:hover:not(:disabled),
