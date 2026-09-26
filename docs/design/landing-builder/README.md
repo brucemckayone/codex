@@ -1,0 +1,53 @@
+# Landing page builder — full redesign
+
+**Why.** After three passes on the nine-axis model (#498, #503) the owner's verdict on the journey
+sales-page builder was "underwhelming… the designs are kind of rubbish… a bad setup — totally
+redesign it". Measured on 2026-09-26 against the seeded pages:
+
+- every look renders a centred text stack on an empty stage; imagery and atmosphere were wired only
+  to the Candlelit look;
+- free / not-yet-open journeys (seeded Bone Deep) render **no CTA at all**;
+- the ache section silently re-uses the hero's sub-line; a £49 one-off card says "Cancel anytime";
+  grey panels read as disabled;
+- the builder asks creators to juggle "Look" vs "Design" vs "Layout", 40 jargon values across nine
+  axes and 63 compositions; look presets are text-only cards; the canvas renders at 50%.
+
+**What.** A new page kit: one **Style** per page (Bold · Clean · Soft · Cinematic), 2–4 designed
+**layouts** per section, five brand-derived **colour schemes**, a **spacing** size; plain-named
+sections (14 types); a canvas-first editor with autosave. The binding spec is
+[`01-contract.md`](01-contract.md).
+
+**Where.** Worktree `/Users/brucemckay/development/Codex-landing-redesign`, branch
+`feat/landing-builder-redesign` off `origin/dev@46677c68`. One PR to `dev` at the end. The dev stack
+runs from this worktree (`pnpm dev` at its root; web on `lvh.me:3000`).
+
+## Work packages
+
+Max two agents at a time. Each WP ends with the orchestrator's gate (contract §9) and a commit.
+
+| WP | Title | Territory | Depends on | Round |
+|---|---|---|---|---|
+| 1 | Model: v2 validation keys, upgrade + legacy maps, id parity, offer-paths accepts `pricing` | `packages/validation`, `packages/shared-types`, `kit/model/upgrade*`, `kit/model/legacy/*`, `offer-paths.ts` | — | 1 |
+| 2 | Kit foundation: styles, schemes, primitives, shell, renderer, registry (all 14 folders), resolve/cta/shape/template, dev preview route; flagship **hero · pricing · cta** | `kit/**` except model/ids,types,upgrade; `studio/page-kit/**` | — | 1 |
+| 3 | Blocks: video · preview · instructor · stats | `kit/blocks/{video,preview,instructor,stats}` | 2 | 2 |
+| 4 | Blocks: problem · transformation · benefits · text | `kit/blocks/{problem,transformation,benefits,text}` | 2 | 2 |
+| 5 | Blocks: curriculum · testimonials · faq | `kit/blocks/{curriculum,testimonials,faq}` | 2 | 3 |
+| 6 | Public switch: sales page, checkout, dashboard read the kit + upgrade; delete legacy renderer | public journey routes, `render/**`, legacy css | 1, 3, 4, 5 | 4 |
+| 7 | Editor A: shell, top bar, outline, true-scale canvas, selection + inline edit, insert points, autosave, store v2 methods | `components/page-builder/editor/**` (shell files), `page-builder-store*`, `studio/journeys/[id]/page-next/**` | 1, 2 | 3 |
+| 8 | Editor B: inspector, layout/scheme/spacing pickers with live mini-renders, fields, section gallery, Style tab + page brand | `components/page-builder/editor/**` (inspector files) | 7 | 4 |
+| 9 | Builder switch + backend defaults: studio route → new editor, delete legacy editor, new-page template + `NEW_PAGE_DESIGN`, seeds, validation prunes legacy keys | studio journey page route, `components/page-builder/*` (legacy), `packages/access`, seeds | 6, 8 | 5 |
+| 10 | Images anywhere: per-section image upload + background images for hero/cta + an image block | content-api route, image-processing, kit media | 9 | 5 |
+| 11 | Verification + polish: multi-brand × Style × theme sweep, axe, contrast matrix, responsive, perf, codex-review, PR | cross-cutting (fixes routed back) | all | 6 |
+
+## Status
+
+| WP | State | Notes |
+|---|---|---|
+| 1 | not started | |
+| 2 | not started | |
+| 3–11 | not started | |
+
+## Resume
+
+Read `01-contract.md` (binding), then this table, then `git log --oneline origin/dev..HEAD` in the
+worktree. Memory: `project_landing_builder_redesign_2026_09_26.md`.
