@@ -30,6 +30,15 @@ import type {
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
 import {
+  isColourSchemeId,
+  isLayoutOf,
+  isSectionSpacingId,
+  isSectionTypeId,
+  type PageStyleId,
+  type SectionTypeId,
+} from './kit/model/ids';
+import type { SectionStyle } from './kit/model/types';
+import {
   createSection,
   findSectionDefinition,
   resolveDesign,
@@ -716,6 +725,141 @@ function setSectionDesignAxis<A extends keyof SectionDesign>(
   }
 }
 
+// ── Page-kit v2 actions (docs/design/landing-builder/01-contract.md §3/§7,
+//    WP-7a) ────────────────────────────────────────────────────────────────
+// The NEW editor (WP7/WP8) calls `upgradePage()` before handing a page to
+// `open()`, so by the time these run `pending` already holds v2 vocabulary:
+// `design.style` (not the legacy nine axes), and each section's `variant` is
+// a LAYOUT id while its `design` is a `SectionStyle` (`{ scheme?, spacing? }`,
+// not the legacy axis bag). `SectionDesign` (`@codex/shared-types`) carries
+// both roles on one interface (see its own doc comment), which is what lets
+// `pending.design`/`section.design` hold either shape without a cast.
+//
+// These four are the v2 counterparts of `setPageDesign` / `setSectionVariant`
+// / `setSectionDesignAxis` / `addSection` — purely ADDITIVE, so the OLD editor
+// and the five legacy actions above keep working unchanged until WP9 deletes
+// them. None of the four below calls `createSection`, `resolveDesign` or
+// `sectionDesignForType`: those three encode the LEGACY nine-axis rhythm and
+// have no v2 concept at all (`kit/model/resolve.ts`, WP2, owns v2 resolution).
+
+/**
+ * Set the page's v2 Style (`kit/model/ids.ts` `PageStyleId`) — the Style tab's
+ * write (contract §7). `design` is the same bag the legacy nine axes live on
+ * (see the section header above), so this MERGES rather than replaces: a page
+ * that still carries other `design` keys keeps them.
+ */
+function setPageStyle(style: PageStyleId): void {
+  if (!state.pending) return;
+  if (state.pending.design?.style === style) return;
+  snapshot();
+  state.pending.design = { ...state.pending.design, style };
+}
+
+/**
+ * Set one section's v2 layout (`variant` holds the layout id; contract §3).
+ * `isLayoutOf` is the single source of truth for which layouts exist per type
+ * (`kit/model/ids.ts`, mirrored by the server's write-time validator) — a
+ * layout invalid for this section's type is IGNORED rather than stored,
+ * matching the "never emit an attribute that matches no CSS rule" discipline
+ * `SectionDesign`'s own doc comment states for an unknown axis value.
+ * `section.type` is checked against `SectionTypeId` first because
+ * {@link PageSection.type} is a widenable `string` — a legacy row's raw type
+ * is never a valid layout target.
+ */
+function setSectionLayout(id: string, layout: string): void {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return;
+  const section = state.pending.sections[i];
+  if (!isSectionTypeId(section.type) || !isLayoutOf(section.type, layout)) {
+    return;
+  }
+  if (section.variant === layout) return;
+  snapshot();
+  section.variant = layout;
+}
+
+/**
+ * Merge a partial v2 `SectionStyle` (`{ scheme?, spacing? }`) into one
+ * section's `design` — the inspector's Colour/Spacing controls (contract §3,
+ * §7). Mirrors {@link setSectionDesignAxis}'s absence-means-inherited
+ * contract exactly: a key patched to `undefined` is REMOVED (so "back to the
+ * Style default" is expressible — `kit/model/resolve.ts` resolves an absent
+ * key from the page's Style), and the whole bag is dropped once empty, since
+ * absence is the only round-trip-stable representation through the save.
+ *
+ * Each key is validated against its `kit/model/ids.ts` guard before being
+ * written. A `<select>`'s `.value` is always a plain `string`, so an invalid
+ * value can reach here even though the parameter's TYPE says otherwise; an
+ * invalid value is IGNORED — the existing value, if any, is left standing —
+ * matching {@link setSectionLayout}'s own "ignore, don't store" rule. If
+ * nothing in the patch was both valid and different, this takes no undo step
+ * and does not dirty the draft (the same no-op discipline
+ * {@link updateBrandOverrides}/{@link updateSeo}/{@link updateOffer} already
+ * apply to their own merges, needed here for the same reason: a `<select>`
+ * can re-fire its current value on mount).
+ */
+function setSectionStyle(id: string, patch: Partial<SectionStyle>): void {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return;
+  const section = state.pending.sections[i];
+  const current = section.design;
+  const next: SectionDesign = { ...(current ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete next[key as 'scheme' | 'spacing'];
+    } else if (key === 'scheme' && isColourSchemeId(value)) {
+      next.scheme = value;
+    } else if (key === 'spacing' && isSectionSpacingId(value)) {
+      next.spacing = value;
+    }
+  }
+  if (sameBag(current, next)) return;
+  snapshot();
+  if (Object.keys(next).length === 0) delete section.design;
+  else section.design = next;
+}
+
+/**
+ * Insert a v2 section (contract §3): `{ id, type, enabled: true, props }` —
+ * deliberately NO `variant` and NO `design`. Both resolve from the page's
+ * Style the moment the renderer draws it (`kit/model/resolve.ts`), so a fresh
+ * v2 section carries no opinion until the creator picks one.
+ *
+ * This is why {@link addSection}'s catalogue seeding (`createSection` +
+ * {@link applyLookSignature}) is the wrong shape for v2 rather than merely an
+ * unneeded one: that path exists to stamp a legacy RHYTHM bag onto a new
+ * section, and a v2 section has no rhythm bag to stamp — `design` staying
+ * absent is the correct starting state, not a gap to backfill.
+ *
+ * `props` is shallow-copied so a caller handing in a shared literal (a
+ * `definition.sample`/`starter()` return reused across the section gallery)
+ * can never be mutated through this section later — the same defensive
+ * posture {@link duplicateSection} takes with `clone(src)`.
+ *
+ * Inserts after `afterId` when given and found, else appends — matching
+ * {@link addSection}'s own insertion rule. Focuses the new section and
+ * returns its id ('' when there is no open session).
+ */
+function addKitSection(
+  type: SectionTypeId,
+  props: Record<string, unknown>,
+  afterId?: string
+): string {
+  if (!state.pending) return '';
+  snapshot();
+  const section: PageSection = {
+    id: makeId(),
+    type,
+    enabled: true,
+    props: { ...props },
+  };
+  const from = afterId ? indexOf(afterId) : -1;
+  const at = from >= 0 ? from + 1 : state.pending.sections.length;
+  state.pending.sections.splice(at, 0, section);
+  state.selectedSectionId = section.id;
+  return section.id;
+}
+
 /** Move a section to an absolute index (the drag-reorder drop target). */
 function moveSectionTo(id: string, toIndex: number): void {
   const from = indexOf(id);
@@ -946,6 +1090,11 @@ export const pageBuilder = {
   setSectionVariant,
   setPageDesign,
   setSectionDesignAxis,
+  // Page-kit v2 (WP-7a) — additive; see the section header above.
+  setPageStyle,
+  setSectionLayout,
+  setSectionStyle,
+  addKitSection,
   removeSection,
   moveSection,
   moveSectionTo,

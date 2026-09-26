@@ -586,6 +586,309 @@ describe('pageBuilder — design axes (F-B2)', () => {
   });
 });
 
+/**
+ * Page-kit v2 actions (docs/design/landing-builder/01-contract.md, WP-7a) —
+ * the additive counterparts of setPageDesign/setSectionVariant/
+ * setSectionDesignAxis/addSection the NEW editor drives. `open()` here is
+ * fed pages already shaped as `upgradePage()` would leave them — a
+ * `design.style` rather than the legacy nine axes, and a `variant` that is a
+ * LAYOUT id — exactly what the new editor's route hands the store.
+ */
+describe('pageBuilder — page-kit v2 actions (WP-7a)', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    let n = 0;
+    pageBuilder.setIdFactory(() => `new-${++n}`);
+    pageBuilder.open(
+      PAGE_ID,
+      makeSaved({
+        design: { style: 'clean' },
+        sections: [
+          makeSection({ id: 'sec-hero', type: 'hero' }),
+          makeSection({ id: 'sec-benefits', type: 'benefits' }),
+        ],
+      })
+    );
+  });
+
+  describe('setPageStyle', () => {
+    it('sets the page Style and marks dirty', () => {
+      pageBuilder.setPageStyle('bold');
+      expect(pageBuilder.pending?.design?.style).toBe('bold');
+      expect(pageBuilder.isDirty).toBe(true);
+    });
+
+    it('merges onto an existing design bag rather than replacing it', () => {
+      pageBuilder.close();
+      pageBuilder.open(
+        PAGE_ID,
+        makeSaved({ design: { width: 'wide' }, sections: [] })
+      );
+      pageBuilder.setPageStyle('soft');
+      expect(pageBuilder.pending?.design).toEqual({
+        width: 'wide',
+        style: 'soft',
+      });
+    });
+
+    it('is a no-op when the Style is already set — no undo step, not dirty', () => {
+      pageBuilder.setPageStyle('clean'); // already the current style
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.setPageStyle('cinematic');
+      pageBuilder.undo();
+      expect(pageBuilder.pending?.design?.style).toBe('clean');
+    });
+  });
+
+  describe('setSectionLayout', () => {
+    it('sets a valid layout for the section’s type', () => {
+      pageBuilder.setSectionLayout('sec-benefits', 'checklist');
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBe('checklist');
+      expect(pageBuilder.isDirty).toBe(true);
+    });
+
+    it('ignores a layout that does not belong to the section’s type', () => {
+      // 'theatre' is a `video` layout, not a `benefits` one.
+      pageBuilder.setSectionLayout('sec-benefits', 'theatre');
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBeUndefined();
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is a no-op for an unknown section id', () => {
+      pageBuilder.setSectionLayout('sec-nope', 'grid');
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.setSectionLayout('sec-benefits', 'split');
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBeUndefined();
+    });
+  });
+
+  describe('setSectionStyle', () => {
+    it('merges scheme and spacing independently', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      pageBuilder.setSectionStyle('sec-benefits', { spacing: 'spacious' });
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand', spacing: 'spacious' });
+    });
+
+    it('a key patched to undefined is REMOVED, not stored as undefined', () => {
+      pageBuilder.setSectionStyle('sec-benefits', {
+        scheme: 'brand',
+        spacing: 'spacious',
+      });
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: undefined });
+      const section = pageBuilder.sections.find((s) => s.id === 'sec-benefits');
+      expect(section?.design).toEqual({ spacing: 'spacious' });
+      expect(Object.keys(section?.design ?? {})).not.toContain('scheme');
+    });
+
+    it('clearing the last key drops the whole design bag', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'soft' });
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: undefined });
+      const section = pageBuilder.sections.find((s) => s.id === 'sec-benefits');
+      expect(section?.design).toBeUndefined();
+      expect(JSON.stringify(section)).not.toContain('design');
+    });
+
+    it('ignores an invalid id for a key and leaves the existing value standing', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      // @ts-expect-error — proving a runtime-invalid value (e.g. a stale
+      // <select>'s .value) is ignored rather than stored.
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'not-a-scheme' });
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand' });
+    });
+
+    it('takes no undo step and does not dirty the draft when nothing valid changes', () => {
+      // @ts-expect-error — same invalid-value proof as above, from a clean draft.
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'nonsense' });
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is a no-op for an unknown section id', () => {
+      pageBuilder.setSectionStyle('sec-nope', { scheme: 'brand' });
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step per call', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      pageBuilder.setSectionStyle('sec-benefits', { spacing: 'compact' });
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand' });
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toBeUndefined();
+    });
+  });
+
+  describe('addKitSection', () => {
+    it('inserts exactly {id, type, enabled, props} — no variant, no design', () => {
+      const id = pageBuilder.addKitSection('cta', { heading: 'Join now' });
+      expect(id).toBe('new-1');
+      const added = pageBuilder.sections.find((s) => s.id === id);
+      expect(added).toEqual({
+        id: 'new-1',
+        type: 'cta',
+        enabled: true,
+        props: { heading: 'Join now' },
+      });
+      expect(pageBuilder.selectedSectionId).toBe('new-1');
+    });
+
+    it('never goes through the legacy rhythm path — no design key materialises', () => {
+      // Falsifiable against `addSection`'s own behaviour: on an equivalent
+      // page shape `addSection('hero')` stamps several axes (see "a new
+      // section arrives with a rhythm" below). addKitSection must not.
+      const id = pageBuilder.addKitSection('hero', {});
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.design
+      ).toBeUndefined();
+    });
+
+    it('inserts after afterId, else appends', () => {
+      pageBuilder.addKitSection('cta', {}, 'sec-hero');
+      expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+        'sec-hero',
+        'new-1',
+        'sec-benefits',
+      ]);
+      pageBuilder.addKitSection('faq', {});
+      expect(pageBuilder.sections.at(-1)?.id).toBe('new-2');
+    });
+
+    it('shallow-copies props so a shared literal cannot be mutated through the store', () => {
+      const sample = { heading: 'Original' };
+      const id = pageBuilder.addKitSection('cta', sample);
+      sample.heading = 'Mutated after the fact';
+      expect(pageBuilder.sections.find((s) => s.id === id)?.props.heading).toBe(
+        'Original'
+      );
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.addKitSection('cta', {});
+      expect(pageBuilder.sections).toHaveLength(3);
+      pageBuilder.undo();
+      expect(pageBuilder.sections).toHaveLength(2);
+    });
+
+    it('setSectionProp keystroke bursts still coalesce for a v2 section', () => {
+      const id = pageBuilder.addKitSection('benefits', {});
+      pageBuilder.setSectionProp(id, 'heading', 'W');
+      pageBuilder.setSectionProp(id, 'heading', 'Wh');
+      pageBuilder.setSectionProp(id, 'heading', 'What you get');
+      pageBuilder.undo(); // undoes the whole typing burst, one step
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.props.heading
+      ).toBeUndefined();
+      pageBuilder.undo(); // undoes the add itself
+      expect(pageBuilder.sections.find((s) => s.id === id)).toBeUndefined();
+    });
+
+    it('setSectionProps round-trips a v2 array-of-objects prop', () => {
+      const items = [
+        { title: 'Weekly calls', detail: 'Live, recorded' },
+        { title: 'Workbook', detail: undefined },
+      ];
+      const id = pageBuilder.addKitSection('benefits', {});
+      pageBuilder.setSectionProps(id, { items });
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.props.items
+      ).toEqual(items);
+    });
+  });
+});
+
+/**
+ * v2 (page-kit) pages pass through open()/getSavePayload()/resetSection()/
+ * discard() untouched. These four are the ones WP-7a's brief called out for
+ * audit: NONE of them calls `createSection`/`resolveDesign`/
+ * `sectionDesignForType` (confirmed by reading — those three names appear
+ * nowhere near open/resetSection/discard/getSavePayload in this file), so
+ * each is a pure structural clone regardless of vocabulary. These tests prove
+ * that conclusion rather than just asserting it: a v2 page's `design.style`
+ * and a v2 section's `scheme`/`spacing` survive every one of these paths
+ * byte-for-byte, with no legacy axis key ever materialising alongside them.
+ * (The sessionStorage crash-recovery effect is the same kind of pure
+ * `JSON.stringify`/`JSON.parse` round trip and is not separately exercised
+ * here, matching the rest of this file's own choice not to drive it directly.)
+ */
+describe('pageBuilder — v2 (page-kit) pages pass through untouched', () => {
+  function makeV2Saved(): PageBuilderState {
+    return makeSaved({
+      design: { style: 'clean' },
+      sections: [
+        {
+          id: 'sec-hero',
+          type: 'hero',
+          enabled: true,
+          variant: 'split',
+          design: { scheme: 'brand', spacing: 'spacious' },
+          props: { heading: 'Come home' },
+        },
+      ],
+    });
+  }
+
+  beforeEach(() => {
+    pageBuilder.close();
+  });
+
+  it('open() seeds pending byte-identical to a v2 saved page', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    expect(pageBuilder.pending).toEqual(saved);
+    expect(pageBuilder.isDirty).toBe(false);
+  });
+
+  it('getSavePayload returns the v2 shape verbatim', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    expect(pageBuilder.getSavePayload()).toEqual(saved);
+  });
+
+  it('resetSection restores a v2 section’s exact saved bag, no legacy axis keys', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    pageBuilder.setSectionStyle('sec-hero', { scheme: 'accent' });
+    pageBuilder.resetSection('sec-hero');
+    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(hero?.design).toEqual({ scheme: 'brand', spacing: 'spacious' });
+    expect(Object.keys(hero?.design ?? {}).sort()).toEqual([
+      'scheme',
+      'spacing',
+    ]);
+  });
+
+  it('discard restores the whole v2 page, no legacy axis keys introduced', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    pageBuilder.setPageStyle('bold');
+    pageBuilder.setSectionLayout('sec-hero', 'cover');
+    pageBuilder.discard();
+    expect(pageBuilder.pending).toEqual(saved);
+  });
+});
+
 // ── A page gets its RHYTHM as sections are added ─────────────────────────────
 //
 // The store is where the page look and the section factory meet, and it is the

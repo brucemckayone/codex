@@ -33,7 +33,8 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | 4 | Blocks: problem · transformation · benefits · text | `kit/blocks/{problem,transformation,benefits,text}` | 2 | 2 |
 | 5 | Blocks: curriculum · testimonials · faq | `kit/blocks/{curriculum,testimonials,faq}` | 2 | 3 |
 | 6 | Public switch: sales page, checkout, dashboard read the kit + upgrade; delete legacy renderer | public journey routes, `render/**`, legacy css | 1, 3, 4, 5 | 4 |
-| 7 | Editor A: shell, top bar, outline, true-scale canvas, selection + inline edit, insert points, autosave, store v2 methods | `components/page-builder/editor/**` (shell files), `page-builder-store*`, `studio/journeys/[id]/page-next/**` | 1, 2 | 3 |
+| 7a | Editor logic: store v2 methods (style/layout/scheme/spacing, add with starter props), autosave controller (draft autosave, published → Publish changes), unload guard | `page-builder-store*`, `builder-save*`, `autosave*` | 1 | 1 |
+| 7b | Editor A UI: shell, top bar, outline, true-scale canvas, selection + inline edit, insert points | `components/page-builder/editor/**` (shell files), `studio/journeys/[id]/page-next/**` | 2, 7a | 3 |
 | 8 | Editor B: inspector, layout/scheme/spacing pickers with live mini-renders, fields, section gallery, Style tab + page brand | `components/page-builder/editor/**` (inspector files) | 7 | 4 |
 | 9 | Builder switch + backend defaults: studio route → new editor, delete legacy editor, new-page template + `NEW_PAGE_DESIGN`, seeds, validation prunes legacy keys | studio journey page route, `components/page-builder/*` (legacy), `packages/access`, seeds | 6, 8 | 5 |
 | 10 | Images anywhere: per-section image upload + background images for hero/cta + an image block | content-api route, image-processing, kit media | 9 | 5 |
@@ -43,8 +44,9 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 
 | WP | State | Notes |
 |---|---|---|
-| 1 | not started | |
-| 2 | not started | |
+| 1 | **done** `dd152aaf` | 561 validation + 123 web tests; provenance fix for hero/faq added by orchestrator (falsified) |
+| 2 | running | |
+| 7a | **done** | store v2 actions + autosave controller; 311 tests across 13 files; web tsc clean |
 | 3–11 | not started | |
 
 ## Resume
