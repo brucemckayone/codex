@@ -736,7 +736,7 @@ const PAGE_COPY: Record<
     },
     curriculum: {
       heading: 'How the thread unfolds',
-      body: 'The near ones starts with parents, and their weather. The far ones reaches for names you were never told. The thread forward is what you choose, deliberately, to carry.',
+      body: 'It begins with the near ones: parents, and their weather. Then the far ones, the names you were never told. Last, the thread forward: what you choose, deliberately, to carry.',
     },
     instructor: {
       bridge:
