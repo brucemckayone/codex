@@ -63,6 +63,8 @@ function publicMarkup(root: HTMLElement): string {
     }
   }
   copy.querySelector('.lp-sticky')?.remove();
+  // The one sanctioned editor-only element (contract A4): an empty-state prompt.
+  for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
 
@@ -90,7 +92,11 @@ describe('PageRenderer', () => {
   });
 
   it('draws public markup identical with and without the editor, apart from editing attributes', async () => {
-    const publicHtml = publicMarkup(await render());
+    const publicRoot = await render();
+    // Stripping edit-only prompts must never hide a public element: the
+    // public render carries none at all.
+    expect(publicRoot.querySelectorAll('[data-lp-edit-only]').length).toBe(0);
+    const publicHtml = publicMarkup(publicRoot);
     unmount(app);
     const edit: PageEdit = { commit: () => {} };
     const editingRoot = await render({ edit, selectedId: 'sample-pricing' });

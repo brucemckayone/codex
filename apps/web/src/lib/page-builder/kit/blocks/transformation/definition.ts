@@ -1,8 +1,10 @@
 import {
   bodyField,
+  ctaLabelField,
   eyebrowField,
   headingField,
   layout,
+  noteField,
 } from '../../model/fields';
 import { compact, readText, readTextList } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
@@ -11,11 +13,17 @@ export type TransformationProps = {
   eyebrow?: string;
   heading?: string;
   body?: string;
+  ctaLabel?: string;
+  note?: string;
   beforeLabel?: string;
   afterLabel?: string;
   before?: string[];
   after?: string[];
 };
+
+/** The canvas prompt where the change would be — shown only while editing. */
+export const TRANSFORMATION_EMPTY =
+  'Add a few before and after lines to show the change.';
 
 export const transformationDefinition: BlockDefinition<TransformationProps> = {
   type: 'transformation',
@@ -27,14 +35,18 @@ export const transformationDefinition: BlockDefinition<TransformationProps> = {
   layouts: [
     layout(
       'columns',
-      'Before and after',
-      'Two columns: where they are now and where they will be.'
+      'Two columns',
+      'Where they are now beside where they will be, line for line.'
     ),
-    layout('steps', 'Step by step', 'The change as a short sequence.'),
+    layout(
+      'steps',
+      'Change by change',
+      'Each before joined to its after, one change per row.'
+    ),
     layout(
       'statement',
       'Big statement',
-      'One sentence that captures the change.'
+      'The before lines quiet, the after lines large, one beneath the other.'
     ),
   ],
   fields: [
@@ -43,34 +55,56 @@ export const transformationDefinition: BlockDefinition<TransformationProps> = {
     { ...bodyField, maxLength: 600 },
     {
       key: 'beforeLabel',
-      label: 'Before heading',
+      label: 'Before title',
+      hint: 'A few words above the before lines, like "Where you are now".',
       control: 'text',
       inline: true,
       maxLength: 40,
     },
-    { key: 'before', label: 'Before', control: 'list', maxItems: 6 },
+    {
+      key: 'before',
+      label: 'Before',
+      hint: 'One short line each. Each pairs with the after line in the same place.',
+      control: 'list',
+      maxItems: 6,
+    },
     {
       key: 'afterLabel',
-      label: 'After heading',
+      label: 'After title',
+      hint: 'A few words above the after lines, like "Where this takes you".',
       control: 'text',
       inline: true,
       maxLength: 40,
     },
-    { key: 'after', label: 'After', control: 'list', maxItems: 6 },
+    {
+      key: 'after',
+      label: 'After',
+      hint: 'One short line each, in the same order as the before lines.',
+      control: 'list',
+      maxItems: 6,
+    },
+    {
+      ...ctaLabelField,
+      hint: 'Optional. Add button text to show a join button here.',
+    },
+    {
+      ...noteField,
+      hint: 'Optional. A short reassurance under the button.',
+    },
   ],
   starter: ({ courseTitle }) => ({
-    heading: `How ${courseTitle} changes things`,
-    beforeLabel: 'Before',
-    afterLabel: 'After',
+    heading: `Where ${courseTitle} takes you`,
+    beforeLabel: 'Where you are now',
+    afterLabel: `After ${courseTitle}`,
     before: [
       'Starting over every Monday',
       'Unsure what to do next',
-      'Doing it all alone',
+      'Figuring it out alone',
     ],
     after: [
       'A routine that holds',
       'A clear next step every day',
-      'Guidance along the way',
+      'Guidance whenever you need it',
     ],
   }),
   sample: {
@@ -93,6 +127,8 @@ export const transformationDefinition: BlockDefinition<TransformationProps> = {
       eyebrow: readText(raw, 'eyebrow', 60),
       heading: readText(raw, 'heading', 140),
       body: readText(raw, 'body', 600),
+      ctaLabel: readText(raw, 'ctaLabel', 40),
+      note: readText(raw, 'note', 120),
       beforeLabel: readText(raw, 'beforeLabel', 40),
       afterLabel: readText(raw, 'afterLabel', 40),
       before: readTextList(raw, 'before', 6),

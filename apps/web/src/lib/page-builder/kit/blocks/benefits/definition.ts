@@ -1,8 +1,10 @@
 import {
   bodyField,
+  ctaLabelField,
   eyebrowField,
   headingField,
   layout,
+  noteField,
 } from '../../model/fields';
 import { compact, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
@@ -16,8 +18,13 @@ export type BenefitsProps = {
   eyebrow?: string;
   heading?: string;
   body?: string;
+  ctaLabel?: string;
+  note?: string;
   items?: BenefitItem[];
 };
+
+/** The canvas prompt where the items would be — shown only while editing. */
+export const BENEFITS_EMPTY = 'Add what is included, one item at a time.';
 
 export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
   type: 'benefits',
@@ -26,11 +33,15 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
   group: 'offer',
   icon: 'CheckCircleIcon',
   layouts: [
-    layout('grid', 'Grid', 'Each item in its own tile.'),
+    layout(
+      'grid',
+      'Grid',
+      'Each item in its own tile, with a line about it underneath.'
+    ),
     layout(
       'checklist',
       'Checklist',
-      'A tidy list with a tick beside each item.'
+      'A compact list in two columns, with a tick beside each item.'
     ),
     layout(
       'split',
@@ -45,6 +56,7 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
     {
       key: 'items',
       label: 'What is included',
+      hint: 'A short name for each thing, and a line about it if you like.',
       control: 'items',
       maxItems: 9,
       itemFields: [
@@ -56,6 +68,14 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           maxLength: 160,
         },
       ],
+    },
+    {
+      ...ctaLabelField,
+      hint: 'Optional. Add button text to show a join button here.',
+    },
+    {
+      ...noteField,
+      hint: 'Optional. A short reassurance under the button.',
     },
   ],
   starter: ({ courseTitle }) => ({
@@ -101,6 +121,8 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
       eyebrow: readText(raw, 'eyebrow', 60),
       heading: readText(raw, 'heading', 120),
       body: readText(raw, 'body', 500),
+      ctaLabel: readText(raw, 'ctaLabel', 40),
+      note: readText(raw, 'note', 120),
       items: readItems(
         raw,
         'items',

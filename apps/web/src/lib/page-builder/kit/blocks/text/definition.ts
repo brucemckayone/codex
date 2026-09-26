@@ -1,8 +1,10 @@
 import {
   bodyField,
+  ctaLabelField,
   eyebrowField,
   headingField,
   layout,
+  noteField,
 } from '../../model/fields';
 import { compact, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
@@ -11,7 +13,13 @@ export type TextProps = {
   eyebrow?: string;
   heading?: string;
   body?: string;
+  ctaLabel?: string;
+  note?: string;
 };
+
+/** The canvas prompt where the text would be — shown only while editing. */
+export const TEXT_EMPTY =
+  'Add your text. Leave a blank line to start a new paragraph.';
 
 export const textDefinition: BlockDefinition<TextProps> = {
   type: 'text',
@@ -23,16 +31,28 @@ export const textDefinition: BlockDefinition<TextProps> = {
     layout(
       'statement',
       'Big statement',
-      'A large opening line with your text beneath it.'
+      'Your first paragraph in large type, with the rest beneath it.'
     ),
     layout(
       'columns',
       'Two columns',
       'Your heading on one side and your text on the other.'
     ),
-    layout('centered', 'Centred', 'A short, centred passage.'),
+    layout('centered', 'Centred', 'A calm passage in the middle of the page.'),
   ],
-  fields: [eyebrowField, headingField(140), { ...bodyField, maxLength: 3000 }],
+  fields: [
+    eyebrowField,
+    headingField(140),
+    { ...bodyField, maxLength: 3000 },
+    {
+      ...ctaLabelField,
+      hint: 'Optional. Add button text to show a join button here.',
+    },
+    {
+      ...noteField,
+      hint: 'Optional. A short reassurance under the button.',
+    },
+  ],
   starter: ({ courseTitle }) => ({
     heading: `Why I made ${courseTitle}`,
     body: `I created ${courseTitle} to share what has helped the people I work with most.\n\nIt is the course I wish I had been given when I started.`,
@@ -46,5 +66,7 @@ export const textDefinition: BlockDefinition<TextProps> = {
       eyebrow: readText(raw, 'eyebrow', 60),
       heading: readText(raw, 'heading', 140),
       body: readText(raw, 'body', 3000),
+      ctaLabel: readText(raw, 'ctaLabel', 40),
+      note: readText(raw, 'note', 120),
     }),
 };
