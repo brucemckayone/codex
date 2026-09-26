@@ -44,7 +44,14 @@
     class: className,
   }: Props = $props();
 
-  const still = $derived(image ?? clip?.posterUrl ?? null);
+  // An image that fails (deleted, missing variant, CDN hiccup) falls back to
+  // the plate instead of a broken-image glyph. Keyed by URL, so a different
+  // image gets its own chance.
+  let failed = $state<string | null>(null);
+  const still = $derived.by(() => {
+    const url = image ?? clip?.posterUrl ?? null;
+    return url && url !== failed ? url : null;
+  });
   const empty = $derived(!clip && !still);
 </script>
 
@@ -63,6 +70,7 @@
       loading={priority ? 'eager' : 'lazy'}
       fetchpriority={priority ? 'high' : undefined}
       decoding="async"
+      onerror={() => (failed = still)}
     />
   {:else}
     <span class="lp-media__plate" aria-hidden="true"></span>
