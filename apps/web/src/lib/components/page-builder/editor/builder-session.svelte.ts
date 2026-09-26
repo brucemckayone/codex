@@ -199,6 +199,8 @@ export function createBuilderSession(options: {
       checkoutUrl,
       dashboardUrl,
       sellPreview,
+      // Page images (contract A3) resolve against the same CDN base as public.
+      mediaBaseUrl: coursePageQuery?.current?.mediaBaseUrl ?? null,
     }),
     sellPreview: sellPreviewPromise,
   });
