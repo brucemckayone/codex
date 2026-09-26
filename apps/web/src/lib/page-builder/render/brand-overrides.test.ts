@@ -34,9 +34,9 @@ describe('brandOverridesToCssVars', () => {
     expect(vars['--brand-bg']).toBe('#0b0b0b');
   });
 
-  it('maps numeric radius + density inputs', () => {
+  it('maps numeric radius + density inputs (radius as a rem length, like the org layout)', () => {
     const vars = brandOverridesToCssVars({ radius: 0.75, density: 1.1 });
-    expect(vars['--brand-radius']).toBe('0.75');
+    expect(vars['--brand-radius']).toBe('0.75rem');
     expect(vars['--brand-density']).toBe('1.1');
   });
 
@@ -100,7 +100,7 @@ describe('brandOverridesToStyleAttr', () => {
       radius: 0.5,
     });
     expect(style).toContain('--brand-color: #3355ff');
-    expect(style).toContain('--brand-radius: 0.5');
+    expect(style).toContain('--brand-radius: 0.5rem');
     expect(style).toMatch(/;\s/); // multiple declarations joined by "; "
   });
 });

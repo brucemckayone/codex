@@ -83,7 +83,9 @@ export function brandOverridesToCssVars(
 
   // ── Numeric inputs: radius + density feed the radius/spacing scales ──
   if (typeof overrides.radius === 'number') {
-    out['--brand-radius'] = String(overrides.radius);
+    // A length, like the org layout's `${radius}rem` — a bare number makes
+    // `--radius-base` an invalid length and breaks every radius token.
+    out['--brand-radius'] = `${overrides.radius}rem`;
   }
   if (typeof overrides.density === 'number') {
     out['--brand-density'] = String(overrides.density);
