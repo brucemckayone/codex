@@ -89,7 +89,8 @@ export interface BlockField {
   /**
    * `text`/`textarea` may also be edited inline on the canvas (`inline`).
    * `list` = string[] · `items` = object[] described by `itemFields` ·
-   * `media` = one of the journey's sell-media slots.
+   * `media` = one of the journey's sell-media slots · `image` = the creator's
+   * own uploaded image, stored as an `ImageRef` (contract A3/A5).
    */
   control:
     | 'text'
@@ -99,7 +100,8 @@ export interface BlockField {
     | 'select'
     | 'list'
     | 'items'
-    | 'media';
+    | 'media'
+    | 'image';
   inline?: boolean;
   placeholder?: string;
   maxLength?: number;

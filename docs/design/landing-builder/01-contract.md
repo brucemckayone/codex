@@ -325,6 +325,15 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   public page — `PageRenderer.svelte.test.ts` asserts the public render has zero such elements, then
   strips them from the editing render before the identity comparison. Nothing else may differ between
   the two renders except editing attributes.
+- **A5 · 2026-09-27 · orchestrator · Creator images in sections (WP10b).** New v2 prop keys, each an
+  `ImageRef = { key, alt? }` (A3) edited with the new `BlockField` control `'image'`: `hero.image`
+  (overrides the course hero still — the one sanctioned override of live media), `text.image` (shown
+  beside the text in `columns`, above it in `statement`/`centered`), `benefits.items[].image`
+  (`grid` tiles), `cta.background` (behind the `band` layout, under the Style's scrim). Blocks resolve
+  a ref with `resolvePageImageUrl(ref, variant, context.mediaBaseUrl)` and render through `Media`
+  (which already falls back to its plate on a failed load). An empty/absent ref renders exactly as
+  today. `alt` is required for a non-decorative image (the field prompts for it); a hero/background
+  image is decorative by default.
 
 ---
 
