@@ -91,15 +91,24 @@ describe('PageRenderer', () => {
     }
   });
 
-  it('draws public markup identical with and without the editor, apart from editing attributes', async () => {
-    const publicRoot = await render();
+  // Every Style, because each defaults different layouts (Clean/Soft reach
+  // the accordions, Cinematic the cover hero) — Bold alone left them unproven.
+  it.each(
+    PAGE_STYLE_IDS
+  )('draws the %s page identical with and without the editor, apart from editing attributes', async (style) => {
+    const page = samplePage(style);
+    const publicRoot = await render({ page });
     // Stripping edit-only prompts must never hide a public element: the
     // public render carries none at all.
     expect(publicRoot.querySelectorAll('[data-lp-edit-only]').length).toBe(0);
     const publicHtml = publicMarkup(publicRoot);
     unmount(app);
     const edit: PageEdit = { commit: () => {} };
-    const editingRoot = await render({ edit, selectedId: 'sample-pricing' });
+    const editingRoot = await render({
+      page,
+      edit,
+      selectedId: 'sample-pricing',
+    });
     expect(
       editingRoot.querySelectorAll('[contenteditable]').length
     ).toBeGreaterThan(10);

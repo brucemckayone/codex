@@ -66,15 +66,62 @@ export function sampleStages(): JourneyStageView[] {
     name,
     gloss,
     sortOrder: stageIndex,
-    practices: Array.from({ length: 4 }, (_, practiceIndex) => ({
-      contentId: `sample-practice-${stageIndex + 1}-${practiceIndex + 1}`,
-      slug: null,
-      title: `${name} practice ${practiceIndex + 1}`,
-      contentType: practiceIndex === 3 ? 'written' : 'audio',
-      sortOrder: stageIndex * 4 + practiceIndex,
-    })),
+    practices: STAGE_PRACTICES[stageIndex].map(
+      ([title, contentType], practiceIndex) => ({
+        contentId: `sample-practice-${stageIndex + 1}-${practiceIndex + 1}`,
+        slug: null,
+        title,
+        contentType,
+        sortOrder: stageIndex * 4 + practiceIndex,
+      })
+    ),
   }));
 }
+
+type PracticeType = JourneyStageView['practices'][number]['contentType'];
+
+/** Believable practices per stage (one film each) — thumbnails show them. */
+const STAGE_PRACTICES: readonly (readonly (readonly [
+  string,
+  PracticeType,
+])[])[] = [
+  [
+    ['Welcome, and how to use the course', 'video'],
+    ['A first quiet twenty minutes', 'audio'],
+    ['Setting up your morning corner', 'written'],
+    ['The notebook page', 'written'],
+  ],
+  [
+    ['The long exhale', 'video'],
+    ['Box breathing for busy heads', 'audio'],
+    ['Breath before the phone', 'audio'],
+    ['Why slow breathing works', 'written'],
+  ],
+  [
+    ['Waking the spine', 'video'],
+    ['Five stretches before coffee', 'video'],
+    ['A body scan in bed', 'audio'],
+    ['Listening to stiffness', 'written'],
+  ],
+  [
+    ['Anchoring the habit', 'video'],
+    ['The two-minute version', 'audio'],
+    ['When the week goes wrong', 'written'],
+    ['Your rhythm check-in', 'written'],
+  ],
+  [
+    ['Unwinding the day', 'video'],
+    ['Evening breath', 'audio'],
+    ['A sleep-ready body scan', 'audio'],
+    ['Closing the notebook', 'written'],
+  ],
+  [
+    ['Carrying it forward', 'video'],
+    ['Your own twenty minutes', 'audio'],
+    ['Practising without the course', 'written'],
+    ['A letter to week one', 'written'],
+  ],
+];
 
 const SAMPLE_TESTIMONIALS: JourneyTestimonialView[] = [
   {
