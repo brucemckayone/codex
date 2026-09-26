@@ -51,9 +51,10 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | 7a | **done** | store v2 actions + autosave controller; 311 tests across 13 files; web tsc clean |
 | 3 | **done** `b7aee127` | video · preview · instructor · stats |
 | 4 | **done** `b7aee127` | problem · transformation · benefits · text; 1,680-combination contrast probe, floor 4.97:1 |
-| 5 | running | curriculum · testimonials · faq |
+| 5 | **done** `99b26ccc` | curriculum · testimonials · faq; identity test now covers all 4 Styles |
 | 7b | running | canvas-first editor shell at `studio/journeys/[id]/page-next` |
-| 6, 8, 9, 10b, 11 | not started | |
+| 6 | running | public sales page on the kit |
+| 8, 9, 10b, 11 | not started | |
 
 ## Resume
 
