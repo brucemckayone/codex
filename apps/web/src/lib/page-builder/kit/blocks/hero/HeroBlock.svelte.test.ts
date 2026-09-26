@@ -149,6 +149,20 @@ describe('HeroBlock', () => {
     expect(document.body.querySelector('img')).toBeNull();
   });
 
+  it.each(
+    SECTION_LAYOUTS.hero
+  )('%s: an uploaded still is on first paint, before the streamed preview settles', async (layout) => {
+    const context = {
+      ...sampleContext({ course: { heroImageUrl: '/uploaded.jpg' } }),
+      // A preview that never settles — only the synchronous still can paint.
+      sellPreview: new Promise<never>(() => {}),
+    };
+    await render({ heading: 'H' }, { layout, context });
+    expect(document.body.querySelector('img')?.getAttribute('src')).toBe(
+      '/uploaded.jpg'
+    );
+  });
+
   it('carries editing attributes only on the canvas', async () => {
     await render({ heading: 'Find your steady ground' });
     expect(document.body.querySelector('[contenteditable]')).toBeNull();

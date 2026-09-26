@@ -39,11 +39,18 @@
     clip: PreviewMedia | null;
   }
 
+  // The uploaded hero still rides the AWAITED envelope, so it is in the
+  // server-rendered HTML (the page's largest paint); the streamed preview can
+  // only add a clip, or a media-item poster when nothing was uploaded.
+  const syncStill = $derived(
+    mode === 'none' ? null : (context.course.heroImageUrl ?? null)
+  );
+
   function pick(preview: SellPreview | null): HeroMedia {
-    if (mode === 'none' || !preview) return { still: null, clip: null };
+    if (mode === 'none') return { still: null, clip: null };
     return {
-      still: preview.heroImageUrl ?? null,
-      clip: mode === 'image' ? null : (preview.heroClip ?? null),
+      still: preview?.heroImageUrl ?? syncStill,
+      clip: mode === 'image' ? null : (preview?.heroClip ?? null),
     };
   }
 
@@ -110,7 +117,11 @@
   <div class="hero-cover lp-bleed" data-lp-on-media>
     <div class="hero-cover__media hero__enter-m">
       {#await context.sellPreview}
-        <span class="lp-atmos" aria-hidden="true"></span>
+        {#if syncStill}
+          <Media image={syncStill} priority alt="" />
+        {:else}
+          <span class="lp-atmos" aria-hidden="true"></span>
+        {/if}
       {:then preview}
         {@const media = pick(preview)}
         {#if media.still || media.clip}
@@ -133,7 +144,7 @@
     {#if mode !== 'none'}
       <div class="hero-split__media hero__enter-m">
         {#await context.sellPreview}
-          {@render frame({ still: null, clip: null }, true, 'var(--_ratio)')}
+          {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
         {:then preview}
           {@render frame(pick(preview), false, 'var(--_ratio)')}
         {/await}
@@ -145,7 +156,7 @@
   {#if mode !== 'none'}
     <div class="hero-centered__media hero__enter-m">
       {#await context.sellPreview}
-        {@render frame({ still: null, clip: null }, true, 'var(--_ratio)')}
+        {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
       {:then preview}
         {@render frame(pick(preview), false, 'var(--_ratio)')}
       {/await}
@@ -153,7 +164,13 @@
   {/if}
 {:else}
   <div class="hero-statement">{@render copy('start')}</div>
-  {#await context.sellPreview then preview}
+  {#await context.sellPreview}
+    {#if syncStill}
+      <div class="hero-statement__media hero__enter-m">
+        {@render frame({ still: syncStill, clip: null }, false, 'var(--_ratio)')}
+      </div>
+    {/if}
+  {:then preview}
     {@const media = pick(preview)}
     {#if media.still || media.clip}
       <div class="hero-statement__media hero__enter-m">
