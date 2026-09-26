@@ -301,9 +301,199 @@ screenshots reviewed. Before the PR: `pnpm typecheck` (0 cached), web + package 
 
 _(append here: `A<n> · <date> · <WP> · what changed · why`)_
 
+- **A1 · 2026-09-26 · orchestrator · Visitor-facing kit strings live in `kit/model/copy.ts`** (English
+  constants, one module, translation-ready), not in `apps/web/messages/en.json`. Creator-facing labels
+  live in each `definition.ts`. Why: `en.json` + its two generated Paraglide files are a single shared
+  file that parallel block agents would all edit; the legacy catalogue already kept creator-authored
+  and catalogue copy out of Paraglide (contract A20 of the axis programme). Studio EDITOR chrome
+  (WP7/WP8, sequential) keeps using Paraglide `studio_builder_*` keys.
+- **A2 · 2026-09-26 · orchestrator · Two aggregators, both WP2-owned and complete for all 14 types
+  from day one:** `kit/model/catalog.ts` (pure TS: `DEFINITIONS` — type → `BlockDefinition`) and
+  `kit/registry.ts` (type → Svelte component). Later WPs never edit either; they replace the files
+  inside their own `blocks/<type>/` folder.
+
 ---
 
 ## Appendix A — Legacy maps
 
 _(written by WP1: legacy variant → v2 layout per type; legacy prop key → v2 key per type; the seed
 default table used to drop unauthored props.)_
+
+All of this is implemented as data + small pure functions in
+`apps/web/src/lib/page-builder/kit/model/legacy/` and consumed by
+`kit/model/upgrade.ts`. This appendix is the readable reference; the code
+comments carry the full reasoning per choice and are the source of truth if
+the two ever disagree.
+
+### A.1 Type map
+
+Legacy → v2 (§2's "Replaces legacy" column, inverted; `legacy/type-map.ts`):
+
+| Legacy | v2 | Legacy | v2 |
+|---|---|---|---|
+| `hero` | `hero` | `reel` | `preview` |
+| `introVideo` | `video` | `guide` | `instructor` |
+| `ache` | `problem` | `proof` | `testimonials` |
+| `turn` | `transformation` | `faq` | `faq` |
+| `feel` | `benefits` | `invite` | `pricing` |
+| `map` | `curriculum` | | |
+
+Any other stored `type` is dropped. `cta`/`stats`/`text` have no legacy source (v2-only).
+
+**The `hero`/`faq` trap.** These two are the only IDENTITY mappings — the legacy and v2 names are the
+same string. `isSectionTypeId('hero')` is therefore true for BOTH a genuinely-legacy row and a
+genuinely-v2 one, so "is the type string a valid v2 id" cannot decide whether `props` still needs
+mapping. `upgrade.ts` resolves this with a structural tell instead: legacy `hero` always writes
+`headline` (v2 always writes `heading`, never `headline`); legacy `faq` never writes `items` (v2's
+`items[]` is faq's primary v2 content, and no legacy path ever produced one). Every other type's
+legacy and v2 names are distinct, so the plain name check is reliable for the other nine.
+
+### A.2 Variant → layout (per legacy type, current ids + retired ids chained through their rename)
+
+PROVISIONAL: v2's actual layouts (`blocks/<type>/definition.ts`) do not exist yet (WP2). Every row is
+a judgement call from the legacy variant's `hint` text against the v2 layout's NAME — the only two
+things that exist to compare — and is freely revisable once the real layouts are visible.
+
+| Legacy type | v2 layouts | Legacy variant → v2 layout |
+|---|---|---|
+| `hero` | statement, split, cover, centered | `stage`→statement · `split-media`→split · `full-bleed`→cover · `oversized`→statement · `banner`→centered · `poster`→cover · _retired:_ `centered`/`left`/`minimal`→statement (via `stage`) · `split`→split (via `split-media`) |
+| `introVideo` | theatre, split | `theatre`→theatre · `plain`→theatre · `split`→split · `bleed`→theatre · `card`→theatre · _retired:_ `cinema`→theatre · `simple`→theatre |
+| `ache` | statement, list, split | `column`→statement · `statement`→statement · `paired`→split · `list`→list · `quote`→statement · `checklist`→list · `descent`→list · _retired:_ `centered`/`wide`→statement (via `column`) · `twocol`→split (via `paired`) |
+| `turn` | columns, steps, statement | `statement`→statement · `column`→statement · `paired`→columns · `arc`→steps · `before-after`→columns · `numbered`→steps · _retired:_ `centered`/`wide`→statement (via `column`) · `twocol`→columns (via `paired`) |
+| `feel` | grid, checklist, split | `paired`→split · `column`→checklist · `statement`→checklist · `grid`→grid · `ledger`→checklist · `stack`→checklist · _retired:_ `centered`/`wide`→checklist (via `column`) · `twocol`→split (via `paired`) |
+| `map` | timeline, accordion, cards | `spine`→timeline · `rows`→accordion · `cards`→cards · `table`→accordion · `timeline`→timeline · `numbered-prose`→accordion · _retired:_ `descent`→timeline (via `spine`) · `list`→accordion (via `rows`) · `grid`→cards (via `cards`) |
+| `reel` | feature, split | `theatre`→feature · `plain`→feature · `split`→split · `bleed`→feature · `card`→feature · `waveform`→feature · _retired:_ `cinema`→feature · `simple`→feature (`strip` is declared-unavailable in the legacy catalogue and never stored) |
+| `guide` | split, quote, centered | `portrait`→split · `column`→centered · `quote`→quote · `credentials`→split · `letter`→centered · _retired:_ `centered`→centered (via `column`) |
+| `proof` | grid, featured, quote | `grid`→grid · `stack`→featured · `spotlight`→featured · `wall`→grid · `marquee`→featured · `pull`→quote (no retired ids exist for `proof`) |
+| `faq` | accordion, columns | `accordion`→accordion · `open`→accordion · `boxed`→accordion · `paired`→columns · `grouped`→accordion (no retired ids exist for `faq`) |
+| `invite` | cards, focus, band | `pool`→focus · `banner`→band · `card`→focus · `tiers`→cards · `table`→cards · `sticky`→band · _retired:_ `descent`→focus (via `pool`) |
+
+### A.3 Prop key → v2 key (per legacy type)
+
+Common v2 keys: `eyebrow?`, `heading?`, `body?`, `ctaLabel?`, `note?`. Every alias below prefers the
+name the OLD PUBLIC RENDERER read (`render/types.ts`) over the name the OLD BUILDER wrote
+(`section-fields.ts`) when the two differ, mirroring `render/coerce.ts`'s own precedent — a page
+authored against the renderer's name still wins. Every scalar read is filtered against the seed-default
+table (A.4) first, so unauthored catalogue/seed copy never reaches the alias chain.
+
+| Legacy type → v2 | Mapping |
+|---|---|
+| `hero`→hero | `eyebrow`←eyebrow · `heading`←`headline` + `accent` joined on its own line · `body`←`sub` + `felt` as a second paragraph · `ctaLabel`←[ctaLabel,button] · `note`←`trust` · `secondaryLabel`←[secondaryLabel,quiet] · `secondaryHref`←secondaryHref · `media`←`mediaMode` (`''`→absent, `none`→none, `image`→image, `loop`/`click`→video) · `watchLabel`←`mediaLabel` · `bg` **dropped** (no v2 prop) |
+| `introVideo`→video | `eyebrow`←[eyebrow,kicker] · `heading`←heading · `body`←sub · `caption`←`clip` · `duration` **dropped** |
+| `ache`→problem | `eyebrow`←[eyebrow,kicker] · `heading`←heading · `body`←[body,sub] · `points`←`points` (NOT `beats` — see below) |
+| `turn`→transformation | `eyebrow`←[eyebrow,kicker] · `heading`←[statement,heading] · `body`←[lede,body] · `before`←`from` split into paragraphs · `after`←`to` split into paragraphs · `points` **dropped — no v2 slot** (Arc/Numbered content loss; see Known gaps) |
+| `feel`→benefits | `eyebrow`←[eyebrow,kicker] · `heading`←heading · `body`←body · `items[].title`←`inclusions[].label` · `items[].detail`←`inclusions[].detail` · `previewTitle`/`previewSub`/`previewDuration` **dropped — no v2 slot** |
+| `map`→curriculum | `eyebrow`←eyebrow · `heading`←[title,heading] · `body`←`sub` · `note`←[foot,note] (no other keys — curriculum's stages are live data) |
+| `reel`→preview | `eyebrow`←[eyebrow,kicker] · `heading`←heading · `body`←sub · `caption`←`captions[0]` else `caption` · `clip`/`tag`/`duration` **dropped — no v2 slot** |
+| `guide`→instructor | `role`←`role` (NOT common `eyebrow` — see below) · `heading`←heading · `body`←[bio,body] (already a plain string; no array conversion needed for v2) · `name`←name · `quote`←quote · `credentials[]`←`facts[].label` + `: ` + `facts[].detail` when present · `clip`/`duration` **dropped** |
+| `proof`→testimonials | `eyebrow`←eyebrow · `heading`←heading · `note`←[trustLabel,trust] (imperfect fit — see below) · `items[]`←numbered `q`/`n`/`c` triples (RECOVERED content — the old renderer never read these at all) |
+| `faq`→faq | `eyebrow`←eyebrow · `heading`←heading · `items[]`←numbered `q`/`a` pairs · `g1..`(group label) **dropped — no v2 slot** · `contactLabel`/`contactHref` have no legacy source (v2-new) |
+| `invite`→pricing | `eyebrow`←eyebrow · `heading`←`heading` + `accent` joined on its own line · `body`←sub · `ctaLabel`←[ctaLabel,button] · `note`←[priceNote,risk] · `offers[]`← same shape minus `who` (**dropped — no v2 `offers[]` field**); never seed-filtered (neither seed source ever seeds an `offers` array) |
+
+**Non-obvious calls, spelled out:**
+- **`ache.beats` vs `ache.points`.** `render/types.ts`'s `AcheSectionProps` declares `beats?:
+  string[]`, but no editor field and no `coerce.ts` alias ever writes `beats` — it is read-but-
+  unauthorable, the same defect class this codebase has repeatedly found elsewhere (Codex-tqr51 &c.).
+  `section-fields.ts`'s actual field (shared with `turn`) is `points`, confirmed on the real
+  `bone-deep` row. Mapped from `points`.
+- **`guide.role` → v2 `role`, not common `eyebrow`.** The legacy field is literally labelled "Role /
+  eyebrow" in `section-fields.ts` — one field serving both ideas. v2 instructor carries a dedicated
+  `role?` AND the common `eyebrow?`; since legacy never had a distinct generic-eyebrow value for guide
+  sections, `role` maps to v2 `role` and `eyebrow` is left unset rather than guessed.
+- **`proof`'s aggregate trust line → `note`.** v2 testimonials has no dedicated "trust line" slot; the
+  common `note?` ("small reassurance under a CTA") is the closest available fit even though
+  testimonials sections rarely carry a CTA. Imperfect, and the best option in the given vocabulary.
+- **`guide.facts[]` → `credentials: string[]`.** No existing alias bridges this shape gap (unlike
+  `feel.inclusions`→`items`, nothing in `coerce.ts` ever read `facts` — again the same "declared,
+  never wired" defect class). Joined as `"label: detail"` (or bare `label` with no detail).
+
+### A.4 Seed-default table (unauthored-copy detection)
+
+Full literal table: `legacy/seed-defaults.ts`. Sources, in provenance order:
+
+1. `section-catalog.ts` `SECTION_CATALOG[type].defaultProps` — the builder's own placeholder copy.
+2. `packages/database/scripts/seed-portals.ts` `buildSections()` — its FIXED literals only (`button:
+   'Begin'`, `risk: 'Cancel anytime'`, `ache.eyebrow: 'Why this'`, `ache.heading: 'You already know
+   the shape of it.'`, …); the per-portal `spec.title`/`lede`/`kicker`/`spec.stages…join`
+   interpolations are excluded — those are that portal's own copy, not a placeholder.
+
+`packages/database/scripts/seed-journey-content.ts`'s `COPY` table is **deliberately NOT a source**,
+reversed from this file's first draft after `upgrade.test.ts` proved the concrete cost against the
+real `bone-deep` row: that script's stated purpose is to replace generic placeholder copy with
+specific, deliberately-authored prose ("demo data that reads as real copy at real lengths is the
+whole point" — its own header). Treating its OUTPUT as the same kind of unauthored scaffolding as the
+catalogue's defaults or `seed-portals.ts`'s uniform literals inverts that purpose, concretely: with
+its `ache.body` ("You have done the reading…") in the table, upgrade dropped that specific paragraph
+and fell back to `sub` (a duplicate lede sentence shared with the hero section) — a real quality
+regression on the one page the script touches. `seed-portals.ts`'s literals do not have this problem:
+short, generic and IDENTICAL across every portal by construction, the same property catalogue
+defaults have and `COPY`'s long, specifically-voiced sentences do not.
+
+Only NON-EMPTY strings count, matching `section-catalog.ts`'s own `seededSections()` precedent exactly
+(`hero.accent`/`felt`/`quiet`/`trust` and `guide.quote` seed `''` in the catalogue — dropping an
+already-empty value achieves nothing).
+`hero.bg`/`introVideo.duration`/`reel.duration`/`guide.duration` are absent from the table on purpose:
+those keys have no v2 destination at all (A.3), so they are dropped unconditionally regardless of
+value.
+
+**A finding worth the orchestrator's attention: real seeded pages are NOT an exact Candlelit match.**
+`seed-portals.ts` `reconcilePage()` hardcodes `width: 'narrow'` for what its own comment calls "the
+Candlelit bundle", but `design-vocabulary.ts`'s REAL Candlelit preset — and its own pinned test,
+`design-vocabulary.test.ts` "Candlelit matches the bundle migration 0084 backfilled" — has `width:
+'text'`. Since look-detection (A.5) requires an exact nine-axis match (mirroring
+`findDesignPreset()`'s own precedent), every page `seed-portals.ts` writes ALREADY reads as "Custom"
+in today's existing look picker, not Candlelit — this is a pre-existing drift between two files, not
+something introduced here. Confirmed on all three sampled real rows: they upgrade to Style `bold`
+("unrecognised"), not `cinematic`, and `upgrade.test.ts` pins this as the correct, honest behaviour
+given the real data. Worth a follow-up bead to reconcile `seed-portals.ts`'s bundle with the real
+Candlelit tuple, since it presumably means those pages don't render as Candlelit TODAY either.
+
+### A.5 Look → Style (page-level, contract §3)
+
+The eight `design-vocabulary.ts` `SECTION_DESIGN_PRESETS` nine-axis tuples, snapshotted in
+`legacy/look-map.ts`, matched EXACTLY (all nine axes) against a page's stored `design` bundle:
+
+| Preset | Style | `width` | `density` | `surface` | `edge` | `align` | `type` | `accent` | `motion` | `media` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Candlelit | **cinematic** | text | airy | media | none | center | monumental | glow | drift | bleed |
+| Quiet Studio | clean | narrow | vast | bare | hairline | center | monumental | none | fade | inset |
+| The Long Read | clean | text | regular | bare | hairline | start | balanced | text | rise | frame |
+| Open Air | **soft** | text | airy | tint | soft | center | expressive | text | drift | mask |
+| Plain Facts | clean | wide | compact | panel | offset | start | monumental | fill | none | none |
+| The Syllabus | clean | wide | compact | panel | hairline | start | restrained | edge | none | frame |
+| Full Send | bold | wide | regular | invert | heavy | center | expressive | fill | stagger | mask |
+| Signal | bold | wide | regular | panel | hairline | start | balanced | fill | rise | frame |
+| _unrecognised_ | **bold** | — any bundle matching none of the eight, including an empty/absent one — | | | | | | | | |
+
+A page-level `style` key already present and valid wins outright (v2 pass-through) and skips this
+detection entirely. All three real rows sampled for `upgrade.test.ts` carry the Candlelit bundle
+verbatim → Style `cinematic`.
+
+### A.6 Section-level axis → `SectionStyle` (contract §3, `legacy/axis-style-map.ts`)
+
+Independent per-axis rules — NOT a tuple match like A.5 — reading only the section's own literal
+`design` bag (a retired variant id's baked-in axes, e.g. `hero.minimal`'s implied `density: compact`,
+are NOT merged in; confirmed low-stakes, `minimal` is unused in the three sampled real rows and the
+catalogue's own comment calls it "latent today"):
+
+- `surface: invert` → `scheme: contrast` · `tint`/`panel` → `scheme: soft` · everything else → absent.
+- `density: compact` → `spacing: compact` · `regular` → `spacing: regular` · `airy`/`vast` →
+  `spacing: spacious` · everything else → absent.
+- The other seven legacy axes (`width`, `edge`, `align`, `type`, `accent`, `motion`, `media`) have no
+  v2 `SectionStyle` counterpart and are not read here at all.
+
+### A.7 Known content-loss gaps (real authored data with no v2 destination today)
+
+Flagged for the orchestrator / a future contract amendment, not silently absorbed:
+
+- **`turn.points`** (the Arc/Numbered compositions' roman-numeralled or three-beat list) has no v2
+  transformation prop at all — contract §2's table is `eyebrow`/`heading`/`body`/`ctaLabel`/`note` +
+  `beforeLabel`/`afterLabel`/`before`/`after` only. A page using either composition loses this content
+  on upgrade.
+- **`feel`'s free-taste preview player** (`previewTitle`/`previewSub`/`previewDuration`) has no v2
+  benefits prop — dropped whole.
+- **`reel`'s on-frame label / corner tag** (`clip`/`tag`) and **`guide`'s on-frame label** (`clip`) —
+  no v2 slot.
+- **`invite.offers[].who`** ("one line above the price") — v2 `pricing.offers[]` has no `who` field.
+- **`hero.bg`** (the atmosphere recipe) — no v2 prop; superseded by the Style + scheme system, but the
+  specific `ember`/`blood`/`still` choice a creator made is not preserved as such.

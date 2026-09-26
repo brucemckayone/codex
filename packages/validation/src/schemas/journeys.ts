@@ -1,6 +1,11 @@
 import type { BrandTokenOverrides } from '@codex/shared-types';
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
+import {
+  COLOUR_SCHEME_IDS,
+  PAGE_STYLE_IDS,
+  SECTION_SPACING_IDS,
+} from './landing-page';
 
 /**
  * Journey member-surface route inputs (Codex-2pryk · Round-D · Codex-776gg).
@@ -224,9 +229,22 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
 ) => z.enum(values).optional().catch(undefined);
 
 /**
- * The nine design axes (`docs/design/journey-sections/02-axis-contract.md` A5).
- * Mirrors `SectionDesign` in `@codex/shared-types`; unknown KEYS are stripped by
+ * The nine LEGACY design axes (`docs/design/journey-sections/02-axis-contract.md`
+ * A5) plus the THREE page-kit v2 keys (`docs/design/landing-builder/01-contract.md`
+ * §2/§3 — BINDING, superseding the nine-axis programme for new work). Mirrors
+ * `SectionDesign` in `@codex/shared-types`; unknown KEYS are stripped by
  * `z.object`'s default behaviour and unknown VALUES by the per-axis `.catch`.
+ *
+ * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
+ * (this one object backs both `pageSectionSchema.design` and
+ * `saveJourneyPageBodySchema.design`, exactly as it already backs both roles
+ * for the nine legacy axes). Before this, these three keys were silently
+ * STRIPPED as unknown — v2 `upgrade.ts` output would round-trip through a
+ * save and lose its own scheme/spacing/style on the very next load. A section
+ * never sets `style` and a page never sets `scheme`/`spacing`; nothing reads
+ * the unused one for either role, so the extra optional keys are harmless.
+ * Legacy axis keys are UNCHANGED and still accepted — the old builder keeps
+ * saving them until WP9 prunes them (contract §3).
  */
 export const sectionDesignSchema = z.object({
   width: designAxis(['narrow', 'text', 'wide', 'full']),
@@ -238,6 +256,9 @@ export const sectionDesignSchema = z.object({
   accent: designAxis(['text', 'fill', 'edge', 'glow', 'none']),
   motion: designAxis(['none', 'fade', 'rise', 'stagger', 'drift']),
   media: designAxis(['bleed', 'frame', 'mask', 'inset', 'none']),
+  scheme: designAxis(COLOUR_SCHEME_IDS),
+  spacing: designAxis(SECTION_SPACING_IDS),
+  style: designAxis(PAGE_STYLE_IDS),
 });
 export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
 

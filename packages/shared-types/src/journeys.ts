@@ -104,19 +104,50 @@ export interface SectionDesign {
   motion?: 'none' | 'fade' | 'rise' | 'stagger' | 'drift';
   /** How media sits in the section. Inert on the types that carry no media. */
   media?: 'bleed' | 'frame' | 'mask' | 'inset' | 'none';
+
+  // ── Page-kit v2 (docs/design/landing-builder/01-contract.md §2/§3 — BINDING,
+  // supersedes the nine axes above for new work). `scheme?`/`spacing?` are a
+  // SECTION's v2 style; `style?` is the PAGE's v2 look. Both land on this one
+  // interface because `PageBuilderState.design` already reuses `SectionDesign`
+  // for the page-level bag exactly as `pageSectionSchema.design` reuses
+  // `sectionDesignSchema` for both roles — a section never sets `style` and a
+  // page never sets `scheme`/`spacing`. The string unions are duplicated from
+  // `kit/model/ids.ts` rather than imported: that file is a `$lib` module a
+  // BE-safe foundation package cannot depend on, and the nine legacy axes
+  // above are already duplicated the same way against `SECTION_DESIGN_VALUES`
+  // in `section-catalog.ts`. Legacy axis fields are unchanged and still valid.
+  /** A section's v2 colour scheme. Mirrors `ColourSchemeId` in `kit/model/ids.ts`. */
+  scheme?: 'base' | 'soft' | 'contrast' | 'brand' | 'accent';
+  /** A section's v2 vertical rhythm. Mirrors `SectionSpacingId` in `kit/model/ids.ts`. */
+  spacing?: 'compact' | 'regular' | 'spacious';
+  /** A page's v2 Style. Mirrors `PageStyleId` in `kit/model/ids.ts`. Page-only. */
+  style?: 'bold' | 'clean' | 'soft' | 'cinematic';
 }
 
 /**
- * A FULLY RESOLVED {@link SectionDesign} — every axis populated, because the
- * renderer emits one `data-jp-<axis>` attribute per axis and an absent value
- * would emit an EMPTY attribute that matches no CSS rule.
+ * A FULLY RESOLVED {@link SectionDesign} — every LEGACY axis populated,
+ * because the renderer emits one `data-jp-<axis>` attribute per axis and an
+ * absent value would emit an EMPTY attribute that matches no CSS rule.
  *
  * Produced by `resolveDesign(section, page)` in
  * `apps/web/src/lib/page-builder/section-catalog.ts`, which resolves per axis
  * (section override → page default → axis default) and drops unknown values.
  * This is the shape a section component receives as its `design` prop.
+ *
+ * `Omit`s the three page-kit v2 keys (`scheme`/`spacing`/`style`) —
+ * DELIBERATELY, not an oversight. `Required<SectionDesign>` would otherwise
+ * demand all three on every literal typed as `ResolvedSectionDesign`
+ * (`design-vocabulary.ts`'s eight presets, `section-catalog.ts`'s own
+ * `SECTION_DESIGN_DEFAULTS`, and every `*Section.svelte.test.ts` fixture —
+ * none of which is page-kit code and none of which this contract's WP may
+ * touch). `resolveDesign()` has no v2 concept at all; the v2 resolution
+ * (`scheme`/`spacing`/`style`) is `kit/model/resolve.ts`'s (WP2) entirely
+ * separate function, over the entirely separate `SectionStyle`/`PageDesign`
+ * types in `kit/model/types.ts`.
  */
-export type ResolvedSectionDesign = Required<SectionDesign>;
+export type ResolvedSectionDesign = Required<
+  Omit<SectionDesign, 'scheme' | 'spacing' | 'style'>
+>;
 
 /**
  * One composable section INSTANCE (SPEC §4.1). Order is array position;

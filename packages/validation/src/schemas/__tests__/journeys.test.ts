@@ -173,6 +173,53 @@ describe('sectionDesignSchema', () => {
     const parsed = sectionDesignSchema.parse({ radius: 'pill', width: 'text' });
     expect(parsed).toEqual({ width: 'text' });
   });
+
+  // ── Page-kit v2 keys (docs/design/landing-builder/01-contract.md §2/§3 —
+  // BINDING). Before this, `scheme`/`spacing`/`style` were unknown KEYS and
+  // silently stripped — `upgrade.ts`'s v2 output would round-trip through a
+  // save and lose its own scheme/spacing/style on the very next load. These
+  // pin the fix, and pin that the nine legacy axes above still work
+  // unchanged (the old builder keeps saving them until WP9 prunes them).
+
+  it('accepts every declared v2 scheme/spacing/style value', () => {
+    for (const scheme of ['base', 'soft', 'contrast', 'brand', 'accent']) {
+      expect(sectionDesignSchema.parse({ scheme }).scheme).toBe(scheme);
+    }
+    for (const spacing of ['compact', 'regular', 'spacious']) {
+      expect(sectionDesignSchema.parse({ spacing }).spacing).toBe(spacing);
+    }
+    for (const style of ['bold', 'clean', 'soft', 'cinematic']) {
+      expect(sectionDesignSchema.parse({ style }).style).toBe(style);
+    }
+  });
+
+  it('SURVIVES a parse instead of being silently stripped as an unknown key', () => {
+    const v2 = { scheme: 'brand', spacing: 'compact', style: 'bold' };
+    expect(sectionDesignSchema.parse(v2)).toEqual(v2);
+  });
+
+  it('degrades an unknown v2 value to undefined, same as a legacy axis', () => {
+    const parsed = sectionDesignSchema.parse({
+      scheme: 'ultra-brand',
+      spacing: 'huge',
+      style: 'not-a-style',
+    });
+    expect(parsed.scheme).toBeUndefined();
+    expect(parsed.spacing).toBeUndefined();
+    expect(parsed.style).toBeUndefined();
+  });
+
+  it('accepts legacy axes and v2 keys TOGETHER on the same bag (the transitional shape)', () => {
+    const mixed = {
+      // Legacy — still written by the old builder until WP9 prunes it.
+      width: 'text',
+      surface: 'invert',
+      // v2 — written by `upgrade.ts` / the new kit.
+      scheme: 'contrast',
+      spacing: 'regular',
+    };
+    expect(sectionDesignSchema.parse(mixed)).toEqual(mixed);
+  });
 });
 
 describe('pageSectionSchema', () => {

@@ -24,6 +24,7 @@ import {
   checkoutUrlForPath,
   deriveOfferPaths,
   deriveOfferPathsForPage,
+  findInviteSection,
   formatCleanPrice,
   resolveOfferTarget,
   resolvePreselectedOffer,
@@ -427,6 +428,63 @@ describe('deriveOfferPathsForPage', () => {
       'subscription-annual',
       `tier:${TIER_ID}`,
     ]);
+  });
+
+  it('reads a v2 `pricing` section exactly like a legacy `invite` one (Codex-61zsk.1)', () => {
+    // `kit/model/upgrade.ts` renames `invite` → `pricing`; the checkout must
+    // keep reading an upgraded page's decorations without a schema bump.
+    const pricing = {
+      id: 'sec-pricing',
+      type: 'pricing' as const,
+      enabled: true,
+      props: { offers: [{ id: 'purchase', name: 'From the v2 page' }] },
+    };
+    const paths = deriveOfferPathsForPage(FULL_OFFER, COURSE, [pricing]);
+    expect(paths[0].name).toBe('From the v2 page');
+  });
+});
+
+describe('findInviteSection', () => {
+  it('finds a legacy `invite` section', () => {
+    const invite = {
+      id: 's1',
+      type: 'invite' as const,
+      enabled: true,
+      props: {},
+    };
+    expect(findInviteSection([invite])).toBe(invite);
+  });
+
+  it('finds a v2 `pricing` section', () => {
+    const pricing = {
+      id: 's1',
+      type: 'pricing' as const,
+      enabled: true,
+      props: {},
+    };
+    expect(findInviteSection([pricing])).toBe(pricing);
+  });
+
+  it('prefers whichever of `invite`/`pricing` is FIRST and enabled, not `invite` specifically', () => {
+    const disabledInvite = {
+      id: 's1',
+      type: 'invite' as const,
+      enabled: false,
+      props: {},
+    };
+    const pricing = {
+      id: 's2',
+      type: 'pricing' as const,
+      enabled: true,
+      props: {},
+    };
+    expect(findInviteSection([disabledInvite, pricing])).toBe(pricing);
+  });
+
+  it('is undefined when the page has neither type', () => {
+    expect(
+      findInviteSection([{ id: 's1', type: 'hero', enabled: true, props: {} }])
+    ).toBeUndefined();
   });
 });
 
