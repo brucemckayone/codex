@@ -52,9 +52,11 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | 3 | **done** `b7aee127` | video · preview · instructor · stats |
 | 4 | **done** `b7aee127` | problem · transformation · benefits · text; 1,680-combination contrast probe, floor 4.97:1 |
 | 5 | **done** `99b26ccc` | curriculum · testimonials · faq; identity test now covers all 4 Styles |
-| 7b | running | canvas-first editor shell at `studio/journeys/[id]/page-next` |
-| 6 | running | public sales page on the kit |
-| 8, 9, 10b, 11 | not started | |
+| 7b | **done** `db094c02` | canvas-first editor at `page-next`; orchestrator fixed autosave wiping undo (`markSaved({keepHistory})`) and the org default font never loading (Inter) |
+| 6 | **done** `6b934c5a` | public page on the kit; not-open pages now say so; hero still on first paint (`e41266ad`) |
+| 8 | running | inspector, pickers, gallery, Style tab |
+| 9b | running | backend defaults, validation v2-only writes, v2 seeds with a Style per portal |
+| 9a, 10b, 11 | not started | |
 
 ## Resume
 
