@@ -450,6 +450,10 @@ export class CourseJourneyService extends BaseService {
           status: courses.status,
           priceCents: courses.priceCents,
           coverImageKey: courses.coverImageKey,
+          // A32 (Codex-490z7): the UPLOADED hero still, joined onto the
+          // AWAITED envelope for the same reason `coverImageKey` is — see
+          // `course.heroImageUrl` below (Codex-61zsk.6 · WP-6).
+          heroImageKey: courses.heroImageKey,
         })
         .from(courses)
         .where(
@@ -526,9 +530,24 @@ export class CourseJourneyService extends BaseService {
             courseRow.coverImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.6 (WP-6): the hero still, on the AWAITED envelope so
+          // the kit's hero block can put an `<img>` in the SSR HTML instead
+          // of waiting on the STREAMED `CourseSellPreview.heroImageUrl` —
+          // see the field comment on `JourneyCourseView.heroImageUrl` for why
+          // this is the upload-only resolution, not that field's full A32
+          // fallback chain. Null with no upload OR no configured base.
+          heroImageUrl: resolveCourseHeroUrl(
+            courseRow.heroImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
+        // The SAME base every still on this envelope already resolved
+        // against, echoed onto the envelope (contract amendment A3) so a
+        // page-kit block can resolve its own `ImageRef`s without the web
+        // needing a second copy of this env value. Null with none configured.
+        mediaBaseUrl: r2PublicUrlBase ?? null,
       };
     } catch (error) {
       this.handleError(error, 'getCoursePage');
@@ -597,6 +616,8 @@ export class CourseJourneyService extends BaseService {
           status: courses.status,
           priceCents: courses.priceCents,
           coverImageKey: courses.coverImageKey,
+          // A32 (Codex-490z7) — see `getCoursePage`'s identical projection.
+          heroImageKey: courses.heroImageKey,
         })
         .from(courses)
         .where(
@@ -671,9 +692,15 @@ export class CourseJourneyService extends BaseService {
             courseRow.coverImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.6 (WP-6) — see `getCoursePage`'s identical projection.
+          heroImageUrl: resolveCourseHeroUrl(
+            courseRow.heroImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
+        mediaBaseUrl: r2PublicUrlBase ?? null,
       };
     } catch (error) {
       this.handleError(error, 'getCoursePagePreview');

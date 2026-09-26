@@ -201,6 +201,26 @@ export interface JourneySalesContext {
    * never blocks the section's text (SEO-critical) from rendering.
    */
   sellPreview: Promise<SellPreview | null>;
+  /**
+   * The CDN base a kit block resolves a page-image `ImageRef` against
+   * (contract amendment A3, Codex-61zsk.10) — `resolvePageImageUrl(ref,
+   * variant, context.mediaBaseUrl)`. The SAME `R2_PUBLIC_URL_BASE` every other
+   * still on this page already resolves against; echoed onto the envelope by
+   * `getCoursePage`/`getCoursePagePreview` so the web never needs its own copy
+   * of the value. Null with no configured base.
+   *
+   * OPTIONAL, not just nullable: `JourneyRenderer` (the pre-kit renderer, still
+   * live for checkout + the studio canvas — `render/builder-context.ts`
+   * defaults it there) and every existing block-test fixture across
+   * `kit/blocks/**` build a `JourneySalesContext` with no opinion on page
+   * images at all. Fifty-plus call sites constructed this object before this
+   * field existed (`grep -rl JourneySalesContext apps/web/src` at the time of
+   * writing); requiring the key would have made every one of them a type
+   * error for a field they have nothing to say about. A host that DOES have a
+   * page-image reader (the public route, `builderSalesContext`) always sets
+   * it explicitly rather than relying on the missing-key case.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

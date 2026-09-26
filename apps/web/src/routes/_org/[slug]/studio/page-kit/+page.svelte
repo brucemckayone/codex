@@ -131,6 +131,10 @@
     sampleContext({
       offer,
       media: withMedia ? { heroImageUrl: image, guidePortraitUrl: image } : {},
+      // Reuses the SAME dev-cdn base as the hero/portrait stills above, so a
+      // page-image block (`resolvePageImageUrl`) previews here too instead of
+      // rendering its designed empty state on every gallery load.
+      mediaBaseUrl: LOCAL_CDN,
     })
   );
 

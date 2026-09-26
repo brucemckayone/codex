@@ -434,11 +434,20 @@ describe('editFieldLabel / editFieldName', () => {
     // the fallback has to be readable rather than absent.
     expect(editFieldLabel('hero', 'previewSub')).toBe('Preview sub');
     expect(editFieldName('hero', 'someNewField')).toBe('Hero — Some new field');
-    expect(editFieldName('nosuchtype', 'heading')).toBe('nosuchtype — Heading');
+    expect(editFieldName('nosuchtype', 'heading')).toBe('Nosuchtype — Heading');
   });
 
-  it('names the section the author sees on the rail', () => {
-    expect(editFieldName('ache', 'heading')).toBe('The ache — Heading');
+  it('names the section with the plain humanised type id, not the legacy catalogue label', () => {
+    // Codex-61zsk.6 (WP-6): this used to read `findSectionDefinition(type)?.label`
+    // ("The ache", "Intro video" — the words on the studio rail), which pulled the
+    // whole legacy catalogue into the public bundle for a name only the ELEVEN
+    // LEGACY sections still consume directly — the kit's own `editAttrs`
+    // (`kit/primitives/edit.ts`) always overwrites this module's `aria-label` with
+    // one built from its own `DEFINITIONS`. Dropped in favour of `humaniseKey`,
+    // which is strictly worse for a type whose catalogue label isn't just its
+    // humanised id ("Ache", not "The ache") and identical for one whose camelCase
+    // id already reads as words ("Intro video" either way).
+    expect(editFieldName('ache', 'heading')).toBe('Ache — Heading');
     expect(editFieldName('introVideo', 'clip')).toBe(
       'Intro video — On-frame label'
     );

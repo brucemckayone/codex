@@ -40,9 +40,25 @@
  * here, deliberately, and the allowed import direction (editor UI may import the
  * public tree, never the reverse) is what a round-trip guard would use to pin the
  * two together — see the handoff on {@link editFieldLabel}.
+ *
+ * `editFieldName` USED TO ALSO import `../section-catalog` for the SECTION half
+ * of the name (`findSectionDefinition(type)?.label`, e.g. "The ache"). That
+ * pulled the entire legacy catalogue — every section's copy, variants and
+ * design defaults — into the PUBLIC bundle for a string only ever read inside
+ * the STUDIO canvas (`editable: false` on the public page returns `{}` before
+ * any label is built). Dropped (Codex-61zsk.6 · WP-6): the section half is now
+ * the plain humanised type id (`humaniseKey('ache')` → "Ache"), which is a
+ * strictly worse label for the ELEVEN LEGACY sections that still call
+ * `editFieldAttrs` directly today ("Ache — Heading" vs "The ache — Heading")
+ * and no change at all for the kit, whose own `editAttrs`
+ * (`kit/primitives/edit.ts`) already OVERWRITES this module's `aria-label` with
+ * one built from its own `DEFINITIONS[type].label` — the two keys collide in
+ * an object spread and the kit's own always wins, so the catalogue lookup this
+ * module used to do for the kit was dead code, computed and discarded on every
+ * edit. The legacy section components retire in WP-9; this is that trade,
+ * taken deliberately rather than silently.
  */
 import type { HTMLAttributes } from 'svelte/elements';
-import { findSectionDefinition } from '../section-catalog';
 
 /** What a section's `onEdit` prop accepts: one `props` key, one plain string. */
 export type EditFieldCommit = (key: string, value: string) => void;
@@ -147,14 +163,14 @@ export function editFieldLabel(type: string, key: string): string {
 /**
  * The accessible name for one editable field: which section, then which field.
  *
- * The section half comes from the catalogue the studio itself draws the rail from
- * (`Hero`, `The ache`, `Intro video`), so the name a screen reader reads is the name
- * on screen. An unknown type degrades to the raw type rather than dropping the
- * qualifier, because "Heading" alone on a page of eleven sections names nothing.
+ * The section half is the plain humanised type id ("Ache", "Intro video") —
+ * see the module header for why this dropped the legacy catalogue's own
+ * labels ("The ache") rather than importing it for a string the kit path
+ * never uses. Still never dropped, because "Heading" alone on a page of
+ * eleven sections names nothing.
  */
 export function editFieldName(type: string, key: string): string {
-  const label = findSectionDefinition(type)?.label ?? type;
-  return `${label} — ${editFieldLabel(type, key)}`;
+  return `${humaniseKey(type)} — ${editFieldLabel(type, key)}`;
 }
 
 /**

@@ -65,6 +65,7 @@ import {
   vi,
 } from 'vitest';
 import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
+import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 
 // `page.url` decides the canonical + the noindex, so it is the one thing these
 // tests vary. A getter (not a captured value) so each test can re-point it
@@ -160,12 +161,24 @@ function render(opts: {
   org?: { name: string } | null;
 }): void {
   urlRef.current = new URL(opts.url ?? CLEAN_URL);
+  const page = coursePage(opts.page, opts.course);
   // The route's real `PageData` carries the whole layout tree; this fixture
   // supplies only what the load returns and the head reads, so it is cast once
   // here rather than stubbing an org layout the head never touches.
   const props = {
     data: {
-      coursePage: coursePage(opts.page, opts.course),
+      coursePage: page,
+      // The component now renders the real `PageRenderer` (Codex-61zsk.6 ·
+      // WP-6), which requires a `KitPage` — computed exactly as the real load
+      // computes it, so a body-shape regression would show up here too, not
+      // just in `page.server.test.ts`. Every fixture's `sections` is `[]`, so
+      // this test file — which asserts on `document.head` only — never has
+      // to care what the upgrade produces, only that it doesn't crash the
+      // mount.
+      kitPage: upgradePage({
+        design: page.page.design,
+        sections: page.page.sections,
+      }),
       orgSlug: 'of-blood-and-bones',
       enrolled: false,
       offer: opts.offer ?? null,

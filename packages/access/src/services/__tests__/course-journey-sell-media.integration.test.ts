@@ -715,4 +715,51 @@ describe('CourseJourneyService sell media + cover (journey media write path)', (
       expect(preview?.heroClip).toBeNull();
     });
   });
+
+  // ── getCoursePage projects the AWAITED hero still + mediaBaseUrl (Codex-61zsk.6 · WP-6) ──
+  //
+  // The A32 upload-only still and the page-image CDN base used to be readable
+  // ONLY off the STREAMED `getCourseSellPreview` payload, which a first-paint
+  // `<img>` cannot wait on. These assert the AWAITED envelope carries both, so
+  // a regression here is a real LCP regression, not just a missing field.
+  describe('getCoursePage projects the awaited hero still + mediaBaseUrl', () => {
+    const CDN = 'https://cdn.example.test';
+    let pageSlug: string;
+
+    beforeAll(async () => {
+      const [row] = await db
+        .select({ slug: landingPages.slug })
+        .from(landingPages)
+        .where(eq(landingPages.id, pageId))
+        .limit(1);
+      if (!row) throw new Error('failed to read the shared page slug');
+      pageSlug = row.slug;
+      // `courses`/`landingPages` are already published from the earlier
+      // "surfaces the resolved cover URL" test in this file; `heroImageKey`
+      // was cleared back to null in `getCourseStillImageKeys`'s `finally`.
+    });
+
+    it('reports heroImageUrl null and mediaBaseUrl set when no hero is uploaded', async () => {
+      const page = await svc.getCoursePage(orgAId, pageSlug, CDN);
+      expect(page?.course.heroImageUrl).toBeNull();
+      expect(page?.mediaBaseUrl).toBe(CDN);
+    });
+
+    it('resolves the UPLOADED hero still to an lg.webp CDN URL — the same still getJourneySellMedia’s panel reads', async () => {
+      const key = `courses/${courseId}/hero`;
+      await svc.setCourseHeroImageKey(orgAId, pageId, key);
+
+      try {
+        const page = await svc.getCoursePage(orgAId, pageSlug, CDN);
+        expect(page?.course.heroImageUrl).toBe(`${CDN}/${key}/lg.webp`);
+      } finally {
+        await svc.setCourseHeroImageKey(orgAId, pageId, null);
+      }
+    });
+
+    it('reports mediaBaseUrl null with no CDN base configured', async () => {
+      const page = await svc.getCoursePage(orgAId, pageSlug, undefined);
+      expect(page?.mediaBaseUrl).toBeNull();
+    });
+  });
 });

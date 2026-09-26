@@ -220,6 +220,13 @@ export interface SampleContextOptions {
   offer?: SampleOfferState;
   media?: SampleMedia;
   course?: Partial<JourneyCourseView>;
+  /**
+   * The page-image CDN base (contract A3), for previewing a block that calls
+   * `resolvePageImageUrl`. Null (the default) renders every page-image
+   * block's designed empty state — the same as a real page with no
+   * configured `R2_PUBLIC_URL_BASE`.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 export function sampleContext(
@@ -252,6 +259,7 @@ export function sampleContext(
         ? true
         : deriveOfferPaths(courseOffer, course).length > 0,
     sellPreview: Promise.resolve(preview),
+    mediaBaseUrl: options.mediaBaseUrl ?? null,
   };
 }
 

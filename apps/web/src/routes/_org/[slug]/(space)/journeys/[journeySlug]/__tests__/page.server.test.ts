@@ -374,6 +374,99 @@ describe('journey sales +page.server load', () => {
     expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
   });
 
+  // ── the load's kit choke point (Codex-61zsk.6 · WP-6, contract §3) ─────────
+  // `upgradePage` runs ONCE here, server-side, on the awaited envelope's
+  // `page`. A stored row may still be in the LEGACY vocabulary — this proves
+  // the load normalises it to `KitPage` for the renderer, while leaving
+  // `coursePage.page` (what SEO/JSON-LD reads) exactly as stored.
+  describe('kitPage', () => {
+    it('upgrades a legacy-shaped page to the v2 kit shape', async () => {
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: {
+          ...MOCK_COURSE_PAGE.page,
+          sections: [
+            {
+              id: 's1',
+              type: 'hero',
+              enabled: true,
+              props: { headline: 'Come home to your body' },
+            },
+            {
+              id: 's2',
+              type: 'invite',
+              enabled: true,
+              props: { heading: 'Join us' },
+            },
+          ],
+        },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      // The RAW envelope is untouched — StructuredData/offer derivation in
+      // `+page.svelte` read `coursePage.page.sections` directly.
+      expect(data.coursePage.page.sections).toEqual([
+        {
+          id: 's1',
+          type: 'hero',
+          enabled: true,
+          props: { headline: 'Come home to your body' },
+        },
+        {
+          id: 's2',
+          type: 'invite',
+          enabled: true,
+          props: { heading: 'Join us' },
+        },
+      ]);
+
+      // The UPGRADED page: legacy `hero.headline` → v2 `hero.heading`, and
+      // legacy `invite` → v2 `pricing` (contract §2's type-rename table).
+      expect(data.kitPage.sections).toHaveLength(2);
+      expect(data.kitPage.sections[0]).toMatchObject({
+        id: 's1',
+        type: 'hero',
+        props: { heading: 'Come home to your body' },
+      });
+      expect(data.kitPage.sections[1]).toMatchObject({
+        id: 's2',
+        type: 'pricing',
+      });
+    });
+
+    it('passes an already-v2 page through with its type/props unchanged', async () => {
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: {
+          ...MOCK_COURSE_PAGE.page,
+          design: { style: 'clean' },
+          sections: [
+            {
+              id: 's1',
+              type: 'pricing',
+              enabled: true,
+              props: { heading: 'Join us' },
+            },
+          ],
+        },
+      });
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork');
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.kitPage.design).toEqual({ style: 'clean' });
+      expect(data.kitPage.sections[0]).toMatchObject({
+        id: 's1',
+        type: 'pricing',
+        props: { heading: 'Join us' },
+      });
+    });
+  });
+
   it('registers the version-cache dependency and locks the PRIVATE (never shared-cacheable) header', async () => {
     const { load } = await import('../+page.server');
     const { event, setHeaders, depends } = makeEvent('rootwork');

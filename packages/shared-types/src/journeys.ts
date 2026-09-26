@@ -789,6 +789,28 @@ export interface JourneyCourseView {
    * worker deployment simply omits it and the head emits no `og:image`.
    */
   coverImageUrl?: string | null;
+  /**
+   * UPLOADED hero-image CDN URL (`courses.heroImageKey` → `lg.webp`), or null
+   * when the creator has uploaded no hero image (Codex-490z7, A32). Rides the
+   * AWAITED envelope for the SAME reason {@link coverImageUrl} does (Codex-61zsk.6
+   * · WP-6): the hero still otherwise arrives only on the STREAMED
+   * `CourseSellPreview.heroImageUrl`, which a first-paint `<img>` cannot wait
+   * on without becoming the page's LCP bottleneck.
+   *
+   * THE UPLOAD ONLY, deliberately NOT `CourseSellPreview.heroImageUrl`'s full
+   * A32 fallback chain (which also resolves a hero VIDEO's poster frame via a
+   * `media_items` join) — the same "upload only" split
+   * {@link JourneySellMedia.heroImageUrl} already documents, kept cheap here on
+   * purpose: this field costs no extra join, because `heroImageKey` is a plain
+   * column already read for {@link coverImageUrl}. A hero that is a video with
+   * no uploaded still stays exactly as fast as before (the streamed poster
+   * frame), it just cannot join the awaited envelope too.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): an older
+   * worker deployment simply omits it and the hero block keeps reading the
+   * streamed field.
+   */
+  heroImageUrl?: string | null;
 }
 
 /** One testimonial rendered by the `proof` section. */
@@ -1058,6 +1080,19 @@ export interface JourneyCoursePage {
   course: JourneyCourseView;
   stages: JourneyStageView[];
   testimonials: JourneyTestimonialView[];
+  /**
+   * The CDN base a page-kit block resolves a page-image `ImageRef` against
+   * (`resolvePageImageUrl`, contract amendment A3 of
+   * `docs/design/landing-builder/01-contract.md`, Codex-61zsk.10/.6) — the
+   * SAME env-owned `R2_PUBLIC_URL_BASE` {@link JourneyCourseView.coverImageUrl}
+   * and {@link JourneyCourseView.heroImageUrl} already resolve against,
+   * echoed here so the web never needs its own copy of the value. Null with
+   * no configured base.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and every
+   * page-image block renders its designed empty state.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 /**

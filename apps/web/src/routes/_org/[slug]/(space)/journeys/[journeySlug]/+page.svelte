@@ -11,13 +11,14 @@
   import { page } from '$app/state';
   import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
   import { StructuredData } from '$lib/components/seo';
+  import { PageRenderer } from '$lib/page-builder/kit';
   import {
     checkoutUrlForPath,
     deriveOfferPathsForPage,
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
-  import { JourneyRenderer } from '$lib/page-builder/render';
+  import { buildPublicContext } from '$lib/page-builder/public-context';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
@@ -106,6 +107,23 @@
   // exactly what they would see without the param, so a banner there would be
   // internal chrome on a public page with nothing true to say.
   const previewAsVisitor = $derived(previewing && data.enrolled === true);
+
+  // ── THE KIT'S RENDER CONTEXT (Codex-61zsk.6 · WP-6) ─────────────────────────
+  // `renderEnrolled`, NOT `data.enrolled`, for the same reason the old
+  // `JourneyRenderer` prop did: under `?preview` the CTA must resolve as a
+  // visitor's so a manager can see their own buy button. `mediaBaseUrl` comes
+  // straight off the awaited envelope — `coursePage.mediaBaseUrl` is already
+  // the worker's `R2_PUBLIC_URL_BASE`, so nothing here re-derives it.
+  const context = $derived(
+    buildPublicContext({
+      coursePage: data.coursePage,
+      sellPreview: data.sellPreview,
+      enrolled: renderEnrolled,
+      offer: data.offer,
+      mediaBaseUrl: data.coursePage.mediaBaseUrl ?? null,
+      url: page.url,
+    })
+  );
 
   // The share image. `courses.coverImageKey` resolved to a public CDN URL by the
   // service (`resolveCourseCoverUrl`) and carried on the AWAITED envelope — the
@@ -317,13 +335,14 @@
 <StructuredData data={structuredData} />
 
 <!--
-  `renderEnrolled`, NOT `data.enrolled`: under `?preview` the CTA resolves as a
-  visitor's so the creator can see their own buy button. See the derivation for
-  why the override is here and not in the load.
+  The kit's own default nav clearance (`--lp-nav-clearance`'s fallback,
+  `var(--space-16)`) already matches this org layout's mobile bottom nav
+  (`MobileBottomNav.svelte`'s `.bottom-nav { height: var(--space-16) }`,
+  border-box, so `env(safe-area-inset-bottom)` is absorbed inside that height,
+  not additive) — measured, not assumed; no override set here.
 -->
-<JourneyRenderer
-  coursePage={data.coursePage}
-  sellPreview={data.sellPreview}
-  enrolled={renderEnrolled}
-  offer={data.offer}
+<PageRenderer
+  page={data.kitPage}
+  {context}
+  brandOverrides={data.coursePage.page.brandOverrides}
 />

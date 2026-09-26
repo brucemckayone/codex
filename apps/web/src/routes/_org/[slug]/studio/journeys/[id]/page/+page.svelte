@@ -1098,6 +1098,7 @@
           {dashboardUrl}
           {testimonials}
           {sellPreview}
+          mediaBaseUrl={coursePageQuery?.current?.mediaBaseUrl ?? null}
         />
       </section>
 

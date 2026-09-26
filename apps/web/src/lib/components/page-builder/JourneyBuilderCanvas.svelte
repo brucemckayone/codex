@@ -174,6 +174,8 @@
      * answer before Codex-bvhcr.
      */
     sellPreview?: BuilderContextInput['sellPreview'];
+    /** CDN base for page images (contract A3); the legacy canvas passes it through. */
+    mediaBaseUrl?: BuilderContextInput['mediaBaseUrl'];
   }
 
   let {
@@ -190,6 +192,7 @@
     dashboardUrl = '',
     testimonials = [],
     sellPreview = null,
+    mediaBaseUrl = null,
   }: Props = $props();
 
   const sections = $derived(pageBuilder.sections);
@@ -243,6 +246,7 @@
       dashboardUrl,
       testimonials,
       sellPreview,
+      mediaBaseUrl,
     })
   );
 

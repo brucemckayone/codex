@@ -81,13 +81,21 @@ export interface JourneyFixture {
    */
   readonly purchasable: boolean;
   /**
-   * The stored section types, in stored order. `db:seed:portals` writes the
+   * The STORED section types, in stored order. `db:seed:portals` writes the
    * same four for every page. Refresh with:
    *   psql -h db.localtest.me -p 5432 -U postgres -d main -At -c "select o.slug
    *     ||' '||lp.slug||' '||(select string_agg(s->>'type', ',' order by ord)
    *     from jsonb_array_elements(lp.sections) with ordinality t(s, ord))
    *     from landing_pages lp join organizations o on o.id=lp.organization_id
    *     where lp.deleted_at is null order by 1;"
+   *
+   * DELIBERATELY THE STORED (legacy) shape, not what a visitor sees — the
+   * studio canvas (`canvas-public-parity.spec.ts`) still renders these
+   * literal types until WP-9 upgrades the builder load too, so a fixture
+   * that already spoke v2 would break that file's canvas-side self-check.
+   * `expectSellPageRendered` (public-page-only) is what translates these
+   * through `upgradePage`'s renames before comparing against the kit's
+   * rendered `data-lp-type` — see `LEGACY_TO_V2_TYPE` below.
    */
   readonly sections: readonly string[];
 }
@@ -478,12 +486,28 @@ export async function readJourneyHead(page: Page): Promise<JourneyHeadTags> {
       robots: contents('meta[name="robots"]'),
       ogDescriptions: contents('meta[property="og:description"]'),
       jsonLdDescription,
-      sectionTypes: [...document.querySelectorAll('[data-section-type]')].map(
-        (element) => (element as HTMLElement).dataset.sectionType ?? ''
+      // `data-lp-type` (kit `SectionShell`), not the legacy renderer's
+      // `data-section-type` (Codex-61zsk.6 · WP-6).
+      sectionTypes: [...document.querySelectorAll('[data-lp-type]')].map(
+        (element) => (element as HTMLElement).dataset.lpType ?? ''
       ),
     };
   });
 }
+
+/**
+ * Legacy stored type → v2 kit type, for the four types every seeded fixture
+ * uses (contract §2's "Replaces legacy" column, `01-contract.md`). Only these
+ * four are needed here — `upgradePage` (Codex-61zsk.6 · WP-6) is the real,
+ * total mapping; this is a narrow, e2e-local restatement of it so this file
+ * does not import the app's module graph.
+ */
+const LEGACY_TO_V2_TYPE: Readonly<Record<string, string>> = {
+  hero: 'hero',
+  ache: 'problem',
+  map: 'curriculum',
+  invite: 'pricing',
+};
 
 /**
  * Assert we are actually looking at a rendered SELL page — TRAPS 2 and 3
@@ -514,20 +538,27 @@ export async function expectSellPageRendered(
   await expect
     .poll(
       () =>
+        // `data-lp-type` (kit `SectionShell`), not the legacy renderer's
+        // `data-section-type` (Codex-61zsk.6 · WP-6): the public page now
+        // renders through the kit, which upgrades a stored row to v2 at the
+        // load choke point.
         page.evaluate(() =>
-          [...document.querySelectorAll('[data-section-type]')].map(
-            (element) => (element as HTMLElement).dataset.sectionType
+          [...document.querySelectorAll('[data-lp-type]')].map(
+            (element) => (element as HTMLElement).dataset.lpType
           )
         ),
       {
         message:
-          'the stored sections did not render in stored order — note a ' +
-          'load-thrown 404 on this surface still returns HTTP 200 ' +
-          '(Codex-nqop3, upstream SvelteKit)',
+          'the stored sections did not render (as their v2 kit type) in ' +
+          'stored order — note a load-thrown 404 on this surface still ' +
+          'returns HTTP 200 (Codex-nqop3, upstream SvelteKit)',
         timeout: 15_000,
       }
     )
-    .toEqual([...fixture.sections]);
+    // `fixture.sections` is the STORED (legacy) shape — translated through
+    // the same renames `upgradePage` applies, since that is what the kit
+    // actually puts in the DOM.
+    .toEqual(fixture.sections.map((type) => LEGACY_TO_V2_TYPE[type] ?? type));
 }
 
 /**
