@@ -1147,6 +1147,20 @@ describe('pageBuilder — undo / redo', () => {
     pageBuilder.markSaved();
     expect(pageBuilder.canUndo).toBe(false);
   });
+
+  it('an autosave checkpoint (keepHistory) keeps undo reaching past it', () => {
+    pageBuilder.addSection('faq');
+    pageBuilder.addSection('proof');
+    const count = pageBuilder.sections.length;
+    pageBuilder.markSaved({ keepHistory: true });
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(pageBuilder.canUndo).toBe(true);
+    pageBuilder.undo();
+    pageBuilder.undo();
+    expect(pageBuilder.sections.length).toBe(count - 2);
+    // Undoing past the checkpoint is a real change again.
+    expect(pageBuilder.isDirty).toBe(true);
+  });
 });
 
 /**

@@ -1023,12 +1023,18 @@ function getSavePayload(): PageBuilderState | null {
   return state.pending ? clone(state.pending) : null;
 }
 
-/** Mark the current pending draft as the new saved baseline (post-persist). */
-function markSaved(): void {
+/**
+ * Mark the current pending draft as the new saved baseline (post-persist).
+ *
+ * `keepHistory` is for AUTOSAVE: a save that fires ~1.5s after every edit must
+ * not erase the undo stack, or ⌘Z only ever reaches back to the last pause. An
+ * explicit Save (the legacy builder) still clears it, as before.
+ */
+function markSaved(options: { keepHistory?: boolean } = {}): void {
   if (!state.pending) return;
   state.saved = clone(state.pending);
   clearStorage();
-  clearHistory();
+  if (!options.keepHistory) clearHistory();
 }
 
 function clearStorage(): void {
