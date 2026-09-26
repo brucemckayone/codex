@@ -169,6 +169,14 @@
     justify-self: center;
   }
 
+  /* A lone card sits under the centred head, not hard left of it. */
+  :global(.lp[data-lp-style='soft'])
+    .pricing[data-layout='cards']
+    .pricing__cards[data-count='1'] {
+    inline-size: 100%;
+    margin-inline: auto;
+  }
+
   .pricing__note,
   .pricing__panel-body {
     margin: 0;
