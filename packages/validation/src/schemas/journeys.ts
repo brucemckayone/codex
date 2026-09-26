@@ -5,6 +5,8 @@ import {
   COLOUR_SCHEME_IDS,
   PAGE_STYLE_IDS,
   SECTION_SPACING_IDS,
+  SECTION_TYPE_IDS,
+  type SectionTypeId,
 } from './landing-page';
 
 /**
@@ -229,33 +231,35 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
 ) => z.enum(values).optional().catch(undefined);
 
 /**
- * The nine LEGACY design axes (`docs/design/journey-sections/02-axis-contract.md`
- * A5) plus the THREE page-kit v2 keys (`docs/design/landing-builder/01-contract.md`
- * §2/§3 — BINDING, superseding the nine-axis programme for new work). Mirrors
- * `SectionDesign` in `@codex/shared-types`; unknown KEYS are stripped by
- * `z.object`'s default behaviour and unknown VALUES by the per-axis `.catch`.
+ * A section's or page's v2 STYLE bag (`docs/design/landing-builder/
+ * 01-contract.md` §2/§3 — BINDING) — the ONLY `design` shape a WRITE may
+ * persist as of WP-9b. Mirrors `SectionDesign` in `@codex/shared-types`
+ * (whose nine legacy fields now carry a `@deprecated` note); unknown KEYS are
+ * stripped by `z.object`'s default behaviour and unknown VALUES by the
+ * per-axis `.catch`.
  *
  * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
  * (this one object backs both `pageSectionSchema.design` and
- * `saveJourneyPageBodySchema.design`, exactly as it already backs both roles
- * for the nine legacy axes). Before this, these three keys were silently
- * STRIPPED as unknown — v2 `upgrade.ts` output would round-trip through a
- * save and lose its own scheme/spacing/style on the very next load. A section
- * never sets `style` and a page never sets `scheme`/`spacing`; nothing reads
- * the unused one for either role, so the extra optional keys are harmless.
- * Legacy axis keys are UNCHANGED and still accepted — the old builder keeps
- * saving them until WP9 prunes them (contract §3).
+ * `saveJourneyPageBodySchema.design`, exactly as it already backed both roles
+ * for the nine legacy axes). A section never sets `style` and a page never
+ * sets `scheme`/`spacing`; nothing reads the unused one for either role, so
+ * the extra optional keys are harmless.
+ *
+ * PRUNED (contract §3: "the server ... validates writes (v2 keys added by
+ * WP1, legacy keys pruned by WP9)"): the nine legacy design axes
+ * (`width`/`density`/`surface`/`edge`/`align`/`type`/`accent`/`motion`/`media`)
+ * are gone from this schema. They are not REJECTED — a stale client sending
+ * them still saves; the axis KEYS are silently stripped as unknown, exactly
+ * like a key this schema never heard of always was. Reads are unaffected: an
+ * existing row's legacy `design` bag is untouched by this schema (validation
+ * only runs on the write path), and the web upgrades it to v2 on load
+ * (`kit/model/upgrade.ts`) — so the row is pruned for real on its next save.
+ * Structurally this is `landing-page.ts`'s `sectionStyleSchema` +
+ * `pageDesignSchema` merged into one object; that file's doc comment called
+ * itself "the standalone v2-only twin ... for any future v2-native write
+ * path" — this schema is that path, now that it exists.
  */
 export const sectionDesignSchema = z.object({
-  width: designAxis(['narrow', 'text', 'wide', 'full']),
-  density: designAxis(['compact', 'regular', 'airy', 'vast']),
-  surface: designAxis(['bare', 'tint', 'panel', 'invert', 'media']),
-  edge: designAxis(['none', 'hairline', 'soft', 'heavy', 'offset']),
-  align: designAxis(['start', 'center', 'end']),
-  type: designAxis(['restrained', 'balanced', 'expressive', 'monumental']),
-  accent: designAxis(['text', 'fill', 'edge', 'glow', 'none']),
-  motion: designAxis(['none', 'fade', 'rise', 'stagger', 'drift']),
-  media: designAxis(['bleed', 'frame', 'mask', 'inset', 'none']),
   scheme: designAxis(COLOUR_SCHEME_IDS),
   spacing: designAxis(SECTION_SPACING_IDS),
   style: designAxis(PAGE_STYLE_IDS),
@@ -270,17 +274,27 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * so adding `design` to the TypeScript interface would have bought no validation
  * at all.
  *
- * Three fields stay deliberately LOOSE, and tightening any of them would reject
- * data the platform already stores:
- *   - `type` is an OPEN string. The renderer skips an unrecognised type rather
- *     than erroring (that is what makes a future page template additive), so the
- *     schema must accept one too.
- *   - `variant` is an OPEN string for the same reason, and concretely: the seeded
- *     `studio-alpha` page stores `variant: "default"`, which is not a declared
- *     variant of any type. An enum here would 400 a real page on save.
+ * TWO fields stay deliberately LOOSE, and tightening either would reject data
+ * the platform already stores:
+ *   - `variant` is an OPEN string. The renderer/resolver falls back to the
+ *     type's default layout on an unrecognised one (that is what makes a
+ *     future layout additive), and concretely: the seeded `studio-alpha` page
+ *     stores `variant: "default"`, which is not a declared variant of any
+ *     type. An enum here would 400 a real page on save.
  *   - `props` is a PASSTHROUGH record. Its per-type shape is owned by the renderer
  *     + editor, not by this contract, and `render/coerce.ts` already treats every
  *     field as untrusted at the read boundary.
+ *
+ * `type` is now the CLOSED v2 vocabulary instead (`SECTION_TYPE_IDS`,
+ * `docs/design/landing-builder/01-contract.md` §2 — BINDING; WP-9b). It used
+ * to be an open string for the same "renderer skips what it doesn't
+ * recognise" reason `variant` still is — that stayed true for READS (an
+ * existing legacy-typed row keeps rendering; the web upgrades it to v2 on
+ * load, `kit/model/upgrade.ts`) but stopped being the right rule for WRITES:
+ * v2 is now the only vocabulary this platform adds section types to, so a
+ * save naming a type outside that closed set is a client bug — an old
+ * builder build or a hand-crafted request — not a future template, and it
+ * 400s rather than persisting a type the new kit will never render.
  *
  * `props` carries `.default({})` rather than being required: `.default()` only
  * widens the INPUT type while the output stays required, so the inferred body is
@@ -295,7 +309,7 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  */
 export const pageSectionSchema = z.object({
   id: z.string().min(1),
-  type: z.string().min(1).max(60),
+  type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
   enabled: z.boolean(),
   variant: z.string().max(60).optional(),
   name: z.string().max(200).optional(),

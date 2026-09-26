@@ -21,6 +21,7 @@ import {
   saveJourneyPageBodySchema,
   sectionDesignSchema,
 } from '../journeys';
+import { SECTION_TYPE_IDS } from '../landing-page';
 
 const ORG_ID = '32300000-0000-4000-8000-000000000002';
 const PAGE_ID = '1a000000-0000-4000-8000-0000000000aa';
@@ -110,16 +111,23 @@ describe('orgJourneyRevenueQuerySchema', () => {
 
 const SECTION = {
   id: 'sec-1',
-  type: 'ache',
+  type: 'problem',
   enabled: true,
   variant: 'statement',
-  name: 'The ache',
+  name: 'The problem',
   props: { kicker: 'K', heading: 'H', body: 'B' },
 };
 
 describe('sectionDesignSchema', () => {
-  it('accepts every declared axis value', () => {
-    const design = {
+  // WP-9b (contract §3: "the server ... validates writes (v2 keys added by
+  // WP1, legacy keys pruned by WP9)"). The nine legacy design axes
+  // (`width`/`density`/`surface`/`edge`/`align`/`type`/`accent`/`motion`/`media`)
+  // are gone from this schema. Not REJECTED — an old client sending one still
+  // saves; the axis KEY is silently stripped as unknown, same as a key this
+  // schema never declared.
+
+  it('strips every legacy axis KEY instead of persisting it', () => {
+    const legacy = {
       width: 'narrow',
       density: 'vast',
       surface: 'invert',
@@ -130,48 +138,33 @@ describe('sectionDesignSchema', () => {
       motion: 'drift',
       media: 'bleed',
     };
-    expect(sectionDesignSchema.parse(design)).toEqual(design);
+    expect(sectionDesignSchema.parse(legacy)).toEqual({});
   });
 
-  it('accepts an empty bag and a partially-set bag', () => {
+  it('accepts an empty bag and a partially-set v2 bag', () => {
     expect(sectionDesignSchema.parse({})).toEqual({});
-    expect(sectionDesignSchema.parse({ width: 'wide' })).toMatchObject({
-      width: 'wide',
+    expect(sectionDesignSchema.parse({ scheme: 'brand' })).toMatchObject({
+      scheme: 'brand',
     });
-  });
-
-  it('DROPS an unknown axis value to undefined rather than failing the parse', () => {
-    // The load-bearing behaviour: a future client sending a new axis value must
-    // not make the whole page save 400. Losing every other edit on the page to
-    // one unrecognised enum member is a far worse outcome than dropping it, and
-    // `resolveDesign` then falls back to the axis default.
-    const parsed = sectionDesignSchema.parse({
-      width: 'ultra-wide',
-      motion: 'explode',
-      density: 'airy',
-    });
-    expect(parsed.width).toBeUndefined();
-    expect(parsed.motion).toBeUndefined();
-    // An axis alongside the unknown one still survives.
-    expect(parsed.density).toBe('airy');
   });
 
   it('drops non-string garbage the same way (jsonb round-trips any shape)', () => {
     const parsed = sectionDesignSchema.parse({
-      width: 42,
-      align: null,
-      surface: { nested: true },
-      edge: ['heavy'],
+      scheme: 42,
+      spacing: null,
+      style: { nested: true },
     });
-    expect(parsed.width).toBeUndefined();
-    expect(parsed.align).toBeUndefined();
-    expect(parsed.surface).toBeUndefined();
-    expect(parsed.edge).toBeUndefined();
+    expect(parsed.scheme).toBeUndefined();
+    expect(parsed.spacing).toBeUndefined();
+    expect(parsed.style).toBeUndefined();
   });
 
-  it('strips unknown axis KEYS instead of rejecting them', () => {
-    const parsed = sectionDesignSchema.parse({ radius: 'pill', width: 'text' });
-    expect(parsed).toEqual({ width: 'text' });
+  it('strips an unrelated unknown KEY the same way', () => {
+    const parsed = sectionDesignSchema.parse({
+      radius: 'pill',
+      scheme: 'base',
+    });
+    expect(parsed).toEqual({ scheme: 'base' });
   });
 
   // ── Page-kit v2 keys (docs/design/landing-builder/01-contract.md §2/§3 —
@@ -209,16 +202,20 @@ describe('sectionDesignSchema', () => {
     expect(parsed.style).toBeUndefined();
   });
 
-  it('accepts legacy axes and v2 keys TOGETHER on the same bag (the transitional shape)', () => {
+  it('PRUNES a legacy axis even mixed with v2 keys on the same bag', () => {
+    // Before WP-9b this was the transitional shape: a legacy axis and a v2 key
+    // survived side by side on one bag while the old builder still wrote the
+    // former. WP-9b is that prune, so only the v2 keys remain.
     const mixed = {
-      // Legacy — still written by the old builder until WP9 prunes it.
       width: 'text',
       surface: 'invert',
-      // v2 — written by `upgrade.ts` / the new kit.
       scheme: 'contrast',
       spacing: 'regular',
     };
-    expect(sectionDesignSchema.parse(mixed)).toEqual(mixed);
+    expect(sectionDesignSchema.parse(mixed)).toEqual({
+      scheme: 'contrast',
+      spacing: 'regular',
+    });
   });
 });
 
@@ -227,19 +224,43 @@ describe('pageSectionSchema', () => {
     expect(pageSectionSchema.parse(SECTION)).toEqual(SECTION);
   });
 
-  it('accepts a section carrying a design bag', () => {
+  it('accepts a section carrying a v2 design bag', () => {
+    const parsed = pageSectionSchema.parse({
+      ...SECTION,
+      design: { scheme: 'brand', spacing: 'compact' },
+    });
+    expect(parsed.design).toEqual({ scheme: 'brand', spacing: 'compact' });
+  });
+
+  it('strips a legacy design axis on a section instead of persisting it', () => {
     const parsed = pageSectionSchema.parse({
       ...SECTION,
       design: { density: 'compact', accent: 'none' },
     });
-    expect(parsed.design).toEqual({ density: 'compact', accent: 'none' });
+    expect(parsed.design).toEqual({});
   });
 
-  it('keeps `type` an OPEN string — the renderer skips unknown types', () => {
+  it('CLOSES `type` to the v2 vocabulary — a legacy or unknown type 400s on save', () => {
+    // WP-9b (contract §3): v2 is the only vocabulary new work adds section
+    // types to, so a save naming a type outside it is a client bug, not a
+    // future template. `ache` is `problem`'s legacy name (contract Appendix
+    // A.1) — a real value this platform has stored, and reads are unaffected
+    // (it still renders); it just cannot be WRITTEN under its old name.
+    expect(
+      pageSectionSchema.safeParse({ ...SECTION, type: 'ache' }).success
+    ).toBe(false);
     expect(
       pageSectionSchema.safeParse({ ...SECTION, type: 'retreat-schedule' })
         .success
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('accepts every v2 section type', () => {
+    for (const type of SECTION_TYPE_IDS) {
+      expect(pageSectionSchema.safeParse({ ...SECTION, type }).success).toBe(
+        true
+      );
+    }
   });
 
   it('keeps `variant` an OPEN string', () => {
@@ -282,41 +303,58 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     subjectType: 'course',
     subjectId: ORG_ID,
     brandOverrides: null,
-    sections: [SECTION, { ...SECTION, id: 'sec-2', design: { edge: 'soft' } }],
+    sections: [
+      SECTION,
+      { ...SECTION, id: 'sec-2', design: { scheme: 'contrast' } },
+    ],
   };
 
-  it('accepts a body whose sections carry design bags', () => {
+  it('accepts a body whose sections carry v2 design bags', () => {
     const parsed = saveJourneyPageBodySchema.parse(BODY);
     expect(parsed.sections).toHaveLength(2);
-    expect(parsed.sections[1]!.design).toEqual({ edge: 'soft' });
+    expect(parsed.sections[1]!.design).toEqual({ scheme: 'contrast' });
   });
 
-  it('does not fail the whole page save over one unknown axis value', () => {
+  it('does not fail the whole page save over one unknown v2 value', () => {
     const parsed = saveJourneyPageBodySchema.parse({
       ...BODY,
-      sections: [{ ...SECTION, design: { width: 'from-the-future' } }],
+      sections: [{ ...SECTION, design: { scheme: 'from-the-future' } }],
     });
     const [section] = parsed.sections;
     expect(section).toBeDefined();
-    expect(section!.design?.width).toBeUndefined();
+    expect(section!.design?.scheme).toBeUndefined();
     // The section's copy — everything the creator actually typed — survives.
     expect(section!.props).toEqual(SECTION.props);
   });
 
-  it('accepts the PAGE-level design bundle (F-B2 — the column now exists)', () => {
+  it('PRUNES a legacy axis on a section instead of persisting it', () => {
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
+      sections: [{ ...SECTION, design: { edge: 'soft' } }],
+    });
+    expect(parsed.sections[0]!.design).toEqual({});
+  });
+
+  it('accepts the PAGE-level v2 Style (F-B2 — the column now exists)', () => {
     // F-A left this key out on purpose: under `.strict()` a declared-but-
     // unpersistable field is worse than a rejected one, because the save accepts
     // it, drops it and reports "Page saved". The column, the service write and the
     // `SavePagePayload` field all landed in F-B2, so the key is now honourable.
     const parsed = saveJourneyPageBodySchema.parse({
       ...BODY,
+      design: { style: 'cinematic' },
+    });
+    expect(parsed.design).toEqual({ style: 'cinematic' });
+  });
+
+  it('PRUNES a legacy PAGE design bundle instead of persisting it', () => {
+    // WP-9b: the nine legacy axes are gone from `sectionDesignSchema`, so a
+    // page-level bundle in the old shape now saves empty rather than intact.
+    const parsed = saveJourneyPageBodySchema.parse({
+      ...BODY,
       design: { width: 'narrow', density: 'airy', surface: 'media' },
     });
-    expect(parsed.design).toEqual({
-      width: 'narrow',
-      density: 'airy',
-      surface: 'media',
-    });
+    expect(parsed.design).toEqual({});
   });
 
   it('accepts a body with NO page design — absence means "leave it alone"', () => {
@@ -324,13 +362,12 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(parsed.design).toBeUndefined();
   });
 
-  it('degrades an unknown PAGE axis value instead of 400ing the whole save', () => {
+  it('degrades an unknown PAGE style value instead of 400ing the whole save', () => {
     const parsed = saveJourneyPageBodySchema.parse({
       ...BODY,
-      design: { width: 'narrow', motion: 'teleport' },
+      design: { style: 'not-a-style' },
     });
-    expect(parsed.design?.width).toBe('narrow');
-    expect(parsed.design?.motion).toBeUndefined();
+    expect(parsed.design?.style).toBeUndefined();
   });
 
   it('accepts a page seo bag and round-trips it', () => {

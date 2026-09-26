@@ -78,15 +78,35 @@ export type SectionProps = Record<string, unknown>;
  * exactly as {@link PageSection.variant} already is. A value this build does not
  * know resolves to the axis DEFAULT rather than reaching the DOM, so the renderer
  * never emits an attribute that matches no CSS rule.
+ *
+ * SUPERSEDED (`docs/design/landing-builder/01-contract.md` §2/§3 — BINDING,
+ * WP-9b): these nine axes are the LEGACY vocabulary the page-kit Style system
+ * (below) replaces for all new work. `@codex/validation`'s `sectionDesignSchema`
+ * no longer accepts them on a WRITE — they are kept here, still typed and still
+ * optional, only because an existing row's `design` bag may still carry them
+ * until its next save; the web upgrades such a row to v2 on load
+ * (`kit/model/upgrade.ts`). Each is marked `@deprecated` below.
  */
 export interface SectionDesign {
-  /** Content measure: `narrow` 46ch · `text` 64ch · `wide` 78ch · `full` bleed. */
+  /**
+   * Content measure: `narrow` 46ch · `text` 64ch · `wide` 78ch · `full` bleed.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   width?: 'narrow' | 'text' | 'wide' | 'full';
-  /** Vertical-rhythm multiplier, applied ON TOP of the org's brand density. */
+  /**
+   * Vertical-rhythm multiplier, applied ON TOP of the org's brand density.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   density?: 'compact' | 'regular' | 'airy' | 'vast';
-  /** Section backdrop: none / tinted / panelled / inverted / media-backed. */
+  /**
+   * Section backdrop: none / tinted / panelled / inverted / media-backed.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   surface?: 'bare' | 'tint' | 'panel' | 'invert' | 'media';
-  /** Border weight FUSED with elevation — they co-vary, so one axis owns both. */
+  /**
+   * Border weight FUSED with elevation — they co-vary, so one axis owns both.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   edge?: 'none' | 'hairline' | 'soft' | 'heavy' | 'offset';
   /**
    * Text/box alignment, and it deletes ~8 alignment-only variants. `end` is
@@ -94,15 +114,28 @@ export interface SectionDesign {
    * while the text stays left-aligned, because a right-ragged body column is a
    * readability regression. WIDENING ONLY — every persisted `start`/`center`
    * stays valid.
+   * @deprecated legacy axis — read-only, upgraded on load
    */
   align?: 'start' | 'center' | 'end';
-  /** Type-scale character, from utilitarian to display-led. */
+  /**
+   * Type-scale character, from utilitarian to display-led.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   type?: 'restrained' | 'balanced' | 'expressive' | 'monumental';
-  /** How the ember accent is spent. `none` still leaves a price-bearing CTA filled. */
+  /**
+   * How the ember accent is spent. `none` still leaves a price-bearing CTA filled.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   accent?: 'text' | 'fill' | 'edge' | 'glow' | 'none';
-  /** Reveal choreography. `none` is an authored value, not just reduced-motion. */
+  /**
+   * Reveal choreography. `none` is an authored value, not just reduced-motion.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   motion?: 'none' | 'fade' | 'rise' | 'stagger' | 'drift';
-  /** How media sits in the section. Inert on the types that carry no media. */
+  /**
+   * How media sits in the section. Inert on the types that carry no media.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   media?: 'bleed' | 'frame' | 'mask' | 'inset' | 'none';
 
   // ── Page-kit v2 (docs/design/landing-builder/01-contract.md §2/§3 — BINDING,

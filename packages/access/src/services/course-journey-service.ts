@@ -1724,37 +1724,31 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * The design bundle a NEW page is born with — **Signal** (research §4.8), the
-   * recommended platform default: a contemporary/product look for the creator
-   * with no design opinion.
+   * The design bundle a NEW page is born with — the page-kit v2 Style `bold`
+   * (`docs/design/landing-builder/01-contract.md` §2/§3, BINDING): the owner's
+   * chosen platform default for a creator with no design opinion, and
+   * `kit/model/ids.ts`'s `DEFAULT_PAGE_STYLE`.
    *
-   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left to
-   * `SECTION_DESIGN_DEFAULTS`: an implicit default is invisible. A page storing no
-   * `design` renders *like something* while the builder's preset picker shows
-   * NOTHING selected — so the creator sees a control that appears dead, and the
-   * first preset they pick looks like it changed the page when it merely made the
-   * existing look explicit. An explicit stored bundle is inspectable, diffable and
-   * editable. Same argument as the Candlelit migration, applied to new pages
-   * instead of old ones.
+   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left absent: an
+   * implicit default is invisible. A page storing no `design.style` still
+   * resolves to `bold` (`kit/model/resolve.ts`'s `resolveStyle`), but the
+   * builder's Style tab would show nothing selected — so the creator sees a
+   * control that appears dead, and the first Style they pick looks like it
+   * changed the page when it merely made the existing look explicit. An
+   * explicit stored value is inspectable, diffable and editable.
    *
-   * These nine values are ALSO declared in the builder's preset table
-   * (`apps/web/src/lib/components/page-builder/design-vocabulary.ts` →
-   * `SECTION_DESIGN_PRESETS` → `signal`), because a package cannot import from
-   * `apps/web` and the presets are builder-UI vocabulary. `design-vocabulary.test.ts`
-   * pins that copy to these exact values, so a drift fails `pnpm --filter web test`
-   * rather than silently making a new page's stored bundle match no preset in the
-   * picker.
+   * `sections: []` below is left EMPTY on purpose (contract §3, WP-9b): the
+   * new canvas-first editor's empty state offers this Style's starter template
+   * (`kit/model/template.ts` `starterPage`) in one click, so a blank page is a
+   * deliberate, visible choice rather than nine invisible legacy axis values.
+   *
+   * This used to be the nine legacy design axes (**Signal**, research §4.8) —
+   * that vocabulary is superseded by the page-kit contract for all new work;
+   * an existing row carrying it still upgrades to a v2 Style on load
+   * (`kit/model/upgrade.ts`).
    */
   private static readonly NEW_PAGE_DESIGN: SectionDesign = {
-    width: 'wide',
-    density: 'regular',
-    surface: 'panel',
-    edge: 'hairline',
-    align: 'start',
-    type: 'balanced',
-    accent: 'fill',
-    motion: 'rise',
-    media: 'frame',
+    style: 'bold',
   };
 
   /**
