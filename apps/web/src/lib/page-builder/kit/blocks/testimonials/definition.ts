@@ -6,6 +6,7 @@ import {
 } from '../../model/fields';
 import { compact, readItems, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
+import { optionalCtaFields } from '../video/definition';
 
 export interface TestimonialItem {
   quote: string;
@@ -21,23 +22,38 @@ export type TestimonialsProps = {
   eyebrow?: string;
   heading?: string;
   body?: string;
+  ctaLabel?: string;
+  note?: string;
   items?: TestimonialItem[];
 };
+
+/** The canvas prompt where the quotes would be — shown only while editing. */
+export const TESTIMONIALS_EMPTY =
+  'Add a few words from your members under “Quotes”, and they appear here.';
 
 export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
   type: 'testimonials',
   label: 'Testimonials',
-  description: 'What members say, from your testimonials and any you add here.',
+  description:
+    'What members say, from your course testimonials and any quotes you add here.',
   group: 'proof',
   icon: 'HeartIcon',
   layouts: [
-    layout('grid', 'Grid', 'Several short quotes together.'),
+    layout(
+      'grid',
+      'Grid',
+      'Your quotes side by side, each given the same space.'
+    ),
     layout(
       'featured',
-      'One big quote',
-      'One standout quote, with the others beside it.'
+      'Highlighted',
+      'Your first quote large in a highlighted panel, the others in a row beneath.'
     ),
-    layout('quote', 'Single quote', 'One quote, large and centred.'),
+    layout(
+      'quote',
+      'Big quote',
+      'Your first quote as large as it goes, centred. Any others follow quietly beneath.'
+    ),
   ],
   fields: [
     eyebrowField,
@@ -45,32 +61,38 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
     { ...bodyField, maxLength: 400 },
     {
       key: 'items',
-      label: 'Extra quotes',
-      hint: 'Shown after the testimonials from your course.',
+      label: 'Quotes',
+      hint: 'Shown after the testimonials from your course. Use their own words, and their name only if they are happy to share it.',
       control: 'items',
       maxItems: 9,
       itemFields: [
         { key: 'quote', label: 'Quote', control: 'textarea', maxLength: 500 },
-        { key: 'name', label: 'Name', control: 'text', maxLength: 80 },
+        {
+          key: 'name',
+          label: 'Name',
+          hint: 'Optional, for example "Priya S."',
+          control: 'text',
+          maxLength: 80,
+        },
         {
           key: 'detail',
           label: 'Who they are',
+          hint: 'Optional, for example "Nurse, night shifts".',
           control: 'text',
           maxLength: 80,
         },
       ],
     },
+    ...optionalCtaFields,
   ],
-  starter: () => ({ heading: 'What members say' }),
+  // No quotes: a starter never puts words in a real person's mouth. The
+  // course's own testimonials fill it; the creator adds any others.
+  starter: ({ courseTitle }) => ({
+    heading: `What people say about ${courseTitle}`,
+  }),
   sample: {
     heading: 'What members say',
     items: [
-      {
-        quote:
-          'I have tried every morning routine going. This is the first one I still do.',
-        name: 'Priya S.',
-        detail: 'Spring group',
-      },
       {
         quote: 'Twenty minutes, and the whole day feels less loud.',
         name: 'Tom W.',
@@ -83,6 +105,8 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
       eyebrow: readText(raw, 'eyebrow', 60),
       heading: readText(raw, 'heading', 100),
       body: readText(raw, 'body', 400),
+      ctaLabel: readText(raw, 'ctaLabel', 40),
+      note: readText(raw, 'note', 120),
       items: readItems(
         raw,
         'items',
