@@ -82,6 +82,7 @@ export function resolveSections(page: KitPage): ResolvedSection[] {
   const style = resolveStyle(page.design);
   const seen = new Map<SectionTypeId, number>();
   let heroTaken = false;
+  let previousScheme: ColourSchemeId | null = null;
 
   return renderableSections(page).map((section, index) => {
     const count = (seen.get(section.type) ?? 0) + 1;
@@ -90,17 +91,39 @@ export function resolveSections(page: KitPage): ResolvedSection[] {
     if (isPageHeading) heroTaken = true;
 
     const layout = resolveLayout(section.type, section.variant, style);
+    const scheme = keepBandsApart(
+      resolveScheme(section.type, section.design, style),
+      previousScheme,
+      isColourSchemeId(section.design?.scheme)
+    );
+    previousScheme = scheme;
     return {
       id: section.id,
       anchor: count === 1 ? section.type : `${section.type}-${count}`,
       type: section.type,
       index,
       layout,
-      scheme: resolveScheme(section.type, section.design, style),
+      scheme,
       spacing: resolveSpacing(section.design, layout),
       headingLevel: isPageHeading ? 1 : 2,
     };
   });
+}
+
+/**
+ * Two identical COLOURED bands in a row read as one oversized slab (a
+ * contrast "problem" straight into a contrast "before and after", or a CTA
+ * dropped under a brand hero). A Style DEFAULT that would repeat the band
+ * above steps back to `base`; a scheme the creator chose is never overridden,
+ * and base-after-base is how plain sections are meant to flow.
+ */
+function keepBandsApart(
+  scheme: ColourSchemeId,
+  previous: ColourSchemeId | null,
+  chosen: boolean
+): ColourSchemeId {
+  if (chosen || scheme === 'base' || scheme !== previous) return scheme;
+  return 'base';
 }
 
 /** The scheme a featured card renders in, inside a section of `scheme`. */

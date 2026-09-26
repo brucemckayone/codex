@@ -137,6 +137,64 @@ describe('resolveSections', () => {
     expect(bold[0]).toMatchObject({ layout: 'statement', scheme: 'brand' });
     expect(bold[1]).toMatchObject({ layout: 'columns', scheme: 'contrast' });
   });
+
+  describe('keeps coloured bands apart', () => {
+    // Bold defaults both `problem` and `transformation` to `contrast`, and
+    // both `hero` and `cta` to `brand`.
+    const bold = (sections: KitSection[]): KitPage => ({
+      design: { style: 'bold' },
+      sections,
+    });
+
+    it('a Style default that would repeat the band above steps back to base', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'p', type: 'problem' }),
+          section({ id: 't', type: 'transformation' }),
+          section({ id: 'h', type: 'hero' }),
+          section({ id: 'c', type: 'cta' }),
+        ])
+      ).map((s) => s.scheme);
+      expect(STYLES.bold.schemes.problem).toBe('contrast');
+      expect(STYLES.bold.schemes.transformation).toBe('contrast');
+      expect(schemes).toEqual(['contrast', 'base', 'brand', 'base']);
+    });
+
+    it('never overrides a scheme the creator chose, even a repeat', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'p', type: 'problem' }),
+          section({
+            id: 't',
+            type: 'transformation',
+            design: { scheme: 'contrast' },
+          }),
+        ])
+      ).map((s) => s.scheme);
+      expect(schemes).toEqual(['contrast', 'contrast']);
+    });
+
+    it('leaves base after base alone — plain sections flow together', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'a', type: 'text' }),
+          section({ id: 'b', type: 'benefits' }),
+        ])
+      ).map((s) => s.scheme);
+      expect(schemes).toEqual(['base', 'base']);
+    });
+
+    it('a hidden section between two bands does not keep them apart', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'p', type: 'problem' }),
+          section({ id: 'x', type: 'text', enabled: false }),
+          section({ id: 't', type: 'transformation' }),
+        ])
+      ).map((s) => s.scheme);
+      expect(schemes).toEqual(['contrast', 'base']);
+    });
+  });
 });
 
 describe('featuredScheme', () => {

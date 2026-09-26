@@ -39,10 +39,25 @@ describe('starterPage — the page a new journey starts with', () => {
       expect(section.enabled).toBe(true);
     }
     const resolved = resolveSections(page);
-    for (const section of resolved) {
+    resolved.forEach((section, i) => {
       expect(section.layout).toBe(STYLES[style].layouts[section.type]);
-      expect(section.scheme).toBe(STYLES[style].schemes[section.type]);
-    }
+      // The Style's colour, unless it would repeat the band above — then the
+      // Style's default steps back to base (resolve.ts keepBandsApart).
+      const styled = STYLES[style].schemes[section.type];
+      const repeats = styled !== 'base' && resolved[i - 1]?.scheme === styled;
+      expect(section.scheme).toBe(repeats ? 'base' : styled);
+    });
+  });
+
+  it.each(
+    PAGE_STYLE_IDS
+  )('never opens a %s page with two identical coloured bands in a row', (style) => {
+    const schemes = resolveSections(starterPage(course, { style })).map(
+      (s) => s.scheme
+    );
+    schemes.forEach((scheme, i) => {
+      if (i > 0 && scheme !== 'base') expect(scheme).not.toBe(schemes[i - 1]);
+    });
   });
 
   it('opens on the course: the hero says its title and its lede', () => {
