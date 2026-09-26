@@ -21,3 +21,11 @@ export {
   type RecordOrphanInput,
 } from './orphaned-file-service';
 export { type ImageProcessingResult, ImageProcessingService } from './service';
+// `recordOrphansOrLog` (Codex-61zsk.10): the one guarded, never-throwing way to
+// queue an orphan record from a failure/removal path. `CourseJourneyService`
+// needs it directly — a page image's orphan candidates surface from a
+// `sections` jsonb diff inside `saveJourneyPage`, not from an
+// `ImageProcessingService` upload/persist call, so this is the one
+// `upload-pipeline.ts` helper that has to leave the package rather than stay
+// an internal implementation detail of `service.ts`.
+export { recordOrphansOrLog } from './utils/upload-pipeline';

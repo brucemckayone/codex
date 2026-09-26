@@ -1463,6 +1463,78 @@ app.delete(
 );
 
 /**
+ * POST /api/journeys/studio/journeys/:pageId/images?organizationId=
+ *
+ * Upload a FREE-PLACEMENT page image (contract amendment A3, Codex-61zsk.10)
+ * — NOT another fixed still slot like the three routes above. The page-kit's
+ * block inspector may put the returned `key` into ANY prop on ANY section
+ * (`props.image`, `props.background`, `items[].image`, ...); this route has
+ * no idea which, and does not need to — `ImageRef = { key, alt? }` is a
+ * convention the web and the save-time orphan scan both honour, not
+ * something this endpoint enforces or validates.
+ *
+ * Content-Type: multipart/form-data. Form field: `image` (file).
+ *
+ * NO DELETE ROUTE, and that is deliberate, not an oversight: unlike a still
+ * slot, there is no column to clear. Removing an image means saving the page
+ * without its reference — `CourseJourneyService.saveJourneyPage`'s deep-scan
+ * diff is what notices a dropped reference and queues the now-unreferenced
+ * key for the orphan sweep.
+ *
+ * The page is resolved (and org-scoped) BEFORE any R2 write, exactly like
+ * the cover/hero/signature routes above, so a foreign or missing page 404s
+ * and never seeds an orphaned object. UNLIKE those three, this does not
+ * resolve a subject COURSE at all (`assertJourneyPageInOrg`, not
+ * `getCourseStillImageKeys`) — a page image belongs to the page itself and
+ * works for every `pageType`.
+ *
+ * `imageId` is minted HERE, not accepted from the client: every upload gets
+ * a fresh uuid rather than a slot-deterministic key, so two uploads for the
+ * same page never collide and neither ever overwrites the other (see
+ * `ImageProcessingService.processPageImage`).
+ * @returns {{ key: string; url: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/images',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      image: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ key: string; url: string }> => {
+      // Resolve (and org-scope) the page FIRST — a foreign or missing page
+      // must 404 before any R2 object exists (Codex-29fs0's ordering rule).
+      await ctx.services.courseJourney.assertJourneyPageInOrg(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed = await ctx.services.imageProcessing.processPageImage(
+        ctx.input.params.pageId,
+        crypto.randomUUID(),
+        new File([ctx.files.image.buffer], ctx.files.image.name, {
+          type: ctx.files.image.type,
+        })
+      );
+
+      return { key: processed.key, url: processed.url };
+    },
+  })
+);
+
+/**
  * GET /api/journeys/studio/journeys/:pageId/curriculum?organizationId=
  *
  * The admin CURRICULUM read for the two-pane editor (Codex-03cwh): the journey's

@@ -311,6 +311,14 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   from day one:** `kit/model/catalog.ts` (pure TS: `DEFINITIONS` — type → `BlockDefinition`) and
   `kit/registry.ts` (type → Svelte component). Later WPs never edit either; they replace the files
   inside their own `blocks/<type>/` folder.
+- **A3 · 2026-09-26 · orchestrator · Page images (WP10).** An uploaded page image is stored in R2 at
+  `landing-pages/{pageId}/images/{imageId}` with the standard `sm|md|lg.webp` variants, and referenced
+  from section props as an **`ImageRef = { key: string; alt?: string }`** (e.g. `props.image`,
+  `props.background`, `items[].image`). The server finds references by deep-scanning section props for
+  strings under that page's prefix — no per-type schema knowledge — so any block may carry images.
+  Removing the last reference to a key (on save) or never saving an uploaded key queues it for the
+  existing orphan sweep. The web resolves a ref to a URL with a pure helper
+  (`lib/page-builder/page-images.ts`); blocks never build CDN URLs themselves.
 
 ---
 

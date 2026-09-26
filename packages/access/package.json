@@ -38,6 +38,7 @@
     "@codex/constants": "workspace:*",
     "@codex/content": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
     "@codex/observability": "workspace:*",
     "@codex/purchase": "workspace:*",
     "@codex/service-errors": "workspace:*",

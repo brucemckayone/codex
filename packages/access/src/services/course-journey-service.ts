@@ -40,11 +40,14 @@ import {
   stagePractices,
   videoPlayback,
 } from '@codex/database/schema';
+import type { OrphanedFileService } from '@codex/image-processing';
+import { recordOrphansOrLog } from '@codex/image-processing';
 import {
   BaseService,
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
 import type {
@@ -177,6 +180,43 @@ function resolveCourseSignatureUrl(
 }
 
 /**
+ * Deep-scan arbitrary `sections` content for R2 keys under one page's own
+ * image prefix (contract amendment A3, Codex-61zsk.10).
+ *
+ * NO PER-TYPE SCHEMA KNOWLEDGE, deliberately. A page image is referenced as
+ * an `ImageRef = { key: string; alt?: string }` from anywhere a block author
+ * chooses — `props.image`, `props.background`, `items[].image`, one nested
+ * inside another — and this file has no catalogue of block prop shapes (that
+ * lives in `apps/web`'s page-kit, a different WP's territory). So rather than
+ * name known keys, this walks every string LEAF in the tree and keeps the
+ * ones that start with the page's own `landing-pages/{pageId}/images/`
+ * prefix. A non-matching string (page copy, a CTA href, another page's key)
+ * is inert — `startsWith` only ever adds a string that could plausibly be
+ * this page's own upload.
+ *
+ * Takes `unknown` rather than `PageSection[]` on purpose: it is called once
+ * for the OLD stored value (whatever an earlier, possibly different, version
+ * of the type persisted) and once for the NEW input, and a shape it does not
+ * recognise should be walked past, never thrown on.
+ */
+function collectPageImageKeys(
+  value: unknown,
+  prefix: string,
+  into: Set<string> = new Set()
+): Set<string> {
+  if (typeof value === 'string') {
+    if (value.startsWith(prefix)) into.add(value);
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectPageImageKeys(item, prefix, into);
+  } else if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) {
+      collectPageImageKeys(nested, prefix, into);
+    }
+  }
+  return into;
+}
+
+/**
  * Summarise the member-library journey-card rollup from the SAME curriculum +
  * completion shapes the dashboard uses (`practice_completions ⋈ stage_practices`,
  * SPEC §11). Flattens the curriculum in course order (stage → practice
@@ -219,7 +259,25 @@ function rollUpEnrollment(
   };
 }
 
+/**
+ * Adds ONE optional field over the base config: an orphan-record PRODUCER for
+ * the media-api `OrphanedFileCleanupDO` sweep (Codex-61zsk.10), mirroring how
+ * `ImageProcessingService` takes the same dependency. Optional because most
+ * call sites (every read, every write that isn't `saveJourneyPage`) never
+ * touch it — only `saveJourneyPage`'s page-image orphan scan does.
+ */
+interface CourseJourneyServiceConfig extends ServiceConfig {
+  orphanedFileService?: OrphanedFileService;
+}
+
 export class CourseJourneyService extends BaseService {
+  private orphanedFileService?: OrphanedFileService;
+
+  constructor(config: CourseJourneyServiceConfig) {
+    super(config);
+    this.orphanedFileService = config.orphanedFileService;
+  }
+
   /**
    * The transaction-capable WS client. The registry injects `getSharedDb()` (the
    * WS driver) as `this.db`, but `BaseService.db`'s static type doesn't expose the
@@ -1814,6 +1872,42 @@ export class CourseJourneyService extends BaseService {
    * live in one action), unpublishing it unpublishes the course, and the course's
    * `slug`/`title` follow the page's.
    */
+  /**
+   * Assert a journey page exists, is org-scoped, and is not soft-deleted —
+   * the ownership check a page-image upload needs BEFORE any R2 write, so a
+   * foreign or missing page 404s and never seeds an orphaned object.
+   *
+   * Deliberately NOT a course resolution like the still-image routes use
+   * (e.g. `getCourseStillImageKeys`): a page image belongs to the PAGE
+   * itself (contract amendment A3), not to a `subjectType: 'course'`
+   * subject, so this makes no assumption about the page's subject and works
+   * for every `pageType`.
+   */
+  async assertJourneyPageInOrg(
+    organizationId: string,
+    pageId: string
+  ): Promise<void> {
+    try {
+      const [existing] = await this.db
+        .select({ id: landingPages.id })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.id, pageId),
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!existing) {
+        throw new NotFoundError('Journey page not found');
+      }
+    } catch (error) {
+      this.handleError(error, 'assertJourneyPageInOrg');
+    }
+  }
+
   async saveJourneyPage(
     organizationId: string,
     // The editable fields the save touches. A structural subset of the frozen
@@ -1854,6 +1948,11 @@ export class CourseJourneyService extends BaseService {
       seo?: PageSeo;
     }
   ): Promise<void> {
+    // Captured inside the transaction below and read AFTER it commits — see
+    // the page-image orphan scan following the try/catch for why acting on
+    // "the old sections are gone" has to wait until they really are.
+    let oldSections: PageSection[] | undefined;
+
     try {
       const status: PageStatus = record.status;
       const nextSlug = record.slug.trim();
@@ -1869,6 +1968,7 @@ export class CourseJourneyService extends BaseService {
             publishedAt: landingPages.publishedAt,
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
+            sections: landingPages.sections,
           })
           .from(landingPages)
           .where(
@@ -1883,6 +1983,7 @@ export class CourseJourneyService extends BaseService {
         if (!existing) {
           throw new NotFoundError('Journey page not found');
         }
+        oldSections = existing.sections;
 
         const subjectCourseId =
           existing.subjectType === 'course' ? existing.subjectId : null;
@@ -1962,6 +2063,70 @@ export class CourseJourneyService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'saveJourneyPage');
+    }
+
+    // Page images (contract amendment A3 · Codex-61zsk.10): an uploaded image
+    // is referenced from ANYWHERE in `sections` as an `ImageRef = { key,
+    // alt? }`, with no per-type schema knowledge, so finding what changed
+    // means deep-scanning both trees for strings under this page's own R2
+    // prefix rather than diffing named columns — see
+    // {@link collectPageImageKeys}.
+    //
+    // Runs AFTER the transaction above, not inside it, and in its OWN
+    // try/catch that only logs: by this point the save has already
+    // committed (a throw in the block above exits via `handleError` and
+    // never reaches here), so a page a creator successfully saved must never
+    // be reported back to them as a failure because a best-effort cleanup
+    // side-channel had a bug. Scanning against a row that instead ROLLED
+    // BACK would be actively wrong — it would queue a key the (unchanged)
+    // old sections still hold.
+    //
+    // Recording never throws (`recordOrphansOrLog` swallows and logs), so the
+    // outer try here is defensive insurance around the scan itself, not
+    // around the record call.
+    try {
+      const imagePrefix = `landing-pages/${record.id}/images/`;
+      const oldKeys = collectPageImageKeys(oldSections, imagePrefix);
+      const newKeys = collectPageImageKeys(record.sections, imagePrefix);
+      const removedKeys = [...oldKeys].filter((key) => !newKeys.has(key));
+
+      if (removedKeys.length === 0) {
+        return;
+      }
+
+      if (this.orphanedFileService) {
+        await recordOrphansOrLog(
+          this.orphanedFileService,
+          removedKeys.map((r2Key) => ({
+            r2Key,
+            imageType: 'page_image' as const,
+            entityId: record.id,
+            entityType: 'landing_page' as const,
+          })),
+          this.obs,
+          'landing-page-image'
+        );
+      } else {
+        // Mirrors the degraded path `ImageProcessingService`'s own orphan
+        // helpers take when built with no `OrphanedFileService` configured
+        // (`withDbUpdateOrphanCleanup`) — until the registry wires one in for
+        // this service too (Codex-61zsk.10 handoff), this is that same warn.
+        this.obs.warn(
+          'Page image orphan(s) detected, no orphan service configured',
+          {
+            context: 'landing-page-image',
+            pageId: record.id,
+            r2Keys: removedKeys,
+          }
+        );
+      }
+    } catch (scanError) {
+      this.obs.error('Page image orphan scan failed after a successful save', {
+        context: 'landing-page-image',
+        pageId: record.id,
+        error:
+          scanError instanceof Error ? scanError.message : String(scanError),
+      });
     }
   }
 

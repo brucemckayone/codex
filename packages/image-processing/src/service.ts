@@ -754,4 +754,85 @@ export class ImageProcessingService extends BaseService {
       .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
   }
+
+  /**
+   * Process and store a PAGE IMAGE — free-placement uploads for the
+   * landing-page builder's blocks (Codex-61zsk.10, contract amendment A3).
+   *
+   * DELIBERATELY NOT ANOTHER STILL SLOT. `processCourseCover` /
+   * `processCourseHero` / `processCourseSignature` above each own exactly one
+   * deterministic key per course, so a re-upload overwrites in place and the
+   * caller persists the key to one named column. A page image has no column
+   * and no 1:1 slot: `imageId` is a FRESH uuid the caller mints per upload, so
+   * every call produces its own key and nothing is ever overwritten. A page
+   * may hold arbitrarily many, referenced from anywhere in its `sections`
+   * jsonb as an `ImageRef = { key, alt? }` (`props.image`, `props.background`,
+   * `items[].image`, ...) — this method has no idea which prop, or even which
+   * block, the caller will put the key into.
+   *
+   * Consequently this method does NOT touch the database and has no
+   * `persistWithOrphanCleanup` counterpart: there is nothing to write, so
+   * there is nothing a DB failure could roll back. What "is this key still
+   * wanted" means for a page image is answered later and elsewhere — a
+   * deep-scan diff of the page's OLD vs NEW `sections` inside
+   * `CourseJourneyService.saveJourneyPage` — never by this method or its
+   * route. An upload that is never saved into a page at all is therefore a
+   * known gap (see that method's doc comment and WP-10a's report), not a
+   * defect in this one.
+   *
+   * Keys are namespaced by `pageId` AND `imageId`
+   * (`landing-pages/{pageId}/images/{imageId}/{size}.webp`), so unlike every
+   * still above, replacing a value in a block means uploading a NEW image and
+   * writing its (different) key over the old one — the old key's bytes are
+   * untouched here and become the save-time diff's job to notice.
+   *
+   * @param pageId - Owning landing page (keys are namespaced under it)
+   * @param imageId - Caller-minted uuid; unique per upload, never reused or
+   *   overwritten
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `key` to address a specific variant — the same
+   *   convention `lib/page-builder/page-images.ts`'s `resolvePageImageUrl`
+   *   reproduces on the web side.
+   */
+  async processPageImage(
+    pageId: string,
+    imageId: string,
+    file: File
+  ): Promise<{
+    key: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only),
+    // same posture and same reason as every still above: `processImageVariants`
+    // decodes via Photon, which cannot rasterise SVG.
+    const { buffer } = await validateImageFile(file);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const key = `landing-pages/${pageId}/images/${imageId}`;
+    const keys = stillVariantKeys(key);
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Page image',
+      obs: this.obs,
+    });
+
+    return {
+      key,
+      // The md variant — a reasonable general-purpose default for an
+      // immediately-usable preview URL. A block that wants `sm`/`lg` resolves
+      // its own via `resolvePageImageUrl`, exactly as it would for any other
+      // stored `ImageRef`.
+      url: `${this.r2PublicUrlBase}/${keys.md}`,
+      size: variants.md.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
 }

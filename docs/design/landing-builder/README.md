@@ -37,7 +37,8 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | 7b | Editor A UI: shell, top bar, outline, true-scale canvas, selection + inline edit, insert points | `components/page-builder/editor/**` (shell files), `studio/journeys/[id]/page-next/**` | 2, 7a | 3 |
 | 8 | Editor B: inspector, layout/scheme/spacing pickers with live mini-renders, fields, section gallery, Style tab + page brand | `components/page-builder/editor/**` (inspector files) | 7 | 4 |
 | 9 | Builder switch + backend defaults: studio route → new editor, delete legacy editor, new-page template + `NEW_PAGE_DESIGN`, seeds, validation prunes legacy keys | studio journey page route, `components/page-builder/*` (legacy), `packages/access`, seeds | 6, 8 | 5 |
-| 10 | Images anywhere: per-section image upload + background images for hero/cta + an image block | content-api route, image-processing, kit media | 9 | 5 |
+| 10a | Images backend: page image upload route + processing, orphan diff on save, `page_image` type migration, web remote + URL helper (contract A3) | content-api route, image-processing, access service, database, `remote/page-images.remote.ts`, `page-builder/page-images.ts` | — | 1 |
+| 10b | Images in the kit: image fields in blocks, hero/cta backgrounds, an image/gallery block, picker UI | kit blocks + editor | 8, 10a | 5 |
 | 11 | Verification + polish: multi-brand × Style × theme sweep, axe, contrast matrix, responsive, perf, codex-review, PR | cross-cutting (fixes routed back) | all | 6 |
 
 ## Status
@@ -46,6 +47,7 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 |---|---|---|
 | 1 | **done** `dd152aaf` | 561 validation + 123 web tests; provenance fix for hero/faq added by orchestrator (falsified) |
 | 2 | running | |
+| 10a | **done** | upload route + processing + save-time orphan diff + migration 0095; 98+380+230+24 tests; live upload smoke-tested. Gaps: abandoned uploads not swept (needs a reference-aware sweep check), cdnBase must reach the kit context (WP6/7b), page duplication would share prefixes (WP11) |
 | 7a | **done** | store v2 actions + autosave controller; 311 tests across 13 files; web tsc clean |
 | 3–11 | not started | |
 
