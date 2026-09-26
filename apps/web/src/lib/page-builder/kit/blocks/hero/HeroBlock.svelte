@@ -232,17 +232,22 @@
   .hero-split__copy {
     display: grid;
     gap: var(--lp-stack);
-    --lp-display-scale: 0.7;
   }
 
   .hero-split__media {
     --_ratio: 4 / 5;
   }
 
+  /* Two columns share the width, so the headline steps down to share it;
+     stacked on a phone it keeps the full display size over the lead. */
   @container (min-width: 50rem) {
     .hero-split {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       column-gap: calc(var(--lp-gap) * 1.5);
+    }
+
+    .hero-split__copy {
+      --lp-display-scale: 0.7;
     }
 
     :global(.lp[data-lp-style='bold']) .hero-split {
@@ -328,7 +333,6 @@
     justify-items: center;
     gap: var(--lp-stack);
     text-align: center;
-    --lp-display-scale: 0.84;
   }
 
   .hero-centered :global(.lp-heading),
@@ -346,7 +350,13 @@
     inline-size: 100%;
   }
 
+  /* A centred line across a wide band steps down a little; a phone keeps
+     the full display size. */
   @container (min-width: 48rem) {
+    .hero-centered {
+      --lp-display-scale: 0.84;
+    }
+
     .hero-centered__media {
       --_ratio: 16 / 7;
     }
