@@ -1,0 +1,274 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE KIT — SURFACES (03-expressive-contract §5)
+
+   What sits BEHIND a section's content: its background image, the org's
+   shader seen through an `atmosphere` section (or the glow that stands in for
+   it), and the textures, shapes and edges a Style opts into. It paints on
+   `.lp-surface` — SectionShell's decorative layer, under the content, the
+   same element in every render — or on the section box itself. Colour only
+   ever comes from the section's own scheme tokens (`schemes.css`).
+
+   THE STYLE API. Set on the Style's root, `.lp[data-lp-style='<id>']`:
+
+     --lp-texture: grain | paper | contour   a mask over the section's line
+                                             colour. Unset: none.
+     --lp-texture-strength: <0–1>            its opacity (each texture has a
+                                             designed default).
+     --lp-shapes: blobs                      three soft shapes tinted from the
+                                             accent. Unset: none.
+     --lp-shapes-strength: <0–1>             a share of their proven alpha.
+     --lp-edge: curve | angle                the cut between two sections.
+                                             Unset: straight.
+     --lp-edge-depth: <length>               how deep the cut runs, never more
+                                             than the smallest section padding.
+     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil (never
+                                             thinner, `schemes.css`).
+     --lp-atmos-a / --lp-atmos-b             where the glow's two lights sit.
+
+   Motion (E2) may drift `.lp-surface::after` (shapes) and the atmosphere
+   glow; a Style's own bleed into an edge's band reads `--lp-edge-offset`.
+
+   They are read by style queries on `.lp-page`, so they are PAGE-level
+   choices: a per-section value would draw a texture without the contrast
+   moves that make it legible. Browsers without style queries draw plain,
+   straight sections. A texture or shapes never sit behind an atmosphere or
+   background-image section, which already have their own surface.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the decorative layer ────────────────────────────────────────────────── */
+.lp-surface {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-hide);
+  pointer-events: none;
+}
+
+/* ── background image (§5.4) ─────────────────────────────────────────────── */
+.lp-surface__image {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+/* A uniform scrim, never a gradient whose stops move with the section's
+   height: the on-media ink holds over it wherever a block puts its words.
+   `::after`, so it paints OVER the image (shapes never draw here). */
+.lp-section[data-lp-on-media] > .lp-surface::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--lp-media-scrim);
+}
+
+/* ── atmosphere (§5.1) ───────────────────────────────────────────────────── */
+/* Where the shader cannot be seen — no preset, the editing canvas, a still
+   thumbnail — the section is its ground plus the kit's glow: the two lights
+   of the `.lp-atmos` recipe, in the brand's two hues at a lightness near the
+   ground's (`--_glow-l` per pole), so they read as colour and the words keep
+   every floor (`schemes.test.ts` measures the glow itself). */
+.lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) > .lp-surface::before {
+  --_glow-a: oklch(from var(--lp-brand) var(--_glow-l) min(c, var(--_glow-c)) h);
+  /* Mostly the second colour, but never a grey: an achromatic second colour
+     has no hue to give, so the primary's shows through. */
+  --_glow-b: oklch(
+    from color-mix(in oklch, var(--lp-brand-2) 70%, var(--lp-brand)) var(--_glow-l)
+      min(c, var(--_glow-c)) h
+  );
+  content: '';
+  position: absolute;
+  inset: -15%;
+  opacity: var(--_glow-strength);
+  background:
+    radial-gradient(
+      ellipse 50% 60% at var(--lp-atmos-a, 20% 24%),
+      var(--_glow-a) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 44% 56% at var(--lp-atmos-b, 82% 76%),
+      var(--_glow-b) 0%,
+      transparent 60%
+    );
+  filter: blur(var(--blur-2xl));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lp:not([data-lp-still])
+    .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    > .lp-surface::before {
+    animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth) infinite
+      alternate;
+  }
+}
+
+/* LIVE: a public page (PageRenderer's flag) in an org whose shader runs. The
+   kit's root goes clear and each atmosphere section paints only its veil;
+   the org layout clears its own background above the shader for this page.
+   Every other section is opaque. Gated on relative colour, which the veil
+   needs — without it the section keeps its opaque ground. */
+@supports (color: rgb(from red r g b / 0.5)) {
+  .org-layout[data-hero-shader-active] .lp[data-lp-atmosphere]:not([data-lp-still]) {
+    background: transparent;
+  }
+
+  .org-layout[data-hero-shader-active]
+    .lp[data-lp-atmosphere]:not([data-lp-still])
+    .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
+    background: var(--_atmos-veil);
+  }
+
+  .org-layout[data-hero-shader-active]
+    .lp[data-lp-atmosphere]:not([data-lp-still])
+    .lp-section[data-lp-scheme='atmosphere']
+    > .lp-surface::before {
+    content: none;
+  }
+}
+
+/* ── textures (§5.2) ─────────────────────────────────────────────────────── */
+/* Static SVG masks over `--_tex-ink` (the line colour, or away from the ink
+   on a brand band), at the texture's intrinsic tile size. */
+@container lp-page style(--lp-texture: grain) {
+  .lp-surface {
+    --_texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.8 -.7'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    --_texture-strength: 0.7;
+  }
+}
+
+@container lp-page style(--lp-texture: paper) {
+  .lp-surface {
+    --_texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320'%3E%3Cfilter id='p' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.045 .11' numOctaves='4' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1.25 -.38'/%3E%3C/filter%3E%3Crect width='320' height='320' filter='url(%23p)'/%3E%3C/svg%3E");
+    --_texture-strength: 0.45;
+  }
+}
+
+/* Contour lines: the noise cut into bands, and each band's edge kept. The
+   noise is tiled a little past the tile's edge so the edge-finding has real
+   neighbours there — without it every tile border draws a straight line. */
+@container lp-page style(--lp-texture: contour) {
+  .lp-surface {
+    --_texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cfilter id='c' filterUnits='userSpaceOnUse' x='-8' y='-8' width='656' height='656'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.0032' numOctaves='2' seed='8' stitchTiles='stitch' x='0' y='0' width='640' height='640' result='t'/%3E%3CfeTile in='t' result='w'/%3E%3CfeComponentTransfer in='w' result='b'%3E%3CfeFuncA type='discrete' tableValues='0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1'/%3E%3C/feComponentTransfer%3E%3CfeMorphology in='b' operator='erode' radius='1' result='e'/%3E%3CfeComposite in='b' in2='e' operator='out'/%3E%3C/filter%3E%3Crect x='-8' y='-8' width='656' height='656' filter='url(%23c)'/%3E%3C/svg%3E");
+    --_texture-strength: 0.8;
+  }
+}
+
+@container lp-page style(--lp-texture: grain) or style(--lp-texture: paper) or style(--lp-texture: contour) {
+  .lp-section:not([data-lp-scheme='atmosphere'], [data-lp-on-media]) > .lp-surface::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--_tex-ink);
+    opacity: clamp(0, var(--lp-texture-strength, var(--_texture-strength)), 1);
+    mask: var(--_texture) repeat;
+  }
+}
+
+/* ── shapes (§5.2) ───────────────────────────────────────────────────────── */
+/* Three organic shapes, sized by the section's width and set off its edges,
+   tinted from the accent (away from the ink on a brand band). */
+@container lp-page style(--lp-shapes: blobs) {
+  .lp-section:not([data-lp-scheme='atmosphere'], [data-lp-on-media]) > .lp-surface::after {
+    --_shape-alpha: 0.12;
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--_shape-ink);
+    opacity: calc(clamp(0, var(--lp-shapes-strength, 1), 1) * var(--_shape-alpha));
+    mask:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cpath d='M187.9 127.2C181.1 147.2 150.4 164.5 128.4 172.6C106.4 180.8 72.2 186.6 55.9 176.2C39.7 165.8 35.2 134 30.8 110.4C26.4 86.8 17.2 48.7 29.7 34.6C42.1 20.6 82.3 23.2 105.6 26.2C128.9 29.2 155.7 35.9 169.4 52.7C183.2 69.6 194.7 107.2 187.9 127.2Z'/%3E%3C/svg%3E")
+        left -12cqi top -16cqi / 46cqi auto no-repeat,
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cpath d='M138.1 174.9C114.9 187.2 67.1 191.9 48.8 178.8C30.4 165.7 26.4 122.7 28.1 96.2C29.8 69.7 40.3 29.8 59.2 19.8C78.1 9.8 120 22.1 141.4 36.3C162.9 50.4 188.4 81.5 187.9 104.6C187.3 127.7 161.3 162.5 138.1 174.9Z'/%3E%3C/svg%3E")
+        right -10cqi bottom -18cqi / 38cqi auto no-repeat,
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cpath d='M62.5 181.8C46 171.7 39.3 144.7 32.5 125.1C25.7 105.5 16 83.1 21.8 64.2C27.6 45.3 49.3 16.5 67.2 11.9C85.1 7.3 110.9 26.4 129.1 36.3C147.4 46.3 170.2 55.5 176.9 71.4C183.5 87.3 176.6 112.5 169.1 131.6C161.6 150.8 149.8 177.9 132.1 186.2C114.3 194.6 79.1 192 62.5 181.8Z'/%3E%3C/svg%3E")
+        right 16% top 10% / 14cqi auto no-repeat;
+  }
+}
+
+/* ── edges (§5.3) ────────────────────────────────────────────────────────── */
+/* Each section after the first rises into the one above by the edge's depth
+   and is cut along the edge's line, so the cut shows the next section's own
+   background — its colour, image, texture — in every scheme pair. The depth
+   never exceeds the smallest section padding, so the band only ever covers
+   the section above's padding, never its words. */
+@container lp-page style(--lp-edge: curve) {
+  .lp-section {
+    --_edge-d: min(
+      var(--lp-edge-depth, clamp(var(--space-6), 3.5cqi, var(--space-16))),
+      var(--lp-pad-compact),
+      var(--lp-pad-regular),
+      var(--lp-pad-spacious)
+    );
+    --_edge-top: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'%3E%3Cpath d='M0 70C300 10 700 0 1000 30C1300 60 1360 90 1440 80V100H0Z'/%3E%3C/svg%3E");
+    --_edge-bottom: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'%3E%3Cpath d='M1440 82C1360 92 1300 62 1000 32C700 2 300 12 0 72V0H1440Z'/%3E%3C/svg%3E");
+  }
+}
+
+@container lp-page style(--lp-edge: angle) {
+  .lp-section {
+    --_edge-d: min(
+      var(--lp-edge-depth, clamp(var(--space-6), 4.5cqi, var(--space-20))),
+      var(--lp-pad-compact),
+      var(--lp-pad-regular),
+      var(--lp-pad-spacious)
+    );
+    --_edge-top: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'%3E%3Cpath d='M0 90L1440 10V100H0Z'/%3E%3C/svg%3E");
+    --_edge-bottom: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1440V12L0 92Z'/%3E%3C/svg%3E");
+  }
+}
+
+/* Inert while no edge is set: an unset `--_edge-top` voids the mask, and the
+   depth falls back to nothing. The edge's lowest point sits a tenth above the
+   band's foot, so the two mask layers meet on solid ground (no seam). */
+.lp-section + .lp-section {
+  --lp-edge-offset: var(--_edge-d, 0px);
+  margin-block-start: calc(-1 * var(--_edge-d, 0px));
+  padding-block-start: calc(var(--lp-pad) + var(--_edge-d, 0px));
+  mask:
+    var(--_edge-top) top / 100% calc(var(--_edge-d) + 1px) no-repeat,
+    linear-gradient(currentColor 0 0) left 0 top var(--_edge-d) / 100% 100% no-repeat;
+}
+
+/* LIVE atmosphere: a see-through section must never overlap another's paint,
+   or its veil would sit on that section instead of the shader. So the opaque
+   section above one takes the complementary cut on its own foot (the two
+   meet along the same line without overlapping), and two see-through
+   sections in a row — one colour — meet straight. The complementary cut runs
+   a hair (2% of the band) past the line, so the opaque section underlaps the
+   see-through one: two half-covered edges would let the shader show through
+   as a seam. */
+@supports (color: rgb(from red r g b / 0.5)) {
+  .org-layout[data-hero-shader-active]
+    .lp[data-lp-atmosphere]:not([data-lp-still])
+    .lp-section:not([data-lp-scheme='atmosphere']:not([data-lp-on-media])):has(
+      + .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    ) {
+    mask:
+      var(--_edge-bottom) bottom / 100% calc(var(--_edge-d) + 1px) no-repeat,
+      linear-gradient(currentColor 0 0) left 0 bottom var(--_edge-d) / 100% 100% no-repeat;
+  }
+
+  .org-layout[data-hero-shader-active]
+    .lp[data-lp-atmosphere]:not([data-lp-still])
+    .lp-section
+    + .lp-section:not([data-lp-scheme='atmosphere']:not([data-lp-on-media])):has(
+      + .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    ) {
+    mask:
+      var(--_edge-top) top / 100% calc(var(--_edge-d) + 1px) no-repeat,
+      var(--_edge-bottom) bottom / 100% calc(var(--_edge-d) + 1px) no-repeat,
+      linear-gradient(currentColor 0 0) center / 100% calc(100% - 2 * var(--_edge-d))
+        no-repeat;
+  }
+
+  .org-layout[data-hero-shader-active]
+    .lp[data-lp-atmosphere]:not([data-lp-still])
+    .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
+    + .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
+    --lp-edge-offset: 0px;
+    margin-block-start: 0;
+    padding-block-start: var(--lp-pad);
+    mask: none;
+  }
+}

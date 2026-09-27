@@ -60,6 +60,14 @@
   --lp-eyebrow-radius: 0;
 
   /* ── shape ────────────────────────────────────────────────────────────── */
+  /* The brand's own corner radius (03 §4.2). A Style BENDS it, never replaces
+     it: each radius token is `clamp(<floor>, calc(var(--lp-brand-radius) *
+     <k>), <ceiling>)`. A zero floor must be a length (`0rem`) — the
+     `--radius-none` token is a unitless 0, which voids any math function it
+     enters. `--brand-radius` is always rem (org layout, page overrides). */
+  --lp-brand-radius: var(--brand-radius, var(--radius-md));
+  /* A pill when the brand is rounded at all, square when the brand is square. */
+  --lp-radius-pill-if-rounded: min(calc(var(--lp-brand-radius) * 1000), var(--radius-full));
   --lp-radius-card: var(--radius-lg);
   --lp-radius-media: var(--radius-lg);
   --lp-radius-button: var(--radius-md);
@@ -107,9 +115,11 @@
 /* The query container sections measure against. The root is deliberately NOT
    one: size containment implies layout containment, which makes an element the
    containing block of its `position: fixed` descendants — the sticky CTA would
-   pin to the page instead of the viewport. It renders beside `.lp-page`. */
+   pin to the page instead of the viewport. It renders beside `.lp-page`.
+   Named so the surface style queries read the Style's page-level choices
+   (`surfaces.css`); unnamed size queries still find the section. */
 .lp-page {
-  container-type: inline-size;
+  container: lp-page / inline-size;
 }
 
 /* ── sections ────────────────────────────────────────────────────────────── */
@@ -164,26 +174,28 @@
 }
 
 /* ── atmosphere — the SubscribeCTA recipe, CSS only (contract §4) ─────────
-   Glows are the brand mixed with WHITE, so a dark brand still reads as light
-   on a dark ground; never brand-into-transparent over a veil, which vanishes
-   on dark brands. Used on dark surfaces only: on a light one a glow is a
-   gradient wash, which the kit does not do. */
+   Glows are the brand mixed with WHITE (`--color-neutral-0`), so a dark brand
+   still reads as light on a dark ground; never brand-into-transparent over a
+   veil, which vanishes on dark brands. Used on dark surfaces only: on a light
+   one a glow is a gradient wash, which the kit does not do — except the
+   `atmosphere` scheme's stand-in for the shader, under its veil
+   (`surfaces.css`). */
 .lp-atmos {
   position: absolute;
   inset: -15%;
-  z-index: -1;
+  z-index: var(--z-hide);
   pointer-events: none;
   opacity: var(--lp-atmos-strength, 0.42);
   /* A block may move the lights off its words (`--lp-atmos-a/-b`). */
   background:
     radial-gradient(
       ellipse 50% 60% at var(--lp-atmos-a, 20% 24%),
-      color-mix(in oklch, var(--lp-brand) 55%, white 45%) 0%,
+      color-mix(in oklch, var(--lp-brand) 55%, var(--color-neutral-0) 45%) 0%,
       transparent 62%
     ),
     radial-gradient(
       ellipse 44% 56% at var(--lp-atmos-b, 82% 76%),
-      color-mix(in oklch, var(--lp-brand-2) 52%, white 45%) 0%,
+      color-mix(in oklch, var(--lp-brand-2) 52%, var(--color-neutral-0) 45%) 0%,
       transparent 60%
     );
   filter: blur(var(--blur-2xl));

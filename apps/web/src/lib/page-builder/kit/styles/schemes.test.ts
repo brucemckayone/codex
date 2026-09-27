@@ -27,6 +27,16 @@ const CSS = readFileSync(
 const squash = (s: string) => s.replace(/\s+/g, ' ');
 const CODE = squash(CSS.replace(/\/\*[\s\S]*?\*\//g, ''));
 
+/** The two pole blocks (the root `.lp` rule comes first) and the exact path's root. */
+const POLE = {
+  light: CODE.match(/\.lp \{([^}]*)\}/)?.[1] ?? '',
+  dark: CODE.match(/\.lp\[data-lp-style='cinematic'\] \{([^}]*)\}/)?.[1] ?? '',
+};
+const EXACT =
+  CODE.match(
+    /@supports \(color: rgb\(from red calc\(255 \* pow\(r \/ 255, 2\)\) 0 0\)\) \{ \.lp \{([^}]*)\}/
+  )?.[1] ?? '';
+
 // ── the parameters the stylesheet is generated from ─────────────────────────
 const INK = { ink: 17, soft: 7, edge: 3.2, line: 1.45 } as const;
 const TARGET = {
@@ -34,6 +44,11 @@ const TARGET = {
   accentDark: 0.3,
   buttonLight: 0.155,
   buttonDark: 0.24,
+  // Atmosphere's brand is moved further so its veil can be thinner (§5 below).
+  atmosAccentLight: 0.06,
+  atmosAccentDark: 0.41,
+  atmosButtonLight: 0.115,
+  atmosButtonDark: 0.26,
 };
 
 // ── 1. parity ────────────────────────────────────────────────────────────────
@@ -81,6 +96,10 @@ function fragments(): string[] {
     ...lighten('acc-lt', TARGET.accentDark),
     ...darken('btn-dk', TARGET.buttonLight),
     ...lighten('btn-lt', TARGET.buttonDark),
+    ...darken('atm-acc-dk', TARGET.atmosAccentLight),
+    ...lighten('atm-acc-lt', TARGET.atmosAccentDark),
+    ...darken('atm-btn-dk', TARGET.atmosButtonLight),
+    ...lighten('atm-btn-lt', TARGET.atmosButtonDark),
   ];
 }
 
@@ -109,6 +128,13 @@ const RECIPES = [
   '--_btn-dark: rgb(from var(--lp-brand) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));',
   '--_acc-light: rgb(from var(--lp-brand) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));',
   '--_acc-dark: rgb(from var(--lp-brand) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));',
+  // atmosphere
+  '--_atm-acc-light: rgb(from var(--lp-brand) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));',
+  '--_atm-acc-dark: rgb(from var(--lp-brand) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));',
+  '--_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));',
+  '--_atm-btn-dark: rgb(from var(--lp-brand) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b));',
+  '--_atmos-s: max(var(--_atmos-min), var(--lp-atmosphere-scrim, 0));',
+  '--_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));',
 ];
 
 describe('schemes.css ↔ model parity', () => {
@@ -129,6 +155,27 @@ describe('schemes.css ↔ model parity', () => {
     expect(rule('soft')).toContain('--lp-button-bg: var(--_button-g)');
     expect(rule('contrast')).toContain('--lp-accent: var(--_accent-i)');
     expect(rule('contrast')).toContain('--lp-button-bg: var(--_button-i)');
+    // Atmosphere is measured against the ground, with its own brand moves.
+    expect(rule('atmosphere')).toContain('--lp-bg: var(--lp-ground)');
+    expect(rule('atmosphere')).toContain('--lp-accent: var(--_atmos-accent)');
+    expect(rule('atmosphere')).toContain(
+      '--lp-button-bg: var(--_atmos-button)'
+    );
+    expect(rule('atmosphere')).toContain(
+      '--lp-button-line: var(--lp-ink-soft)'
+    );
+  });
+
+  it('routes atmosphere to each pole, and keeps the fallback path opaque', () => {
+    expect(POLE.light).toContain('--_atmos-accent: var(--_atm-acc-light)');
+    expect(POLE.light).toContain('--_atmos-button: var(--_atm-btn-light)');
+    expect(POLE.light).toContain('--_atmos-min: var(--_atmos-min-light)');
+    expect(POLE.dark).toContain('--_atmos-accent: var(--_atm-acc-dark)');
+    expect(POLE.dark).toContain('--_atmos-button: var(--_atm-btn-dark)');
+    expect(POLE.dark).toContain('--_atmos-min: var(--_atmos-min-dark)');
+    // Without pow() the moved brand does not exist, so neither may the gap.
+    expect(POLE.light).toContain('--_atmos-min-light: 1;');
+    expect(POLE.light).toContain('--_atmos-min-dark: 1;');
   });
 });
 
@@ -550,5 +597,379 @@ describe('the §5 floors — generated sweep of the sRGB cube', () => {
     }
     // The brand fill's own ink is the provable 4.58:1 luminance crossover.
     expect(worst.ink).toBeGreaterThan(4.57);
+  });
+});
+
+// ── 5. atmosphere: a uniform veil over ANY backdrop (03 §5.1) ───────────────
+/*
+ * An atmosphere section paints its pole's ground at strength `s` over whatever
+ * is behind it — the org's shader, or the kit's glow — and browsers composite
+ * in encoded sRGB, so the result is `s·ground + (1 − s)·backdrop` per channel.
+ * Contrast against that is monotonic in the backdrop, so pure black and pure
+ * white bound every shader frame and every glow. (The glow fallback paints the
+ * glow at opacity `1 − s` over the opaque ground, which is the same sum.)
+ */
+const VEIL: Record<Mode, number> = {
+  light: Number(EXACT.match(/--_atmos-min-light: ([\d.]+);/)?.[1]),
+  dark: Number(EXACT.match(/--_atmos-min-dark: ([\d.]+);/)?.[1]),
+};
+
+/** What an atmosphere section's tokens are, per the scheme block. */
+function atmosphereTokens(
+  mode: Mode,
+  g: Rgb,
+  brand: Rgb,
+  tint: Tint,
+  moved = true
+): SchemeTokens {
+  const base = schemeTokens(mode, 'base', g, brand, tint);
+  if (!moved) return base;
+  const light = mode === 'light';
+  const button = light
+    ? darken(brand, TARGET.atmosButtonLight)
+    : lighten(brand, TARGET.atmosButtonDark);
+  return {
+    ...base,
+    accent: light
+      ? darken(brand, TARGET.atmosAccentLight)
+      : lighten(brand, TARGET.atmosAccentDark),
+    button,
+    buttonInk: ink(button, INK.ink),
+    // `--lp-button-line: var(--lp-ink-soft)`.
+    edge: base.soft,
+  };
+}
+
+/** Floors measured against the veil over each backdrop; focus is the ink. */
+const OVER_BACKDROP = {
+  ink: 4.5,
+  soft: 4.5,
+  accent: 4.5,
+  button: 3,
+  edge: 3,
+  focus: 3,
+} as const;
+
+function veilFailures(s: number, t: SchemeTokens): string[] {
+  const out: string[] = [];
+  for (const [name, backdrop] of [
+    ['black', 0],
+    ['white', 1],
+  ] as const) {
+    const seen = triple((i) => s * clip(t.bg)[i] + (1 - s) * backdrop);
+    const r = {
+      ink: ratio(t.ink, seen),
+      soft: ratio(t.soft, seen),
+      accent: ratio(t.accent, seen),
+      button: ratio(t.button, seen),
+      edge: ratio(t.edge, seen),
+      focus: ratio(t.ink, seen),
+    };
+    for (const [token, floor] of Object.entries(OVER_BACKDROP)) {
+      const value = r[token as keyof typeof r];
+      if (value < floor) out.push(`${token} over ${name} ${value.toFixed(2)}`);
+    }
+  }
+  // Opaque on top of the veil, so measured against themselves.
+  if (ratio(t.buttonInk, t.button) < FLOORS.buttonInk) out.push('buttonInk');
+  if (ratio(t.panelInk, t.panel) < FLOORS.panelInk) out.push('panelInk');
+  return out;
+}
+
+/** Named matrix, a 4 096-brand sweep, and a 216-ground sweep per pole. */
+function atmosphereCases(mode: Mode): [Rgb, Rgb, Tint][] {
+  const cases: [Rgb, Rgb, Tint][] = [];
+  for (const groundHex of Object.values(GROUNDS[mode]))
+    for (const brandHex of Object.values(BRANDS))
+      for (const tint of Object.values(STYLE_TINTS))
+        cases.push([ground(mode, hex(groundHex)), hex(brandHex), tint]);
+  const platform = ground(mode, hex(mode === 'light' ? '#fafafa' : '#171717'));
+  for (let r = 0; r < 256; r += 17)
+    for (let gr = 0; gr < 256; gr += 17)
+      for (let b = 0; b < 256; b += 17)
+        cases.push([platform, [r / 255, gr / 255, b / 255], DEFAULT_TINT]);
+  for (let r = 0; r < 256; r += 51)
+    for (let gr = 0; gr < 256; gr += 51)
+      for (let b = 0; b < 256; b += 51)
+        for (const brandHex of Object.values(BRANDS))
+          cases.push([
+            ground(mode, [r / 255, gr / 255, b / 255]),
+            hex(brandHex),
+            DEFAULT_TINT,
+          ]);
+  return cases;
+}
+
+function failuresAt(mode: Mode, s: number, moved = true): string[] {
+  return atmosphereCases(mode).flatMap(([g, brand, tint]) =>
+    veilFailures(s, atmosphereTokens(mode, g, brand, tint, moved))
+  );
+}
+
+describe('atmosphere — the veil over the worst backdrops', () => {
+  it('reads a real strength for each pole from the exact path', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      expect(VEIL[mode]).toBeGreaterThan(0.5);
+      expect(VEIL[mode]).toBeLessThan(1);
+    }
+  });
+
+  for (const mode of ['light', 'dark'] as const) {
+    it(`${mode}: holds every floor over pure black and pure white`, () => {
+      expect(failuresAt(mode, VEIL[mode])).toEqual([]);
+    });
+
+    it(`${mode}: is the thinnest such veil — 0.01 less loses the soft ink`, () => {
+      const thinner = failuresAt(mode, VEIL[mode] - 0.01);
+      expect(thinner.length).toBeGreaterThan(0);
+      expect(thinner.some((f) => f.startsWith('soft over'))).toBe(true);
+    });
+
+    it(`${mode}: needs the moved brand — the usual accent fails at this veil`, () => {
+      expect(failuresAt(mode, VEIL[mode], false).length).toBeGreaterThan(0);
+    });
+  }
+});
+
+/*
+ * Where no shader runs, the section is its opaque ground plus a glow in the
+ * brand's hues at a fixed lightness (`--_glow-l`, chroma capped `--_glow-c`),
+ * at `--_glow-strength`. Its colour is known, so it is measured itself — as
+ * the backdrop, at full strength under every word — for every brand as either
+ * light (the primary or a second colour are both "any brand" here).
+ */
+const GLOW = {
+  light: {
+    l: Number(POLE.light.match(/--_glow-l: ([\d.]+);/)?.[1]),
+    c: Number(POLE.light.match(/--_glow-c: ([\d.]+);/)?.[1]),
+  },
+  dark: {
+    l: Number(POLE.dark.match(/--_glow-l: ([\d.]+);/)?.[1]),
+    c: Number(POLE.dark.match(/--_glow-c: ([\d.]+);/)?.[1]),
+  },
+  strength: Number(EXACT.match(/--_glow-strength: ([\d.]+);/)?.[1]),
+};
+
+function glowFailures(
+  mode: Mode,
+  strength: number,
+  l = GLOW[mode].l
+): string[] {
+  return atmosphereCases(mode).flatMap(([g, brand, tint]) => {
+    const t = atmosphereTokens(mode, g, brand, tint);
+    const glow = oklchFrom(
+      brand,
+      () => l,
+      (_, c) => Math.min(c, GLOW[mode].c)
+    );
+    const seen = triple(
+      (i) => strength * clip(glow)[i] + (1 - strength) * clip(t.bg)[i]
+    );
+    return Object.entries(OVER_BACKDROP)
+      .filter(([token, floor]) => {
+        const colour =
+          token === 'focus' ? t.ink : t[token as keyof SchemeTokens];
+        return ratio(colour, seen) < floor;
+      })
+      .map(([token]) => token);
+  });
+}
+
+describe('atmosphere — the glow where no shader runs', () => {
+  it('is off on the fallback path, on at a real strength on the exact one', () => {
+    expect(POLE.light).toContain('--_glow-strength: 0;');
+    expect(GLOW.strength).toBeGreaterThan(0.5);
+    expect(GLOW.strength).toBeLessThanOrEqual(1);
+    for (const mode of ['light', 'dark'] as const) {
+      expect(GLOW[mode].l).toBeGreaterThan(0);
+      expect(GLOW[mode].c).toBeGreaterThan(0);
+    }
+  });
+
+  for (const mode of ['light', 'dark'] as const) {
+    it(`${mode}: every word keeps its floor over the glow at full strength`, () => {
+      expect(glowFailures(mode, GLOW.strength)).toEqual([]);
+    });
+  }
+
+  it('has teeth: a glow lifted toward the ink fails', () => {
+    // A light-pole glow at the ink's side of the ground, or a dark-pole one
+    // lifted to mid-grey, is the brightness the recipe exists to avoid.
+    expect(glowFailures('light', 1, 0.6).length).toBeGreaterThan(0);
+    expect(glowFailures('dark', 1, 0.55).length).toBeGreaterThan(0);
+  });
+});
+
+// ── 6. textures and shapes behind the words (03 §5.2) ───────────────────────
+/*
+ * A texture paints `--_tex-ink` and shapes `--_shape-ink` behind the text, so
+ * every floor is measured against the section colour with that paint over
+ * it. On a decorated page base / soft / contrast take atmosphere's moved
+ * brand and the soft-ink ghost line; brand / accent bands paint AWAY from
+ * their ink (white under dark ink, black under light), which only raises
+ * every ratio.
+ */
+const SURFACES = squash(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), 'surfaces.css'),
+    'utf8'
+  ).replace(/\/\*[\s\S]*?\*\//g, '')
+);
+const SHAPE_ALPHA = Number(SURFACES.match(/--_shape-alpha: ([\d.]+);/)?.[1]);
+const DECORATED =
+  CODE.match(
+    /@container lp-page (style\([^{]*\)) \{ \.lp :is\(\[data-lp-scheme='base'\], \[data-lp-scheme='soft'\]\) \{([^}]*)\} \.lp \[data-lp-scheme='contrast'\] \{([^}]*)\} \}/
+  ) ?? [];
+
+type Decorated = SchemeTokens & { texture: Rgb; shape: Rgb };
+
+function decoratedTokens(
+  mode: Mode,
+  scheme: Scheme,
+  g: Rgb,
+  brand: Rgb,
+  tint: Tint,
+  moved = true
+): Decorated {
+  const t = schemeTokens(mode, scheme, g, brand, tint);
+  if (scheme === 'brand' || scheme === 'accent') {
+    // `oklch(from var(--lp-ink) clamp(0, (0.5 - l) * 1000, 1) 0 0)`.
+    const anti: Rgb = toLab(t.ink)[0] < 0.5 ? [1, 1, 1] : [0, 0, 0];
+    return { ...t, texture: mix(t.bg, anti, 0.4), shape: anti };
+  }
+  const line = ink(t.bg, INK.line);
+  if (!moved) return { ...t, texture: line, shape: t.accent };
+  // base / soft sit on the ground's polarity, contrast on the other.
+  const light = (mode === 'light') !== (scheme === 'contrast');
+  const accent = light
+    ? darken(brand, TARGET.atmosAccentLight)
+    : lighten(brand, TARGET.atmosAccentDark);
+  const button = light
+    ? darken(brand, TARGET.atmosButtonLight)
+    : lighten(brand, TARGET.atmosButtonDark);
+  return {
+    ...t,
+    accent,
+    button,
+    buttonInk: ink(button, INK.ink),
+    edge: t.soft,
+    texture: line,
+    shape: accent,
+  };
+}
+
+/** Floors against the section colour with `layers` painted over it, in order. */
+function behindFailures(t: Decorated, layers: [Rgb, number][]): string[] {
+  let seen = clip(t.bg);
+  for (const [paint, alpha] of layers)
+    seen = triple((i) => alpha * clip(paint)[i] + (1 - alpha) * seen[i]);
+  const r = {
+    ink: ratio(t.ink, seen),
+    soft: ratio(t.soft, seen),
+    accent: ratio(t.accent, seen),
+    button: ratio(t.button, seen),
+    edge: ratio(t.edge, seen),
+    focus: ratio(t.ink, seen),
+  };
+  return Object.entries(OVER_BACKDROP)
+    .filter(([token, floor]) => r[token as keyof typeof r] < floor)
+    .map(([token]) => token);
+}
+
+function decoratedCases(mode: Mode): [Rgb, Rgb, Tint][] {
+  const cases: [Rgb, Rgb, Tint][] = [];
+  for (const groundHex of Object.values(GROUNDS[mode]))
+    for (const brandHex of Object.values(BRANDS))
+      for (const tint of Object.values(STYLE_TINTS))
+        cases.push([ground(mode, hex(groundHex)), hex(brandHex), tint]);
+  const platform = ground(mode, hex(mode === 'light' ? '#fafafa' : '#171717'));
+  for (let r = 0; r < 256; r += 17)
+    for (let gr = 0; gr < 256; gr += 17)
+      for (let b = 0; b < 256; b += 17)
+        cases.push([platform, [r / 255, gr / 255, b / 255], DEFAULT_TINT]);
+  return cases;
+}
+
+function surfaceFailures(
+  mode: Mode,
+  layers: (t: Decorated) => [Rgb, number][],
+  moved = true
+): string[] {
+  const out: string[] = [];
+  for (const [g, brand, tint] of decoratedCases(mode))
+    for (const scheme of SCHEMES) {
+      const t = decoratedTokens(mode, scheme, g, brand, tint, moved);
+      for (const token of behindFailures(t, layers(t)))
+        out.push(`${scheme} ${token}`);
+    }
+  return out;
+}
+
+describe('textures and shapes — behind the words', () => {
+  it('draws them only where the decorated treatment applies', () => {
+    expect(SHAPE_ALPHA).toBeGreaterThan(0);
+    expect(SHAPE_ALPHA).toBeLessThan(1);
+    const [, query = '', softBase = '', contrast = ''] = DECORATED;
+    // Every surface `surfaces.css` can draw is one the moves cover.
+    const drawn =
+      SURFACES.match(/style\(--lp-(texture|shapes): [a-z]+\)/g) ?? [];
+    expect(drawn.length).toBeGreaterThanOrEqual(4);
+    for (const surface of new Set(drawn)) expect(query).toContain(surface);
+    expect(softBase).toContain('--lp-accent: var(--_atmos-accent)');
+    expect(softBase).toContain('--lp-button-bg: var(--_atmos-button)');
+    expect(softBase).toContain('--lp-button-line: var(--lp-ink-soft)');
+    expect(contrast).toContain('--lp-accent: var(--_atmos-accent-i)');
+    expect(contrast).toContain('--lp-button-bg: var(--_atmos-button-i)');
+    expect(contrast).toContain('--lp-button-line: var(--lp-ink-soft)');
+    for (const recipe of [
+      '--_tex-ink: var(--lp-line);',
+      '--_shape-ink: var(--lp-accent);',
+      '--_anti-ink: oklch(from var(--lp-ink) clamp(0, (0.5 - l) * 1000, 1) 0 0);',
+      '--_tex-ink: color-mix(in oklab, var(--lp-bg), var(--_anti-ink) 40%);',
+      '--_shape-ink: var(--_anti-ink);',
+    ])
+      expect(CODE).toContain(recipe);
+  });
+
+  for (const mode of ['light', 'dark'] as const) {
+    it(`${mode}: a texture at any strength holds every floor`, () => {
+      for (const strength of [0.25, 0.5, 0.75, 1])
+        expect(surfaceFailures(mode, (t) => [[t.texture, strength]])).toEqual(
+          []
+        );
+    });
+
+    it(`${mode}: shapes at their alpha, and a texture over them, hold every floor`, () => {
+      for (const layers of [
+        (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA / 2]],
+        (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA]],
+        (t: Decorated): [Rgb, number][] => [
+          [t.shape, SHAPE_ALPHA],
+          [t.texture, 0.5],
+        ],
+        (t: Decorated): [Rgb, number][] => [
+          [t.shape, SHAPE_ALPHA],
+          [t.texture, 1],
+        ],
+      ])
+        expect(surfaceFailures(mode, layers)).toEqual([]);
+    });
+  }
+
+  it('has teeth: shapes a little past their alpha, or on the usual brand, fail', () => {
+    const past = (t: Decorated): [Rgb, number][] => [
+      [t.shape, SHAPE_ALPHA + 0.04],
+    ];
+    const at = (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA]];
+    expect(
+      [...surfaceFailures('light', past), ...surfaceFailures('dark', past)]
+        .length
+    ).toBeGreaterThan(0);
+    expect(
+      [
+        ...surfaceFailures('light', at, false),
+        ...surfaceFailures('dark', at, false),
+      ].length
+    ).toBeGreaterThan(0);
   });
 });

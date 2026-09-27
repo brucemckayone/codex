@@ -69,8 +69,10 @@
   --_panel-i: oklch(from var(--lp-brand) 0.265 min(c * 0.35, 0.043) h);
   --_scrim: oklch(from var(--lp-brand) 0.16 min(c * 0.25, 0.027) h);
 
-  --_acc-light: color-mix(in oklab, var(--lp-brand) 55%, black);
-  --_acc-dark: color-mix(in oklab, var(--lp-brand) 55%, white);
+  /* The brand 55% of the way from black / to white in OKLab — the same mixes,
+     written from the brand so no literal colour appears. */
+  --_acc-light: oklch(from var(--lp-brand) calc(l * 0.55) calc(c * 0.55) h);
+  --_acc-dark: oklch(from var(--lp-brand) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
   --_btn-light: var(--lp-brand);
   --_btn-dark: var(--lp-brand);
 
@@ -78,6 +80,29 @@
   --_accent-i: var(--_acc-dark);
   --_button-g: var(--_btn-light);
   --_button-i: var(--_btn-dark);
+
+  /* Atmosphere (03 §5.1). On this fallback path its scrim is fully opaque —
+     the section renders as `base` — because the lighter scrim is only proven
+     for the exact path's moved brand (see the atmosphere scheme below). */
+  --_atm-acc-light: var(--_acc-light);
+  --_atm-acc-dark: var(--_acc-dark);
+  --_atm-btn-light: var(--_btn-light);
+  --_atm-btn-dark: var(--_btn-dark);
+  --_atmos-min-light: 1;
+  --_atmos-min-dark: 1;
+
+  --_atmos-accent: var(--_atm-acc-light);
+  --_atmos-button: var(--_atm-btn-light);
+  --_atmos-accent-i: var(--_atm-acc-dark);
+  --_atmos-button-i: var(--_atm-btn-dark);
+  --_atmos-min: var(--_atmos-min-light);
+  /* The glow that stands in for the shader where none runs: the brand's hue
+     at a fixed lightness near the ground's, so it reads as COLOUR rather than
+     light and barely moves the text's contrast (`schemes.test.ts` §5). Off
+     on this fallback path, where the moved brand it is proven with is not. */
+  --_glow-l: 0.89;
+  --_glow-c: 0.08;
+  --_glow-strength: 0;
 
   background: var(--lp-ground);
 }
@@ -132,6 +157,14 @@
   --_accent-i: var(--_acc-light);
   --_button-g: var(--_btn-dark);
   --_button-i: var(--_btn-light);
+
+  --_atmos-accent: var(--_atm-acc-dark);
+  --_atmos-button: var(--_atm-btn-dark);
+  --_atmos-accent-i: var(--_atm-acc-light);
+  --_atmos-button-i: var(--_atm-btn-light);
+  --_atmos-min: var(--_atmos-min-dark);
+  --_glow-l: 0.3;
+  --_glow-c: 0.08;
 }
 
 /* ── Scheme tokens (fallback path) ───────────────────────────────────────── */
@@ -143,6 +176,9 @@
   --lp-panel-ink: oklch(from var(--lp-panel) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
   --lp-button-ink: oklch(from var(--lp-button-bg) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --lp-focus: var(--lp-ink);
+  /* What a Style's texture and shapes are drawn in (`surfaces.css`). */
+  --_tex-ink: var(--lp-line);
+  --_shape-ink: var(--lp-accent);
 }
 
 /* ── The exact path ──────────────────────────────────────────────────────── */
@@ -194,12 +230,46 @@
     --_btn-lt-r: max(0, 255 * (1.055 * pow(var(--_btn-lt-1r) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1r)), 1 / 2.4) - 0.055));
     --_btn-lt-g: max(0, 255 * (1.055 * pow(var(--_btn-lt-1g) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1g)), 1 / 2.4) - 0.055));
     --_btn-lt-b: max(0, 255 * (1.055 * pow(var(--_btn-lt-1b) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1b)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-s: max(1, 0.41 / max(var(--_y), 1e-6));
+    --_atm-acc-lt-1r: min(1, var(--_lr) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-1g: min(1, var(--_lg) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-1b: min(1, var(--_lb) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-y1: (0.2126 * var(--_atm-acc-lt-1r) + 0.7152 * var(--_atm-acc-lt-1g) + 0.0722 * var(--_atm-acc-lt-1b));
+    --_atm-acc-lt-k: max(0, (0.41 - var(--_atm-acc-lt-y1)) / max(1 - var(--_atm-acc-lt-y1), 1e-6));
+    --_atm-acc-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1r) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1r)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1g) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1g)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1b) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1b)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-s: max(1, 0.26 / max(var(--_y), 1e-6));
+    --_atm-btn-lt-1r: min(1, var(--_lr) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-1g: min(1, var(--_lg) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-1b: min(1, var(--_lb) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-y1: (0.2126 * var(--_atm-btn-lt-1r) + 0.7152 * var(--_atm-btn-lt-1g) + 0.0722 * var(--_atm-btn-lt-1b));
+    --_atm-btn-lt-k: max(0, (0.26 - var(--_atm-btn-lt-y1)) / max(1 - var(--_atm-btn-lt-y1), 1e-6));
+    --_atm-btn-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1r) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1r)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1g) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1g)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1b) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1b)), 1 / 2.4) - 0.055));
 
     /* The brand, moved only as far as each polarity requires. */
     --_acc-light: rgb(from var(--lp-brand) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
     --_acc-dark: rgb(from var(--lp-brand) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
     --_btn-light: rgb(from var(--lp-brand) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));
     --_btn-dark: rgb(from var(--lp-brand) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));
+
+    /* Moved further for atmosphere, and the smallest scrims that then hold
+       every floor over a pure black and a pure white backdrop. */
+    --_atm-acc-light: rgb(from var(--lp-brand) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));
+    --_atm-acc-dark: rgb(from var(--lp-brand) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));
+    --_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));
+    --_atm-btn-dark: rgb(from var(--lp-brand) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b));
+    --_atmos-min-light: 0.82;
+    --_atmos-min-dark: 0.86;
+    --_glow-strength: 0.9;
   }
 
   .lp :is([data-lp-scheme], [data-lp-on-media]) {
@@ -225,14 +295,25 @@
   --lp-button-bg: var(--_button-g);
 }
 
-/* PROVISIONAL (03 §12 R0): renders as `base` until E1 gives it its
-   see-through recipe over the org shader (03 §5.1). Its own rule, not a
-   selector shared with `base`, so each scheme stays one findable block. */
+/* ATMOSPHERE (03 §5.1) — the org's own shader seen through the section.
+   Every colour is measured against the pole's GROUND. Where the shader runs,
+   the section paints that ground as a uniform veil of strength `--_atmos-s`
+   over it, so every floor must hold over the two worst backdrops, pure black
+   and pure white; where it does not, the section is the opaque ground under
+   a glow whose own colours are measured (`surfaces.css`, `--_glow-*` above).
+   Ink and soft ink are the usual ones; the accent
+   and button are the brand moved further (`--_atm-*`) and the ghost button's
+   line is the soft ink — which is what lets the veil stop at 0.82 (light) /
+   0.86 (dark) instead of 0.97. A Style may thicken the veil with
+   `--lp-atmosphere-scrim` (0–1), never thin it. */
 .lp [data-lp-scheme='atmosphere'] {
   --lp-bg: var(--lp-ground);
   --lp-panel: var(--_panel-g);
-  --lp-accent: var(--_accent-g);
-  --lp-button-bg: var(--_button-g);
+  --lp-accent: var(--_atmos-accent);
+  --lp-button-bg: var(--_atmos-button);
+  --lp-button-line: var(--lp-ink-soft);
+  --_atmos-s: max(var(--_atmos-min), var(--lp-atmosphere-scrim, 0));
+  --_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));
 }
 
 .lp [data-lp-scheme='soft'] {
@@ -256,10 +337,35 @@
   --lp-accent: var(--lp-ink);
   --lp-button-bg: var(--lp-ink);
   --lp-button-ink: var(--lp-bg);
+  /* This ink sits as close as 4.58:1, so a texture or shapes behind it may
+     only move AWAY from it: toward white under dark ink, black under light. */
+  --_anti-ink: oklch(from var(--lp-ink) clamp(0, (0.5 - l) * 1000, 1) 0 0);
+  --_tex-ink: color-mix(in oklab, var(--lp-bg), var(--_anti-ink) 40%);
+  --_shape-ink: var(--_anti-ink);
 }
 
 .lp [data-lp-scheme='accent'] {
   --lp-bg: var(--lp-brand-2);
+}
+
+/* DECORATED (03 §5.2) — a page whose Style draws a texture or shapes behind
+   the text. Its base / soft / contrast sections take atmosphere's moved
+   brand and soft-ink ghost line, so a texture in the line colour holds every
+   floor at any strength and shapes up to their alpha; brand / accent bands
+   draw away from their ink (above). `schemes.test.ts` measures both. A
+   PAGE-level choice: the queries read `.lp-page` (see `surfaces.css`). */
+@container lp-page style(--lp-texture: grain) or style(--lp-texture: paper) or style(--lp-texture: contour) or style(--lp-shapes: blobs) {
+  .lp :is([data-lp-scheme='base'], [data-lp-scheme='soft']) {
+    --lp-accent: var(--_atmos-accent);
+    --lp-button-bg: var(--_atmos-button);
+    --lp-button-line: var(--lp-ink-soft);
+  }
+
+  .lp [data-lp-scheme='contrast'] {
+    --lp-accent: var(--_atmos-accent-i);
+    --lp-button-bg: var(--_atmos-button-i);
+    --lp-button-line: var(--lp-ink-soft);
+  }
 }
 
 /* Text laid over imagery. Ink is measured against the scrim colour and the

@@ -15,6 +15,11 @@
 
   `theme` is a SCOPED preview (`data-lp-theme`) for thumbnails and the dev
   route; it never touches `<html data-theme>` (ref 11-theming §4).
+
+  ATMOSPHERE (03 §5.1): `data-lp-atmosphere` marks a live page with a "Moving
+  background" section, so the org layout clears the stack above its shader
+  for this page only. Never set while editing or still — the canvas and
+  thumbnails sit inside the studio, and there `atmosphere` draws its glow.
 -->
 <script lang="ts">
   import type { BrandTokenOverrides } from '$lib/page-builder';
@@ -25,6 +30,7 @@
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import { resolveSections, resolveStyle } from './model/resolve';
+  import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { type PageEdit, setKitPage } from './page-context';
   import { BLOCKS } from './registry';
@@ -32,6 +38,7 @@
   import StickyCta from './StickyCta.svelte';
   import './styles/kit.css';
   import './styles/schemes.css';
+  import './styles/surfaces.css';
   import './styles/style-bold.css';
   import './styles/style-clean.css';
   import './styles/style-soft.css';
@@ -101,6 +108,11 @@
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
+  const atmosphere = $derived(
+    edit || still || !sections.some((s) => s.scheme === 'atmosphere')
+      ? undefined
+      : (STYLES[style].atmosphere ?? 'soft')
+  );
 </script>
 
 <svelte:head>
@@ -113,13 +125,20 @@
   data-lp-theme={theme}
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
+  data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
 >
   <div class="lp-page">
     {#each sections as section (section.id)}
       {@const Block = BLOCKS[section.type]}
-      <SectionShell {section} editing={!!edit} selected={selectedId === section.id}>
+      <SectionShell
+        {section}
+        background={propsById.get(section.id)?.background}
+        mediaBaseUrl={context.mediaBaseUrl}
+        editing={!!edit}
+        selected={selectedId === section.id}
+      >
         <Block
           props={propsById.get(section.id) ?? {}}
           {section}

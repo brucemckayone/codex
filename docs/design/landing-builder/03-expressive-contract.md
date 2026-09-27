@@ -415,3 +415,45 @@ Estimate (memory rule of thumb, ~190k output tokens per implementation agent): a
 ## 13. Amendments
 
 _(append here: `X<n> · <date> · <WP> · what changed · why`)_
+
+- **X1 · 2026-09-27 · E1 · Atmosphere tokens and veils.** On an `atmosphere` section the accent moves
+  to Y ≤ 0.06 (light) / ≥ 0.41 (dark), the button to Y ≤ 0.115 / ≥ 0.26, and the ghost-button line is
+  `--lp-ink-soft`; ink and soft ink are the usual ones. The veil is 0.82 (light) / 0.86 (dark): the
+  smallest two-decimal values that hold every floor over pure black AND pure white (`schemes.test.ts`
+  §5, with a minimality check). Why: with the usual accent and button the minimum veil was 0.97/0.98 —
+  the shader would have been invisible. Engines without `pow()` in relative colour get a veil of 1.
+- **X2 · 2026-09-27 · E1 · The fallback glow** (no preset, editing canvas, thumbnails) is the brand
+  hue at a FIXED lightness (L 0.89 light / 0.30 dark, chroma ≤ 0.08) at 0.9 opacity; its second light
+  mixes the secondary 70% with the primary so an achromatic secondary never reads grey. It varies hue,
+  not luminance, so it can be strong and still clear every text floor (measured by its own test).
+  Replaces §5.1's "the existing CSS glow", which at 14–18% was invisible.
+- **X3 · 2026-09-27 · E1 · `data-lp-atmosphere` is withheld when still, not only when editing:** Style
+  tab and gallery thumbnails render inside the studio's own `.org-layout`, whose `.org-main` the page
+  rule would otherwise clear.
+- **X4 · 2026-09-27 · E1 · Mobile clearance band:** under `--below-md` the org layout keeps its 80%
+  cover on `.org-main`'s bottom `--space-20` (the mobile nav's clearance), so no raw shader strip shows
+  between the last section and the footer.
+- **X5 · 2026-09-27 · E1 · Surfaces API (page-level, set on `.lp[data-lp-style='<id>']`, read by style
+  queries on the named container `lp-page`):** `--lp-texture: grain | paper | contour`
+  (+ `--lp-texture-strength` 0–1), `--lp-shapes: blobs` (+ `--lp-shapes-strength` 0–1, a share of the
+  proven 0.12 alpha), `--lp-edge: curve | angle` (+ `--lp-edge-depth`, always capped at the section
+  padding; `--lp-edge-offset` is read-only), `--lp-atmosphere-scrim` (thicker only), `--lp-atmos-a/-b`.
+  Pages with texture or shapes take the moved brand on `base`/`soft`/`contrast`; `brand`/`accent`
+  bands paint texture away from their ink. No texture or shapes on `atmosphere` or on-media sections.
+  Engines without custom-property style queries draw plain, straight sections.
+- **X6 · 2026-09-27 · E1 · Background images** render for every type except `hero` and `cta`; `cta`
+  keeps its A5 field until the editor's generic control lands (E5).
+- **X7 · 2026-09-27 · orchestrator · Radius floors** inside `clamp()`/`min()` are written `0rem`:
+  `--radius-none` is a unitless `0`, which voids the whole math function.
+- **X8 · 2026-09-27 · E3 · Story and journey.** The before/after `toggle` renders as `columns` on the
+  server and becomes tabs only while it is below the viewport, so nothing on screen re-lays out (a
+  toggle already in view at load stays columns until it next leaves the screen). A journey-map stage
+  with nothing inside is a plain stop, not a `<details>` (a disclosure that opens to nothing), as the
+  accordion already does. Visitor copy lives in block-local `copy.ts` files, the existing precedent
+  (curriculum, preview, instructor, stats, video).
+- **X9 · 2026-09-27 · orchestrator · Atmosphere panel mode.** E1 measured the live shader at ~14%
+  under the 0.86 dark veil: quieter than the no-shader glow, so an org that adds a shader would see LESS
+  atmosphere. The veil stays proven, but a Style may now choose WHERE it is drawn:
+  `--lp-atmosphere-veil: section | panel`. `panel` draws the veil only behind the section's content,
+  with the Style's card radius, and leaves the shader at full strength around it — nothing readable
+  sits outside the panel, so the contrast proof is unchanged. Default `section`.

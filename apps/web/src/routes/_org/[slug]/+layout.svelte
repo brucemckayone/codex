@@ -582,6 +582,20 @@
     background: transparent;
   }
 
+  /* A sales page with a "Moving background" section (landing-builder 03
+     §5.1): for the life of that page, clear the stack above the org's shader
+     so the section's own veil sits on the shader itself. The kit clears its
+     root and keeps every other section opaque (`kit/styles/surfaces.css`). A
+     Style that asks for a sharp background lifts the blur as well. */
+  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+    background: transparent;
+  }
+
+  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='sharp']))
+    :global(.shader-hero--fullpage) {
+    filter: none;
+  }
+
 
   @media (--below-md) {
     .org-main {
@@ -591,6 +605,13 @@
 
     .org-main--studio {
       padding-bottom: 0;
+    }
+
+    /* The page ends above that clearance, so it keeps its usual cover: the
+       shader is seen through the page's own veil, never raw below it. */
+    .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+      background: linear-gradient(color-mix(in srgb, var(--color-background) 80%, transparent) 0 0)
+        bottom / 100% var(--space-20) no-repeat;
     }
   }
 

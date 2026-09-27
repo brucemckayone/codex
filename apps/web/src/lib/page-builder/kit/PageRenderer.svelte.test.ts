@@ -8,6 +8,7 @@ import {
 import { PAGE_STYLE_IDS } from './model/ids';
 import { sampleContext, samplePage } from './model/sample';
 import { STYLES } from './model/styles';
+import type { KitPage } from './model/types';
 import PageRenderer from './PageRenderer.svelte';
 import type { PageEdit } from './page-context';
 
@@ -157,6 +158,119 @@ describe('PageRenderer', () => {
     expect(document.documentElement.getAttribute('data-theme')).not.toBe(
       'dark'
     );
+  });
+
+  describe('atmosphere and background images (03 §5)', () => {
+    const IMAGE = { key: 'landing-pages/page-1/images/image-1' };
+    const CDN = 'https://cdn.example';
+
+    /** Bold's sample page with a Moving background hero and imaged sections. */
+    function surfacedPage(): KitPage {
+      const page = samplePage('bold');
+      return {
+        ...page,
+        sections: page.sections.map((s) => {
+          if (s.type === 'hero')
+            return {
+              ...s,
+              design: { scheme: 'atmosphere' as const },
+              props: { ...s.props, background: IMAGE },
+            };
+          if (s.type === 'text' || s.type === 'cta')
+            return { ...s, props: { ...s.props, background: IMAGE } };
+          return s;
+        }),
+      };
+    }
+
+    const context = () => sampleContext({ offer: 'tiers', mediaBaseUrl: CDN });
+
+    it('flags a live page that has a Moving background section, blurred unless the Style asks otherwise', async () => {
+      const root = await render({ page: surfacedPage(), context: context() });
+      expect(root.dataset.lpAtmosphere).toBe('soft');
+      unmount(app);
+      const cinematic = STYLES.cinematic as { atmosphere?: 'soft' | 'sharp' };
+      cinematic.atmosphere = 'sharp';
+      try {
+        const page = samplePage('cinematic');
+        page.sections[0] = {
+          ...page.sections[0],
+          design: { scheme: 'atmosphere' },
+        };
+        const sharp = await render({ page, context: context() });
+        expect(sharp.dataset.lpAtmosphere).toBe('sharp');
+      } finally {
+        delete cinematic.atmosphere;
+      }
+    });
+
+    it('never flags it while editing, in a still thumbnail, or without such a section', async () => {
+      const edit: PageEdit = { commit: () => {} };
+      for (const props of [
+        { page: surfacedPage(), edit },
+        { page: surfacedPage(), still: true },
+        { page: samplePage('bold') },
+      ]) {
+        const root = await render({ ...props, context: context() });
+        expect(root.hasAttribute('data-lp-atmosphere')).toBe(false);
+        unmount(app);
+        app = null;
+      }
+    });
+
+    it('draws a background image behind a section, decoratively, on the media colours', async () => {
+      const root = await render({ page: surfacedPage(), context: context() });
+      const text = root.querySelector<HTMLElement>('#text');
+      const img = text?.querySelector('.lp-surface > img');
+      expect(img?.getAttribute('src')).toBe(`${CDN}/${IMAGE.key}/lg.webp`);
+      expect(img?.getAttribute('alt')).toBe('');
+      expect(img?.getAttribute('loading')).toBe('lazy');
+      expect(img?.getAttribute('decoding')).toBe('async');
+      expect(
+        text?.querySelector('.lp-surface')?.getAttribute('aria-hidden')
+      ).toBe('true');
+      expect(text?.hasAttribute('data-lp-on-media')).toBe(true);
+      // The surface sits behind the content, as the section's first child.
+      expect(text?.firstElementChild?.classList.contains('lp-surface')).toBe(
+        true
+      );
+    });
+
+    it('leaves the hero and the call to action to their own media', async () => {
+      const root = await render({ page: surfacedPage(), context: context() });
+      for (const id of ['#hero', '#cta']) {
+        const section = root.querySelector<HTMLElement>(id);
+        expect(section?.querySelector('.lp-surface img')).toBeNull();
+        expect(section?.hasAttribute('data-lp-on-media')).toBe(false);
+      }
+      // Every other section still has an (empty) surface for Style decoration.
+      expect(root.querySelectorAll('.lp-section > .lp-surface')).toHaveLength(
+        root.querySelectorAll('.lp-section').length
+      );
+    });
+
+    it('renders no image without a CDN base, and the section keeps its scheme', async () => {
+      const root = await render({
+        page: surfacedPage(),
+        context: sampleContext({ offer: 'tiers' }),
+      });
+      const text = root.querySelector<HTMLElement>('#text');
+      expect(text?.querySelector('.lp-surface img')).toBeNull();
+      expect(text?.hasAttribute('data-lp-on-media')).toBe(false);
+    });
+
+    it('draws the surfaced page identical with and without the editor', async () => {
+      const page = surfacedPage();
+      const publicRoot = await render({ page, context: context() });
+      const publicHtml = publicMarkup(publicRoot);
+      unmount(app);
+      const editingRoot = await render({
+        page,
+        context: context(),
+        edit: { commit: () => {} },
+      });
+      expect(publicMarkup(editingRoot)).toBe(publicHtml);
+    });
   });
 
   it('keeps the floating call to action outside every query container', async () => {
