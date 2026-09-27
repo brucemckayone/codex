@@ -351,10 +351,16 @@
     color: var(--color-text-secondary);
   }
 
+  /* Two lines before clamping: "Before and after" and "What's included" must
+     read whole beside the row's tools, not as "Before and aft…". */
   .outline__label {
+    display: -webkit-box;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    line-height: var(--leading-snug);
+    overflow-wrap: anywhere;
   }
 
   .outline__row[data-selected] .outline__label {
