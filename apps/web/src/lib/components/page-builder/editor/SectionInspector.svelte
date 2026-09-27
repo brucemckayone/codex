@@ -12,6 +12,7 @@
   canvas see it at once.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { CopyIcon, EyeIcon, EyeOffIcon, TrashIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -57,6 +58,20 @@
   }: Props = $props();
 
   const id = $props.id();
+
+  // Pinned for the life of this inspector, which Inspector re-creates for
+  // every section (`{#key section.id}`). A write that arrives after the
+  // creator has moved on — an image upload finishing, say — must land on the
+  // section it was made for, never on whichever one the parent shows now
+  // (Codex-61zsk review).
+  const sectionId = untrack(() => section.id);
+
+  /** A field's value: `section`'s while on screen, the store's once moved on. */
+  function valueOf(key: string): unknown {
+    if (section.id === sectionId) return section.props[key];
+    return pageBuilder.sections.find((s) => s.id === sectionId)?.props[key];
+  }
+
   const definition = $derived(DEFINITIONS[section.type]);
   const Glyph = $derived(sectionIcon(section.type));
   const style = $derived(resolveStyle(page.design));
@@ -91,15 +106,17 @@
   );
 
   function writeProp(key: string, value: unknown): void {
-    if (sameValue(section.props[key], value)) return;
-    pageBuilder.setSectionProp(section.id, key, value);
+    // Deleted by the time a slow write arrived: there is nothing to write to.
+    if (!pageBuilder.sections.some((s) => s.id === sectionId)) return;
+    if (sameValue(valueOf(key), value)) return;
+    pageBuilder.setSectionProp(sectionId, key, value);
   }
 
   function rename(next: string): void {
     const name = next.trim() ? next : undefined;
     if ((section.name ?? undefined) === name) return;
     const sections = $state.snapshot(pageBuilder.sections).map((s) => {
-      if (s.id !== section.id) return s;
+      if (s.id !== sectionId) return s;
       const { name: _old, ...rest } = s;
       return name === undefined ? rest : { ...rest, name };
     });
@@ -196,7 +213,7 @@
         {#each fields as field (field.key)}
           <FieldControl
             {field}
-            value={section.props[field.key]}
+            value={valueOf(field.key)}
             onChange={(next) => writeProp(field.key, next)}
             mediaBaseUrl={context.mediaBaseUrl}
           />

@@ -37,8 +37,10 @@
   }
 
   function setKey(index: number, key: string, next: unknown): void {
+    // The items as they are NOW, not `entries`: an entry's image upload can
+    // finish after this field has left the screen.
     write(
-      entries.map((entry, at) => {
+      readEntries(value).map((entry, at) => {
         if (at !== index) return entry;
         const copy = { ...entry };
         if (next === undefined) delete copy[key];

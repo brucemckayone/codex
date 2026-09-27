@@ -13,7 +13,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
-import { buildPublicContext } from './public-context';
+import { isEnrolled } from './kit/model/cta';
+import { buildPublicContext, offerAsVisitor } from './public-context';
 
 const URL_ = new URL('http://acme.lvh.me:3000/journeys/rootwork');
 
@@ -222,5 +223,33 @@ describe('buildPublicContext — passthrough fields', () => {
     expect(context.stages).toBe(page.stages);
     expect(context.testimonials).toBe(page.testimonials);
     expect(context.sellPreview).toBe(SELL_PREVIEW);
+  });
+});
+
+describe('offerAsVisitor — the ?preview override reaches the offer too', () => {
+  function contextFor(previewOffer: CourseOffer | null) {
+    return buildPublicContext({
+      coursePage: coursePage(),
+      sellPreview: SELL_PREVIEW,
+      enrolled: false,
+      offer: previewOffer,
+      mediaBaseUrl: null,
+      url: URL_,
+    });
+  }
+
+  it('shows an entitled creator the buy state, not the member state', () => {
+    const entitled = offer({ entitled: true });
+
+    // The bug: clearing the flag alone is not enough, because the kit also
+    // reads the offer's own entitlement.
+    expect(isEnrolled(contextFor(entitled))).toBe(true);
+    expect(isEnrolled(contextFor(offerAsVisitor(entitled)))).toBe(false);
+  });
+
+  it('leaves the rest of the offer alone, and a failed read null', () => {
+    const entitled = offer({ entitled: true, courseId: 'course-9' });
+    expect(offerAsVisitor(entitled)).toEqual({ ...entitled, entitled: false });
+    expect(offerAsVisitor(null)).toBeNull();
   });
 });

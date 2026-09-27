@@ -116,26 +116,33 @@
       {...upload.enhance(async ({ form, submit }) => {
         error = null;
         uploaded = false;
+        // The catch covers the UPLOAD only. It used to wrap the write below
+        // too, so a failed write was reported as a failed upload — and, when
+        // the field had gone, reported nowhere at all.
         try {
           await submit();
-          const result = upload.result;
-          if (result?.outcome === 'uploaded') {
-            fresh = { key: result.key, url: result.url };
-            onChange(ref?.alt ? { key: result.key, alt: ref.alt } : { key: result.key });
-            uploaded = true;
-          } else {
-            // The server's own words (a format it refuses, a size over the
-            // limit) — a creator can only fix what they can read.
-            error =
-              result?.message ??
-              upload.fields.image.issues()?.[0]?.message ??
-              m.studio_page_editor_image_failed();
-          }
         } catch {
           error = m.studio_page_editor_image_failed();
+          return;
         } finally {
           // Re-picking the same file must fire `change` again.
           form.reset();
+        }
+        const result = upload.result;
+        if (result?.outcome === 'uploaded') {
+          fresh = { key: result.key, url: result.url };
+          // `value` as it is NOW, not the `ref` derived when the upload
+          // started: a slow upload can outlive the field on screen.
+          const alt = isImageRef(value) ? value.alt : undefined;
+          onChange(alt ? { key: result.key, alt } : { key: result.key });
+          uploaded = true;
+        } else {
+          // The server's own words (a format it refuses, a size over the
+          // limit) — a creator can only fix what they can read.
+          error =
+            result?.message ??
+            upload.fields.image.issues()?.[0]?.message ??
+            m.studio_page_editor_image_failed();
         }
       })}
     >

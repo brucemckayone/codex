@@ -103,3 +103,17 @@ export function buildPublicContext(
     mediaBaseUrl,
   };
 }
+
+/**
+ * The offer as a VISITOR's read would return it: `entitled` cleared.
+ *
+ * For the `?preview`-as-visitor override, which has to reach BOTH signals the
+ * kit reads. `isEnrolled` ORs `context.enrolled` with `offer.entitled`, so
+ * clearing only the flag still showed an entitled creator the member state —
+ * "Continue", and no prices — on the preview meant to show them their buy
+ * button (Codex-61zsk review). The studio canvas strips `entitled` for the
+ * same reason.
+ */
+export function offerAsVisitor(offer: CourseOffer | null): CourseOffer | null {
+  return offer ? { ...offer, entitled: false } : offer;
+}

@@ -18,7 +18,7 @@
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
-  import { buildPublicContext } from '$lib/page-builder/public-context';
+  import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
 
@@ -111,15 +111,17 @@
   // ── THE KIT'S RENDER CONTEXT (Codex-61zsk.6 · WP-6) ─────────────────────────
   // `renderEnrolled`, NOT `data.enrolled`, for the same reason the old
   // `JourneyRenderer` prop did: under `?preview` the CTA must resolve as a
-  // visitor's so a manager can see their own buy button. `mediaBaseUrl` comes
-  // straight off the awaited envelope — `coursePage.mediaBaseUrl` is already
-  // the worker's `R2_PUBLIC_URL_BASE`, so nothing here re-derives it.
+  // visitor's so a manager can see their own buy button. The offer gets the
+  // same override (`offerAsVisitor`): the kit also reads `offer.entitled`, so
+  // the flag alone still showed the owner the member state. `mediaBaseUrl`
+  // comes straight off the awaited envelope — `coursePage.mediaBaseUrl` is
+  // already the worker's `R2_PUBLIC_URL_BASE`, so nothing here re-derives it.
   const context = $derived(
     buildPublicContext({
       coursePage: data.coursePage,
       sellPreview: data.sellPreview,
       enrolled: renderEnrolled,
-      offer: data.offer,
+      offer: previewing ? offerAsVisitor(data.offer) : data.offer,
       mediaBaseUrl: data.coursePage.mediaBaseUrl ?? null,
       url: page.url,
     })

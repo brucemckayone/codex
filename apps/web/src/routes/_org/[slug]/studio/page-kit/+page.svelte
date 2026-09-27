@@ -138,9 +138,9 @@
     })
   );
 
-  const edit = $derived(
-    editing ? { commit: (id: string, key: string, value: string) => console.info(id, key, value) } : null
-  );
+  // `?edit=1` turns the inline-edit attributes on so they can be checked by
+  // eye; the gallery has no page to write to, so a commit goes nowhere.
+  const edit = $derived(editing ? { commit: () => {} } : null);
 
   function set(key: string, value: string) {
     const url = new URL(page.url);
