@@ -65,21 +65,14 @@ export interface JourneyFixture {
    */
   readonly purchasable: boolean;
   /**
-   * The STORED section types, in stored order. `db:seed:portals` writes the
-   * same four for every page. Refresh with:
+   * The STORED section types, in stored order — v2 kit ids since WP-9b
+   * (`db:seed:portals` writes the same nine for every page), which is also
+   * exactly what the kit renders as `data-lp-type`. Refresh with:
    *   psql -h db.localtest.me -p 5432 -U postgres -d main -At -c "select o.slug
    *     ||' '||lp.slug||' '||(select string_agg(s->>'type', ',' order by ord)
    *     from jsonb_array_elements(lp.sections) with ordinality t(s, ord))
    *     from landing_pages lp join organizations o on o.id=lp.organization_id
    *     where lp.deleted_at is null order by 1;"
-   *
-   * DELIBERATELY THE STORED (legacy) shape, not what a visitor sees — the
-   * studio canvas (`canvas-public-parity.spec.ts`) still renders these
-   * literal types until WP-9 upgrades the builder load too, so a fixture
-   * that already spoke v2 would break that file's canvas-side self-check.
-   * `expectSellPageRendered` (public-page-only) is what translates these
-   * through `upgradePage`'s renames before comparing against the kit's
-   * rendered `data-lp-type` — see `LEGACY_TO_V2_TYPE` below.
    */
   readonly sections: readonly string[];
 }
@@ -91,58 +84,72 @@ export interface JourneyFixture {
  * and idempotent.
  *
  * `studio-alpha` (#E11D48) vs `studio-beta` (#2563EB) is the brand-neutrality
- * pair; `of-blood-and-bones` is the fully-branded case (cream/near-black,
- * Playfair) and the only org with a purchasable course.
+ * pair; `of-blood-and-bones` is the fully-branded case (its own serif and
+ * palette) and the only org with purchasable courses.
  */
+
+/** The nine v2 sections `db:seed:portals` writes for every seeded page. */
+const SEEDED_SECTIONS: readonly string[] = [
+  'hero',
+  'problem',
+  'transformation',
+  'benefits',
+  'curriculum',
+  'instructor',
+  'pricing',
+  'faq',
+  'cta',
+];
+
 export const JOURNEY_FIXTURES: readonly JourneyFixture[] = [
   {
     org: 'of-blood-and-bones',
     pageSlug: 'ancestral-threads',
     owner: 'luzura@test.com',
     purchasable: true,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'return-to-the-shoreline',
     owner: 'luzura@test.com',
     purchasable: true,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'bone-deep',
     owner: 'luzura@test.com',
     purchasable: false,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'tending-the-grief',
     owner: 'luzura@test.com',
     purchasable: false,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'studio-alpha',
     pageSlug: 'bone-deep',
     owner: 'creator@test.com',
     purchasable: false,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'studio-alpha',
     pageSlug: 'tending-the-grief',
     owner: 'creator@test.com',
     purchasable: false,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
   {
     org: 'studio-beta',
     pageSlug: 'bone-deep',
     owner: 'admin@test.com',
     purchasable: false,
-    sections: ['hero', 'ache', 'map', 'invite'],
+    sections: SEEDED_SECTIONS,
   },
 ];
 
@@ -277,20 +284,6 @@ export async function readJourneyHead(page: Page): Promise<JourneyHeadTags> {
 }
 
 /**
- * Legacy stored type → v2 kit type, for the four types every seeded fixture
- * uses (contract §2's "Replaces legacy" column, `01-contract.md`). Only these
- * four are needed here — `upgradePage` (Codex-61zsk.6 · WP-6) is the real,
- * total mapping; this is a narrow, e2e-local restatement of it so this file
- * does not import the app's module graph.
- */
-const LEGACY_TO_V2_TYPE: Readonly<Record<string, string>> = {
-  hero: 'hero',
-  ache: 'problem',
-  map: 'curriculum',
-  invite: 'pricing',
-};
-
-/**
  * Assert we are actually looking at a rendered SELL page — TRAPS 2 and 3
  * together.
  *
@@ -330,14 +323,11 @@ export async function expectSellPageRendered(
         ),
       {
         message:
-          'the stored sections did not render (as their v2 kit type) in ' +
-          'stored order — note a load-thrown 404 on this surface still ' +
+          'the stored sections did not render in stored order — note a load-thrown 404 on this surface still ' +
           'returns HTTP 200 (Codex-nqop3, upstream SvelteKit)',
         timeout: 15_000,
       }
     )
-    // `fixture.sections` is the STORED (legacy) shape — translated through
-    // the same renames `upgradePage` applies, since that is what the kit
-    // actually puts in the DOM.
-    .toEqual(fixture.sections.map((type) => LEGACY_TO_V2_TYPE[type] ?? type));
+    // Seeds store v2 types, which is exactly what the kit puts in the DOM.
+    .toEqual([...fixture.sections]);
 }
