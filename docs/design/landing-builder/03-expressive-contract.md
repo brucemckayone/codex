@@ -457,3 +457,43 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   `--lp-atmosphere-veil: section | panel`. `panel` draws the veil only behind the section's content,
   with the Style's card radius, and leaves the shader at full strength around it — nothing readable
   sits outside the panel, so the contrast proof is unchanged. Default `section`.
+- **X10 · 2026-09-27 · E1 · Panel geometry and its limits.** The card is the `.lp-inner` content
+  column grown by `clamp(--space-4, 2.5cqi, --space-10)`, over the section's content box, with
+  `--lp-radius-card`, painted with the SAME veil and moved tokens (drawn on `.lp-surface::after`). The
+  section's own veil is cleared only by the selector that draws the card (a test pins both
+  occurrences). A section with a direct `.lp-bleed` child, or with a background image, keeps the
+  full SECTION veil — its words may reach the edges. **Rule for every block:** an element that moves
+  WORDS into the bleed tracks is marked `.lp-bleed`. The fallback (no shader, canvas, thumbnails)
+  draws the card over the glow, so the canvas shows the live composition. Verified geometrically
+  (every text line box and control inside the card, ±0.5px) for Bold's four hero layouts and the CTA
+  band at 1440 and 390; other Styles and blocks verify their own.
+- **X11 · 2026-09-27 · orchestrator · A page with its own colours uses the glow, not the org's
+  shader.** `ShaderHero` reads the ORG's brand, so under a page's own primary or secondary colour the
+  org's moving background would clash with the page. The owner's rule is that a page conforms to the
+  brand "aslong as thats not over ridden", so when a page overrides a colour, `atmosphere` draws the
+  glow (which follows the page's colours) and `data-lp-atmosphere` is not set.
+- **X12 · 2026-09-27 · E2 · Motion mechanics.** (a) On an `svg`, `data-lp-draw` is a clip wipe from the
+  top, timed on `view(block 50%)`: a dash draw cannot work with `vector-effect: non-scaling-stroke`
+  (Chromium 141 and WebKit 26 measure `pathLength` in user units but apply dashes in screen pixels — a
+  400px line drew 50% at "full"); `data-lp-draw="stroke"` opts a SCALING stroke into the dash draw.
+  (b) The gates are `@media screen and (prefers-reduced-motion: no-preference)` → `@supports
+  (animation-timeline: view())` → `:root[data-theme] .lp:not([data-lp-still])`; `screen` so print shows
+  the final state. (c) `track` is `scale` from the start edge plus a fade — animating
+  `letter-spacing` re-wraps a balanced heading every frame (CLS). (d) Parallax "at most `--space-10`"
+  is the distance from rest. (e) Count-up skips a figure already on screen at hydration; its real text
+  stays in the DOM (painted transparent) under an `aria-hidden` counting copy. (f) Style hooks:
+  `--lp-build-display | -heading | -title: rise | wipe | track`, `--lp-media-reveal: rise | fade | wipe
+  | scale`, `--lp-media-parallax: 1 | 2`, `--lp-text-readalong: on`, `--lp-stat-count: none` (count-up
+  is on by default), marks `--lp-mark-underline | -circle | -scribble | -arrow` with `--lp-mark-draw`
+  / `--lp-mark-range`, and `--lp-route-draw` for Path's page line. Never two motion attributes on one
+  element (they share `animation`).
+- **X13 · 2026-09-28 · orchestrator · Entrances are triggered, not scrubbed.** An entrance tied to
+  scroll position (`entry 0% entry clamp(25svh, 100%, 50svh)`) cannot finish for an element near the
+  end of a short page — it can never scroll that far into view — so it would stay part-faded (on a short
+  page, the call to action's own heading). Reveals, heading builds and marks therefore run once, on a
+  time-based animation, when one shared `IntersectionObserver` sees them clear the floating CTA bar;
+  they are armed only for elements below the fold at hydration, so without JS, under reduced motion,
+  or still, the final state renders. Scrubbed motion (parallax, the route draw, read-along) stays CSS
+  scroll-driven: at the page end it leaves only harmless partial states (an offset, a partly drawn
+  decorative line, text at `--lp-ink-soft`, which still passes 4.5:1). Amends §6's "No scroll-linked
+  motion is driven from JavaScript": a one-shot trigger is not scroll-linked.

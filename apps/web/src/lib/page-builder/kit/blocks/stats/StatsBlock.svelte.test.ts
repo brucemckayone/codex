@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JourneyStageView } from '$lib/page-builder';
 import {
   flushSync,
@@ -29,6 +29,7 @@ async function render(
     headingLevel?: 1 | 2;
     context?: JourneySalesContext;
     edit?: BlockEdit | null;
+    target?: HTMLElement;
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -42,7 +43,7 @@ async function render(
     headingLevel: options.headingLevel ?? 2,
   };
   app = mount(StatsBlock, {
-    target: document.body,
+    target: options.target ?? document.body,
     props: {
       props,
       section,
@@ -180,5 +181,79 @@ describe('StatsBlock', () => {
     expect(document.body.querySelector('h2')?.getAttribute('aria-label')).toBe(
       'Numbers — Heading'
     );
+  });
+});
+
+describe('StatsBlock counting up', () => {
+  /** An observer that reports every figure below the viewport as it wakes. */
+  class BelowTheFold {
+    constructor(readonly callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      const entry = {
+        isIntersecting: false,
+        target,
+      } as IntersectionObserverEntry;
+      this.callback([entry], this as unknown as IntersectionObserver);
+    }
+    disconnect() {}
+  }
+
+  const reduced = (matches: boolean) =>
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches, media: query }));
+  const values = () => [
+    ...document.body.querySelectorAll<HTMLElement>('.stat__value'),
+  ];
+  const own = [
+    { value: '4,000+', label: 'students taught' },
+    { value: '24/7', label: 'support' },
+  ];
+
+  beforeEach(() => {
+    vi.stubGlobal('IntersectionObserver', BelowTheFold);
+    reduced(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('marks only a figure that is one amount', async () => {
+    await render({ items: own });
+    expect(
+      values().map((value) => value.hasAttribute('data-lp-count'))
+    ).toEqual([true, false]);
+  });
+
+  it('waits at zero below the fold, keeping the final value for a screen reader', async () => {
+    await render({ items: own });
+    const [counted, still] = values();
+    expect(counted.querySelector('.lp-count')?.textContent).toBe('0+');
+    expect(counted.firstChild?.textContent).toBe('4,000+');
+    expect(still.querySelector('.lp-count')).toBeNull();
+  });
+
+  it('never counts under reduced motion', async () => {
+    reduced(true);
+    await render({ live: true, items: own });
+    expect(
+      document.body.querySelector('.lp-count, [data-lp-counting]')
+    ).toBeNull();
+    expect(figures()).toEqual([
+      '6 stages',
+      '24 practices',
+      '4,000+ students taught',
+      '24/7 support',
+    ]);
+  });
+
+  it('never counts on a still page (the canvas, thumbnails)', async () => {
+    const page = document.createElement('div');
+    page.setAttribute('data-lp-still', '');
+    document.body.appendChild(page);
+    await render({ items: own }, { target: page, edit: { commit: () => {} } });
+    expect(
+      document.body.querySelector('.lp-count, [data-lp-counting]')
+    ).toBeNull();
+    expect(values()[0].textContent).toBe('4,000+');
   });
 });

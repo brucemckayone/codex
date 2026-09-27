@@ -39,6 +39,7 @@
   import './styles/kit.css';
   import './styles/schemes.css';
   import './styles/surfaces.css';
+  import './styles/motion.css';
   import './styles/style-bold.css';
   import './styles/style-clean.css';
   import './styles/style-soft.css';

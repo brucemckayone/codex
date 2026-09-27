@@ -1,0 +1,562 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE KIT — MOTION (03-expressive-contract §6, §7)
+
+   Motion follows the story: a thing moves because of where the visitor is.
+   Everything here is scroll-driven (`animation-timeline: view()`), so it
+   needs no script and is simply absent where it is not wanted. Each rule sits
+   behind all of these at once, and each shows the FINAL state without them:
+   reduced motion, print, a still page (`.lp[data-lp-still]` — thumbnails,
+   galleries, the editing canvas), no JavaScript (`:root[data-theme]` is set
+   by app.html's first script), a browser without scroll-driven animations.
+
+   Every animation ends on the element's own look (a keyframe list with no
+   `to`, or a `to` equal to it). An entrance plays over its element's own
+   height as it comes in, but never less than a quarter of the viewport (a
+   one-line heading would otherwise build in the few pixels at the screen's
+   edge, unseen) nor more than half (a tall image is revealed while it is
+   looked at). So it is complete a quarter of the way up the screen at the
+   latest; the org page's CTA band and footer keep every moving element above
+   that line when the page can scroll no further. Only transform, opacity and
+   clip-path move, with two exceptions named where they are used.
+
+   ── THE ATTRIBUTES (a block places them; the values are the contract) ────
+     data-lp-reveal="rise|fade|wipe|scale"   enters as it scrolls into view
+     data-lp-build="rise|wipe|track"         a heading builds as ONE element
+                                             (Heading's `build` prop) — never
+                                             split into words or letters
+     data-lp-draw                            on an <svg>: its drawing is
+                                             uncovered down the page, the tip
+                                             on the middle of the viewport (a
+                                             route). On anything else, a mark
+                                             drawn as a mask: wiped in from its
+                                             start edge as it enters.
+     data-lp-draw="stroke"                   on an <svg> whose shapes carry
+                                             `pathLength="1"`: the stroke itself
+                                             draws. Never with `vector-effect:
+                                             non-scaling-stroke` — Chromium and
+                                             WebKit measure `pathLength` in user
+                                             units but dash in screen pixels, so
+                                             the dash cannot be normalised.
+     data-lp-parallax="1|2"                  media drifts against the scroll,
+                                             ±space-5 / ±space-10 over its whole
+                                             pass (at most --space-10 from where
+                                             it sits); the block gives it that
+                                             much overscan
+     data-lp-readalong                       brightens from --lp-ink-soft to
+                                             --lp-ink as it rises to the middle
+                                             of the viewport
+     data-lp-count                           a stats figure counts up once
+                                             (`kit/motion/count-up.ts`)
+
+   ── THE HOOKS (a Style sets them; the primitives answer, no markup) ──────
+   Set on the Style's root, a section or a block: each is read by a style
+   query on the element's PARENT, so anywhere above the element works (on the
+   element itself does not). Never in the hero, which has its one entrance;
+   never inside something a block already moves with an attribute.
+     --lp-build-display: rise|wipe|track     Heading, by its `size`
+     --lp-build-heading: rise|wipe|track
+     --lp-build-title:   rise|wipe|track
+     --lp-media-reveal: rise|fade|wipe|scale Media (not a background plate)
+     --lp-media-parallax: 1|2                the image drifts inside its frame
+     --lp-text-readalong: on                 ink-toned Text, each paragraph on
+                                             its own (the text block's words)
+     --lp-stat-count: none                   the numbers stay still
+   Browsers without custom-property style queries run none of them — the same
+   browsers that lack scroll-driven animations.
+
+   ── THE MARKS (hand-drawn, for a Style to place; masks, so no colour) ────
+     --lp-mark-underline   under a heading (stretches to any width)
+     --lp-mark-circle      round a number (stretches to any box)
+     --lp-mark-scribble    a frame round an image (stretches to any box)
+     --lp-mark-arrow       pointing up and right (keep its 3 / 2 shape)
+   The pen keeps one width however far a mark stretches. A Style draws one
+   with a pseudo-element, coloured by the section, drawn in as its HOST
+   enters (its own box is too thin to time anything by):
+     .host { position: relative; view-timeline: --lp-mark block; }
+     .host::after {
+       content: '';
+       position: absolute;                 (placement: the Style's; a heading
+       inset-inline-start: -0.08em;         is as wide as its column, so an
+       inset-block-end: -0.3em;             underline takes a length of its
+       inline-size: min(100%, 5.5em);       own)
+       block-size: 0.34em;
+       background: var(--lp-accent);
+       mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
+       animation: var(--lp-mark-draw, none);
+       animation-timeline: --lp-mark;
+       animation-range: var(--lp-mark-range, normal);
+     }
+   `--lp-mark-draw` exists only behind the gates, so without them the mark is
+   simply there. Media clips what it holds (`overflow: hidden`): frame an
+   image from its wrapper, or inset the mark inside the frame.
+   A route down the page (Path) is the same idea on a tall pseudo-element,
+   uncovered as the middle of the viewport passes down its own box:
+       animation: var(--lp-route-draw, none);
+       animation-timeline: view(block 50%);
+       animation-range: cover 0% cover 100%;
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the marks ───────────────────────────────────────────────────────────── */
+.lp {
+  --lp-mark-underline: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 20' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M3 12C46 6 98 8 138 7S185 5 197 8'/%3E%3Cpath vector-effect='non-scaling-stroke' d='M20 16C68 11 126 12 180 11'/%3E%3C/svg%3E");
+  --lp-mark-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 120' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M116 10C62 6 14 28 9 61C4 96 56 113 104 111C158 109 195 88 191 55C187 22 141 5 84 15'/%3E%3C/svg%3E");
+  --lp-mark-scribble: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M4 9C62 5 138 4 196 7M191 3C195 68 196 132 193 197M197 192C138 195 62 196 3 193M8 198C4 132 3 68 6 2'/%3E%3C/svg%3E");
+  --lp-mark-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80' fill='none' stroke='currentColor' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 66C26 32 60 18 104 25M88 10L105 25L89 41'/%3E%3C/svg%3E");
+}
+
+/* ── counting (`kit/motion/count-up.ts`; the script holds the gates) ──────── */
+/* The figure's own text stays, painted clear; the copy over it runs the
+   number in the figure's own colour and face. Printed, it is itself. */
+[data-lp-counting] {
+  position: relative;
+  -webkit-text-fill-color: transparent;
+}
+
+.lp-count {
+  position: absolute;
+  inset: 0;
+  -webkit-text-fill-color: currentcolor;
+  pointer-events: none;
+}
+
+@media print {
+  [data-lp-counting] {
+    -webkit-text-fill-color: currentcolor;
+  }
+
+  .lp-count {
+    display: none;
+  }
+}
+
+/* ── keyframes ───────────────────────────────────────────────────────────── */
+/* The individual transform properties, never `transform`: a Style that tilts
+   a photo (`rotate`) keeps its tilt through any of these. */
+@keyframes lp-reveal-rise {
+  from {
+    opacity: 0;
+    translate: 0 var(--space-8);
+  }
+}
+
+@keyframes lp-reveal-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes lp-reveal-scale {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+
+@keyframes lp-build-rise {
+  from {
+    opacity: 0;
+    translate: 0 0.35em;
+  }
+}
+
+/* Tracking that closes up, done with `scale` along the line: animating
+   `letter-spacing` would re-wrap a balanced heading on every frame and move
+   everything under it. */
+@keyframes lp-build-track {
+  from {
+    opacity: 0;
+    scale: 1.08 1;
+  }
+}
+
+/* Uncovered from the start edge. The clip stands a little outside the box
+   (glyphs overhang a tight line box; strokes have caps), so the last frame
+   cuts nothing. */
+@keyframes lp-wipe {
+  from {
+    clip-path: inset(-0.5em calc(100% + 0.25em) -0.5em -0.25em);
+  }
+  to {
+    clip-path: inset(-0.5em -0.25em);
+  }
+}
+
+@keyframes lp-wipe-down {
+  from {
+    clip-path: inset(-0.5em -0.5em calc(100% + 0.5em));
+  }
+  to {
+    clip-path: inset(-0.5em);
+  }
+}
+
+/* A paint property, not a compositor one: the one stroke that uses it is a
+   thin line, and the dash is the only way a curve that doubles back can
+   draw along itself. */
+@keyframes lp-draw-stroke {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes lp-parallax {
+  from {
+    translate: 0 calc(-1 * var(--_lp-drift));
+  }
+  to {
+    translate: 0 var(--_lp-drift);
+  }
+}
+
+/* The other paint property: colour, on a paragraph. Both ends are the
+   section's own proven inks (ink 17:1, soft ink 7:1 against its ground), so
+   every frame between them clears 4.5:1 — which an opacity fade could not
+   promise over an image or the shader. */
+@keyframes lp-readalong {
+  from {
+    color: var(--lp-ink-soft);
+  }
+  to {
+    color: var(--lp-ink);
+  }
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    :root[data-theme] .lp:not([data-lp-still]) {
+      /* How an entrance is timed: eased, holding its first frame until the
+         element arrives and its last once it has. */
+      --_lp-enter: var(--ease-out) both;
+      --_lp-enter-range: entry 0% entry clamp(25svh, 100%, 50svh);
+      /* A mark draws once its host has begun to arrive, and finishes just
+         after it: the words first, then the hand that marks them. */
+      --lp-mark-draw: lp-wipe var(--_lp-enter);
+      --lp-mark-range: entry 10svh entry clamp(30svh, 100%, 50svh);
+      --lp-route-draw: lp-wipe-down linear both;
+    }
+
+    /* ── entrances: reveal, build, a masked mark ─────────────────────────── */
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-reveal='rise'] {
+      animation: lp-reveal-rise var(--_lp-enter);
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-reveal='fade'] {
+      animation: lp-reveal-fade var(--_lp-enter);
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-reveal='wipe'],
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-build='wipe'],
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-draw]:not(svg) {
+      animation: lp-wipe var(--_lp-enter);
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-reveal='scale'] {
+      animation: lp-reveal-scale var(--_lp-enter);
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-build='rise'] {
+      animation: lp-build-rise var(--_lp-enter);
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-build='track'] {
+      transform-origin: 0 50%;
+      animation: lp-build-track var(--_lp-enter);
+    }
+
+    /* After the shorthands, which reset these. */
+    :root[data-theme]
+      .lp:not([data-lp-still])
+      :is([data-lp-reveal], [data-lp-build], [data-lp-draw]:not(svg)) {
+      animation-timeline: view();
+      animation-range: var(--_lp-enter-range);
+    }
+
+    /* ── a route: uncovered as the middle of the viewport passes down it ──── */
+    /* `view(block 50%)` narrows the viewport to its middle line, so progress
+       is the share of the drawing above that line: the tip stays on it. Exact
+       for any drawing that only ever runs downward, as a route does. */
+    :root[data-theme] .lp:not([data-lp-still]) svg[data-lp-draw]:not([data-lp-draw='stroke']) {
+      animation: lp-wipe-down linear both;
+      animation-timeline: view(block 50%);
+      animation-range: cover 0% cover 100%;
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) svg[data-lp-draw='stroke'] {
+      view-timeline: --lp-stroke block;
+      view-timeline-inset: 50%;
+    }
+
+    /* The gap is twice the path, so no second dash can start inside it. */
+    :root[data-theme]
+      .lp:not([data-lp-still])
+      svg[data-lp-draw='stroke']
+      :is(path, line, polyline, polygon, circle, ellipse, rect) {
+      stroke-dasharray: 1 2;
+      animation: lp-draw-stroke linear both;
+      animation-timeline: --lp-stroke;
+      animation-range: cover 0% cover 100%;
+    }
+
+    /* ── parallax: against the scroll, over the element's whole pass ──────── */
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-parallax] {
+      --_lp-drift: var(--space-5);
+      animation: lp-parallax linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
+    }
+
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-parallax='2'] {
+      --_lp-drift: var(--space-10);
+    }
+
+    /* ── read-along: full ink by the time it reaches the middle ───────────── */
+    :root[data-theme] .lp:not([data-lp-still]) [data-lp-readalong] {
+      animation: lp-readalong linear both;
+      animation-timeline: view();
+      animation-range: entry 100% cover 50%;
+    }
+
+    /* ── the hooks ───────────────────────────────────────────────────────── */
+    /* Headings, by size. A heading a block builds itself keeps its own. */
+    @container style(--lp-build-display: rise) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='display']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-build-rise var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-display: wipe) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='display']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-wipe var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-display: track) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='display']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        transform-origin: 0 50%;
+        animation: lp-build-track var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-heading: rise) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='heading']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-build-rise var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-heading: wipe) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='heading']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-wipe var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-heading: track) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='heading']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        transform-origin: 0 50%;
+        animation: lp-build-track var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-title: rise) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='title']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-build-rise var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-title: wipe) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='title']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        animation: lp-wipe var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-build-title: track) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-heading[data-size='title']:not(
+          [data-lp-build],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+        ) {
+        transform-origin: 0 50%;
+        animation: lp-build-track var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    /* Media. A background plate (on-media) sits under words whose contrast
+       assumes it is there, so it never fades. */
+    @container style(--lp-media-reveal: rise) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(
+          [data-lp-reveal],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax], [data-lp-on-media]) *
+        ) {
+        animation: lp-reveal-rise var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-media-reveal: fade) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(
+          [data-lp-reveal],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax], [data-lp-on-media]) *
+        ) {
+        animation: lp-reveal-fade var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-media-reveal: wipe) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(
+          [data-lp-reveal],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax], [data-lp-on-media]) *
+        ) {
+        animation: lp-wipe var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    @container style(--lp-media-reveal: scale) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(
+          [data-lp-reveal],
+          :is([data-lp-reveal], [data-lp-build], [data-lp-parallax], [data-lp-on-media]) *
+        ) {
+        animation: lp-reveal-scale var(--_lp-enter);
+        animation-timeline: view();
+        animation-range: var(--_lp-enter-range);
+      }
+    }
+
+    /* The image drifts inside its frame, which is grown by the drift at both
+       ends so no edge ever shows. The frame clips (`overflow: hidden`, so it
+       is a scroll container), so the image follows the FRAME's pass through
+       the viewport, not its own pass through the frame. Media a block already
+       drifts, or a background plate, is left alone. */
+    @container style(--lp-media-parallax: 1) or style(--lp-media-parallax: 2) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *) {
+        view-timeline: --lp-frame block;
+      }
+
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *)
+        > img {
+        --_lp-drift: var(--space-5);
+        inset-block-start: calc(-1 * var(--_lp-drift));
+        block-size: calc(100% + 2 * var(--_lp-drift));
+        animation: lp-parallax linear both;
+        animation-timeline: --lp-frame;
+        animation-range: cover 0% cover 100%;
+      }
+    }
+
+    @container style(--lp-media-parallax: 2) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *)
+        > img {
+        --_lp-drift: var(--space-10);
+      }
+    }
+
+    /* Text in the section's full ink: it starts one step quieter and reaches
+       its own ink. Supporting text (soft ink) is already where it ends. */
+    @container style(--lp-text-readalong: on) {
+      :root[data-theme]
+        .lp:not([data-lp-still])
+        .lp-section:not([data-lp-type='hero'])
+        .lp-text[data-tone='ink']:not(:is([data-lp-reveal], [data-lp-build]) *)
+        > p {
+        animation: lp-readalong linear both;
+        animation-timeline: view();
+        animation-range: entry 100% cover 50%;
+      }
+    }
+  }
+}
