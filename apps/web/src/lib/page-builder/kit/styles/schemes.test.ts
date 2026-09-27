@@ -973,3 +973,47 @@ describe('textures and shapes — behind the words', () => {
     ).toBeGreaterThan(0);
   });
 });
+
+// ── 7. the atmosphere panel (03 X9) ─────────────────────────────────────────
+/*
+ * `panel` moves the veil, it never removes it: the section is cleared only by
+ * the selector that draws the card, and the card IS the proven veil — so the
+ * §5 proof covers every word inside it. Where the words sit is a layout
+ * question, checked in the browser (every hero layout and the CTA band).
+ */
+describe('atmosphere panel — the veil moved, never removed', () => {
+  const start = SURFACES.indexOf(
+    '@container lp-page style(--lp-atmosphere-veil: panel)'
+  );
+  const PANEL = SURFACES.slice(
+    start,
+    SURFACES.indexOf('@container lp-page style(--lp-texture: grain)')
+  );
+  const SECTION =
+    ".lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))";
+
+  it('draws the card in the veil itself', () => {
+    expect(start).toBeGreaterThan(0);
+    const draw = PANEL.slice(
+      PANEL.indexOf(`${SECTION} > .lp-surface::after {`)
+    );
+    expect(draw.slice(0, draw.indexOf('}'))).toContain(
+      'background: var(--_atmos-veil);'
+    );
+  });
+
+  it('clears a section only where it draws the card, under the live veil gate', () => {
+    // The section condition appears twice: the card, and the clear.
+    expect(PANEL.split(SECTION).length - 1).toBe(2);
+    const gate = PANEL.indexOf('@supports (color: rgb(from red r g b / 0.5))');
+    expect(gate).toBeGreaterThan(0);
+    const clear = PANEL.slice(gate);
+    expect(clear).toContain(`${SECTION} { background: transparent; }`);
+    // Nothing outside the panel query clears an atmosphere section's veil.
+    const elsewhere =
+      SURFACES.slice(0, start) + SURFACES.slice(start + PANEL.length);
+    expect(elsewhere).not.toMatch(
+      /\.lp-section\[data-lp-scheme='atmosphere'\][^{]*\{ background: transparent/
+    );
+  });
+});
