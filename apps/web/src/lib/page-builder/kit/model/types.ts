@@ -109,6 +109,9 @@ export interface BlockField {
   itemFields?: readonly BlockField[];
   maxItems?: number;
   mediaSlot?: JourneySellMediaSlot;
+  /** `image` only: the image is decorative unless the creator describes it —
+   *  the alt-text prompt becomes an opt-in (hero, cta background; contract A5). */
+  decorative?: boolean;
   /** Layout ids this field applies to. Absent = every layout. The inspector
    *  hides a field whose layout doesn't use it; the block never force-hides
    *  content the creator filled (layouts arrange, they don't censor). */
