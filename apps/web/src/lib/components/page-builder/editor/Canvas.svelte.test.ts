@@ -3,7 +3,7 @@
  * edit seam's two guarantees — a focused field is never re-rendered from the
  * store, and blurring it leaves exactly the nodes the store describes.
  */
-import { tick } from 'svelte';
+import { type ComponentProps, tick } from 'svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type KitPage, sampleContext, samplePage } from '$lib/page-builder/kit';
 import {
@@ -32,7 +32,12 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-async function render(overrides: { device?: Device } = {}) {
+async function render(
+  overrides: {
+    device?: Device;
+    notices?: ComponentProps<typeof Canvas>['notices'];
+  } = {}
+) {
   const state = $state({
     page: samplePage('bold') as KitPage,
     selectedId: null as string | null,
@@ -165,5 +170,56 @@ describe('Canvas', () => {
     });
     heading?.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('pins each notice above the page with its action, dismissible only when it says so', async () => {
+    const reload = vi.fn();
+    const retry = vi.fn();
+    const dismiss = vi.fn();
+    await render({
+      notices: [
+        {
+          id: 'stale',
+          message: 'This page was saved in another tab.',
+          action: { label: 'Reload', run: reload },
+        },
+        {
+          id: 'context',
+          message: 'Some course details did not load.',
+          action: { label: 'Retry', run: retry },
+          onDismiss: dismiss,
+        },
+      ],
+    });
+    const shown = [
+      ...document.querySelectorAll<HTMLElement>('.canvas__notice'),
+    ];
+    expect(shown.map((notice) => notice.dataset.notice)).toEqual([
+      'stale',
+      'context',
+    ]);
+    // Above the page, never scrolled away with it.
+    expect(shown[0].closest('.canvas__scroller')).toBeNull();
+    expect(shown[0].getAttribute('role')).toBe('alert');
+    expect(shown[0].textContent).toContain(
+      'This page was saved in another tab.'
+    );
+
+    shown[0]
+      .querySelector<HTMLButtonElement>('.canvas__notice-action')
+      ?.click();
+    expect(reload).toHaveBeenCalledOnce();
+    expect(shown[0].querySelector('.canvas__notice-dismiss')).toBeNull();
+
+    shown[1]
+      .querySelector<HTMLButtonElement>('.canvas__notice-dismiss')
+      ?.click();
+    expect(dismiss).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('has no notice area when there is nothing to say', async () => {
+    await render();
+    expect(document.querySelector('.canvas__notices')).toBeNull();
   });
 });

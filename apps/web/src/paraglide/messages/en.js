@@ -14151,6 +14151,14 @@ export const studio_page_editor_preview_live_note = () => `The preview shows the
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_preview_blocked = () => `Your browser blocked the preview tab. Allow pop-ups for this site, then try Preview again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_need_slug = () => `Give the page a web address in Settings first.`
 
 
@@ -14296,6 +14304,30 @@ export const studio_page_editor_stale_banner = () => `This page was saved in ano
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_stale_reload = () => `Reload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_closed_unsaved = () => `The editor closed before your change was saved. Open the page again to check it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_context_failed = () => `Some of this page’s course details couldn’t be loaded, so the preview may be missing parts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_context_retry = () => `Retry`
 
 
 /**

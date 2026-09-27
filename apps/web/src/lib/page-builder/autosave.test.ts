@@ -236,12 +236,16 @@ describe('createAutosave — flush', () => {
     await expect(flushed).resolves.toEqual({ ok: true });
   });
 
-  it('resolves ok:true with no-op when called after dispose', async () => {
+  it('after dispose, saves nothing and says so rather than reporting success', async () => {
     const deps = makeDeps();
     const autosave = createAutosave(deps);
     autosave.dispose();
 
-    await expect(autosave.flush()).resolves.toEqual({ ok: true });
+    await expect(autosave.flush()).resolves.toEqual({
+      ok: false,
+      message:
+        'The editor closed before your change was saved. Open the page again to check it.',
+    });
     expect(deps.save).not.toHaveBeenCalled();
   });
 });
@@ -277,6 +281,41 @@ describe('createAutosave — dispose', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(save).toHaveBeenCalledTimes(1); // the queued follow-up never ran
+  });
+});
+
+describe('createAutosave — cancel', () => {
+  it('drops a scheduled save and stops showing it as pending', async () => {
+    const deps = makeDeps();
+    const autosave = createAutosave(deps);
+
+    autosave.notifyChange();
+    expect(autosave.status).toBe('pending');
+    autosave.cancel();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(deps.save).not.toHaveBeenCalled();
+    expect(autosave.status).toBe('idle');
+  });
+
+  it('drops the follow-up queued behind a running save, which still lands', async () => {
+    const deferred = createDeferred<AutosaveSaveResult>();
+    const save = vi
+      .fn<() => Promise<AutosaveSaveResult>>()
+      .mockReturnValue(deferred.promise);
+    const autosave = createAutosave(makeDeps({ save }));
+
+    autosave.notifyChange();
+    await vi.advanceTimersByTimeAsync(100);
+    autosave.notifyChange(); // queues a follow-up
+    autosave.cancel();
+    deferred.resolve({ ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(save).toHaveBeenCalledTimes(1);
+    // A cancelled controller is not a disposed one: the save it had sent
+    // still reports its outcome.
+    expect(autosave.status).toBe('saved');
   });
 });
 

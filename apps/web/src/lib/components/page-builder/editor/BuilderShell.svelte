@@ -36,7 +36,7 @@
   import { themeState } from '$lib/theme.svelte';
   import * as m from '$paraglide/messages';
   import type { BuilderSession } from './builder-session.svelte';
-  import Canvas from './Canvas.svelte';
+  import Canvas, { type CanvasNotice } from './Canvas.svelte';
   import EmptyPage from './EmptyPage.svelte';
   import {
     type Device,
@@ -113,14 +113,41 @@
   const inspectorShown = $derived(
     tab === 'page' && (placement === 'docked' ? inspectorOpen : drawerOpen)
   );
+  // A stale tab (another tab saved this page) must not put its older copy
+  // live, so Publish and Publish changes are off until it reloads.
   const primary = $derived(
     primaryAction({
       status: session.status,
       hasUnpublishedChanges: session.hasUnpublishedChanges,
       busy: session.busy,
-      ready: true,
+      ready: !session.stale,
     })
   );
+  const notices = $derived.by<CanvasNotice[]>(() => {
+    const shown: CanvasNotice[] = [];
+    if (session.stale) {
+      shown.push({
+        id: 'stale',
+        message: m.studio_page_editor_stale_banner(),
+        action: {
+          label: m.studio_page_editor_stale_reload(),
+          run: () => session.reloadTab(),
+        },
+      });
+    }
+    if (session.contextError) {
+      shown.push({
+        id: 'context',
+        message: m.studio_page_editor_context_failed(),
+        action: {
+          label: m.studio_page_editor_context_retry(),
+          run: () => session.retryContext(),
+        },
+        onDismiss: () => session.dismissContextError(),
+      });
+    }
+    return shown;
+  });
   const counts = $derived(
     sections.reduce<Partial<Record<SectionTypeId, number>>>((all, s) => {
       if (isSectionTypeId(s.type)) all[s.type] = (all[s.type] ?? 0) + 1;
@@ -283,7 +310,7 @@
     saveError={session.saveError}
     {primary}
     busy={session.busy}
-    canUnpublish={session.status === 'published'}
+    canUnpublish={session.status === 'published' && !session.stale}
     onTitle={(title) => pageBuilder.updateMeta('title', title)}
     onDevice={(next) => (device = next)}
     onUndo={() => pageBuilder.undo()}
@@ -402,6 +429,7 @@
           onCommit={commit}
           onInsert={openPicker}
           onAction={onCanvasAction}
+          {notices}
         >
           {#snippet empty()}
             <EmptyPage

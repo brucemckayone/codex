@@ -214,7 +214,35 @@ function mediaEcho(heroMediaId: string | null) {
   };
 }
 
+/**
+ * An in-memory `BroadcastChannel`, delivering synchronously to every OTHER
+ * open channel of the same name — never back to the sender, as the real one.
+ */
+class FakeChannel {
+  static open: FakeChannel[] = [];
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  constructor(readonly name: string) {
+    FakeChannel.open.push(this);
+  }
+  postMessage(data: unknown): void {
+    for (const other of FakeChannel.open) {
+      if (other !== this && other.name === this.name)
+        other.onmessage?.({ data });
+    }
+  }
+  close(): void {
+    FakeChannel.open = FakeChannel.open.filter((channel) => channel !== this);
+  }
+}
+
+/** A second editor tab on the same page, as the session's channel sees it. */
+function otherTab(): FakeChannel {
+  return new FakeChannel(`codex:page-builder:${PAGE_ID}`);
+}
+
 beforeEach(() => {
+  vi.stubGlobal('BroadcastChannel', FakeChannel);
+  FakeChannel.open = [];
   draft = new FakeQuery<JourneyPageRecord>();
   remotes.getJourneyForBuilder.mockImplementation(() => draft);
   remotes.saveJourneyPage.mockReset().mockResolvedValue(undefined);
@@ -243,6 +271,7 @@ afterEach(() => {
   stop = null;
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('load', () => {
@@ -615,6 +644,31 @@ describe('publish', () => {
     expect(remotes.saveJourneyPage.mock.calls[0][0].status).toBe('draft');
     expect(session.status).toBe('draft');
   });
+
+  it('claims no publish when the editor closes before the status is saved', async () => {
+    vi.useFakeTimers();
+    const first = deferred();
+    remotes.saveJourneyPage.mockImplementationOnce(() => first.promise);
+    const session = start();
+    editHeading('In flight with the draft status');
+    vi.advanceTimersByTime(1500);
+    await settle();
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+
+    const publishing = session.publish();
+    // The creator leaves before the in-flight save comes back.
+    stop?.();
+    stop = null;
+    first.resolve();
+    const result = await publishing;
+    await settle();
+
+    expect(result.ok).toBe(false);
+    expect(toasts.success).not.toHaveBeenCalled();
+    // Nothing ever sent the new status.
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+    expect(remotes.saveJourneyPage.mock.calls[0][0].status).toBe('draft');
+  });
 });
 
 describe('the status is never an undo step', () => {
@@ -662,6 +716,333 @@ describe('the status is never an undo step', () => {
   });
 });
 
+/**
+ * An action the creator started says when it fails, every time. The autosave
+ * toast is deduped (one per distinct failure), and routed through it, an
+ * action that failed the same way as the last autosave said nothing at all.
+ */
+describe('an action the creator started reports its own failure', () => {
+  const IN_USE = 'The slug "bone-deep" is already in use';
+
+  it('Publish says why it failed, even when the last autosave failed the same way', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValue({ body: { message: IN_USE } });
+    const session = start();
+    editHeading('Will not save');
+    vi.advanceTimersByTime(1500);
+    await settle();
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+
+    expect((await session.publish()).ok).toBe(false);
+
+    expect(toasts.error).toHaveBeenCalledTimes(2);
+    expect(toasts.error.mock.calls[1][1]).toBe(IN_USE);
+    expect(session.status).toBe('draft');
+  });
+
+  it('Publish changes and Unpublish say so on every failed attempt', async () => {
+    remotes.saveJourneyPage.mockRejectedValue(new Error('offline'));
+    const session = start(record({ status: 'published' }));
+    editHeading('A live edit');
+
+    await session.publishChanges();
+    await session.publishChanges();
+    expect(toasts.error).toHaveBeenCalledTimes(2);
+
+    expect(await session.unpublish()).toBe(false);
+    expect(toasts.error).toHaveBeenCalledTimes(3);
+    expect(toasts.error.mock.calls.map((call) => call[1])).toEqual([
+      'offline',
+      'offline',
+      'offline',
+    ]);
+  });
+
+  it('leaving says why the save failed, and stays on the page', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValue({ body: { message: IN_USE } });
+    start();
+    editHeading('Will not save');
+    vi.advanceTimersByTime(1500);
+    await settle();
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+
+    const cancel = vi.fn();
+    nav.guards[0]({
+      willUnload: false,
+      to: { url: new URL('http://studio-alpha.lvh.me:3000/studio/journeys') },
+      cancel,
+    });
+    await settle();
+
+    expect(cancel).toHaveBeenCalled();
+    expect(nav.goto).not.toHaveBeenCalled();
+    expect(toasts.error).toHaveBeenCalledTimes(2);
+    expect(toasts.error.mock.calls[1][1]).toBe(IN_USE);
+  });
+
+  it('a background repeat of a failure already reported does not toast again', async () => {
+    vi.useFakeTimers();
+    remotes.saveJourneyPage.mockRejectedValue(new Error('offline'));
+    const session = start();
+    expect((await session.publish()).ok).toBe(false);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+
+    editHeading('Still offline');
+    vi.advanceTimersByTime(1500);
+    await settle();
+
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(2);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Two editor tabs on one page. A save sends the WHOLE page, so the tab that
+ * saves last silently wins — unless the other one knows its copy is stale.
+ */
+describe('another tab on the same page', () => {
+  /** The other tab announces that it saved this page. */
+  function savedElsewhere(): void {
+    otherTab().postMessage({ tab: 'the-other-tab' });
+    flushSync();
+  }
+
+  it('hears about each save this tab makes, and this tab stays editable', async () => {
+    const heard = vi.fn();
+    otherTab().onmessage = heard;
+    const session = start(record({ status: 'published' }));
+    editHeading('A better promise');
+    expect((await session.publishChanges()).ok).toBe(true);
+
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(heard.mock.calls[0][0].data).toEqual({ tab: expect.any(String) });
+    expect(session.stale).toBe(false);
+  });
+
+  it('once another tab has saved, this one stops saving and cannot publish', async () => {
+    vi.useFakeTimers();
+    const session = start();
+    editHeading('Typed in this tab');
+    savedElsewhere();
+
+    expect(session.stale).toBe(true);
+    // The scheduled save is gone, and so is its "Saving…".
+    expect(session.saveStatus).toBe('idle');
+    vi.advanceTimersByTime(5000);
+    await settle();
+    editHeading('Typed after the other tab saved');
+    vi.advanceTimersByTime(5000);
+    await settle();
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+
+    // Nor can it put its older copy live.
+    expect((await session.publish()).ok).toBe(false);
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+    expect(session.status).toBe('draft');
+  });
+
+  it('a stale live page can neither publish its changes nor unpublish', async () => {
+    const session = start(record({ status: 'published' }));
+    editHeading('Not published yet');
+    savedElsewhere();
+
+    expect((await session.publishChanges()).ok).toBe(false);
+    expect(await session.unpublish()).toBe(false);
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+    expect(session.status).toBe('published');
+  });
+
+  it('a stale draft leaves without saving first', async () => {
+    start();
+    editHeading('Cannot be saved now');
+    savedElsewhere();
+    const cancel = vi.fn();
+    nav.guards[0]({
+      willUnload: false,
+      to: { url: new URL('http://studio-alpha.lvh.me:3000/studio/journeys') },
+      cancel,
+    });
+    await settle();
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+  });
+
+  it('its Reload leaves without the browser’s leave prompt', () => {
+    const session = start();
+    editHeading('Cannot be saved now');
+    savedElsewhere();
+
+    // jsdom prints "Not implemented: navigation" instead of reloading.
+    session.reloadTab();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+
+    expect(unload.defaultPrevented).toBe(false);
+  });
+});
+
+/**
+ * The four reads the canvas is drawn from besides the page. Each falls back
+ * to its empty shape, so a FAILED read used to render as content that is
+ * missing — no stages, no price, images on their plates — with nothing to
+ * say it was only unread.
+ */
+describe('the course reads the canvas is drawn from', () => {
+  const coursePage = () =>
+    record({ subjectType: 'course', subjectId: 'course-1' });
+
+  function answered<T>(current: T): FakeQuery<T> {
+    const query = new FakeQuery<T>();
+    query.current = current;
+    query.loading = false;
+    return query;
+  }
+
+  function failed(): FakeQuery<unknown> {
+    const query = new FakeQuery<unknown>();
+    query.loading = false;
+    query.error = { status: 503, body: { message: 'Worker down' } };
+    return query;
+  }
+
+  it('a failed read says so, and Retry reads again only what failed', () => {
+    const curriculum = answered({ stages: [] });
+    const preview = failed();
+    remotes.getCourseCurriculum.mockReturnValue(curriculum);
+    remotes.getCoursePagePreview.mockReturnValue(preview);
+    const session = start(coursePage());
+
+    expect(session.contextError).toBe(true);
+    session.retryContext();
+    expect(preview.refresh).toHaveBeenCalledOnce();
+    expect(curriculum.refresh).not.toHaveBeenCalled();
+  });
+
+  it('says nothing while a read is loading, even when it is a retry of a failure', () => {
+    const offer = new FakeQuery<unknown>();
+    remotes.getCourseOffer.mockReturnValue(offer);
+    const session = start(coursePage());
+    expect(session.contextError).toBe(false);
+
+    // A retry in flight: loading again, the last failure still on it.
+    offer.error = { status: 500, body: { message: 'Worker down' } };
+    offer.loading = true;
+    flushSync();
+    expect(session.contextError).toBe(false);
+
+    offer.loading = false;
+    flushSync();
+    expect(session.contextError).toBe(true);
+  });
+
+  it('put away, it stays away until a read fails again', () => {
+    const offer = failed();
+    remotes.getCourseOffer.mockReturnValue(offer);
+    const session = start(coursePage());
+    expect(session.contextError).toBe(true);
+
+    session.dismissContextError();
+    flushSync();
+    expect(session.contextError).toBe(false);
+
+    offer.error = { status: 503, body: { message: 'Worker down again' } };
+    flushSync();
+    expect(session.contextError).toBe(true);
+  });
+});
+
+/**
+ * Preview opens its tab INSIDE the click. Opened after the save's round trip,
+ * the click's activation can have lapsed and the browser blocks the popup —
+ * so the click appeared to do nothing.
+ */
+describe('preview', () => {
+  function fakeTab() {
+    return {
+      opener: {} as unknown,
+      location: { href: '' },
+      close: vi.fn(),
+    };
+  }
+
+  function openReturns(tab: ReturnType<typeof fakeTab> | null) {
+    return vi
+      .spyOn(window, 'open')
+      .mockReturnValue(tab as unknown as Window | null);
+  }
+
+  it('opens the tab before the save, and sends it to the page once the save lands', async () => {
+    const first = deferred();
+    remotes.saveJourneyPage.mockImplementationOnce(() => first.promise);
+    const tab = fakeTab();
+    const open = openReturns(tab);
+    const session = start();
+    editHeading('Show me this');
+
+    const previewing = session.preview();
+    // Still inside the click: the save has not come back.
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('');
+    first.resolve();
+    await previewing;
+
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('/journeys/bone-deep?preview=1');
+    expect(tab.opener).toBeNull();
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+
+  it('closes the tab and says why when the save fails', async () => {
+    remotes.saveJourneyPage.mockRejectedValue({
+      body: { message: 'The slug "bone-deep" is already in use' },
+    });
+    const tab = fakeTab();
+    openReturns(tab);
+    const session = start();
+    editHeading('Will not save');
+
+    await session.preview();
+
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(tab.location.href).toBe('');
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Couldn’t save your changes',
+      'The slug "bone-deep" is already in use'
+    );
+  });
+
+  it('says so when the browser blocks the tab', async () => {
+    openReturns(null);
+    const session = start();
+    editHeading('Show me this');
+
+    await session.preview();
+
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Your browser blocked the preview tab. Allow pop-ups for this site, then try Preview again.'
+    );
+    // Nothing to save FOR: the tab it would have filled does not exist.
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+  });
+
+  it('a live page opens straight away, and says the preview shows what is live', async () => {
+    const tab = fakeTab();
+    openReturns(tab);
+    const session = start(record({ status: 'published' }));
+    editHeading('Not published yet');
+
+    await session.preview();
+
+    expect(tab.location.href).toBe('/journeys/bone-deep?preview=1');
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+    expect(toasts.info).toHaveBeenCalledWith(
+      'The preview shows the live page. Publish your changes to see them there.'
+    );
+  });
+});
+
 describe('guards', () => {
   it('blocks an unload while anything is unsaved', () => {
     start();
@@ -681,7 +1062,7 @@ describe('guards', () => {
     const to = new URL('http://studio-alpha.lvh.me:3000/studio/journeys');
     nav.guards[0]({ willUnload: false, to: { url: to }, cancel });
     expect(cancel).toHaveBeenCalled();
-    await settle();
+    await drain();
     expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
     expect(nav.goto).toHaveBeenCalledWith(to);
   });

@@ -10,9 +10,24 @@
   sections' measured boxes, so the page underneath is the public markup plus
   the kit's editing attributes and nothing else (contract §6).
 -->
+<script module lang="ts">
+  /**
+   * A message pinned above the page, with the one action that resolves it —
+   * for what the page itself cannot show, like a save that can no longer
+   * happen, or course details that did not load.
+   */
+  export interface CanvasNotice {
+    id: string;
+    message: string;
+    action: { label: string; run: () => void };
+    /** Present when the creator may put the notice away. */
+    onDismiss?: () => void;
+  }
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { PlusIcon } from '$lib/components/ui/Icon';
+  import { AlertTriangleIcon, PlusIcon, XIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
     type KitPage,
@@ -43,6 +58,8 @@
     onAction: (action: SectionAction, id: string) => void;
     /** Shown in place of the page when no section is visible. */
     empty?: Snippet;
+    /** Pinned above the page, in order, until each is resolved or put away. */
+    notices?: CanvasNotice[];
   }
 
   const {
@@ -57,6 +74,7 @@
     onInsert,
     onAction,
     empty,
+    notices = [],
   }: Props = $props();
 
   interface Box {
@@ -209,6 +227,30 @@
 </script>
 
 <div class="canvas" role="region" aria-label={m.studio_page_editor_canvas_label()}>
+  {#if notices.length > 0}
+    <div class="canvas__notices">
+      {#each notices as notice (notice.id)}
+        <div class="canvas__notice" role="alert" data-notice={notice.id}>
+          <AlertTriangleIcon size={16} />
+          <p class="canvas__notice-text">{notice.message}</p>
+          <button type="button" class="canvas__notice-action" onclick={notice.action.run}>
+            {notice.action.label}
+          </button>
+          {#if notice.onDismiss}
+            <button
+              type="button"
+              class="canvas__notice-dismiss"
+              aria-label={m.studio_page_editor_dismiss()}
+              title={m.studio_page_editor_dismiss()}
+              onclick={notice.onDismiss}
+            >
+              <XIcon size={16} />
+            </button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
   <div class="canvas__scroller" bind:this={scroller}>
     <div
       class="canvas__frame"
@@ -297,13 +339,81 @@
 <style>
   .canvas {
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     min-block-size: 0;
     block-size: 100%;
     isolation: isolate;
     background: var(--color-background);
   }
 
+  /* The warning ramp the studio panels give a read failure: nothing here is
+     beyond fixing, and the notice's one action says what fixes it. */
+  .canvas__notices {
+    grid-row: 1;
+    display: grid;
+  }
+
+  .canvas__notice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-block-end: var(--border-width) var(--border-style) var(--color-warning-200);
+    background-color: var(--color-warning-50);
+    color: var(--color-warning-700);
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
+  }
+
+  .canvas__notice :global(svg) {
+    flex: none;
+  }
+
+  .canvas__notice-text {
+    flex: 1;
+    min-inline-size: 0;
+    margin: 0;
+  }
+
+  .canvas__notice-action,
+  .canvas__notice-dismiss {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-block-size: var(--space-7);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+  }
+
+  .canvas__notice-action {
+    padding: 0 var(--space-2);
+    border: var(--border-width) var(--border-style) currentColor;
+  }
+
+  .canvas__notice-dismiss {
+    min-inline-size: var(--space-7);
+    padding: 0;
+    border: 0;
+  }
+
+  .canvas__notice-action:hover,
+  .canvas__notice-dismiss:hover {
+    background: color-mix(in oklab, currentColor 10%, transparent);
+  }
+
+  .canvas__notice-action:focus-visible,
+  .canvas__notice-dismiss:focus-visible {
+    outline: var(--border-width-thick) solid currentColor;
+    outline-offset: var(--focus-offset);
+  }
+
   .canvas__scroller {
+    grid-row: 2;
     min-block-size: 0;
     overflow: auto;
     overscroll-behavior: contain;

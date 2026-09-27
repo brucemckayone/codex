@@ -32,6 +32,7 @@
  */
 
 import { browser } from '$app/environment';
+import * as m from '$paraglide/messages';
 
 export type AutosaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 
@@ -73,6 +74,8 @@ export interface AutosaveController {
   /**
    * Save immediately, bypassing the debounce (Publish / Preview). Rides an
    * already-running autosave instead of starting a second, concurrent one.
+   * After {@link dispose} it saves nothing and says so (`ok: false`): the
+   * caller would otherwise report a save that never happened.
    */
   flush(): Promise<AutosaveSaveResult>;
   /** Re-attempt after an error. No-op while a save is already in flight. */
@@ -184,7 +187,12 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
   }
 
   function flush(): Promise<AutosaveSaveResult> {
-    if (disposed) return Promise.resolve({ ok: true });
+    if (disposed) {
+      return Promise.resolve({
+        ok: false,
+        message: m.studio_page_editor_closed_unsaved(),
+      });
+    }
     clearDebounce();
     // Ride the chain already running — it already covers any follow-up
     // queued behind it — rather than starting a competing save.

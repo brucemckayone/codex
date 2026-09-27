@@ -94,6 +94,16 @@ export interface BuilderSession {
   readonly stale: boolean;
   /** Reload the browser tab — the way out of {@link stale}. */
   reloadTab(): void;
+  /**
+   * A read the canvas is drawn from — curriculum, course details, sell
+   * preview, price — failed, so the page shown may be missing parts. False
+   * while a read is still loading, and once the creator puts the notice away.
+   */
+  readonly contextError: boolean;
+  /** Read each failed read again. */
+  retryContext(): void;
+  /** Put the notice away, until a read fails again. */
+  dismissContextError(): void;
   retrySave(): void;
   publish(): Promise<PublishResult>;
   publishChanges(): Promise<PublishResult>;
@@ -167,6 +177,37 @@ export function createBuilderSession(options: {
   const offer = $derived(
     offerQuery?.current ? { ...offerQuery.current, entitled: false } : null
   );
+
+  // Each read above falls back to its EMPTY shape, which is right while it
+  // loads and wrong once it has failed: a rejected read renders as "no
+  // stages", "no price", every image on its plate — content that exists,
+  // shown as missing. So a failure says so on the canvas instead, and Retry
+  // re-reads only what failed.
+  const failedReads = $derived(
+    [curriculumQuery, coursePageQuery, sellPreviewQuery, offerQuery].flatMap(
+      (query) =>
+        query && !query.loading && queryErrorMessage(query.error) !== null
+          ? [query]
+          : []
+    )
+  );
+  /** The failures the creator put away. A NEW failure raises the notice again. */
+  let dismissedErrors = $state.raw<unknown[]>([]);
+  const contextError = $derived(
+    failedReads.some((query) => !dismissedErrors.includes(query.error))
+  );
+
+  function retryContext(): void {
+    for (const query of failedReads) {
+      // The outcome arrives through the query itself; this promise only
+      // rejects with the same failure.
+      void query.refresh().catch(() => {});
+    }
+  }
+
+  function dismissContextError(): void {
+    dismissedErrors = failedReads.map((query) => query.error);
+  }
 
   const draftError = $derived(queryErrorMessage(draftQuery?.error));
   const draftMissing = $derived(
@@ -461,20 +502,45 @@ export function createBuilderSession(options: {
     });
   });
 
-  // One toast per distinct failure; a success in between re-arms it. A stale
-  // tab's banner already says why nothing saves.
+  // A BACKGROUND autosave toasts once per distinct failure; a success in
+  // between re-arms it. An action the creator started reports its own failure
+  // (see `flushForAction`), and a stale tab's banner already says why nothing
+  // saves.
   let toastedError: string | null = null;
+  let acting = 0;
   $effect(() => {
     const now = autosave.status;
     const message = autosave.errorMessage;
     untrack(() => {
       if (now === 'saved') toastedError = null;
       if (now !== 'error' || !message || message === toastedError) return;
-      if (stale) return;
+      if (stale || acting > 0) return;
       toastedError = message;
       toast.error(m.studio_page_editor_toast_save_failed(), message);
     });
   });
+
+  /**
+   * Save for something the creator just asked for — Publish, Publish changes,
+   * Unpublish, Preview, leaving. The caller reports a failure with
+   * {@link reportFailure}, EVERY time: left to the deduped toast above, an
+   * action failing the same way as the last autosave would say nothing, and
+   * the click would look like it did nothing.
+   */
+  async function flushForAction(): Promise<AutosaveSaveResult> {
+    acting += 1;
+    try {
+      return await autosave.flush();
+    } finally {
+      acting -= 1;
+    }
+  }
+
+  function reportFailure(message: string | undefined): void {
+    // The creator has now seen it: a background repeat need not toast again.
+    toastedError = message ?? null;
+    toast.error(m.studio_page_editor_toast_save_failed(), message);
+  }
 
   // ── Status transitions ───────────────────────────────────────────────────
   /**
@@ -489,14 +555,18 @@ export function createBuilderSession(options: {
     try {
       // Never an undo step: undo walks back edits, not whether the page is live.
       pageBuilder.updateMeta('status', next, { record: false });
-      let result = await autosave.flush();
+      let result = await flushForAction();
       if (result.ok && persistedStatus !== next) {
-        result = await autosave.flush();
+        result = await flushForAction();
       }
       if (!result.ok && persistedStatus !== next) {
         pageBuilder.updateMeta('status', previous, { record: false });
       }
-      return result.ok;
+      // A flush can resolve without having sent the status (the editor closed
+      // under it), so only what the server holds counts as done.
+      const landed = result.ok && persistedStatus === next;
+      if (!landed) reportFailure(result.message);
+      return landed;
     } finally {
       busy = null;
     }
@@ -534,9 +604,12 @@ export function createBuilderSession(options: {
     if (blocked) return blocked;
     busy = 'publishing';
     try {
-      const result = await autosave.flush();
-      if (result.ok)
+      const result = await flushForAction();
+      if (result.ok) {
         toast.success(m.studio_page_editor_toast_changes_published());
+      } else {
+        reportFailure(result.message);
+      }
       return { ok: result.ok };
     } finally {
       busy = null;
@@ -554,23 +627,46 @@ export function createBuilderSession(options: {
    * Open the public page. A draft is saved first so the preview shows it; a
    * LIVE page is never flushed from here — that would publish — so the
    * creator is told the preview shows what is live.
+   *
+   * The tab opens IN the click, before any save. A browser blocks a tab
+   * opened after an await once the click's activation has lapsed, and a save
+   * of four legs can outlast it. So the tab opens blank and is sent to the
+   * page once the save lands — or closed, with the reason, if it fails.
    */
   async function preview(): Promise<void> {
     // A stale tab's copy is never saved first: the preview shows the newer
     // copy the other tab saved.
-    if (isDirty && !isPublished && !stale) {
-      const result = await autosave.flush();
-      if (!result.ok) return;
+    const saveFirst = isDirty && !isPublished && !stale;
+    if (!saveFirst && !pageBuilder.saved?.slug) {
+      toast.error(m.studio_page_editor_need_slug());
+      return;
+    }
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      toast.error(m.studio_page_editor_preview_blocked());
+      return;
+    }
+    if (saveFirst) {
+      const result = await flushForAction();
+      if (!result.ok) {
+        tab.close();
+        reportFailure(result.message);
+        return;
+      }
     }
     const slug = pageBuilder.saved?.slug;
     if (!slug) {
+      tab.close();
       toast.error(m.studio_page_editor_need_slug());
       return;
     }
     if (isPublished && isDirty) {
       toast.info(m.studio_page_editor_preview_live_note());
     }
-    window.open(`/journeys/${slug}?preview=1`, '_blank', 'noopener');
+    tab.location.href = `/journeys/${slug}?preview=1`;
+    // What 'noopener' did for the old one-step open: the public page gets no
+    // handle back into the editor.
+    tab.opener = null;
   }
 
   // ── Sections with course-aware starter copy ──────────────────────────────
@@ -616,8 +712,11 @@ export function createBuilderSession(options: {
     navigation.cancel();
     const target = navigation.to?.url;
     if (!target) return;
-    void autosave.flush().then((result) => {
-      if (!result.ok) return;
+    void flushForAction().then((result) => {
+      if (!result.ok) {
+        reportFailure(result.message);
+        return;
+      }
       leaving = true;
       void goto(target);
     });
@@ -679,6 +778,11 @@ export function createBuilderSession(options: {
       return stale;
     },
     reloadTab,
+    get contextError() {
+      return contextError;
+    },
+    retryContext,
+    dismissContextError,
     get busy() {
       return busy;
     },
