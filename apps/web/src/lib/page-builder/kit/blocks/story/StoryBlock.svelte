@@ -1,39 +1,50 @@
 <!--
   @component StoryBlock
 
-  The journey told in moments (03-expressive-contract §3, §7). Every layout
-  currently renders the INLINE sequence — each moment's picture beside its
-  words — which is also the contract's no-JS / narrow / reduced-motion form of
-  `scroll` (the sticky, changing picture) and the base `chapters` and `strip`
-  build on. E3 designs the three layouts on top of it.
+  The journey told in moments (03-expressive-contract §3, §7). The moments are
+  a real sequence, so every layout is an ordered list. Three layouts, each its
+  own component in this folder:
+    scroll   — words beside pictures; wide and in motion, a sticky frame shows
+               the picture of the moment being read (StoryScroll)
+    chapters — each moment a full-width scene behind a uniform scrim
+               (StoryChapters)
+    strip    — the moments as cards in a row that scrolls sideways
+               (StoryStrip)
 
-  The moments are a real sequence, so they are an ordered list.
+  The block spans the section's full width with the page's own columns, so a
+  layout may run a row to the edges while its words keep to the content
+  column.
 -->
 <script lang="ts">
   import { resolvePageImageUrl } from '../../../page-images';
-  import { paragraphs } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
-  import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import { STORY_EMPTY, storyDefinition } from './definition';
+  import StoryChapters from './StoryChapters.svelte';
+  import StoryScroll from './StoryScroll.svelte';
+  import StoryStrip from './StoryStrip.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
 
   const content = $derived(storyDefinition.coerce(props));
   const steps = $derived(content.steps ?? []);
+  const layout = $derived(
+    section.layout === 'chapters' || section.layout === 'strip' ? section.layout : 'scroll'
+  );
+  // A full-width scene draws its picture at the large size (03 §10).
   const images = $derived(
-    steps.map((step) => resolvePageImageUrl(step.image, 'md', context.mediaBaseUrl))
+    steps.map((step) =>
+      resolvePageImageUrl(step.image, layout === 'chapters' ? 'lg' : 'md', context.mediaBaseUrl)
+    )
   );
   // A moment's heading sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.
-  const stepLevel = $derived(
-    content.heading ? (section.headingLevel === 1 ? 2 : 3) : section.headingLevel
-  );
+  const level = $derived(content.heading ? (section.headingLevel === 1 ? 2 : 3) : section.headingLevel);
 </script>
 
-<div class="story" data-layout={section.layout}>
+<div class="story lp-bleed" data-layout={layout}>
   {#if content.eyebrow || content.heading || content.body}
     <header class="story__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="story" {edit} />{/if}
@@ -52,33 +63,31 @@
     </header>
   {/if}
 
-  {#if steps.length > 0}
-    <ol class="story__steps">
-      {#each steps as step, index (index)}
-        <li class="story__step" data-pictured={images[index] ? '' : undefined}>
-          {#if images[index]}
-            <div class="story__media">
-              <Media image={images[index]} alt={step.image?.alt ?? ''} ratio="4 / 3" />
-            </div>
-          {/if}
-          <div class="story__words">
-            <Heading level={stepLevel} size="title" text={step.heading} type="story" />
-            {#each paragraphs(step.body) as part, p (p)}
-              <p class="story__body">{part}</p>
-            {/each}
-          </div>
-        </li>
-      {/each}
-    </ol>
-  {:else if edit}
-    <p class="story__empty" data-lp-edit-only>{STORY_EMPTY}</p>
+  {#if steps.length === 0}
+    {#if edit}<p class="story__empty" data-lp-edit-only>{STORY_EMPTY}</p>{/if}
+  {:else if layout === 'chapters'}
+    <StoryChapters {steps} {images} {level} />
+  {:else if layout === 'strip'}
+    <StoryStrip {steps} {images} {level} label={content.heading} anchor={section.anchor} />
+  {:else}
+    <StoryScroll {steps} {images} {level} />
   {/if}
 </div>
 
 <style>
   .story {
     display: grid;
-    gap: var(--lp-gap);
+    grid-template-columns: inherit;
+    row-gap: var(--lp-gap);
+  }
+
+  .story > :global(*) {
+    grid-column: content;
+    min-inline-size: 0;
+  }
+
+  .story > :global(:is(.story-chapters, .story-strip)) {
+    grid-column: bleed;
   }
 
   .story__head {
@@ -87,34 +96,9 @@
     max-inline-size: var(--lp-measure);
   }
 
-  .story__steps {
-    display: grid;
-    gap: var(--space-12);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  /* base.css spaces every `li` but the last. */
-  .story__step {
-    display: grid;
-    gap: var(--space-5);
-    margin: 0;
-  }
-
-  .story__words {
-    display: grid;
-    align-content: start;
-    gap: var(--space-3);
-    max-inline-size: var(--lp-measure);
-  }
-
-  .story__body {
-    margin: 0;
-    color: var(--lp-ink-soft);
-    font-size: var(--lp-size-body);
-    line-height: var(--lp-leading-body);
-    text-wrap: pretty;
+  /* The heading measures itself in its own `ch`, not the body face's. */
+  .story__head :global(.lp-heading) {
+    max-inline-size: 20ch;
   }
 
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
@@ -127,15 +111,5 @@
     color: var(--lp-ink-soft);
     font-size: var(--lp-size-small);
     text-align: center;
-  }
-
-  /* Wide: the picture and its words side by side, the words level with the
-     top of the picture. */
-  @container (min-width: 48rem) {
-    .story__step[data-pictured] {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      align-items: start;
-      column-gap: var(--lp-gap);
-    }
   }
 </style>

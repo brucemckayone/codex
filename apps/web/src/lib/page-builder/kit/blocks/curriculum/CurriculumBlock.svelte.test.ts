@@ -155,6 +155,78 @@ describe('CurriculumBlock', () => {
     expect(text()).not.toContain('0 practices');
   });
 
+  it('map: each stop is a native disclosure — number, name and count, the first open', async () => {
+    await render(SAMPLE, { layout: 'map' });
+    const stops = [...document.body.querySelectorAll('details')];
+    expect(stops).toHaveLength(STAGES.length);
+    // Opens and closes with no script at all: no buttons, no ARIA state.
+    expect(toggles()).toHaveLength(0);
+    stops.forEach((stop, index) => {
+      const summary = stop.querySelector(':scope > summary');
+      expect(summary?.textContent).toContain(`Stage ${index + 1}`);
+      expect(summary?.querySelector('h3')?.textContent).toBe(
+        STAGES[index].name
+      );
+      expect(summary?.textContent).toContain(
+        CURRICULUM_COPY.practices(STAGES[index].practices.length)
+      );
+      expect(stop.open).toBe(index === 0);
+      // Closed stops keep their practices in the page (find-in-page opens them).
+      expect(stop.textContent).toContain(STAGES[index].practices[0].title);
+    });
+  });
+
+  it('map: a stage with nothing inside is a plain stop; the first that holds anything opens', async () => {
+    const stages = [
+      { ...STAGES[0], gloss: null, practices: [] },
+      { ...STAGES[1], practices: [] },
+      STAGES[2],
+    ];
+    await render(SAMPLE, { layout: 'map', context: withStages(stages) });
+    const stops = [...document.body.querySelectorAll('.map__stop')];
+    expect(stops.map((s) => s.tagName)).toEqual(['DIV', 'DETAILS', 'DETAILS']);
+    expect(stops[0].textContent).toContain(STAGES[0].name);
+    expect(text()).not.toContain('0 practices');
+    // The second holds only its line: it opens, and shows no count.
+    expect((stops[1] as HTMLDetailsElement).open).toBe(true);
+    expect(stops[1].textContent).toContain(STAGES[1].gloss ?? '');
+    expect(stops[1].querySelector('.map__count')).toBeNull();
+    expect((stops[2] as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it('map: the route is decoration, joining each stop to the next and ready to draw', async () => {
+    const eight = Array.from({ length: 8 }, (_, i) => ({
+      ...STAGES[i % STAGES.length],
+      id: `stage-${i}`,
+      sortOrder: i,
+    }));
+    await render(SAMPLE, { layout: 'map', context: withStages(eight) });
+    expect(document.body.querySelectorAll('.map__stage')).toHaveLength(8);
+    const route = [...document.body.querySelectorAll('.map__line, .map__bend')];
+    // A line and a bend under every stop but the last.
+    expect(route).toHaveLength(7 * 2);
+    for (const piece of route) {
+      expect(piece.getAttribute('aria-hidden')).toBe('true');
+      expect(piece.hasAttribute('data-lp-draw')).toBe(true);
+    }
+    unmount(app);
+    await render(SAMPLE, { layout: 'map', context: withStages([STAGES[0]]) });
+    expect(
+      document.body.querySelectorAll('.map__line, .map__bend')
+    ).toHaveLength(0);
+    expect(document.body.querySelector('details')?.open).toBe(true);
+  });
+
+  it('map: a long stage name stays whole', async () => {
+    const name =
+      'An unhurried week of learning to breathe slowly before anything else happens';
+    await render(SAMPLE, {
+      layout: 'map',
+      context: withStages([{ ...STAGES[0], name }]),
+    });
+    expect(document.body.querySelector('summary h3')?.textContent).toBe(name);
+  });
+
   it.each(
     SECTION_LAYOUTS.curriculum
   )('%s: with no stages yet the public page keeps only the words', async (layout) => {

@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -10,6 +10,7 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { featuredScheme } from '../../model/resolve';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { TRANSFORMATION_COPY } from './copy';
 import { TRANSFORMATION_EMPTY, transformationDefinition } from './definition';
 import TransformationBlock from './TransformationBlock.svelte';
 
@@ -30,6 +31,7 @@ async function render(
     headingLevel?: 1 | 2;
     offer?: SampleOfferState;
     edit?: BlockEdit | null;
+    target?: HTMLElement;
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -43,7 +45,7 @@ async function render(
     headingLevel: options.headingLevel ?? 2,
   };
   app = mount(TransformationBlock, {
-    target: document.body,
+    target: options.target ?? document.body,
     props: {
       props,
       section,
@@ -227,5 +229,198 @@ describe('TransformationBlock', () => {
     expect(starter.before?.length).toBe(starter.after?.length);
     expect(starter.before?.length).toBeGreaterThanOrEqual(2);
     expect(starter.before?.length).toBeLessThanOrEqual(4);
+  });
+});
+
+/**
+ * An observer the test drives: `report()` tells every observed element where
+ * it is. (The shared jsdom stub never reports, so a toggle mounted without
+ * this stays the columns it starts as — the no-JS markup.)
+ */
+const observers: FakeObserver[] = [];
+
+class FakeObserver {
+  targets: Element[] = [];
+  constructor(readonly callback: IntersectionObserverCallback) {
+    observers.push(this);
+  }
+  observe(target: Element) {
+    this.targets.push(target);
+  }
+  unobserve() {}
+  disconnect() {
+    this.targets = [];
+  }
+  takeRecords() {
+    return [];
+  }
+}
+
+function report(isIntersecting: boolean, top: number) {
+  for (const observer of observers) {
+    const entries = observer.targets.map(
+      (target) =>
+        ({
+          target,
+          isIntersecting,
+          boundingClientRect: { top },
+        }) as unknown as IntersectionObserverEntry
+    );
+    if (entries.length > 0)
+      observer.callback(entries, observer as unknown as IntersectionObserver);
+  }
+  flushSync();
+}
+
+describe('TransformationBlock — toggle', () => {
+  beforeEach(() => {
+    observers.length = 0;
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const tabs = () => all('[role="tab"]') as HTMLButtonElement[];
+  const panelOf = (tab: Element) =>
+    document.getElementById(tab.getAttribute('aria-controls') ?? '');
+  const key = (el: Element, name: string) => {
+    el.dispatchEvent(
+      new KeyboardEvent('keydown', { key: name, bubbles: true })
+    );
+    flushSync();
+  };
+
+  it('before the script has placed it, reads both sides exactly like columns', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    expect(one('[role="tablist"]')).toBeNull();
+    expect(one('.tf-toggle .tf-cols')).not.toBeNull();
+    for (const side of ['before', 'after']) {
+      expect(one(`.tf-col[data-side="${side}"]`)?.hasAttribute('hidden')).toBe(
+        false
+      );
+    }
+    expect(text()).toContain(SAMPLE.before?.[0]);
+    expect(text()).toContain(SAMPLE.after?.[0]);
+  });
+
+  it('becomes two tabs while the section is still ahead of the visitor', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    report(false, 2000);
+    const list = one('[role="tablist"]');
+    expect(list?.getAttribute('aria-label')).toBe(TRANSFORMATION_COPY.switch);
+    const [before, after] = tabs();
+    expect(tabs().map((t) => t.textContent?.trim())).toEqual([
+      SAMPLE.beforeLabel,
+      SAMPLE.afterLabel,
+    ]);
+    expect(before.getAttribute('aria-selected')).toBe('true');
+    expect(after.getAttribute('aria-selected')).toBe('false');
+    for (const tab of [before, after]) {
+      const panel = panelOf(tab);
+      expect(panel?.getAttribute('role')).toBe('tabpanel');
+      expect(panel?.getAttribute('aria-labelledby')).toBe(tab.id);
+      expect(panel?.getAttribute('tabindex')).toBe('0');
+    }
+    expect(panelOf(before)?.hasAttribute('hidden')).toBe(false);
+    expect(panelOf(after)?.hasAttribute('hidden')).toBe(true);
+    // Every line is still in the page: the panel not shown keeps its place.
+    for (const line of [...(SAMPLE.before ?? []), ...(SAMPLE.after ?? [])]) {
+      expect(text()).toContain(line);
+    }
+    // The after side is the section's one filled panel, as in columns.
+    expect(panelOf(after)?.getAttribute('data-lp-scheme')).toBe(
+      featuredScheme('bold', 'contrast')
+    );
+  });
+
+  it('never re-lays out a section the visitor is looking at', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    report(true, 100);
+    expect(one('[role="tablist"]')).toBeNull();
+    // Scrolled past: still columns, it is above the visitor now.
+    report(false, -900);
+    expect(one('[role="tablist"]')).toBeNull();
+    // Back ahead of them: now it can change.
+    report(false, 1200);
+    expect(one('[role="tablist"]')).not.toBeNull();
+  });
+
+  it('a still preview shows the tabs at once', async () => {
+    const still = document.createElement('div');
+    still.className = 'lp';
+    still.setAttribute('data-lp-still', '');
+    document.body.appendChild(still);
+    await render(SAMPLE, { layout: 'toggle', target: still });
+    report(true, 0);
+    expect(tabs()).toHaveLength(2);
+  });
+
+  it('flips with a click, and only one panel is shown at a time', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    report(false, 2000);
+    const [before, after] = tabs();
+    after.click();
+    flushSync();
+    expect(after.getAttribute('aria-selected')).toBe('true');
+    expect(before.getAttribute('aria-selected')).toBe('false');
+    expect(panelOf(after)?.hasAttribute('hidden')).toBe(false);
+    expect(panelOf(before)?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('arrow keys, Home and End move the selection with the focus (roving tabindex)', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    report(false, 2000);
+    const [before, after] = tabs();
+    expect([before.tabIndex, after.tabIndex]).toEqual([0, -1]);
+    before.focus();
+    key(before, 'ArrowRight');
+    expect(document.activeElement).toBe(after);
+    expect(after.getAttribute('aria-selected')).toBe('true');
+    expect([before.tabIndex, after.tabIndex]).toEqual([-1, 0]);
+    key(after, 'ArrowRight');
+    expect(document.activeElement).toBe(before);
+    key(before, 'ArrowLeft');
+    expect(document.activeElement).toBe(after);
+    key(after, 'Home');
+    expect(document.activeElement).toBe(before);
+    expect(before.getAttribute('aria-selected')).toBe('true');
+    key(before, 'End');
+    expect(document.activeElement).toBe(after);
+    // Up and down stay the page's own (a horizontal tab list).
+    key(after, 'ArrowUp');
+    expect(document.activeElement).toBe(after);
+    expect(after.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('names an untitled side plainly', async () => {
+    await render(
+      { before: ['Rushed mornings'], after: ['A quiet start'] },
+      { layout: 'toggle' }
+    );
+    report(false, 2000);
+    expect(tabs().map((t) => t.textContent?.trim())).toEqual([
+      TRANSFORMATION_COPY.before,
+      TRANSFORMATION_COPY.after,
+    ]);
+  });
+
+  it('with one side written there is nothing to flip: it stays columns', async () => {
+    await render({ after: ['A quiet start'] }, { layout: 'toggle' });
+    report(false, 2000);
+    expect(one('[role="tablist"]')).toBeNull();
+    expect(text()).toContain('A quiet start');
+  });
+
+  it('a side with fewer lines still shows every line of its own', async () => {
+    await render(
+      { before: ['One', 'Two', 'Three'], after: ['Uno'] },
+      { layout: 'toggle' }
+    );
+    report(false, 2000);
+    expect(all('.tf-toggle__panel[data-side="before"] li')).toHaveLength(3);
+    expect(all('.tf-toggle__panel[data-side="after"] li')).toHaveLength(1);
+    expect(all('.tf-toggle__panel[data-side="after"] svg')).toHaveLength(1);
   });
 });

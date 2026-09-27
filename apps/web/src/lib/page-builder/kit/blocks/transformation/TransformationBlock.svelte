@@ -9,6 +9,8 @@
                 connector (ChangeSteps)
     statement — the before lines small and quiet, the after lines large and
                 bright, one beneath the other (ChangeStatement)
+    toggle    — a switch that flips one panel between the two sides; the
+                columns layout until the page's script runs (ChangeToggle)
 
   Lines pair by position. A line without a partner still shows (layouts
   arrange, they never censor); only its connector is left out.
@@ -24,6 +26,7 @@
   import ChangeColumns from './ChangeColumns.svelte';
   import ChangeStatement from './ChangeStatement.svelte';
   import ChangeSteps from './ChangeSteps.svelte';
+  import ChangeToggle from './ChangeToggle.svelte';
   import { TRANSFORMATION_EMPTY, transformationDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -63,6 +66,8 @@
     <ChangeSteps {lines} {labels} anchor={section.anchor} {edit} />
   {:else if layout === 'statement'}
     <ChangeStatement {lines} {labels} anchor={section.anchor} {edit} />
+  {:else if layout === 'toggle'}
+    <ChangeToggle {lines} {labels} anchor={section.anchor} {featured} {edit} />
   {:else}
     <ChangeColumns {lines} {labels} anchor={section.anchor} {featured} {edit} />
   {/if}
