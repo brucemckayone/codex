@@ -356,6 +356,30 @@ describe('Inspector — section', () => {
     ]);
   });
 
+  it("items: an entry's own fields follow the layout (a tile image only in grid)", () => {
+    render([
+      {
+        id: 'b',
+        type: 'benefits',
+        enabled: true,
+        variant: 'checklist',
+        props: { items: [{ title: 'One' }] },
+      },
+    ]);
+    click('.item__toggle');
+    const labels = () =>
+      [
+        ...document.querySelectorAll(
+          '.item__fields .field__label, .item__fields .image__label'
+        ),
+      ].map((label) => label.textContent?.trim());
+    expect(labels()).toEqual(['Item', 'One line about it']);
+
+    pageBuilder.setSectionLayout('b', 'grid');
+    flushSync();
+    expect(labels()).toContain('Image');
+  });
+
   it('renames the section for the outline, and clears back to its type', () => {
     render([{ id: 'f', type: 'faq', enabled: true, props: {} }]);
     const name = field('Name in the list');

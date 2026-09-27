@@ -23,7 +23,8 @@ async function render(
   props: Record<string, unknown>,
   layout: string,
   offer: SampleOfferState = 'buy',
-  edit: BlockEdit | null = null
+  edit: BlockEdit | null = null,
+  mediaBaseUrl: string | null = null
 ) {
   const section: ResolvedSection = {
     id: 'cta-1',
@@ -37,7 +38,12 @@ async function render(
   };
   app = mount(CtaBlock, {
     target: document.body,
-    props: { props, section, context: sampleContext({ offer }), edit },
+    props: {
+      props,
+      section,
+      context: sampleContext({ offer, mediaBaseUrl }),
+      edit,
+    },
   });
   flushSync();
   await tick();
@@ -106,5 +112,34 @@ describe('CtaBlock', () => {
     expect(document.body.querySelector('h2')?.getAttribute('aria-label')).toBe(
       'Call to action — Heading'
     );
+  });
+
+  describe('the band background image (contract A5)', () => {
+    const CDN = 'https://cdn.test';
+    const background = { key: 'landing-pages/p1/images/bg' };
+    const root = () => document.body.querySelector('.cta');
+
+    it('fills the band on the media ink set, decorative unless described', async () => {
+      await render({ heading: 'Join', background }, 'band', 'buy', null, CDN);
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe(`${CDN}/${background.key}/lg.webp`);
+      expect(img?.getAttribute('alt')).toBe('');
+      expect(root()?.hasAttribute('data-lp-on-media')).toBe(true);
+      expect(document.body.querySelector('.cta__atmos')).toBeNull();
+      expect(link(COPY.cta.buy)).toBeDefined();
+    });
+
+    it.each(['split', 'compact'])('%s ignores it', async (layout) => {
+      await render({ heading: 'Join', background }, layout, 'buy', null, CDN);
+      expect(document.body.querySelector('img')).toBeNull();
+      expect(root()?.hasAttribute('data-lp-on-media')).toBe(false);
+    });
+
+    it('without a CDN base, draws the band exactly as without an image', async () => {
+      await render({ heading: 'Join', background }, 'band');
+      expect(document.body.querySelector('img')).toBeNull();
+      expect(root()?.hasAttribute('data-lp-on-media')).toBe(false);
+      expect(document.body.querySelector('.cta__atmos')).not.toBeNull();
+    });
   });
 });

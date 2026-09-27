@@ -4,7 +4,8 @@
   One `BlockField`, drawn with the control it declares. Text is written as
   the creator types (blank = the key is removed, exactly as the canvas's
   inline edit commits), so the inspector and inline editing are two views of
-  one value: whichever is typed in, the other follows.
+  one value: whichever is typed in, the other follows. `mediaBaseUrl` is
+  only for `image` fields, which preview the stored image against it.
 -->
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
@@ -12,6 +13,7 @@
   import type { BlockField } from '$lib/page-builder/kit';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
+  import ImageField from './ImageField.svelte';
   import ItemsField from './ItemsField.svelte';
   import ListField from './ListField.svelte';
   import MediaField from './MediaField.svelte';
@@ -20,9 +22,10 @@
     field: BlockField;
     value: unknown;
     onChange: (value: unknown) => void;
+    mediaBaseUrl?: string | null;
   }
 
-  const { field, value, onChange }: Props = $props();
+  const { field, value, onChange, mediaBaseUrl = null }: Props = $props();
 
   const id = $props.id();
   const text = $derived(typeof value === 'string' ? value : '');
@@ -50,9 +53,17 @@
 {#if field.control === 'list'}
   <ListField {field} {value} {onChange} />
 {:else if field.control === 'items'}
-  <ItemsField {field} {value} {onChange} />
+  <ItemsField {field} {value} {onChange} {mediaBaseUrl} />
 {:else if field.control === 'media'}
   <MediaField {field} />
+{:else if field.control === 'image'}
+  <ImageField
+    {field}
+    {value}
+    {onChange}
+    {mediaBaseUrl}
+    decorative={field.decorative}
+  />
 {:else if field.control === 'toggle'}
   <div class="field field--toggle">
     <span class="field__label" id="{id}-label">{field.label}</span>

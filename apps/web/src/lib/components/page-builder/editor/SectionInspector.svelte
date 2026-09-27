@@ -81,7 +81,14 @@
     };
     return resolvedIn(unset)?.scheme ?? resolveScheme(section.type, undefined, style);
   });
-  const fields = $derived(fieldsForLayout(definition.fields, layout));
+  // Item fields follow the layout too: a benefits tile's image only shows in `grid`.
+  const fields = $derived(
+    fieldsForLayout(definition.fields, layout).map((field) =>
+      field.itemFields
+        ? { ...field, itemFields: fieldsForLayout(field.itemFields, layout) }
+        : field
+    )
+  );
 
   function writeProp(key: string, value: unknown): void {
     if (sameValue(section.props[key], value)) return;
@@ -191,6 +198,7 @@
             {field}
             value={section.props[field.key]}
             onChange={(next) => writeProp(field.key, next)}
+            mediaBaseUrl={context.mediaBaseUrl}
           />
         {/each}
       </div>

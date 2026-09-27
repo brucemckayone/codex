@@ -8,14 +8,17 @@
                 scrolls), the items as large ruled rows on the other
 
   A join button appears only when the creator gives it words (`ctaLabel` or
-  `note`).
+  `note`). A grid tile may carry the creator's image (contract A5); once one
+  does, every tile holds the same frame, so a mixed row still reads as a set.
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
+  import { resolvePageImageUrl } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
@@ -31,6 +34,12 @@
   const itemLevel = $derived(
     content.heading ? (section.headingLevel === 1 ? 2 : 3) : section.headingLevel
   );
+  const tileImages = $derived(
+    layout === 'grid'
+      ? items.map((item) => resolvePageImageUrl(item.image, 'md', context.mediaBaseUrl))
+      : []
+  );
+  const pictured = $derived(tileImages.some(Boolean));
 </script>
 
 {#snippet words()}
@@ -101,9 +110,12 @@
         {/each}
       </ul>
     {:else}
-      <ul class="benefits-grid" data-count={items.length}>
+      <ul class="benefits-grid" data-count={items.length} data-pictured={pictured ? '' : undefined}>
         {#each items as item, index (index)}
           <li>
+            {#if pictured}
+              <Media image={tileImages[index]} alt={item.image?.alt ?? ''} ratio="3 / 2" />
+            {/if}
             <Heading level={itemLevel} size="title" text={item.title} type="benefits" />
             {#if item.detail}<p class="benefits__detail">{item.detail}</p>{/if}
           </li>
@@ -181,6 +193,11 @@
 
   .benefits-grid[data-count='1'] {
     max-inline-size: var(--lp-measure);
+  }
+
+  /* The picture leads the tile; its name keeps the tile's own rhythm under it. */
+  .benefits-grid[data-pictured] :global(.lp-media) {
+    margin-block-end: var(--space-2);
   }
 
   @container (min-width: 36rem) {

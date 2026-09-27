@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
+  import { resolvePageImageUrl } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
   import type { BlockProps } from '../../model/types';
@@ -39,17 +40,25 @@
     clip: PreviewMedia | null;
   }
 
+  // The creator's own image (contract A5) replaces the course still — never
+  // the clip, which keeps playing wherever it did, over this as its poster.
+  const ownStill = $derived(
+    mode === 'none' ? null : resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl)
+  );
+  // Decorative unless described; only the creator's image can carry words.
+  const alt = $derived(ownStill ? (content.image?.alt ?? '') : '');
+
   // The uploaded hero still rides the AWAITED envelope, so it is in the
   // server-rendered HTML (the page's largest paint); the streamed preview can
   // only add a clip, or a media-item poster when nothing was uploaded.
   const syncStill = $derived(
-    mode === 'none' ? null : (context.course.heroImageUrl ?? null)
+    mode === 'none' ? null : (ownStill ?? context.course.heroImageUrl ?? null)
   );
 
   function pick(preview: SellPreview | null): HeroMedia {
     if (mode === 'none') return { still: null, clip: null };
     return {
-      still: preview?.heroImageUrl ?? syncStill,
+      still: ownStill ?? preview?.heroImageUrl ?? syncStill,
       clip: mode === 'image' ? null : (preview?.heroClip ?? null),
     };
   }
@@ -105,11 +114,11 @@
 
 {#snippet frame(media: HeroMedia, pending: boolean, ratio: string)}
   {#if media.clip}
-    <Media image={media.still} clip={media.clip} {ratio} {pending} priority alt="">
+    <Media image={media.still} clip={media.clip} {ratio} {pending} priority {alt}>
       {@render watchControl(media)}
     </Media>
   {:else}
-    <Media image={media.still} {ratio} {pending} priority alt="" />
+    <Media image={media.still} {ratio} {pending} priority {alt} />
   {/if}
 {/snippet}
 
@@ -118,14 +127,14 @@
     <div class="hero-cover__media hero__enter-m">
       {#await context.sellPreview}
         {#if syncStill}
-          <Media image={syncStill} priority alt="" />
+          <Media image={syncStill} priority {alt} />
         {:else}
           <span class="lp-atmos" aria-hidden="true"></span>
         {/if}
       {:then preview}
         {@const media = pick(preview)}
         {#if media.still || media.clip}
-          <Media image={media.still} clip={media.clip} priority alt="" />
+          <Media image={media.still} clip={media.clip} priority {alt} />
         {:else}
           <span class="lp-atmos" data-drift aria-hidden="true"></span>
         {/if}

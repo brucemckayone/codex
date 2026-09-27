@@ -1,3 +1,4 @@
+import { type ImageRef, isImageRef } from '../../../page-images';
 import {
   bodyField,
   ctaLabelField,
@@ -12,6 +13,8 @@ import type { BlockDefinition } from '../../model/types';
 export interface BenefitItem {
   title: string;
   detail?: string;
+  /** Atop the tile in `grid` (contract A5). */
+  image?: ImageRef;
 }
 
 export type BenefitsProps = {
@@ -66,6 +69,13 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
           label: 'One line about it',
           control: 'text',
           maxLength: 160,
+        },
+        {
+          key: 'image',
+          label: 'Image',
+          hint: 'Optional. Shown at the top of this item in the grid.',
+          control: 'image',
+          layouts: ['grid'],
         },
       ],
     },
@@ -129,7 +139,11 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
         (entry) => {
           const title = readText(entry, 'title', 80);
           return title
-            ? compact({ title, detail: readText(entry, 'detail', 160) })
+            ? compact({
+                title,
+                detail: readText(entry, 'detail', 160),
+                image: isImageRef(entry.image) ? entry.image : undefined,
+              })
             : null;
         },
         9

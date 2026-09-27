@@ -29,6 +29,7 @@ async function render(
     headingLevel?: 1 | 2;
     offer?: SampleOfferState;
     edit?: BlockEdit | null;
+    mediaBaseUrl?: string;
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -46,7 +47,10 @@ async function render(
     props: {
       props,
       section,
-      context: sampleContext({ offer: options.offer ?? 'buy' }),
+      context: sampleContext({
+        offer: options.offer ?? 'buy',
+        mediaBaseUrl: options.mediaBaseUrl,
+      }),
       edit: options.edit ?? null,
     },
   });
@@ -191,5 +195,62 @@ describe('BenefitsBlock', () => {
     expect(starter.items?.length).toBeGreaterThanOrEqual(2);
     expect(starter.items?.length).toBeLessThanOrEqual(4);
     expect(benefitsDefinition.coerce(starter)).toEqual(starter);
+  });
+
+  describe('tile images (contract A5)', () => {
+    const CDN = 'https://cdn.test';
+    const image = {
+      key: 'landing-pages/p1/images/b1',
+      alt: 'The printed journal',
+    };
+    const [first, second, ...rest] = SAMPLE.items ?? [];
+    const mixed = { ...SAMPLE, items: [{ ...first, image }, second, ...rest] };
+
+    it('grid: pictures a tile, and gives every other tile the same frame', async () => {
+      await render(mixed, { mediaBaseUrl: CDN });
+      const tiles = [...document.body.querySelectorAll('.benefits-grid li')];
+      expect(tiles).toHaveLength(mixed.items.length);
+      const img = tiles[0].querySelector('img');
+      expect(img?.getAttribute('src')).toBe(`${CDN}/${image.key}/md.webp`);
+      expect(img?.getAttribute('alt')).toBe(image.alt);
+      for (const tile of tiles.slice(1)) {
+        expect(tile.querySelector('.lp-media[data-empty]')).not.toBeNull();
+        expect(tile.querySelector('img')).toBeNull();
+      }
+    });
+
+    it.each([
+      'checklist',
+      'split',
+    ])('%s ignores tile images', async (layout) => {
+      await render(mixed, { layout, mediaBaseUrl: CDN });
+      expect(document.body.querySelector('.lp-media, img')).toBeNull();
+      expect(document.body.textContent).toContain(first.title);
+    });
+
+    it('grid without a CDN base draws the tiles exactly as without images', async () => {
+      await render(mixed);
+      expect(document.body.querySelector('.lp-media, img')).toBeNull();
+      expect(
+        document.body
+          .querySelector('.benefits-grid')
+          ?.hasAttribute('data-pictured')
+      ).toBe(false);
+    });
+
+    it('reads a tile image and drops a malformed one', () => {
+      const read = benefitsDefinition.coerce({
+        items: [
+          { title: 'A', image },
+          { title: 'B', image: { key: '' } },
+          { title: 'C', image: 'landing-pages/p1/images/x' },
+        ],
+      });
+      expect(read.items).toEqual([
+        { title: 'A', image },
+        { title: 'B' },
+        { title: 'C' },
+      ]);
+    });
   });
 });

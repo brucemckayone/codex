@@ -10,8 +10,13 @@
   Every state has its next step: the button (buy), "Continue" (enrolled) or the
   closed notice (no way in) — all decided by `ButtonRow`. The price line in
   `split` comes from the live offer, and is simply absent when there is none.
+
+  `band` may carry the creator's background image (contract A5): the whole
+  band sits on the media ink set, over a full-strength scrim, so every line is
+  legible wherever the Style aligns it.
 -->
 <script lang="ts">
+  import { resolvePageImageUrl } from '../../../page-images';
   import { priceWithCadence } from '../../model/copy';
   import { pricingView } from '../../model/offer';
   import { featuredScheme } from '../../model/resolve';
@@ -20,6 +25,7 @@
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import { ctaDefinition } from './definition';
 
@@ -30,6 +36,11 @@
   const layout = $derived(section.layout);
   const view = $derived(pricingView(context, {}));
   const panel = $derived(featuredScheme(page.style, section.scheme));
+  const backdrop = $derived(
+    layout === 'band'
+      ? resolvePageImageUrl(content.background, 'lg', context.mediaBaseUrl)
+      : null
+  );
 </script>
 
 {#snippet words(size: 'heading' | 'title')}
@@ -55,8 +66,14 @@
   {/if}
 {/snippet}
 
-<div class="cta" data-layout={layout}>
-  <span class="lp-atmos cta__atmos" data-drift aria-hidden="true"></span>
+<div class="cta" data-layout={layout} data-lp-on-media={backdrop ? '' : undefined}>
+  {#if backdrop}
+    <div class="cta__backdrop">
+      <Media image={backdrop} alt={content.background?.alt ?? ''} />
+    </div>
+  {:else}
+    <span class="lp-atmos cta__atmos" data-drift aria-hidden="true"></span>
+  {/if}
   {#if layout === 'split'}
     <div class="cta__words">{@render words('heading')}</div>
     <div class="cta__panel" data-lp-scheme={panel}>
@@ -114,6 +131,27 @@
   .cta[data-layout='band'] {
     --lp-size-heading: var(--lp-size-cta);
     padding-block: var(--space-4);
+  }
+
+  /* Placed against the SECTION like the glow, so it fills the band edge to
+     edge. The scrim is uniform: the copy may sit anywhere the Style puts it. */
+  .cta__backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    display: grid;
+  }
+
+  .cta__backdrop :global(.lp-media) {
+    border-radius: 0;
+  }
+
+  .cta__backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--lp-media-scrim);
+    pointer-events: none;
   }
 
   /* Centred all the way down: a measured paragraph centres its own box too. */

@@ -163,6 +163,76 @@ describe('HeroBlock', () => {
     );
   });
 
+  describe('the creator image (contract A5)', () => {
+    const CDN = 'https://cdn.test';
+    const image = { key: 'landing-pages/p1/images/i1', alt: 'A lake at dawn' };
+    const url = `${CDN}/${image.key}/lg.webp`;
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: replaces the course still on first paint, with its description', async (layout) => {
+      const context = {
+        ...sampleContext({
+          course: { heroImageUrl: '/uploaded.jpg' },
+          mediaBaseUrl: CDN,
+        }),
+        sellPreview: new Promise<never>(() => {}),
+      };
+      await render({ heading: 'H', image }, { layout, context });
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe(url);
+      expect(img?.getAttribute('alt')).toBe(image.alt);
+    });
+
+    it('wins over the streamed still too, and is decorative when undescribed', async () => {
+      await render(
+        { heading: 'H', image: { key: image.key } },
+        {
+          layout: 'split',
+          context: sampleContext({
+            media: { heroImageUrl: '/hero.jpg' },
+            mediaBaseUrl: CDN,
+          }),
+        }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe(url);
+      expect(img?.getAttribute('alt')).toBe('');
+    });
+
+    it('leaves a chosen clip playing, and shows nothing when asked for no image', async () => {
+      const context = sampleContext({
+        media: { heroClip: { playlistUrl: '/clip.m3u8' } },
+        mediaBaseUrl: CDN,
+      });
+      await render(
+        { heading: 'H', image, media: 'video' },
+        { layout: 'split', context }
+      );
+      expect(document.body.textContent).toContain(COPY.hero.watch);
+      unmount(app);
+      await render(
+        { heading: 'H', image, media: 'none' },
+        { layout: 'split', context }
+      );
+      expect(document.body.querySelector('img, video')).toBeNull();
+    });
+
+    it('without a CDN base, keeps the course still and builds no broken URL', async () => {
+      await render(
+        { heading: 'H', image },
+        {
+          layout: 'split',
+          context: sampleContext({ media: { heroImageUrl: '/hero.jpg' } }),
+        }
+      );
+      const srcs = [...document.body.querySelectorAll('img')].map((img) =>
+        img.getAttribute('src')
+      );
+      expect(srcs).toEqual(['/hero.jpg']);
+    });
+  });
+
   it('carries editing attributes only on the canvas', async () => {
     await render({ heading: 'Find your steady ground' });
     expect(document.body.querySelector('[contenteditable]')).toBeNull();

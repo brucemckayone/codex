@@ -11,14 +11,17 @@
                 reads from the start of each line
 
   A join button appears only when the creator gives it words (`ctaLabel` or
-  `note`).
+  `note`). The creator's image (contract A5) joins the heading's column in
+  `columns`, and leads the passage in the other two.
 -->
 <script lang="ts">
+  import { resolvePageImageUrl } from '../../../page-images';
   import { paragraphs } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
+  import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
   import { TEXT_EMPTY, textDefinition } from './definition';
 
@@ -36,7 +39,15 @@
   // Under a large first paragraph the heading is a quiet title; alone, it is
   // the statement itself.
   const headingSize = $derived(layout === 'statement' && content.body ? 'title' : 'heading');
+  const image = $derived(resolvePageImageUrl(content.image, 'lg', context.mediaBaseUrl));
+  const beside = $derived(layout === 'columns');
 </script>
+
+{#snippet figure(src: string)}
+  <div class="text__media">
+    <Media image={src} alt={content.image?.alt ?? ''} ratio="var(--_ratio)" />
+  </div>
+{/snippet}
 
 <div
   class="text"
@@ -44,7 +55,8 @@
   data-long={long ? '' : undefined}
   data-long-lead={longLead ? '' : undefined}
 >
-  {#if content.eyebrow || content.heading}
+  {#if image && !beside}{@render figure(image)}{/if}
+  {#if content.eyebrow || content.heading || (image && beside)}
     <header class="text__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="text" {edit} />{/if}
       {#if content.heading}
@@ -57,6 +69,7 @@
           {edit}
         />
       {/if}
+      {#if image && beside}{@render figure(image)}{/if}
     </header>
   {/if}
 
@@ -104,6 +117,27 @@
     max-inline-size: 20ch;
   }
 
+  /* Calm and low above a passage; a little taller beside one. */
+  .text__media {
+    --_ratio: 3 / 2;
+    inline-size: 100%;
+  }
+
+  .text[data-layout='centered'] > .text__media {
+    max-inline-size: 52rem;
+  }
+
+  @container (min-width: 48rem) {
+    .text[data-layout='statement'] > .text__media {
+      --_ratio: 21 / 9;
+    }
+
+    .text[data-layout='centered'] > .text__media,
+    .text[data-layout='columns'] .text__media {
+      --_ratio: 16 / 9;
+    }
+  }
+
   /* global.css caps every `p` at 65ch; the prompt spans its region. */
   .text__empty {
     max-inline-size: none;
@@ -119,6 +153,11 @@
   /* ── statement ─────────────────────────────────────────────────────────── */
   .text[data-layout='statement'] {
     gap: var(--lp-stack);
+  }
+
+  /* The words stay tight to each other; the image stands a band-gap off them. */
+  .text[data-layout='statement'] > .text__media {
+    margin-block-end: calc(var(--lp-gap) - var(--lp-stack));
   }
 
   .text[data-layout='statement'] > :global(.lp-text.text__body) {
@@ -197,9 +236,18 @@
       top: var(--space-12);
     }
 
-    /* A heading with nothing beside it takes the width instead. */
+    .text[data-layout='columns'] .text__media {
+      --_ratio: 4 / 3;
+    }
+
+    /* A heading with nothing beside it takes the width instead — and its
+       image turns wide and low rather than towering over the band. */
     .text[data-layout='columns']:not(:has(> :global(.text__body))) > .text__head {
       grid-column: 1 / -1;
+    }
+
+    .text[data-layout='columns']:not(:has(> :global(.text__body))) .text__media {
+      --_ratio: 21 / 9;
     }
   }
 

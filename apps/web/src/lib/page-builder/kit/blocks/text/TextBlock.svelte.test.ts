@@ -35,6 +35,7 @@ async function render(
     headingLevel?: 1 | 2;
     offer?: SampleOfferState;
     edit?: BlockEdit | null;
+    mediaBaseUrl?: string;
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -52,7 +53,10 @@ async function render(
     props: {
       props,
       section,
-      context: sampleContext({ offer: options.offer ?? 'buy' }),
+      context: sampleContext({
+        offer: options.offer ?? 'buy',
+        mediaBaseUrl: options.mediaBaseUrl,
+      }),
       edit: options.edit ?? null,
     },
   });
@@ -185,5 +189,54 @@ describe('TextBlock', () => {
     expect(starter.heading).toContain('Steady Ground');
     expect(starter.body).toContain('Steady Ground');
     expect(starter.body?.split('\n\n').length).toBeGreaterThanOrEqual(2);
+  });
+
+  describe('the creator image (contract A5)', () => {
+    const CDN = 'https://cdn.test';
+    const image = {
+      key: 'landing-pages/p1/images/t1',
+      alt: 'A notebook by a window',
+    };
+    const url = `${CDN}/${image.key}/lg.webp`;
+
+    it('columns: sits in the heading column, beside the text', async () => {
+      await render(
+        { ...SAMPLE, image },
+        { layout: 'columns', mediaBaseUrl: CDN }
+      );
+      const img = document.body.querySelector('.text__head img');
+      expect(img?.getAttribute('src')).toBe(url);
+      expect(img?.getAttribute('alt')).toBe(image.alt);
+    });
+
+    it('columns: still shows with no heading to sit under', async () => {
+      await render(
+        { body: SAMPLE.body, image },
+        { layout: 'columns', mediaBaseUrl: CDN }
+      );
+      expect(
+        document.body.querySelector('.text__head img')?.getAttribute('src')
+      ).toBe(url);
+      expect(document.body.querySelector('h2')).toBeNull();
+    });
+
+    it.each([
+      'statement',
+      'centered',
+    ])('%s: leads the passage, above the words', async (layout) => {
+      await render({ ...SAMPLE, image }, { layout, mediaBaseUrl: CDN });
+      const first = document.body.querySelector('.text')?.firstElementChild;
+      expect(first?.querySelector('img')?.getAttribute('src')).toBe(url);
+      expect(document.body.querySelector('.text__head img')).toBeNull();
+    });
+
+    it.each(
+      SECTION_LAYOUTS.text
+    )('%s without a CDN base draws no image and no empty header', async (layout) => {
+      await render({ body: SAMPLE.body, image }, { layout });
+      expect(
+        document.body.querySelector('img, .text__media, .text__head')
+      ).toBeNull();
+    });
   });
 });

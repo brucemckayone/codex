@@ -1,3 +1,4 @@
+import { type ImageRef, isImageRef } from '../../../page-images';
 import {
   bodyField,
   ctaLabelField,
@@ -15,6 +16,8 @@ export type TextProps = {
   body?: string;
   ctaLabel?: string;
   note?: string;
+  /** Beside the words in `columns`, above them otherwise (contract A5). */
+  image?: ImageRef;
 };
 
 /** The canvas prompt where the text would be — shown only while editing. */
@@ -52,6 +55,12 @@ export const textDefinition: BlockDefinition<TextProps> = {
       ...noteField,
       hint: 'Optional. A short reassurance under the button.',
     },
+    {
+      key: 'image',
+      label: 'Image',
+      hint: 'Optional. Sits beside your text in two columns, and above it in the other layouts.',
+      control: 'image',
+    },
   ],
   starter: ({ courseTitle }) => ({
     heading: `Why I made ${courseTitle}`,
@@ -68,5 +77,6 @@ export const textDefinition: BlockDefinition<TextProps> = {
       body: readText(raw, 'body', 3000),
       ctaLabel: readText(raw, 'ctaLabel', 40),
       note: readText(raw, 'note', 120),
+      image: isImageRef(raw.image) ? raw.image : undefined,
     }),
 };

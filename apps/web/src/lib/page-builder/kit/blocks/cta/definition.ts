@@ -1,3 +1,4 @@
+import { type ImageRef, isImageRef } from '../../../page-images';
 import {
   bodyField,
   ctaLabelField,
@@ -15,6 +16,8 @@ export type CtaProps = {
   body?: string;
   ctaLabel?: string;
   note?: string;
+  /** Behind the `band` layout, under the scrim (contract A5). */
+  background?: ImageRef;
 };
 
 export const ctaDefinition: BlockDefinition<CtaProps> = {
@@ -46,6 +49,14 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
     { ...bodyField, maxLength: 300 },
     ctaLabelField,
     noteField,
+    {
+      key: 'background',
+      label: 'Background image',
+      hint: 'Fills the band behind your words, darkened so they stay easy to read.',
+      control: 'image',
+      layouts: ['band'],
+      decorative: true,
+    },
   ],
   starter: ({ courseTitle }) => ({
     heading: `Ready to begin ${courseTitle}?`,
@@ -63,5 +74,6 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
       body: readText(raw, 'body', 300),
       ctaLabel: readText(raw, 'ctaLabel', 40),
       note: readText(raw, 'note', 120),
+      background: isImageRef(raw.background) ? raw.background : undefined,
     }),
 };

@@ -20,9 +20,11 @@
     field: BlockField;
     value: unknown;
     onChange: (value: Record<string, unknown>[] | undefined) => void;
+    /** Passed through to an entry's `image` field. */
+    mediaBaseUrl?: string | null;
   }
 
-  const { field, value, onChange }: Props = $props();
+  const { field, value, onChange, mediaBaseUrl = null }: Props = $props();
 
   const id = $props.id();
   const entries = $derived(readEntries(value));
@@ -109,6 +111,7 @@
                 field={itemField}
                 value={entries[index]?.[itemField.key]}
                 onChange={(next) => setKey(index, itemField.key, next)}
+                {mediaBaseUrl}
               />
             {/each}
           {/if}

@@ -1,3 +1,4 @@
+import { type ImageRef, isImageRef } from '../../../page-images';
 import {
   bodyField,
   ctaLabelField,
@@ -22,6 +23,8 @@ export type HeroProps = {
   secondaryHref?: string;
   media?: HeroMediaMode;
   watchLabel?: string;
+  /** Replaces the course hero still (contract A5); a clip still plays over it. */
+  image?: ImageRef;
 };
 
 export const heroDefinition: BlockDefinition<HeroProps> = {
@@ -85,6 +88,13 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       mediaSlot: 'heroMediaId',
     },
     {
+      key: 'image',
+      label: 'Your own image',
+      hint: 'Replaces the course image here. When the hero plays a clip, pick "The image only" below to show this instead.',
+      control: 'image',
+      decorative: true,
+    },
+    {
       key: 'media',
       label: 'What to show',
       control: 'select',
@@ -131,5 +141,6 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       secondaryHref: readText(raw, 'secondaryHref', 500),
       media: readOneOf(raw, 'media', HERO_MEDIA_MODES),
       watchLabel: readText(raw, 'watchLabel', 40),
+      image: isImageRef(raw.image) ? raw.image : undefined,
     }),
 };
