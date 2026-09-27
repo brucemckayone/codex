@@ -43,20 +43,18 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 
 ## Status
 
-| WP | State | Notes |
-|---|---|---|
-| 1 | **done** `dd152aaf` | 561 validation + 123 web tests; provenance fix for hero/faq added by orchestrator (falsified) |
-| 2 | **done** `d193b38a` | 241 kit tests; svelte-check 0 new; visually approved in all 4 Styles, dark brand, dark theme, mobile. Follow-up: centre a lone offer card in Soft `cards` |
-| 10a | **done** | upload route + processing + save-time orphan diff + migration 0095; 98+380+230+24 tests; live upload smoke-tested. Gaps: abandoned uploads not swept (needs a reference-aware sweep check), cdnBase must reach the kit context (WP6/7b), page duplication would share prefixes (WP11) |
-| 7a | **done** | store v2 actions + autosave controller; 311 tests across 13 files; web tsc clean |
-| 3 | **done** `b7aee127` | video · preview · instructor · stats |
-| 4 | **done** `b7aee127` | problem · transformation · benefits · text; 1,680-combination contrast probe, floor 4.97:1 |
-| 5 | **done** `99b26ccc` | curriculum · testimonials · faq; identity test now covers all 4 Styles |
-| 7b | **done** `db094c02` | canvas-first editor at `page-next`; orchestrator fixed autosave wiping undo (`markSaved({keepHistory})`) and the org default font never loading (Inter) |
-| 6 | **done** `6b934c5a` | public page on the kit; not-open pages now say so; hero still on first paint (`e41266ad`) |
-| 8 | running | inspector, pickers, gallery, Style tab |
-| 9b | running | backend defaults, validation v2-only writes, v2 seeds with a Style per portal |
-| 9a, 10b, 11 | not started | |
+| WP | State | Commit(s) | Notes |
+|---|---|---|---|
+| 1 | done | `dd152aaf` | v2 validation keys, legacy→v2 upgrade, id parity; hero/faq provenance fix |
+| 2 | done | `d193b38a` `54efd94f` `e8ffd9c6` `cf373b26` `93e694c3` | Styles, schemes, primitives, renderer, hero/pricing/cta; band-apart rule; failed-image fallback |
+| 3 · 4 · 5 | done | `b7aee127` `99b26ccc` | all 14 section types real; identity test across all 4 Styles |
+| 6 | done | `6b934c5a` `e41266ad` | public page on the kit; not-open pages say so; hero still on first paint |
+| 7a · 7b | done | `63a269ff` `db094c02` | store v2 + autosave; canvas-first editor; undo survives autosave; org default font loads |
+| 8 | done | `cea0b39f` `85f46fa9` | inspector, live pickers, gallery, Style tab, icons; dark-mode brand carry |
+| 9a · 9b · 9c | done | `2af311cd` `f1216ed1` `11e49b80` | new editor is THE builder; legacy builder/renderer/catalogue deleted (~59k lines); v2-only writes; v2 seeds in 4 Styles |
+| 10a | done | `9081d842` | page image upload route + orphan diff |
+| 10b | running | | creator images in hero/cta/text/benefits |
+| 11 | in progress | | final gates, review, PR |
 
 ## Resume
 
