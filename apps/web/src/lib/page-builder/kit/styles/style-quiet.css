@@ -1,0 +1,10 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — QUIET (PROVISIONAL, 03-expressive-contract §12 R0)
+   Renders on the kit's base tokens until its Style WP (S1) designs it.
+   Everything a Style changes lives here, including its treatment of blocks
+   (03 §4.3): rules that reach inside a block start
+   `:is(.lp, #lp-style)[data-lp-style='quiet']`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lp[data-lp-style='quiet'] {
+  --lp-style-provisional: 1;
+}

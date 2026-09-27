@@ -50,6 +50,7 @@
     contrast: () => m.studio_page_editor_scheme_contrast(),
     brand: () => m.studio_page_editor_scheme_brand(),
     accent: () => m.studio_page_editor_scheme_accent(),
+    atmosphere: () => m.studio_page_editor_scheme_atmosphere(),
   };
 
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));

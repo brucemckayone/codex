@@ -225,6 +225,16 @@
   --lp-button-bg: var(--_button-g);
 }
 
+/* PROVISIONAL (03 §12 R0): renders as `base` until E1 gives it its
+   see-through recipe over the org shader (03 §5.1). Its own rule, not a
+   selector shared with `base`, so each scheme stays one findable block. */
+.lp [data-lp-scheme='atmosphere'] {
+  --lp-bg: var(--lp-ground);
+  --lp-panel: var(--_panel-g);
+  --lp-accent: var(--_accent-g);
+  --lp-button-bg: var(--_button-g);
+}
+
 .lp [data-lp-scheme='soft'] {
   --lp-bg: var(--_soft-bg);
   --lp-panel: var(--lp-ground);

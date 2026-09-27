@@ -1,6 +1,10 @@
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sampleContext } from '$lib/page-builder/kit';
+import {
+  PAGE_STYLE_IDS,
+  SECTION_TYPE_IDS,
+} from '$lib/page-builder/kit/model/ids';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -98,12 +102,7 @@ describe('StylePanel', () => {
     const cards = [
       ...document.querySelectorAll<HTMLButtonElement>('.style-card'),
     ];
-    expect(cards.map((c) => c.dataset.style)).toEqual([
-      'bold',
-      'clean',
-      'soft',
-      'cinematic',
-    ]);
+    expect(cards.map((c) => c.dataset.style)).toEqual([...PAGE_STYLE_IDS]);
     const soft = el('.style-card[data-style="soft"]');
     expect(el('.lp', soft).dataset.lpStyle).toBe('soft');
     expect(soft.textContent).toContain('Quiet hours, every morning');
@@ -181,7 +180,7 @@ describe('SectionGallery', () => {
     const items = [
       ...document.querySelectorAll<HTMLButtonElement>('.gallery__item'),
     ];
-    expect(items).toHaveLength(14);
+    expect(items).toHaveLength(SECTION_TYPE_IDS.length);
     const faq = el('.gallery__item[data-type="faq"]');
     expect(el('.lp', faq).dataset.lpStyle).toBe('clean');
     expect(el('[data-lp-type="faq"]', faq)).toBeTruthy();

@@ -1841,6 +1841,7 @@
   "studio_page_editor_scheme_contrast": "Contrast",
   "studio_page_editor_scheme_brand": "Brand",
   "studio_page_editor_scheme_accent": "Second",
+  "studio_page_editor_scheme_atmosphere": "Moving",
   "studio_page_editor_spacing_title": "Spacing",
   "studio_page_editor_spacing_default": "{size} is the default for this layout.",
   "studio_page_editor_spacing_reset": "Use the default spacing",

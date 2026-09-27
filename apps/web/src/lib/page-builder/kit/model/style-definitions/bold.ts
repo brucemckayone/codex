@@ -1,0 +1,68 @@
+import { STORY_ORDER, type StyleDefinition } from '../style-definition';
+
+export const BOLD: StyleDefinition = {
+  id: 'bold',
+  label: 'Bold',
+  description:
+    'Huge headlines and full-width colour bands. Your words do the selling.',
+  layouts: {
+    hero: 'statement',
+    video: 'theatre',
+    problem: 'statement',
+    story: 'scroll',
+    transformation: 'columns',
+    benefits: 'checklist',
+    curriculum: 'timeline',
+    preview: 'feature',
+    gallery: 'mosaic',
+    instructor: 'split',
+    testimonials: 'featured',
+    faq: 'columns',
+    pricing: 'focus',
+    cta: 'band',
+    stats: 'row',
+    text: 'statement',
+  },
+  // Brand, base and contrast bands in turn: the page opens and closes on the
+  // brand colour, and a brand band never touches a contrast band — with a very
+  // dark brand the two are near-identical and would read as one smeared block.
+  schemes: {
+    hero: 'brand',
+    video: 'base',
+    problem: 'contrast',
+    story: 'base',
+    text: 'base',
+    transformation: 'contrast',
+    benefits: 'base',
+    curriculum: 'base',
+    preview: 'contrast',
+    gallery: 'base',
+    instructor: 'base',
+    testimonials: 'base',
+    stats: 'brand',
+    pricing: 'base',
+    faq: 'base',
+    cta: 'brand',
+  },
+  featured: {
+    base: 'contrast',
+    soft: 'contrast',
+    contrast: 'brand',
+    brand: 'base',
+    accent: 'base',
+    atmosphere: 'base',
+  },
+  order: STORY_ORDER,
+  starter: [
+    'hero',
+    'problem',
+    'transformation',
+    'benefits',
+    'curriculum',
+    'instructor',
+    'testimonials',
+    'pricing',
+    'faq',
+    'cta',
+  ],
+};

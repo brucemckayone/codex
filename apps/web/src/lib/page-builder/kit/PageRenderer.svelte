@@ -36,6 +36,10 @@
   import './styles/style-clean.css';
   import './styles/style-soft.css';
   import './styles/style-cinematic.css';
+  import './styles/style-path.css';
+  import './styles/style-poster.css';
+  import './styles/style-studio.css';
+  import './styles/style-quiet.css';
 
   interface Props {
     page: KitPage;

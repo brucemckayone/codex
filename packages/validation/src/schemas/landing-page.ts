@@ -21,7 +21,16 @@ import { z } from 'zod';
 // ─── Enum twins of ids.ts ──────────────────────────────────────────────────
 
 /** A page's Style — one complete, brand-driven design system. */
-export const PAGE_STYLE_IDS = ['bold', 'clean', 'soft', 'cinematic'] as const;
+export const PAGE_STYLE_IDS = [
+  'bold',
+  'clean',
+  'soft',
+  'cinematic',
+  'path',
+  'poster',
+  'studio',
+  'quiet',
+] as const;
 export type PageStyleId = (typeof PAGE_STYLE_IDS)[number];
 
 /** A section's colour scheme — each derived from the org brand at render time. */
@@ -31,6 +40,7 @@ export const COLOUR_SCHEME_IDS = [
   'contrast',
   'brand',
   'accent',
+  'atmosphere',
 ] as const;
 export type ColourSchemeId = (typeof COLOUR_SCHEME_IDS)[number];
 
@@ -58,6 +68,8 @@ export const SECTION_LAYOUTS = {
   cta: ['band', 'split', 'compact'],
   stats: ['row', 'grid'],
   text: ['statement', 'columns', 'centered'],
+  story: ['scroll', 'chapters', 'strip'],
+  gallery: ['mosaic', 'strip', 'grid'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;

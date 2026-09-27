@@ -20,7 +20,8 @@ import {
 describe('SECTION_LAYOUTS / SECTION_TYPE_IDS', () => {
   it('derives the type ids from the layout record keys, in declaration order', () => {
     expect(SECTION_TYPE_IDS).toEqual(Object.keys(SECTION_LAYOUTS));
-    expect(SECTION_TYPE_IDS).toHaveLength(14);
+    // 14 from 01-contract §2, + story and gallery (03-expressive-contract §3).
+    expect(SECTION_TYPE_IDS).toHaveLength(16);
   });
 
   it("every type's layout list is non-empty", () => {

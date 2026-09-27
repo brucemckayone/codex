@@ -14751,6 +14751,14 @@ export const studio_page_editor_scheme_accent = () => `Second`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere = () => `Moving`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_spacing_title = () => `Spacing`
 
 
