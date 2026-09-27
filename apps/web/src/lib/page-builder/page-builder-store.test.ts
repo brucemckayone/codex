@@ -9,6 +9,7 @@
  */
 
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
+import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pageBuilder } from './page-builder-store.svelte';
 
@@ -618,6 +619,130 @@ describe('pageBuilder — save + preview applier', () => {
       headline: 'edited',
     });
   });
+
+  it('markSaved({ baseline }) moves the baseline to what landed, and a newer edit stays unsaved', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.updateMeta('title', 'Sent');
+    const sent = pageBuilder.getSavePayload() as PageBuilderState;
+    pageBuilder.updateMeta('title', 'Typed while it was saving');
+
+    pageBuilder.markSaved({ baseline: sent });
+
+    expect(pageBuilder.saved?.title).toBe('Sent');
+    expect(pageBuilder.pending?.title).toBe('Typed while it was saving');
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+});
+
+/**
+ * CRASH RECOVERY. The tab's sessionStorage row keeps its UNSAVED draft across a
+ * reload, and is restored only over the page it was edited FROM. Once another
+ * tab has saved the page, the draft is stale: restoring it would autosave the
+ * older page over the newer one, with nothing on screen to say so.
+ */
+describe('pageBuilder — crash recovery', () => {
+  const KEY = 'codex:page-builder';
+
+  /** Open, edit, then "crash": the tab keeps the row a reload would find. */
+  function editThenCrash(edit: () => void): string | null {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    edit();
+    flushSync();
+    const row = sessionStorage.getItem(KEY);
+    pageBuilder.close();
+    if (row) sessionStorage.setItem(KEY, row);
+    return row;
+  }
+
+  beforeEach(() => {
+    pageBuilder.close();
+    sessionStorage.clear();
+  });
+
+  it('restores an unsaved draft over the page it was edited from', () => {
+    editThenCrash(() => pageBuilder.updateMeta('title', 'Bone Deep'));
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('restored');
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+
+  it('discards a draft edited from a page the server no longer holds', () => {
+    editThenCrash(() => pageBuilder.updateMeta('title', 'Bone Deep'));
+
+    // Another tab saved the page in the meantime.
+    const newer = makeSaved({ title: 'Stillness, revised' });
+    expect(pageBuilder.open(PAGE_ID, newer)).toBe('discarded');
+    expect(pageBuilder.pending?.title).toBe('Stillness, revised');
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('never takes the status from the row', () => {
+    editThenCrash(() => {
+      pageBuilder.updateMeta('status', 'published', { record: false });
+      pageBuilder.updateMeta('title', 'Bone Deep');
+    });
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('restored');
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.pending?.status).toBe('draft');
+  });
+
+  it('discards a row with no baseline to check it against', () => {
+    // The shape the previous editor wrote: a draft with nothing to say what
+    // it was edited from.
+    sessionStorage.setItem(
+      KEY,
+      JSON.stringify({
+        pageId: PAGE_ID,
+        pending: makeSaved({ title: 'From an older editor' }),
+      })
+    );
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('discarded');
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+  });
+
+  it('keeps a row only while something is unsaved', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.selectSection('sec-ache');
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).not.toBeNull();
+
+    pageBuilder.markSaved();
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('a page this tab saved still matches the copy the server hands back', () => {
+    // The server trims the title, and a page whose offer was never sent has
+    // no bag at all — neither is the byte-for-byte page this tab saved.
+    const row = editThenCrash(() => {
+      pageBuilder.updateMeta('title', 'Bone Deep ');
+      pageBuilder.updateOffer(
+        {
+          tiersEnabled: false,
+          subscriptionEnabled: false,
+          subscriptionPriceCents: null,
+          oneOffEnabled: false,
+          oneOffPriceCents: null,
+        },
+        { record: false }
+      );
+      pageBuilder.markSaved();
+      pageBuilder.setSectionProp('sec-hero', 'heading', 'Typed after the save');
+    });
+    expect(row).not.toBeNull();
+
+    const reloaded = makeSaved({ title: 'Bone Deep' });
+    expect(pageBuilder.open(PAGE_ID, reloaded)).toBe('restored');
+    expect(pageBuilder.sections[0].props.heading).toBe('Typed after the save');
+  });
 });
 
 describe('pageBuilder — undo / redo', () => {
@@ -773,12 +898,12 @@ describe('pageBuilder — page-level edits are part of the history', () => {
 
   it('an undo of a title edit leaves a price set BEFORE it untouched', () => {
     pageBuilder.updateOffer({ oneOffPriceCents: 2700 });
-    pageBuilder.updateMeta('status', 'published');
+    pageBuilder.updateMeta('title', 'Bone Deep');
 
     pageBuilder.undo();
 
-    expect(pageBuilder.pending?.status).toBe('draft');
-    // £27 was entered before the status change and must survive its undo.
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+    // £27 was entered before the rename and must survive its undo.
     expect(pageBuilder.pending?.offer?.oneOffPriceCents).toBe(2700);
   });
 
@@ -795,14 +920,50 @@ describe('pageBuilder — page-level edits are part of the history', () => {
   });
 
   it('a write that changes nothing takes no step and does not dirty the draft', () => {
-    // `handlePublish` re-writes the same status when it rolls back a failed
-    // publish, and a colour input echoes its own value while the picker is open.
+    // A title input re-fires its own value, and a colour input echoes its own
+    // value while the picker is open.
     pageBuilder.updateMeta('title', 'Stillness');
     pageBuilder.updateOffer({});
     pageBuilder.updateBrandOverrides({ primaryColor: undefined });
 
     expect(pageBuilder.canUndo).toBe(false);
     expect(pageBuilder.isDirty).toBe(false);
+  });
+});
+
+/**
+ * The STATUS is outside the history. It is the server's publish state, and a
+ * snapshot's status is whatever it was when some OTHER edit was made — so an
+ * undo that restored it would unpublish a live page through Cmd+Z, or show
+ * "Live" over a draft.
+ */
+describe('pageBuilder — the status is outside the history', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    pageBuilder.open(PAGE_ID, makeSaved());
+  });
+
+  it('a status write with record: false takes no undo step', () => {
+    pageBuilder.updateMeta('status', 'published', { record: false });
+
+    expect(pageBuilder.pending?.status).toBe('published');
+    expect(pageBuilder.canUndo).toBe(false);
+  });
+
+  it('undo and redo walk the edits and keep the current status', () => {
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    pageBuilder.updateMeta('status', 'published', { record: false });
+
+    pageBuilder.undo();
+    // The rename is taken back; the page stays live.
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+    expect(pageBuilder.pending?.status).toBe('published');
+
+    pageBuilder.updateMeta('status', 'draft', { record: false });
+    pageBuilder.redo();
+    // Redo re-applies the rename and never re-publishes.
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.pending?.status).toBe('draft');
   });
 });
 

@@ -12,6 +12,14 @@ const remotes = vi.hoisted(() => ({
   getJourneyForBuilder: vi.fn(),
   saveJourneyPage: vi.fn(),
   updateJourneyOffer: vi.fn(),
+  getCourseCurriculum: vi.fn(),
+  getCourseOffer: vi.fn(),
+  getCoursePagePreview: vi.fn(),
+  resolveSellPreview: vi.fn(),
+  getJourneySellMedia: vi.fn(),
+  updateJourneySellMedia: vi.fn(),
+  getCourseMonetisation: vi.fn(),
+  updateCourseMonetisation: vi.fn(),
 }));
 const nav = vi.hoisted(() => ({
   guards: [] as Array<(navigation: unknown) => void>,
@@ -43,17 +51,20 @@ vi.mock('$lib/remote/journeys.remote', () => ({
   getJourneyForBuilder: (input: unknown) => remotes.getJourneyForBuilder(input),
   saveJourneyPage: (input: unknown) => remotes.saveJourneyPage(input),
   updateJourneyOffer: (input: unknown) => remotes.updateJourneyOffer(input),
-  getCourseCurriculum: vi.fn(),
-  getCourseOffer: vi.fn(),
-  getCoursePagePreview: vi.fn(),
-  resolveSellPreview: vi.fn(),
-  getJourneySellMedia: vi.fn(async () => null),
-  updateJourneySellMedia: vi.fn(),
+  getCourseCurriculum: (input: unknown) => remotes.getCourseCurriculum(input),
+  getCourseOffer: (input: unknown) => remotes.getCourseOffer(input),
+  getCoursePagePreview: (input: unknown) => remotes.getCoursePagePreview(input),
+  resolveSellPreview: (input: unknown) => remotes.resolveSellPreview(input),
+  getJourneySellMedia: (input: unknown) => remotes.getJourneySellMedia(input),
+  updateJourneySellMedia: (input: unknown) =>
+    remotes.updateJourneySellMedia(input),
   deleteJourneyCover: vi.fn(),
   deleteJourneyHeroImage: vi.fn(),
   deleteJourneySignatureImage: vi.fn(),
-  getCourseMonetisation: vi.fn(async () => null),
-  updateCourseMonetisation: vi.fn(),
+  getCourseMonetisation: (input: unknown) =>
+    remotes.getCourseMonetisation(input),
+  updateCourseMonetisation: (input: unknown) =>
+    remotes.updateCourseMonetisation(input),
 }));
 vi.mock('$lib/remote/media.remote', () => ({
   listMedia: vi.fn(async () => ({ items: [] })),
@@ -63,6 +74,10 @@ const { createBuilderSession } = await import('./builder-session.svelte');
 const { pageBuilder } = await import(
   '$lib/page-builder/page-builder-store.svelte'
 );
+const { monetisation } = await import(
+  '$lib/page-builder/monetisation-store.svelte'
+);
+const { sellMedia } = await import('$lib/page-builder/sell-media-store.svelte');
 
 type Session = ReturnType<typeof createBuilderSession>;
 
@@ -145,18 +160,58 @@ function editHeading(value: string): void {
   flushSync();
 }
 
+/** The tab goes down: the session is gone, its recovery row is not. */
+function crash(): void {
+  const row = sessionStorage.getItem(STORAGE_KEY);
+  stop?.();
+  stop = null;
+  if (row) sessionStorage.setItem(STORAGE_KEY, row);
+}
+
 /** Resolve the promises a save chain awaits, one macrotask at a time. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 6; i++) await Promise.resolve();
   flushSync();
 }
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve = () => {};
-  const promise = new Promise<void>((done) => {
+/** Settle a whole chain: a save, then the follow-up it queued. */
+async function drain(): Promise<void> {
+  for (let i = 0; i < 8; i++) await settle();
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+/** The course the monetisation leg reads and writes, as the remote returns it. */
+function plan(priceMonthly: number) {
+  return {
+    courseId: 'course-1',
+    subscription: { priceMonthly, priceAnnual: 10000 },
+    tierIds: [],
+    tierOptions: [],
+  };
+}
+
+/** The sell media the media leg writes, as the remote echoes it back. */
+function mediaEcho(heroMediaId: string | null) {
+  return {
+    courseId: 'course-1',
+    introVideoMediaId: null,
+    previewVideoMediaId: null,
+    guideVideoMediaId: null,
+    guidePortraitMediaId: null,
+    heroMediaId,
+    signatureMediaId: null,
+    coverImageUrl: null,
+  };
 }
 
 beforeEach(() => {
@@ -164,6 +219,18 @@ beforeEach(() => {
   remotes.getJourneyForBuilder.mockImplementation(() => draft);
   remotes.saveJourneyPage.mockReset().mockResolvedValue(undefined);
   remotes.updateJourneyOffer.mockReset().mockResolvedValue(undefined);
+  for (const read of [
+    remotes.getCourseCurriculum,
+    remotes.getCourseOffer,
+    remotes.getCoursePagePreview,
+    remotes.resolveSellPreview,
+  ]) {
+    read.mockReset().mockReturnValue(undefined);
+  }
+  remotes.getJourneySellMedia.mockReset().mockResolvedValue(null);
+  remotes.updateJourneySellMedia.mockReset();
+  remotes.getCourseMonetisation.mockReset().mockResolvedValue(null);
+  remotes.updateCourseMonetisation.mockReset();
   nav.guards.length = 0;
   nav.goto.mockReset().mockResolvedValue(undefined);
   nav.invalidate.mockReset().mockResolvedValue(undefined);
@@ -222,42 +289,59 @@ describe('open', () => {
     expect(session.page?.sections).toHaveLength(2);
   });
 
-  it('carries a legacy crash-recovery draft over in v2 vocabulary', () => {
-    const legacy = legacyRecord();
-    const {
-      id: _id,
-      organizationId: _o,
-      publishedAt: _p,
-      ...editable
-    } = legacy;
-    sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        pageId: PAGE_ID,
-        pending: {
-          ...editable,
-          title: 'Bone Deep, recovered',
-          sections: editable.sections.map((s) =>
-            s.id === 'sec-ache'
-              ? { ...s, props: { heading: 'Typed before the crash' } }
-              : s
-          ),
-        },
-      })
-    );
-    const session = start(legacy);
-    const pending = pageBuilder.pending;
-    expect(pending?.sections.map((s) => s.type)).toEqual(['hero', 'problem']);
-    expect(pending?.sections[1].props).toEqual({
-      heading: 'Typed before the crash',
-    });
-    expect(pending?.title).toBe('Bone Deep, recovered');
+  it('restores unsaved changes edited from the page the server still holds', () => {
+    start(legacyRecord());
+    pageBuilder.updateMeta('title', 'Bone Deep, recovered');
+    flushSync();
+    crash();
+
+    const session = start(legacyRecord());
+    // The draft is the UPGRADED page it was edited as, with the edit on it.
+    expect(pageBuilder.pending?.sections.map((s) => s.type)).toEqual([
+      'hero',
+      'problem',
+    ]);
+    expect(pageBuilder.pending?.title).toBe('Bone Deep, recovered');
     expect(session.isDirty).toBe(true);
-    // Undo walks back to the saved page, not to the legacy draft.
-    while (pageBuilder.canUndo) pageBuilder.undo();
-    expect(pageBuilder.pending?.sections[1].props).toEqual({
-      heading: 'You already know',
-    });
+    expect(toasts.info).toHaveBeenCalledWith('Restored your unsaved changes');
+  });
+
+  it('reloading with a recovery row older than the server copy does not autosave it', async () => {
+    vi.useFakeTimers();
+    start();
+    editHeading('Typed in this tab');
+    crash();
+
+    // Meanwhile another tab renamed the page and published it.
+    const session = start(
+      record({ title: 'Edited in the other tab', status: 'published' })
+    );
+    expect(pageBuilder.pending?.title).toBe('Edited in the other tab');
+    expect(pageBuilder.pending?.sections[0].props.heading).toBe(
+      'Find your ground'
+    );
+    expect(session.status).toBe('published');
+    expect(session.isDirty).toBe(false);
+    expect(toasts.warning).toHaveBeenCalledWith(
+      'Unsaved changes from an earlier session weren’t restored because the page has changed since.'
+    );
+    vi.advanceTimersByTime(5000);
+    await settle();
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+  });
+
+  it('never takes the status from a recovery row', () => {
+    start();
+    // The tab went down mid-publish, with the status already flipped.
+    pageBuilder.updateMeta('status', 'published', { record: false });
+    editHeading('Typed before the crash');
+    crash();
+
+    const session = start();
+    expect(pageBuilder.pending?.sections[0].props.heading).toBe(
+      'Typed before the crash'
+    );
+    expect(session.status).toBe('draft');
   });
 });
 
@@ -312,6 +396,136 @@ describe('autosave', () => {
       remotes.saveJourneyPage.mock.calls[1][0].sections[0].props.heading
     ).toBe('Typed while it was saving');
     expect(session.isDirty).toBe(false);
+  });
+
+  it('a crash after an overtaken save still restores the edit typed during it', async () => {
+    vi.useFakeTimers();
+    const first = deferred();
+    remotes.saveJourneyPage
+      .mockImplementationOnce(() => first.promise)
+      // The follow-up never lands: the tab goes down first.
+      .mockImplementationOnce(() => new Promise(() => {}));
+    start();
+    editHeading('Sent in the first save');
+    vi.advanceTimersByTime(1500);
+    await settle();
+    editHeading('Typed while it was saving');
+    first.resolve();
+    await drain();
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(2);
+    crash();
+
+    // The server holds what the first save sent, so the draft still applies.
+    start(
+      record({
+        sections: [{ ...hero(), props: { heading: 'Sent in the first save' } }],
+      })
+    );
+    expect(pageBuilder.pending?.sections[0].props.heading).toBe(
+      'Typed while it was saving'
+    );
+    expect(toasts.info).toHaveBeenCalledWith('Restored your unsaved changes');
+  });
+
+  it('a one-off price typed during an autosave survives the save', async () => {
+    vi.useFakeTimers();
+    const first = deferred();
+    remotes.saveJourneyPage.mockImplementationOnce(() => first.promise);
+    const session = start();
+    pageBuilder.updateOffer({ oneOffEnabled: true, oneOffPriceCents: 4900 });
+    flushSync();
+    vi.advanceTimersByTime(1500);
+    await settle();
+    expect(remotes.saveJourneyPage).toHaveBeenCalledTimes(1);
+
+    // Corrected while the page leg is in flight.
+    pageBuilder.updateOffer({ oneOffPriceCents: 4500 });
+    flushSync();
+    first.resolve();
+    await drain();
+
+    const sent = remotes.updateJourneyOffer.mock.calls.map(
+      (call) => call[0].offer.oneOffPriceCents
+    );
+    expect(sent).toEqual([4900, 4500]);
+    expect(pageBuilder.pending?.offer?.oneOffPriceCents).toBe(4500);
+    expect(session.isDirty).toBe(false);
+    expect(session.saveStatus).toBe('saved');
+  });
+
+  it('a price typed during the monetisation leg is not reverted', async () => {
+    vi.useFakeTimers();
+    remotes.getCourseMonetisation.mockResolvedValue(plan(1000));
+    const inflight = deferred<ReturnType<typeof plan>>();
+    remotes.updateCourseMonetisation
+      .mockImplementationOnce(() => inflight.promise)
+      .mockResolvedValueOnce(plan(2900));
+    const session = start(
+      record({ subjectType: 'course', subjectId: 'course-1' })
+    );
+    await settle();
+    expect(monetisation.loaded).toBe(true);
+
+    monetisation.setPriceMonthly(2000);
+    flushSync();
+    vi.advanceTimersByTime(1500);
+    await drain();
+    expect(remotes.updateCourseMonetisation).toHaveBeenCalledTimes(1);
+
+    // Typed while the Stripe-backed write is in flight.
+    monetisation.setPriceMonthly(2900);
+    flushSync();
+    inflight.resolve(plan(2000));
+    await drain();
+
+    const sent = remotes.updateCourseMonetisation.mock.calls.map(
+      (call) => call[0].subscriptionPriceMonthly
+    );
+    expect(sent).toEqual([2000, 2900]);
+    expect(monetisation.draft.priceMonthlyCents).toBe(2900);
+    expect(session.isDirty).toBe(false);
+    expect(session.saveStatus).toBe('saved');
+  });
+
+  it('an offer set back after a later leg failed is sent again', async () => {
+    vi.useFakeTimers();
+    remotes.updateJourneySellMedia
+      .mockRejectedValueOnce({ body: { message: 'That clip is not ready' } })
+      .mockResolvedValueOnce(mediaEcho('media-2'));
+    const session = start(
+      record({
+        subjectType: 'course',
+        subjectId: 'course-1',
+        offer: { oneOffEnabled: true, oneOffPriceCents: 4900 },
+      })
+    );
+    await settle();
+    expect(sellMedia.loaded).toBe(true);
+    const oneOffPrices = () =>
+      remotes.updateJourneyOffer.mock.calls.map(
+        (call) => call[0].offer.oneOffPriceCents
+      );
+
+    pageBuilder.updateOffer({ oneOffPriceCents: 5900 });
+    sellMedia.setSlot('heroMediaId', 'media-1');
+    flushSync();
+    vi.advanceTimersByTime(1500);
+    await drain();
+    // The price landed; the media leg after it was refused.
+    expect(oneOffPrices()).toEqual([5900]);
+    expect(session.saveStatus).toBe('error');
+
+    // The creator changes their mind about the price, and fixes the media.
+    pageBuilder.updateOffer({ oneOffPriceCents: 4900 });
+    sellMedia.setSlot('heroMediaId', 'media-2');
+    flushSync();
+    vi.advanceTimersByTime(1500);
+    await drain();
+
+    // The server holds £59, so £49 is a change and is sent.
+    expect(oneOffPrices()).toEqual([5900, 4900]);
+    expect(session.isDirty).toBe(false);
+    expect(session.saveStatus).toBe('saved');
   });
 
   it('toasts a failed autosave once, with the server’s reason', async () => {
@@ -400,6 +614,51 @@ describe('publish', () => {
     expect(ok).toBe(true);
     expect(remotes.saveJourneyPage.mock.calls[0][0].status).toBe('draft');
     expect(session.status).toBe('draft');
+  });
+});
+
+describe('the status is never an undo step', () => {
+  it('undo after publish never changes the status, and never unpublishes', async () => {
+    vi.useFakeTimers();
+    const session = start();
+    editHeading('Before going live');
+    expect((await session.publish()).ok).toBe(true);
+    await settle();
+    remotes.saveJourneyPage.mockClear();
+
+    editHeading('An edit on the live page');
+    while (pageBuilder.canUndo) pageBuilder.undo();
+    flushSync();
+
+    expect(pageBuilder.pending?.sections[0].props.heading).toBe(
+      'Find your ground'
+    );
+    expect(session.status).toBe('published');
+    vi.advanceTimersByTime(5000);
+    await settle();
+    // Still live, so nothing autosaves — and nothing ever sent 'draft'.
+    expect(remotes.saveJourneyPage).not.toHaveBeenCalled();
+  });
+
+  it('undo after unpublish never shows Live over a draft', async () => {
+    const session = start(record({ status: 'published' }));
+    editHeading('A live edit');
+    expect(await session.unpublish()).toBe(true);
+
+    while (pageBuilder.canUndo) pageBuilder.undo();
+    flushSync();
+
+    expect(session.status).toBe('draft');
+    expect(session.hasUnpublishedChanges).toBe(false);
+  });
+
+  it('a failed publish rolls back without leaving a step to undo', async () => {
+    remotes.saveJourneyPage.mockRejectedValue(new Error('offline'));
+    const session = start();
+    expect((await session.publish()).ok).toBe(false);
+
+    expect(session.status).toBe('draft');
+    expect(pageBuilder.canUndo).toBe(false);
   });
 });
 

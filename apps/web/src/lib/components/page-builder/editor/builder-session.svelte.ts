@@ -12,7 +12,11 @@
  * Create it during component initialisation: it registers a navigation guard
  * and an unload guard, and its teardown closes the stores.
  */
-import type { PageBuilderState, PageStatus } from '@codex/shared-types';
+import type {
+  PageBuilderState,
+  PageOffer,
+  PageStatus,
+} from '@codex/shared-types';
 import { buildJourneyUrl } from '@codex/urls';
 import { untrack } from 'svelte';
 import { beforeNavigate, goto, invalidate } from '$app/navigation';
@@ -83,6 +87,13 @@ export interface BuilderSession {
   readonly saveStatus: AutosaveStatus;
   readonly saveError: string | undefined;
   readonly busy: SessionBusy;
+  /**
+   * Another tab saved this page after it was opened here. This copy is older,
+   * so nothing in it saves or publishes again until the creator reloads.
+   */
+  readonly stale: boolean;
+  /** Reload the browser tab — the way out of {@link stale}. */
+  reloadTab(): void;
   retrySave(): void;
   publish(): Promise<PublishResult>;
   publishChanges(): Promise<PublishResult>;
@@ -218,7 +229,16 @@ export function createBuilderSession(options: {
 
   /** The status the server last accepted — see `setLive`. */
   let persistedStatus: PageStatus | null = null;
+  /**
+   * The offer the server last accepted: what the offer leg compares against
+   * to decide whether to send. It moves the moment that leg lands, while the
+   * page's saved baseline moves only once EVERY leg has — so an offer that
+   * landed before a later leg failed would otherwise still read as the old
+   * one, and setting it back to the old value would never be sent.
+   */
+  let persistedOffer: PageOffer | undefined;
   let busy = $state<SessionBusy>(null);
+  let stale = $state(false);
 
   // ── Open ─────────────────────────────────────────────────────────────────
   $effect(() => {
@@ -243,9 +263,18 @@ export function createBuilderSession(options: {
       design: kit.design,
       sections: kit.sections,
     };
-    pageBuilder.open(id, baseline);
-    adoptRecoveredDraft(id, baseline);
+    // A restored draft was edited from exactly this page (the store checks),
+    // so it autosaves like any edit. A discarded one was not, and saving it
+    // would have written the older page over the newer one.
+    const recovery = pageBuilder.open(id, baseline);
+    if (recovery === 'restored') {
+      toast.info(m.studio_page_editor_recovery_restored());
+    } else if (recovery === 'discarded') {
+      toast.warning(m.studio_page_editor_recovery_discarded());
+    }
     persistedStatus = baseline.status;
+    persistedOffer = baseline.offer;
+    stale = false;
     void sellMedia.open(id, {
       hasCourse: loaded.subjectType === 'course' && !!loaded.subjectId,
     });
@@ -254,50 +283,72 @@ export function createBuilderSession(options: {
     );
   }
 
+  // ── Other tabs ───────────────────────────────────────────────────────────
   /**
-   * The legacy editor writes crash recovery under the same key, so `open()`
-   * can restore a draft in legacy vocabulary the kit cannot edit. Its edits
-   * are carried over upgraded: reopen on the clean baseline and re-apply each
-   * field that differs, so undo walks back to the saved page, never to a
-   * legacy draft.
+   * Two tabs on one page would each autosave their own copy over the other's:
+   * a save sends the WHOLE page. So every save is announced on a channel for
+   * this page, and a tab that hears another tab saved it goes STALE — it stops
+   * saving and publishing, and the canvas says to reload.
+   *
+   * Best effort by design: without `BroadcastChannel` nothing is heard, and a
+   * second DEVICE is out of reach of any tab-to-tab signal.
    */
-  function adoptRecoveredDraft(id: string, baseline: PageBuilderState): void {
-    const restored = pageBuilder.getSavePayload();
-    if (!restored) return;
-    const kit = toKitPage(restored);
-    const shape = { design: restored.design, sections: restored.sections };
-    if (sameValue(shape, kit)) return;
-    const recovered: PageBuilderState = {
-      ...restored,
-      design: kit.design,
-      sections: kit.sections,
+  const tabId = crypto.randomUUID();
+  let channel: BroadcastChannel | null = null;
+
+  $effect(() => {
+    const id = pageId;
+    if (!id || typeof BroadcastChannel === 'undefined') return;
+    const opened = new BroadcastChannel(`codex:page-builder:${id}`);
+    opened.onmessage = (event: MessageEvent<{ tab?: unknown }>) => {
+      const from = event.data?.tab;
+      if (typeof from === 'string' && from !== tabId) goStale();
     };
-    pageBuilder.close();
-    pageBuilder.open(id, baseline);
-    for (const key of Object.keys(recovered) as (keyof PageBuilderState)[]) {
-      if (!sameValue(recovered[key], baseline[key])) {
-        pageBuilder.updateMeta(key, recovered[key]);
-      }
+    channel = opened;
+    return () => {
+      opened.close();
+      if (channel === opened) channel = null;
+    };
+  });
+
+  function goStale(): void {
+    if (stale) return;
+    stale = true;
+    autosave.cancel();
+  }
+
+  /** Tell the page's other tabs that the server's copy just moved. */
+  function announceSave(): void {
+    try {
+      channel?.postMessage({ tab: tabId });
+    } catch {
+      // Closed under a save that outlived the editor: nobody left to tell.
     }
   }
 
   // ── Save ─────────────────────────────────────────────────────────────────
+  /** What the server holds once `sent` has landed: the offer as persisted. */
+  function landed(
+    sent: PageBuilderState,
+    synced: PersistedPageOffer | null
+  ): PageBuilderState {
+    return synced
+      ? { ...sent, offer: { ...(sent.offer ?? {}), ...synced } }
+      : sent;
+  }
+
   /**
-   * Only promote the draft to "saved" if nothing changed while the write was
-   * in flight. The store's `markSaved()` baselines the CURRENT draft, so
-   * keystrokes typed during an autosave would otherwise be marked saved
-   * without ever being sent. Left dirty, the next save sends them.
+   * Did the draft change while the write was in flight? The store's plain
+   * `markSaved()` baselines the CURRENT draft, so keystrokes typed during an
+   * autosave would be marked saved without ever being sent. When they exist,
+   * the baseline moves to what landed instead, and the next save sends them.
    */
   function unchangedSince(
     sent: PageBuilderState,
     synced: PersistedPageOffer | null
   ): boolean {
     const now = pageBuilder.getSavePayload();
-    if (!now) return false;
-    const expected = synced
-      ? { ...sent, offer: { ...(sent.offer ?? {}), ...synced } }
-      : sent;
-    return sameValue(now, expected);
+    return !!now && sameValue(now, landed(sent, synced));
   }
 
   /**
@@ -318,6 +369,9 @@ export function createBuilderSession(options: {
   }
 
   async function saveNow(): Promise<AutosaveSaveResult> {
+    // The one gate every save passes: a stale copy would write over newer work.
+    if (stale)
+      return { ok: false, message: m.studio_page_editor_stale_banner() };
     if (!isDirty) return { ok: true };
     const payload = pageBuilder.getSavePayload();
     const rowId = record?.id;
@@ -328,9 +382,13 @@ export function createBuilderSession(options: {
     const result = await saveBuilderDraft({
       pageId: rowId,
       payload,
-      savedOffer: pageBuilder.saved?.offer,
+      savedOffer: persistedOffer,
       savePage: (input) => saveJourneyPage(toV2SaveBody(input)),
-      saveOffer: updateJourneyOffer,
+      saveOffer: async (input) => {
+        const saved = await updateJourneyOffer(input);
+        persistedOffer = input.offer;
+        return saved;
+      },
       monetisation: {
         isDirty: monetisation.isDirty,
         save: () => monetisation.save(),
@@ -342,14 +400,20 @@ export function createBuilderSession(options: {
       },
       syncOffer: (next) => {
         synced = next;
+        // Only over the offer that was SENT. A price typed while this save was
+        // in flight is newer than `next`: overwriting it would make the draft
+        // match the payload, so it would be marked saved and never sent.
+        if (!sameValue(pageBuilder.pending?.offer, payload.offer)) return;
         // The server's normalised offer, not a creator edit — no undo step.
         pageBuilder.updateOffer(next, { record: false });
       },
       markSaved: () => {
         // Autosave is a checkpoint, not a commit point: keep the undo stack.
-        if (unchangedSince(payload, synced)) {
-          pageBuilder.markSaved({ keepHistory: true });
-        }
+        pageBuilder.markSaved(
+          unchangedSince(payload, synced)
+            ? { keepHistory: true }
+            : { keepHistory: true, baseline: landed(payload, synced) }
+        );
       },
       refresh: () => invalidate('cache:versions'),
       refreshQueries: ({ offer: offerMoved, media }) =>
@@ -360,11 +424,15 @@ export function createBuilderSession(options: {
     });
     if (result.outcome === 'failed') {
       // Every stage after `page` means the page row — its status included —
-      // already landed.
-      if (result.stage !== 'page') persistedStatus = payload.status;
+      // already landed, so the other tabs' copies are just as out of date.
+      if (result.stage !== 'page') {
+        persistedStatus = payload.status;
+        announceSave();
+      }
       return { ok: false, message: result.message };
     }
     persistedStatus = payload.status;
+    announceSave();
     if (result.staleWarning) toast.warning(result.staleWarning);
     return { ok: true };
   }
@@ -389,11 +457,12 @@ export function createBuilderSession(options: {
   $effect(() => {
     if (changeSignal === null) return;
     untrack(() => {
-      if (isDirty) autosave.notifyChange();
+      if (isDirty && !stale) autosave.notifyChange();
     });
   });
 
-  // One toast per distinct failure; a success in between re-arms it.
+  // One toast per distinct failure; a success in between re-arms it. A stale
+  // tab's banner already says why nothing saves.
   let toastedError: string | null = null;
   $effect(() => {
     const now = autosave.status;
@@ -401,6 +470,7 @@ export function createBuilderSession(options: {
     untrack(() => {
       if (now === 'saved') toastedError = null;
       if (now !== 'error' || !message || message === toastedError) return;
+      if (stale) return;
       toastedError = message;
       toast.error(m.studio_page_editor_toast_save_failed(), message);
     });
@@ -417,13 +487,14 @@ export function createBuilderSession(options: {
     const previous = status;
     busy = next === 'published' ? 'publishing' : 'unpublishing';
     try {
-      pageBuilder.updateMeta('status', next);
+      // Never an undo step: undo walks back edits, not whether the page is live.
+      pageBuilder.updateMeta('status', next, { record: false });
       let result = await autosave.flush();
       if (result.ok && persistedStatus !== next) {
         result = await autosave.flush();
       }
       if (!result.ok && persistedStatus !== next) {
-        pageBuilder.updateMeta('status', previous);
+        pageBuilder.updateMeta('status', previous, { record: false });
       }
       return result.ok;
     } finally {
@@ -446,8 +517,10 @@ export function createBuilderSession(options: {
     return { ok: false, reveal };
   }
 
+  // A stale tab publishes nothing: its copy is older than the server's, and
+  // publishing it would put the older page live over the newer one.
   async function publish(): Promise<PublishResult> {
-    if (busy) return { ok: false };
+    if (busy || stale) return { ok: false };
     const blocked = blockedBy();
     if (blocked) return blocked;
     const ok = await setLive('published');
@@ -456,7 +529,7 @@ export function createBuilderSession(options: {
   }
 
   async function publishChanges(): Promise<PublishResult> {
-    if (busy) return { ok: false };
+    if (busy || stale) return { ok: false };
     const blocked = blockedBy();
     if (blocked) return blocked;
     busy = 'publishing';
@@ -471,7 +544,7 @@ export function createBuilderSession(options: {
   }
 
   async function unpublish(): Promise<boolean> {
-    if (busy) return false;
+    if (busy || stale) return false;
     const ok = await setLive('draft');
     if (ok) toast.success(m.studio_page_editor_toast_unpublished());
     return ok;
@@ -483,7 +556,9 @@ export function createBuilderSession(options: {
    * creator is told the preview shows what is live.
    */
   async function preview(): Promise<void> {
-    if (isDirty && !isPublished) {
+    // A stale tab's copy is never saved first: the preview shows the newer
+    // copy the other tab saved.
+    if (isDirty && !isPublished && !stale) {
       const result = await autosave.flush();
       if (!result.ok) return;
     }
@@ -530,7 +605,9 @@ export function createBuilderSession(options: {
       toast.info(m.studio_page_editor_toast_links_inert());
       return;
     }
-    if (!isDirty) return;
+    // A stale tab's edits cannot be saved or published, so there is nothing
+    // to wait for and nothing to ask about.
+    if (!isDirty || stale) return;
     if (isPublished) {
       if (!confirm(m.studio_page_editor_confirm_leave())) navigation.cancel();
       return;
@@ -546,7 +623,16 @@ export function createBuilderSession(options: {
     });
   });
 
-  const stopUnloadGuard = guardUnload(() => isDirty);
+  // The stale banner's Reload is the creator's own choice, made knowing this
+  // tab's edits cannot be saved — the browser's leave prompt would only
+  // second-guess it.
+  let reloading = false;
+  const stopUnloadGuard = guardUnload(() => isDirty && !reloading);
+
+  function reloadTab(): void {
+    reloading = true;
+    window.location.reload();
+  }
 
   $effect(() => () => {
     autosave.dispose();
@@ -582,12 +668,17 @@ export function createBuilderSession(options: {
     get hasUnpublishedChanges() {
       return autosave.hasUnpublishedChanges;
     },
+    // Nothing saves in a stale tab, so there is no save state to show.
     get saveStatus() {
-      return autosave.status;
+      return stale ? 'idle' : autosave.status;
     },
     get saveError() {
-      return autosave.errorMessage;
+      return stale ? undefined : autosave.errorMessage;
     },
+    get stale() {
+      return stale;
+    },
+    reloadTab,
     get busy() {
       return busy;
     },

@@ -251,6 +251,32 @@ describe('sell-media store · save', () => {
     // The baseline must NOT have moved — the creator's draft is still unsaved.
     expect(sellMedia.isDirty).toBe(true);
   });
+
+  it('keeps a slot picked while the write is in flight, unsaved against the new baseline', async () => {
+    getJourneySellMedia.mockResolvedValue({ ...PERSISTED, heroMediaId: null });
+    let answer: (media: JourneySellMedia) => void = () => {};
+    updateJourneySellMedia.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+    await sellMedia.open(PAGE_ID);
+
+    sellMedia.setSlot('heroMediaId', PERSISTED.heroMediaId);
+    const saving = sellMedia.save();
+    // Picked again while the write is in flight.
+    const newer = PERSISTED.signatureMediaId;
+    sellMedia.setSlot('heroMediaId', newer);
+    answer(PERSISTED);
+    await saving;
+
+    // The echo does not revert the newer pick, and it is still to be sent.
+    expect(sellMedia.slot('heroMediaId')).toBe(newer);
+    expect(sellMedia.isDirty).toBe(true);
+    // The baseline DID move to what the server holds.
+    sellMedia.setSlot('heroMediaId', PERSISTED.heroMediaId);
+    expect(sellMedia.isDirty).toBe(false);
+  });
 });
 
 /**

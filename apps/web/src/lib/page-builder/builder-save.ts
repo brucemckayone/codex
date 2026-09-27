@@ -202,7 +202,13 @@ export interface BuilderSaveDeps {
   pageId: string;
   /** The builder's pending draft snapshot (`pageBuilder.getSavePayload()`). */
   payload: PageBuilderState;
-  /** The last-saved offer baseline — the offer leg is skipped when unchanged. */
+  /**
+   * The offer the server last ACCEPTED — the offer leg is skipped when the
+   * draft's offer matches it. Pass what the offer leg last persisted, not the
+   * page's saved baseline: that moves only once every leg lands, so after a
+   * later leg fails it still holds the old offer, and an offer set back to
+   * that old value would compare "unchanged" and never be sent.
+   */
   savedOffer: PageOffer | undefined;
   savePage(input: SavePagePayload): Promise<unknown>;
   saveOffer(input: {

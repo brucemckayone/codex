@@ -14271,6 +14271,38 @@ export const studio_page_editor_toast_links_inert = () => `Buttons on the page d
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_recovery_restored = () => `Restored your unsaved changes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_recovery_discarded = () => `Unsaved changes from an earlier session weren’t restored because the page has changed since.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_stale_banner = () => `This page was saved in another tab. Reload to keep editing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_stale_reload = () => `Reload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_tabs_label = () => `Editor panels`
 
 

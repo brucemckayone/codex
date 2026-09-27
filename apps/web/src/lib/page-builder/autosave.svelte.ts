@@ -77,6 +77,13 @@ export interface AutosaveController {
   flush(): Promise<AutosaveSaveResult>;
   /** Re-attempt after an error. No-op while a save is already in flight. */
   retry(): void;
+  /**
+   * Drop a scheduled save and any follow-up queued behind the running one.
+   * Unlike {@link dispose} the controller stays usable, and a save already in
+   * flight still lands — it cannot be recalled. For a caller that must stop
+   * saving NOW (another tab saved this page), and gates its own later calls.
+   */
+  cancel(): void;
   /** Stop scheduling saves and clear timers. Call on teardown. */
   dispose(): void;
 }
@@ -189,6 +196,13 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
     void startChain();
   }
 
+  function cancel(): void {
+    clearDebounce();
+    queuedAnotherSave = false;
+    // A scheduled save that will never run is not "Saving…".
+    if (state.status === 'pending') state.status = 'idle';
+  }
+
   function dispose(): void {
     disposed = true;
     clearDebounce();
@@ -211,6 +225,7 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
     notifyChange,
     flush,
     retry,
+    cancel,
     dispose,
   };
 }

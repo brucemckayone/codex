@@ -29,6 +29,7 @@ import type {
   SectionProps,
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
+import { toPersistedOffer } from './builder-save';
 import { DEFINITIONS } from './kit/model/catalog';
 import {
   isColourSchemeId,
@@ -43,6 +44,82 @@ import type { SectionStyle } from './kit/model/types';
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'codex:page-builder';
+
+// ── Crash recovery ──────────────────────────────────────────────────────────
+// The tab keeps its unsaved draft in sessionStorage, so a reload or a crash
+// does not lose it. A draft is only safe to restore over the page it was
+// edited FROM: once another tab has saved the page, the draft is stale, and
+// restoring it would autosave the old page over the newer one. So the row
+// carries a fingerprint of the saved page it was written against, and `open`
+// restores it only when that still matches what the server holds.
+
+/** What {@link open} did with the tab's crash-recovery row. */
+export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+
+interface RecoveryRow {
+  pageId?: string;
+  /** {@link fingerprint} of the saved page the draft was edited from. */
+  baseline?: string;
+  pending?: PageBuilderState;
+  selectedSectionId?: string | null;
+}
+
+/** JSON with every object's keys sorted, because jsonb does not keep order. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+      return inner;
+    }
+    const bag = inner as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(bag)
+        .sort()
+        .map((key) => [key, bag[key]])
+    );
+  });
+}
+
+/** A 53-bit string hash (cyrb53): a short fingerprint, not a security check. */
+function hash(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * A saved page's fingerprint, taken the way the SERVER will hand the page
+ * back, so a page this tab saved matches its own next load.
+ *
+ * The save is lossy in three known ways, each normalised here: the save body
+ * trims the title, the slug and the SEO text; the offer is stored as a TOTAL
+ * bag, so "no bag" and "every way in off" are the same offer; and jsonb does
+ * not keep key order.
+ */
+function fingerprint(page: PageBuilderState): string {
+  const seo = page.seo && {
+    ...page.seo,
+    title: page.seo.title?.trim(),
+    description: page.seo.description?.trim(),
+  };
+  return hash(
+    canonicalJson({
+      ...page,
+      title: page.title.trim(),
+      slug: page.slug.trim(),
+      seo,
+      offer: toPersistedOffer(page.offer ?? {}),
+    })
+  );
+}
 
 // ── ID factory (injectable for tests) ───────────────────────────────────────
 // Defaults to crypto.randomUUID (present in the SvelteKit + Node runtimes).
@@ -81,6 +158,11 @@ const isDirty = $derived.by(() => {
   return JSON.stringify(state.saved) !== JSON.stringify(state.pending);
 });
 
+/** Moves only when `saved` does — never once per keystroke. */
+const savedFingerprint = $derived(
+  state.saved ? fingerprint(state.saved) : null
+);
+
 const sections = $derived<PageSection[]>(state.pending?.sections ?? []);
 
 const selectedSection = $derived.by<PageSection | null>(
@@ -102,15 +184,20 @@ function initEffects(): void {
     // not opened a page must never write a recovery row.
     $effect(() => {
       if (!browser || !state.pageId || !state.pending) return;
+      // Only UNSAVED work gets a row. A clean one could only ever restore the
+      // saved page — or, once another tab has saved over it, a stale copy.
+      if (!isDirty || !savedFingerprint) {
+        clearStorage();
+        return;
+      }
+      const row: RecoveryRow = {
+        pageId: state.pageId,
+        baseline: savedFingerprint,
+        pending: state.pending,
+        selectedSectionId: state.selectedSectionId,
+      };
       try {
-        sessionStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            pageId: state.pageId,
-            pending: state.pending,
-            selectedSectionId: state.selectedSectionId,
-          })
-        );
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(row));
       } catch {
         // sessionStorage full/unavailable — crash recovery is best-effort.
       }
@@ -165,6 +252,9 @@ function sameBag(
 // its call site is keystroke-driven (`oninput`), `snapshot()` for a discrete
 // action. When in doubt use `snapshotEdit()`: over-coalescing costs granularity,
 // under-recording costs the author their work.
+//
+// The one field outside the history is `status`: it is the server's publish
+// state, not an edit, and undo/redo never move it (see {@link undo}).
 
 const history = $state<{ undo: PageBuilderState[]; redo: PageBuilderState[] }>({
   undo: [],
@@ -240,23 +330,40 @@ function ensureSelection(): void {
   }
 }
 
-/** Step back one discrete edit (Cmd/Ctrl+Z). */
+/**
+ * Step back one discrete edit (Cmd/Ctrl+Z).
+ *
+ * THE STATUS IS NOT PART OF THE HISTORY, and a restored snapshot keeps the
+ * CURRENT one. `status` is what the server holds — live or draft — and only
+ * Publish and Unpublish change it (never as an undo step). A snapshot's status
+ * is whatever it was when some other edit was made, so restoring it would
+ * unpublish a live page through Cmd+Z, or show "Live" over a draft.
+ */
 function undo(): void {
   if (!state.pending || history.undo.length === 0) return;
   // Seal any in-flight typing burst so it is its own step before walking back.
   sealBurst();
   history.redo.push(clone(state.pending));
   const prev = history.undo.pop();
-  if (prev) state.pending = prev;
+  if (prev) {
+    prev.status = state.pending.status;
+    state.pending = prev;
+  }
   ensureSelection();
 }
 
-/** Re-apply the last undone edit (Cmd/Ctrl+Shift+Z / Ctrl+Y). */
+/**
+ * Re-apply the last undone edit (Cmd/Ctrl+Shift+Z / Ctrl+Y). Keeps the current
+ * status, for the reason {@link undo} gives.
+ */
 function redo(): void {
   if (!state.pending || history.redo.length === 0) return;
   history.undo.push(clone(state.pending));
   const next = history.redo.pop();
-  if (next) state.pending = next;
+  if (next) {
+    next.status = state.pending.status;
+    state.pending = next;
+  }
   ensureSelection();
 }
 
@@ -264,40 +371,52 @@ function redo(): void {
 
 /**
  * Begin a builder session for a persisted page. Seeds `saved`/`pending` from the
- * loaded draft, restoring an in-flight `pending` from sessionStorage when it
- * matches this page (crash recovery), and focuses the first section.
+ * loaded draft and focuses the first section — then restores the tab's unsaved
+ * draft of this page, if it has one that is still safe to restore (see
+ * {@link recover}). Returns what happened to that draft, for the caller to say.
  */
-function open(pageId: string, saved: PageBuilderState): void {
+function open(pageId: string, saved: PageBuilderState): RecoveryOutcome {
   initEffects();
   clearHistory();
   state.pageId = pageId;
   state.saved = clone(saved);
-
-  if (browser) {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const restored = JSON.parse(raw) as {
-          pageId?: string;
-          pending?: PageBuilderState;
-          selectedSectionId?: string | null;
-        };
-        if (restored.pageId === pageId && restored.pending) {
-          state.pending = restored.pending;
-          state.selectedSectionId =
-            restored.selectedSectionId ?? firstSectionId(restored.pending);
-          state.isOpen = true;
-          return;
-        }
-      }
-    } catch {
-      // Corrupt persisted state — fall through to a clean clone.
-    }
-  }
-
   state.pending = clone(saved);
   state.selectedSectionId = firstSectionId(state.pending);
   state.isOpen = true;
+  try {
+    return recover(pageId, saved);
+  } catch {
+    // Corrupt persisted state — the saved page stands.
+    return 'none';
+  }
+}
+
+/**
+ * Restore the tab's unsaved draft of `pageId`, but only over the page it was
+ * edited from. A row written against a different saved page is DISCARDED: the
+ * server's copy has moved on (another tab saved it), and restoring the draft
+ * would autosave the older page over the newer one.
+ *
+ * The draft never brings its STATUS. That is the server's, and a stale one
+ * would publish or unpublish the page on the draft's first save.
+ */
+function recover(pageId: string, saved: PageBuilderState): RecoveryOutcome {
+  if (!browser) return 'none';
+  const raw = sessionStorage.getItem(STORAGE_KEY);
+  const row = raw ? (JSON.parse(raw) as RecoveryRow) : null;
+  if (row?.pageId !== pageId || !row.pending) return 'none';
+  const baseline = fingerprint(saved);
+  const draft: PageBuilderState = { ...row.pending, status: saved.status };
+  // Nothing in it that the saved page does not already say.
+  if (fingerprint(draft) === baseline) return 'none';
+  if (row.baseline !== baseline) {
+    clearStorage();
+    return 'discarded';
+  }
+  const selected = row.selectedSectionId ?? firstSectionId(draft);
+  state.pending = draft;
+  state.selectedSectionId = selected;
+  return 'restored';
 }
 
 function firstSectionId(page: PageBuilderState): string | null {
@@ -328,17 +447,21 @@ function selectSection(id: string | null): void {
  * panel's slug input both fire on `oninput`, so a per-keystroke step would fill
  * the 80-step history with one sentence and evict every real edit behind it.
  *
- * A no-op write is dropped before the snapshot: `handlePublish` re-writes the
- * same status when it rolls back a failed publish, and a step that changes
- * nothing is a step the author has to press undo twice to get past.
+ * `record: false` writes without an undo step, mirroring {@link updateOffer}.
+ * A STATUS write must pass it: the status is outside the history (see
+ * {@link undo}), so a step recorded for it would restore nothing.
+ *
+ * A no-op write is dropped before the snapshot: a step that changes nothing is
+ * a step the author has to press undo twice to get past.
  */
 function updateMeta<K extends keyof PageBuilderState>(
   field: K,
-  value: PageBuilderState[K]
+  value: PageBuilderState[K],
+  options: { record?: boolean } = {}
 ): void {
   if (!state.pending) return;
   if (state.pending[field] === value) return;
-  snapshotEdit(`meta:${String(field)}`);
+  if (options.record !== false) snapshotEdit(`meta:${String(field)}`);
   state.pending[field] = value;
 }
 
@@ -727,10 +850,16 @@ function getSavePayload(): PageBuilderState | null {
  * `keepHistory` is for AUTOSAVE: a save that fires ~1.5s after every edit must
  * not erase the undo stack, or ⌘Z only ever reaches back to the last pause. An
  * explicit Save (the legacy builder) still clears it, as before.
+ *
+ * `baseline` is what the server now holds, when that is NOT the current draft
+ * — a save overtaken by an edit made while it was in flight. The baseline
+ * moves to what landed, and the edit stays unsaved until a save sends it.
  */
-function markSaved(options: { keepHistory?: boolean } = {}): void {
+function markSaved(
+  options: { keepHistory?: boolean; baseline?: PageBuilderState } = {}
+): void {
   if (!state.pending) return;
-  state.saved = clone(state.pending);
+  state.saved = clone(options.baseline ?? state.pending);
   clearStorage();
   if (!options.keepHistory) clearHistory();
 }
