@@ -59,7 +59,7 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 ## Open follow-ups (not blockers)
 
 - Run the journeys e2e specs (`sell-page-head`, `sell-page-purchase` were updated to kit markup but not executed) and `codex-review` before merging; the legacy canvas-parity spec was deleted, not rewritten.
-- Page images: uploads never saved into a page aren't swept (the sweep's re-occupied guard is timestamp-based); image variants top out at 800px (full-bleed hero/cta upscale on wide screens — add an `xl` variant or srcset); a duplicated page would share another page's image prefix.
+- Page images: variants top out at 800px (full-bleed hero/cta upscale on wide screens — add an `xl` variant or srcset). Cleanup was reworked after codex-review (contract A3, revised 2026-09-27): uploads are queued as they land and the sweep re-checks references, so never-saved uploads and duplicated pages are both handled.
 - Pricing `offers[].id` is free text — a picker of the live offer paths would be friendlier.
 - Only Chrome audited; the no-`pow()` colour fallback isn't in the contrast matrix. Editor checked at 1280–1440 desktop only.
 - Dev DB: the draft test portal "Quiet Hours" (studio-alpha) carries test images and a Text section.

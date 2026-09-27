@@ -315,10 +315,15 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   `landing-pages/{pageId}/images/{imageId}` with the standard `sm|md|lg.webp` variants, and referenced
   from section props as an **`ImageRef = { key: string; alt?: string }`** (e.g. `props.image`,
   `props.background`, `items[].image`). The server finds references by deep-scanning section props for
-  strings under that page's prefix — no per-type schema knowledge — so any block may carry images.
+  strings that are exactly a minted key — no per-type schema knowledge — so any block may carry images.
   Removing the last reference to a key (on save) or never saving an uploaded key queues it for the
   existing orphan sweep. The web resolves a ref to a URL with a pure helper
   (`lib/page-builder/page-images.ts`); blocks never build CDN URLs themselves.
+  *Revised 2026-09-27 (codex-review):* the queue holds each image's three OBJECT keys (nothing lives at
+  the base key), every upload is queued as it lands, and a queued row is a nomination, not a verdict —
+  the sweep acts on a page image only after 7 days, and only if no page in the key's own org
+  (soft-deleted included) still references it. One owner of the key shape:
+  `@codex/image-processing` `page-image-keys.ts`.
 - **A4 · 2026-09-26 · orchestrator (WP3/WP4 question) · The one sanctioned editor-only element.** A
   block may render an EMPTY-STATE PROMPT (e.g. "Add your intro video under Settings → Media") only
   when `edit` is non-null, and that element carries **`data-lp-edit-only`**. It must never exist on the

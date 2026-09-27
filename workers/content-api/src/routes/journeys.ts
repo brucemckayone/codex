@@ -1476,10 +1476,14 @@ app.delete(
  * Content-Type: multipart/form-data. Form field: `image` (file).
  *
  * NO DELETE ROUTE, and that is deliberate, not an oversight: unlike a still
- * slot, there is no column to clear. Removing an image means saving the page
- * without its reference — `CourseJourneyService.saveJourneyPage`'s deep-scan
- * diff is what notices a dropped reference and queues the now-unreferenced
- * key for the orphan sweep.
+ * slot, there is no column to clear. Every upload is queued for the orphan
+ * sweep the moment it lands, and so is every image a save drops
+ * (`CourseJourneyService.saveJourneyPage`'s deep-scan diff); the sweep keeps
+ * an image for as long as a page references it and reclaims it once none does.
+ *
+ * `rateLimit: 'strict'` (20/min) rather than the siblings' `'api'`: those
+ * overwrite one deterministic key per course, so their storage is bounded,
+ * while every call here mints a new key and writes three new objects.
  *
  * The page is resolved (and org-scoped) BEFORE any R2 write, exactly like
  * the cover/hero/signature routes above, so a foreign or missing page 404s
@@ -1500,7 +1504,7 @@ app.post(
     policy: {
       auth: 'required',
       requireOrgManagement: true,
-      rateLimit: 'api',
+      rateLimit: 'strict',
     },
     input: {
       params: journeyPageParamsSchema,

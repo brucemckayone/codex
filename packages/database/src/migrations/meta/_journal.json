@@ -673,6 +673,13 @@
       "when": 1790429191814,
       "tag": "0095_tired_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1790496212097,
+      "tag": "0096_breezy_jack_flag",
+      "breakpoints": true
     }
   ]
 }

@@ -45,6 +45,24 @@ export interface CourseGuide {
   quote?: string;
 }
 
+/**
+ * A page exactly as the LEGACY builder stored it, kept on the first save that
+ * rewrites it in the page-kit (v2) vocabulary (Codex-61zsk review).
+ *
+ * The editor opens a legacy row through a read-time upgrade and saves the
+ * upgraded form, and the upgrade has no v2 home for some authored content
+ * (`docs/design/landing-builder/01-contract.md` Appendix A.7: `turn.points`,
+ * the free-taste preview, on-frame labels, `invite.offers[].who`, sections of
+ * an unknown type). Without this, one edit to such a page deletes that content
+ * for good. Written once and never overwritten, so a later contract amendment
+ * that gives the content a home can still restore it.
+ */
+export interface LegacyPageSnapshot {
+  sections: unknown;
+  design: unknown;
+  archivedAt: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Landing pages (D1 — SPEC §4 + §4.1)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -114,6 +132,12 @@ export const landingPages = pgTable(
     // this column existed. So there is no value to write onto existing rows, and
     // an empty `{}` would be indistinguishable from "the creator cleared it".
     seo: jsonb('seo').$type<PageSeo>(),
+
+    // The legacy builder's `sections` + `design`, archived by the first v2
+    // save ({@link LegacyPageSnapshot}). NULL for every page created in the
+    // page kit, and for a legacy page nobody has edited since. Server-only:
+    // no read returns it.
+    legacySnapshot: jsonb('legacy_snapshot').$type<LegacyPageSnapshot>(),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

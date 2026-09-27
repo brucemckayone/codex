@@ -64,6 +64,20 @@ export interface VariantKeys {
   lg: string;
 }
 
+/**
+ * The three variant keys under a still's BASE key (`categories/{id}/cover`,
+ * `courses/{id}/hero`, `landing-pages/{id}/images/{id}`, ...). One definition,
+ * so the upload that writes the objects and the cleanup that may delete them
+ * can never disagree on a key.
+ */
+export function stillVariantKeys(baseKey: string): VariantKeys {
+  return {
+    sm: `${baseKey}/sm.webp`,
+    md: `${baseKey}/md.webp`,
+    lg: `${baseKey}/lg.webp`,
+  };
+}
+
 /** WebP buffers for the three size variants. Internal helper — service.ts
  * passes a structurally-matching object literal to `uploadImageVariants`
  * and never imports the named type, so this stays unexported. */

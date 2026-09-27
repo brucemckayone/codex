@@ -387,6 +387,114 @@ describe('ImageProcessingService', () => {
         expect(firstKeys).not.toContain(key);
       }
     });
+
+    describe('cleanup tracking (Codex-61zsk.10)', () => {
+      const base = 'landing-pages/page-1/images/image-1';
+      const objects = [`${base}/sm.webp`, `${base}/md.webp`, `${base}/lg.webp`];
+
+      function trackedService(r2: Partial<Record<'put' | 'delete', unknown>>) {
+        const orphans = { recordOrphanedFiles: vi.fn().mockResolvedValue([]) };
+        const tracked = new ImageProcessingService({
+          db: testMockDb,
+          environment: 'test',
+          r2Service: {
+            put: vi.fn().mockResolvedValue(undefined),
+            delete: vi.fn().mockResolvedValue(undefined),
+            ...r2,
+          } as unknown as R2Service,
+          r2PublicUrlBase: 'https://test.r2.dev',
+          orphanedFileService: orphans as unknown as OrphanedFileService,
+        });
+        return { tracked, orphans };
+      }
+
+      /** A put that fails for the md variant only. */
+      function putFailingOnMd() {
+        return vi
+          .fn()
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error('R2 unavailable'))
+          .mockResolvedValueOnce(undefined);
+      }
+
+      beforeEach(() => {
+        vi.mocked(processor.processImageVariants).mockReturnValue({
+          sm: new Uint8Array([1]),
+          md: new Uint8Array([2]),
+          lg: new Uint8Array([3]),
+        });
+      });
+
+      it('queues its three OBJECTS at upload, so an image no page uses is reclaimed', async () => {
+        const { tracked, orphans } = trackedService({});
+
+        await tracked.processPageImage(
+          'page-1',
+          'image-1',
+          createTestImageFile('image/png', 'section.png')
+        );
+
+        // The objects, never the base key: nothing lives at the base key, so
+        // a sweep given it deletes nothing and marks the row done.
+        expect(orphans.recordOrphanedFiles).toHaveBeenCalledWith(
+          objects.map((r2Key) => ({
+            r2Key,
+            imageType: 'page_image',
+            entityId: 'page-1',
+            entityType: 'landing_page',
+          }))
+        );
+      });
+
+      it('removes a partial upload instead of leaving objects nothing can name', async () => {
+        const remove = vi.fn().mockResolvedValue(undefined);
+        const { tracked, orphans } = trackedService({
+          put: putFailingOnMd(),
+          delete: remove,
+        });
+
+        await expect(
+          tracked.processPageImage(
+            'page-1',
+            'image-1',
+            createTestImageFile('image/png', 'section.png')
+          )
+        ).rejects.toThrow(/Page image upload failed/);
+
+        expect(remove.mock.calls.map((call) => call[0])).toEqual(objects);
+        // Every object was removed, so there is nothing left to queue.
+        expect(orphans.recordOrphanedFiles).not.toHaveBeenCalled();
+      });
+
+      it('queues whatever part of a failed upload it cannot remove', async () => {
+        const remove = vi
+          .fn()
+          .mockResolvedValueOnce(undefined)
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error('R2 still unavailable'));
+        const { tracked, orphans } = trackedService({
+          put: putFailingOnMd(),
+          delete: remove,
+        });
+
+        await expect(
+          tracked.processPageImage(
+            'page-1',
+            'image-1',
+            createTestImageFile('image/png', 'section.png')
+          )
+        ).rejects.toThrow(/Page image upload failed/);
+
+        expect(orphans.recordOrphanedFiles).toHaveBeenCalledWith([
+          {
+            r2Key: `${base}/lg.webp`,
+            imageType: 'page_image',
+            entityId: 'page-1',
+            entityType: 'landing_page',
+          },
+        ]);
+      });
+    });
   });
 
   describe('processUserAvatar', () => {

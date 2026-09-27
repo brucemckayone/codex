@@ -20,9 +20,11 @@ import {
   validateImageSignature,
 } from '@codex/validation';
 import type { OrphanedFileService } from './orphaned-file-service';
+import { pageImageKey, pageImageObjectKeys } from './page-image-keys';
 import { processImageVariants } from './processor';
 import {
   recordOrphansOrLog,
+  stillVariantKeys,
   uploadImageVariants,
   type VariantKeys,
   withDbUpdateOrphanCleanup,
@@ -105,19 +107,6 @@ async function validateImageFile(
 /** Helper: collect a `VariantKeys` object as a flat `string[]` in sm/md/lg order. */
 function variantKeyList(keys: VariantKeys): string[] {
   return [keys.sm, keys.md, keys.lg];
-}
-
-/**
- * The three variant keys under a still's BASE key (`categories/{id}/cover`,
- * `courses/{id}/hero`, ...). One definition, so the upload that writes the
- * objects and the cleanup that may delete them can never disagree on a key.
- */
-function stillVariantKeys(baseKey: string): VariantKeys {
-  return {
-    sm: `${baseKey}/sm.webp`,
-    md: `${baseKey}/md.webp`,
-    lg: `${baseKey}/lg.webp`,
-  };
 }
 
 /** Orphan classification for the four stills whose DB write the caller owns. */
@@ -770,21 +759,22 @@ export class ImageProcessingService extends BaseService {
    * `items[].image`, ...) — this method has no idea which prop, or even which
    * block, the caller will put the key into.
    *
-   * Consequently this method does NOT touch the database and has no
-   * `persistWithOrphanCleanup` counterpart: there is nothing to write, so
-   * there is nothing a DB failure could roll back. What "is this key still
-   * wanted" means for a page image is answered later and elsewhere — a
-   * deep-scan diff of the page's OLD vs NEW `sections` inside
-   * `CourseJourneyService.saveJourneyPage` — never by this method or its
-   * route. An upload that is never saved into a page at all is therefore a
-   * known gap (see that method's doc comment and WP-10a's report), not a
-   * defect in this one.
+   * Consequently this method has no `persistWithOrphanCleanup` counterpart:
+   * there is no column to write, so nothing a DB failure could roll back.
+   * Instead the three objects are recorded as PENDING `page_image` orphans
+   * the moment they land. That is what reclaims an upload no page ever
+   * references (the creator picked an image and then left): the sweep acts
+   * on a page image only after `PAGE_IMAGE_GRACE_MS`, and only if no page in
+   * its org still references it (`OrphanedFileService.isPageImageReferenced`),
+   * so recording an image that does get used is safe — it is retained, never
+   * deleted. `CourseJourneyService.saveJourneyPage` nominates the images a
+   * save drops the same way.
    *
-   * Keys are namespaced by `pageId` AND `imageId`
-   * (`landing-pages/{pageId}/images/{imageId}/{size}.webp`), so unlike every
-   * still above, replacing a value in a block means uploading a NEW image and
-   * writing its (different) key over the old one — the old key's bytes are
-   * untouched here and become the save-time diff's job to notice.
+   * Keys are namespaced by `pageId` AND `imageId` (`page-image-keys.ts`), so
+   * unlike every still above, replacing a value in a block means uploading a
+   * NEW image and writing its (different) key over the old one — the old
+   * key's bytes are untouched here and become the save-time diff's job to
+   * notice.
    *
    * @param pageId - Owning landing page (keys are namespaced under it)
    * @param imageId - Caller-minted uuid; unique per upload, never reused or
@@ -813,16 +803,29 @@ export class ImageProcessingService extends BaseService {
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
-    const key = `landing-pages/${pageId}/images/${imageId}`;
+    const key = pageImageKey(pageId, imageId);
     const keys = stillVariantKeys(key);
+    const objectKeys = pageImageObjectKeys(key);
 
-    await uploadImageVariants({
-      keys,
-      variants,
-      r2: this.r2Service,
-      failureLabel: 'Page image',
-      obs: this.obs,
-    });
+    try {
+      await uploadImageVariants({
+        keys,
+        variants,
+        r2: this.r2Service,
+        failureLabel: 'Page image',
+        obs: this.obs,
+      });
+    } catch (error) {
+      // `uploadImageVariants` deletes nothing on a partial failure, which is
+      // right for a deterministic key: a retry re-puts the same three and
+      // converges. This key never converges. It is a fresh uuid nothing
+      // references, and a retry mints another, so whatever did land is
+      // removed here and anything that cannot be removed is queued.
+      await this.discardPageImageObjects(pageId, objectKeys);
+      throw error;
+    }
+
+    await this.recordPageImageObjects(pageId, objectKeys, 'page-image-upload');
 
     return {
       key,
@@ -834,5 +837,55 @@ export class ImageProcessingService extends BaseService {
       size: variants.md.byteLength,
       mimeType: 'image/webp',
     };
+  }
+
+  /**
+   * Queue a page image's objects for the sweep, which keeps them for as long
+   * as a page references them (see {@link processPageImage}). Never throws.
+   */
+  private async recordPageImageObjects(
+    pageId: string,
+    r2Keys: string[],
+    context: string
+  ): Promise<void> {
+    if (!this.orphanedFileService) {
+      this.obs.warn('Page image not tracked for cleanup, no orphan service', {
+        context,
+        pageId,
+        r2Keys,
+      });
+      return;
+    }
+    await recordOrphansOrLog(
+      this.orphanedFileService,
+      r2Keys.map((r2Key) => ({
+        r2Key,
+        imageType: 'page_image' as const,
+        entityId: pageId,
+        entityType: 'landing_page' as const,
+      })),
+      this.obs,
+      context
+    );
+  }
+
+  /** Delete a failed upload's objects now; queue any delete that fails. */
+  private async discardPageImageObjects(
+    pageId: string,
+    r2Keys: string[]
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      r2Keys.map((r2Key) => this.r2Service.delete(r2Key))
+    );
+    const failedKeys = r2Keys.filter(
+      (_, i) => results[i]?.status === 'rejected'
+    );
+    if (failedKeys.length > 0) {
+      await this.recordPageImageObjects(
+        pageId,
+        failedKeys,
+        'page-image-upload-failed'
+      );
+    }
   }
 }

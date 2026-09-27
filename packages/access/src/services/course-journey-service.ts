@@ -41,7 +41,11 @@ import {
   videoPlayback,
 } from '@codex/database/schema';
 import type { OrphanedFileService } from '@codex/image-processing';
-import { recordOrphansOrLog } from '@codex/image-processing';
+import {
+  pageIdOfPageImageKey,
+  pageImageObjectKeys,
+  recordOrphansOrLog,
+} from '@codex/image-processing';
 import {
   BaseService,
   ConflictError,
@@ -86,6 +90,7 @@ import type {
   PracticeContentType,
   SectionDesign,
 } from '@codex/shared-types';
+import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 /**
@@ -180,19 +185,24 @@ function resolveCourseSignatureUrl(
 }
 
 /**
- * Deep-scan arbitrary `sections` content for R2 keys under one page's own
- * image prefix (contract amendment A3, Codex-61zsk.10).
+ * Deep-scan arbitrary `sections` content for page-image keys (contract
+ * amendment A3, Codex-61zsk.10).
  *
  * NO PER-TYPE SCHEMA KNOWLEDGE, deliberately. A page image is referenced as
  * an `ImageRef = { key: string; alt?: string }` from anywhere a block author
  * chooses — `props.image`, `props.background`, `items[].image`, one nested
  * inside another — and this file has no catalogue of block prop shapes (that
- * lives in `apps/web`'s page-kit, a different WP's territory). So rather than
- * name known keys, this walks every string LEAF in the tree and keeps the
- * ones that start with the page's own `landing-pages/{pageId}/images/`
- * prefix. A non-matching string (page copy, a CTA href, another page's key)
- * is inert — `startsWith` only ever adds a string that could plausibly be
- * this page's own upload.
+ * lives in `apps/web`'s page-kit). So rather than name known keys, this walks
+ * every string LEAF in the tree and keeps the ones that are EXACTLY a key the
+ * upload route mints (`pageIdOfPageImageKey`). Page copy, a CTA href or a
+ * string that merely shares the prefix is inert.
+ *
+ * Any page's key counts, not only this page's: a duplicated page renders its
+ * source's keys, and dropping one must still nominate it. Nominating is all a
+ * save does. The sweep deletes a page image only after a grace period, and
+ * only if no page in the key's own org references it
+ * (`OrphanedFileService.isPageImageReferenced`), so a key pasted in from
+ * another org can neither keep that org's image nor lose it.
  *
  * Takes `unknown` rather than `PageSection[]` on purpose: it is called once
  * for the OLD stored value (whatever an earlier, possibly different, version
@@ -201,20 +211,38 @@ function resolveCourseSignatureUrl(
  */
 function collectPageImageKeys(
   value: unknown,
-  prefix: string,
   into: Set<string> = new Set()
 ): Set<string> {
   if (typeof value === 'string') {
-    if (value.startsWith(prefix)) into.add(value);
+    if (pageIdOfPageImageKey(value)) into.add(value);
   } else if (Array.isArray(value)) {
-    for (const item of value) collectPageImageKeys(item, prefix, into);
+    for (const item of value) collectPageImageKeys(item, into);
   } else if (value !== null && typeof value === 'object') {
     for (const nested of Object.values(value)) {
-      collectPageImageKeys(nested, prefix, into);
+      collectPageImageKeys(nested, into);
     }
   }
   return into;
 }
+
+/**
+ * Whether a stored page `design` is the page kit's: a v2 Style id under
+ * `style`. Anything else — the legacy axes object, or NULL from before the
+ * column existed — is a legacy row.
+ */
+function isPageKitDesign(design: unknown): boolean {
+  if (typeof design !== 'object' || design === null) return false;
+  const style: unknown = (design as { style?: unknown }).style;
+  return (PAGE_STYLE_IDS as readonly unknown[]).includes(style);
+}
+
+/**
+ * The most page images one save may nominate for cleanup. A save that drops
+ * more nominates the first this many and logs the rest, which then stay in R2:
+ * the safe direction for a bound whose job is to keep any one page from
+ * flooding the orphan queue every tenant's cleanup shares.
+ */
+const MAX_PAGE_IMAGES_NOMINATED_PER_SAVE = 100;
 
 /**
  * Summarise the member-library journey-card rollup from the SAME curriculum +
@@ -1881,19 +1909,6 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * Persist the builder's draft (the frozen save command). Scoped to `(id, org)`
-   * among non-deleted pages — a foreign/missing id throws `NotFoundError` (never a
-   * silent cross-org write). A changed slug is collision-checked against the org's
-   * other non-deleted pages AND courses first (they share one org slug-space), so
-   * it surfaces as a `ConflictError` (409) rather than a raw unique-violation.
-   *
-   * For a COURSE page the subject course is kept in LOCKSTEP with the page
-   * (Codex-xzwl5) — see {@link cascadeCourseFromPage}. Publishing the page
-   * publishes the course (so the public sales page, which requires BOTH, goes
-   * live in one action), unpublishing it unpublishes the course, and the course's
-   * `slug`/`title` follow the page's.
-   */
-  /**
    * Assert a journey page exists, is org-scoped, and is not soft-deleted —
    * the ownership check a page-image upload needs BEFORE any R2 write, so a
    * foreign or missing page 404s and never seeds an orphaned object.
@@ -1929,6 +1944,19 @@ export class CourseJourneyService extends BaseService {
     }
   }
 
+  /**
+   * Persist the builder's draft (the frozen save command). Scoped to `(id, org)`
+   * among non-deleted pages — a foreign/missing id throws `NotFoundError` (never a
+   * silent cross-org write). A changed slug is collision-checked against the org's
+   * other non-deleted pages AND courses first (they share one org slug-space), so
+   * it surfaces as a `ConflictError` (409) rather than a raw unique-violation.
+   *
+   * For a COURSE page the subject course is kept in LOCKSTEP with the page
+   * (Codex-xzwl5) — see {@link cascadeCourseFromPage}. Publishing the page
+   * publishes the course (so the public sales page, which requires BOTH, goes
+   * live in one action), unpublishing it unpublishes the course, and the course's
+   * `slug`/`title` follow the page's.
+   */
   async saveJourneyPage(
     organizationId: string,
     // The editable fields the save touches. A structural subset of the frozen
@@ -1990,6 +2018,8 @@ export class CourseJourneyService extends BaseService {
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
             sections: landingPages.sections,
+            design: landingPages.design,
+            legacySnapshot: landingPages.legacySnapshot,
           })
           .from(landingPages)
           .where(
@@ -2005,6 +2035,19 @@ export class CourseJourneyService extends BaseService {
           throw new NotFoundError('Journey page not found');
         }
         oldSections = existing.sections;
+
+        // The first page-kit save of a LEGACY row keeps what it replaces
+        // (`LegacyPageSnapshot`): the upgraded form the editor saves has no
+        // home for some authored content, and this write is where that content
+        // would otherwise be lost for good. Written once, never overwritten.
+        const legacySnapshot =
+          existing.legacySnapshot || isPageKitDesign(existing.design)
+            ? undefined
+            : {
+                sections: existing.sections,
+                design: existing.design ?? null,
+                archivedAt: new Date().toISOString(),
+              };
 
         const subjectCourseId =
           existing.subjectType === 'course' ? existing.subjectId : null;
@@ -2062,6 +2105,7 @@ export class CourseJourneyService extends BaseService {
             ...(record.design ? { design: record.design } : {}),
             ...(record.seo ? { seo: record.seo } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
+            ...(legacySnapshot ? { legacySnapshot } : {}),
           })
           .where(
             and(
@@ -2089,9 +2133,16 @@ export class CourseJourneyService extends BaseService {
     // Page images (contract amendment A3 · Codex-61zsk.10): an uploaded image
     // is referenced from ANYWHERE in `sections` as an `ImageRef = { key,
     // alt? }`, with no per-type schema knowledge, so finding what changed
-    // means deep-scanning both trees for strings under this page's own R2
-    // prefix rather than diffing named columns — see
-    // {@link collectPageImageKeys}.
+    // means deep-scanning both trees for page-image keys rather than diffing
+    // named columns — see {@link collectPageImageKeys}.
+    //
+    // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
+    // page and two overlapping saves can all put a reference back after the
+    // save that dropped it, so the sweep re-checks the pages before it
+    // deletes anything (`OrphanedFileService.isPageImageReferenced`). The
+    // rows name each image's three R2 OBJECTS, not the base key a block
+    // stores, because nothing lives at the base key: queueing it deleted
+    // nothing while marking the row done.
     //
     // Runs AFTER the transaction above, not inside it, and in its OWN
     // try/catch that only logs: by this point the save has already
@@ -2106,19 +2157,32 @@ export class CourseJourneyService extends BaseService {
     // outer try here is defensive insurance around the scan itself, not
     // around the record call.
     try {
-      const imagePrefix = `landing-pages/${record.id}/images/`;
-      const oldKeys = collectPageImageKeys(oldSections, imagePrefix);
-      const newKeys = collectPageImageKeys(record.sections, imagePrefix);
+      const oldKeys = collectPageImageKeys(oldSections);
+      const newKeys = collectPageImageKeys(record.sections);
       const removedKeys = [...oldKeys].filter((key) => !newKeys.has(key));
 
       if (removedKeys.length === 0) {
         return;
       }
 
+      const nominated = removedKeys.slice(
+        0,
+        MAX_PAGE_IMAGES_NOMINATED_PER_SAVE
+      );
+      if (removedKeys.length > nominated.length) {
+        this.obs.warn('Page image nominations capped for one save', {
+          context: 'landing-page-image',
+          pageId: record.id,
+          removed: removedKeys.length,
+          nominated: nominated.length,
+        });
+      }
+      const r2Keys = nominated.flatMap(pageImageObjectKeys);
+
       if (this.orphanedFileService) {
         await recordOrphansOrLog(
           this.orphanedFileService,
-          removedKeys.map((r2Key) => ({
+          r2Keys.map((r2Key) => ({
             r2Key,
             imageType: 'page_image' as const,
             entityId: record.id,
@@ -2128,16 +2192,16 @@ export class CourseJourneyService extends BaseService {
           'landing-page-image'
         );
       } else {
-        // Mirrors the degraded path `ImageProcessingService`'s own orphan
-        // helpers take when built with no `OrphanedFileService` configured
-        // (`withDbUpdateOrphanCleanup`) — until the registry wires one in for
-        // this service too (Codex-61zsk.10 handoff), this is that same warn.
+        // The registry always supplies one (service-registry.ts, the
+        // `courseJourney` getter). This degraded warn exists for instances
+        // built directly, such as tests, and mirrors the one
+        // `ImageProcessingService` logs in the same situation.
         this.obs.warn(
           'Page image orphan(s) detected, no orphan service configured',
           {
             context: 'landing-page-image',
             pageId: record.id,
-            r2Keys: removedKeys,
+            r2Keys,
           }
         );
       }
