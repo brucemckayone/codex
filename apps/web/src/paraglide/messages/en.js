@@ -15023,6 +15023,14 @@ export const studio_page_editor_image_added = () => `Image added`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_image_broken = () => `This image could not be loaded. Replace it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_image_uploaded = () => `Image uploaded.`
 
 

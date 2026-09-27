@@ -1875,6 +1875,7 @@
   "studio_page_editor_image_remove": "Remove",
   "studio_page_editor_image_empty": "No image yet",
   "studio_page_editor_image_added": "Image added",
+  "studio_page_editor_image_broken": "This image could not be loaded. Replace it.",
   "studio_page_editor_image_uploaded": "Image uploaded.",
   "studio_page_editor_image_failed": "The image could not be uploaded. Please try again.",
   "studio_page_editor_image_formats": "JPG, PNG, WebP or GIF, up to {mb}MB. SVG and other files are not accepted.",

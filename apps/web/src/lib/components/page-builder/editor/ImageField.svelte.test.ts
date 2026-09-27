@@ -211,6 +211,28 @@ describe('ImageField', () => {
     ).toBe('/preview.webp');
   });
 
+  it('says a stored image will not load, instead of calling it added', () => {
+    render({ key: KEY });
+    const thumb = document.body.querySelector('.image__thumb');
+    expect(thumb).not.toBeNull();
+
+    thumb?.dispatchEvent(new Event('error'));
+    flushSync();
+
+    const frame = document.body.querySelector('.image__frame');
+    expect(frame?.textContent?.trim()).toBe(
+      'This image could not be loaded. Replace it.'
+    );
+    expect(document.body.querySelector('.image__thumb')).toBeNull();
+  });
+
+  it('still calls an image with no preview available added', () => {
+    render({ key: KEY }, { mediaBaseUrl: null });
+    expect(
+      document.body.querySelector('.image__frame')?.textContent?.trim()
+    ).toBe('Image added');
+  });
+
   it("shows the server's own words when it refuses the file, and writes nothing", async () => {
     const { writes } = render(undefined);
     remote.next.result = {

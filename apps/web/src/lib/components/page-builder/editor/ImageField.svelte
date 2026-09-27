@@ -58,13 +58,17 @@
   /** Switched off "Decorative" but typed nothing yet — never persisted. */
   let describing = $state(false);
 
-  const thumb = $derived.by(() => {
-    if (!ref) return null;
-    const url =
-      resolvePageImageUrl(ref, 'sm', mediaBaseUrl) ??
-      (fresh?.key === ref.key ? fresh.url : null);
-    return url && url !== brokenThumb ? url : null;
-  });
+  const thumbUrl = $derived(
+    ref
+      ? (resolvePageImageUrl(ref, 'sm', mediaBaseUrl) ??
+          (fresh?.key === ref.key ? fresh.url : null))
+      : null
+  );
+  // Failed to load: its files are missing, or the CDN base is wrong. Not the
+  // same as "no preview available", and the canvas hides it behind the
+  // designed plate, so this field is the one place a creator can learn of it.
+  const broken = $derived(thumbUrl !== null && thumbUrl === brokenThumb);
+  const thumb = $derived(broken ? null : thumbUrl);
   const isDecorative = $derived(decorative && !describing && !alt.trim());
 
   function writeAlt(next: string): void {
@@ -103,6 +107,10 @@
     <div class="image__frame">
       {#if thumb}
         <img class="image__thumb" src={thumb} alt="" onerror={() => (brokenThumb = thumb)} />
+      {:else if broken}
+        <span class="image__empty" data-state="broken">
+          {m.studio_page_editor_image_broken()}
+        </span>
       {:else}
         <span class="image__empty">
           {ref ? m.studio_page_editor_image_added() : m.studio_page_editor_image_empty()}
@@ -245,7 +253,8 @@
     font-weight: var(--font-medium);
   }
 
-  .image__error::before {
+  .image__error::before,
+  .image__empty[data-state='broken']::before {
     content: '';
     display: inline-block;
     inline-size: var(--space-2);
