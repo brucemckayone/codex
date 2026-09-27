@@ -15,7 +15,11 @@
  * TypeScript compiled.
  *
  * Each test seeds its own org (mirrors `course-journey-publish-cascade`'s
- * convention), so the shared branch needs no inter-test cleanup.
+ * convention), so the shared branch needs no inter-test cleanup — except for
+ * the orphan rows the saves queue. Those are live input to a GLOBAL sweep:
+ * media-api's `OrphanedFileCleanupDO` tests sweep the whole table, and rows
+ * left here come due after the grace period and stall them on this file's
+ * leftovers. So every page this file makes has its rows deleted afterwards.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -45,6 +49,8 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
   let serviceWithOrphanTracking: CourseJourneyService;
   let serviceWithoutOrphanTracking: CourseJourneyService;
   let creatorId: string;
+  /** Every page made here; each nomination is filed under one of them. */
+  const pageIds: string[] = [];
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -63,6 +69,11 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
   });
 
   afterAll(async () => {
+    if (pageIds.length > 0) {
+      await db
+        .delete(orphanedImageFiles)
+        .where(inArray(orphanedImageFiles.originalEntityId, pageIds));
+    }
     await teardownTestDatabase();
   });
 
@@ -85,6 +96,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       title,
       pageType: 'course',
     });
+    pageIds.push(pageId);
     return { pageId, slug, title };
   }
 
