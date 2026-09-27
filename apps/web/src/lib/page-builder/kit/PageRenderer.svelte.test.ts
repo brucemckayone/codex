@@ -218,6 +218,31 @@ describe('PageRenderer', () => {
       }
     });
 
+    // Contract X11: the org's shader reads the ORG's colours, so a page with its
+    // own colours would clash with it; it draws the glow in its own colours.
+    it('uses the glow, not the org shader, once the page has its own colours', async () => {
+      for (const brandOverrides of [
+        { primaryColor: '#0D9488' },
+        { secondaryColor: '#1B2A41' },
+      ]) {
+        const root = await render({
+          page: surfacedPage(),
+          context: context(),
+          brandOverrides,
+        });
+        expect(root.hasAttribute('data-lp-atmosphere')).toBe(false);
+        unmount(app);
+        app = null;
+      }
+      // Fonts alone leave the colours the shader draws with untouched.
+      const fontsOnly = await render({
+        page: surfacedPage(),
+        context: context(),
+        brandOverrides: { fontHeading: 'Syne' },
+      });
+      expect(fontsOnly.dataset.lpAtmosphere).toBe('soft');
+    });
+
     it('draws a background image behind a section, decoratively, on the media colours', async () => {
       const root = await render({ page: surfacedPage(), context: context() });
       const text = root.querySelector<HTMLElement>('#text');

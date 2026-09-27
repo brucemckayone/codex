@@ -109,8 +109,13 @@
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
+  // The org's shader draws in the ORG's colours, so a page with its own
+  // colours shows the glow (which follows them) rather than clash (03 X11).
+  const ownColours = $derived(
+    Boolean(brandOverrides?.primaryColor || brandOverrides?.secondaryColor)
+  );
   const atmosphere = $derived(
-    edit || still || !sections.some((s) => s.scheme === 'atmosphere')
+    edit || still || ownColours || !sections.some((s) => s.scheme === 'atmosphere')
       ? undefined
       : (STYLES[style].atmosphere ?? 'soft')
   );
