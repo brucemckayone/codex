@@ -1,4 +1,3 @@
-import type { BrandTokenOverrides } from '@codex/shared-types';
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 import {
@@ -308,7 +307,8 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * frozen contract fails `pnpm typecheck` at that call site.
  */
 export const pageSectionSchema = z.object({
-  id: z.string().min(1),
+  // Capped like every other string here; the builder mints uuids (36 chars).
+  id: z.string().min(1).max(100),
   type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
   enabled: z.boolean(),
   variant: z.string().max(60).optional(),
@@ -372,12 +372,65 @@ export const pageSeoSchema = z
   .strict();
 export type PageSeoBody = z.infer<typeof pageSeoSchema>;
 
+/** One brand value: a CSS colour, a font family name, a small token value. */
+const brandValueSchema = z.string().max(200);
+
+/** A brand editor token-override map (`tokenOverrides` / `darkTokenOverrides`). */
+const brandTokenMapSchema = z
+  .record(z.string().regex(/^[a-z0-9-]{1,64}$/), brandValueSchema.nullable())
+  .refine(
+    (map) => Object.keys(map).length <= 100,
+    'Too many token overrides (100 limit)'
+  );
+
+/**
+ * A page's brand overrides (`BrandTokenOverrides`) — BOUNDED. This was
+ * `z.custom()`, which checks nothing: any JSON of any size persisted, and was
+ * re-served in every public page payload (Codex-61zsk review).
+ *
+ * Sizes and shapes only, never a colour or font grammar. The values are CSS
+ * values the brand controls write (hex colours, family names, small numbers),
+ * and the bag round-trips — the builder loads it whole and sends it whole back
+ * — so a grammar stricter than what rendering accepts would make an
+ * otherwise-valid page unsaveable. What stops a value breaking out of its CSS
+ * declaration is the renderer's own check at the sink
+ * (`apps/web/src/lib/page-builder/render/brand-overrides.ts`), which also
+ * covers rows stored before this schema existed.
+ *
+ * Unknown keys are STRIPPED, not rejected, unlike {@link pageSeoSchema}: every
+ * key the renderer reads is declared here, so a stripped key is one nothing
+ * could show, and rejecting it would lock a creator out of a page they can see.
+ */
+export const brandTokenOverridesSchema = z.object({
+  primaryColor: brandValueSchema.optional(),
+  secondaryColor: brandValueSchema.nullable().optional(),
+  accentColor: brandValueSchema.nullable().optional(),
+  backgroundColor: brandValueSchema.nullable().optional(),
+  fontBody: brandValueSchema.nullable().optional(),
+  fontHeading: brandValueSchema.nullable().optional(),
+  radius: z.number().min(0).max(10).optional(),
+  density: z.number().min(0).max(10).optional(),
+  logoUrl: z.string().max(2048).nullable().optional(),
+  tokenOverrides: brandTokenMapSchema.optional(),
+  darkOverrides: z
+    .object({
+      primaryColor: brandValueSchema.optional(),
+      secondaryColor: brandValueSchema.nullable().optional(),
+      accentColor: brandValueSchema.nullable().optional(),
+      backgroundColor: brandValueSchema.nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  darkTokenOverrides: brandTokenMapSchema.nullable().optional(),
+  heroLayout: z.string().max(64).optional(),
+});
+
 /**
  * Save-journey-page body — the editable page record (frozen `JourneyPageRecord`
  * minus the server-owned `organizationId`/`publishedAt`, which the service
- * derives). `sections` is validated structurally by {@link pageSectionSchema};
- * `brandOverrides` still carries its FE type via `z.custom` so the inferred type
- * is assignable to the service input with no boundary cast.
+ * derives). `sections` is validated structurally by {@link pageSectionSchema},
+ * `brandOverrides` by {@link brandTokenOverridesSchema}; both infer types
+ * assignable to the service input with no boundary cast.
  *
  * `.strict()` because this endpoint does NOT own the whole builder draft. The
  * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema` — under Zod's
@@ -425,7 +478,7 @@ export const saveJourneyPageBodySchema = z
     status: journeyPageStatusSchema,
     subjectType: z.string().max(30).nullable(),
     subjectId: uuidSchema.nullable(),
-    brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
+    brandOverrides: brandTokenOverridesSchema.nullable(),
     // CAPPED (Codex-us9ay residual 1). An unbounded array on a jsonb column is an
     // unbounded write; the idiom is already in this file at
     // `saveCurriculumStageSchema` (`.max(100)`). 60 is ~5x the eleven-entry

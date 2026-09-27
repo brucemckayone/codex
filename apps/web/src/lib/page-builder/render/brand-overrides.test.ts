@@ -102,6 +102,45 @@ describe('brandOverridesToCssVars', () => {
     } as BrandTokenOverrides);
     expect(vars).not.toHaveProperty('--brand-color');
   });
+
+  describe('keeps every value inside its own declaration', () => {
+    it.each([
+      ['a second declaration', 'red; position: fixed; inset: 0'],
+      ['a fetched url', 'url(https://pub-x.r2.dev/p.png)'],
+      ['a block', 'red} body{display:none'],
+      ['an escape', 'red\\3b position: fixed'],
+      ['markup', '<b>red</b>'],
+      ['a newline', 'red\nposition: fixed'],
+    ])('drops a value carrying %s', (_label, value) => {
+      const vars = brandOverridesToCssVars({ primaryColor: value });
+      expect(vars).not.toHaveProperty('--brand-color');
+      expect(Object.values(vars).join(' ')).not.toContain(value);
+    });
+
+    it('drops a token whose NAME would inject', () => {
+      const vars = brandOverridesToCssVars({
+        tokenOverrides: {
+          'x: y; position: fixed; --z': 'red',
+          'heading-weight': '400',
+        },
+      });
+      expect(Object.keys(vars)).toEqual(['--brand-heading-weight']);
+    });
+
+    it('keeps the colours, families and numbers the brand controls write', () => {
+      expect(
+        brandOverridesToCssVars({
+          primaryColor: 'oklch(0.62 0.19 35 / 90%)',
+          fontHeading: 'Playfair Display',
+          radius: 0.5,
+        })
+      ).toMatchObject({
+        '--brand-color': 'oklch(0.62 0.19 35 / 90%)',
+        '--brand-font-heading': '"Playfair Display"',
+        '--brand-radius': '0.5rem',
+      });
+    });
+  });
 });
 
 describe('brandOverridesToStyleAttr', () => {

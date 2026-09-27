@@ -315,6 +315,59 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(parsed.sections[1]!.design).toEqual({ scheme: 'contrast' });
   });
 
+  describe('brandOverrides (bounded, where z.custom checked nothing)', () => {
+    const withBrand = (brandOverrides: unknown) =>
+      saveJourneyPageBodySchema.safeParse({ ...BODY, brandOverrides });
+
+    it('round-trips what the brand controls write', () => {
+      const brand = {
+        primaryColor: '#A62B0C',
+        fontHeading: 'Playfair Display',
+        fontBody: 'Inter',
+        radius: 0.5,
+        tokenOverrides: { 'heading-weight': '400', 'shadow-color': null },
+        darkOverrides: { primaryColor: '#F2B8A0' },
+      };
+      const parsed = withBrand(brand);
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.brandOverrides).toEqual(brand);
+    });
+
+    it('drops a key nothing reads instead of refusing the page', () => {
+      const parsed = withBrand({ primaryColor: '#000000', legacyThing: 'x' });
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.brandOverrides).toEqual({ primaryColor: '#000000' });
+    });
+
+    it.each([
+      ['an oversized value', { primaryColor: 'x'.repeat(201) }],
+      [
+        'a token name that is not a token',
+        { tokenOverrides: { 'x; position: fixed': 'red' } },
+      ],
+      [
+        'too many tokens',
+        {
+          tokenOverrides: Object.fromEntries(
+            Array.from({ length: 101 }, (_, i) => [`t-${i}`, '1'])
+          ),
+        },
+      ],
+      ['a radius out of range', { radius: 1e9 }],
+    ])('refuses %s', (_label, brand) => {
+      expect(withBrand(brand).success).toBe(false);
+    });
+  });
+
+  it('caps a section id', () => {
+    expect(
+      saveJourneyPageBodySchema.safeParse({
+        ...BODY,
+        sections: [{ ...SECTION, id: 'x'.repeat(101) }],
+      }).success
+    ).toBe(false);
+  });
+
   it('does not fail the whole page save over one unknown v2 value', () => {
     const parsed = saveJourneyPageBodySchema.parse({
       ...BODY,
