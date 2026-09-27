@@ -54,14 +54,17 @@ Max two agents at a time. Each WP ends with the orchestrator's gate (contract §
 | 9a · 9b · 9c | done | `2af311cd` `f1216ed1` `11e49b80` | new editor is THE builder; legacy builder/renderer/catalogue deleted (~59k lines); v2-only writes; v2 seeds in 4 Styles |
 | 10a | done | `9081d842` | page image upload route + orphan diff |
 | 10b | done | `249821af` | creator images in hero/cta/text/benefits; alt text + decorative opt-in |
-| 11 | done (gates) | `7169709b` | R16 build 24/24 + typecheck 57/57 (0 cached); web 2872, validation 564, access 383, worker-utils 230, content-api 169, image-processing 98; check:ci + brand-boundary clean. NOT run: journeys e2e, codex-review |
+| 11 | done (gates) | `7169709b` | R16 build 24/24 + typecheck 57/57 (0 cached); web 2872, validation 564, access 383, worker-utils 230, content-api 169, image-processing 98; check:ci + brand-boundary clean |
+| review | done | `6d0ed355` … `5ce974c6` | journeys e2e fixtures moved to v2; codex-review 0 critical / 8 high / 9 medium / 5 low / 2 nit, all fixed with a test that fails without its fix (residuals: .17, .18, .19). Final gates at `5ce974c6`: R16 build 24/24 + typecheck 57/57 (0 cached); web 235 files / 2939 tests; validation 571, access 394+, image-processing 114, media-api 38, content-api 169, worker-utils 230; journeys e2e 11/11; check:ci, import boundary, data-access contract clean; svelte-check at the 64-error baseline with none in a changed file |
 
 ## Open follow-ups (not blockers)
 
-- Run the journeys e2e specs (`sell-page-head`, `sell-page-purchase` were updated to kit markup but not executed) and `codex-review` before merging; the legacy canvas-parity spec was deleted, not rewritten.
-- Page images: variants top out at 800px (full-bleed hero/cta upscale on wide screens — add an `xl` variant or srcset). Cleanup was reworked after codex-review (contract A3, revised 2026-09-27): uploads are queued as they land and the sweep re-checks references, so never-saved uploads and duplicated pages are both handled.
-- Pricing `offers[].id` is free text — a picker of the live offer paths would be friendlier.
-- Only Chrome audited; the no-`pow()` colour fallback isn't in the contrast matrix. Editor checked at 1280–1440 desktop only.
+- The canvas-vs-public parity e2e was deleted with the legacy canvas and is not yet rewritten (`Codex-61zsk.15`).
+- Page images: variants top out at 800px (full-bleed hero/cta upscale on wide screens — add an `xl` variant or srcset; `.13`). Cleanup was reworked after codex-review (contract A3, revised 2026-09-27): uploads are queued as they land and the sweep re-checks references, so never-saved uploads and duplicated pages are both handled. Nominations are not yet bounded to keys an upload minted (`.17`).
+- Pricing `offers[].id` is free text — a picker of the live offer paths would be friendlier (`.14`).
+- Only Chrome audited; the no-`pow()` colour fallback isn't in the contrast matrix. Editor checked at 1280–1440 desktop only (`.16`).
+- One page open on two devices: the later save still wins; tabs in one browser are guarded (`.18`).
+- A legacy page's content the kit cannot show is archived in `landing_pages.legacy_snapshot`, but the creator is not told (`.19`).
 - Dev DB: the draft test portal "Quiet Hours" (studio-alpha) carries test images and a Text section.
 
 ## Resume
