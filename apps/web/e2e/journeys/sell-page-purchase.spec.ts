@@ -30,7 +30,6 @@
 import { expect, test } from '@playwright/test';
 import {
   expectSellPageRendered,
-  forceRevealsIn,
   journeyFixture,
   journeyUrl,
 } from '../helpers/journeys';
@@ -49,7 +48,6 @@ test.describe('journey sell page · a purchasable course', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, PURCHASABLE));
     await expectSellPageRendered(page, PURCHASABLE);
-    await forceRevealsIn(page);
 
     const affordances = await page.evaluate(() => {
       const hrefs = (selector: string) =>
@@ -107,7 +105,6 @@ test.describe('journey sell page · a purchasable course', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, PURCHASABLE));
     await expectSellPageRendered(page, PURCHASABLE);
-    await forceRevealsIn(page);
 
     await page.locator('.hero__actions a[href*="/checkout"]').first().click();
     // 30s, not the 5s `expect` default: the checkout is a separate route with its
@@ -145,7 +142,6 @@ test.describe('journey sell page · a course with no way in', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
     await expectSellPageRendered(page, NOT_PURCHASABLE);
-    await forceRevealsIn(page);
 
     // The kit's `HeroBlock` renders `.hero__actions` UNCONDITIONALLY (it also
     // holds the secondary link / watch button, neither gated on purchasability)
@@ -205,7 +201,6 @@ test.describe('journey sell page · a course with no way in', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
     await expectSellPageRendered(page, NOT_PURCHASABLE);
-    await forceRevealsIn(page);
 
     const checkoutLinks = await page.evaluate(() =>
       [...document.querySelectorAll('a[href*="/checkout"]')].map((element) => ({

@@ -1,5 +1,5 @@
 /**
- * Journey / portal E2E helpers — fixtures, auth, and the THREE MEASUREMENT TRAPS
+ * Journey / portal E2E helpers — fixtures, auth, and the TWO MEASUREMENT TRAPS
  * that make this surface lie to anyone who measures it naively.
  *
  * WHY THIS FILE EXISTS. Before it, the journey builder and the whole public
@@ -11,17 +11,13 @@
  * that was so expensive, and they are encoded HERE rather than restated in each
  * spec so the next author cannot repeat them.
  *
- * ── TRAP 1 · 29 OF 37 TEXT LEAVES SIT AT OPACITY 0 ────────────────────────────
- * `reveal.ts` arms `.reveal--armed` from JS and only removes it when the element
- * intersects. That is correct progressive enhancement (immediate-reveal for
- * reduced motion, for no IntersectionObserver, and for SSR — a no-JS client gets
- * fully painted content), so DO NOT "fix" it. But it means a `fullPage`
- * screenshot of an un-scrolled journey page captures almost-empty sections —
- * which is exactly why the repo's own `--project=visual` snapshots of this
- * surface are blank. Call {@link forceRevealsIn} before asserting on geometry or
- * capturing anything.
+ * The sell page now renders through the page kit (`$lib/page-builder/kit`,
+ * Codex-61zsk), which has no scroll-armed reveals: the old opacity-0 trap and
+ * its `forceRevealsIn()` went with the legacy renderer's `reveal.ts`. The studio
+ * canvas parity spec went with the legacy canvas; its rewrite for the new editor
+ * is Codex-61zsk.15.
  *
- * ── TRAP 2 · THE ORG OWNER NEVER SEES THEIR OWN SELL PAGE ─────────────────────
+ * ── TRAP 1 · THE ORG OWNER NEVER SEES THEIR OWN SELL PAGE ─────────────────────
  * An entitled viewer (and the org owner always is) is redirected off
  * `/journeys/<slug>` to `/journeys/<slug>/dashboard`. A spec that signs in to
  * use the builder and then measures "the public page" is measuring the
@@ -31,7 +27,7 @@
  * are not a member of. {@link expectSellPageRendered} fails loudly rather than
  * silently measuring the wrong page.
  *
- * ── TRAP 3 · A LOAD-THROWN 404 RETURNS HTTP 200 ───────────────────────────────
+ * ── TRAP 2 · A LOAD-THROWN 404 RETURNS HTTP 200 ───────────────────────────────
  * `@sveltejs/kit@2.55.0`'s `render_response()` builds the streaming `Response`
  * without passing `status` through (Codex-nqop3 — an UPSTREAM bug, root-caused
  * in round 3, not a defect in this app). So the status code is worthless as
@@ -196,27 +192,6 @@ export function journeyUrl(
   );
 }
 
-/**
- * Force every armed scroll-reveal into its in-state — TRAP 1.
- *
- * Adds `.is-in` rather than scrolling the page, because scrolling a journey page
- * to its full height also arms the `FloatingCta` and moves the layout under a
- * measurement that is already in flight. Returns how many elements were armed so
- * a caller can prove it did something (0 on a page whose reveals have already
- * fired, which is a legitimate state — not a reason to fail).
- */
-export async function forceRevealsIn(
-  page: Page,
-  scope = ':root'
-): Promise<number> {
-  return page.evaluate((selector) => {
-    const root = document.querySelector(selector) ?? document;
-    const armed = root.querySelectorAll('.reveal--armed');
-    for (const element of armed) element.classList.add('is-in');
-    return armed.length;
-  }, scope);
-}
-
 export interface JourneyHeadTags {
   readonly title: string;
   readonly descriptions: readonly string[];
@@ -284,7 +259,7 @@ export async function readJourneyHead(page: Page): Promise<JourneyHeadTags> {
 }
 
 /**
- * Assert we are actually looking at a rendered SELL page — TRAPS 2 and 3
+ * Assert we are actually looking at a rendered SELL page — TRAPS 1 and 2
  * together.
  *
  * HTTP 200 is not evidence here (a load-thrown 404 also returns 200), and an
