@@ -15,7 +15,7 @@
  *      break a lightness pivot) on each ground in both themes, and for a
  *      generated sweep of the sRGB cube.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -484,10 +484,13 @@ const GROUNDS: Record<Mode, Record<string, string>> = {
   },
 };
 
+/** Every tint a Style ships, keyed by Style id; `default` is the kit's own.
+ * 'models every tint a Style ships' holds this to the stylesheets. */
 const STYLE_TINTS: Record<string, Tint> = {
-  'bold / clean': DEFAULT_TINT,
+  default: DEFAULT_TINT,
   soft: { soft: 0.16, panel: 0.22 },
   cinematic: { soft: 0.1, panel: 0.14 },
+  clean: { soft: 0.05, panel: 0.14 },
 };
 
 const SCHEMES: Scheme[] = ['base', 'soft', 'contrast', 'brand', 'accent'];
@@ -546,6 +549,42 @@ describe('the second colour skips a neutral secondary (03 X19)', () => {
     for (const [i, v] of kept.entries())
       expect(Math.abs(v - blue[i])).toBeLessThanOrEqual(1.02);
     expect(pick([115, 115, 115], 0, amber)).toEqual(amber);
+  });
+});
+
+describe('the tints the model proves are the tints that ship', () => {
+  // A hand-kept list drifts: Clean shipped a 5% tint while this file still
+  // proved it at the default 8%. Read every Style's stylesheet (its partials
+  // included, comments stripped) and hold STYLE_TINTS to what it declares.
+  it('models every tint a Style ships', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const declared = new Map<string, { soft?: number; panel?: number }>();
+    for (const file of readdirSync(dir)) {
+      const id = file.match(/^style-([a-z]+)(?:-[a-z]+)?\.css$/)?.[1];
+      if (!id) continue;
+      const css = readFileSync(join(dir, file), 'utf8').replace(
+        /\/\*[\s\S]*?\*\//g,
+        ''
+      );
+      const tint = declared.get(id) ?? {};
+      for (const key of ['soft', 'panel'] as const) {
+        const value = css.match(
+          new RegExp(`--lp-tint-${key}:\\s*([\\d.]+)%`)
+        )?.[1];
+        if (value !== undefined) tint[key] = Number(value) / 100;
+      }
+      declared.set(id, tint);
+    }
+    expect(declared.size).toBe(8);
+    for (const [id, tint] of declared) {
+      const modelled = STYLE_TINTS[id] ?? DEFAULT_TINT;
+      expect(modelled.soft, `${id}: soft tint`).toBeCloseTo(
+        tint.soft ?? DEFAULT_TINT.soft
+      );
+      expect(modelled.panel, `${id}: panel tint`).toBeCloseTo(
+        tint.panel ?? DEFAULT_TINT.panel
+      );
+    }
   });
 });
 
@@ -988,29 +1027,43 @@ describe('textures and shapes — behind the words', () => {
       expect(CODE).toContain(recipe);
   });
 
-  for (const mode of ['light', 'dark'] as const) {
-    it(`${mode}: a texture at any strength holds every floor`, () => {
-      for (const strength of [0.25, 0.5, 0.75, 1])
-        expect(surfaceFailures(mode, (t) => [[t.texture, strength]])).toEqual(
-          []
-        );
-    });
+  // Each sweep runs the 4 096-brand cube once per strength or layering: ~8s
+  // on a quiet machine, past the 15s default at a load average of 24–41
+  // (S3's runs). The work is fixed and deterministic, so the limit is sized
+  // to it rather than to the default; a pathological slowdown still fails.
+  const SWEEP_TIMEOUT = 60_000;
 
-    it(`${mode}: shapes at their alpha, and a texture over them, hold every floor`, () => {
-      for (const layers of [
-        (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA / 2]],
-        (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA]],
-        (t: Decorated): [Rgb, number][] => [
-          [t.shape, SHAPE_ALPHA],
-          [t.texture, 0.5],
-        ],
-        (t: Decorated): [Rgb, number][] => [
-          [t.shape, SHAPE_ALPHA],
-          [t.texture, 1],
-        ],
-      ])
-        expect(surfaceFailures(mode, layers)).toEqual([]);
-    });
+  for (const mode of ['light', 'dark'] as const) {
+    it(
+      `${mode}: a texture at any strength holds every floor`,
+      { timeout: SWEEP_TIMEOUT },
+      () => {
+        for (const strength of [0.25, 0.5, 0.75, 1])
+          expect(surfaceFailures(mode, (t) => [[t.texture, strength]])).toEqual(
+            []
+          );
+      }
+    );
+
+    it(
+      `${mode}: shapes at their alpha, and a texture over them, hold every floor`,
+      { timeout: SWEEP_TIMEOUT },
+      () => {
+        for (const layers of [
+          (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA / 2]],
+          (t: Decorated): [Rgb, number][] => [[t.shape, SHAPE_ALPHA]],
+          (t: Decorated): [Rgb, number][] => [
+            [t.shape, SHAPE_ALPHA],
+            [t.texture, 0.5],
+          ],
+          (t: Decorated): [Rgb, number][] => [
+            [t.shape, SHAPE_ALPHA],
+            [t.texture, 1],
+          ],
+        ])
+          expect(surfaceFailures(mode, layers)).toEqual([]);
+      }
+    );
   }
 
   it('has teeth: shapes a little past their alpha, or on the usual brand, fail', () => {
