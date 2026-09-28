@@ -598,3 +598,14 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   Rule the renderer test enforces: a Style's defaults never repeat a coloured band in its own full
   order (Bold's first draft put curriculum and preview on contrast side by side). The fourteen
   suggested families across the seven Styles that suggest fonts are all distinct.
+- **X23 · 2026-09-28 · orchestrator · Brand never touches contrast on the page as it renders.**
+  `catalog.test.ts` held each Style's full `order` to "a brand band never touches a contrast band"
+  (with a very dark brand the two are near-identical and smear into one block), but nothing held the
+  STARTER, a creator's reorder, or a hidden section between two bands — and Bold, the default Style,
+  opened every new page brand hero → contrast problem. `keepBandsApart` (`resolve.ts`) now steps a
+  Style DEFAULT back to `base` when it would put brand against contrast in either order, exactly as
+  it already did for a repeated band; a scheme the creator chose is never overridden. Bold's starter
+  now resolves brand · base · contrast · base · contrast · base · base · brand · base · base · brand.
+  Pinned: `resolve.test.ts` (both orders, the chosen pair kept, and every Style's resolved starter
+  and order checked for both rules — red before the fix on `bold starter 1: brand → contrast`);
+  `template.test.ts`'s inline copy of the rule updated to match.

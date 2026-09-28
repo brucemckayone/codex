@@ -194,6 +194,70 @@ describe('resolveSections', () => {
       ).map((s) => s.scheme);
       expect(schemes).toEqual(['contrast', 'base']);
     });
+
+    // With a very dark brand the brand and contrast bands are near-identical
+    // and smear into one block. The Style's own `order` is designed apart
+    // (catalog.test.ts), but a starter, a creator's reorder or a hidden
+    // section between them brings the two together — only the resolver sees
+    // the page as it renders.
+    it('a Style default that would put contrast straight under brand steps back to base', () => {
+      expect(STYLES.bold.schemes.hero).toBe('brand');
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'h', type: 'hero' }),
+          section({ id: 'p', type: 'problem' }),
+        ])
+      ).map((s) => s.scheme);
+      expect(schemes).toEqual(['brand', 'base']);
+    });
+
+    it('and brand straight under contrast', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'p', type: 'problem' }),
+          section({ id: 'c', type: 'cta' }),
+        ])
+      ).map((s) => s.scheme);
+      expect(STYLES.bold.schemes.cta).toBe('brand');
+      expect(schemes).toEqual(['contrast', 'base']);
+    });
+
+    it('never overrides a brand and contrast pair the creator chose', () => {
+      const schemes = resolveSections(
+        bold([
+          section({ id: 'h', type: 'hero' }),
+          section({
+            id: 'p',
+            type: 'problem',
+            design: { scheme: 'contrast' },
+          }),
+        ])
+      ).map((s) => s.scheme);
+      expect(schemes).toEqual(['brand', 'contrast']);
+    });
+  });
+
+  describe('every Style, as a creator first gets it', () => {
+    it.each(
+      PAGE_STYLE_IDS
+    )('%s: its starter and its full page keep coloured bands apart', (style) => {
+      for (const [name, types] of [
+        ['starter', STYLES[style].starter],
+        ['order', STYLES[style].order],
+      ] as const) {
+        const schemes = resolveSections({
+          design: { style },
+          sections: types.map((type, i) => section({ id: `s${i}`, type })),
+        }).map((s) => s.scheme);
+        for (let i = 1; i < schemes.length; i++) {
+          const [above, below] = [schemes[i - 1], schemes[i]];
+          const where = `${style} ${name} ${i}: ${above} → ${below}`;
+          const pair = new Set([above, below]);
+          expect(pair.has('brand') && pair.has('contrast'), where).toBe(false);
+          if (below !== 'base') expect(below, where).not.toBe(above);
+        }
+      }
+    });
   });
 });
 
