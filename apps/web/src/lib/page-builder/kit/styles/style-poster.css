@@ -192,6 +192,20 @@
   isolation: isolate;
 }
 
+/* How far the block sits out from its photo — set on the photo, so the room
+   made for it below reads the same value. */
+:is(.lp, #lp-style)[data-lp-style='poster']
+  :is(
+    .hero-poster__reveal,
+    .hero-split__media,
+    .hero-statement__media,
+    .hero-centered__media,
+    .guide__portrait[data-layout='split'],
+    .text__media
+  ) {
+  --_off: clamp(var(--space-3), 1.4cqi, var(--space-6));
+}
+
 :is(.lp, #lp-style)[data-lp-style='poster']
   :is(
     .hero-poster__reveal,
@@ -201,7 +215,6 @@
     .guide__portrait[data-layout='split'],
     .text__media
   )::before {
-  --_off: clamp(var(--space-3), 1.4cqi, var(--space-6));
   content: '';
   position: absolute;
   inset: 0;
@@ -210,6 +223,13 @@
   border-radius: var(--lp-radius-media);
   background: var(--_poster-block);
   pointer-events: none;
+}
+
+/* A photo set under words in its own column (the text block's columns) is
+   pushed down by the block's rise, so the block never runs into the words:
+   measured, it caught a heading's last line at 2.15:1. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .text__head > .text__media {
+  margin-block-start: var(--_off);
 }
 
 /* A hero's wide picture meets the sheet's foot, so the next sheet's cut runs
@@ -241,6 +261,11 @@
   font-synthesis: none;
   line-height: var(--lp-leading-title);
   letter-spacing: var(--lp-tracking-title);
+}
+
+/* …so the room the strip makes for their hanging mark is a title's too. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .tm-marquee__card > .voice:not([data-length='long']) {
+  padding-inline-start: calc(var(--lp-size-title) * 0.4);
 }
 
 /* ── story chapters: the step's number is the poster's big figure ───────── */

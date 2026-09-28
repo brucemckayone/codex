@@ -15,6 +15,8 @@ import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
 import { MARQUEE_MIN, marqueeCopies } from './marquee';
 import TestimonialsBlock from './TestimonialsBlock.svelte';
 import MARQUEE_SOURCE from './TestimonialsMarquee.svelte?raw';
+import WALL_SOURCE from './TestimonialsWall.svelte?raw';
+import VOICE_SOURCE from './Voice.svelte?raw';
 import { unwrapQuote, voices } from './voices';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -77,6 +79,59 @@ const bylines = () =>
   );
 const inert = (el: Element) =>
   Boolean((el as HTMLElement).inert || el.hasAttribute('inert'));
+
+/**
+ * A component's stylesheet as declarations, read with svelte's own CSS parser
+ * (as `styles/motion.test.ts` reads the kit): comments are not rules, so a
+ * commented-out rule cannot pass.
+ */
+function declarationsOf(source: string) {
+  type Node = {
+    type: string;
+    name?: string;
+    prelude?: string | { children: { start: number; end: number }[] };
+    property?: string;
+    value?: string;
+    block?: { children: Node[] } | null;
+  };
+  const declared: {
+    property: string;
+    value: string;
+    selectors: string[];
+    conditions: string[];
+  }[] = [];
+  const walk = (nodes: Node[], conditions: string[]) => {
+    for (const node of nodes) {
+      if (node.type === 'Atrule' && node.name !== 'keyframes') {
+        walk(node.block?.children ?? [], [
+          ...conditions,
+          `@${node.name} ${node.prelude}`,
+        ]);
+      } else if (
+        node.type === 'Rule' &&
+        typeof node.prelude === 'object' &&
+        node.prelude
+      ) {
+        const selectors = node.prelude.children.map((part) =>
+          source.slice(part.start, part.end).replace(/\s+/g, ' ').trim()
+        );
+        for (const child of node.block?.children ?? [])
+          if (child.type === 'Declaration')
+            declared.push({
+              property: child.property ?? '',
+              value: (child.value ?? '').trim(),
+              selectors,
+              conditions,
+            });
+      }
+    }
+  };
+  walk(
+    (parse(source, { modern: true }).css?.children ?? []) as unknown as Node[],
+    []
+  );
+  return declared;
+}
 
 describe('TestimonialsBlock', () => {
   const live = sampleContext().testimonials;
@@ -288,60 +343,10 @@ describe('TestimonialsBlock', () => {
     });
 
     /**
-     * The stylesheet's half of the contract, read with svelte's own CSS
-     * parser (as `styles/motion.test.ts` reads the kit): comments are not
-     * rules, so a commented-out rule cannot pass. `motion.test.ts` already
-     * proves the strip never animates under reduced motion or when still.
+     * The stylesheet's half of the contract. `motion.test.ts` already proves
+     * the strip never animates under reduced motion or when still.
      */
-    function marqueeCss() {
-      const source = MARQUEE_SOURCE;
-      type Node = {
-        type: string;
-        name?: string;
-        prelude?: string | { children: { start: number; end: number }[] };
-        property?: string;
-        value?: string;
-        block?: { children: Node[] } | null;
-      };
-      const declared: {
-        property: string;
-        value: string;
-        selectors: string[];
-        conditions: string[];
-      }[] = [];
-      const walk = (nodes: Node[], conditions: string[]) => {
-        for (const node of nodes) {
-          if (node.type === 'Atrule' && node.name !== 'keyframes') {
-            walk(node.block?.children ?? [], [
-              ...conditions,
-              `@${node.name} ${node.prelude}`,
-            ]);
-          } else if (
-            node.type === 'Rule' &&
-            typeof node.prelude === 'object' &&
-            node.prelude
-          ) {
-            const selectors = node.prelude.children.map((part) =>
-              source.slice(part.start, part.end).replace(/\s+/g, ' ').trim()
-            );
-            for (const child of node.block?.children ?? [])
-              if (child.type === 'Declaration')
-                declared.push({
-                  property: child.property ?? '',
-                  value: (child.value ?? '').trim(),
-                  selectors,
-                  conditions,
-                });
-          }
-        }
-      };
-      walk(
-        (parse(source, { modern: true }).css?.children ??
-          []) as unknown as Node[],
-        []
-      );
-      return declared;
-    }
+    const marqueeCss = () => declarationsOf(MARQUEE_SOURCE);
 
     const MOVING =
       /^@media screen and \(prefers-reduced-motion: no-preference\)$/;
@@ -457,6 +462,80 @@ describe('TestimonialsBlock', () => {
         true,
         false,
       ]);
+    });
+  });
+
+  /**
+   * Voice hangs a quote's opening mark outside its words by a share of the
+   * quote's own size (`text-indent`), and sets that size case by case. A card
+   * cannot read its child's font-size, so the wall and the strip restate each
+   * case to make the mark's room — on the voice, so the words and the name
+   * keep one edge whatever padding a Style gives the card. Every restated
+   * case is pinned to Voice's own here: a size or hang Voice changes fails
+   * this, rather than silently pushing the mark out over the card's edge.
+   */
+  describe('the opening mark', () => {
+    /** Voice's quote size and hang per modifier of `.voice`, for one size. */
+    const quoteCases = (size: 'wall' | 'grid') => {
+      const cases = new Map<string, { size?: string; hang?: string }>();
+      const own = new RegExp(`^\\.voice\\[data-size='${size}'\\](.*) p$`);
+      for (const d of declarationsOf(VOICE_SOURCE)) {
+        for (const selector of d.selectors) {
+          const modifier =
+            selector === '.voice__quote p'
+              ? ''
+              : (selector.match(own)?.[1] ?? null);
+          if (modifier === null) continue;
+          const entry = cases.get(modifier) ?? {};
+          if (d.property === 'font-size') entry.size = d.value;
+          if (d.property === 'text-indent')
+            entry.hang = d.value.replace(/^-/, '').replace(/em$/, '');
+          cases.set(modifier, entry);
+        }
+      }
+      return cases;
+    };
+
+    /** The room a card makes per modifier of the `.voice` it holds. */
+    const roomCases = (source: string, card: string) => {
+      const cases = new Map<
+        string,
+        { size?: string; hang?: string; room?: string }
+      >();
+      const prefix = `${card} > :global(.voice`;
+      for (const d of declarationsOf(source)) {
+        for (const selector of d.selectors) {
+          if (!selector.startsWith(prefix) || !selector.endsWith(')')) continue;
+          const modifier = selector.slice(prefix.length, -1);
+          const entry = cases.get(modifier) ?? {};
+          if (d.property === '--_quote') entry.size = d.value;
+          if (d.property === '--_hang') entry.hang = d.value;
+          if (d.property === 'padding-inline-start') entry.room = d.value;
+          cases.set(modifier, entry);
+        }
+      }
+      return cases;
+    };
+
+    it.each([
+      ['wall', WALL_SOURCE, '.tm-wall__tile', 'wall'],
+      ['marquee', MARQUEE_SOURCE, '.tm-marquee__card', 'grid'],
+    ] as const)('%s: makes the room each quote size hangs its mark into', (_, source, card, size) => {
+      const voice = quoteCases(size);
+      const room = roomCases(source, card);
+      expect(voice.get('')).toEqual({
+        size: 'var(--lp-size-lead)',
+        hang: '0.4',
+      });
+      expect(room.get('')?.room).toBe('calc(var(--_quote) * var(--_hang))');
+      for (const [modifier, own] of voice) {
+        const made = room.get(modifier);
+        if (own.size) expect(made?.size, `.voice${modifier}`).toBe(own.size);
+        if (own.hang) expect(made?.hang, `.voice${modifier}`).toBe(own.hang);
+      }
+      // …and restates no case Voice does not have.
+      for (const modifier of room.keys())
+        expect(voice.has(modifier), `.voice${modifier}`).toBe(true);
     });
   });
 });

@@ -209,6 +209,23 @@
   }
 }
 
+/* From the split's first width until its words' column holds both buttons
+   on one row (the editor's Tablet frame, 820px, is in between), that column
+   is narrower than a phone: the buttons keep the phone's rule — they share
+   the row, or each takes a full row — never a ragged stack. */
+@container (50rem <= width < 64rem) {
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split__copy .lp-actions__row {
+    justify-self: stretch;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean']
+    .hero-split__copy
+    .lp-actions__row
+    > .lp-button:not([data-variant='quiet']) {
+    flex: 1 1 auto;
+  }
+}
+
 /* ── the story's moments: a strip of prints at a real size ───────────────── */
 :is(.lp, #lp-style)[data-lp-style='clean'] .story-strip {
   --lp-strip-item: clamp(16rem, 34cqi, 28rem);

@@ -121,6 +121,22 @@
   text-align: center;
 }
 
+/* Each card is a plate with a rim. Over the org's shader the smoked card
+   stands clear on its own; over the glow that stands in for it (no preset, a
+   page's own colours, the editing canvas, every thumbnail) it is the ground
+   laid on the ground wherever the glow thins, and its edge goes. A hairline
+   of the ink rims it, and a shade under it lifts it off the light — the
+   same on both, so the canvas shows the page it makes. Paint only: the
+   card's box, and every line in it, stay the panel's own (03 X10). */
+:is(.lp, #lp-style)[data-lp-style='cinematic']
+  .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))
+  > .lp-surface::after {
+  box-shadow:
+    inset 0 0 0 var(--border-width) color-mix(in oklab, var(--lp-ink) 18%, transparent),
+    0 var(--space-8) var(--space-20) calc(-1 * var(--space-6))
+      oklch(from var(--lp-ground) calc(l * 0.35) c h / 0.75);
+}
+
 /* Titles lit from behind, on the two cards only. */
 :is(.lp, #lp-style)[data-lp-style='cinematic']
   .lp-section:is([data-lp-type='hero'], [data-lp-type='cta'])
@@ -140,7 +156,8 @@
   --lp-build-heading: rise;
 }
 
-/* ── room: a quote hangs its opening mark into the card's padding ────────── */
+/* ── the wall: more air round each quote in the dark ─────────────────────── */
+/* Air only: the wall makes its hanging marks' room itself, on the quote. */
 :is(.lp, #lp-style)[data-lp-style='cinematic'] .tm-wall__tile {
   padding: clamp(var(--space-6), var(--space-4) + 1.8cqi, var(--space-10));
 }

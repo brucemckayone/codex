@@ -121,6 +121,21 @@
     border-radius: var(--lp-radius-card);
   }
 
+  /* The opening mark hangs outside the quote's words (`Voice`). As on the
+     wall, its room is made on the voice, on top of whatever padding a Style
+     gives the card: the mark clears the card's edge by that whole padding —
+     an open card (a rule, no sides) starts it on the rule — and the words and
+     the name keep one edge. Voice's own sizes, pinned by the block's test. */
+  .tm-marquee__card > :global(.voice) {
+    --_quote: var(--lp-size-lead);
+    --_hang: 0.4;
+    padding-inline-start: calc(var(--_quote) * var(--_hang));
+  }
+
+  .tm-marquee__card > :global(.voice[data-length='long']) {
+    --_quote: var(--lp-size-body);
+  }
+
   .tm-marquee__toggle {
     display: inline-flex;
     align-items: center;

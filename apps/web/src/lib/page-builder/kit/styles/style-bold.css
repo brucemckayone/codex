@@ -34,9 +34,10 @@
 
    MOTION. Headlines BUILD. The hero's headline lifts out of its own baseline
    as the page opens, the words and the picture after it; every other
-   headline rises into place once, as the visitor reaches it
-   (`--lp-build-display/-heading: rise`, X12/X13). The numbers count up once
-   (the kit's default), set at display size. Nothing else moves.
+   headline lifts the same way, once, as the visitor reaches it (armed by
+   the kit's `rise` hook, X12/X13 — drawn with Bold's lift, not the kit's
+   fade). The numbers count up once (the kit's default), set at display
+   size. Nothing else moves.
 
    SIGNATURE. Headlines that build, and numbers that count up.
 
@@ -94,7 +95,8 @@
     calc(var(--lp-stagger) * 3) both;
   --lp-enter-media: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
     calc(var(--lp-stagger) * 4) both;
-  /* Every other headline builds as the visitor reaches it. */
+  /* Every other headline builds as the visitor reaches it: the hook arms it,
+     and Bold draws it with its own lift (below). */
   --lp-build-display: rise;
   --lp-build-heading: rise;
 }
@@ -120,6 +122,26 @@
 
 :is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
   font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+}
+
+/* Every other headline lifts the same way. The kit's `rise` is a fade under a
+   short lift — on every section heading, the generic fade-up (03 §6) — so a
+   heading the stage armed through that hook takes Bold's keyframes instead:
+   in full ink throughout, it surfaces through a line under its own last
+   baseline, first line first. The stage still decides when and in what
+   order; without motion, script or style queries, or on a still page, the
+   heading is simply there. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root[data-theme]
+    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='bold']
+    .lp-section:not([data-lp-type='hero'])
+    .lp-heading:is([data-size='display'], [data-size='heading'])[data-lp-enter]:not(
+      [data-lp-build],
+      :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+    ) {
+    animation-name: lp-bold-lift;
+    animation-duration: calc(var(--duration-slowest) * 1.25);
+  }
 }
 
 /* ── a slab over every section on the ground ─────────────────────────────── */

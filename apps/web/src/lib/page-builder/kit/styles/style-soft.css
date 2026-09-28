@@ -160,9 +160,10 @@
    air between scenes and the band's own padding kept at its foot — so the
    next band's curve cuts into tint, never into a dark scene. The inset is
    a clip, not a margin: the scene keeps its layout, so its words stay on
-   the page's content line. */
+   the page's content line — and the air is a row gap only, as the block's
+   own is (a column gap on the scenes' subgrid moves the words off it). */
 :is(.lp, #lp-style)[data-lp-style='soft'] .story-chapters {
-  gap: clamp(var(--space-2), 1cqi, var(--space-4));
+  row-gap: clamp(var(--space-2), 1cqi, var(--space-4));
   margin-block: 0;
 }
 
@@ -170,7 +171,8 @@
   clip-path: inset(0 calc(var(--lp-gutter) / 2) round var(--lp-radius-card));
 }
 
-/* ── room: a quote hangs its opening mark into the card's padding ────────── */
+/* ── the wall: pebbles with room round each quote ─────────────────────────── */
+/* Air only: the wall makes its hanging marks' room itself, on the quote. */
 :is(.lp, #lp-style)[data-lp-style='soft'] .tm-wall__tile {
   padding: clamp(var(--space-6), var(--space-4) + 1.8cqi, var(--space-10));
 }

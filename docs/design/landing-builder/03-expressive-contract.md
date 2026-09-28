@@ -644,3 +644,44 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     localStorage, every access guarded; no schema change).
   - **Path's stops sit on the heading** with a creator eyebrow (they sat 41px above) and on the CTA
     band's headline (25px above).
+- **X25 · 2026-09-28 · V2a · Measured in the browser, and the looks it called.**
+  - **§1's floors hold in every Style, brand and theme.** A calibrated instrument measured each text
+    element against its PAINTED backdrop (glyphs hidden, the box captured, the 5th percentile per
+    line), on the still page. Calibration: 32 planted checks. It failed exactly the planted fails,
+    including a gradient that a flat `background-color` check passes at 4.89 but that paints 3.14,
+    and white on a photo (1.66 vs 1.67 ground truth). It passed exactly the passes, a 1px stripe
+    included. Coverage: 429 pages, 21,475 elements measured —
+    - 8 Styles × brands 0–3 + org × light/dark, with pictures;
+    - every atmosphere-scheme type with the org shader live, sampled three times (tightest 4.83,
+      soft ink, light);
+    - every non-default layout once;
+    - every Style at 390.
+
+    Result: 0 below the floor. The 16 flags were line-box geometry, each re-measured under the
+    glyphs' own ink:
+    - Studio's drawn circles crossing the empty ascent of a stat or price at 390: 9.78–17.01;
+    - Poster's −2° transformation stickers, whose axis-aligned line box pokes past the pill: 15.58.
+
+    102 aria-hidden story-chapter numerals at 2.24–2.89 are decoration (WCAG 1.4.3 exempts them).
+  - **Marquee:** the opening mark's room is made on the voice, as the wall's is, from Voice's own
+    sizes (pinned by the block's test). Bold's open cards had hung it 10.4px outside the card. Poster,
+    which sets marquee quotes at title size, makes a title-size room.
+  - **Bold:** section headings the kit's `rise` hook arms draw with Bold's own lift instead of the
+    kit's fade-up: full ink, rising through a fixed line. It is gated like the kit's motion.
+  - **Cinematic over the glow (no shader):** each title card gets an ink hairline rim and a shade
+    under it. The rim had faded to ΔL 0.005 on about 60% of the edge. This is paint only; X10's
+    geometry is unchanged.
+  - **Clean in a 50–64rem container** (the editor's Tablet frame): the split hero's buttons share
+    the row or each take a full row, never a ragged stack.
+  - **Poster:** a photo under words in the text block's columns sits down by the colour block's
+    offset. The block had caught a heading's last line at 2.15:1. `--_off` is now declared on the
+    photo, so the room and the block read one value.
+  - **Comments:** Soft's and Cinematic's wall comments are corrected (air only). Soft's chapters use
+    `row-gap`.
+  - **Handoffs, outside V2a's files:**
+    - Bold's display with a long creator headline (61–85 characters at ~157px, up to 987px tall at
+      1440) needs a hero length hook like ProblemBlock's `data-long`.
+    - Seven of eight Styles stack split-hero buttons raggedly at tablet width (a ButtonRow rule).
+    - The section-veil Styles (Clean, Soft, Quiet) show a mottled grey band and a pale edge over a
+      blurred Bloom shader on atmosphere (the kit veil and the blurred canvas's edge).
+    - The wall's quote room could come from one Voice-side value.
