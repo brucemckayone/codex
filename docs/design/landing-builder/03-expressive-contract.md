@@ -578,3 +578,23 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   as the sticky bar and every other action on the org's site. Measured after: studio-alpha button
   rgb(214 27 68) light / rgb(255 47 89) dark; brand 2 its navy. A Style may still paint the second
   colour as decoration (Path's route, Poster's fields); the call to action is always the primary.
+- **X22 · 2026-09-28 · S3 · Bold and Clean as built.** Bold ("said in headlines"): the largest type
+  in the system (display ~157px, headings ~90px at 1440; a side-head step-down wherever a heading
+  shares its row), one brand colour at full volume plus its contrast inverse — brand slabs at the
+  hero, stats and CTA, contrast at problem, transformation and curriculum — and deliberately never
+  the second colour (two loud fields is Poster's page). A 6px ink slab tops each ground section after
+  the first, so plain sections in a row still read as separate. Story defaults to `chapters` (flat
+  slabs); preview `base`; the featured card is always the OTHER pole (a brand card vanished on a navy
+  brand's contrast band); the starter gains stats. Motion: the hero headline rises out of a fixed
+  line under its own last baseline (`lp-bold-lift`, clip measured in the headline's em), every other
+  heading builds `rise`, figures count up. No font suggestion; corners `clamp(0rem, brand × 0.25,
+  --radius-sm)`, never a pill. Clean ("a portfolio"): the ground, a 5% whisper tint for reading
+  sections, contrast "screening rooms" for video, preview and the CTA; the brand colour only on the
+  ask. The hero picture takes 7/12 of the row and bleeds off the page edge (words stay in the
+  column, X10); gallery `grid` in 3:2 frames, at most three to a row, a hairline caption rail. Motion:
+  every picture wipes open while the photo settles from 1.1 (both end together); a hover lean-in on
+  hover-capable devices only. Fonts Plus Jakarta Sans + Inter (replacing X16's provisional Manrope +
+  Inter; Inter is the platform default body face, chosen knowingly). Corners: the brand's exactly.
+  Rule the renderer test enforces: a Style's defaults never repeat a coloured band in its own full
+  order (Bold's first draft put curriculum and preview on contrast side by side). The fourteen
+  suggested families across the seven Styles that suggest fonts are all distinct.
