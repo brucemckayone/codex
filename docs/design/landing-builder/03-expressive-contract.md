@@ -484,9 +484,11 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   stays in the DOM (painted transparent) under an `aria-hidden` counting copy. (f) Style hooks:
   `--lp-build-display | -heading | -title: rise | wipe | track`, `--lp-media-reveal: rise | fade | wipe
   | scale`, `--lp-media-parallax: 1 | 2`, `--lp-text-readalong: on`, `--lp-stat-count: none` (count-up
-  is on by default), marks `--lp-mark-underline | -circle | -scribble | -arrow` with `--lp-mark-draw`
-  / `--lp-mark-range`, and `--lp-route-draw` for Path's page line. Never two motion attributes on one
-  element (they share `animation`).
+  is on by default), marks `--lp-mark-underline | -circle | -scribble | -arrow` drawn by
+  `--lp-mark-draw` (a beat after their host enters; `--lp-mark-range` and the host `view-timeline`
+  are retired by X13), and `--lp-route-draw` for Path's page line. Never two motion attributes on one
+  element (they share `animation`). A mark's host must be one of the entrance candidates listed in
+  the `motion.css` header.
 - **X13 · 2026-09-28 · orchestrator · Entrances are triggered, not scrubbed.** An entrance tied to
   scroll position (`entry 0% entry clamp(25svh, 100%, 50svh)`) cannot finish for an element near the
   end of a short page — it can never scroll that far into view — so it would stay part-faded (on a short
@@ -496,4 +498,22 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   or still, the final state renders. Scrubbed motion (parallax, the route draw, read-along) stays CSS
   scroll-driven: at the page end it leaves only harmless partial states (an offset, a partly drawn
   decorative line, text at `--lp-ink-soft`, which still passes 4.5:1). Amends §6's "No scroll-linked
-  motion is driven from JavaScript": a one-shot trigger is not scroll-linked.
+  motion is driven from JavaScript": a one-shot trigger is not scroll-linked. *As built (E2):* two
+  observers per page (`motion/stage.ts`) — the first report decides (on screen or already passed →
+  left final; below the fold → armed), and an armed element plays when its top clears the line
+  `max(15% of the screen, the floating bar's footprint + 2%)`, measured from the real `.lp-sticky`.
+  An armed element in view that the page can no longer scroll up to the line plays at once (the
+  short-page case), checked against its nearest scrolling ancestor so the editor's Preview works too.
+  A candidate is armed only if `motion.css` actually gives it a time-based animation (tried once with
+  `data-lp-enter="wait"`); content added after hydration is staged by a `MutationObserver`. All
+  motion JS, count-up included: 2,122 B gzipped. Entrances no longer need scroll-timeline support, so
+  they play in Firefox too.
+- **X14 · 2026-09-28 · orchestrator · Layout ids both builders use.** Three new v2 layouts share a name
+  with an old builder variant of the same type: hero `poster`, testimonials `wall` and `marquee`. The
+  old testimonial wall and moving strip ARE the new ones, so the legacy table now maps `proof.wall →
+  wall` and `proof.marquee → marquee` (they went to `grid` and `featured` only while v2 lacked them).
+  The old hero `poster` was a framed media plate — a different design from the new type-led poster —
+  so it still becomes `cover`. `upgrade.ts` now reads a layout id in the namespace of whoever wrote
+  it: a legacy-only type name, or a hero/faq on a page without a v2 Style, goes through the legacy
+  table FIRST; everything else passes through first, as before. Pinned both ways, including
+  idempotence; a mutation that skips the table-first rule fails the hero test.

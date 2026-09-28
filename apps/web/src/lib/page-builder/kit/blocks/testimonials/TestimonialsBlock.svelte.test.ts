@@ -9,7 +9,9 @@ import type { JourneySalesContext } from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { TESTIMONIALS_COPY } from './copy';
 import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
+import { MARQUEE_MIN, marqueeCopies } from './marquee';
 import TestimonialsBlock from './TestimonialsBlock.svelte';
 import { unwrapQuote, voices } from './voices';
 
@@ -60,14 +62,18 @@ async function render(
 }
 
 const text = () => document.body.textContent ?? '';
-const quotes = () =>
-  [...document.body.querySelectorAll('blockquote')].map((q) =>
-    q.textContent?.trim()
+/** What a screen reader meets: the moving strip's copies are hidden from it. */
+const read = (selector: string) =>
+  [...document.body.querySelectorAll(selector)].filter(
+    (el) => !el.closest('[aria-hidden="true"]')
   );
+const quotes = () => read('blockquote').map((q) => q.textContent?.trim());
 const bylines = () =>
-  [...document.body.querySelectorAll('figcaption')].map((c) =>
+  read('figcaption').map((c) =>
     [...c.children].map((part) => part.textContent).join(' / ')
   );
+const inert = (el: Element) =>
+  Boolean((el as HTMLElement).inert || el.hasAttribute('inert'));
 
 describe('TestimonialsBlock', () => {
   const live = sampleContext().testimonials;
@@ -207,5 +213,122 @@ describe('TestimonialsBlock', () => {
     expect(document.body.querySelector('h2')?.getAttribute('aria-label')).toBe(
       'Testimonials — Heading'
     );
+  });
+
+  describe('marquee', () => {
+    const lanes = () => [
+      ...document.body.querySelectorAll('.tm-marquee__lane'),
+    ];
+
+    it('reads each quote once: every copy on the strip is hidden and unreachable', async () => {
+      await render({ items: [OWN] }, { layout: 'marquee' });
+      const [first, ...copies] = lanes();
+      expect(first.hasAttribute('aria-hidden')).toBe(false);
+      expect(inert(first)).toBe(false);
+      expect(copies).toHaveLength(marqueeCopies(live.length + 1));
+      expect(copies.length).toBeGreaterThan(0);
+      for (const copy of copies) {
+        expect(copy.getAttribute('aria-hidden')).toBe('true');
+        expect(inert(copy)).toBe(true);
+        expect(
+          [...copy.querySelectorAll('blockquote')].map((q) =>
+            q.textContent?.trim()
+          )
+        ).toEqual(quotes());
+      }
+    });
+
+    it('has a pause button that says whether it is pressed', async () => {
+      await render({ items: [OWN] }, { layout: 'marquee' });
+      const button = document.body.querySelector(
+        '.tm-marquee__toggle'
+      ) as HTMLButtonElement;
+      const strip = () => document.body.querySelector('.tm-marquee');
+      // Its name starts with the word it shows.
+      expect(button.getAttribute('aria-label')).toBe(
+        TESTIMONIALS_COPY.pauseLabel
+      );
+      expect(button.textContent?.trim()).toBe(TESTIMONIALS_COPY.pause);
+      expect(
+        TESTIMONIALS_COPY.pauseLabel.startsWith(TESTIMONIALS_COPY.pause)
+      ).toBe(true);
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      expect(strip()?.hasAttribute('data-paused')).toBe(false);
+      button.click();
+      flushSync();
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+      expect(strip()?.hasAttribute('data-paused')).toBe(true);
+      button.click();
+      flushSync();
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('sits still, with no copies and no button, when there are too few quotes to move', async () => {
+      const context = {
+        ...sampleContext(),
+        testimonials: live.slice(0, MARQUEE_MIN - 2),
+      };
+      await render({ items: [OWN] }, { layout: 'marquee', context });
+      expect(quotes()).toHaveLength(MARQUEE_MIN - 1);
+      expect(lanes()).toHaveLength(1);
+      expect(document.body.querySelector('.tm-marquee__toggle')).toBeNull();
+      expect(
+        document.body.querySelector('.tm-marquee')?.hasAttribute('data-moving')
+      ).toBe(false);
+    });
+
+    it('covers the widest window at every count, so no gap opens behind the last card', () => {
+      for (let count = MARQUEE_MIN; count <= 12; count++) {
+        // A card is at most 22rem with at least 1.5rem after it; the widest
+        // window is 240rem.
+        expect(marqueeCopies(count) * count * 23.5).toBeGreaterThanOrEqual(240);
+      }
+      expect(marqueeCopies(MARQUEE_MIN - 1)).toBe(0);
+    });
+
+    it('is the only layout that runs to the section edges', async () => {
+      for (const layout of SECTION_LAYOUTS.testimonials) {
+        await render({ items: [OWN] }, { layout });
+        expect(
+          document.body.querySelector('.tm')?.classList.contains('lp-bleed')
+        ).toBe(layout === 'marquee');
+        unmount(app);
+        app = null;
+      }
+    });
+  });
+
+  describe('wall', () => {
+    it('features the first quote in the filled panel, and sets every other on the wall', async () => {
+      await render({ items: [OWN] }, { layout: 'wall' });
+      const tiles = [...document.body.querySelectorAll('.tm-wall__tile')];
+      expect(tiles).toHaveLength(live.length + 1);
+      expect(tiles[0].hasAttribute('data-featured')).toBe(true);
+      // Bold (the default Style) features a base section's card in `contrast`.
+      expect(tiles[0].getAttribute('data-lp-scheme')).toBe('contrast');
+      for (const tile of tiles.slice(1)) {
+        expect(tile.hasAttribute('data-featured')).toBe(false);
+        expect(tile.hasAttribute('data-lp-scheme')).toBe(false);
+      }
+    });
+
+    it('sets each quote by its length', async () => {
+      await render(
+        { items: [{ quote: 'Short.' }, { quote: 'x'.repeat(200) }] },
+        {
+          layout: 'wall',
+          context: { ...sampleContext(), testimonials: [] },
+        }
+      );
+      const voicesOnWall = [...document.body.querySelectorAll('.voice')];
+      expect(voicesOnWall.map((v) => v.getAttribute('data-length'))).toEqual([
+        'short',
+        'long',
+      ]);
+      expect(voicesOnWall.map((v) => v.hasAttribute('data-featured'))).toEqual([
+        true,
+        false,
+      ]);
+    });
   });
 });

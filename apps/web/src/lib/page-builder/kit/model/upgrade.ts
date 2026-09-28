@@ -119,25 +119,33 @@ function resolveTypeAndProps(
 }
 
 /**
- * One section's v2 layout id, or undefined. Tries "already a valid v2
- * layout for this type" FIRST (handles v2 pass-through, and the rare case
- * where a legacy and a v2 composition id are the SAME string for the SAME
- * type — e.g. `faq: 'accordion'` is a legal id on both sides), then the
- * legacy retirement/rename table keyed by the RAW stored type (current
- * composition ids AND retired ones — see `variant-map.ts`'s header), then
- * absent — never the type's default; that is `resolve.ts`'s (WP2) job.
+ * One section's v2 layout id, or undefined — never the type's default; that
+ * is `resolve.ts`'s (WP2) job.
+ *
+ * `legacy` says which composition NAMESPACE the stored id is in. A v2 id
+ * passes through first, then the legacy retirement/rename table (keyed by the
+ * RAW stored type — current composition ids AND retired ones, see
+ * `variant-map.ts`'s header) catches retired ids. A LEGACY id goes through the
+ * table first: once v2 gained layouts, some old ids became v2 ids for a
+ * DIFFERENT design — the old hero `poster` was a framed media plate (→ `cover`),
+ * the new one sets type around an image (03 §13 X14). Names shared with the
+ * same meaning (`faq: 'accordion'`) are table entries too, so they still land
+ * where they did.
  */
 function resolveLayout(
   rawType: string,
   v2Type: SectionTypeId,
-  rawVariant: unknown
+  rawVariant: unknown,
+  legacy: boolean
 ): string | undefined {
   if (typeof rawVariant !== 'string' || rawVariant.length === 0) {
     return undefined;
   }
-  if (isLayoutOf(v2Type, rawVariant)) return rawVariant;
   const mapped = LEGACY_VARIANT_MAP[rawType]?.[rawVariant];
-  return mapped && isLayoutOf(v2Type, mapped) ? mapped : undefined;
+  const fromTable = mapped && isLayoutOf(v2Type, mapped) ? mapped : undefined;
+  if (legacy && fromTable) return fromTable;
+  if (isLayoutOf(v2Type, rawVariant)) return rawVariant;
+  return fromTable;
 }
 
 /**
@@ -212,7 +220,18 @@ function upgradeSection(raw: unknown, pageIsV2: boolean): KitSection | null {
     props: resolved.props,
   };
 
-  const variant = resolveLayout(rawType, resolved.type, raw.variant);
+  // The old builder wrote this section's layout id if its type is a legacy-only
+  // name, or it is a hero/faq (names both builders share) on a page the old
+  // builder wrote — a page without a v2 Style.
+  const legacyVariant =
+    !isSectionTypeId(rawType) ||
+    (LEGACY_TYPE_MAP[rawType] !== undefined && !pageIsV2);
+  const variant = resolveLayout(
+    rawType,
+    resolved.type,
+    raw.variant,
+    legacyVariant
+  );
   if (variant) section.variant = variant;
 
   const name =

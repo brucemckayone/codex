@@ -56,6 +56,11 @@ export const heroDefinition: BlockDefinition<HeroProps> = {
       'Centred',
       'Everything centred, with a wide image underneath.'
     ),
+    layout(
+      'poster',
+      'Poster',
+      'Your headline as large as it goes, set around an image that runs off the edge.'
+    ),
   ],
   fields: [
     eyebrowField,

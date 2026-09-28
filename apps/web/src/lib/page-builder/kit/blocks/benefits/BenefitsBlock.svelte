@@ -1,29 +1,36 @@
 <!--
   @component BenefitsBlock
 
-  Everything a member gets. Three layouts:
+  Everything a member gets. Four layouts:
     grid      — each item a transparent tile under a rule: its name, then a line
     checklist — compact rows in two columns, a tick beside each
     split     — the words on one side (they stay in view while a long list
                 scrolls), the items as large ruled rows on the other
+    bento     — tiles of mixed sizes, the first large and filled
+                (BenefitsBento)
 
   A join button appears only when the creator gives it words (`ctaLabel` or
-  `note`). A grid tile may carry the creator's image (contract A5); once one
-  does, every tile holds the same frame, so a mixed row still reads as a set.
+  `note`). A grid or bento tile may carry the creator's image (contract A5);
+  in the grid, once one does, every tile holds the same frame, so a mixed row
+  still reads as a set.
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { resolvePageImageUrl } from '../../../page-images';
+  import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
+  import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Media from '../../primitives/Media.svelte';
   import Text from '../../primitives/Text.svelte';
+  import BenefitsBento from './BenefitsBento.svelte';
   import { BENEFITS_EMPTY, benefitsDefinition } from './definition';
 
   const { props, section, context, edit }: BlockProps = $props();
 
+  const page = getKitPage();
   const content = $derived(benefitsDefinition.coerce(props));
   const layout = $derived(section.layout);
   const items = $derived(content.items ?? []);
@@ -34,9 +41,17 @@
   const itemLevel = $derived(
     content.heading ? (section.headingLevel === 1 ? 2 : 3) : section.headingLevel
   );
+  // The bento's lead tile is drawn wider than the medium file, so it takes
+  // the large one.
   const tileImages = $derived(
-    layout === 'grid'
-      ? items.map((item) => resolvePageImageUrl(item.image, 'md', context.mediaBaseUrl))
+    layout === 'grid' || layout === 'bento'
+      ? items.map((item, index) =>
+          resolvePageImageUrl(
+            item.image,
+            layout === 'bento' && index === 0 ? 'lg' : 'md',
+            context.mediaBaseUrl
+          )
+        )
       : []
   );
   const pictured = $derived(tileImages.some(Boolean));
@@ -109,6 +124,13 @@
           </li>
         {/each}
       </ul>
+    {:else if layout === 'bento'}
+      <BenefitsBento
+        {items}
+        images={tileImages}
+        level={itemLevel}
+        featured={featuredScheme(page.style, section.scheme)}
+      />
     {:else}
       <ul class="benefits-grid" data-count={items.length} data-pictured={pictured ? '' : undefined}>
         {#each items as item, index (index)}

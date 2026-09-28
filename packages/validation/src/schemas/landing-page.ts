@@ -54,15 +54,15 @@ export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
  * Twin of `ids.ts` `SECTION_LAYOUTS` — `ids.parity.test.ts` asserts equality.
  */
 export const SECTION_LAYOUTS = {
-  hero: ['statement', 'split', 'cover', 'centered'],
+  hero: ['statement', 'split', 'cover', 'centered', 'poster'],
   video: ['theatre', 'split'],
   problem: ['statement', 'list', 'split'],
   transformation: ['columns', 'steps', 'statement', 'toggle'],
-  benefits: ['grid', 'checklist', 'split'],
+  benefits: ['grid', 'checklist', 'split', 'bento'],
   curriculum: ['timeline', 'accordion', 'cards', 'map'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
-  testimonials: ['grid', 'featured', 'quote'],
+  testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
   faq: ['accordion', 'columns'],
   pricing: ['cards', 'focus', 'band'],
   cta: ['band', 'split', 'compact'],

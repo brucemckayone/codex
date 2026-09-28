@@ -1,11 +1,15 @@
 <!--
   @component HeroBlock
 
-  The page's promise and its first way in. Four layouts:
+  The page's promise and its first way in. Five layouts:
     statement — the headline IS the hero; the image runs full width below it
     split     — words and image side by side (half-bleed in Bold)
-    cover     — the image fills the band; luminous words over a scrim
+    cover     — the image fills the band; luminous words over a scrim. On a
+                Moving background with no image, the band is the section's:
+                the org's shader (or its glow) under the scheme's own veil
     centered  — centred words over a wide image
+    poster    — the headline at full size set round a picture that runs off
+                the band's edge (HeroPoster)
 
   The one sanctioned fallback in the kit: an empty headline renders the course
   title. Media arrives on the streamed `sellPreview`; each layout holds its
@@ -26,6 +30,8 @@
   import Text from '../../primitives/Text.svelte';
   import WatchButton from '../../primitives/WatchButton.svelte';
   import { heroDefinition } from './definition';
+  import HeroPoster from './HeroPoster.svelte';
+  import { settled as settledValue } from './settled.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -66,6 +72,21 @@
   function watch(clip: PreviewMedia) {
     if (!edit) watching = clip;
   }
+
+  // The streamed preview once it settles, for the two layouts whose shape
+  // depends on whether there is media at all (cover, poster) — read in place,
+  // never through `{#await}` (`settled.svelte.ts`). Until it settles, and on
+  // the server, the media is the synchronous still.
+  const preview = $derived(settledValue(context.sellPreview));
+  const settled = $derived<HeroMedia>(
+    preview === undefined ? { still: syncStill, clip: null } : pick(preview)
+  );
+  const hasMedia = $derived(Boolean(settled.still || settled.clip));
+  // A cover with nothing to show on a Moving background leaves the band to
+  // the section: the org's shader (or the glow standing in for it) under the
+  // scheme's own veil and ink. Otherwise it draws its own band — the image,
+  // or its glow — under the media colours.
+  const coverOwnsBand = $derived(section.scheme !== 'atmosphere' || hasMedia);
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
@@ -122,31 +143,26 @@
   {/if}
 {/snippet}
 
+{#snippet posterWatch()}{@render watchControl(settled)}{/snippet}
+
 {#if layout === 'cover'}
-  <div class="hero-cover lp-bleed" data-lp-on-media>
-    <div class="hero-cover__media hero__enter-m">
-      {#await context.sellPreview}
-        {#if syncStill}
-          <Media image={syncStill} priority {alt} />
-        {:else}
-          <span class="lp-atmos" aria-hidden="true"></span>
-        {/if}
-      {:then preview}
-        {@const media = pick(preview)}
-        {#if media.still || media.clip}
-          <Media image={media.still} clip={media.clip} priority {alt} />
-        {:else}
-          <span class="lp-atmos" data-drift aria-hidden="true"></span>
-        {/if}
-      {/await}
+  <!-- Only the media bleeds (03 X10): the words keep the content column, so
+       a Style's atmosphere panel can hold them. -->
+  {#if coverOwnsBand}
+    <div class="hero-cover__media lp-bleed hero__enter-m" data-lp-on-media>
+      {#if hasMedia}
+        <Media image={settled.still} clip={settled.clip} priority {alt} />
+      {:else}
+        <span class="lp-atmos" data-drift aria-hidden="true"></span>
+      {/if}
     </div>
-    <div class="hero-cover__copy">
-      {@render copy('start')}
-      {#await context.sellPreview then preview}
-        <div class="hero__enter-c">{@render watchControl(pick(preview))}</div>
-      {/await}
-    </div>
+  {/if}
+  <div class="hero-cover__copy" data-lp-on-media={coverOwnsBand ? '' : undefined}>
+    {@render copy('start')}
+    {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
   </div>
+{:else if layout === 'poster'}
+  <HeroPoster still={settled.still} clip={settled.clip} {alt} {copy} watch={posterWatch} />
 {:else if layout === 'split'}
   <div class="hero-split">
     <div class="hero-split__copy">{@render copy('start')}</div>
@@ -298,22 +314,20 @@
   }
 
   /* ── cover ─────────────────────────────────────────────────────────────── */
-  .hero-cover {
-    position: relative;
-    display: grid;
-    grid-template-columns: inherit;
+  /* Two layers in one row of the section's grid, each through the band's own
+     padding: the media edge to edge behind, the words in the content column. */
+  .hero-cover__media,
+  .hero-cover__copy {
+    grid-row: 1;
     margin-block: calc(-1 * var(--lp-pad));
-    background: var(--lp-bg);
-    color: var(--lp-ink);
-    isolation: isolate;
   }
 
   /* With no image the glow IS the hero: stronger, and lit opposite the words. */
   .hero-cover__media {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
+    position: relative;
     display: grid;
+    background: var(--lp-bg);
+    isolation: isolate;
     --lp-atmos-strength: 0.7;
     --lp-atmos-a: 78% 30%;
     --lp-atmos-b: 34% 92%;
@@ -325,20 +339,22 @@
 
   .hero-cover__copy {
     position: relative;
-    grid-column: content;
     display: grid;
     align-content: end;
     gap: var(--lp-stack);
     max-inline-size: 60rem;
     min-block-size: clamp(32rem, 56cqi, 48rem);
     padding-block: calc(var(--lp-pad) * 1.5) var(--lp-pad);
+    color: var(--lp-ink);
+    isolation: isolate;
   }
 
   /* A scrim shaped to the WORDS: every line sits on at least 72% of the scrim
      colour however the headline wraps, and it fades out to the right and at
      the top so the rest of the image stays bright. It starts at the band's
-     left edge (100cqi is the section), so it never shows a seam. */
-  .hero-cover__copy::before {
+     left edge (100cqi is the section), so it never shows a seam. Only over
+     the cover's own band: on a Moving background the section's veil does it. */
+  .hero-cover__copy[data-lp-on-media]::before {
     content: '';
     position: absolute;
     z-index: -1;

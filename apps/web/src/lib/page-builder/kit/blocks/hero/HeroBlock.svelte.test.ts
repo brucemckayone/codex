@@ -5,9 +5,9 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import type { JourneySalesContext } from '../../../render/types';
+import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
-import { SECTION_LAYOUTS } from '../../model/ids';
+import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import HeroBlock from './HeroBlock.svelte';
@@ -20,14 +20,18 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function section(layout: string, headingLevel: 1 | 2 = 1): ResolvedSection {
+function section(
+  layout: string,
+  headingLevel: 1 | 2 = 1,
+  scheme: ColourSchemeId = 'brand'
+): ResolvedSection {
   return {
     id: 'hero-1',
     anchor: 'hero',
     type: 'hero',
     index: 0,
     layout,
-    scheme: 'brand',
+    scheme,
     spacing: 'regular',
     headingLevel,
   };
@@ -38,6 +42,7 @@ async function render(
   options: {
     layout?: string;
     headingLevel?: 1 | 2;
+    scheme?: ColourSchemeId;
     offer?: SampleOfferState;
     context?: JourneySalesContext;
     edit?: BlockEdit | null;
@@ -47,7 +52,11 @@ async function render(
     target: document.body,
     props: {
       props,
-      section: section(options.layout ?? 'statement', options.headingLevel),
+      section: section(
+        options.layout ?? 'statement',
+        options.headingLevel,
+        options.scheme
+      ),
       context:
         options.context ??
         sampleContext({
@@ -249,5 +258,143 @@ describe('HeroBlock', () => {
     h1!.textContent = 'New headline';
     h1!.dispatchEvent(new Event('input', { bubbles: true }));
     expect(edits).toEqual([['heading', 'New headline']]);
+  });
+
+  /** A preview the test settles by hand. */
+  function deferred() {
+    let settle: (value: SellPreview | null) => void = () => {};
+    const promise = new Promise<SellPreview | null>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  const noMedia = () => ({
+    ...sampleContext({ course: { heroImageUrl: null } }),
+    sellPreview: Promise.resolve(null),
+  });
+
+  describe('cover on a Moving background (03 §5.1, X10)', () => {
+    it('with nothing to show, leaves the band to the section: no paint, no glow, no media colours', async () => {
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', scheme: 'atmosphere', context: noMedia() }
+      );
+      expect(document.body.querySelector('h1')?.textContent).toBe('H');
+      expect(document.body.querySelector('.lp-bleed')).toBeNull();
+      expect(document.body.querySelector('[data-lp-on-media]')).toBeNull();
+      expect(document.body.querySelector('.lp-atmos')).toBeNull();
+    });
+
+    it('with an image, bleeds only the image; the words keep the column on the media colours', async () => {
+      await render({ heading: 'H' }, { layout: 'cover', scheme: 'atmosphere' });
+      const bleeding = [...document.body.querySelectorAll('.lp-bleed')];
+      expect(bleeding).toHaveLength(1);
+      expect(bleeding[0].classList.contains('hero-cover__media')).toBe(true);
+      expect(bleeding[0].querySelector('img')?.getAttribute('src')).toBe(
+        '/hero.jpg'
+      );
+      expect(bleeding[0].querySelector('h1')).toBeNull();
+      const copy = document.body.querySelector('.hero-cover__copy');
+      expect(copy?.hasAttribute('data-lp-on-media')).toBe(true);
+      expect(copy?.querySelector('h1')).not.toBeNull();
+    });
+
+    it('on any other colour, draws its own glow when it has no image', async () => {
+      await render({ heading: 'H' }, { layout: 'cover', context: noMedia() });
+      const media = document.body.querySelector('.hero-cover__media');
+      expect(media?.classList.contains('lp-bleed')).toBe(true);
+      expect(media?.querySelector('.lp-atmos')).not.toBeNull();
+      expect(
+        document.body
+          .querySelector('.hero-cover__copy')
+          ?.hasAttribute('data-lp-on-media')
+      ).toBe(true);
+    });
+
+    it('keeps the same headline when the streamed clip arrives, and adds the play button', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'cover',
+          scheme: 'atmosphere',
+          context: {
+            ...sampleContext({ course: { heroImageUrl: null } }),
+            sellPreview: promise,
+          },
+        }
+      );
+      const before = document.body.querySelector('h1');
+      expect(document.body.querySelector('[data-lp-on-media]')).toBeNull();
+      settle({
+        intro: null,
+        reel: null,
+        heroImageUrl: null,
+        heroClip: { playlistUrl: '/clip.m3u8' },
+        guidePortraitUrl: null,
+      });
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      expect(document.body.querySelector('h1')).toBe(before);
+      expect(document.body.textContent).toContain(COPY.hero.watch);
+      expect(
+        document.body
+          .querySelector('.hero-cover__copy')
+          ?.hasAttribute('data-lp-on-media')
+      ).toBe(true);
+    });
+  });
+
+  describe('poster', () => {
+    it('sets the words round the picture, which paints first and never bleeds the words', async () => {
+      await render({ heading: 'H', body: 'B' }, { layout: 'poster' });
+      const poster = document.body.querySelector('.hero-poster');
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      // The picture comes first, so the words can wrap round it.
+      expect(
+        poster?.firstElementChild?.classList.contains('hero-poster__media')
+      ).toBe(true);
+      const img = poster?.querySelector('img');
+      expect(img?.getAttribute('src')).toBe('/hero.jpg');
+      expect(img?.getAttribute('loading')).toBe('eager');
+      expect(img?.getAttribute('fetchpriority')).toBe('high');
+      expect(document.body.querySelector('.lp-bleed')).toBeNull();
+    });
+
+    it('takes the hero entrance and its reveal on two boxes, never one', async () => {
+      await render({ heading: 'H' }, { layout: 'poster' });
+      const outer = document.body.querySelector('.hero-poster__media');
+      const inner = document.body.querySelector('[data-lp-reveal]');
+      expect(outer?.classList.contains('hero__enter-m')).toBe(true);
+      expect(outer?.hasAttribute('data-lp-reveal')).toBe(false);
+      expect(inner?.getAttribute('data-lp-reveal')).toBe('wipe');
+      expect(inner?.parentElement).toBe(outer);
+      expect(inner?.classList.contains('hero__enter-m')).toBe(false);
+    });
+
+    it('is a type-only poster when there is no picture', async () => {
+      await render({ heading: 'H', media: 'none' }, { layout: 'poster' });
+      const poster = document.body.querySelector('.hero-poster');
+      expect(poster?.hasAttribute('data-pictured')).toBe(false);
+      expect(poster?.querySelector('.hero-poster__media, img')).toBeNull();
+      expect(poster?.querySelector('h1')?.textContent).toBe('H');
+    });
+
+    it('plays a clip silently in the picture, with the play button over it', async () => {
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'poster',
+          context: sampleContext({
+            media: { heroClip: { playlistUrl: '/clip.m3u8' } },
+          }),
+        }
+      );
+      expect(
+        document.body.querySelector('.hero-poster__media')?.textContent
+      ).toContain(COPY.hero.watch);
+    });
   });
 });

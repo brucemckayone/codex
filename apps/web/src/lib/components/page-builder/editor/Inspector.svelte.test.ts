@@ -2,6 +2,7 @@ import type { PageBuilderState, PageSection } from '@codex/shared-types';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sampleContext } from '$lib/page-builder/kit';
+import { SECTION_LAYOUTS } from '$lib/page-builder/kit/model/ids';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -137,10 +138,7 @@ describe('Inspector — section', () => {
       ...document.querySelectorAll<HTMLButtonElement>('.layout'),
     ];
     expect(layouts.map((b) => b.dataset.layout)).toEqual([
-      'statement',
-      'split',
-      'cover',
-      'centered',
+      ...SECTION_LAYOUTS.hero,
     ]);
     // The thumbnail is the kit's own markup, with the section's own words.
     expect(

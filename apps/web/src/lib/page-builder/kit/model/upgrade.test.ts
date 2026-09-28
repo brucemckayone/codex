@@ -394,7 +394,8 @@ describe('upgradePage · every legacy type, hand-built', () => {
         // `quote` is required).
       })
     ).sections;
-    expect(section).toMatchObject({ type: 'testimonials', variant: 'grid' });
+    // The old masonry wall is the new wall (03 §13 X14).
+    expect(section).toMatchObject({ type: 'testimonials', variant: 'wall' });
     expect(section!.props.note).toBe('A real aggregate trust line');
     expect(section!.props.items).toEqual([
       {
@@ -536,6 +537,59 @@ describe('upgradePage · the `hero`/`faq` identity-mapped collision', () => {
       sections: [{ id: 'h1', type: 'hero', enabled: true, props: v2Props }],
     }).sections;
     expect(section!.props).toEqual(v2Props);
+  });
+});
+
+// 03 §13 X14: once v2 gained `poster`, `wall` and `marquee`, three old layout
+// ids became v2 ids too. Which one a stored id means depends on who wrote it.
+describe('upgradePage · layout ids both builders use', () => {
+  const legacyHero = (variant: string) => ({
+    sections: [
+      {
+        id: 'h1',
+        type: 'hero',
+        enabled: true,
+        variant,
+        props: { headline: 'A real headline' },
+      },
+    ],
+  });
+
+  it('maps the old hero `poster` (a framed media plate) to `cover`, not the new type-led poster', () => {
+    const [section] = upgradePage(legacyHero('poster')).sections;
+    expect(section!.variant).toBe('cover');
+  });
+
+  it('keeps `poster` on a page the new builder wrote', () => {
+    const [section] = upgradePage({
+      design: { style: 'poster' },
+      sections: [
+        { id: 'h1', type: 'hero', enabled: true, variant: 'poster', props: {} },
+      ],
+    }).sections;
+    expect(section!.variant).toBe('poster');
+  });
+
+  it('carries the old testimonial wall and moving strip to the new ones of the same name', () => {
+    for (const variant of ['wall', 'marquee']) {
+      const [section] = upgradePage({
+        sections: [
+          {
+            id: 'p1',
+            type: 'proof',
+            enabled: true,
+            variant,
+            props: { q1: 'A real quote.' },
+          },
+        ],
+      }).sections;
+      expect(section).toMatchObject({ type: 'testimonials', variant });
+    }
+  });
+
+  it('settles: upgrading the upgraded page changes nothing', () => {
+    const once = upgradePage(legacyHero('poster'));
+    expect(upgradePage(once)).toEqual(once);
   });
 });
 
