@@ -11,11 +11,14 @@
  * counts (`£49`, `4,000+`, `20 min`, `4.9★`); `24/7`, `1h 30m`, a year or a
  * code never do, and the signs and words stay as they are.
  *
- * It never runs on a still page (the canvas, thumbnails), under reduced
- * motion, where the Style opts out (`--lp-stat-count: none`), or for a figure
- * already on screen when the page wakes up: that visitor has seen its value.
+ * The page's stage (`./stage`) times it like every other entrance: a figure
+ * below the fold waits at zero and counts once it clears the floating call to
+ * action; one on screen when the page wakes up has been seen, and stays. It
+ * never runs on a still page (the canvas, thumbnails), under reduced motion,
+ * or where the Style opts out (`--lp-stat-count: none`).
  */
 import type { Attachment } from 'svelte/attachments';
+import { stageFor } from './stage';
 
 export interface Figure {
   prefix: string;
@@ -58,16 +61,6 @@ export function figureAt(figure: Figure, progress: number): string {
   return `${figure.prefix}${amount}${figure.suffix}`;
 }
 
-function allowed(value: HTMLElement): boolean {
-  return (
-    typeof IntersectionObserver !== 'undefined' &&
-    !value.closest('[data-lp-still]') &&
-    !matchMedia('(prefers-reduced-motion: reduce)').matches &&
-    getComputedStyle(value).getPropertyValue('--lp-stat-count').trim() !==
-      'none'
-  );
-}
-
 /** A time token (`800ms`, `0.8s`) in milliseconds. */
 function milliseconds(token: string): number {
   const amount = Number.parseFloat(token);
@@ -82,7 +75,11 @@ export function countUp(text: string): Attachment<HTMLElement> | undefined {
   const figure = parseFigure(text);
   if (!figure) return undefined;
   return (value) => {
-    if (!allowed(value)) return;
+    // The Style's opt-out first: a stage is only made for something to stage.
+    const style = getComputedStyle(value);
+    if (style.getPropertyValue('--lp-stat-count').trim() === 'none') return;
+    const stage = stageFor(value);
+    if (!stage) return;
     const copy = document.createElement('span');
     copy.className = 'lp-count';
     copy.setAttribute('aria-hidden', 'true');
@@ -97,12 +94,12 @@ export function countUp(text: string): Attachment<HTMLElement> | undefined {
     };
 
     // The motion tokens time it, and the browser eases it: the effect's
-    // progress is already eased, so the curve is the token's own.
+    // progress is already eased, so the curve is the token's own. (Under
+    // reduced motion the tokens are near zero, and it is simply there.)
     const run = () => {
-      const style = getComputedStyle(value);
       const duration =
         2 * milliseconds(style.getPropertyValue('--duration-slowest'));
-      if (!(duration > 0) || !allowed(value)) return settle();
+      if (!(duration > 0)) return settle();
       const easing = style.getPropertyValue('--ease-out').trim() || undefined;
       const running = copy.animate(null, {
         duration,
@@ -122,26 +119,15 @@ export function countUp(text: string): Attachment<HTMLElement> | undefined {
       running.finished.then(settle, () => {});
     };
 
-    const observer = new IntersectionObserver((entries) => {
-      const seen = entries.at(-1)?.isIntersecting ?? false;
-      // The first report says where the figure is as the page wakes up: on
-      // screen, it stays as it is; off it, it waits at zero, out of sight.
-      if (!copy.isConnected) {
-        if (seen) return observer.disconnect();
+    return stage.add(value, {
+      arm() {
         copy.textContent = figureAt(figure, 0);
         value.setAttribute('data-lp-counting', '');
         value.appendChild(copy);
-        return;
-      }
-      if (!seen) return;
-      observer.disconnect();
-      run();
+        return true;
+      },
+      play: run,
+      settle,
     });
-    observer.observe(value);
-
-    return () => {
-      observer.disconnect();
-      settle();
-    };
   };
 }

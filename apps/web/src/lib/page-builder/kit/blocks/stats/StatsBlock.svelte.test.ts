@@ -192,9 +192,12 @@ describe('StatsBlock counting up', () => {
       const entry = {
         isIntersecting: false,
         target,
-      } as IntersectionObserverEntry;
+        boundingClientRect: { top: 2000 },
+        rootBounds: { height: 1000 },
+      } as unknown as IntersectionObserverEntry;
       this.callback([entry], this as unknown as IntersectionObserver);
     }
+    unobserve() {}
     disconnect() {}
   }
 

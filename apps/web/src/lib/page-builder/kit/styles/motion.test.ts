@@ -156,11 +156,23 @@ function ungated(sheet: Sheet): string[] {
 }
 
 // ── motion.css's own contract ─────────────────────────────────────────────
-const MOTION_GATES = [
-  /^@media screen and \(prefers-reduced-motion: no-preference\)$/,
-  /^@supports \(animation-timeline: view\(\)\)$/,
-];
+const MOTION_GATE =
+  /^@media screen and \(prefers-reduced-motion: no-preference\)$/;
+const SCRUB_GATE = /^@supports \(animation-timeline: view\(\)\)$/;
 const ROOT_GATE = ':root[data-theme] .lp:not([data-lp-still])';
+
+/** An entrance's keyframes play only on an element the stage armed, in time. */
+const ENTRANCES = new Set([
+  'lp-reveal-rise',
+  'lp-reveal-fade',
+  'lp-reveal-scale',
+  'lp-build-rise',
+  'lp-build-track',
+  'lp-wipe',
+]);
+/** What ties an animation to the scroll. */
+const SCROLL =
+  /^(animation-timeline|animation-range(-start|-end)?|view-timeline(-name|-axis|-inset)?)$/;
 
 /** What may sit outside the gates: the marks (images) and counting's layout. */
 const UNGATED: Record<string, RegExp> = {
@@ -194,10 +206,18 @@ function motionViolations(source: string): string[] {
     const inPrint = d.conditions.includes('@media print');
     const allowed = d.selectors.every((s) => UNGATED[s]?.test(d.property));
     const gated =
-      MOTION_GATES.every((gate, i) => gate.test(d.conditions[i] ?? '')) &&
+      MOTION_GATE.test(d.conditions[0] ?? '') &&
       d.selectors.every((s) => s.startsWith(ROOT_GATE));
     if (!gated && !allowed && !inPrint)
       out.push(`outside the gates — ${where}`);
+    const scrubbed = d.conditions.some((c) => SCRUB_GATE.test(c));
+    if (SCROLL.test(d.property) && !scrubbed)
+      out.push(`tied to the scroll outside @supports — ${where}`);
+    if (d.value.split(/[\s,]+/).some((token) => ENTRANCES.has(token))) {
+      if (!d.selectors.every((s) => s.includes('[data-lp-enter]')))
+        out.push(`an entrance the stage did not arm — ${where}`);
+      if (scrubbed) out.push(`an entrance tied to the scroll — ${where}`);
+    }
     if (/(?<![\w.-])\d*\.?\d+m?s(?![\w-])/.test(d.value))
       out.push(`a literal duration — ${where}`);
     if (
@@ -252,16 +272,55 @@ describe('the motion gates (calibration)', () => {
   });
 
   it('holds motion.css to its own contract', () => {
-    const gated = (rule: string) =>
-      `@media screen and (prefers-reduced-motion: no-preference) { @supports (animation-timeline: view()) { ${rule} } }`;
+    const entrance = (rule: string) =>
+      `@media screen and (prefers-reduced-motion: no-preference) { ${rule} }`;
+    const scrubbed = (rule: string) =>
+      entrance(`@supports (animation-timeline: view()) { ${rule} }`);
     const cases: [string, number][] = [
-      [gated(`${ROOT_GATE} .a { animation: lp-x var(--_lp-enter); }`), 0],
-      [gated('.lp:not([data-lp-still]) .a { animation: lp-x both; }'), 1],
-      [`${ROOT_GATE} .a { animation: lp-x both; }`, 1],
-      [gated(`${ROOT_GATE} .a { animation: lp-x 300ms both; }`), 1],
-      [gated(`${ROOT_GATE} .a { animation: lp-x ease-out both; }`), 1],
       [
-        gated(`${ROOT_GATE} .a { animation: lp-x cubic-bezier(0, 0, 1, 1); }`),
+        entrance(
+          `${ROOT_GATE} [data-lp-enter] { animation-name: lp-reveal-rise; }`
+        ),
+        0,
+      ],
+      [entrance(`${ROOT_GATE} .a { animation-name: lp-reveal-rise; }`), 1],
+      [
+        scrubbed(`${ROOT_GATE} [data-lp-enter] { animation-name: lp-wipe; }`),
+        1,
+      ],
+      [
+        entrance(
+          `${ROOT_GATE} [data-lp-parallax] { animation-timeline: view(); }`
+        ),
+        1,
+      ],
+      [
+        scrubbed(
+          `${ROOT_GATE} [data-lp-parallax] { animation: lp-parallax linear both; animation-timeline: view(); }`
+        ),
+        0,
+      ],
+      [
+        entrance(
+          `.lp:not([data-lp-still]) [data-lp-enter] { animation-name: lp-wipe; }`
+        ),
+        1,
+      ],
+      [`${ROOT_GATE} [data-lp-enter] { animation-name: lp-wipe; }`, 1],
+      [
+        entrance(`${ROOT_GATE} [data-lp-enter] { animation-duration: 300ms; }`),
+        1,
+      ],
+      [
+        entrance(
+          `${ROOT_GATE} [data-lp-enter] { animation-timing-function: ease-out; }`
+        ),
+        1,
+      ],
+      [
+        entrance(
+          `${ROOT_GATE} [data-lp-enter] { animation-timing-function: cubic-bezier(0, 0, 1, 1); }`
+        ),
         1,
       ],
       [
@@ -271,7 +330,7 @@ describe('the motion gates (calibration)', () => {
       ['@keyframes lp-grow { from { width: 0; } }', 1],
       ['@keyframes lp-readalong { from { color: var(--a); } }', 0],
       ['.lp { --lp-mark-circle: url(x); }', 0],
-      ['.lp { --lp-mark-draw: lp-wipe both; }', 1],
+      ['.lp { --lp-mark-draw: lp-wipe both; }', 2],
       ['.lp-count { translate: 0 1em; }', 1],
       ['@media print { .lp-count { display: none; } }', 0],
     ];
@@ -352,7 +411,7 @@ describe('motion.css', () => {
   it('never moves the hero, which has its own entrance', () => {
     const hooks = readCss(MOTION).declared.filter(
       (d) =>
-        d.property === 'animation' &&
+        (d.property === 'animation' || d.property === 'animation-name') &&
         d.conditions.some((c) => c.startsWith('@container'))
     );
     // Nine builds, four reveals, the drift, the read-along.

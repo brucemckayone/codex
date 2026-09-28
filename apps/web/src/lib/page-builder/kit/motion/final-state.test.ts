@@ -97,4 +97,9 @@ describe.each(
     expect(html).not.toContain('data-lp-counting');
     expect(html).not.toContain('lp-count"');
   });
+
+  it('arms no entrance: the stage does that in the browser, below the fold', () => {
+    expect(html).not.toContain('data-lp-enter');
+    expect(html).not.toContain('data-lp-order');
+  });
 });

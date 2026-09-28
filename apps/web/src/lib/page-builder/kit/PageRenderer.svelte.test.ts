@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -9,6 +9,13 @@ import { PAGE_STYLE_IDS } from './model/ids';
 import { sampleContext, samplePage } from './model/sample';
 import { STYLES } from './model/styles';
 import type { KitPage } from './model/types';
+import {
+  animate,
+  entranceOn,
+  FakeObserver,
+  install,
+  wake,
+} from './motion/testing';
 import PageRenderer from './PageRenderer.svelte';
 import type { PageEdit } from './page-context';
 
@@ -307,5 +314,52 @@ describe('PageRenderer', () => {
     // Svelte sets `inert` as a property; jsdom does not reflect it.
     expect(bar?.inert || bar?.hasAttribute('inert')).toBe(true);
     expect(bar?.hasAttribute('data-shown')).toBe(false);
+  });
+});
+
+describe('PageRenderer entrances (03 X13)', () => {
+  let restore: () => void;
+
+  beforeEach(() => {
+    install();
+    // What motion.css gives a heading that builds, once armed (jsdom runs no CSS).
+    restore = animate((el) =>
+      el.matches('.lp-heading') ? [entranceOn(el)] : []
+    );
+  });
+
+  afterEach(() => {
+    restore();
+    vi.unstubAllGlobals();
+  });
+
+  const headings = (root: HTMLElement) => [
+    ...root.querySelectorAll<HTMLElement>(
+      '.lp-section:not([data-lp-type="hero"]) .lp-heading'
+    ),
+  ];
+
+  it('stages the public page from its root: one below the fold waits, one on screen stays', async () => {
+    const root = await render();
+    const [onScreen, ...below] = headings(root);
+    expect(below.length).toBeGreaterThan(3);
+    wake(onScreen, 'on');
+    for (const heading of below) wake(heading, 'below');
+    expect(onScreen.hasAttribute('data-lp-enter')).toBe(false);
+    expect(below.map((h) => h.getAttribute('data-lp-enter'))).toEqual(
+      below.map(() => 'wait')
+    );
+  });
+
+  it.each([
+    ['the canvas', { edit: { commit: () => {} } }],
+    ['a still thumbnail', { still: true }],
+  ])('stages nothing on %s', async (_, props) => {
+    const root = await render(props);
+    for (const heading of headings(root)) wake(heading, 'below');
+    expect(root.querySelector('[data-lp-enter]')).toBeNull();
+    expect(
+      FakeObserver.all.some((o) => headings(root).some((h) => o.targets.has(h)))
+    ).toBe(false);
   });
 });

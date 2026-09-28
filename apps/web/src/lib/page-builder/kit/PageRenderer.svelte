@@ -20,6 +20,10 @@
   background" section, so the org layout clears the stack above its shader
   for this page only. Never set while editing or still — the canvas and
   thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+
+  ENTRANCES (03 X13): the root hosts the page's stage (`motion/entrances.ts`),
+  which plays each reveal, build and mark once as the visitor reaches it.
+  Nothing is staged while still.
 -->
 <script lang="ts">
   import type { BrandTokenOverrides } from '$lib/page-builder';
@@ -32,6 +36,7 @@
   import { resolveSections, resolveStyle } from './model/resolve';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
+  import { entrances } from './motion/entrances';
   import { type PageEdit, setKitPage } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
@@ -134,6 +139,7 @@
   data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
+  {@attach entrances(still || !!edit)}
 >
   <div class="lp-page">
     {#each sections as section (section.id)}

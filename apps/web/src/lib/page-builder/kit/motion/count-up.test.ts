@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { countUp, figureAt, parseFigure } from './count-up';
+import { cross, FakeObserver, install, wake } from './testing';
 
 describe('which figures count', () => {
   it.each([
@@ -81,33 +82,11 @@ describe('which figures count', () => {
 });
 
 // ── the attachment ───────────────────────────────────────────────────────
-class FakeObserver {
-  static last: FakeObserver | null = null;
-  targets: Element[] = [];
-  disconnected = false;
-  constructor(readonly callback: IntersectionObserverCallback) {
-    FakeObserver.last = this;
-  }
-  observe(target: Element) {
-    this.targets.push(target);
-  }
-  disconnect() {
-    this.disconnected = true;
-  }
-  /** The browser reporting where the figure is. */
-  report(isIntersecting: boolean) {
-    const entry = {
-      isIntersecting,
-      target: this.targets[0],
-    } as IntersectionObserverEntry;
-    this.callback([entry], this as unknown as IntersectionObserver);
-  }
-}
-
 let frames: FrameRequestCallback[] = [];
 let progress = 0;
 let finish: () => void = () => {};
 const animate = vi.fn();
+const cleanups: (() => void)[] = [];
 
 function fakeAnimation() {
   const finished = new Promise<void>((resolve) => {
@@ -118,10 +97,6 @@ function fakeAnimation() {
     finished,
     cancel: vi.fn(),
   };
-}
-
-function reduced(matches: boolean) {
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches, media: query }));
 }
 
 /** A figure's element with the motion tokens its page would give it. */
@@ -136,6 +111,13 @@ function figure(text: string, style: Record<string, string> = {}) {
   return value;
 }
 
+/** Attach the count-up as StatsBlock does, and remember to take it off. */
+function attach(value: HTMLElement, text = value.textContent ?? '') {
+  const cleanup = countUp(text)!(value);
+  if (cleanup) cleanups.push(cleanup);
+  return cleanup;
+}
+
 /** What a screen reader reads: the text outside anything aria-hidden. */
 function spoken(value: HTMLElement) {
   const clone = value.cloneNode(true) as HTMLElement;
@@ -148,20 +130,19 @@ describe('counting up', () => {
   const realAnimate = Element.prototype.animate;
 
   beforeEach(() => {
-    FakeObserver.last = null;
+    install();
     frames = [];
     progress = 0;
     animate.mockReset().mockImplementation(fakeAnimation);
-    vi.stubGlobal('IntersectionObserver', FakeObserver);
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
       frames.push(callback)
     );
     vi.stubGlobal('cancelAnimationFrame', () => {});
     Element.prototype.animate = animate as unknown as Element['animate'];
-    reduced(false);
   });
 
   afterEach(() => {
+    for (const cleanup of cleanups.splice(0)) cleanup();
     vi.unstubAllGlobals();
     Element.prototype.animate = realAnimate;
     document.body.innerHTML = '';
@@ -176,20 +157,20 @@ describe('counting up', () => {
 
   it('leaves a figure that is on screen as the page wakes up exactly as it is', () => {
     const value = figure('4,000+');
-    countUp('4,000+')!(value);
-    FakeObserver.last!.report(true);
-    expect(FakeObserver.last!.disconnected).toBe(true);
+    attach(value);
+    wake(value, 'on');
     expect([...value.childNodes].map((node) => node.nodeType)).toEqual([
       Node.TEXT_NODE,
     ]);
     expect(value.hasAttribute('data-lp-counting')).toBe(false);
+    cross(value);
     expect(animate).not.toHaveBeenCalled();
   });
 
   it('waits at zero out of sight, the real value still there for a screen reader', () => {
     const value = figure('4,000+');
-    countUp('4,000+')!(value);
-    FakeObserver.last!.report(false);
+    attach(value);
+    wake(value, 'below');
     const copy = value.querySelector('.lp-count');
     expect(value.hasAttribute('data-lp-counting')).toBe(true);
     expect(copy?.getAttribute('aria-hidden')).toBe('true');
@@ -198,12 +179,11 @@ describe('counting up', () => {
     expect(animate).not.toHaveBeenCalled();
   });
 
-  it('counts once it is seen, timed and eased by the motion tokens, then is itself again', async () => {
+  it('counts once it clears the line, timed and eased by the motion tokens, then is itself again', async () => {
     const value = figure('4,000+');
-    countUp('4,000+')!(value);
-    FakeObserver.last!.report(false);
-    FakeObserver.last!.report(true);
-    expect(FakeObserver.last!.disconnected).toBe(true);
+    attach(value);
+    wake(value, 'below');
+    cross(value);
     expect(animate).toHaveBeenCalledWith(null, {
       duration: 1600,
       easing: 'cubic-bezier(0, 0, 0.2, 1)',
@@ -228,27 +208,27 @@ describe('counting up', () => {
     const value = figure('4,000+');
     still.appendChild(value);
     document.body.appendChild(still);
-    countUp('4,000+')!(value);
-    expect(FakeObserver.last).toBeNull();
+    expect(attach(value)).toBeUndefined();
+    expect(FakeObserver.all).toHaveLength(0);
   });
 
   it('never runs under reduced motion', () => {
-    reduced(true);
-    const value = figure('4,000+');
-    countUp('4,000+')!(value);
-    expect(FakeObserver.last).toBeNull();
+    install({ reduced: true });
+    expect(attach(figure('4,000+'))).toBeUndefined();
+    expect(FakeObserver.all).toHaveLength(0);
   });
 
   it('stays still where the Style says so', () => {
-    const value = figure('4,000+', { '--lp-stat-count': 'none' });
-    countUp('4,000+')!(value);
-    expect(FakeObserver.last).toBeNull();
+    expect(
+      attach(figure('4,000+', { '--lp-stat-count': 'none' }))
+    ).toBeUndefined();
+    expect(FakeObserver.all).toHaveLength(0);
   });
 
   it('shows the real value again when it goes away mid-way', () => {
     const value = figure('4,000+');
-    const cleanup = countUp('4,000+')!(value) as () => void;
-    FakeObserver.last!.report(false);
+    const cleanup = attach(value) as () => void;
+    wake(value, 'below');
     cleanup();
     expect(value.querySelector('.lp-count')).toBeNull();
     expect(value.hasAttribute('data-lp-counting')).toBe(false);
