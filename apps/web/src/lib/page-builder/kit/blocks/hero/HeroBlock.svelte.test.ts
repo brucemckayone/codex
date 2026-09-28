@@ -12,6 +12,7 @@ import {
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
+import { isLongHeading } from '../../model/long-heading';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
 import HeroBlock from './HeroBlock.svelte';
@@ -262,6 +263,49 @@ describe('HeroBlock', () => {
     h1!.textContent = 'New headline';
     h1!.dispatchEvent(new Event('input', { bubbles: true }));
     expect(edits).toEqual([['heading', 'New headline']]);
+  });
+
+  describe('a long headline (Codex-61zsk.23)', () => {
+    const LONG =
+      'Twenty quiet minutes every morning, for six weeks, until calm is simply how you begin';
+    const headline = () => document.body.querySelector('.hero__headline');
+    // The element each layout sets its display scale on: a Style steps a long
+    // headline down with `<parent>:has(> .hero__headline[data-long])`, so the
+    // poster's picture — which drops by one headline line — steps with it.
+    const PARENT: Record<string, string> = {
+      statement: 'hero-statement',
+      split: 'hero-split__copy',
+      cover: 'hero-cover__copy',
+      centered: 'hero-centered',
+      poster: 'hero-poster',
+    };
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: marks a long headline for its Style to step down, and never a short one', async (layout) => {
+      await render({ heading: LONG }, { layout });
+      expect(headline()?.hasAttribute('data-long')).toBe(true);
+      expect(
+        headline()?.parentElement?.classList.contains(PARENT[layout])
+      ).toBe(true);
+      unmount(app);
+      await render({ heading: 'Find your steady ground' }, { layout });
+      expect(headline()?.hasAttribute('data-long')).toBe(false);
+    });
+
+    it('draws the line where the problem statement does, on the headline it draws', async () => {
+      for (const heading of ['x'.repeat(64), 'x'.repeat(65)]) {
+        await render({ heading });
+        expect(headline()?.hasAttribute('data-long')).toBe(
+          isLongHeading(heading)
+        );
+        unmount(app);
+      }
+      // Left empty, the headline is the course title, and that is measured.
+      await render({}, { context: sampleContext({ course: { title: LONG } }) });
+      expect(document.body.querySelector('h1')?.textContent).toBe(LONG);
+      expect(headline()?.hasAttribute('data-long')).toBe(true);
+    });
   });
 
   /** A preview the test settles by hand. */

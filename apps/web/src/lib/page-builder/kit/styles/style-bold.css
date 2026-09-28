@@ -21,7 +21,8 @@
    5.75rem, leading under 1, tracking pulled in, in the brand's own face and
    case. Supporting copy is big as well (lead to 1.625rem, body to 1.3rem),
    quiet by colour, never by size. Emphasis is size and leading only — never
-   weight — so a one-weight face (Archivo Black, Anton) holds.
+   weight — so a one-weight face (Archivo Black, Anton) holds. A long
+   headline steps down on a wide screen, so the promise stays one screen.
 
    LAYOUT. Hung heads: a heading spans its column and its lead hangs in the
    right-hand five-twelfths under it, so the words step down the page on one
@@ -122,6 +123,38 @@
 
 :is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
   font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+}
+
+/* ── a long promise steps down ───────────────────────────────────────────── */
+/* A headline the hero marks long (`data-long`, over 64 characters, the line
+   the problem statement draws) runs to five lines and more at this display
+   size: taller than the first screen, and a word to a line beside a picture.
+   Wide, it steps down as far as each layout's measure needs for the longest
+   headline the field takes (120 characters) to end, lede and buttons with
+   it, above the fold of a 1440 × 900 screen in the widest face measured
+   (Archivo Black). The step sits on the headline's parent, so the poster's
+   picture, which drops by one headline line, steps down with it. A phone
+   draws the display at its floor already, where a long headline runs on. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-centered:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.62;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.5;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.45;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.4;
+  }
 }
 
 /* Every other headline lifts the same way. The kit's `rise` is a fade under a

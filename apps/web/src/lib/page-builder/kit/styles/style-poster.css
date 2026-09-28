@@ -113,6 +113,36 @@
   }
 }
 
+/* ── a long headline steps down ──────────────────────────────────────────── */
+/* In capitals at this size a headline the hero marks long (`data-long`, over
+   64 characters) runs to six lines and more, and breaks words beside the
+   poster's picture. Wide, it steps down as far as each layout's measure
+   needs for the longest headline the field takes (120 characters) to end,
+   lede and buttons with it, above the fold of a 1440 × 900 screen in the
+   widest face measured (Archivo Black). On the headline's parent, so the
+   poster's picture, which drops by one headline line, steps with it. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-centered:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.62;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.55;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.5;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.45;
+  }
+}
+
 /* ── printed rules: every line on the page in a strong tone of the ink ──── */
 :is(.lp, #lp-style)[data-lp-style='poster'] :is([data-lp-scheme], [data-lp-on-media]) {
   --lp-line: color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg));

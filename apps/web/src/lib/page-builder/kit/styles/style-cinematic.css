@@ -121,6 +121,29 @@
   text-align: center;
 }
 
+/* A headline the hero marks long (`data-long`, over 64 characters) fills the
+   opening card or the cover with six lines and more. Wide, it steps down as
+   far as each layout's measure needs for the longest headline the field
+   takes (120 characters) to end, lede and buttons with it, above the fold of
+   a 1440 × 900 screen in the widest face measured (Archivo Black) — the
+   cover's one step serves the pictured cover and the card alike. On the
+   headline's parent, so the poster's picture steps with it. The centred
+   hero holds: its measure is counted in characters. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-statement:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.8;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='cinematic']
+    :is(.hero-cover__copy, .hero-poster):has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.62;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-split__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.55;
+  }
+}
+
 /* Each card is a plate with a rim. Over the org's shader the smoked card
    stands clear on its own; over the glow that stands in for it (no preset, a
    page's own colours, the editing canvas, every thumbnail) it is the ground

@@ -713,3 +713,41 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   Not fixed, and filed: Codex-61zsk.29 (whether an unknown Style should be rejected on save instead
   of degraded, the owner's call) and Codex-n4844 (the brand-override sanitiser admits `image-set(`;
   CSP contains it).
+- **X27 · 2026-09-28 · orchestrator + V3 · A long headline steps down (Codex-61zsk.23).** Bold's
+  display (~157px at 1440) turned an 85-character headline into a wall. With the buttons' end
+  measured against a 900px fold in brand 0, Bold's heroes ended at: statement 1093, split 1425,
+  cover 1952, centered 1050, poster 1468. Poster's poster hero ran 9 lines to 1354 and split words
+  mid-word ("MINUTE/S"). Cinematic's cover ran 6 lines to 1007.
+  - **One line for "long".** `isLongHeading` (`kit/model/long-heading.ts`, over 64 characters) is
+    shared by the hero and the problem statement, which had its own literal 64. The hero marks
+    `.hero__headline` with `data-long`. The length measured is the headline the hero actually
+    draws, so a hero left empty is measured by the course title.
+  - **The step sits on the headline's parent**, as `<parent>:has(> .hero__headline[data-long])`
+    setting `--lp-display-scale`. The poster's picture drops by one headline line and reads the
+    scale on `.hero-poster__media`, a sibling of the headline, so the picture steps with the
+    words (Bold 317→239px, Poster 260→202, Cinematic 254→212). HeroBlock's test pins each layout's
+    parent class, so wrapping the headline fails a test instead of silently losing the step.
+  - **Scales are absolute, per layout, at ≥ 56rem containers.** A custom property cannot multiply
+    its own inherited value, and the measures differ. Each value is the largest step at which the
+    field's maximum (120 characters) still ends, lede and buttons with it, above a 1440 × 900
+    fold in the widest face measured (Archivo Black). A phone already draws the display at its
+    floor.
+
+    | Style | statement | centered | cover | poster | split |
+    |---|---|---|---|---|---|
+    | Bold | 0.70 | 0.62 | 0.50 | 0.45 | 0.40 |
+    | Poster | 0.70 | 0.62 | 0.55 | 0.50 | 0.45 |
+    | Cinematic | 0.80 | holds (120ch: 6 lines, ends at 855) | 0.62 | 0.62 | 0.55 |
+
+    Cinematic's cover value also serves its no-photo title card: 85 characters was 6–7 lines
+    ending at 930–1020, and is now 6 lines ending at 798 in brand 0.
+  - **Measured after:**
+    - Bold, 320 rows (5 layouts × 1440/390 × brands 0/3 × light/dark × 8 lengths): all 80 long
+      rows at 1440 fit, with 0 split words. Every row at 390 and every short row is unchanged.
+    - Poster and Cinematic, 240 rows A/B: all 60 long rows at 1440 fit, 0 changed elsewhere.
+  - **Not fixed, and filed as Codex-61zsk.30:** at full size, 46–64 characters still runs past the
+    fold in Bold's split, cover and poster heroes (6–8 lines, buttons ending at 932–1389). Poster's
+    poster hero splits words from 46 characters. A single length line cannot fix this: it needs a
+    second tier or a smaller base display in those layouts.
+  - **Not measured:** 1024 × 768, containers of 50–56rem, the public page's site header above the
+    hero, and the other five Styles with long headlines.
