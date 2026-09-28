@@ -115,7 +115,9 @@
 
   /* A phone-width band never shows a ragged stack: the buttons share the row,
      or each takes a full row of its own. A link-styled way in keeps its width.
-     `justify-self` so the row fills its cell however the block aligns it. */
+     `justify-self` so the row fills its cell however the block aligns it.
+     The split hero's words column, narrower than a phone at tablet width,
+     keeps the same rule (HeroBlock): change them together. */
   @container (max-width: 30rem) {
     .lp-actions,
     .lp-actions__row {

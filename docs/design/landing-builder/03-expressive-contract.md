@@ -787,3 +787,31 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **Filed as Codex-61zsk.31:** the portrait's frame is drawn on the print's paper edge, not
     outside it as its comment says. In dark mode it crosses that border at 2.78 / 2.80:1 (about 4.0
     in the accent). Against the section's ground it holds 4.58 / 4.64.
+- **X29 · 2026-09-28 · orchestrator + V3 · A split hero's buttons are never ragged
+  (Codex-61zsk.24).** From the split's own 50rem breakpoint to about 70rem, the words column is
+  narrower than a phone, so its two buttons wrapped into a ragged stack. That happened at 820 in
+  Soft, Cinematic, Path, Poster, Studio and (brand 0) Bold, and at 1000 in Poster. Clean had fixed
+  it for itself in X25.
+  - **One kit rule, in HeroBlock's split styles.** `@container (50rem <= width < 70rem)` gives that
+    column ButtonRow's phone rule: the row stretches, the buttons grow, and a quiet button or Bold's
+    link-styled secondary keeps its width. Clean's copy is deleted. The two copies of the rule point
+    at each other ("change them together"). HeroBlock's test pins the markup the rule selects on,
+    the three declarations, and that the range starts exactly at the split's own breakpoint.
+  - **Why not in ButtonRow.** 14 blocks use it, and it measures only the section, so it can't tell a
+    half-width column from a full-width row. A 50–70rem rule there would stretch every full-width
+    button row on a tablet. Making the column a size container would let the phone rule fire by
+    itself, but it breaks two ways:
+    - it collapses wherever a block shrink-wraps the row (the statement hero's `justify-self: end`);
+    - it re-bases every `cqi` token inside, so Bold's `--lp-button-size` would move even at 1440.
+  - **Why 70rem, not Clean's 64rem.** Poster's capitals pair (about 456px) stayed ragged up to
+    1056px in brand 0, so 64rem would have left it ragged at 1024, the landscape-tablet width.
+    70rem is where a 1:1 split's words column reaches 30rem, the width the phone rule is written
+    for.
+  - **Measured** over 8 Styles × 820/1000/1440 × brands 0 and 3, 48 rows each way:
+    - 0 ragged after;
+    - 1440: 16 of 16 rows identical to before;
+    - buttons that already fit share a filled row, a little wider than their natural size, which
+      is ButtonRow's own phone look.
+  - **Limits:** a creator's longer labels can still go ragged above 70rem, because no width rule can
+    know label widths (filed as Codex-61zsk.32). The sample pair fits every Style from 1088px. Only
+    a browser can see raggedness; the tests pin the keys and the range.

@@ -308,6 +308,112 @@ describe('HeroBlock', () => {
     });
   });
 
+  describe('the split buttons in a narrow column (Codex-61zsk.24)', () => {
+    type Node = {
+      type: string;
+      name?: string;
+      prelude?: string | { start: number; end: number };
+      property?: string;
+      value?: string;
+      block?: { children: Node[] } | null;
+    };
+    const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+    /** Each rule of HeroBlock's <style>, with the container query it sits in. */
+    function rules() {
+      const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), 'HeroBlock.svelte'),
+        'utf8'
+      );
+      const found: {
+        query: string;
+        selector: string;
+        decls: Record<string, string>;
+      }[] = [];
+      const visit = (nodes: Node[], query: string) => {
+        for (const node of nodes) {
+          if (node.type === 'Atrule')
+            visit(
+              node.block?.children ?? [],
+              node.name === 'container' ? squash(String(node.prelude)) : query
+            );
+          else if (node.type === 'Rule' && typeof node.prelude === 'object') {
+            const decls: Record<string, string> = {};
+            for (const d of node.block?.children ?? [])
+              if (d.type === 'Declaration')
+                decls[d.property ?? ''] = squash(d.value ?? '');
+            found.push({
+              query,
+              selector: squash(
+                source.slice(node.prelude.start, node.prelude.end)
+              ),
+              decls,
+            });
+          }
+        }
+      };
+      visit(
+        (parse(source, { modern: true }).css?.children ?? []) as Node[],
+        ''
+      );
+      return found;
+    }
+
+    it('sets its buttons where the rule reaches them: in the words column, each with its variant', async () => {
+      await render(
+        {
+          heading: 'H',
+          secondaryLabel: 'See what is inside',
+          secondaryHref: '#curriculum',
+        },
+        { layout: 'split' }
+      );
+      const row = document.body.querySelector(
+        '.hero-split__copy .lp-actions__row'
+      );
+      expect(
+        [...(row?.children ?? [])].map((b) => [
+          b.classList.contains('lp-button'),
+          b.getAttribute('data-variant'),
+        ])
+      ).toEqual([
+        [true, 'primary'],
+        [true, 'secondary'],
+      ]);
+    });
+
+    it('keeps the phone rule from the width the layout splits at: share the row or take full rows, a link keeps its width', () => {
+      const all = rules();
+      const split = all.find(
+        (r) => r.selector === '.hero-split' && r.decls['grid-template-columns']
+      );
+      const row = all.find(
+        (r) => r.selector === '.hero-split__copy :global(.lp-actions__row)'
+      );
+      const range = row?.query.match(
+        /^\((\d+(?:\.\d+)?)rem <= width < (\d+(?:\.\d+)?)rem\)$/
+      );
+      expect(split?.query).toMatch(/^\(min-width: \d+(?:\.\d+)?rem\)$/);
+      expect(range, `no narrow-column rule: ${row?.query}`).not.toBeNull();
+      // It starts where the words get a column of their own, and ends later.
+      expect(`(min-width: ${range![1]}rem)`).toBe(split!.query);
+      expect(Number(range![2])).toBeGreaterThan(Number(range![1]));
+      const inRange = (selector: string) =>
+        all.find((r) => r.query === row!.query && r.selector === selector)
+          ?.decls;
+      expect(row?.decls['justify-self']).toBe('stretch');
+      expect(
+        inRange('.hero-split__copy :global(.lp-actions__row > .lp-button)')
+          ?.flex
+      ).toBe('1 1 auto');
+      expect(
+        inRange(
+          ".hero-split__copy :global(.lp-actions__row > .lp-button[data-variant='quiet']), :global(.lp[data-lp-style='bold']) .hero-split__copy :global(.lp-actions__row > .lp-button[data-variant='secondary'])"
+        )?.flex
+      ).toBe('0 0 auto');
+    });
+  });
+
   /** A preview the test settles by hand. */
   function deferred() {
     let settle: (value: SellPreview | null) => void = () => {};

@@ -328,6 +328,29 @@
     }
   }
 
+  /* From there until the words' column is as wide as a phone (it reaches
+     30rem at about 69–71rem), the column is narrower than one — the editor's
+     Tablet frame, 820px, is in between — so its buttons keep ButtonRow's
+     phone rule: they share the row, or each takes a full row, and a
+     link-styled way in keeps its width. Never a ragged stack, in any Style.
+     ButtonRow measures the section, so it cannot see this column. */
+  @container (50rem <= width < 70rem) {
+    .hero-split__copy :global(.lp-actions__row) {
+      justify-self: stretch;
+    }
+
+    .hero-split__copy :global(.lp-actions__row > .lp-button) {
+      flex: 1 1 auto;
+    }
+
+    .hero-split__copy :global(.lp-actions__row > .lp-button[data-variant='quiet']),
+    :global(.lp[data-lp-style='bold'])
+      .hero-split__copy
+      :global(.lp-actions__row > .lp-button[data-variant='secondary']) {
+      flex: 0 0 auto;
+    }
+  }
+
   /* ── cover ─────────────────────────────────────────────────────────────── */
   /* Two layers in one row of the section's grid, each through the band's own
      padding: the media edge to edge behind, the words in the content column. */
