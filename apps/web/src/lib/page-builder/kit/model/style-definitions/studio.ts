@@ -1,58 +1,65 @@
 import { STORY_ORDER, type StyleDefinition } from '../style-definition';
 
 /**
- * PROVISIONAL (03 §12 R0): a working stand-in until Studio's Style WP (S2)
- * designs it. The paper, the hand-drawn marks and the font suggestion arrive
- * then; the ground stays the brand's own background, never a stock cream.
+ * Studio (03 §4.1): handmade and warm. Paper first — the brand's own ground
+ * and a tint of it take turns (`base` / `soft`), so the page reads as sheets
+ * of one paper, never a stock cream. The second colour gets one field (the
+ * numbers, circled by hand) and the closing ask the brand's own. The words
+ * sit beside photographs, pinned like prints: `split` and `columns` layouts,
+ * the testimonials a `wall`, the gallery a `mosaic`.
  */
 export const STUDIO: StyleDefinition = {
   id: 'studio',
   label: 'Studio',
   description:
-    'Handmade and warm. Paper texture, hand-drawn marks and photos set at a tilt.',
+    'Handmade and warm. Paper texture, hand-drawn marks and photos pinned at a tilt.',
   layouts: {
     hero: 'split',
     video: 'split',
-    problem: 'split',
+    problem: 'list',
     story: 'strip',
-    transformation: 'columns',
+    transformation: 'steps',
     benefits: 'grid',
-    curriculum: 'cards',
+    curriculum: 'timeline',
     preview: 'split',
     gallery: 'mosaic',
     instructor: 'split',
-    testimonials: 'grid',
-    faq: 'accordion',
+    testimonials: 'wall',
+    faq: 'columns',
     pricing: 'cards',
     cta: 'split',
-    stats: 'grid',
+    stats: 'row',
     text: 'columns',
   },
+  // Paper and tinted paper in turn, whichever sections a page keeps: the
+  // starter and every recipe alternate without a repeat to step back from.
   schemes: {
-    hero: 'soft',
+    hero: 'base',
     video: 'base',
     problem: 'soft',
     story: 'base',
-    text: 'base',
-    transformation: 'soft',
-    benefits: 'base',
-    curriculum: 'soft',
-    preview: 'base',
+    text: 'soft',
+    transformation: 'base',
+    benefits: 'soft',
+    curriculum: 'base',
+    preview: 'soft',
     gallery: 'base',
     instructor: 'soft',
     testimonials: 'base',
-    stats: 'soft',
-    pricing: 'base',
-    faq: 'soft',
-    cta: 'base',
+    stats: 'accent',
+    pricing: 'soft',
+    faq: 'base',
+    cta: 'brand',
   },
+  // A card is a sheet of the other paper: tinted on the ground, plain on the
+  // tint, plain on a colour field.
   featured: {
     base: 'soft',
     soft: 'base',
     contrast: 'base',
     brand: 'base',
     accent: 'base',
-    atmosphere: 'base',
+    atmosphere: 'soft',
   },
   order: STORY_ORDER,
   starter: [
@@ -67,4 +74,5 @@ export const STUDIO: StyleDefinition = {
     'faq',
     'cta',
   ],
+  fonts: { heading: 'Bitter', body: 'Figtree' },
 };

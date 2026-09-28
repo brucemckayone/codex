@@ -517,3 +517,22 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   it: a legacy-only type name, or a hero/faq on a page without a v2 Style, goes through the legacy
   table FIRST; everything else passes through first, as before. Pinned both ways, including
   idempotence; a mutation that skips the table-first rule fails the hero test.
+- **X15 · 2026-09-28 · E4 · Picture sizes.** A picture drawn wider than the `md` file (400px) takes
+  `lg` (800px): the mosaic's large tiles, the strip's landscapes, two-column grids and the bento lead.
+  Amends §10's "md unless full-bleed". Tiles wider than 800 CSS px still upscale until
+  `Codex-61zsk.13` adds a larger variant or `srcset`.
+- **X16 · 2026-09-28 · E5 · Editor.** The Style tab mounts only while open (eight live thumbnails; the
+  size bindings that cost 574ms of forced reflow were replaced by `ResizeObserver` measuring). A
+  page's "current fonts" = its own, else the org's, else Inter; "Use these fonts" writes the pair as
+  one undo step. The five recipes replace the empty page's single "start from the template"; new
+  pages start empty, so `studio/journeys/new` needs no extra step. Clean's font pair (Manrope + Inter)
+  is provisional until S3.
+- **X17 · 2026-09-28 · S2 · Poster and Studio as built.** Poster ("printed sheets pasted up the page"):
+  brand and accent fields alternate with paper, never contrast; capitals at display and heading
+  size; rotated stickers; photos printed over a block of the other brand colour; angled edges; the
+  panel veil with a sharp shader; fonts Anton + Roboto. Studio ("a maker's studio wall"): base/soft
+  alternation, stats on accent with drawn circles, drawn underlines under section headings, a
+  scribbled frame round the guide portrait, tilted prints with a lifted-ground border, paper grain at
+  0.22; fonts Bitter + Figtree. Known limits: Poster's capitals read poorly in a script heading face;
+  a brand with no secondary colour gives Poster's accent fields the org's secondary (grey on
+  studio-alpha).
