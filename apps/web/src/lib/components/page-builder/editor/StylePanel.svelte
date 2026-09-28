@@ -19,6 +19,15 @@
   Eight live renders are this panel's cost, so the shell mounts it only while
   the Style tab is open.
 -->
+<script module lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
+
+  // "Keep my fonts" answers given this visit, by storage key. Module scope:
+  // the panel is unmounted on every tab switch, and where storage refuses,
+  // this is all that remembers them.
+  const keptThisVisit = new SvelteSet<string>();
+</script>
+
 <script lang="ts">
   import { tick } from 'svelte';
   import { findFont } from '$lib/brand-editor/font-catalog';
@@ -111,11 +120,10 @@
 
   // "Keep my fonts", per page and Style. Storage can be missing or refuse
   // (a private window, blocked site data), so every access is guarded; the
-  // dismissals made here stand for this visit whatever it says.
+  // dismissals made this visit stand whatever it says, tab switches included.
   const KEPT = 'lp-keep-fonts';
-  let keptNow = $state<readonly string[]>([]);
   const keptKey = $derived(`${KEPT}:${pageBuilder.pageId ?? 'unsaved'}:${current}`);
-  const kept = $derived(keptNow.includes(keptKey) || stored(keptKey));
+  const kept = $derived(keptThisVisit.has(keptKey) || stored(keptKey));
 
   function stored(key: string): boolean {
     try {
@@ -126,7 +134,7 @@
   }
 
   function keepFonts(): void {
-    keptNow = [...keptNow, keptKey];
+    keptThisVisit.add(keptKey);
     try {
       window.localStorage.setItem(keptKey, '1');
     } catch {

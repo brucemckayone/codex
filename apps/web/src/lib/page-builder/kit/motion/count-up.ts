@@ -116,7 +116,10 @@ export function countUp(text: string): Attachment<HTMLElement> | undefined {
         frame = requestAnimationFrame(tick);
       };
       tick();
-      running.finished.then(settle, () => {});
+      // Finished, or cancelled by anything at all (an extension clearing the
+      // page's animations): either way the figure is itself again and the
+      // frames stop.
+      running.finished.then(settle, settle);
     };
 
     return stage.add(value, {

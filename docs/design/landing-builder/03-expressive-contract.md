@@ -685,3 +685,31 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - The section-veil Styles (Clean, Soft, Quiet) show a mottled grey band and a pale edge over a
       blurred Bloom shader on atmosphere (the kit veil and the blurred canvas's edge).
     - The wall's quote room could come from one Voice-side value.
+- **X26 · 2026-09-28 · orchestrator + R1 · What the branch review found.** The codex-review lenses
+  were chosen by roster globs: silent-failure-hunter and scoping-security. Scoping-security found
+  nothing in the diff. Silent-failure-hunter found 1 medium, 2 low and 1 nit, all fixed here, each
+  with a test that fails without it:
+  - **A layout id is read in the namespace of whoever wrote the section**, decided by the same test
+    as its props. A section is legacy if its type is a legacy-only name, or if it is a hero or faq
+    on a page without a valid v2 Style AND its props have the old builder's shape (a hero
+    `headline`, a faq without `items`). "No valid Style" alone is not enough. The save schema
+    degrades an unknown Style to none (deploy skew, or a Style retired later: Codex-61zsk.29), and
+    such a page's v2 Poster hero was being read as the old `poster`, turned into `cover`, and
+    autosaved that way. Only two ids mean different things in the two namespaces: hero `poster` →
+    `cover`, and the retired `centered` → `statement`. The second is deliberate, because the old
+    builder had renamed `centered` to `stage`; it is pinned.
+  - **`upgradePage` is total for names `Object.prototype` has.** Every table lookup is own-property
+    only (`own()`, and `mapLegacyProps`). `{type:'constructor', variant:'x'}` had thrown, and
+    `toString`/`valueOf` had made sections typed as functions. Only a raw DB write could reach it,
+    but this path renders the public page. `isLayoutOf` (ids.ts) still indexes plainly; it is safe
+    while every caller passes a real type id.
+  - **"Keep my fonts" remembers a decline for the whole visit when storage is refused.** The
+    fallback moved to module scope, because the panel mounts only while its tab is open.
+  - **A count-up cancelled from outside still settles** (`finished.then(settle, settle)`). It had
+    stayed in its counting state with its frame loop running.
+  - **The portal seed says what it retires.** It logs each course plan it retires, and keeps (with a
+    warning) a plan with any subscription not `cancelled`.
+
+  Not fixed, and filed: Codex-61zsk.29 (whether an unknown Style should be rejected on save instead
+  of degraded, the owner's call) and Codex-n4844 (the brand-override sanitiser admits `image-set(`;
+  CSP contains it).

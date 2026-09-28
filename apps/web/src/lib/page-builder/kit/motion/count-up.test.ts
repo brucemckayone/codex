@@ -82,20 +82,25 @@ describe('which figures count', () => {
 });
 
 // ── the attachment ───────────────────────────────────────────────────────
-let frames: FrameRequestCallback[] = [];
+// Frames by id, so a cancelled one is gone as it would be in the browser.
+let frames = new Map<number, FrameRequestCallback>();
+let lastFrame = 0;
 let progress = 0;
 let finish: () => void = () => {};
 const animate = vi.fn();
 const cleanups: (() => void)[] = [];
 
 function fakeAnimation() {
-  const finished = new Promise<void>((resolve) => {
+  let abort: () => void = () => {};
+  const finished = new Promise<void>((resolve, reject) => {
     finish = resolve;
+    abort = () => reject(new DOMException('Cancelled', 'AbortError'));
   });
   return {
     effect: { getComputedTiming: () => ({ progress }) },
     finished,
-    cancel: vi.fn(),
+    // As in the browser: cancelling rejects `finished`, whoever cancels.
+    cancel: vi.fn(() => abort()),
   };
 }
 
@@ -131,13 +136,14 @@ describe('counting up', () => {
 
   beforeEach(() => {
     install();
-    frames = [];
+    frames = new Map();
     progress = 0;
     animate.mockReset().mockImplementation(fakeAnimation);
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
-      frames.push(callback)
-    );
-    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++lastFrame, callback);
+      return lastFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
     Element.prototype.animate = animate as unknown as Element['animate'];
   });
 
@@ -150,8 +156,8 @@ describe('counting up', () => {
 
   const step = (to: number) => {
     progress = to;
-    const pending = frames;
-    frames = [];
+    const pending = [...frames.values()];
+    frames.clear();
     for (const frame of pending) frame(0);
   };
 
@@ -200,6 +206,20 @@ describe('counting up', () => {
     expect(value.querySelector('.lp-count')).toBeNull();
     expect(value.hasAttribute('data-lp-counting')).toBe(false);
     expect(value.textContent).toBe('4,000+');
+  });
+
+  it('is itself again, and stops counting, when something else cancels the count', async () => {
+    const value = figure('4,000+');
+    attach(value);
+    wake(value, 'below');
+    cross(value);
+    step(0.5);
+    // What an extension's `getAnimations().forEach((a) => a.cancel())` does.
+    animate.mock.results[0]?.value.cancel();
+    await Promise.resolve();
+    expect(value.querySelector('.lp-count')).toBeNull();
+    expect(value.hasAttribute('data-lp-counting')).toBe(false);
+    expect(frames.size).toBe(0);
   });
 
   it('never runs on a still page', () => {

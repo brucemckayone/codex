@@ -256,17 +256,31 @@ describe('StylePanel — the fonts a Style suggests', () => {
       open(null, style, pageId);
       renderStyle();
     };
+    // The panel remembers a decline for the visit at module scope, which
+    // outlives a test, so each test declines on a page of its own.
+    const pageOf = (n: number) => `00000000-0000-4000-8000-0000000000c${n}`;
+    const refuseStorage = () => {
+      const refuse = () => {
+        throw new DOMException('Storage is disabled', 'SecurityError');
+      };
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse);
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse);
+    };
 
     it('declines the pair for this page and Style, changes no font, and is remembered', () => {
-      open(null, suggesting);
+      open(null, suggesting, pageOf(1));
       renderStyle();
       expect(keep().textContent?.trim()).toBe('Keep my fonts');
       keep().click();
       flushSync();
       expect(row()).toBeNull();
       expect(pageBuilder.pending?.brandOverrides).toBeNull();
-      // Back to the page later: still declined.
-      reopen(suggesting);
+      // Stored in this browser, for later visits…
+      expect(
+        localStorage.getItem(`lp-keep-fonts:${pageOf(1)}:${suggesting}`)
+      ).toBe('1');
+      // …and back to the page later: still declined.
+      reopen(suggesting, pageOf(1));
       expect(row()).toBeNull();
       // Another Style's pair is still offered, on this page…
       el<HTMLButtonElement>(`.style-card[data-style="${other}"]`).click();
@@ -279,8 +293,15 @@ describe('StylePanel — the fonts a Style suggests', () => {
       expect(row()).not.toBeNull();
     });
 
+    it('stays declined on a later visit, from what this browser stored', () => {
+      localStorage.setItem(`lp-keep-fonts:${pageOf(2)}:${suggesting}`, '1');
+      open(null, suggesting, pageOf(2));
+      renderStyle();
+      expect(row()).toBeNull();
+    });
+
     it('hands focus back to the Style it was about, whichever answer is given', async () => {
-      open(null, suggesting);
+      open(null, suggesting, pageOf(3));
       renderStyle();
       const card = el(`.style-card[data-style="${suggesting}"]`);
       keep().focus();
@@ -299,18 +320,28 @@ describe('StylePanel — the fonts a Style suggests', () => {
     });
 
     it('without storage, offers the pair as before and still declines it for this visit', () => {
-      const refuse = () => {
-        throw new DOMException('Storage is disabled', 'SecurityError');
-      };
-      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse);
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse);
-      open(null, suggesting);
+      refuseStorage();
+      open(null, suggesting, pageOf(4));
       renderStyle();
       // A store that cannot be read hides nothing…
       expect(row()).not.toBeNull();
       // …and a refused write still takes the row away, without an error.
       keep().click();
       flushSync();
+      expect(row()).toBeNull();
+    });
+
+    it('without storage, a declined pair stays declined when the Style tab is left and opened again', () => {
+      refuseStorage();
+      open(null, suggesting, pageOf(5));
+      renderStyle();
+      keep().click();
+      flushSync();
+      expect(row()).toBeNull();
+      // Another tab: the shell unmounts the panel, and mounts it again on return.
+      if (app) unmount(app);
+      app = null;
+      renderStyle();
       expect(row()).toBeNull();
     });
   });

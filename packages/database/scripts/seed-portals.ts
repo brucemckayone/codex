@@ -49,7 +49,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,6 +71,7 @@ import {
   courseEnrollments,
   courseStages,
   courseSubscriptionPlans,
+  courseSubscriptions,
   courses,
   entitlements,
   landingPages,
@@ -471,7 +481,7 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
     // already exist.
     await reconcilePage(org.id, userId, courseId, spec);
     await reconcilePrice(courseId, spec);
-    await retirePlans(courseId);
+    await retirePlans(courseId, spec);
     await reconcileCover(courseId, spec);
     await reconcileEnrollment(userId, org.id, courseId, spec);
     await reconcileCompletions(userId, courseId, spec.completions);
@@ -1422,20 +1432,56 @@ async function reconcilePrice(
  * undone; the plan's Stripe product is left as it is. A no-op once retired,
  * and in CI, where no seeded portal has a plan.
  *
+ * A plan someone still subscribes to is KEPT, with a warning: its subscribers
+ * hold a `planId` to it and must keep renewing, which is why the service's own
+ * `deactivatePlan` never deletes one either. Every `course_subscriptions`
+ * status but `cancelled` counts — `paused` can resume and `incomplete` can
+ * still be paid, so neither has ended.
+ *
  * Tier access (`course_tier_access`) is NOT reset: that join table has no
  * soft delete, and this seed never hard-deletes.
  */
-async function retirePlans(courseId: string): Promise<void> {
+async function retirePlans(courseId: string, spec: PortalSpec): Promise<void> {
+  const held = await dbWs
+    .selectDistinct({ id: courseSubscriptionPlans.id })
+    .from(courseSubscriptionPlans)
+    .innerJoin(
+      courseSubscriptions,
+      eq(courseSubscriptions.planId, courseSubscriptionPlans.id)
+    )
+    .where(
+      and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt),
+        ne(courseSubscriptions.status, 'cancelled')
+      )
+    );
+  const heldIds = held.map((plan) => plan.id);
+  for (const id of heldIds) {
+    console.log(
+      `    ! kept course subscription plan ${id} on ${spec.slug}: it still has a live subscription`
+    );
+  }
+
   const now = new Date();
-  await dbWs
+  const retired = await dbWs
     .update(courseSubscriptionPlans)
     .set({ isActive: false, deletedAt: now, updatedAt: now })
     .where(
       and(
         eq(courseSubscriptionPlans.courseId, courseId),
-        isNull(courseSubscriptionPlans.deletedAt)
+        isNull(courseSubscriptionPlans.deletedAt),
+        heldIds.length > 0
+          ? notInArray(courseSubscriptionPlans.id, heldIds)
+          : sql`true`
       )
+    )
+    .returning({ id: courseSubscriptionPlans.id });
+  for (const plan of retired) {
+    console.log(
+      `    (retired course subscription plan ${plan.id} on ${spec.slug})`
     );
+  }
 }
 
 /**

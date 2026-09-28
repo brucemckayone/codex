@@ -9,6 +9,8 @@
  * the axis→SectionStyle conversion — none of which any sampled real row uses.
  */
 import { describe, expect, it } from 'vitest';
+import { isSectionTypeId } from './ids';
+import { mapLegacyProps } from './legacy/prop-mappers';
 import { upgradePage } from './upgrade';
 
 describe('upgradePage · real stored rows', () => {
@@ -541,7 +543,8 @@ describe('upgradePage · the `hero`/`faq` identity-mapped collision', () => {
 });
 
 // 03 §13 X14: once v2 gained `poster`, `wall` and `marquee`, three old layout
-// ids became v2 ids too. Which one a stored id means depends on who wrote it.
+// ids became v2 ids too — as the retired hero `centered` always was. Which one
+// a stored id means depends on who wrote it.
 describe('upgradePage · layout ids both builders use', () => {
   const legacyHero = (variant: string) => ({
     sections: [
@@ -554,6 +557,15 @@ describe('upgradePage · layout ids both builders use', () => {
       },
     ],
   });
+  // A v2 page can lose its Style: the save schema degrades a Style id this
+  // build does not know (deploy skew, a Style retired later) to absent. Its
+  // heroes are still v2 — their props say so — and so are their layout ids.
+  const styleLessHero = (variant: string, props: Record<string, unknown>) => ({
+    design: {},
+    sections: [{ id: 'h1', type: 'hero', enabled: true, variant, props }],
+  });
+  const V2_HERO = { heading: 'A v2 headline' };
+  const LEGACY_HERO = { headline: 'A real headline' };
 
   it('maps the old hero `poster` (a framed media plate) to `cover`, not the new type-led poster', () => {
     const [section] = upgradePage(legacyHero('poster')).sections;
@@ -568,6 +580,25 @@ describe('upgradePage · layout ids both builders use', () => {
       ],
     }).sections;
     expect(section!.variant).toBe('poster');
+  });
+
+  it.each([
+    'poster',
+    'centered',
+  ])('keeps a v2 hero’s `%s` on a page that has lost its Style', (variant) => {
+    const [section] = upgradePage(styleLessHero(variant, V2_HERO)).sections;
+    expect(section!.variant).toBe(variant);
+    expect(section!.props).toEqual(V2_HERO);
+  });
+
+  it('reads a legacy hero’s `centered` as the retired id it is: statement', () => {
+    // Deliberate, and pinned so the choice is on record: to the old builder
+    // `centered` is a RETIRED id, renamed to `stage`, which maps to
+    // `statement` (variant-map.ts) — not the v2 `centered` of the same name.
+    const [section] = upgradePage(
+      styleLessHero('centered', LEGACY_HERO)
+    ).sections;
+    expect(section!.variant).toBe('statement');
   });
 
   it('carries the old testimonial wall and moving strip to the new ones of the same name', () => {
@@ -587,8 +618,16 @@ describe('upgradePage · layout ids both builders use', () => {
     }
   });
 
-  it('settles: upgrading the upgraded page changes nothing', () => {
-    const once = upgradePage(legacyHero('poster'));
+  it.each([
+    ['a legacy hero’s `poster`', legacyHero('poster')],
+    ['a style-less v2 hero’s `poster`', styleLessHero('poster', V2_HERO)],
+    ['a style-less v2 hero’s `centered`', styleLessHero('centered', V2_HERO)],
+    [
+      'a style-less legacy hero’s `centered`',
+      styleLessHero('centered', LEGACY_HERO),
+    ],
+  ])('settles: upgrading %s twice changes nothing', (_name, page) => {
+    const once = upgradePage(page);
     expect(upgradePage(once)).toEqual(once);
   });
 });
@@ -733,6 +772,110 @@ describe('upgradePage · garbage input, never throws', () => {
 
   it('defaults to Style "bold" for a page with no design at all', () => {
     expect(upgradePage({}).design).toEqual({ style: 'bold' });
+  });
+});
+
+// A stored name is untrusted, and some names are ones every object already
+// has. Wherever a stored name is looked up, one of these must read exactly as
+// any other unknown name would there — never as what `Object.prototype` holds.
+describe('upgradePage · names every object inherits', () => {
+  const NAMES = [
+    'constructor',
+    'toString',
+    '__proto__',
+    'hasOwnProperty',
+    'valueOf',
+  ];
+  const UNKNOWN = 'no-such-name';
+  const AXES = [
+    'width',
+    'density',
+    'surface',
+    'edge',
+    'align',
+    'type',
+    'accent',
+    'motion',
+    'media',
+  ];
+  const hero = {
+    id: 'h',
+    type: 'hero',
+    enabled: true,
+    props: { heading: 'H' },
+  };
+  type Place = [
+    place: string,
+    page: (name: string) => Parameters<typeof upgradePage>[0],
+  ];
+  const PLACES: Place[] = [
+    // Dropped, as an unknown type is — with a layout id, which is what threw.
+    [
+      'a section type',
+      (name) => ({
+        sections: [
+          hero,
+          { id: 's', type: name, enabled: true, variant: 'poster', props: {} },
+        ],
+      }),
+    ],
+    [
+      'a layout id',
+      (name) => ({
+        sections: ['hero', 'faq', 'proof', 'testimonials'].map((type) => ({
+          id: type,
+          type,
+          enabled: true,
+          variant: name,
+          props: {},
+        })),
+      }),
+    ],
+    [
+      'a section surface and density',
+      (name) => ({
+        sections: [{ ...hero, design: { surface: name, density: name } }],
+      }),
+    ],
+    [
+      'the page Style and every axis of its look',
+      (name) => ({
+        design: Object.fromEntries(
+          ['style', ...AXES].map((key) => [key, name])
+        ),
+        sections: [hero],
+      }),
+    ],
+    [
+      'a key of the page design',
+      (name) => ({
+        design: Object.fromEntries([[name, 'cinematic']]),
+        sections: [hero],
+      }),
+    ],
+  ];
+  const CASES = PLACES.flatMap(([place, page]) =>
+    NAMES.map((name): [string, string, Place[1]] => [name, place, page])
+  );
+
+  it.each(
+    CASES
+  )('`%s` as %s reads as any other unknown name would', (name, _place, page) => {
+    expect(() => upgradePage(page(name))).not.toThrow();
+    const upgraded = upgradePage(page(name));
+    for (const section of upgraded.sections) {
+      expect(isSectionTypeId(section.type), section.id).toBe(true);
+    }
+    expect(upgraded).toEqual(upgradePage(page(UNKNOWN)));
+  });
+
+  // `upgradePage` reaches the prop mappers with a real legacy type only, so
+  // their own guard is asked directly.
+  it('maps no props for one of these names, asked directly', () => {
+    for (const name of NAMES) {
+      expect(() => mapLegacyProps(name, {}), name).not.toThrow();
+      expect(mapLegacyProps(name, {}), name).toBeUndefined();
+    }
   });
 });
 

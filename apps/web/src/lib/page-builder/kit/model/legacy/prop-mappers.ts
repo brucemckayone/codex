@@ -432,10 +432,13 @@ const PROP_MAPPERS: Readonly<
 
 /** Map one legacy type's raw props to its v2 shape, or `undefined` when
  *  `legacyType` names no known legacy type (the caller's v2-pass-through
- *  path handles that case instead — see `upgrade.ts`). */
+ *  path handles that case instead — see `upgrade.ts`). Own entries only: a
+ *  stored type such as `'valueOf'` must not call `Object.prototype.valueOf`. */
 export function mapLegacyProps(
   legacyType: string,
   raw: Record<string, unknown>
 ): Record<string, unknown> | undefined {
-  return PROP_MAPPERS[legacyType]?.(raw);
+  return Object.hasOwn(PROP_MAPPERS, legacyType)
+    ? PROP_MAPPERS[legacyType]?.(raw)
+    : undefined;
 }
