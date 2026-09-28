@@ -144,6 +144,23 @@
   }
 }
 
+/* A medium headline (`data-medium`, 25–64 characters) passes the fold beside
+   the poster's picture from 55 characters, and in the opening card with no
+   picture from 59. Wide, each steps it down as far as the medium's longest
+   (64 characters) needs to end, lede and buttons with it, above a
+   1440 × 900 fold in Archivo Black with no word split — a step above the
+   long one. The other layouts, and the pictured cover, hold it. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-poster:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.85;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='cinematic']
+    .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.75;
+  }
+}
+
 /* Each card is a plate with a rim. Over the org's shader the smoked card
    stands clear on its own; over the glow that stands in for it (no preset, a
    page's own colours, the editing canvas, every thumbnail) it is the ground

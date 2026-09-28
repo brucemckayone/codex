@@ -17,16 +17,17 @@
   changes it through tokens and a few `[data-lp-style]` rules — so switching
   Style never re-mounts the block.
 
-  A long headline is marked `data-long` (the kit's one line, as the problem
-  statement's): a Style whose display would make it a wall steps it down on
-  the headline's parent, `<parent>:has(> .hero__headline[data-long])`.
+  A medium or a long headline is marked `data-medium` / `data-long` (the
+  kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
+  Style whose display would make it a wall steps it down on the headline's
+  parent, `<parent>:has(> .hero__headline[data-medium])`.
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import { resolvePageImageUrl } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
-  import { isLongHeading } from '../../model/long-heading';
+  import { headingLength } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -42,7 +43,7 @@
 
   const content = $derived(heroDefinition.coerce(props));
   const heading = $derived(content.heading ?? context.course.title);
-  const long = $derived(isLongHeading(heading));
+  const length = $derived(headingLength(heading));
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
   let watching = $state<PreviewMedia | null>(null);
@@ -101,7 +102,11 @@
       <Eyebrow text={content.eyebrow} type="hero" {edit} />
     </div>
   {/if}
-  <div class="hero__headline hero__enter-h" data-long={long ? '' : undefined}>
+  <div
+    class="hero__headline hero__enter-h"
+    data-medium={length === 'medium' ? '' : undefined}
+    data-long={length === 'long' ? '' : undefined}
+  >
     <Heading
       level={section.headingLevel}
       size="display"

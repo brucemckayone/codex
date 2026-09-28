@@ -265,13 +265,17 @@ describe('HeroBlock', () => {
     expect(edits).toEqual([['heading', 'New headline']]);
   });
 
-  describe('a long headline (Codex-61zsk.23)', () => {
+  describe('a medium or long headline (Codex-61zsk.23, Codex-61zsk.30)', () => {
     const LONG =
       'Twenty quiet minutes every morning, for six weeks, until calm is simply how you begin';
+    const MEDIUM = 'Twenty minutes a morning, for a calmer and steadier you';
     const headline = () => document.body.querySelector('.hero__headline');
-    // The element each layout sets its display scale on: a Style steps a long
-    // headline down with `<parent>:has(> .hero__headline[data-long])`, so the
-    // poster's picture — which drops by one headline line — steps with it.
+    const marks = () =>
+      ['data-medium', 'data-long'].filter((a) => headline()?.hasAttribute(a));
+    // The element each layout sets its display scale on: a Style steps a
+    // headline down with `<parent>:has(> .hero__headline[data-medium])` (or
+    // `[data-long]`), so the poster's picture — which drops by one headline
+    // line — steps with it.
     const PARENT: Record<string, string> = {
       statement: 'hero-statement',
       split: 'hero-split__copy',
@@ -282,29 +286,46 @@ describe('HeroBlock', () => {
 
     it.each(
       SECTION_LAYOUTS.hero
-    )('%s: marks a long headline for its Style to step down, and never a short one', async (layout) => {
+    )('%s: marks a medium or a long headline for its Style to step down, and never a short one', async (layout) => {
       await render({ heading: LONG }, { layout });
-      expect(headline()?.hasAttribute('data-long')).toBe(true);
+      expect(marks()).toEqual(['data-long']);
       expect(
         headline()?.parentElement?.classList.contains(PARENT[layout])
       ).toBe(true);
       unmount(app);
+      await render({ heading: MEDIUM }, { layout });
+      expect(marks()).toEqual(['data-medium']);
+      unmount(app);
       await render({ heading: 'Find your steady ground' }, { layout });
-      expect(headline()?.hasAttribute('data-long')).toBe(false);
+      expect(marks()).toEqual([]);
     });
 
-    it('draws the line where the problem statement does, on the headline it draws', async () => {
-      for (const heading of ['x'.repeat(64), 'x'.repeat(65)]) {
+    it('draws its lines on the headline it draws: medium past 24, long past 64 as the problem statement does', async () => {
+      const tiers = [
+        [24, []],
+        [25, ['data-medium']],
+        [64, ['data-medium']],
+        [65, ['data-long']],
+      ] as const;
+      for (const [chars, expected] of tiers) {
+        const heading = 'x'.repeat(chars);
         await render({ heading });
+        expect(marks(), `${chars} characters`).toEqual(expected);
         expect(headline()?.hasAttribute('data-long')).toBe(
           isLongHeading(heading)
         );
         unmount(app);
       }
       // Left empty, the headline is the course title, and that is measured.
+      await render(
+        {},
+        { context: sampleContext({ course: { title: MEDIUM } }) }
+      );
+      expect(document.body.querySelector('h1')?.textContent).toBe(MEDIUM);
+      expect(marks()).toEqual(['data-medium']);
+      unmount(app);
       await render({}, { context: sampleContext({ course: { title: LONG } }) });
-      expect(document.body.querySelector('h1')?.textContent).toBe(LONG);
-      expect(headline()?.hasAttribute('data-long')).toBe(true);
+      expect(marks()).toEqual(['data-long']);
     });
   });
 

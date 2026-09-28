@@ -143,6 +143,30 @@
   }
 }
 
+/* A medium headline (`data-medium`, 25–64 characters) splits words beside
+   the poster's picture from 27 characters, and passes the fold in the cover
+   from 32, the split from 55 and the statement from 59. Wide, each steps it
+   down as far as the medium's longest (64 characters) needs to end, lede and
+   buttons with it, above a 1440 × 900 fold in Archivo Black with no word
+   split — a step above the long one. The centred hero holds. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.75;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.6;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.55;
+  }
+}
+
 /* ── printed rules: every line on the page in a strong tone of the ink ──── */
 :is(.lp, #lp-style)[data-lp-style='poster'] :is([data-lp-scheme], [data-lp-on-media]) {
   --lp-line: color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg));

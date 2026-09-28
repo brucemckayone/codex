@@ -842,3 +842,53 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Style with the issue at `design.style`, and accepts every id and an absent Style. An unknown
     `scheme` or `spacing` still degrades. The twin rejects the same way. Calibrated by restoring
     the `.catch`: exactly the 4 new tests went red.
+- **X31 · 2026-09-29 · orchestrator + V3 · Medium headlines get their own step
+  (Codex-61zsk.30).** The owner's decision, verbatim: "A second size step (Recommended)", meaning
+  "Medium headlines get their own smaller step; short headlines keep Bold's full display size."
+  - **Three tiers from one module.** `headingLength()` in `kit/model/long-heading.ts` returns
+    short (up to 24 characters), medium (25–64) or long (over 64). `isLongHeading` is the long
+    tier, so ProblemBlock is unchanged. HeroBlock marks the drawn headline `data-medium` or
+    `data-long`.
+  - **Why the medium line is 24.** A full-size sweep of 30 headlines (20–64 characters) over
+    Bold, Poster and Cinematic, 5 layouts each, in Archivo Black at 1440 × 900. The longest
+    headline each layout fits:
+
+    | Layout | Fits up to |
+    |---|---|
+    | Bold cover | 24 |
+    | Bold poster | 27 |
+    | Poster cover | 31 |
+    | Bold split | 40 |
+    | Bold statement | 46 |
+    | Poster split | 50 |
+    | Cinematic poster | 50 |
+    | Poster statement | 55 |
+
+    One shared line has to sit where the tightest layout breaks, and that is Bold's cover.
+  - **The steps,** at ≥ 56rem, on the headline's parent as in X27. Each is the largest scale at
+    which a 61–64-character headline ends above the fold with 0 split words:
+
+    | Style | statement | split | cover | poster |
+    |---|---|---|---|---|
+    | Bold | 0.90 | 0.55 | 0.70 | 0.65 |
+    | Poster | 0.95 | 0.55 | 0.75 | 0.60 |
+    | Cinematic | — | — | 0.75, the no-photo card only | 0.85 |
+
+    - Every layout is monotonic: short ≥ medium ≥ X27's long.
+    - Where the full size holds to 64 there is no step: Bold's and Poster's centered, and
+      Cinematic's statement, split, centered and pictured cover.
+  - **Measured after** (1440, three Styles, 30 headlines):
+    - 468 medium rows in stepped layouts: 0 past the fold, 0 split words;
+    - unstepped layouts and every short row: unchanged;
+    - 390: every row unchanged.
+  - **The cost of one shared line**, filed as Codex-61zsk.34 (a continuous, per-layout scale;
+    needs the owner's OK):
+    - layouts that hold more step down anyway (at 40 characters, Bold's statement goes from 157
+      to 141px, and its split from 110 to 86px);
+    - the size jumps while a creator types, at the 25th and the 65th character.
+  - **Filed as Codex-61zsk.33:** Poster's poster hero splits a long word mid-word even in a short
+    headline ("MORNINGS," at 21 characters). That depends on word length, so no length tier can
+    fix it.
+  - **Instrument note:** on a browser context's first page, `fonts.ready` resolves before the
+    brand webfont has even been requested, so the first measurement reads the fallback face.
+    Warm up with a throwaway page before measuring.

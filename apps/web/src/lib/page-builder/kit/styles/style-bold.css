@@ -157,6 +157,33 @@
   }
 }
 
+/* A medium headline (`data-medium`, 25–64 characters) is held at full size
+   only by a short promise's layouts: in the cover it runs past the first
+   screen from 27 characters, beside the poster's picture it splits a word
+   from 28, in the split column it passes the fold from 41, and the
+   statement's five lines do from 50. Wide, each steps it down as far as the
+   medium's longest (64 characters) needs to end, lede and buttons with it,
+   above a 1440 × 900 fold in Archivo Black with no word split — always a
+   step above the long one, so a longer headline is never set larger. The
+   centred hero holds every medium headline at its own size. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.9;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.65;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.55;
+  }
+}
+
 /* Every other headline lifts the same way. The kit's `rise` is a fade under a
    short lift — on every section heading, the generic fade-up (03 §6) — so a
    heading the stage armed through that hook takes Bold's keyframes instead:
