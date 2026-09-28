@@ -21,7 +21,7 @@ import {
   saveJourneyPageBodySchema,
   sectionDesignSchema,
 } from '../journeys';
-import { SECTION_TYPE_IDS } from '../landing-page';
+import { PAGE_STYLE_IDS, SECTION_TYPE_IDS } from '../landing-page';
 
 const ORG_ID = '32300000-0000-4000-8000-000000000002';
 const PAGE_ID = '1a000000-0000-4000-8000-0000000000aa';
@@ -148,15 +148,21 @@ describe('sectionDesignSchema', () => {
     });
   });
 
-  it('drops non-string garbage the same way (jsonb round-trips any shape)', () => {
+  it('drops non-string garbage for scheme/spacing the same way (jsonb round-trips any shape)', () => {
     const parsed = sectionDesignSchema.parse({
       scheme: 42,
       spacing: null,
-      style: { nested: true },
     });
     expect(parsed.scheme).toBeUndefined();
     expect(parsed.spacing).toBeUndefined();
-    expect(parsed.style).toBeUndefined();
+  });
+
+  // `style` is the exception (owner decision 2026-09-28, Codex-61zsk.29): it
+  // REJECTS garbage instead of dropping it, same as any other wrong-typed value.
+  it('rejects non-string garbage for style instead of dropping it', () => {
+    expect(
+      sectionDesignSchema.safeParse({ style: { nested: true } }).success
+    ).toBe(false);
   });
 
   it('strips an unrelated unknown KEY the same way', () => {
@@ -174,16 +180,25 @@ describe('sectionDesignSchema', () => {
   // pin the fix, and pin that the nine legacy axes above still work
   // unchanged (the old builder keeps saving them until WP9 prunes them).
 
-  it('accepts every declared v2 scheme/spacing/style value', () => {
+  it('accepts every declared v2 scheme/spacing value', () => {
     for (const scheme of ['base', 'soft', 'contrast', 'brand', 'accent']) {
       expect(sectionDesignSchema.parse({ scheme }).scheme).toBe(scheme);
     }
     for (const spacing of ['compact', 'regular', 'spacious']) {
       expect(sectionDesignSchema.parse({ spacing }).spacing).toBe(spacing);
     }
-    for (const style of ['bold', 'clean', 'soft', 'cinematic']) {
+  });
+
+  it('accepts every declared PAGE_STYLE_IDS value for style', () => {
+    for (const style of PAGE_STYLE_IDS) {
       expect(sectionDesignSchema.parse({ style }).style).toBe(style);
     }
+  });
+
+  it('accepts an absent style', () => {
+    expect(
+      sectionDesignSchema.parse({ scheme: 'brand' }).style
+    ).toBeUndefined();
   });
 
   it('SURVIVES a parse instead of being silently stripped as an unknown key', () => {
@@ -191,15 +206,31 @@ describe('sectionDesignSchema', () => {
     expect(sectionDesignSchema.parse(v2)).toEqual(v2);
   });
 
-  it('degrades an unknown v2 value to undefined, same as a legacy axis', () => {
+  it('degrades an unknown scheme/spacing value to undefined, same as a legacy axis', () => {
     const parsed = sectionDesignSchema.parse({
       scheme: 'ultra-brand',
       spacing: 'huge',
-      style: 'not-a-style',
     });
     expect(parsed.scheme).toBeUndefined();
     expect(parsed.spacing).toBeUndefined();
-    expect(parsed.style).toBeUndefined();
+  });
+
+  // Owner decision 2026-09-28 (Codex-61zsk.29): "Reject the save." Was:
+  // 'degrades an unknown v2 value to undefined, same as a legacy axis' — style
+  // used to silently drop to `undefined` right alongside scheme/spacing. It now
+  // REJECTS instead: a dropped Style would silently turn the whole page's look
+  // into Bold, worse than a failed save the creator can retry and keep.
+  it('rejects an unknown style value instead of degrading it', () => {
+    const result = sectionDesignSchema.safeParse({ style: 'not-a-style' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find(
+        (i) => i.path.join('.') === 'style'
+      );
+      expect(issue?.message).toBe(
+        'Unknown page Style. Refresh and choose a Style again.'
+      );
+    }
   });
 
   it('PRUNES a legacy axis even mixed with v2 keys on the same bag', () => {
@@ -415,12 +446,37 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     expect(parsed.design).toBeUndefined();
   });
 
-  it('degrades an unknown PAGE style value instead of 400ing the whole save', () => {
-    const parsed = saveJourneyPageBodySchema.parse({
+  // Owner decision 2026-09-28 (Codex-61zsk.29): "Reject the save." Was:
+  // 'degrades an unknown PAGE style value instead of 400ing the whole save' —
+  // an unrecognised Style used to silently drop to `undefined`, and the page
+  // would render as Bold, a look the creator never chose. The save now REJECTS
+  // instead, so the editor keeps the creator's work and reports the failure
+  // rather than silently changing what they see.
+  it('REJECTS the whole save over an unknown PAGE style value', () => {
+    const result = saveJourneyPageBodySchema.safeParse({
       ...BODY,
       design: { style: 'not-a-style' },
     });
-    expect(parsed.design?.style).toBeUndefined();
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find(
+        (i) => i.path.join('.') === 'design.style'
+      );
+      expect(issue?.message).toBe(
+        'Unknown page Style. Refresh and choose a Style again.'
+      );
+    }
+  });
+
+  it('accepts every PAGE_STYLE_IDS value and an absent style on the save body', () => {
+    for (const style of PAGE_STYLE_IDS) {
+      const parsed = saveJourneyPageBodySchema.parse({
+        ...BODY,
+        design: { style },
+      });
+      expect(parsed.design?.style).toBe(style);
+    }
+    expect(saveJourneyPageBodySchema.parse(BODY).design).toBeUndefined();
   });
 
   it('accepts a page seo bag and round-trips it', () => {

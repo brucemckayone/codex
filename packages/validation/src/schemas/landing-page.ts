@@ -83,6 +83,13 @@ export const SECTION_TYPE_IDS = Object.keys(SECTION_LAYOUTS) as SectionTypeId[];
  * import: that helper is three lines, and re-declaring three lines here is
  * cheaper than a cross-file coupling between two independently-owned schema
  * modules for a helper this small.
+ *
+ * Used by {@link sectionStyleSchema}'s `scheme`/`spacing` only. The PAGE's
+ * `style` (in {@link pageDesignSchema} below) does NOT use this helper — it
+ * REJECTS an unrecognised value instead of degrading (owner decision
+ * 2026-09-28, Codex-61zsk.29), for the same reason `journeys.ts`'s
+ * `designAxis` comment gives: degrading Style would silently turn the whole
+ * page's look into Bold, worse than a failed save the creator can retry.
  */
 const closedEnum = <const T extends readonly [string, ...string[]]>(
   values: T
@@ -104,8 +111,19 @@ export const sectionStyleSchema = z.object({
 });
 export type SectionStyleBody = z.infer<typeof sectionStyleSchema>;
 
-/** A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above. */
+/**
+ * A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above.
+ *
+ * `style` REJECTS an unrecognised value instead of degrading — same
+ * exception as `journeys.ts`'s `sectionDesignSchema.style` (owner decision
+ * 2026-09-28, Codex-61zsk.29), kept in sync even though this schema isn't
+ * wired to a live route yet.
+ */
 export const pageDesignSchema = z.object({
-  style: closedEnum(PAGE_STYLE_IDS),
+  style: z
+    .enum(PAGE_STYLE_IDS, {
+      error: 'Unknown page Style. Refresh and choose a Style again.',
+    })
+    .optional(),
 });
 export type PageDesignBody = z.infer<typeof pageDesignSchema>;

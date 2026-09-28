@@ -815,3 +815,30 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **Limits:** a creator's longer labels can still go ragged above 70rem, because no width rule can
     know label widths (filed as Codex-61zsk.32). The sample pair fits every Style from 1088px. Only
     a browser can see raggedness; the tests pin the keys and the range.
+
+    The owner later chose to leave it as is ("Leave as is (Recommended)"), and .32 is closed.
+- **X30 · 2026-09-29 · orchestrator + S29 · An unknown page Style is rejected on save
+  (Codex-61zsk.29).** The owner's decision, verbatim: "Reject the save (Recommended)", meaning "The
+  editor says the save failed and keeps the creator's work. The stored page never changes to a Style
+  they didn't pick."
+
+  Before this, the save schema degraded an unknown Style to none, like every design axis. A page
+  saved during deploy skew (the web newer than the content-api worker) therefore silently became
+  Bold.
+  - **Only the Style rejects.** `sectionDesignSchema.style` (`packages/validation`, `journeys.ts`)
+    and its twin `pageDesignSchema.style` (`landing-page.ts`) are now plain enums. An absent Style
+    still passes. A section's `scheme` and `spacing` keep degrading, for the reason their comment
+    gives: one section losing an axis is better than a failed page save.
+  - **Only writes reject.** No read path parses with these schemas. The builder's read is a plain
+    select, and `upgrade.ts` passes a stored Style through only when it is a known id. Anything
+    else resolves to Bold on load. So a page whose Style is retired later still renders and still
+    saves (as Bold); it can never get stuck failing every save.
+  - **What the creator sees.** The top bar and toast say the save failed, and the editor keeps
+    every edit. Autosave never retries on its own, and the local draft survives. The message
+    itself reads "Invalid request data": `withServiceErrors` forwards only a 4xx's top-level
+    message, and the schema's sentence ("Unknown page Style. Refresh and choose a Style again.")
+    stays in the response's doubly nested `details`. Filed as Codex-pubug.
+  - **Tests** (`packages/validation`, 576/576): the save body rejects an unknown or non-string
+    Style with the issue at `design.style`, and accepts every id and an absent Style. An unknown
+    `scheme` or `spacing` still degrades. The twin rejects the same way. Calibrated by restoring
+    the `.catch`: exactly the 4 new tests went red.
