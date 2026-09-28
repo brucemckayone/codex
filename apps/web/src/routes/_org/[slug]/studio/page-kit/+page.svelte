@@ -7,9 +7,12 @@
   overrides (the production mechanism). Every control is also a query
   parameter, so a screenshot is reproducible from its URL:
 
-    ?style=bold|clean|soft|cinematic   ?brand=0..3|org   ?theme=light|dark
+    ?style=<any Style id>   ?brand=0..3|org   ?theme=light|dark
     ?offer=buy|sub|tiers|enrolled|unavailable|unknown    ?media=off
-    ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>    ?img=1..6
+    ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>
+      (`only` may list types, `only=hero,transformation`, drawn in that order:
+      a layout or colour applies to each listed section it fits)
+    ?img=1..6 (the hero's photo; every picture field takes the next ones)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
 <script lang="ts">
@@ -35,11 +38,24 @@
     sampleContext,
     samplePage,
   } from '$lib/page-builder/kit';
+  import { type SamplePicture, withSamplePictures } from '$lib/page-builder/kit/model/sample';
 
   /** The local dev-cdn (`workers/dev-cdn`) that serves the seeded sample
    *  images; there is no deployed copy, so production shows the kit's
    *  designed empty media instead. */
   const LOCAL_CDN = 'http://localhost:4100';
+
+  /** What each of the dev-cdn's six sample photographs (`page-kit/img1-6.jpg`,
+   *  copies of `docs/design/mockup-assets`) shows; half carry a caption, so a
+   *  gallery shows both kinds of tile. */
+  const PHOTOS: readonly { alt: string; caption?: string }[] = [
+    { alt: 'Storm clouds over a dark sea, waves breaking on the shore', caption: 'Weather coming in off the sea' },
+    { alt: 'A road through an avenue of trees, fading into fog' },
+    { alt: 'Someone in a scarf, seen from behind, looking out to sea at sunset', caption: 'Ten quiet minutes, facing the water' },
+    { alt: 'Car lights streaking along a curving road at night' },
+    { alt: 'A pine forest in morning mist', caption: 'Mist over the pines, first thing' },
+    { alt: 'Shirts on hangers along a rail, under a wall calendar' },
+  ];
 
   const BRANDS: readonly { id: string; label: string; overrides: BrandTokenOverrides | null }[] = [
     {
@@ -99,17 +115,38 @@
       ? (param('offer') as SampleOfferState)
       : 'buy'
   );
+  /** The listed types, in order, or null for the whole page. */
   const only = $derived.by(() => {
-    const value = param('only');
-    return isSectionTypeId(value) ? value : null;
+    const types = param('only').split(',').filter(isSectionTypeId);
+    return types.length > 0 ? types : null;
   });
-  const image = $derived(`${LOCAL_CDN}/page-kit/img${/^[1-6]$/.test(param('img')) ? param('img') : '3'}.jpg`);
+  /** The section the controls edit: the last one listed. */
+  const focus = $derived(only?.at(-1) ?? null);
+  /** The hero's photo, 1–6. */
+  const photo = $derived(/^[1-6]$/.test(param('img')) ? Number(param('img')) : 3);
+  const image = $derived(`${LOCAL_CDN}/page-kit/img${photo}.jpg`);
   const withMedia = $derived(dev && param('media') !== 'off');
   const editing = $derived(param('edit') === '1');
   const chrome = $derived(param('chrome') !== '0');
 
+  /*
+   * Every picture field takes the photos in turn, from the one after the
+   * hero's. The files are plain JPEGs, not the size variants a real page
+   * image has, so each key ends in `#`: `resolvePageImageUrl` appends
+   * `/<size>.webp` after it as a fragment the browser never sends, and every
+   * size resolves to the one file.
+   */
+  const pictures: SamplePicture[] = $derived(
+    PHOTOS.map((_, index) => {
+      const n = ((photo + index) % PHOTOS.length) + 1;
+      const { alt, caption } = PHOTOS[n - 1];
+      return { image: { key: `page-kit/img${n}.jpg#`, alt }, ...(caption ? { caption } : {}) };
+    })
+  );
+
   const kitPage: KitPage = $derived.by(() => {
-    const sample = only ? samplePage(style, [only]) : samplePage(style);
+    const plain = only ? samplePage(style, only) : samplePage(style);
+    const sample = withMedia ? withSamplePictures(plain, pictures) : plain;
     if (!only) return sample;
     const layout = param('layout');
     const scheme = param('scheme');
@@ -185,17 +222,17 @@
       </label>
       <label>
         Section
-        <select value={only ?? ''} onchange={(e) => set('only', e.currentTarget.value)}>
+        <select value={focus ?? ''} onchange={(e) => set('only', e.currentTarget.value)}>
           <option value="">All sections</option>
           {#each SECTION_TYPE_IDS as id (id)}<option value={id}>{id}</option>{/each}
         </select>
       </label>
-      {#if only}
+      {#if focus}
         <label>
           Layout
           <select value={param('layout')} onchange={(e) => set('layout', e.currentTarget.value)}>
             <option value="">Style default</option>
-            {#each SECTION_LAYOUTS[only] as id (id)}<option value={id}>{id}</option>{/each}
+            {#each SECTION_LAYOUTS[focus] as id (id)}<option value={id}>{id}</option>{/each}
           </select>
         </label>
         <label>
@@ -249,6 +286,36 @@
   :global(.studio-layout:has(> .studio-layout__main > .kit-preview[data-chrome='off'])) > :global(.studio-layout__main) {
     grid-column: 1;
     grid-row: 1;
+  }
+
+  /* A Moving background (`atmosphere`) shows the org's shader at its real
+     strength. On a live page the org layout clears its own cover for that
+     page (`routes/_org/[slug]/+layout.svelte`); here the studio shell lays a
+     second 80% cover over the shader, so screenshot mode clears that one on
+     the same terms: a shader preset, and a page with a Moving background. */
+  :global(
+      .org-layout[data-hero-shader-active]
+        .studio-layout:has(> .studio-layout__main > .kit-preview[data-chrome='off'] .lp[data-lp-atmosphere])
+    ) {
+    background: transparent;
+  }
+
+  /* Below the page's last section, where a live page has its footer, the
+     studio's cover comes back: the shader is only ever seen through a
+     section, never raw under a short preview. */
+  .kit-preview[data-chrome='off'] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .kit-preview[data-chrome='off']::after {
+    content: '';
+    flex: 1;
+  }
+
+  :global(.org-layout[data-hero-shader-active])
+    .kit-preview[data-chrome='off']:has(:global(.lp[data-lp-atmosphere]))::after {
+    background: color-mix(in srgb, var(--color-background) 80%, transparent);
   }
 
   .kit-preview__bar {

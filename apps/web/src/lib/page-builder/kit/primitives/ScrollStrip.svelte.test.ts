@@ -79,6 +79,47 @@ describe('ScrollStrip', () => {
     expect(region().querySelector('ul')).toBeNull();
   });
 
+  it('adds a block’s own names for its parts beside the strip’s own', () => {
+    render(3, {
+      parts: {
+        track: 'story-strip__track',
+        items: 'story-strip__cards',
+        nav: 'story-strip__nav',
+        move: 'story-strip__move',
+      },
+    });
+    expect([...region().classList]).toEqual(
+      expect.arrayContaining(['lp-strip__track', 'story-strip__track'])
+    );
+    const list = region().querySelector(':scope > ul') as HTMLElement;
+    expect([...list.classList]).toEqual(
+      expect.arrayContaining(['lp-strip__items', 'story-strip__cards'])
+    );
+    expect(
+      document.body
+        .querySelector('.lp-strip__nav')
+        ?.classList.contains('story-strip__nav')
+    ).toBe(true);
+    for (const button of buttons()) {
+      expect([...button.classList]).toEqual(
+        expect.arrayContaining(['lp-strip__move', 'story-strip__move'])
+      );
+    }
+  });
+
+  it('without them, its parts carry only the strip’s own names', () => {
+    render(3);
+    const names = [
+      region(),
+      region().querySelector(':scope > ul'),
+      document.body.querySelector('.lp-strip__nav'),
+      ...buttons(),
+    ].flatMap((el) => [...(el?.classList ?? [])]);
+    expect(names.filter((name) => !/^(lp-strip__|svelte-)/.test(name))).toEqual(
+      []
+    );
+  });
+
   it('before it has measured the row, both buttons rest and keep their room', () => {
     render(4);
     const [previous, next] = buttons();

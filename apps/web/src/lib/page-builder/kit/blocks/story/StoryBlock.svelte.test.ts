@@ -1,4 +1,5 @@
 import { tick } from 'svelte';
+import { parse } from 'svelte/compiler';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   flushSync,
@@ -11,6 +12,7 @@ import type { BlockEdit, ResolvedSection } from '../../model/types';
 import { STORY_COPY } from './copy';
 import { STORY_EMPTY, type StoryStep, storyDefinition } from './definition';
 import StoryBlock from './StoryBlock.svelte';
+import CHAPTERS_SOURCE from './StoryChapters.svelte?raw';
 
 let app: ReturnType<typeof mount> | null = null;
 
@@ -292,11 +294,85 @@ describe('StoryBlock — chapters', () => {
       true
     );
   });
+
+  /**
+   * Each rule's declarations in StoryChapters' `<style>`, by selector. The
+   * comments go first, so a commented-out declaration is no declaration.
+   */
+  function chaptersRules(): Map<string, Map<string, string>> {
+    const source = CHAPTERS_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '');
+    type Node = {
+      type: string;
+      prelude?: string | { children: { start: number; end: number }[] };
+      property?: string;
+      value?: string;
+      block?: { children: Node[] } | null;
+    };
+    const rules = new Map<string, Map<string, string>>();
+    const walk = (nodes: Node[]) => {
+      for (const node of nodes) {
+        if (node.type === 'Atrule') walk(node.block?.children ?? []);
+        else if (
+          node.type === 'Rule' &&
+          typeof node.prelude === 'object' &&
+          node.prelude
+        ) {
+          const selector = node.prelude.children
+            .map((part) =>
+              source.slice(part.start, part.end).replace(/\s+/g, ' ').trim()
+            )
+            .join(', ');
+          const declared = rules.get(selector) ?? new Map<string, string>();
+          for (const child of node.block?.children ?? [])
+            if (child.type === 'Declaration')
+              declared.set(child.property ?? '', (child.value ?? '').trim());
+          rules.set(selector, declared);
+        }
+      }
+    };
+    walk(
+      (parse(source, { modern: true }).css?.children ?? []) as unknown as Node[]
+    );
+    return rules;
+  }
+
+  // A subgrid's column gap is centred on the page's own column lines, so any
+  // column gap on the list pushes the content track — and every scene's
+  // words — half a gap off the content line (7px at 1440 under Soft).
+  it('keeps the words on the content line: the list spaces rows only, and a scene zeroes its column gap', () => {
+    const rules = chaptersRules();
+    const list = rules.get('.story-chapters');
+    const scene = rules.get('.story-chapter');
+    expect(list?.get('grid-template-columns')).toBe('subgrid');
+    expect(list?.has('row-gap')).toBe(true);
+    expect(list?.has('gap')).toBe(false);
+    expect(list?.has('column-gap')).toBe(false);
+    expect(scene?.get('grid-template-columns')).toBe('subgrid');
+    expect(scene?.get('column-gap')).toBe('0');
+  });
 });
 
 describe('StoryBlock — strip', () => {
   const region = () => one('[role="region"]') as HTMLElement;
   const buttons = () => all('.story-strip__move') as HTMLButtonElement[];
+  const resting = (button: HTMLButtonElement) =>
+    button.getAttribute('aria-disabled') === 'true';
+
+  it('is the kit’s strip, keeping the block’s own class names for its parts', async () => {
+    await render(SAMPLE, { layout: 'strip' });
+    expect(one('.story-strip > .lp-strip')).not.toBeNull();
+    for (const [part, own] of [
+      ['lp-strip__track', 'story-strip__track'],
+      ['lp-strip__items', 'story-strip__cards'],
+      ['lp-strip__nav', 'story-strip__nav'],
+    ]) {
+      expect(one(`.${part}`)?.classList.contains(own)).toBe(true);
+    }
+    expect(all('.lp-strip__move.story-strip__move')).toHaveLength(2);
+    expect(all('.story-strip__cards > li.story-strip__card')).toHaveLength(
+      SAMPLE.steps?.length ?? 0
+    );
+  });
 
   it('is a labelled region a keyboard can focus and scroll', async () => {
     await render(SAMPLE, { layout: 'strip' });
@@ -315,18 +391,21 @@ describe('StoryBlock — strip', () => {
     expect(next.getAttribute('aria-label')).toBe(STORY_COPY.next);
     for (const button of [previous, next]) {
       expect(button.getAttribute('aria-controls')).toBe(region().id);
-      expect(button.disabled).toBe(true);
+      expect(resting(button)).toBe(true);
+      // Resting, not disabled: a keyboard keeps its place on it.
+      expect(button.disabled).toBe(false);
     }
     expect(one('.story-strip__nav')?.hasAttribute('data-idle')).toBe(true);
   });
 
   describe('with a row wider than the screen', () => {
+    // Cards 300 wide, 20 apart: they start at 0, 320, 640…
     let scrollLeft = 0;
-    const scrollBy = vi.fn();
+    const scrollTo = vi.fn();
 
     beforeEach(() => {
       scrollLeft = 0;
-      scrollBy.mockReset();
+      scrollTo.mockReset();
       const dimension = (name: string, value: (el: HTMLElement) => number) =>
         vi
           .spyOn(HTMLElement.prototype, name as 'scrollWidth', 'get')
@@ -340,57 +419,72 @@ describe('StoryBlock — strip', () => {
       vi.spyOn(Element.prototype, 'scrollLeft', 'get').mockImplementation(
         () => scrollLeft
       );
-      Object.defineProperty(Element.prototype, 'scrollBy', {
+      Object.defineProperty(Element.prototype, 'scrollTo', {
         configurable: true,
         writable: true,
-        value: scrollBy,
+        value: scrollTo,
       });
-      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
-        width: 300,
-      } as DOMRect);
+      // Each card sits at its start, less the scroll, past a 48px inset.
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+        function (this: Element) {
+          const index = this.parentElement
+            ? [...this.parentElement.children].indexOf(this)
+            : 0;
+          return { left: 48 + index * 320 - scrollLeft, width: 300 } as DOMRect;
+        }
+      );
     });
 
-    const scrollTo = (value: number) => {
+    const scrolled = (value: number) => {
       scrollLeft = value;
       region().dispatchEvent(new Event('scroll'));
       flushSync();
     };
 
-    it('moves one card at a time and rests at each end', async () => {
+    it('moves one card at a time and rests at each end, keeping the keyboard on the button', async () => {
       await render({ steps: moments(8) }, { layout: 'strip' });
       const [previous, next] = buttons();
-      expect(previous.disabled).toBe(true);
-      expect(next.disabled).toBe(false);
+      expect(resting(previous)).toBe(true);
+      expect(resting(next)).toBe(false);
       expect(one('.story-strip__nav')?.hasAttribute('data-idle')).toBe(false);
       next.focus();
       next.click();
-      expect(scrollBy).toHaveBeenCalledWith({ left: 300, behavior: 'smooth' });
-      scrollTo(600);
-      expect(previous.disabled).toBe(false);
-      previous.click();
-      expect(scrollBy).toHaveBeenLastCalledWith({
-        left: -300,
+      expect(scrollTo).toHaveBeenLastCalledWith({
+        left: 320,
         behavior: 'smooth',
       });
-      scrollTo(1200);
-      expect(next.disabled).toBe(true);
+      scrolled(640);
+      expect(resting(previous)).toBe(false);
+      previous.click();
+      expect(scrollTo).toHaveBeenLastCalledWith({
+        left: 320,
+        behavior: 'smooth',
+      });
+      scrolled(1200);
+      expect(resting(next)).toBe(true);
+      expect(document.activeElement).toBe(next);
+      scrollTo.mockReset();
+      next.click();
+      expect(scrollTo).not.toHaveBeenCalled();
     });
 
     it('jumps rather than glides under reduced motion', async () => {
       preferReducedMotion();
       await render({ steps: moments(8) }, { layout: 'strip' });
       buttons()[1].click();
-      expect(scrollBy).toHaveBeenCalledWith({ left: 300, behavior: 'auto' });
+      expect(scrollTo).toHaveBeenLastCalledWith({
+        left: 320,
+        behavior: 'auto',
+      });
     });
   });
 
   it('words-only cards when no moment has a picture; the plate keeps the rhythm when some do', async () => {
     await render(SAMPLE, { layout: 'strip' });
-    expect(one('.story-strip__cards')?.hasAttribute('data-pictured')).toBe(
-      false
-    );
+    expect(one('.story-strip')?.hasAttribute('data-pictured')).toBe(false);
     expect(one('.lp-media')).toBeNull();
     await rerender({ steps: moments(2) }, { layout: 'strip' });
+    expect(one('.story-strip')?.hasAttribute('data-pictured')).toBe(true);
     expect(all('.story-strip__card .lp-media')).toHaveLength(2);
     expect(all('.story-strip__card img')).toHaveLength(1);
   });

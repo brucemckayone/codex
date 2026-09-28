@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { parse } from 'svelte/compiler';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   flushSync,
   mount,
@@ -13,6 +14,7 @@ import { TESTIMONIALS_COPY } from './copy';
 import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
 import { MARQUEE_MIN, marqueeCopies } from './marquee';
 import TestimonialsBlock from './TestimonialsBlock.svelte';
+import MARQUEE_SOURCE from './TestimonialsMarquee.svelte?raw';
 import { unwrapQuote, voices } from './voices';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -21,6 +23,7 @@ afterEach(() => {
   if (app) unmount(app);
   app = null;
   document.body.innerHTML = '';
+  vi.unstubAllGlobals();
 });
 
 const OWN = {
@@ -244,6 +247,9 @@ describe('TestimonialsBlock', () => {
         '.tm-marquee__toggle'
       ) as HTMLButtonElement;
       const strip = () => document.body.querySelector('.tm-marquee');
+      // A real button, so Enter and Space work it with no script of its own.
+      expect(button.tagName).toBe('BUTTON');
+      expect(button.type).toBe('button');
       // Its name starts with the word it shows.
       expect(button.getAttribute('aria-label')).toBe(
         TESTIMONIALS_COPY.pauseLabel
@@ -261,6 +267,128 @@ describe('TestimonialsBlock', () => {
       button.click();
       flushSync();
       expect(button.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    // Reduced motion has no script path: the component renders one strip, and
+    // its stylesheet decides whether it moves, so the server's HTML and the
+    // page never disagree.
+    it('renders the same strip whatever the motion preference', async () => {
+      await render({ items: [OWN] }, { layout: 'marquee' });
+      const welcome = document.body.innerHTML;
+      unmount(app);
+      app = null;
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('reduce'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }));
+      await render({ items: [OWN] }, { layout: 'marquee' });
+      expect(document.body.innerHTML).toBe(welcome);
+    });
+
+    /**
+     * The stylesheet's half of the contract, read with svelte's own CSS
+     * parser (as `styles/motion.test.ts` reads the kit): comments are not
+     * rules, so a commented-out rule cannot pass. `motion.test.ts` already
+     * proves the strip never animates under reduced motion or when still.
+     */
+    function marqueeCss() {
+      const source = MARQUEE_SOURCE;
+      type Node = {
+        type: string;
+        name?: string;
+        prelude?: string | { children: { start: number; end: number }[] };
+        property?: string;
+        value?: string;
+        block?: { children: Node[] } | null;
+      };
+      const declared: {
+        property: string;
+        value: string;
+        selectors: string[];
+        conditions: string[];
+      }[] = [];
+      const walk = (nodes: Node[], conditions: string[]) => {
+        for (const node of nodes) {
+          if (node.type === 'Atrule' && node.name !== 'keyframes') {
+            walk(node.block?.children ?? [], [
+              ...conditions,
+              `@${node.name} ${node.prelude}`,
+            ]);
+          } else if (
+            node.type === 'Rule' &&
+            typeof node.prelude === 'object' &&
+            node.prelude
+          ) {
+            const selectors = node.prelude.children.map((part) =>
+              source.slice(part.start, part.end).replace(/\s+/g, ' ').trim()
+            );
+            for (const child of node.block?.children ?? [])
+              if (child.type === 'Declaration')
+                declared.push({
+                  property: child.property ?? '',
+                  value: (child.value ?? '').trim(),
+                  selectors,
+                  conditions,
+                });
+          }
+        }
+      };
+      walk(
+        (parse(source, { modern: true }).css?.children ??
+          []) as unknown as Node[],
+        []
+      );
+      return declared;
+    }
+
+    const MOVING =
+      /^@media screen and \(prefers-reduced-motion: no-preference\)$/;
+    const LIVE = /:root\[data-theme\] \.lp:not\(\[data-lp-still\]\)/;
+
+    it('stops the strip when paused, and while a pointer rests on it or focus is inside', () => {
+      const held = marqueeCss().filter(
+        (d) => d.property === 'animation-play-state' && d.value === 'paused'
+      );
+      expect(held).toHaveLength(1);
+      const [rule] = held;
+      expect(rule.conditions.some((c) => MOVING.test(c))).toBe(true);
+      for (const selector of rule.selectors) {
+        expect(selector).toMatch(LIVE);
+        expect(selector).toMatch(
+          /\.tm-marquee\[data-moving\]:is\(:hover, :focus-within, \[data-paused\]\) \.tm-marquee__lane$/
+        );
+      }
+    });
+
+    it('draws no control and no copy wherever it does not move', () => {
+      const css = marqueeCss();
+      const display = (selector: string, where: 'still' | 'moving') =>
+        css
+          .filter(
+            (d) =>
+              d.property === 'display' &&
+              d.selectors.some((s) => s.endsWith(selector)) &&
+              (where === 'still'
+                ? d.conditions.length === 0
+                : d.conditions.some((c) => MOVING.test(c)))
+          )
+          .map((d) => ({ value: d.value, selectors: d.selectors }));
+      // Reduced motion, a still page, print and no script: the final state.
+      expect(
+        display('.tm-marquee__controls', 'still').map((d) => d.value)
+      ).toEqual(['none']);
+      expect(
+        display('.tm-marquee__lane[data-copy]', 'still').map((d) => d.value)
+      ).toEqual(['none']);
+      // The control appears only on a live strip that moves.
+      const shown = display('.tm-marquee__controls', 'moving');
+      expect(shown.map((d) => d.value)).toEqual(['flex']);
+      for (const selector of shown[0].selectors) {
+        expect(selector).toMatch(LIVE);
+        expect(selector).toContain('.tm-marquee[data-moving]');
+      }
     });
 
     it('sits still, with no copies and no button, when there are too few quotes to move', async () => {

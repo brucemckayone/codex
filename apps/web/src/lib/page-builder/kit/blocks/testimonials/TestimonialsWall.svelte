@@ -62,6 +62,31 @@
     color: var(--lp-ink);
   }
 
+  /* The opening mark hangs outside the quote's words (`Voice`: 0.42em of a
+     quote set in the display face, 0.4em of one set to be read). The room
+     for it is added on the voice, not the tile, so it comes on top of
+     whatever padding a Style gives the tile: the mark clears the edge by that
+     whole padding, and the words and the name still share one edge. The
+     sizes are the Voice's own, case by case. */
+  .tm-wall__tile > :global(.voice) {
+    --_quote: var(--lp-size-lead);
+    --_hang: 0.4;
+    padding-inline-start: calc(var(--_quote) * var(--_hang));
+  }
+
+  .tm-wall__tile > :global(.voice[data-length='long']) {
+    --_quote: var(--lp-size-body);
+  }
+
+  .tm-wall__tile > :global(.voice:is([data-length='short'], [data-featured])) {
+    --_quote: var(--lp-size-title);
+    --_hang: 0.42;
+  }
+
+  .tm-wall__tile > :global(.voice[data-featured]:not([data-length='long'])) {
+    --_quote: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+  }
+
   @container (min-width: 40rem) {
     .tm-wall:not([data-count='1']) {
       columns: 2;

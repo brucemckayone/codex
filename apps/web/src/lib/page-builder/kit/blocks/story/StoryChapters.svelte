@@ -42,16 +42,21 @@
 </ol>
 
 <style>
+  /* The space between scenes is a ROW gap only: a subgrid's column gap is
+     centred on the page's column lines, so it would push the content track,
+     and the words with it, half a gap off the content line. */
   .story-chapters {
     display: grid;
     grid-template-columns: subgrid;
-    gap: var(--space-1);
+    row-gap: var(--space-1);
     margin: 0 0 calc(-1 * var(--lp-pad));
     padding: 0;
     list-style: none;
   }
 
-  /* base.css spaces every `li` but the last. */
+  /* base.css spaces every `li` but the last. The scene's own column gap is
+     zero, so its words sit on the content line even when a Style spaces the
+     scenes with the `gap` shorthand. */
   .story-chapter {
     position: relative;
     isolation: isolate;
@@ -59,6 +64,7 @@
     display: grid;
     grid-template-columns: subgrid;
     grid-template-rows: auto 1fr auto;
+    column-gap: 0;
     min-block-size: clamp(24rem, 64svh, 42rem);
     margin: 0;
     padding-block: clamp(var(--space-10), var(--space-6) + 5cqi, var(--space-20));

@@ -14,12 +14,22 @@
   to the end never drops the keyboard's place.
 
   The consumer renders the `<li>` items and sizes them through
-  `--lp-strip-item` (a grid column size) and `--lp-strip-gap`.
+  `--lp-strip-item` (a grid column size) and `--lp-strip-gap`. A block whose
+  Styles already style its strip by the block's own names passes them as
+  `parts`: they are added beside the strip's own, which still do the work.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
+
+  /** Extra class names for the strip's own parts. */
+  interface Parts {
+    track?: string;
+    items?: string;
+    nav?: string;
+    move?: string;
+  }
 
   interface Props {
     /** The row's id: the buttons name it in `aria-controls`. */
@@ -33,6 +43,7 @@
     /** An ordered list for a real sequence, a plain one otherwise. */
     ordered?: boolean;
     class?: string;
+    parts?: Parts;
     children: Snippet;
   }
 
@@ -44,6 +55,7 @@
     count,
     ordered = false,
     class: className,
+    parts = {},
     children,
   }: Props = $props();
 
@@ -108,21 +120,21 @@
   <!-- A scrolling region must take focus, or a keyboard cannot scroll it. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
-    class="lp-strip__track"
+    class="lp-strip__track {parts.track ?? ''}"
     {id}
     role="region"
     aria-label={label}
     tabindex="0"
     {@attach measure(count)}
   >
-    <svelte:element this={ordered ? 'ol' : 'ul'} class="lp-strip__items">
+    <svelte:element this={ordered ? 'ol' : 'ul'} class="lp-strip__items {parts.items ?? ''}">
       {@render children()}
     </svelte:element>
   </div>
-  <div class="lp-strip__nav" data-idle={atStart && atEnd ? '' : undefined}>
+  <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
     <button
       type="button"
-      class="lp-strip__move"
+      class="lp-strip__move {parts.move ?? ''}"
       aria-label={previousLabel}
       aria-controls={id}
       aria-disabled={atStart}
@@ -132,7 +144,7 @@
     </button>
     <button
       type="button"
-      class="lp-strip__move"
+      class="lp-strip__move {parts.move ?? ''}"
       aria-label={nextLabel}
       aria-controls={id}
       aria-disabled={atEnd}
