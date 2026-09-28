@@ -1,10 +1,524 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   STYLE — PATH (PROVISIONAL, 03-expressive-contract §12 R0)
-   Renders on the kit's base tokens until its Style WP (S1) designs it.
-   Everything a Style changes lives here, including its treatment of blocks
-   (03 §4.3): rules that reach inside a block start
-   `:is(.lp, #lp-style)[data-lp-style='path']`.
+   STYLE — PATH (03-expressive-contract §4.1)
+
+   The course as a route. One line runs down the page from the hero (where
+   the visitor sets out) to the closing ask (where they arrive), with a stop
+   at every section, and it draws itself as they scroll.
+
+   PALETTE. The route, its stops and every marker are the SECOND brand
+   colour: this Style points the kit's own "moved brand" accents at
+   `--lp-brand-2` (below), so the colour is moved only as far as each ground
+   needs and keeps the proven floors — and a neutral second colour (the
+   brand editor's default grey) gives way to the brand colour, so a route is
+   never grey. The calls to action stay in the PRIMARY. The ground and a
+   tint of it take turns, one stretch per stop; two dark stretches and the
+   arrival in the brand's own colour.
+
+   TYPE. Signpost type: sentence case, clear steps between display, heading
+   and title, leading just over 1, and a body with room to read (1.62).
+   Emphasis is size and leading, never weight, so a one-weight face holds.
+
+   LAYOUT. A narrower column (70rem) with the route in a lane of its own in
+   the gutter, so the words never share their space with it. The course is
+   the journey map, its stops riding the route itself and winding across
+   the page where there is room; a timeline's stages sit on it too, and the
+   story's moments are stations on it. Two-column layouts start at the top,
+   so each section's heading meets its stop.
+
+   SURFACES. None: the route is the decoration. Straight edges.
+
+   MOTION. The route is scrubbed (`--lp-route-draw`, X12): it draws down as
+   the middle of the screen passes, a stop fills as the line reaches it, and
+   a small marker rides the tip — you are here. The map's own route, and
+   each story chapter's stretch across its picture, draw the same way. The
+   hero has its one entrance. Nothing else moves. Without
+   scroll-driven animation, under reduced motion or still, the whole route is
+   drawn and every stop filled.
+
+   SIGNATURE. The route, and the journey map it opens into.
+
+   Corners: the brand radius exactly (k 1, 03 §4.2); the stops are circles
+   (decoration, not brand shape). Fonts: suggests Lato over Source Sans 3;
+   designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
+
 .lp[data-lp-style='path'] {
-  --lp-style-provisional: 1;
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(2.6rem, 0.9rem + 5.6cqi, 5.9rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.35rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1rem + 0.85cqi, 1.6rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4cqi, 4.4rem) * var(--lp-scale));
+
+  --lp-leading-display: 1.02;
+  --lp-leading-heading: 1.08;
+  --lp-leading-title: 1.2;
+  --lp-leading-body: 1.62;
+
+  --lp-tracking-display: -0.024em;
+  --lp-tracking-heading: -0.016em;
+  --lp-tracking-title: -0.006em;
+  --lp-tracking-label: 0.01em;
+
+  /* ── shape: the brand radius exactly ──────────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
+
+  /* ── rhythm: a column with a lane for the route beside it ─────────────── */
+  --lp-container: 70rem;
+  /* Symmetric, so every block that finds the column edge from the gutter
+     still does; wide enough on a phone for the route's lane. */
+  --lp-gutter: clamp(var(--space-10), 6cqi, var(--space-16));
+  --lp-measure-lead: 42ch;
+
+  /* ── the route ────────────────────────────────────────────────────────── */
+  /* Its line, its stops, and how far left of the words it runs. */
+  --_path-w: clamp(calc(var(--border-width-thick) * 1.5), 0.25cqi, calc(var(--border-width-thick) * 2));
+  --_path-r: clamp(var(--space-2), 0.75cqi, var(--space-3));
+  --_path-lane: clamp(var(--space-5), 3cqi, var(--space-12));
+
+  /* ── the hero's one entrance ──────────────────────────────────────────── */
+  --lp-enter-headline: lp-rise-soft var(--duration-slowest) var(--ease-smooth) both;
+  --lp-enter-copy: lp-fade var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 2) both;
+  --lp-enter-media: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 3) both;
+
+  /* ── the second colour ────────────────────────────────────────────────── */
+  /* The kit moves its accent from the brand colour; Path moves it from the
+     second one instead, with the same formulas (`schemes.css`), so every
+     scheme's accent — and atmosphere's further-moved one — is the second
+     colour in the band that holds its floors. The pole rules keep choosing
+     which band applies; buttons are untouched, so they stay primary.
+     A neutral second colour (the brand editor's default is a grey) has no
+     colour to give a route, so then the route is the brand colour: the
+     second colour, opaque only when it has chroma, mixed over a trace of
+     the first and made opaque again — a real second colour survives within
+     a 255th, a grey gives way to the brand's own. */
+  --_path-2: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--lp-brand-2) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--lp-brand) r g b / 0.004) 50%
+      )
+      r g b / 1
+  );
+  --_acc-light: oklch(from var(--_path-2) calc(l * 0.55) calc(c * 0.55) h);
+  --_acc-dark: oklch(from var(--_path-2) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
+}
+
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  .lp[data-lp-style='path'] {
+    --_acc-light: rgb(from var(--_path-2) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
+    --_acc-dark: rgb(from var(--_path-2) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
+    --_atm-acc-light: rgb(
+      from var(--_path-2) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b)
+    );
+    --_atm-acc-dark: rgb(
+      from var(--_path-2) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b)
+    );
+  }
+}
+
+/* ── the route down the page ─────────────────────────────────────────────── */
+/* Each section draws its own stretch in three layers, so the line is always
+   in that section's colours: the way ahead (dots, and the stop as a ring),
+   the way walked (a solid line, and the stop filled), and the marker at its
+   tip. Only real sections: the editor's colour tiles are `.lp-section`s too.
+   The rail runs a lane's width left of the content column, in the gutter,
+   so no word or control ever sits under it. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] {
+  --_path-x: calc(
+    max(var(--lp-gutter), (100% - var(--lp-container)) / 2) - var(--_path-lane)
+  );
+  /* A stop sits on the middle of the section heading's first line. */
+  --_path-y: calc(
+    var(--lp-pad) + var(--lp-edge-offset, 0px) + var(--lp-size-heading) *
+      var(--lp-leading-heading) / 2
+  );
+  --_path-ink: var(--lp-accent);
+  --_path-ahead: var(--lp-button-line);
+  /* What a ring is filled with: the ground it sits on. */
+  --_path-gap: var(--lp-bg);
+}
+
+/* The hero sets out from its headline. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'] {
+  --_path-y: calc(var(--lp-pad) + var(--lp-size-display) * var(--lp-leading-display) / 2);
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] > .lp-inner::before,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]::after,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] > .lp-inner::after {
+  /* Where the stop is drawn, from the top of the layer. */
+  --_path-ring: var(--_path-y);
+  content: '';
+  position: absolute;
+  z-index: var(--z-hide);
+  inset-block: 0;
+  inset-inline-start: calc(var(--_path-x) - var(--_path-r));
+  inline-size: calc(var(--_path-r) * 2);
+  pointer-events: none;
+}
+
+/* The way ahead: a dotted line, the stop a ring. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] > .lp-inner::before {
+  background:
+    radial-gradient(
+      circle at 50% var(--_path-ring),
+      var(--_path-gap) calc(var(--_path-r) - var(--_path-w)),
+      var(--_path-ink) calc(var(--_path-r) - var(--_path-w) + 0.5px) calc(var(--_path-r) - 0.5px),
+      transparent var(--_path-r)
+    ),
+    radial-gradient(
+        circle,
+        var(--_path-ahead) calc(var(--_path-w) * 0.36),
+        transparent calc(var(--_path-w) * 0.36 + 0.5px)
+      )
+      50% 0 / 100% calc(var(--_path-w) * 3.25) repeat-y;
+}
+
+/* The way walked: the line, the stop filled. Drawn in full unless the
+   route is scrubbed (below). */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]::after {
+  background:
+    radial-gradient(
+      circle at 50% var(--_path-ring),
+      var(--_path-ink) calc(var(--_path-r) - 0.5px),
+      transparent var(--_path-r)
+    ),
+    linear-gradient(var(--_path-ink) 0 0) 50% 0 / var(--_path-w) 100% no-repeat;
+}
+
+/* You are here: a marker on the tip, shown only while the route is drawn by
+   the scroll, so a still page shows none. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] > .lp-inner::after {
+  inset-inline-start: calc(var(--_path-x) - var(--_path-r) * 2);
+  inline-size: calc(var(--_path-r) * 4);
+  background: radial-gradient(
+      circle at 50% calc(var(--_path-r) * 2),
+      var(--_path-ink) calc(var(--_path-r) * 0.62),
+      color-mix(in oklab, var(--_path-ink) 28%, transparent)
+        calc(var(--_path-r) * 0.62 + 0.5px) calc(var(--_path-r) * 1.7),
+      transparent calc(var(--_path-r) * 1.7 + 0.5px)
+    )
+    50% 0 / 100% calc(var(--_path-r) * 4) no-repeat;
+  opacity: 0;
+}
+
+/* Setting out: the route starts at the hero's stop, already reached, with a
+   ring round it. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:first-child > .lp-inner::before,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:first-child::after {
+  --_path-ring: calc(var(--_path-r) * 2);
+  inset-block-start: calc(var(--_path-y) - var(--_path-r) * 2);
+  inset-inline-start: calc(var(--_path-x) - var(--_path-r) * 2);
+  inline-size: calc(var(--_path-r) * 4);
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:first-child > .lp-inner::before {
+  background:
+    radial-gradient(
+      circle at 50% var(--_path-ring),
+      var(--_path-ink) calc(var(--_path-r) - 0.5px),
+      var(--_path-gap) var(--_path-r) calc(var(--_path-r) * 1.45),
+      var(--_path-ink) calc(var(--_path-r) * 1.45 + 0.5px) calc(var(--_path-r) * 1.45 + var(--_path-w)),
+      transparent calc(var(--_path-r) * 1.45 + var(--_path-w) + 0.5px)
+    ),
+    radial-gradient(
+        circle,
+        var(--_path-ahead) calc(var(--_path-w) * 0.36),
+        transparent calc(var(--_path-w) * 0.36 + 0.5px)
+      )
+      50% 0 / 100% calc(var(--_path-w) * 3.25) repeat-y;
+}
+
+/* The walked line leaves from the start's centre, never above it. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:first-child::after {
+  inset-block-start: var(--_path-y);
+  background: linear-gradient(var(--_path-ink) 0 0) 50% 0 / var(--_path-w) 100% no-repeat;
+}
+
+/* Arriving: the route ends at the last section's stop, a target. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child > .lp-inner::before,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child::after {
+  inset-block-end: calc(100% - var(--_path-y) - var(--_path-r) * 2);
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child:not(:first-child) > .lp-inner::before {
+  --_path-ring: var(--_path-y);
+  inset-inline-start: calc(var(--_path-x) - var(--_path-r) * 2);
+  inline-size: calc(var(--_path-r) * 4);
+  background:
+    radial-gradient(
+      circle at 50% var(--_path-ring),
+      var(--_path-ink) calc(var(--_path-r) * 0.5),
+      var(--_path-gap) calc(var(--_path-r) * 0.5 + 0.5px) calc(var(--_path-r) * 0.95),
+      var(--_path-ink) calc(var(--_path-r) * 0.95 + 0.5px) calc(var(--_path-r) * 0.95 + var(--_path-w)),
+      var(--_path-gap) calc(var(--_path-r) * 0.95 + var(--_path-w) + 0.5px) calc(var(--_path-r) * 1.55),
+      var(--_path-ink) calc(var(--_path-r) * 1.55 + 0.5px) calc(var(--_path-r) * 1.55 + var(--_path-w)),
+      transparent calc(var(--_path-r) * 1.55 + var(--_path-w) + 0.5px)
+    ),
+    radial-gradient(
+        circle,
+        var(--_path-ahead) calc(var(--_path-w) * 0.36),
+        transparent calc(var(--_path-w) * 0.36 + 0.5px)
+      )
+      50% 0 / 100% calc(var(--_path-w) * 3.25) repeat-y;
+}
+
+/* The walked line and its marker stop at the target. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child:not(:first-child)::after,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child:not(:first-child) > .lp-inner::after {
+  inset-block-end: calc(100% - var(--_path-y));
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:last-child:not(:first-child)::after {
+  background: linear-gradient(var(--_path-ink) 0 0) 50% 0 / var(--_path-w) 100% no-repeat;
+}
+
+/* A page of one section has a start and no road: no line, no marker. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:only-child::after,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type]:only-child > .lp-inner::after {
+  content: none;
+}
+
+@keyframes lp-path-tip {
+  from {
+    opacity: 1;
+    translate: 0 calc(-2 * var(--_path-r));
+  }
+  to {
+    opacity: 1;
+    translate: 0 calc(100% - 2 * var(--_path-r));
+  }
+}
+
+/* Scrubbed: the walked line is uncovered down to the middle of the screen
+   (`view(block 50%)`), and the marker rides that line. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    :root[data-theme]
+      .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+      .lp-section[data-lp-type]::after,
+    :root[data-theme] .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path'] .story-chapter::after {
+      animation: var(--lp-route-draw, none);
+      animation-timeline: view(block 50%);
+      animation-range: cover 0% cover 100%;
+    }
+
+    :root[data-theme]
+      .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+      .lp-section[data-lp-type]
+      > .lp-inner::after {
+      animation: lp-path-tip linear;
+      animation-timeline: view(block 50%);
+      animation-range: cover 0% cover 100%;
+    }
+  }
+}
+
+/* ── the journey map: the route opens out ────────────────────────────────── */
+/* The map's own route in the route's colour; each stop a ring that fills
+   when it opens, its number set in the ink of that fill. */
+:is(.lp, #lp-style)[data-lp-style='path'] :is(.map__line, .map__bend) {
+  stroke: var(--lp-accent);
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] details[open] .map__marker {
+  --_path-on: oklch(from var(--lp-accent) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
+  border-color: var(--lp-accent);
+  background: var(--lp-accent);
+  color: var(--_path-on);
+}
+
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  :is(.lp, #lp-style)[data-lp-style='path'] details[open] .map__marker {
+    --_path-on: rgb(from var(--lp-accent) var(--_ink-r) var(--_ink-g) var(--_ink-b));
+  }
+}
+
+/* The map's stops ride ON the page's route — every stop at a phone's width,
+   the first column of them where the map winds — so the course is the route
+   itself rather than a second line beside it. Inside the map its own line
+   is the route: the page's line is covered there, and the names start on
+   the column the rest of the page's words start on. Its route takes the
+   page route's weight, and a stop small enough to ride the rail on a phone. */
+:is(.lp, #lp-style)[data-lp-style='path'] .map {
+  --_route: var(--_path-w);
+  --_dot: clamp(var(--space-8), 1.5rem + 1.6cqi, var(--space-12));
+  margin-inline-start: calc(-1 * (var(--_path-lane) + var(--_dot) / 2));
+}
+
+/* Over the shader or a picture an opaque cover would show as a stripe, so
+   there the page's line stays visible under the map's. */
+:is(.lp, #lp-style)[data-lp-style='path']
+  .lp-section:not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+  .map {
+  background: linear-gradient(var(--lp-bg) 0 0) calc(var(--_dot) / 2 - var(--_path-r) * 2) 0 /
+    calc(var(--_path-r) * 4) 100% no-repeat;
+}
+
+/* An even count ends on the far side: the route bends back to the page's
+   line under the last stop, the way the map's own bends run. */
+@container (min-width: 48rem) {
+  :is(.lp, #lp-style)[data-lp-style='path'] .map:has(> .map__stage:nth-child(even):last-child) {
+    padding-block-end: var(--_gap);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='path'] .map__stage:nth-child(even):last-child::before,
+  :is(.lp, #lp-style)[data-lp-style='path'] .map__stage:nth-child(even):last-child::after {
+    content: '';
+    position: absolute;
+    background: var(--lp-accent);
+    pointer-events: none;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='path'] .map__stage:nth-child(even):last-child::before {
+    inset-block: var(--_dot) 0;
+    inset-inline-start: calc(var(--_dot) / 2 - var(--_route) / 2);
+    inline-size: var(--_route);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='path'] .map__stage:nth-child(even):last-child::after {
+    inset-block-start: 100%;
+    inset-inline-start: calc(var(--_dot) / 2 - 100% * 2 / 3);
+    inline-size: calc(100% * 2 / 3);
+    block-size: var(--_gap);
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' fill='none' stroke='currentColor' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath vector-effect='non-scaling-stroke' d='M100 0C100 60 0 40 0 100'/%3E%3C/svg%3E")
+      0 0 / 100% 100% no-repeat;
+  }
+}
+
+/* The bend back draws with the route. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    @container (min-width: 48rem) {
+      :root[data-theme]
+        .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+        .map__stage:nth-child(even):last-child::before,
+      :root[data-theme]
+        .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+        .map__stage:nth-child(even):last-child::after {
+        animation: var(--lp-route-draw, none);
+        animation-timeline: view(block 50%);
+        animation-range: cover 0% cover 100%;
+      }
+    }
+  }
+}
+
+/* ── the timeline: its stages are stops on the route ─────────────────────── */
+/* The markers sit on the page's line, which runs on through them (the list's
+   own spine steps aside); circles whatever the brand's corners. */
+:is(.lp, #lp-style)[data-lp-style='path'] .timeline {
+  --_marker: clamp(var(--space-8), 1.5rem + 1.6cqi, var(--space-12));
+  margin-inline-start: calc(-1 * (var(--_path-lane) + var(--_marker) / 2));
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .timeline__stage::before {
+  content: none;
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .timeline__marker {
+  border-width: var(--_path-w);
+  border-color: var(--lp-accent);
+  border-radius: var(--radius-full);
+  background: var(--lp-bg);
+}
+
+/* ── the story: moments passed on the way ────────────────────────────────── */
+/* Each moment is a station on the line, level with its title. Chapters are
+   full-width scenes over the route, so each draws its own stretch of the
+   line across its picture, in the ink the scene's scrim holds. */
+:is(.lp, #lp-style)[data-lp-style='path'] :is(.story-scroll, .story-chapters) .story-words {
+  --_path-line: calc(var(--lp-size-title) * var(--lp-leading-title));
+  position: relative;
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .story-words[data-size='heading'] {
+  --_path-line: calc(var(--lp-size-heading) * var(--lp-leading-heading));
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] .story-chapter::after {
+  --_path-x: calc(
+    max(var(--lp-gutter), (100% - var(--lp-container)) / 2) - var(--_path-lane)
+  );
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  inset-inline-start: calc(var(--_path-x) - var(--_path-w) / 2);
+  inline-size: var(--_path-w);
+  background: var(--lp-accent);
+  pointer-events: none;
+}
+
+:is(.lp, #lp-style)[data-lp-style='path'] :is(.story-scroll, .story-chapters) .story-words::before {
+  --_r: calc(var(--_path-r) * 0.72);
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--_path-line) / 2 - var(--_r));
+  inset-inline-start: calc(-1 * var(--_path-lane) - var(--_r));
+  inline-size: calc(var(--_r) * 2);
+  block-size: calc(var(--_r) * 2);
+  border-radius: var(--radius-full);
+  background: radial-gradient(
+    circle,
+    var(--lp-bg) calc(var(--_r) - var(--_path-w) * 0.8),
+    var(--lp-accent) calc(var(--_r) - var(--_path-w) * 0.8 + 0.5px)
+  );
+  pointer-events: none;
+}
+
+/* ── the recommended way in, ringed in the route's colour ────────────────── */
+:is(.lp, #lp-style)[data-lp-style='path'] .offer[data-featured] {
+  box-shadow: inset 0 0 0 var(--_path-w) var(--lp-accent);
+}
+
+/* ── two-column layouts start at the top ─────────────────────────────────── */
+/* So a section's heading meets its stop: the words start level with the
+   top of the picture or list beside them. */
+:is(.lp, #lp-style)[data-lp-style='path']
+  :is(.hero-split, .video-split, .preview-split, .benefits[data-layout='split']) {
+  align-items: start;
+}
+
+/* ── hero layouts: where the route sets out ──────────────────────────────── */
+/* Split: the first stop meets the headline, drawn at the split's 0.7
+   display step. */
+@container lp-page (min-width: 50rem) {
+  :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'][data-lp-layout='split'] {
+    --_path-y: calc(var(--lp-pad) + var(--lp-size-display) * 0.7 * var(--lp-leading-display) / 2);
+  }
+}
+
+/* Cover: the words sit at the foot of the picture, so the route sets out
+   from there, drawn over the picture in the ink its scrim holds (the scrim
+   runs under the gutter). Without a picture the cover is its glow on the
+   ground, and the route keeps the ground's own colours. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'][data-lp-layout='cover'] {
+  --_path-y: calc(100% - var(--lp-pad) * 0.5);
+}
+
+:is(.lp, #lp-style)[data-lp-style='path']
+  .lp-section[data-lp-type='hero'][data-lp-layout='cover']:has(.hero-cover__copy[data-lp-on-media]) {
+  --_path-ink: oklch(from var(--_scrim) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
+  --_path-gap: var(--_scrim);
+}
+
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  :is(.lp, #lp-style)[data-lp-style='path']
+    .lp-section[data-lp-type='hero'][data-lp-layout='cover']:has(.hero-cover__copy[data-lp-on-media]) {
+    --_path-ink: rgb(from var(--_scrim) var(--_ink-r) var(--_ink-g) var(--_ink-b));
+  }
+}
+
+:is(.lp, #lp-style)[data-lp-style='path']
+  .lp-section[data-lp-type='hero'][data-lp-layout='cover']
+  > .lp-inner::before,
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'][data-lp-layout='cover']::after {
+  z-index: 1;
 }

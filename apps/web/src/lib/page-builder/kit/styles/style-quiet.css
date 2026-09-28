@@ -1,10 +1,217 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   STYLE — QUIET (PROVISIONAL, 03-expressive-contract §12 R0)
-   Renders on the kit's base tokens until its Style WP (S1) designs it.
-   Everything a Style changes lives here, including its treatment of blocks
-   (03 §4.3): rules that reach inside a block start
-   `:is(.lp, #lp-style)[data-lp-style='quiet']`.
+   STYLE — QUIET (03-expressive-contract §4.1)
+
+   Space and one accent. A page made for reading slowly: nothing competes
+   with the words, and the words answer the reader.
+
+   PALETTE. Every section sits on the brand's own ground (`base`) — no
+   colour bands; a section is parted from the next by room and one hairline.
+   The ONE accent is the second brand colour, and it goes only where the eye
+   should land: markers, links and the call to action (buttons included —
+   this Style points the kit's moved accent AND button colours at it, with
+   the kit's own formulas, so every floor holds). A neutral second colour
+   (the brand editor's default is a grey) would leave the page without any
+   brand colour at all, so then the accent is the brand colour itself.
+
+   TYPE. Light and large: display and headings at the regular weight (a
+   brand that set a heading weight keeps it), generous leading, a reading
+   body of 1.72 on a 60ch measure, modest section headings. The text
+   statement is a passage set large in the reading face. Sentence case;
+   emphasis is size and leading, never weight.
+
+   LAYOUT. A narrow column (64rem) and the most room between sections of any
+   Style; centred where a passage stands alone (the hero, the quotes, the
+   ask), stated where it argues (the problem, the before and after).
+
+   SURFACES. None. The ground is the brand's own background — never a stock
+   near-black, cream or paper.
+
+   MOTION. Slow and sparse: the hero fades in, unhurried. The statement
+   READS ALONG — each paragraph brightens from the soft ink to the full ink
+   as it rises to the middle of the screen (`--lp-text-readalong`, X12; both
+   inks pass 4.5:1, so every frame between them does). Nothing else moves.
+
+   SIGNATURE. Read-along: the page brightens as it is read.
+
+   Corners: the brand radius bent by 0.5, never past `--radius-md` (03 §4.2).
+   Fonts: suggests Spectral over DM Sans; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
+
 .lp[data-lp-style='quiet'] {
-  --lp-style-provisional: 1;
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(2.75rem, 1.2rem + 5cqi, 6rem) * var(--lp-scale));
+  /* Section headings stay modest: room and the reading text do the work. */
+  --lp-size-heading: calc(clamp(1.75rem, 1.15rem + 1.8cqi, 2.6rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1.02rem + 0.7cqi, 1.5rem) * var(--lp-scale));
+  --lp-size-lead: calc(clamp(1.3rem, 1.12rem + 0.55cqi, 1.625rem) * var(--lp-scale));
+  --lp-size-body: calc(clamp(1.125rem, 1.06rem + 0.26cqi, 1.3125rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.3rem, 1.2rem + 3.6cqi, 4.4rem) * var(--lp-scale));
+
+  --lp-leading-display: 1.06;
+  --lp-leading-heading: 1.14;
+  --lp-leading-title: 1.25;
+  --lp-leading-lead: 1.5;
+  --lp-leading-body: 1.72;
+
+  --lp-tracking-display: -0.022em;
+  --lp-tracking-heading: -0.012em;
+  --lp-tracking-title: -0.004em;
+  --lp-tracking-label: 0.01em;
+
+  --lp-weight-display: var(--heading-weight, var(--font-normal));
+  --lp-weight-heading: var(--heading-weight, var(--font-normal));
+  --lp-weight-title: var(--heading-weight, var(--font-medium));
+  --lp-weight-label: var(--font-medium);
+
+  /* ── shape: the brand radius bent by 0.5, never past `--radius-md` ────── */
+  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
+
+  /* ── buttons: unhurried ───────────────────────────────────────────────── */
+  --lp-button-pad: var(--space-7);
+  --lp-button-weight: var(--font-medium);
+  --lp-button-tracking: 0.01em;
+
+  /* ── rhythm: the most room of any Style ───────────────────────────────── */
+  --lp-pad-compact: clamp(var(--space-12), var(--space-8) + 3cqi, var(--space-20));
+  --lp-pad-regular: clamp(var(--space-20), var(--space-10) + 6cqi, calc(var(--space-32) * 1.25));
+  --lp-pad-spacious: clamp(var(--space-24), var(--space-12) + 9cqi, calc(var(--space-32) * 1.5));
+  --lp-container: 64rem;
+  --lp-measure: 60ch;
+  --lp-measure-lead: 36ch;
+
+  /* ── the hero's one entrance: a slow fade ─────────────────────────────── */
+  --lp-enter-headline: lp-fade calc(var(--duration-slowest) * 1.6) var(--ease-out) both;
+  --lp-enter-copy: lp-fade calc(var(--duration-slowest) * 1.6) var(--ease-out)
+    calc(var(--lp-stagger) * 3) both;
+  --lp-enter-media: lp-fade calc(var(--duration-slowest) * 2) var(--ease-out)
+    calc(var(--lp-stagger) * 5) both;
+
+  /* ── the one accent ───────────────────────────────────────────────────── */
+  /* The second colour, opaque only when it has chroma, mixed over a trace of
+     the brand colour and made opaque again: a real second colour survives
+     within a 255th, a grey gives way to the brand's own. Then the kit's own
+     moves (`schemes.css`) take it to each ground's accent and button bands;
+     the pole rules keep choosing which band applies. */
+  --_quiet-1: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--lp-brand-2) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--lp-brand) r g b / 0.004) 50%
+      )
+      r g b / 1
+  );
+  --_acc-light: oklch(from var(--_quiet-1) calc(l * 0.55) calc(c * 0.55) h);
+  --_acc-dark: oklch(from var(--_quiet-1) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
+  --_btn-light: var(--_quiet-1);
+  --_btn-dark: var(--_quiet-1);
+}
+
+@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
+  .lp[data-lp-style='quiet'] {
+    --_acc-light: rgb(from var(--_quiet-1) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
+    --_acc-dark: rgb(from var(--_quiet-1) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
+    --_btn-light: rgb(from var(--_quiet-1) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));
+    --_btn-dark: rgb(from var(--_quiet-1) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));
+    --_atm-acc-light: rgb(
+      from var(--_quiet-1) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b)
+    );
+    --_atm-acc-dark: rgb(
+      from var(--_quiet-1) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b)
+    );
+    --_atm-btn-light: rgb(
+      from var(--_quiet-1) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b)
+    );
+    --_atm-btn-dark: rgb(
+      from var(--_quiet-1) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b)
+    );
+  }
+}
+
+/* ── one hairline between two plain sections ─────────────────────────────── */
+/* Across the content column, at the top of the lower one — room does the
+   rest. Only real sections (the editor's colour tiles are `.lp-section`s
+   too), and never where a band, a picture or the shader already parts them. */
+:is(.lp, #lp-style)[data-lp-style='quiet']
+  .lp-section[data-lp-type][data-lp-scheme='base']:not([data-lp-on-media])
+  + .lp-section[data-lp-type][data-lp-scheme='base']:not([data-lp-on-media])::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: max(var(--lp-gutter), (100% - var(--lp-container)) / 2);
+  block-size: var(--border-width);
+  background: var(--lp-line);
+  pointer-events: none;
+}
+
+/* ── the statement: a passage set large, that reads along ────────────────── */
+/* In the reading face, not the display one: a heavy one-weight display face
+   (Archivo Black, Anton) would turn a passage into a slab. */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='text'] {
+  --lp-text-readalong: on;
+}
+
+:is(.lp, #lp-style)[data-lp-style='quiet']
+  .text[data-layout='statement']:not([data-long-lead])
+  .text__body
+  > p:first-child {
+  max-inline-size: 30ch;
+  font-size: calc(var(--lp-size-lead) * 1.42);
+  line-height: 1.34;
+  letter-spacing: -0.012em;
+}
+
+/* The statement is the one passage that reads along; the lines answering it
+   keep their soft ink, as they do without motion. */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .text[data-layout='statement'] .text__body > p:not(:first-child) {
+  animation: none;
+}
+
+/* ── the ask, understated ────────────────────────────────────────────────── */
+/* A second button is a link in the page's ink, underlined in the accent;
+   its target stays full height. */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .lp-button[data-variant='secondary'] {
+  min-inline-size: 0;
+  padding-inline: var(--space-1);
+  border-color: transparent;
+  background: transparent;
+  color: var(--lp-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--lp-accent);
+  text-decoration-thickness: var(--border-width-thick);
+  text-underline-offset: var(--lp-underline-offset);
+}
+
+@media (hover: hover) {
+  :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-button[data-variant='secondary']:hover {
+    border-color: transparent;
+    text-decoration-color: var(--lp-ink);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-button[data-variant='primary']:hover {
+    transform: none;
+    box-shadow: 0 0 0 var(--border-width-thick) var(--lp-bg),
+      0 0 0 calc(var(--border-width-thick) * 2) var(--lp-button-bg);
+  }
+}
+
+/* ── the floating bar: the page's own ground, not a dark band ─────────────── */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .lp-sticky[data-lp-scheme] {
+  --lp-bg: var(--lp-ground);
+  --lp-panel: var(--_panel-g);
+  --lp-accent: var(--_accent-g);
+  --lp-button-bg: var(--_button-g);
+  box-shadow:
+    0 0 0 var(--border-width) var(--lp-line),
+    var(--shadow-lg);
+}
+
+/* ── the closing ask, centred like the promise it answers ────────────────── */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .cta[data-layout='band'],
+:is(.lp, #lp-style)[data-lp-style='quiet'] .cta[data-layout='band'] .cta__words {
+  --lp-actions-align: center;
+  justify-items: center;
+  text-align: center;
 }

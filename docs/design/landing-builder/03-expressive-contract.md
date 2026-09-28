@@ -536,3 +536,35 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   0.22; fonts Bitter + Figtree. Known limits: Poster's capitals read poorly in a script heading face;
   a brand with no secondary colour gives Poster's accent fields the org's secondary (grey on
   studio-alpha).
+- **X18 · 2026-09-28 · S4 · Soft and Cinematic as built.** Soft ("a calm, flowing surface"): one
+  colour in tones — soft/base alternate in the full order AND the starter; the one filled card is a
+  pebble of the PRIMARY; drifting shapes (strength 0.7, a mask fades them toward each band's top and
+  foot so two same-colour bands never show a step) and curved edges; fonts Nunito + Outfit. Cinematic
+  ("a film in scenes"): hero and CTA default to `atmosphere` with the panel veil and a SHARP shader
+  (blurred Bloom read as mud); title cards narrow to a 46rem column; luminous hero/CTA titles; fonts
+  Unbounded + Sora. **Radius floors:** inside an org, `--radius-md` IS the brand radius
+  (`org-brand.css`), so a floor of `--radius-md` is 0 for a square brand and voids "Soft rounds it
+  up" — a Style that must round a square brand floors on a space token (Soft uses `--space-2`). §4.2's
+  ceilings still work, since they only cap.
+- **X19 · 2026-09-28 · orchestrator · The second brand colour must be a colour.** `--lp-brand-2`
+  prefers `--brand-secondary` even when it is a neutral (studio-alpha: secondary `#737373`, accent
+  amber), so every Style that paints the second colour — Poster's fields, Soft's pebbles, Path's route,
+  Quiet's markers — goes grey. The grey is usually not chosen: `BRAND_DEFAULT_SECONDARY` is
+  `#737373`, so every org that never picked a second colour carries it. Fix at the source, once, in
+  `schemes.css`: the second colour is the secondary when it has real chroma, otherwise the accent,
+  otherwise the hue-shifted primary. It is pure CSS — S1 proved a chroma switch with premultiplied
+  `color-mix()` (alpha `clamp(0, (c − 0.02) × 1000, 1)`; the picked colour within 1/255, or the
+  fallback exactly), so it works on a page's own brand scope unchanged. A brand whose colours are all
+  neutral stays neutral.
+- **X20 · 2026-09-28 · S1 · Path and Quiet as built.** Path ("the course as a route"): one line in the
+  second colour runs down a lane in the gutter from the hero's haloed start to the call to action's
+  target, with a stop at every section heading; it draws to the middle of the screen as the visitor
+  scrolls, a "you are here" marker rides its tip and each stop fills as the line reaches it; the
+  journey map's stops sit on the route itself; defaults curriculum `map`, story `scroll`; the brand's
+  corners exactly; fonts Lato + Source Sans 3. Quiet ("space and one accent"): every section on the
+  brand's own ground parted by one hairline, the second colour only for markers, links and the call
+  to action; read-along on the statement's first paragraph; the most padding of any Style; secondary
+  buttons as underlined links; fonts Spectral + DM Sans. Both re-point the kit's own pole-switched
+  accent tokens at the second colour (so the kit's moves keep every floor) and fall back to the
+  primary when the second colour is neutral — superseded at the source by X19, harmless alongside it.
+  All eight Styles' suggested families are distinct; Bold suggests none.

@@ -1,57 +1,67 @@
 import { STORY_ORDER, type StyleDefinition } from '../style-definition';
 
 /**
- * PROVISIONAL (03 §12 R0): a working stand-in until Path's Style WP (S1)
- * designs it. The route, the journey map and the font suggestion arrive then.
+ * Path (03 §4.1): the course as a route. One line in the second brand colour
+ * runs down the page from the hero (the start) to the closing ask (the
+ * arrival), with a stop at every section, and draws itself as the visitor
+ * scrolls. The course itself is the journey map (`curriculum` `map`), and the
+ * story is told as moments along the way (`story` `scroll`).
+ *
+ * The ground and a tint of it take turns so each stop reads as a new stretch
+ * of the route; two dark stretches (the film, the voices of people who walked
+ * it) and the arrival in the brand's own colour. The starter alternates the
+ * same way, and a brand band never meets a contrast band.
  */
 export const PATH: StyleDefinition = {
   id: 'path',
   label: 'Path',
   description:
-    'Your course as a route. A line leads visitors from one stage to the next.',
+    'Your course as a route. A line draws itself down the page and leads visitors stop by stop.',
   layouts: {
-    hero: 'split',
+    hero: 'statement',
     video: 'split',
     problem: 'list',
     story: 'scroll',
     transformation: 'steps',
     benefits: 'grid',
-    curriculum: 'timeline',
-    preview: 'split',
-    gallery: 'grid',
+    curriculum: 'map',
+    preview: 'feature',
+    gallery: 'strip',
     instructor: 'split',
-    testimonials: 'grid',
+    testimonials: 'featured',
     faq: 'accordion',
     pricing: 'cards',
-    cta: 'split',
+    cta: 'band',
     stats: 'row',
     text: 'columns',
   },
   schemes: {
     hero: 'base',
-    video: 'soft',
-    problem: 'base',
+    video: 'contrast',
+    problem: 'soft',
     story: 'base',
     text: 'soft',
     transformation: 'base',
-    benefits: 'soft',
-    curriculum: 'base',
-    preview: 'soft',
-    gallery: 'base',
+    benefits: 'base',
+    curriculum: 'soft',
+    preview: 'base',
+    gallery: 'soft',
     instructor: 'base',
-    testimonials: 'soft',
-    stats: 'base',
-    pricing: 'soft',
-    faq: 'base',
+    testimonials: 'contrast',
+    stats: 'soft',
+    pricing: 'base',
+    faq: 'soft',
     cta: 'brand',
   },
+  // The recommended way in is the other ground, ringed in the route's colour
+  // (style-path.css); on a coloured band it is the plain ground.
   featured: {
     base: 'soft',
     soft: 'base',
     contrast: 'base',
     brand: 'base',
     accent: 'base',
-    atmosphere: 'base',
+    atmosphere: 'soft',
   },
   order: STORY_ORDER,
   starter: [
@@ -65,4 +75,6 @@ export const PATH: StyleDefinition = {
     'faq',
     'cta',
   ],
+  // A humanist pair, the faces of wayfinding signs (03 §4.1).
+  fonts: { heading: 'Lato', body: 'Source Sans 3' },
 };

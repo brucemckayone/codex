@@ -1,20 +1,23 @@
-import { STORY_ORDER, type StyleDefinition } from '../style-definition';
+import type { StyleDefinition } from '../style-definition';
 
 /**
- * PROVISIONAL (03 §12 R0): a working stand-in until Quiet's Style WP (S1)
- * designs it. Every section on the page background — Quiet has no bands; its
- * one accent is the secondary colour, used for markers, links and the ask.
+ * Quiet (03 §4.1): space and one accent. Every section sits on the brand's
+ * own ground — no colour bands — parted only by room and a hairline, so the
+ * words carry the page. The second colour is the one accent: markers, links
+ * and the call to action. The statement comes straight after the hero and
+ * reads along with the visitor (`text` `statement`); the layouts are the
+ * ones that give a passage room: centred, stated, quoted, one at a time.
  */
 export const QUIET: StyleDefinition = {
   id: 'quiet',
   label: 'Quiet',
   description:
-    'Lots of space and a single accent colour. Made for reading slowly.',
+    'Lots of space and a single accent colour. Your words brighten as visitors read them.',
   layouts: {
     hero: 'centered',
     video: 'theatre',
     problem: 'statement',
-    story: 'chapters',
+    story: 'scroll',
     transformation: 'statement',
     benefits: 'checklist',
     curriculum: 'accordion',
@@ -23,8 +26,8 @@ export const QUIET: StyleDefinition = {
     instructor: 'quote',
     testimonials: 'quote',
     faq: 'accordion',
-    pricing: 'cards',
-    cta: 'compact',
+    pricing: 'focus',
+    cta: 'band',
     stats: 'row',
     text: 'statement',
   },
@@ -46,15 +49,35 @@ export const QUIET: StyleDefinition = {
     faq: 'base',
     cta: 'base',
   },
+  // One card may lift off the ground: a tint of it. Inside a band a creator
+  // chose, the card is the plain ground.
   featured: {
     base: 'soft',
     soft: 'base',
     contrast: 'base',
     brand: 'base',
     accent: 'base',
-    atmosphere: 'base',
+    atmosphere: 'soft',
   },
-  order: STORY_ORDER,
+  // The statement straight after the promise, then the story in order.
+  order: [
+    'hero',
+    'text',
+    'problem',
+    'video',
+    'story',
+    'transformation',
+    'benefits',
+    'curriculum',
+    'preview',
+    'gallery',
+    'instructor',
+    'testimonials',
+    'stats',
+    'pricing',
+    'faq',
+    'cta',
+  ],
   starter: [
     'hero',
     'text',
@@ -66,4 +89,6 @@ export const QUIET: StyleDefinition = {
     'faq',
     'cta',
   ],
+  // A light serif heading over a neutral sans (03 §4.1).
+  fonts: { heading: 'Spectral', body: 'DM Sans' },
 };
