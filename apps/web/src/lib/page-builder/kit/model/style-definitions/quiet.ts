@@ -3,8 +3,8 @@ import type { StyleDefinition } from '../style-definition';
 /**
  * Quiet (03 §4.1): space and one accent. Every section sits on the brand's
  * own ground — no colour bands — parted only by room and a hairline, so the
- * words carry the page. The second colour is the one accent: markers, links
- * and the call to action. The statement comes straight after the hero and
+ * words carry the page. The brand's own colour is the one accent: markers,
+ * links and the call to action. The statement comes straight after the hero and
  * reads along with the visitor (`text` `statement`); the layouts are the
  * ones that give a passage room: centred, stated, quoted, one at a time.
  */

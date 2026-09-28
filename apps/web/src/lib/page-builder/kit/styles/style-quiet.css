@@ -6,12 +6,12 @@
 
    PALETTE. Every section sits on the brand's own ground (`base`) — no
    colour bands; a section is parted from the next by room and one hairline.
-   The ONE accent is the second brand colour, and it goes only where the eye
-   should land: markers, links and the call to action (buttons included —
-   this Style points the kit's moved accent AND button colours at it, with
-   the kit's own formulas, so every floor holds). A neutral second colour
-   (the brand editor's default is a grey) would leave the page without any
-   brand colour at all, so then the accent is the brand colour itself.
+   The ONE accent is the brand's own colour, and it goes only where the eye
+   should land: markers, links and the call to action — the kit's accent and
+   button colours as they are, so every floor holds and the ask is the same
+   colour as the org's every other action. Never the second colour (03 X21):
+   a bright one (a gold, an amber) moves to brown on a light ground, and on
+   a default org it is the platform's amber, not the brand.
 
    TYPE. Light and large: display and headings at the regular weight (a
    brand that set a heading weight keeps it), generous leading, a reading
@@ -88,46 +88,6 @@
     calc(var(--lp-stagger) * 3) both;
   --lp-enter-media: lp-fade calc(var(--duration-slowest) * 2) var(--ease-out)
     calc(var(--lp-stagger) * 5) both;
-
-  /* ── the one accent ───────────────────────────────────────────────────── */
-  /* The second colour, opaque only when it has chroma, mixed over a trace of
-     the brand colour and made opaque again: a real second colour survives
-     within a 255th, a grey gives way to the brand's own. Then the kit's own
-     moves (`schemes.css`) take it to each ground's accent and button bands;
-     the pole rules keep choosing which band applies. */
-  --_quiet-1: rgb(
-    from color-mix(
-        in srgb,
-        oklch(from var(--lp-brand-2) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
-        rgb(from var(--lp-brand) r g b / 0.004) 50%
-      )
-      r g b / 1
-  );
-  --_acc-light: oklch(from var(--_quiet-1) calc(l * 0.55) calc(c * 0.55) h);
-  --_acc-dark: oklch(from var(--_quiet-1) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
-  --_btn-light: var(--_quiet-1);
-  --_btn-dark: var(--_quiet-1);
-}
-
-@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
-  .lp[data-lp-style='quiet'] {
-    --_acc-light: rgb(from var(--_quiet-1) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
-    --_acc-dark: rgb(from var(--_quiet-1) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
-    --_btn-light: rgb(from var(--_quiet-1) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));
-    --_btn-dark: rgb(from var(--_quiet-1) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));
-    --_atm-acc-light: rgb(
-      from var(--_quiet-1) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b)
-    );
-    --_atm-acc-dark: rgb(
-      from var(--_quiet-1) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b)
-    );
-    --_atm-btn-light: rgb(
-      from var(--_quiet-1) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b)
-    );
-    --_atm-btn-dark: rgb(
-      from var(--_quiet-1) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b)
-    );
-  }
 }
 
 /* ── one hairline between two plain sections ─────────────────────────────── */

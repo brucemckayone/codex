@@ -133,7 +133,7 @@ different sites if the brands were swapped.
   gallery to `mosaic`. Font suggestion: a characterful serif or grotesk heading with a readable body.
   **Not** the cream-plus-serif-plus-terracotta default: the ground is the brand's own background.
 - **Quiet** (new). *Space and one accent.* No colour bands (every section `base`), thin rules, the
-  secondary colour used only for markers, links and the CTA. Signature: **read-along** — a statement
+  brand colour used only for markers, links and the CTA (X21 — not the secondary). Signature: **read-along** — a statement
   paragraph brightens from `--lp-ink-soft` to `--lp-ink` as it crosses the middle of the screen (both
   states pass 4.5:1). Font suggestion: a light serif heading with a neutral sans body. **Not** the
   near-black-plus-one-acid-accent default.
@@ -568,3 +568,13 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   accent tokens at the second colour (so the kit's moves keep every floor) and fall back to the
   primary when the second colour is neutral — superseded at the source by X19, harmless alongside it.
   All eight Styles' suggested families are distinct; Bold suggests none.
+- **X21 · 2026-09-28 · orchestrator · Quiet's one accent is the brand colour.** §4.1 said Quiet's
+  accent is the secondary; X19 exposed why that is wrong. The kit moves any colour used as text or a
+  button into its ground's safe band, and a bright second colour (a gold, an amber) lands on brown on
+  a light ground — measured on studio-alpha after X19, Quiet's "Join now" was ochre on a rose brand,
+  with the brand's colour nowhere on the page; brand 2's gold gave an olive button. On a default org
+  the second colour is the platform's amber (Codex-tbr04), not the brand at all. So Quiet uses the
+  kit's accent and button colours as they are (the primary): the ask is the brand's colour, the same
+  as the sticky bar and every other action on the org's site. Measured after: studio-alpha button
+  rgb(214 27 68) light / rgb(255 47 89) dark; brand 2 its navy. A Style may still paint the second
+  colour as decoration (Path's route, Poster's fields); the call to action is always the primary.
