@@ -64,4 +64,7 @@ export const CLEAN: StyleDefinition = {
     'faq',
     'cta',
   ],
+  // A neutral grotesk pair (03 §4.1). Provisional, from E5, so the Style tab's
+  // suggestion can be seen; Clean's Style WP chooses the final pair.
+  fonts: { heading: 'Manrope', body: 'Inter' },
 };

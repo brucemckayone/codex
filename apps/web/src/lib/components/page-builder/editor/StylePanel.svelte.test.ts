@@ -1,8 +1,10 @@
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sampleContext } from '$lib/page-builder/kit';
+import { getBodyFonts, getHeadingFonts } from '$lib/brand-editor/font-catalog';
+import { STYLES, sampleContext } from '$lib/page-builder/kit';
 import {
   PAGE_STYLE_IDS,
+  type PageStyleId,
   SECTION_TYPE_IDS,
 } from '$lib/page-builder/kit/model/ids';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
@@ -50,7 +52,10 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-function open(brandOverrides: PageBuilderState['brandOverrides'] = null): void {
+function open(
+  brandOverrides: PageBuilderState['brandOverrides'] = null,
+  style: PageStyleId = 'bold'
+): void {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
     slug: 'quiet-hours',
@@ -59,7 +64,7 @@ function open(brandOverrides: PageBuilderState['brandOverrides'] = null): void {
     subjectType: 'course',
     subjectId: 'course-1',
     brandOverrides,
-    design: { style: 'bold' },
+    design: { style },
     sections: [HERO],
   } as PageBuilderState);
 }
@@ -158,6 +163,94 @@ describe('StylePanel', () => {
   });
 });
 
+describe('StylePanel — the fonts a Style suggests', () => {
+  // Whichever Styles suggest a pair today: the Style WPs choose them.
+  const suggesting = PAGE_STYLE_IDS.find((id) => STYLES[id].fonts);
+  const plain = PAGE_STYLE_IDS.find((id) => !STYLES[id].fonts);
+  if (!suggesting || !plain) throw new Error('needs one Style of each kind');
+  const pair = STYLES[suggesting].fonts as { heading: string; body: string };
+
+  const row = () => document.querySelector<HTMLElement>('.style-fonts__row');
+
+  it('appears only on choosing a Style that suggests fonts, and changes no font by itself', () => {
+    open(null, plain);
+    renderStyle();
+    expect(row()).toBeNull();
+
+    el<HTMLButtonElement>(`.style-card[data-style="${suggesting}"]`).click();
+    flushSync();
+    expect(pageBuilder.pending?.design?.style).toBe(suggesting);
+    expect(row()?.textContent).toContain(
+      `This Style suggests ${pair.heading} and ${pair.body}.`
+    );
+    // The sample sets the page's own headline in the suggested face.
+    const sample = el('.style-fonts__heading');
+    expect(sample.textContent?.trim()).toBe('Quiet hours, every morning');
+    expect(sample.style.fontFamily).toContain(pair.heading);
+    expect(pageBuilder.pending?.brandOverrides).toBeNull();
+  });
+
+  it('writes both fonts as ONE undoable step, which the font fields can undo', () => {
+    open(null, suggesting);
+    renderStyle();
+    el<HTMLButtonElement>('.style-fonts__use').click();
+    flushSync();
+    expect(pageBuilder.pending?.brandOverrides).toEqual({
+      fontHeading: pair.heading,
+      fontBody: pair.body,
+    });
+    expect(row()).toBeNull();
+    const [heading, body] =
+      document.querySelectorAll<HTMLElement>('.brand-font');
+    expect(heading.textContent).toContain('This page only');
+    expect(body.textContent).toContain('This page only');
+
+    pageBuilder.undo();
+    flushSync();
+    expect(pageBuilder.pending?.brandOverrides).toBeNull();
+    expect(row()).not.toBeNull();
+
+    pageBuilder.redo();
+    flushSync();
+    el<HTMLButtonElement>('.brand-font__reset', heading).click();
+    flushSync();
+    expect(pageBuilder.pending?.brandOverrides).toEqual({
+      fontBody: pair.body,
+    });
+    expect(row()).not.toBeNull();
+  });
+
+  it('stays away while the page already renders the pair, as its own or the organisation’s', () => {
+    open({ fontHeading: pair.heading, fontBody: pair.body }, suggesting);
+    renderStyle();
+    expect(row()).toBeNull();
+    if (app) unmount(app);
+    app = null;
+    pageBuilder.close();
+
+    const layout = document.createElement('div');
+    layout.className = 'org-layout';
+    layout.style.setProperty('--brand-font-heading', `'${pair.heading}'`);
+    layout.style.setProperty('--brand-font-body', `'${pair.body}'`);
+    // `appendChild`: the ambient Workers types retype `append` (see `el`).
+    document.body.appendChild(layout);
+    open(null, suggesting);
+    renderStyle();
+    expect(row()).toBeNull();
+  });
+
+  it('suggests only fonts the page’s font fields offer', () => {
+    const headings = new Set(getHeadingFonts().map((font) => font.family));
+    const bodies = new Set(getBodyFonts().map((font) => font.family));
+    for (const id of PAGE_STYLE_IDS) {
+      const fonts = STYLES[id].fonts;
+      if (!fonts) continue;
+      expect(headings.has(fonts.heading), `${id} heading`).toBe(true);
+      expect(bodies.has(fonts.body), `${id} body`).toBe(true);
+    }
+  });
+});
+
 describe('SectionGallery', () => {
   function renderGallery(counts: Record<string, number>) {
     const onChoose = vi.fn();
@@ -185,6 +278,27 @@ describe('SectionGallery', () => {
     expect(el('.lp', faq).dataset.lpStyle).toBe('clean');
     expect(el('[data-lp-type="faq"]', faq)).toBeTruthy();
     expect(document.querySelectorAll('.gallery__group-title').length).toBe(5);
+  });
+
+  it('shows Story and Gallery in their groups, the gallery drawing its plates before any picture exists', () => {
+    renderGallery({});
+    const groupOf = (type: string) =>
+      el(`.gallery__item[data-type="${type}"]`)
+        .closest('.gallery__group')
+        ?.querySelector('.gallery__group-title')?.textContent;
+    expect(groupOf('story')).toBe('Your story');
+    expect(groupOf('gallery')).toBe('Proof');
+
+    const story = el('.gallery__item[data-type="story"]');
+    expect(el('[data-lp-type="story"]', story).textContent).toContain(
+      'How the six weeks unfold'
+    );
+    // A still render — every thumbnail is — draws the layout's plates.
+    const gallery = el('.gallery__item[data-type="gallery"]');
+    expect(el('.lp', gallery).hasAttribute('data-lp-still')).toBe(true);
+    expect(el('.gallery__plates', gallery).childElementCount).toBeGreaterThan(
+      0
+    );
   });
 
   it('disables a type at its maximum, saying why, and inserts the one chosen', () => {
