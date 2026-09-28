@@ -1,43 +1,179 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   STYLE — CINEMATIC
+   STYLE — CINEMATIC (03-expressive-contract §4.1)
 
-   Dark and immersive, dark in BOTH themes (the one documented exception to
-   following the viewer's theme, contract §4 — `schemes.css` routes this Style
-   to the dark pole). The boldness is spent on MEDIA: full-bleed imagery behind
-   luminous type, a slow reveal, and a brand-tinted glow where there is no
-   image. Pill buttons; the secondary is a ghost.
+   A film in scenes: opening titles, the scenes, the closing card. Dark in
+   BOTH themes (the one documented exception to the viewer's theme, 01 §4 —
+   `schemes.css` routes this Style to the dark pole).
+
+   PALETTE. The room is the brand's own dark ground (or the primary taken
+   down to a deep, faintly tinted near-black); the lifted tint (`soft`)
+   marks each change of scene, so the page reads as one continuous room.
+   Colour is LIGHT, never paint: the primary and the secondary live in the
+   org's moving background (the shader, or the glow of both hues where there
+   is none) and in the one call to action. No brand, accent or contrast
+   bands — nothing breaks the dark.
+
+   TYPE. Luminous titles: display type large and close-set (0.98), lit by a
+   faint halo of the scheme's accent on the two title cards only; titles
+   centred on those cards, left-set everywhere the page reads. Labels
+   tracked a little open, sentence case. Emphasis is size and light, never
+   weight.
+
+   LAYOUT. Two title cards on the Moving background (`atmosphere`, the
+   panel veil, 03 X9/X10): the opening (a cover with no picture) and the
+   close. Each is a compact card of words on a narrowed column, its band's
+   height given to padding outside the card, so the moving light surrounds
+   it. A cover WITH a picture keeps the picture edge to edge. Between them,
+   scenes: pictures that bleed and fade into the dark (the in-block rules),
+   the story as a scroll whose sticky picture changes as its numbered
+   moments pass. Corners are the brand's own radius; buttons are pills when
+   the brand is rounded at all.
+
+   MOTION. The opening: the light is already moving, the words arrive over
+   it (and a picture, when there is one, settles first). The story's frame
+   crossfades from moment to moment. The close builds as it arrives. Nothing
+   else moves.
+
+   SIGNATURE. The org's own moving background behind the opening and the
+   close; the story told as a scroll.
+
+   Moving background: sharp (`atmosphere: 'sharp'`) — the org's shader as
+   its designer drew it, round a smoked card. Blurred, a field of lights
+   (studio-alpha's Bloom) turns to mud.
+
+   Fonts: suggests Unbounded over Sora; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .lp[data-lp-style='cinematic'] {
-  /* A deep, brand-tinted room — unless the org chose its own dark ground. */
+  /* ── the room: the brand's dark ground, or the primary taken down ─────── */
   --lp-dark-ground-in: var(
     --brand-bg-dark,
     oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
   );
   --lp-tint-soft: 10%;
 
+  /* ── type ─────────────────────────────────────────────────────────────── */
   --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale));
   --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.4rem, 0.8rem + 5.8cqi, 5.75rem) * var(--lp-scale));
 
   --lp-leading-display: 0.98;
   --lp-leading-heading: 1.02;
+  --lp-leading-lead: 1.5;
 
   --lp-tracking-display: -0.02em;
   --lp-tracking-heading: -0.015em;
   --lp-tracking-label: 0.04em;
   --lp-weight-label: var(--font-medium);
 
-  --lp-radius-card: var(--radius-lg);
-  --lp-radius-media: var(--radius-md);
-  --lp-radius-button: var(--radius-full);
+  /* ── shape: the brand radius exactly (03 §4.2, k 1) ───────────────────── */
+  --lp-radius-card: max(0rem, var(--lp-brand-radius));
+  --lp-radius-media: max(0rem, var(--lp-brand-radius));
+  --lp-radius-button: var(--lp-radius-pill-if-rounded);
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   --lp-button-pad: var(--space-7);
+
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  /* The Moving background shows at full strength round one card of words. */
+  --lp-atmosphere-veil: panel;
   --lp-atmos-strength: 0.5;
 
-  /* The image arrives slowly behind the words; the words follow it. */
+  /* ── the opening: the picture settles, then the words arrive over it ─── */
   --lp-enter-media: lp-reveal calc(var(--duration-slowest) * 2) var(--ease-smooth) both;
   --lp-enter-headline: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
     calc(var(--lp-stagger) * 4) both;
   --lp-enter-copy: lp-fade var(--duration-slowest) var(--ease-smooth)
     calc(var(--lp-stagger) * 6) both;
+}
+
+/* ── the title cards: the opening and the close ──────────────────────────── */
+/* A cover with nothing to show and the closing band, on the Moving
+   background. The narrowed column narrows the panel with it (the card is
+   drawn from the column, surfaces.css), and the band's height is padding —
+   outside the card — so the light shows above and below it as well as
+   either side. The creator's spacing still scales it: the three steps are
+   re-set, not the chosen one. A cover whose picture bleeds keeps its band. */
+:is(.lp, #lp-style)[data-lp-style='cinematic']
+  .lp-section[data-lp-scheme='atmosphere']:is(
+    [data-lp-type='hero'][data-lp-layout='cover'],
+    [data-lp-type='cta'][data-lp-layout='band']
+  ):not(:has(> .lp-inner > .lp-bleed)) {
+  --lp-container: 46rem;
+  /* Wide enough on a phone that the light frames the card at its sides. */
+  --lp-gutter: clamp(var(--space-8), 7cqi, var(--space-12));
+  /* The screen's height sets the padding, so the card sits in most of the
+     first screen on a phone and a desktop alike. */
+  --lp-pad-compact: clamp(var(--space-12), 12svh, var(--space-32));
+  --lp-pad-regular: clamp(var(--space-16), 20svh, calc(var(--space-32) * 2));
+  --lp-pad-spacious: clamp(var(--space-20), 28svh, calc(var(--space-32) * 2.5));
+}
+
+/* The opening card: the words centred in it, the card as tall as they are. */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-cover__copy:not([data-lp-on-media]) {
+  --lp-actions-align: center;
+  --lp-display-scale: 0.82;
+  justify-items: center;
+  align-content: center;
+  min-block-size: 0;
+  max-inline-size: none;
+  padding-block: var(--lp-pad);
+  text-align: center;
+}
+
+/* Titles lit from behind, on the two cards only. */
+:is(.lp, #lp-style)[data-lp-style='cinematic']
+  .lp-section:is([data-lp-type='hero'], [data-lp-type='cta'])
+  .lp-heading:is([data-size='display'], [data-size='heading']) {
+  text-shadow: 0 0 0.55em color-mix(in oklab, var(--lp-accent) 28%, transparent);
+}
+
+/* The close's own glow belongs to a plain dark band. On the Moving
+   background the section already draws the light (or its proven glow), and
+   a second glow would sit over the card. */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-scheme='atmosphere'] .cta__atmos {
+  display: none;
+}
+
+/* The close builds as the visitor reaches it (a triggered entrance, X13). */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='cta'] {
+  --lp-build-heading: rise;
+}
+
+/* ── room: a quote hangs its opening mark into the card's padding ────────── */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .tm-wall__tile {
+  padding: clamp(var(--space-6), var(--space-4) + 1.8cqi, var(--space-10));
+}
+
+/* ── the story: numbered scenes that hold the frame ──────────────────────── */
+/* The moments are a real sequence (an ordered list), so each carries its
+   number, silent to assistive tech — the list already counts. Wide, and
+   pictured, the moments stand apart, so the sticky picture holds each one
+   for a while; words alone keep the block's own pace. */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll {
+  --lp-size-title: calc(clamp(1.45rem, 1rem + 1.5cqi, 2.4rem) * var(--lp-scale));
+}
+
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll__steps {
+  counter-reset: lp-scene;
+}
+
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll__step {
+  counter-increment: lp-scene;
+}
+
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll__step .story-words::before {
+  content: counter(lp-scene, decimal-leading-zero);
+  content: counter(lp-scene, decimal-leading-zero) / '';
+  color: var(--lp-accent);
+  font-family: var(--lp-font-display);
+  font-size: var(--lp-size-label);
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: 0.12em;
+}
+
+@container (min-width: 48rem) {
+  :is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll:has(> .story-scroll__frame) .story-scroll__steps {
+    gap: clamp(var(--space-16), 22svh, calc(var(--space-32) * 1.5));
+  }
 }

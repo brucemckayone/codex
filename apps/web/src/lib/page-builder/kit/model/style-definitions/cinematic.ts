@@ -1,10 +1,20 @@
 import type { StyleDefinition } from '../style-definition';
 
+/**
+ * Cinematic (03 §4.1): dark and immersive — a film in scenes. It opens and
+ * closes on title cards over the org's OWN moving background (`atmosphere`,
+ * drawn as a panel so the shader shows at full strength round the words, or
+ * the brand glow where there is no shader); between them the page is one
+ * continuous dark room, the lifted tint (`soft`) marking each change of
+ * scene. Dark in both themes, so never a `brand`, `accent` or `contrast`
+ * band: the colour lives in the moving light and the call to action. The
+ * story is a scroll with a sticky picture that changes as its moments pass.
+ */
 export const CINEMATIC: StyleDefinition = {
   id: 'cinematic',
   label: 'Cinematic',
   description:
-    'Dark and immersive, with full-width imagery and a glow of your brand colour.',
+    'Dark and immersive, with full-width pictures and your brand’s moving light behind the opening and the close.',
   layouts: {
     hero: 'cover',
     video: 'theatre',
@@ -23,10 +33,8 @@ export const CINEMATIC: StyleDefinition = {
     stats: 'row',
     text: 'statement',
   },
-  // Cinematic's base is dark in both themes; the lifted tint is its only
-  // variation, so the page reads as one continuous dark room.
   schemes: {
-    hero: 'base',
+    hero: 'atmosphere',
     video: 'soft',
     problem: 'base',
     story: 'base',
@@ -41,8 +49,10 @@ export const CINEMATIC: StyleDefinition = {
     stats: 'soft',
     pricing: 'base',
     faq: 'soft',
-    cta: 'base',
+    cta: 'atmosphere',
   },
+  // The one filled card is the lifted tint in the room, the room in the tint,
+  // and the tint again inside a Moving background.
   featured: {
     base: 'soft',
     soft: 'base',
@@ -81,4 +91,8 @@ export const CINEMATIC: StyleDefinition = {
     'faq',
     'cta',
   ],
+  fonts: { heading: 'Unbounded', body: 'Sora' },
+  // Sharp: the org's own moving background as designed, round a smoked card
+  // (blurred, a shader like Bloom's field of lights turns to mud).
+  atmosphere: 'sharp',
 };

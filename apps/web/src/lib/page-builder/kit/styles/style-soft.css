@@ -1,23 +1,60 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   STYLE — SOFT
+   STYLE — SOFT (03-expressive-contract §4.1)
 
-   Rounded, tinted, calm. The boldness is spent on SHAPES AND TINT: large
-   radii whatever the brand's own radius, pill buttons and labels, and tinted
-   bands with a stronger brand tint than the other Styles. Type is gentle —
-   lighter, looser, never tight.
+   A calm, flowing surface: rounded, tinted, never loud.
+
+   PALETTE. One colour, in tones. Tint (`soft`, the ground warmed toward
+   the primary — more than any other Style, 16%) and page (`base`) take
+   turns down the page; the shapes that drift behind every band are the
+   primary moved into its legible band, at a share of the proven alpha. The
+   ONE filled card a section may carry — the "after" of the change, the
+   lead voice, the recommended offer — is a pebble of the primary itself
+   (`featured` → `brand`), and the page closes on the primary's field. The
+   secondary is never used by default: a brand's second colour may be a
+   neutral (studio-alpha's is grey), and a grey pebble on a warm tint reads
+   as switched off. A creator can still give any band the second colour.
+
+   TYPE. Sentence case everywhere, never tight: easy leading (1.08 display,
+   1.12 heading, 1.65 body), tracking near zero, a moderate display size.
+   Heads gather to the centre where a section gathers (grids, the course,
+   the numbers, the offer); reading columns stay left. Emphasis is size and
+   leading only — the brand's own heavy face is never pushed further.
+
+   LAYOUT. Every corner rounded within the bend (03 §4.2): cards and
+   pictures twice the brand radius, from a gentle floor to 2rem; buttons,
+   labels and chips pills whenever the brand is rounded at all. Cards are
+   open pebbles — a soft line, no fill; the one filled card of a section
+   rests a hair above the page on a shadow of its own colour. Even a story's
+   full-width scenes are rounded, inset pebbles, never slabs.
+
+   SURFACES. Three soft shapes behind every band (`--lp-shapes: blobs`) and
+   curved edges (`--lp-edge: curve`): each band rises into the one above
+   along a wave that shows its own colour, so the page reads as one surface.
+
+   MOTION. The shapes drift, slowly and forever — a breath, not a movement
+   (stopped under reduced motion and on still pages). The hero's one
+   entrance is a slow, even rise. Nothing else moves.
+
+   SIGNATURE. The drifting tinted shapes and the curved edges.
+
+   Fonts: suggests Nunito over Outfit; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .lp[data-lp-style='soft'] {
+  /* ── tint ─────────────────────────────────────────────────────────────── */
   --lp-tint-soft: 16%;
   --lp-tint-panel: 22%;
 
-  --lp-size-display: calc(clamp(2.4rem, 1rem + 4.6cqi, 4.75rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.8rem, 1rem + 2.6cqi, 3rem) * var(--lp-scale));
-  --lp-size-title: calc(clamp(1.15rem, 1rem + 0.7cqi, 1.45rem) * var(--lp-scale));
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(2.5rem, 1rem + 4.8cqi, 5rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 2.7cqi, 3.2rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1rem + 0.7cqi, 1.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.9cqi, 4.25rem) * var(--lp-scale));
 
   --lp-leading-display: 1.08;
   --lp-leading-heading: 1.12;
   --lp-leading-title: 1.25;
+  --lp-leading-lead: 1.5;
   --lp-leading-body: 1.65;
 
   --lp-tracking-display: -0.012em;
@@ -28,25 +65,147 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  /* Soft whatever the brand radius is: a sharp brand still gets round cards. */
-  --lp-radius-card: max(var(--radius-xl), var(--space-6));
-  --lp-radius-media: max(var(--radius-xl), var(--space-8));
-  --lp-radius-button: var(--radius-full);
-  --lp-radius-chip: var(--radius-full);
+  /* ── shape: twice the brand radius, from a gentle floor to 2rem ─────────
+     The floor is the design system's md step AS A LENGTH: inside an org
+     `--radius-md` is the brand's own radius, which is 0 for a square brand —
+     and Soft is the one Style that rounds a square brand up (03 §4.2). */
+  --lp-radius-card: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
+  --lp-radius-media: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
+  --lp-radius-button: var(--lp-radius-pill-if-rounded);
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   --lp-eyebrow-fill: 1;
   --lp-eyebrow-pad: var(--space-1) var(--space-3);
-  --lp-eyebrow-radius: var(--radius-full);
+  --lp-eyebrow-radius: var(--lp-radius-pill-if-rounded);
 
   --lp-button-pad: var(--space-7);
+
+  /* ── rhythm: an intimate column, air above and below ─────────────────── */
   --lp-container: 68rem;
   --lp-measure-lead: 40ch;
+  --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 5.5cqi, calc(var(--space-24) * 1.1));
 
-  /* One slow, even fade: nothing leaps. */
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --lp-shapes: blobs;
+  /* A share of the proven alpha: felt behind the words, never a stain. */
+  --lp-shapes-strength: 0.7;
+  --lp-edge: curve;
+  --lp-edge-depth: clamp(var(--space-8), 4.5cqi, var(--space-16));
+
+  /* ── the hero's one entrance: a slow, even rise ───────────────────────── */
   --lp-enter-headline: lp-rise-soft calc(var(--duration-slowest) * 1.25) var(--ease-out)
     both;
   --lp-enter-copy: lp-fade calc(var(--duration-slowest) * 1.25) var(--ease-out)
     calc(var(--lp-stagger) * 2) both;
   --lp-enter-media: lp-fade calc(var(--duration-slowest) * 1.5) var(--ease-out)
     calc(var(--lp-stagger) * 3) both;
+}
+
+/* ── the shapes: a different arrangement band to band ────────────────────── */
+/* The layer reaches past the band, so the shapes (sized by the band's width,
+   placed against the layer) peek in from its edges and leave the words in
+   the middle clear. The kit draws the same three in every band; mirrored on
+   every other band and flipped on every third, no two neighbours repeat.
+   `transform` composes after the drift's own translate / rotate / scale.
+   Only a page's own bands (`[data-lp-type]`), never the editor's tiles. */
+:is(.lp, #lp-style)[data-lp-style='soft']
+  .lp-section[data-lp-type]:not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+  > .lp-surface::after {
+  inset: -6% -4%;
+}
+
+/* A shape dissolves before it reaches a band's top or foot: where two bands
+   of one colour meet, the next band's cut would otherwise clip it along an
+   unseen line and leave a step. */
+:is(.lp, #lp-style)[data-lp-style='soft']
+  .lp-section[data-lp-type]:not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+  > .lp-surface {
+  --_mist: calc(var(--_edge-d, var(--space-8)) * 2.5);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    currentColor var(--_mist),
+    currentColor calc(100% - var(--_mist)),
+    transparent
+  );
+}
+
+:is(.lp, #lp-style)[data-lp-style='soft']
+  .lp-section[data-lp-type]:nth-child(even):not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+  > .lp-surface::after {
+  transform: scaleX(-1);
+}
+
+:is(.lp, #lp-style)[data-lp-style='soft']
+  .lp-section[data-lp-type]:nth-child(3n):not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+  > .lp-surface::after {
+  transform: scale(-1, -1);
+}
+
+/* ── the pebbles: the one filled card rests a hair above the page ────────── */
+/* A scheme nested in a band is that band's one filled card — the featured
+   offer, the lead voice, the "after", a panel. Its shadow is its own ground
+   deepened, so it reads as the card's colour on any band, never a grey
+   smudge; on a dark page it simply disappears. */
+:is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type] [data-lp-scheme] {
+  box-shadow:
+    0 var(--space-5) var(--space-12) calc(-1 * var(--space-6))
+      oklch(from var(--lp-bg) calc(l * 0.5) c h / 0.5),
+    0 var(--space-1) var(--space-3) calc(-1 * var(--space-1))
+      oklch(from var(--lp-bg) calc(l * 0.6) c h / 0.22);
+}
+
+/* ── story chapters: scenes as pebbles, not slabs ────────────────────────── */
+/* Each scene floats inside the band, inset half a gutter and rounded, with
+   air between scenes and the band's own padding kept at its foot — so the
+   next band's curve cuts into tint, never into a dark scene. The inset is
+   a clip, not a margin: the scene keeps its layout, so its words stay on
+   the page's content line. */
+:is(.lp, #lp-style)[data-lp-style='soft'] .story-chapters {
+  gap: clamp(var(--space-2), 1cqi, var(--space-4));
+  margin-block: 0;
+}
+
+:is(.lp, #lp-style)[data-lp-style='soft'] .story-chapter {
+  clip-path: inset(0 calc(var(--lp-gutter) / 2) round var(--lp-radius-card));
+}
+
+/* ── room: a quote hangs its opening mark into the card's padding ────────── */
+:is(.lp, #lp-style)[data-lp-style='soft'] .tm-wall__tile {
+  padding: clamp(var(--space-6), var(--space-4) + 1.8cqi, var(--space-10));
+}
+
+/* The drift: grown a tenth so its edges never enter the band, turned at
+   most a degree so no corner does either. Neighbouring bands breathe out of
+   step. */
+@keyframes lp-soft-drift {
+  from {
+    translate: -1.5% 1%;
+    rotate: -0.8deg;
+    scale: 1.1;
+  }
+
+  to {
+    translate: 1.5% -1.5%;
+    rotate: 0.8deg;
+    scale: 1.14;
+  }
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root[data-theme]
+    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='soft']
+    .lp-section[data-lp-type]:not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+    > .lp-surface::after {
+    animation: lp-soft-drift calc(var(--duration-slowest) * 40) var(--ease-in-out) infinite
+      alternate;
+  }
+
+  :root[data-theme]
+    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='soft']
+    .lp-section[data-lp-type]:nth-child(even):not([data-lp-scheme='atmosphere'], [data-lp-on-media])
+    > .lp-surface::after {
+    animation-duration: calc(var(--duration-slowest) * 52);
+    animation-direction: alternate-reverse;
+  }
 }
