@@ -43,12 +43,33 @@
   --lp-tint-panel: 14%;
 
   --lp-brand: var(--brand-color, var(--color-brand-primary));
-  --lp-brand-2: var(
-    --brand-secondary,
-    var(
-      --brand-accent,
-      oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45))
-    )
+  /* THE SECOND COLOUR MUST BE A COLOUR (03 §13 X19). The brand editor's default
+     secondary is #737373, so most orgs carry a grey they never chose; painted
+     as a "second colour" it reads as switched off. So: the secondary if it has
+     real chroma, else the accent, else the primary turned 45°. The switch is a
+     premultiplied color-mix (S1's proof, measured in Chrome): the candidate's
+     alpha is 1 when c > 0.02 and 0 when not, and it is mixed half-and-half
+     with the fallback at alpha 0.004 — the result is the candidate within
+     1/255, or the fallback exactly, and `/ 1` makes it opaque again. The dark
+     pole redefines only the inputs; this rule resolves against them. */
+  --_second-shift: oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45));
+  --_accent-in: var(--brand-accent, var(--_second-shift));
+  --_second-in: var(--brand-secondary, var(--_accent-in));
+  --_second-or-shift: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--_accent-in) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--_second-shift) r g b / 0.004) 50%
+      )
+      r g b / 1
+  );
+  --lp-brand-2: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--_second-in) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--_second-or-shift) r g b / 0.004) 50%
+      )
+      r g b / 1
   );
   /* The raw light pole rather than `--color-background`: that token is the
      VIEWER's, and is dark inside a light preview on a dark-theme viewer. */
@@ -117,19 +138,9 @@
 .lp[data-lp-theme='dark'],
 .lp[data-lp-style='cinematic'] {
   --lp-brand: var(--brand-color-dark, var(--brand-color, var(--color-brand-primary)));
-  --lp-brand-2: var(
-    --brand-secondary-dark,
-    var(
-      --brand-secondary,
-      var(
-        --brand-accent-dark,
-        var(
-          --brand-accent,
-          oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45))
-        )
-      )
-    )
-  );
+  /* The second colour's dark inputs; `.lp` above picks among them (03 X19). */
+  --_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-shift)));
+  --_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
      property, so a Style never has to out-specify this selector list. */
   --_ground-in: var(

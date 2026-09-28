@@ -492,6 +492,63 @@ const STYLE_TINTS: Record<string, Tint> = {
 
 const SCHEMES: Scheme[] = ['base', 'soft', 'contrast', 'brand', 'accent'];
 
+// 03 §13 X19. The brand editor's default secondary is #737373, so most orgs
+// carry a grey they never chose; the second colour must skip it. Measured live
+// (Chromium, studio-alpha's grey secondary + amber accent): the accent band
+// paints the amber; a real secondary paints itself within 1/255.
+describe('the second colour skips a neutral secondary (03 X19)', () => {
+  const rule = (selector: string) =>
+    CODE.slice(CODE.indexOf(selector)).match(/\{([^}]*)\}/)?.[1] ?? '';
+  const PICK = (candidate: string, fallback: string) =>
+    `rgb( from color-mix( in srgb, oklch(from var(${candidate}) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%, rgb(from var(${fallback}) r g b / 0.004) 50% ) r g b / 1 )`;
+
+  it('picks the secondary if it has chroma, else the accent, else the primary turned', () => {
+    expect(CODE).toContain(
+      `--lp-brand-2: ${PICK('--_second-in', '--_second-or-shift')};`
+    );
+    expect(CODE).toContain(
+      `--_second-or-shift: ${PICK('--_accent-in', '--_second-shift')};`
+    );
+    expect(CODE).toContain(
+      '--_second-shift: oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45));'
+    );
+  });
+
+  it('reads each pole’s own inputs, falling through unset ones', () => {
+    const light = rule('.lp {');
+    expect(light).toContain(
+      '--_accent-in: var(--brand-accent, var(--_second-shift));'
+    );
+    expect(light).toContain(
+      '--_second-in: var(--brand-secondary, var(--_accent-in));'
+    );
+    const dark = rule(".lp[data-lp-style='cinematic'] {");
+    expect(dark).toContain(
+      '--_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-shift)));'
+    );
+    expect(dark).toContain(
+      '--_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));'
+    );
+    // Only the root rule picks; the dark pole must not reintroduce a plain chain.
+    expect(dark).not.toContain('--lp-brand-2');
+  });
+
+  it('keeps a real colour to within about 1/255 and takes the fallback exactly (premultiplied mix)', () => {
+    // color-mix interpolates premultiplied: each colour weighs share × alpha.
+    const pick = (a: Rgb, aAlpha: number, b: Rgb): number[] => {
+      const wa = 0.5 * aAlpha;
+      const wb = 0.5 * 0.004;
+      return a.map((v, i) => (wa * v + wb * b[i]) / (wa + wb));
+    };
+    const blue: Rgb = [29, 78, 137];
+    const amber: Rgb = [245, 158, 11];
+    const kept = pick(blue, 1, amber);
+    for (const [i, v] of kept.entries())
+      expect(Math.abs(v - blue[i])).toBeLessThanOrEqual(1.02);
+    expect(pick([115, 115, 115], 0, amber)).toEqual(amber);
+  });
+});
+
 describe('the §5 floors — named brand matrix', () => {
   for (const mode of ['light', 'dark'] as const) {
     for (const [groundName, groundHex] of Object.entries(GROUNDS[mode])) {
