@@ -162,7 +162,16 @@
     {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
   </div>
 {:else if layout === 'poster'}
-  <HeroPoster still={settled.still} clip={settled.clip} {alt} {copy} watch={posterWatch} />
+  <!-- With no still known as it draws, the picture's place is held (the clip
+       or the plate fills it), so nothing moves when the stream settles. -->
+  <HeroPoster
+    still={settled.still}
+    clip={settled.clip}
+    reserve={!syncStill && mode !== 'none'}
+    {alt}
+    {copy}
+    watch={posterWatch}
+  />
 {:else if layout === 'split'}
   <div class="hero-split">
     <div class="hero-split__copy">{@render copy('start')}</div>

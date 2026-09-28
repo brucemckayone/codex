@@ -6,13 +6,12 @@
    at every section, and it draws itself as they scroll.
 
    PALETTE. The route, its stops and every marker are the SECOND brand
-   colour: this Style points the kit's own "moved brand" accents at
-   `--lp-brand-2` (below), so the colour is moved only as far as each ground
-   needs and keeps the proven floors — and a neutral second colour (the
-   brand editor's default grey) gives way to the brand colour, so a route is
-   never grey. The calls to action stay in the PRIMARY. The ground and a
-   tint of it take turns, one stretch per stop; two dark stretches and the
-   arrival in the brand's own colour.
+   colour: this Style makes it the kit's accent source (below), so they are
+   drawn in the kit's mark (`--lp-mark-ink`), moved only as far as a graphic
+   needs (3:1, so an amber stays amber), and the words it colours in the
+   accent, moved to the text floor. The calls to action stay in the PRIMARY.
+   The ground and a tint of it take turns, one stretch per stop; two dark
+   stretches and the arrival in the brand's own colour.
 
    TYPE. Signpost type: sentence case, clear steps between display, heading
    and title, leading just over 1, and a body with room to read (1.62).
@@ -86,39 +85,9 @@
     calc(var(--lp-stagger) * 3) both;
 
   /* ── the second colour ────────────────────────────────────────────────── */
-  /* The kit moves its accent from the brand colour; Path moves it from the
-     second one instead, with the same formulas (`schemes.css`), so every
-     scheme's accent — and atmosphere's further-moved one — is the second
-     colour in the band that holds its floors. The pole rules keep choosing
-     which band applies; buttons are untouched, so they stay primary.
-     A neutral second colour (the brand editor's default is a grey) has no
-     colour to give a route, so then the route is the brand colour: the
-     second colour, opaque only when it has chroma, mixed over a trace of
-     the first and made opaque again — a real second colour survives within
-     a 255th, a grey gives way to the brand's own. */
-  --_path-2: rgb(
-    from color-mix(
-        in srgb,
-        oklch(from var(--lp-brand-2) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
-        rgb(from var(--lp-brand) r g b / 0.004) 50%
-      )
-      r g b / 1
-  );
-  --_acc-light: oklch(from var(--_path-2) calc(l * 0.55) calc(c * 0.55) h);
-  --_acc-dark: oklch(from var(--_path-2) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
-}
-
-@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
-  .lp[data-lp-style='path'] {
-    --_acc-light: rgb(from var(--_path-2) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
-    --_acc-dark: rgb(from var(--_path-2) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
-    --_atm-acc-light: rgb(
-      from var(--_path-2) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b)
-    );
-    --_atm-acc-dark: rgb(
-      from var(--_path-2) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b)
-    );
-  }
+  /* The kit moves its accent and its marks from this, in every scheme and
+     both poles (`schemes.css`); the buttons stay the brand's. */
+  --lp-accent-source: var(--lp-brand-2);
 }
 
 /* ── the route down the page ─────────────────────────────────────────────── */
@@ -134,10 +103,10 @@
   );
   /* A stop sits on the middle of the section heading's first line. */
   --_path-y: calc(
-    var(--lp-pad) + var(--lp-edge-offset, 0px) + var(--lp-size-heading) *
-      var(--lp-leading-heading) / 2
+    var(--lp-pad) + var(--lp-edge-offset, 0px) + var(--_path-eyebrow, 0px) +
+      var(--lp-size-heading) * var(--lp-leading-heading) / 2
   );
-  --_path-ink: var(--lp-accent);
+  --_path-ink: var(--lp-mark-ink);
   --_path-ahead: var(--lp-button-line);
   /* What a ring is filled with: the ground it sits on. */
   --_path-gap: var(--lp-bg);
@@ -145,7 +114,27 @@
 
 /* The hero sets out from its headline. */
 :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'] {
-  --_path-y: calc(var(--lp-pad) + var(--lp-size-display) * var(--lp-leading-display) / 2);
+  --_path-y: calc(
+    var(--lp-pad) + var(--_path-eyebrow, 0px) + var(--lp-size-display) *
+      var(--lp-leading-display) / 2
+  );
+}
+
+/* A creator's eyebrow over the heading moves the heading down, and the stop
+   with it: every block stacks the two with the kit's stack gap, and here the
+   eyebrow is one label line (this Style gives it no padding). */
+:is(.lp, #lp-style)[data-lp-style='path']
+  .lp-section[data-lp-type]:has(.lp-eyebrow + .lp-heading, .hero__eyebrow + .hero__headline) {
+  --_path-eyebrow: calc(var(--lp-size-label) * var(--lp-leading-title) + var(--lp-stack));
+}
+
+/* The closing band sets its heading at the ask's size, below the band's own
+   padding: the target sits on that line. */
+:is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='cta']:has(.cta[data-layout='band']) {
+  --_path-y: calc(
+    var(--lp-pad) + var(--lp-edge-offset, 0px) + var(--space-4) + var(--_path-eyebrow, 0px) +
+      var(--lp-size-cta) * var(--lp-leading-heading) / 2
+  );
 }
 
 :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type] > .lp-inner::before,
@@ -323,19 +312,19 @@
 /* The map's own route in the route's colour; each stop a ring that fills
    when it opens, its number set in the ink of that fill. */
 :is(.lp, #lp-style)[data-lp-style='path'] :is(.map__line, .map__bend) {
-  stroke: var(--lp-accent);
+  stroke: var(--lp-mark-ink);
 }
 
 :is(.lp, #lp-style)[data-lp-style='path'] details[open] .map__marker {
-  --_path-on: oklch(from var(--lp-accent) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
-  border-color: var(--lp-accent);
-  background: var(--lp-accent);
+  --_path-on: oklch(from var(--lp-mark-ink) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
+  border-color: var(--lp-mark-ink);
+  background: var(--lp-mark-ink);
   color: var(--_path-on);
 }
 
 @supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0)) {
   :is(.lp, #lp-style)[data-lp-style='path'] details[open] .map__marker {
-    --_path-on: rgb(from var(--lp-accent) var(--_ink-r) var(--_ink-g) var(--_ink-b));
+    --_path-on: rgb(from var(--lp-mark-ink) var(--_ink-r) var(--_ink-g) var(--_ink-b));
   }
 }
 
@@ -371,7 +360,7 @@
   :is(.lp, #lp-style)[data-lp-style='path'] .map__stage:nth-child(even):last-child::after {
     content: '';
     position: absolute;
-    background: var(--lp-accent);
+    background: var(--lp-mark-ink);
     pointer-events: none;
   }
 
@@ -423,7 +412,7 @@
 
 :is(.lp, #lp-style)[data-lp-style='path'] .timeline__marker {
   border-width: var(--_path-w);
-  border-color: var(--lp-accent);
+  border-color: var(--lp-mark-ink);
   border-radius: var(--radius-full);
   background: var(--lp-bg);
 }
@@ -451,7 +440,7 @@
   inset-block: 0;
   inset-inline-start: calc(var(--_path-x) - var(--_path-w) / 2);
   inline-size: var(--_path-w);
-  background: var(--lp-accent);
+  background: var(--lp-mark-ink);
   pointer-events: none;
 }
 
@@ -468,14 +457,14 @@
   background: radial-gradient(
     circle,
     var(--lp-bg) calc(var(--_r) - var(--_path-w) * 0.8),
-    var(--lp-accent) calc(var(--_r) - var(--_path-w) * 0.8 + 0.5px)
+    var(--lp-mark-ink) calc(var(--_r) - var(--_path-w) * 0.8 + 0.5px)
   );
   pointer-events: none;
 }
 
 /* ── the recommended way in, ringed in the route's colour ────────────────── */
 :is(.lp, #lp-style)[data-lp-style='path'] .offer[data-featured] {
-  box-shadow: inset 0 0 0 var(--_path-w) var(--lp-accent);
+  box-shadow: inset 0 0 0 var(--_path-w) var(--lp-mark-ink);
 }
 
 /* ── two-column layouts start at the top ─────────────────────────────────── */
@@ -491,7 +480,10 @@
    display step. */
 @container lp-page (min-width: 50rem) {
   :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero'][data-lp-layout='split'] {
-    --_path-y: calc(var(--lp-pad) + var(--lp-size-display) * 0.7 * var(--lp-leading-display) / 2);
+    --_path-y: calc(
+      var(--lp-pad) + var(--_path-eyebrow, 0px) + var(--lp-size-display) * 0.7 *
+        var(--lp-leading-display) / 2
+    );
   }
 }
 

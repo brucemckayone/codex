@@ -1,4 +1,5 @@
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getBodyFonts, getHeadingFonts } from '$lib/brand-editor/font-catalog';
 import { STYLES, sampleContext } from '$lib/page-builder/kit';
@@ -45,18 +46,21 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   if (app) unmount(app);
   app = null;
   pageBuilder.close();
   sessionStorage.clear();
+  localStorage.clear();
   document.body.innerHTML = '';
 });
 
 function open(
   brandOverrides: PageBuilderState['brandOverrides'] = null,
-  style: PageStyleId = 'bold'
+  style: PageStyleId = 'bold',
+  pageId = PAGE_ID
 ): void {
-  pageBuilder.open(PAGE_ID, {
+  pageBuilder.open(pageId, {
     pageType: 'course',
     slug: 'quiet-hours',
     title: 'Quiet Hours',
@@ -237,6 +241,78 @@ describe('StylePanel — the fonts a Style suggests', () => {
     open(null, suggesting);
     renderStyle();
     expect(row()).toBeNull();
+  });
+
+  describe('“Keep my fonts”', () => {
+    const other = PAGE_STYLE_IDS.find(
+      (id) => id !== suggesting && STYLES[id].fonts
+    );
+    if (!other) throw new Error('needs two Styles that suggest fonts');
+    const keep = () => el<HTMLButtonElement>('.style-fonts__keep');
+    const reopen = (style: PageStyleId, pageId = PAGE_ID) => {
+      if (app) unmount(app);
+      app = null;
+      pageBuilder.close();
+      open(null, style, pageId);
+      renderStyle();
+    };
+
+    it('declines the pair for this page and Style, changes no font, and is remembered', () => {
+      open(null, suggesting);
+      renderStyle();
+      expect(keep().textContent?.trim()).toBe('Keep my fonts');
+      keep().click();
+      flushSync();
+      expect(row()).toBeNull();
+      expect(pageBuilder.pending?.brandOverrides).toBeNull();
+      // Back to the page later: still declined.
+      reopen(suggesting);
+      expect(row()).toBeNull();
+      // Another Style's pair is still offered, on this page…
+      el<HTMLButtonElement>(`.style-card[data-style="${other}"]`).click();
+      flushSync();
+      expect(row()?.textContent).toContain(
+        `This Style suggests ${STYLES[other].fonts?.heading}`
+      );
+      // …and this Style's on another page.
+      reopen(suggesting, '00000000-0000-4000-8000-0000000000b9');
+      expect(row()).not.toBeNull();
+    });
+
+    it('hands focus back to the Style it was about, whichever answer is given', async () => {
+      open(null, suggesting);
+      renderStyle();
+      const card = el(`.style-card[data-style="${suggesting}"]`);
+      keep().focus();
+      keep().click();
+      await tick();
+      await Promise.resolve();
+      expect(document.activeElement).toBe(card);
+
+      reopen(other);
+      el<HTMLButtonElement>('.style-fonts__use').click();
+      await tick();
+      await Promise.resolve();
+      expect(document.activeElement).toBe(
+        el(`.style-card[data-style="${other}"]`)
+      );
+    });
+
+    it('without storage, offers the pair as before and still declines it for this visit', () => {
+      const refuse = () => {
+        throw new DOMException('Storage is disabled', 'SecurityError');
+      };
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(refuse);
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(refuse);
+      open(null, suggesting);
+      renderStyle();
+      // A store that cannot be read hides nothing…
+      expect(row()).not.toBeNull();
+      // …and a refused write still takes the row away, without an error.
+      keep().click();
+      flushSync();
+      expect(row()).toBeNull();
+    });
   });
 
   it('suggests only fonts the page’s font fields offer', () => {

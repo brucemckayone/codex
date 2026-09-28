@@ -14943,6 +14943,14 @@ export const studio_page_editor_style_fonts_use = () => `Use these fonts`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_style_fonts_keep = () => `Keep my fonts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_brand_title = () => `Page brand`
 
 

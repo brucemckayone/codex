@@ -48,9 +48,9 @@
                                              pass (at most --space-10 from where
                                              it sits); the block gives it that
                                              much overscan
-     data-lp-readalong                       brightens from --lp-ink-soft to
-                                             --lp-ink as it rises to the middle
-                                             of the viewport
+     data-lp-readalong                       brightens from --lp-ink-soft to its
+                                             own colour as it rises to the
+                                             middle of the viewport
      data-lp-count                           a stats figure counts up once,
                                              staged like an entrance
                                              (`kit/motion/count-up.ts`)
@@ -218,16 +218,16 @@
   }
 }
 
-/* The other paint property: colour, on a paragraph. Both ends are the
-   section's own proven inks (ink 17:1, soft ink 7:1 against its ground), so
-   every frame between them clears 4.5:1 — which an opacity fade could not
-   promise over an image or the shader. */
+/* The other paint property: colour, on a paragraph. It starts in the soft
+   ink and ends on the paragraph's OWN colour (no `to`), so it only brightens
+   what is set in full ink — a paragraph its block sets soft (the text
+   statement's answers) stays soft, and the end is the render without motion.
+   Both ends are the section's proven inks (ink 17:1, soft ink 7:1 against its
+   ground), so every frame between them clears 4.5:1 — which an opacity fade
+   could not promise over an image or the shader. */
 @keyframes lp-readalong {
   from {
     color: var(--lp-ink-soft);
-  }
-  to {
-    color: var(--lp-ink);
   }
 }
 
@@ -544,7 +544,8 @@
     }
 
     /* Text in the section's full ink: it starts one step quieter and reaches
-       its own ink. Supporting text (soft ink) is already where it ends. */
+       its own ink. Supporting text (soft ink) — a soft Text, or paragraphs a
+       block sets soft inside an ink one — starts and ends where it is. */
     @container style(--lp-text-readalong: on) {
       :root[data-theme]
         .lp:not([data-lp-still])

@@ -41,6 +41,12 @@ export interface StyleDefinition {
    * the org's other pages, or sharp (03 §5.1). Absent = blurred.
    */
   atmosphere?: 'soft' | 'sharp';
+  /**
+   * The scheme the floating call to action is drawn in — its own small band
+   * over whatever section it passes, so never `atmosphere` (there is no veil
+   * to see through). Absent = `contrast`.
+   */
+  sticky?: Exclude<ColourSchemeId, 'atmosphere'>;
 }
 
 /** The sales narrative: promise, pain, the journey, shift, proof, offer, objections, ask. */

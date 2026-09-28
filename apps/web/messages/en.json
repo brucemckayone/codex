@@ -1865,6 +1865,7 @@
   "studio_page_editor_style_in_use": "In use",
   "studio_page_editor_style_fonts": "This Style suggests {heading} and {body}.",
   "studio_page_editor_style_fonts_use": "Use these fonts",
+  "studio_page_editor_style_fonts_keep": "Keep my fonts",
   "studio_page_editor_brand_title": "Page brand",
   "studio_page_editor_brand_body": "Colours and fonts for this page only. Anything you don’t change follows your organisation’s brand.",
   "studio_page_editor_brand_primary": "Brand colour",

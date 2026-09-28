@@ -95,4 +95,6 @@ export const CINEMATIC: StyleDefinition = {
   // Sharp: the org's own moving background as designed, round a smoked card
   // (blurred, a shader like Bloom's field of lights turns to mud).
   atmosphere: 'sharp',
+  // A dark page's bar: its tint, not the light contrast pole.
+  sticky: 'soft',
 };

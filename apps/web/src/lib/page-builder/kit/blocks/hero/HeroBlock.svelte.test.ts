@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tick } from 'svelte';
+import { parse } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   flushSync,
@@ -374,12 +378,107 @@ describe('HeroBlock', () => {
       expect(inner?.classList.contains('hero__enter-m')).toBe(false);
     });
 
-    it('is a type-only poster when there is no picture', async () => {
+    it('is a type-only poster when the creator chooses No image', async () => {
       await render({ heading: 'H', media: 'none' }, { layout: 'poster' });
       const poster = document.body.querySelector('.hero-poster');
       expect(poster?.hasAttribute('data-pictured')).toBe(false);
       expect(poster?.querySelector('.hero-poster__media, img')).toBeNull();
       expect(poster?.querySelector('h1')?.textContent).toBe('H');
+    });
+
+    it('with no still known as it draws, holds the picture’s place, and the streamed clip lands in it', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'poster',
+          context: {
+            ...sampleContext({ course: { heroImageUrl: null } }),
+            sellPreview: promise,
+          },
+        }
+      );
+      const poster = document.body.querySelector('.hero-poster');
+      // Before the stream settles: already set round the picture, the plate
+      // in its place (the server's HTML is this).
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      const box = poster?.querySelector('.hero-poster__media');
+      const headline = poster?.querySelector('h1');
+      expect(box?.querySelector('.lp-media__plate')).not.toBeNull();
+      settle({
+        intro: null,
+        reel: null,
+        heroImageUrl: null,
+        heroClip: { playlistUrl: '/clip.m3u8' },
+        guidePortraitUrl: null,
+      });
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      // The clip lands in that same box; the words were never re-set.
+      expect(poster?.querySelector('.hero-poster__media')).toBe(box);
+      expect(poster?.querySelector('h1')).toBe(headline);
+      expect(box?.querySelector('.lp-media__plate')).toBeNull();
+      expect(box?.textContent).toContain(COPY.hero.watch);
+    });
+
+    it('settled with no media at all, keeps that arrangement with the plate as its picture', async () => {
+      await render({ heading: 'H' }, { layout: 'poster', context: noMedia() });
+      const poster = document.body.querySelector('.hero-poster');
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      const media = poster?.querySelector('.hero-poster__media .lp-media');
+      expect(media?.hasAttribute('data-empty')).toBe(true);
+      expect(media?.querySelector('.lp-media__plate')).not.toBeNull();
+      expect(poster?.querySelector('img, video')).toBeNull();
+    });
+
+    it('gives that plate a sheet of its own — the panel tinted with the brand and lifted toward its ink — computed a step up (no cycle)', () => {
+      // On a band the plate's panel is the page's ground, and this picture
+      // runs off the band's foot into the next section's ground: untinted, it
+      // had no edge. Redeclaring `--lp-panel` from itself on one element
+      // would be a cycle, voiding the plate's whole background.
+      const source = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), 'HeroPoster.svelte'),
+        'utf8'
+      );
+      const rules = new Map<string, Map<string, string>>();
+      type Node = {
+        type: string;
+        property?: string;
+        value?: string;
+        prelude?: { start: number; end: number };
+        block?: { children: Node[] } | null;
+      };
+      const squash = (s: string) =>
+        s
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      // A selector can recur (inside a container query): merge its rules.
+      const visit = (nodes: Node[]) => {
+        for (const node of nodes) {
+          const children = node.block?.children ?? [];
+          if (node.type === 'Rule' && node.prelude) {
+            const selector = squash(
+              source.slice(node.prelude.start, node.prelude.end)
+            );
+            const own = rules.get(selector) ?? new Map<string, string>();
+            for (const d of children)
+              if (d.type === 'Declaration')
+                own.set(d.property ?? '', squash(d.value ?? ''));
+            rules.set(selector, own);
+          }
+          visit(children);
+        }
+      };
+      visit((parse(source, { modern: true }).css?.children ?? []) as Node[]);
+      expect(rules.get('.hero-poster__reveal')?.get('--_plate')).toBe(
+        'color-mix( in oklab, color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel)), var(--lp-panel-ink) 5% )'
+      );
+      expect([
+        ...(rules.get('.hero-poster__reveal :global(.lp-media[data-empty])') ??
+          []),
+      ]).toEqual([['--lp-panel', 'var(--_plate)']]);
     });
 
     it('plays a clip silently in the picture, with the play button over it', async () => {

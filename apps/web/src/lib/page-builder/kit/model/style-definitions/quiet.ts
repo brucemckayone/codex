@@ -91,4 +91,6 @@ export const QUIET: StyleDefinition = {
   ],
   // A light serif heading over a neutral sans (03 §4.1).
   fonts: { heading: 'Spectral', body: 'DM Sans' },
+  // No colour bands, the bar included: it floats on the brand's own ground.
+  sticky: 'base',
 };

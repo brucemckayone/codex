@@ -12,12 +12,15 @@
   fields below show them and "Use organisation brand" undoes them. Choosing a
   Style never touches the fonts. The row sticks to the foot of the panel while
   the Styles run on below it, so it is seen the moment a Style is chosen
-  without moving the card under the pointer.
+  without moving the card under the pointer. "Keep my fonts" declines the pair
+  for this page and Style; the page model has no place for that, so this
+  browser remembers it (and, with no storage, this visit does).
 
   Eight live renders are this panel's cost, so the shell mounts it only while
   the Style tab is open.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import { findFont } from '$lib/brand-editor/font-catalog';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -103,6 +106,39 @@
 
   function useSuggestedFonts(): void {
     if (suggestion) setBrand({ fontHeading: suggestion.heading, fontBody: suggestion.body });
+    returnFocus();
+  }
+
+  // "Keep my fonts", per page and Style. Storage can be missing or refuse
+  // (a private window, blocked site data), so every access is guarded; the
+  // dismissals made here stand for this visit whatever it says.
+  const KEPT = 'lp-keep-fonts';
+  let keptNow = $state<readonly string[]>([]);
+  const keptKey = $derived(`${KEPT}:${pageBuilder.pageId ?? 'unsaved'}:${current}`);
+  const kept = $derived(keptNow.includes(keptKey) || stored(keptKey));
+
+  function stored(key: string): boolean {
+    try {
+      return window.localStorage.getItem(key) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function keepFonts(): void {
+    keptNow = [...keptNow, keptKey];
+    try {
+      window.localStorage.setItem(keptKey, '1');
+    } catch {
+      // Remembered for this visit only.
+    }
+    returnFocus();
+  }
+
+  // Either answer takes the row away; focus goes back to the Style it was about.
+  let styles = $state<HTMLElement>();
+  function returnFocus(): void {
+    void tick().then(() => styles?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus());
   }
 </script>
 
@@ -114,7 +150,12 @@
   <section class="style-panel__group" aria-labelledby="style-panel-styles">
     <h2 class="style-panel__title" id="style-panel-styles">{m.studio_page_editor_style_title()}</h2>
     <p class="style-panel__body">{m.studio_page_editor_style_body()}</p>
-    <div class="style-panel__styles" role="group" aria-labelledby="style-panel-styles">
+    <div
+      class="style-panel__styles"
+      role="group"
+      aria-labelledby="style-panel-styles"
+      bind:this={styles}
+    >
       {#each previews as preview (preview.style.id)}
         {@const active = preview.style.id === current}
         <button
@@ -145,7 +186,7 @@
     </div>
 
     <div class="style-fonts" aria-live="polite">
-      {#if suggestion}
+      {#if suggestion && !kept}
         <div class="style-fonts__row" role="group" aria-labelledby="style-fonts-text">
           <p class="style-fonts__text" id="style-fonts-text">
             {m.studio_page_editor_style_fonts({ heading: suggestion.heading, body: suggestion.body })}
@@ -161,6 +202,9 @@
               {sample.body}
             </span>
           </div>
+          <button type="button" class="style-fonts__keep" onclick={keepFonts}>
+            {m.studio_page_editor_style_fonts_keep()}
+          </button>
         </div>
       {/if}
     </div>
@@ -338,9 +382,32 @@
     background: color-mix(in oklab, var(--color-text) 86%, var(--color-background));
   }
 
-  .style-fonts__use:focus-visible {
+  .style-fonts__use:focus-visible,
+  .style-fonts__keep:focus-visible {
     outline: var(--border-width-thick) solid var(--color-text);
     outline-offset: var(--focus-offset);
+  }
+
+  /* The quiet answer: a plain text button under the sample, where the eye
+     lands after reading it, as tall as the button beside the offer. */
+  .style-fonts__keep {
+    grid-column: 1 / -1;
+    justify-self: end;
+    min-block-size: var(--space-10);
+    padding-inline: var(--space-2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-decoration: underline;
+    text-underline-offset: var(--space-1);
+    cursor: pointer;
+  }
+
+  .style-fonts__keep:hover {
+    color: var(--color-text);
   }
 
   .style-fonts__sample {

@@ -315,6 +315,32 @@ describe('PageRenderer', () => {
     expect(bar?.inert || bar?.hasAttribute('inert')).toBe(true);
     expect(bar?.hasAttribute('data-shown')).toBe(false);
   });
+
+  it.each(
+    PAGE_STYLE_IDS
+  )('draws the %s floating bar in the scheme its Style names', async (style) => {
+    const root = await render({ page: samplePage(style) });
+    expect(
+      root.querySelector('.lp-sticky')?.getAttribute('data-lp-scheme')
+    ).toBe(STYLES[style].sticky ?? 'contrast');
+  });
+
+  it('floats Quiet’s bar on its own ground and Cinematic’s on its tint; the rest on contrast', async () => {
+    const bars: Record<string, string | null | undefined> = {};
+    for (const style of ['quiet', 'cinematic', 'bold'] as const) {
+      const root = await render({ page: samplePage(style) });
+      bars[style] = root
+        .querySelector('.lp-sticky')
+        ?.getAttribute('data-lp-scheme');
+      if (app) unmount(app);
+      app = null;
+    }
+    expect(bars).toEqual({
+      quiet: 'base',
+      cinematic: 'soft',
+      bold: 'contrast',
+    });
+  });
 });
 
 describe('PageRenderer entrances (03 X13)', () => {

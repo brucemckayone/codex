@@ -609,3 +609,38 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   Pinned: `resolve.test.ts` (both orders, the chosen pair kept, and every Style's resolved starter
   and order checked for both rules — red before the fix on `bold starter 1: brand → contrast`);
   `template.test.ts`'s inline copy of the rule updated to match.
+- **X24 · 2026-09-28 · V2b · Kit polish.**
+  - **`--lp-mark-ink`, a decorative grade.** The accent is text-grade (4.5:1), so a bright second
+    colour drawn as a line or marker landed on brown. Decorative marks (Path's route, stops, tip,
+    map and timeline markers, story line) take `--lp-mark-ink`: the same fragment machinery, 3:1
+    (WCAG 1.4.11) with the accent's own ~9.7% margin against the WORST surface of each pole (light
+    Y ≤ 0.18 → 3.33:1 on the soft band at L 0.900; dark ≥ 0.185 → 3.30:1; atmosphere and decorated
+    0.11 / 0.27). Amber #F59E0B's light route is rgb(165 105 3), not rgb(129 81 0). A kit test
+    forbids any `color:` or button token taking it: marks only, never text.
+  - **`--lp-accent-source`** (default `var(--lp-brand)`) is read by every accent and mark recipe;
+    buttons still read `--lp-brand` (X21). A Style that wants its accent in another colour sets
+    this one public token (Path: `var(--lp-brand-2)`) instead of re-pointing kit privates.
+    `registry.test.ts` holds every `--_*` a Style declares OR reads to a declaration it may use (the
+    kit sheets, its own `--_<id>-…` namespace, or a listed block private with its owner); a rename
+    anywhere fails the build instead of silently falling back to the primary.
+  - **Read-along ends on the paragraph's own colour** (`@keyframes lp-readalong` has only a
+    `from`): it had brightened the statement's soft-ink answers to full ink, breaking motion.css's
+    rule that an animation ends on the element's own look.
+  - **Poster reserves its pictured geometry** while the hero has no still known at render and the
+    mode is not "No image": a clip that lands fills the same box (it had jumped the words 116–151px at
+    1440, and pushed the next section off screen at 390). Auto with no media now shows the brand
+    plate; the type-only poster is the explicit "No image". Codex-vn5ir: hero-media presence on the
+    awaited view would let auto-without-media render type-only with no shift.
+  - **The plate is drawn in its panel's own ink** (`Media.svelte`): its disc and ring were the
+    section's accent, which on a white-ink brand band is white on a near-white panel (1.04:1, a blank
+    card on studio-alpha) and on a black-ink band a black disc at 20.12:1, as loud as body text. Now
+    `--lp-panel-ink` mixed 18% / 32% into `--lp-panel`: disc ~1.5, ring ~2.1–2.5 in every brand and
+    theme measured, always quieter than the softest text. Poster's empty picture, which runs off the
+    band's foot, also gets a sheet of its own (the panel tinted like a card, 1.14–1.34 off the
+    ground), computed one element up — `--lp-panel` declared from itself would be a cycle.
+  - **A per-Style sticky-bar scheme** (`StyleDefinition.sticky`, absent = contrast; Cinematic soft,
+    Quiet base) replaces PageRenderer's hard-code.
+  - **"Keep my fonts"** declines a Style's font suggestion for that page and Style (per viewer,
+    localStorage, every access guarded; no schema change).
+  - **Path's stops sit on the heading** with a creator eyebrow (they sat 41px above) and on the CTA
+    band's headline (25px above).

@@ -50,7 +50,7 @@ type CssNode = {
   prelude?: string | { children: { start: number; end: number }[] };
   property?: string;
   value?: string;
-  block?: { children: CssNode[] } | null;
+  block?: { start: number; children: CssNode[] } | null;
 };
 
 function read(nodes: CssNode[], source: string): Sheet {
@@ -234,6 +234,26 @@ function motionViolations(source: string): string[] {
   return out;
 }
 
+/** Each stop of the named keyframes, as written, with what it declares. */
+function stops(source: string, name: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const visit = (nodes: CssNode[]) => {
+    for (const node of nodes) {
+      if (node.type !== 'Atrule') continue;
+      if (node.name !== 'keyframes' || String(node.prelude) !== name) {
+        visit(node.block?.children ?? []);
+        continue;
+      }
+      for (const frame of node.block?.children ?? [])
+        out[source.slice(frame.start, frame.block?.start).trim()] = (
+          frame.block?.children ?? []
+        ).map((d) => `${d.property}: ${d.value}`);
+    }
+  };
+  visit(parseCss(source).children as unknown as CssNode[]);
+  return out;
+}
+
 /** The selector of each rule that handles a value, for the vocabulary check. */
 function handles(
   source: string
@@ -406,6 +426,22 @@ describe('motion.css', () => {
     for (const depth of DEPTHS)
       expect(queries).toContain(`style(--lp-media-parallax: ${depth})`);
     expect(queries).toContain('style(--lp-text-readalong: on)');
+  });
+
+  it('ends a read-along on the paragraph’s own colour, so what a block sets soft stays soft', () => {
+    // The text statement's answers are soft paragraphs inside the ink body
+    // the hook animates; a `to` in the full ink brightened them past both
+    // their own look and the render without motion.
+    expect(stops(MOTION, 'lp-readalong')).toEqual({
+      from: ['color: var(--lp-ink-soft)'],
+    });
+    // Calibration: the reader sees a `to` where there is one.
+    expect(
+      stops(
+        '@keyframes lp-readalong { from { color: a; } to { color: b; } }',
+        'lp-readalong'
+      )
+    ).toEqual({ from: ['color: a'], to: ['color: b'] });
   });
 
   it('never moves the hero, which has its own entrance', () => {

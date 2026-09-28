@@ -165,7 +165,7 @@
       {context}
       label={stickyLabel}
       priceLine={stickyPrice}
-      scheme={style === 'cinematic' ? 'soft' : 'contrast'}
+      scheme={STYLES[style].sticky ?? 'contrast'}
       {signature}
     />
   {/if}

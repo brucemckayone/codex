@@ -9,8 +9,14 @@
   the drop above it at full width and the lines after it step in beside the
   picture — the words never sit on the photograph, so it needs no scrim. The
   lede and the buttons follow round it. Narrow, the words stack and the
-  picture closes the band edge to edge. With no picture it is a type-only
-  poster: the headline at the top, the lede and the buttons at the foot.
+  picture closes the band edge to edge.
+
+  The picture's place is kept whenever one is allowed (`reserve`): a clip or
+  a still that arrives on the stream drops into it, and with none the plate
+  fills it — so nothing moves as the stream settles, and the canvas, the
+  thumbnails and the public page draw the same arrangement. Only "No image"
+  makes it a type-only poster: the headline at the top, the lede and the
+  buttons at the foot.
 
   Only the picture reaches the edges (03 X10): the words keep the content
   column, so this is never `.lp-bleed`. The picture paints in the first HTML
@@ -30,11 +36,18 @@
     copy: Snippet<['start' | 'center']>;
     /** The play button laid over a clip. */
     watch: Snippet;
+    /**
+     * Keep the picture's place though there is no still yet: one may arrive
+     * on the streamed preview, and the plate stands in for it until then —
+     * or for good, the designed empty picture — so the words are set round
+     * it from the first paint.
+     */
+    reserve?: boolean;
   }
 
-  const { still, clip, alt, copy, watch }: Props = $props();
+  const { still, clip, alt, copy, watch, reserve = false }: Props = $props();
 
-  const pictured = $derived(Boolean(still || clip));
+  const pictured = $derived(Boolean(still || clip) || reserve);
 </script>
 
 <div class="hero-poster" data-pictured={pictured ? '' : undefined}>
@@ -68,8 +81,25 @@
   }
 
   .hero-poster__reveal {
+    /* The empty picture's sheet (below), from the panel it would have had. */
+    --_plate: color-mix(
+      in oklab,
+      color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel)),
+      var(--lp-panel-ink) 5%
+    );
     position: relative;
     aspect-ratio: 4 / 5;
+  }
+
+  /* An empty picture is the plate, in the panel's colour — which on a band is
+     the page's own ground, and this picture runs off the band's foot into the
+     next section's ground, where a blank sheet has no edge. So its sheet is
+     the panel tinted with the brand, as cards on the ground are, and a step
+     toward its own ink: a pale brand on a light page or a dark one on a dark
+     page tints the ground too little to show alone. The marks stay the
+     panel's ink. Paint only: the box is the picture's either way. */
+  .hero-poster__reveal :global(.lp-media[data-empty]) {
+    --lp-panel: var(--_plate);
   }
 
   .hero-poster__reveal :global(.lp-media) {
