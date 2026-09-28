@@ -66,6 +66,7 @@ Consequences, each testable (§11):
 | §2 Styles list | 4 Styles | 8 Styles (§3, §4). |
 | §5 Schemes | 5 schemes | 6: + `atmosphere` (§5.1). |
 | 01 decision 4 "at most two agents at a time" | — | Unchanged by default. The owner may raise it; the orchestrator states the spend estimate first (§12). |
+| §5 token table: the `--lp-accent` row ("links, highlights, markers") | The accent paints marks | A drawn mark takes **`--lp-mark-ink`**, the 3:1 decorative grade (X24, X28). `--lp-accent` is the text grade (4.5:1): links and highlighted words, never a stroke. |
 
 ---
 
@@ -751,3 +752,38 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     second tier or a smaller base display in those layouts.
   - **Not measured:** 1024 × 768, containers of 50–56rem, the public page's site header above the
     hero, and the other five Styles with long headlines.
+- **X28 · 2026-09-28 · orchestrator + V3 · Studio's pen takes the mark ink (Codex-61zsk.27).**
+  Studio drew every pen mark in `--lp-accent`. That is the text grade, which moves a bright brand as
+  far as a line of text needs: a teal brand's marks came out in `rgb(1 78 72)`, a near-black green
+  at 9.2:1 on the page's ground, and a rose brand's in wine.
+  - **The five pen marks take `--lp-mark-ink`:** the section-heading underline, the hero
+    underline, the number circles, the portrait's scribble and the problem's dashes. The dash names
+    the ink itself; it had inherited the block's accent bar. Studio's sheet no longer names
+    `--lp-accent`.
+  - **Measured** (OK-L, and chroma where it moved):
+
+    | Page | Before | After | Brand |
+    |---|---|---|---|
+    | teal, light | L .38 | L .47 | L .60 |
+    | teal, dark | L .73 | L .63 | L .60 |
+    | rose, light | L .41, C .156 | L .50, C .191 | L .59, C .222 |
+    | rose, dark | C .146 | C .217 | C .222 |
+
+    - Against their ground: flat ≥ 4.58, painted 5th percentile ≥ 4.40. Studio draws paper grain,
+      so the kit's decorated grade applies, and its marks sit at 4.6–6.3 rather than ~3.3.
+    - Text over the marks, measured under the glyphs' own ink: every mark host is at p5 ≥ 16.1 at
+      1440 and ≥ 16.3 at 390.
+  - **Not moved:** the prints' paper border and 1px ring frame the photograph; they are not pen
+    strokes. Marks on the accent field (stats) and on the brand band (the CTA) resolve to ink
+    either way.
+  - **`style-studio.test.ts`** finds a mark the way the page draws it: a rule masked with a
+    `--lp-mark-*` shape, read with Svelte's CSS parser. It requires that rule's own paint to
+    resolve to exactly `var(--lp-mark-ink)`, following the sheet's custom properties, so neither a
+    `var()` hop nor a tint can hide the grade.
+  - **The reference pattern moved with it.** `motion.css`'s header showed a mark painted in
+    `--lp-accent`, which the next Style would have copied. It now shows the mark ink and names the
+    accent as the wrong grade. §2 records that 01's token table no longer paints markers in the
+    accent.
+  - **Filed as Codex-61zsk.31:** the portrait's frame is drawn on the print's paper edge, not
+    outside it as its comment says. In dark mode it crosses that border at 2.78 / 2.80:1 (about 4.0
+    in the accent). Against the section's ground it holds 4.58 / 4.64.

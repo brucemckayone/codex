@@ -3,14 +3,16 @@
 
    A maker's studio wall. Handmade and warm through TEXTURE, TILT and the
    HAND-DRAWN LINE — never through a stock palette: the ground is the brand's
-   own background, the pen is the brand's own accent.
+   own background, the pen is the brand's own colour.
 
    PALETTE. Paper first: the brand's ground (`base`) and a tint of it
    (`soft`) take turns, so the page reads as sheets of one paper. The second
    colour gets one field — the numbers, circled by hand — and the closing
-   ask the brand's own. Every mark is drawn in `--lp-accent`, the brand moved
-   into a band that holds 3:1 against its sheet (and the ink itself on a
-   colour field), so the pen shows on any brand.
+   ask the brand's own. Every mark is drawn in `--lp-mark-ink` (X24): the
+   brand moved only as far as a mark needs to hold 3:1 against its sheet,
+   grain and all (the ink itself on a colour field), so the pen shows on any
+   brand and still reads as the brand. Never the text-grade accent, which
+   darkens it as far as a line of text needs.
 
    TYPE. Sentence case everywhere; a moderate display size with easy leading
    (1.04 / 1.1) and a narrower, looser body (58ch, 1.68) — a notebook, not a
@@ -165,7 +167,7 @@
   --_gap: clamp(var(--space-4), 0.5rem + 1.6cqi, var(--space-8));
 }
 
-/* ── the pen: marks drawn in the accent ─────────────────────────────────── */
+/* ── the pen: marks drawn in the mark ink ───────────────────────────────── */
 /* An underline under a section's heading, a length of its own. Not where the
    section carries a mark of its own (the numbers, the guide's portrait). */
 :is(.lp, #lp-style)[data-lp-style='studio']
@@ -183,7 +185,7 @@
   inset-block-end: -0.36em;
   inline-size: min(100%, 4.5em);
   block-size: 0.3em;
-  background: var(--lp-accent);
+  background: var(--lp-mark-ink);
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
   pointer-events: none;
 }
@@ -205,7 +207,7 @@
   inset-block-end: -0.3em;
   inline-size: min(100%, 3.6em);
   block-size: 0.26em;
-  background: var(--lp-accent);
+  background: var(--lp-mark-ink);
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
   pointer-events: none;
 }
@@ -242,7 +244,7 @@
   content: '';
   position: absolute;
   inset: -38% calc(-16% - 0.15em);
-  background: var(--lp-accent);
+  background: var(--lp-mark-ink);
   mask: var(--lp-mark-circle) center / 100% 100% no-repeat;
   pointer-events: none;
 }
@@ -301,15 +303,17 @@
   position: absolute;
   inset: calc(-1 * var(--space-4));
   z-index: 1;
-  background: var(--lp-accent);
+  background: var(--lp-mark-ink);
   mask: var(--lp-mark-scribble) center / 100% 100% no-repeat;
   pointer-events: none;
 }
 
-/* The problem's signs are dashed off by the same pen. */
+/* The problem's signs are dashed off by the same pen, in its ink (the
+   block's own bar is the accent). */
 :is(.lp, #lp-style)[data-lp-style='studio'] .problem__bar {
   block-size: 0.5em;
   margin-block-start: calc(0.5lh - 0.25em);
+  background: var(--lp-mark-ink);
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
 }
 

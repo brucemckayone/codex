@@ -77,7 +77,10 @@
      --lp-mark-scribble    a frame round an image (stretches to any box)
      --lp-mark-arrow       pointing up and right (keep its 3 / 2 shape)
    The pen keeps one width however far a mark stretches. A Style draws one
-   with a pseudo-element, coloured by the section:
+   with a pseudo-element, in the section's mark ink (X24). That grade moves
+   the brand only as far as a mark needs to hold 3:1. Never paint a mark in
+   `--lp-accent`, the text grade, which darkens a bright brand until it no
+   longer reads as the brand:
      .host { position: relative; }
      .host::after {
        content: '';
@@ -86,7 +89,7 @@
        inset-block-end: -0.3em;             underline takes a length of its
        inline-size: min(100%, 5.5em);       own)
        block-size: 0.34em;
-       background: var(--lp-accent);
+       background: var(--lp-mark-ink);
        mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
        animation: var(--lp-mark-draw, none);
      }
