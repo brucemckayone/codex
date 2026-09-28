@@ -892,3 +892,31 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **Instrument note:** on a browser context's first page, `fonts.ready` resolves before the
     brand webfont has even been requested, so the first measurement reads the fallback face.
     Warm up with a throwaway page before measuring.
+- **X32 · 2026-09-29 · orchestrator + V3 · Studio's portrait frame sits outside the print
+  (Codex-61zsk.31).** The owner's decision, verbatim: "Move it outside (Recommended)", meaning
+  "Matches the design's intent and fixes the dark-mode dip; the frame gets a little air around the
+  photo. Checked at phone width too."
+
+  The scribbled frame's comment said "outside the print", but it was drawn on the print's paper
+  edge, with much of its stroke over the photograph. X28's 2.78:1 was the border alone. Measured
+  across every pixel of the stroke, the dark minimum was 1.04–1.25.
+  - **The outset is proportional:** `inset: calc(-1 * (var(--space-7) + 5%))`. The scribble's
+    paths wander in from their box by up to 4.5% of it. A fixed 56px step cleared the print at
+    1440 but left 3.4px of air, with the stroke in the shade, on a 746px stacked print at 820. The
+    measured air is now 14–18px at every width from 390 to 1440.
+  - **Room, never clipping,** in Studio's own rules:
+    - a split portrait pads in by the frame's reach minus its distance from the section edge
+      (0 at 1440);
+    - a centred portrait is capped at `100% - 2 × --space-8`;
+    - below the guide's split width, `(width < 52rem)`, a stacked portrait keeps the frame's foot
+      clear of the heading. The new test pins that query to InstructorBlock's own
+      `(min-width: 52rem)`.
+  - **Measured after,** on 24 pages (split and centred × 390/820/1440 × brands 3 and org × light
+    and dark):
+    - 0 stroke pixels on the print or over the photo;
+    - air 13–18px;
+    - contrast outside the photo at least 4.34 (light at least 4.56);
+    - no horizontal scroll on any page.
+  - **The cost:** on narrow screens the print steps in to make room. The split print loses about
+    68px of width at 390 and 84px at 820, and the centred one goes from 320 to 291px at 390. 1440
+    is unchanged.

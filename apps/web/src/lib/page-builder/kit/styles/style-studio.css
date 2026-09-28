@@ -297,15 +297,47 @@
   content: none;
 }
 
-/* A scribbled frame round the guide's portrait, outside the print. */
+/* A scribbled frame round the guide's portrait, outside the print: clear of
+   its paper border and of the shade under it, with a little air. The pen
+   wanders in from its box by up to a twentieth of the frame, so the frame
+   stands off by a step plus a twentieth of the print — the same air, about
+   15px, at any size. */
 :is(.lp, #lp-style)[data-lp-style='studio'] .guide__portrait:not([data-layout='quote']) .clip::after {
   content: '';
   position: absolute;
-  inset: calc(-1 * var(--space-4));
+  inset: calc(-1 * (var(--space-7) + 5%));
   z-index: 1;
   background: var(--lp-mark-ink);
   mask: var(--lp-mark-scribble) center / 100% 100% no-repeat;
   pointer-events: none;
+}
+
+/* Room for that frame, never a clipped one. Beside the words, or stacked
+   over them, the print steps in from a section edge nearer than the frame
+   reaches (the step, its twentieth and the tilt's spill): none on a wide
+   screen, whose margin holds it. A centred print keeps the same room on a
+   phone. */
+:is(.lp, #lp-style)[data-lp-style='studio'] .guide-split > .guide__portrait {
+  padding-inline: max(
+    0rem,
+    var(--space-7) + 7% - max(var(--lp-gutter), (100cqi - var(--lp-container)) / 2)
+  );
+}
+
+:is(.lp, #lp-style)[data-lp-style='studio'] .guide-centered > .guide__portrait {
+  max-inline-size: calc(100% - 2 * var(--space-8));
+}
+
+/* Stacked over the words (below the split's two columns), the portrait
+   keeps the frame's foot clear of the heading under it. */
+@container (width < 52rem) {
+  :is(.lp, #lp-style)[data-lp-style='studio'] .guide-split > .guide__portrait {
+    margin-block-end: max(0rem, var(--space-7) + 8% - var(--lp-gap));
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio'] .guide-centered > .guide__portrait {
+    margin-block-end: max(0rem, var(--space-12) - var(--lp-gap));
+  }
 }
 
 /* The problem's signs are dashed off by the same pen, in its ink (the

@@ -18,16 +18,20 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseCss } from 'svelte/compiler';
+import { parse, parseCss } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 
 type CssNode = {
   type: string;
+  name?: string;
   property?: string;
   value?: string;
   prelude?: { start: number; end: number } | string;
   block?: { children: CssNode[] } | null;
 };
+
+const STYLES = dirname(fileURLToPath(import.meta.url));
+const SHEET = join(STYLES, 'style-studio.css');
 
 interface Mark {
   selector: string;
@@ -41,27 +45,43 @@ const MARK_INK = 'var(--lp-mark-ink)';
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 const uncomment = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** Every rule of a sheet, at any depth, with its selector and its own declarations. */
-function rulesOf(css: string) {
-  const rules: { selector: string; decls: Map<string, string> }[] = [];
-  const visit = (nodes: CssNode[]) => {
-    for (const node of nodes) {
+/**
+ * Every rule, at any depth, with its selector, its own declarations and the
+ * container query it sits in (`source` is what the parser's offsets index).
+ */
+function rulesIn(nodes: CssNode[], source: string) {
+  const rules: {
+    selector: string;
+    decls: Map<string, string>;
+    query: string;
+  }[] = [];
+  const visit = (children: CssNode[], query: string) => {
+    for (const node of children) {
       if (node.type === 'Rule' && typeof node.prelude === 'object') {
         const decls = new Map<string, string>();
         for (const d of node.block?.children ?? [])
           if (d.type === 'Declaration')
             decls.set(d.property ?? '', squash(d.value ?? ''));
         rules.push({
-          selector: squash(css.slice(node.prelude.start, node.prelude.end)),
+          selector: squash(source.slice(node.prelude.start, node.prelude.end)),
           decls,
+          query,
         });
       }
-      visit(node.block?.children ?? []);
+      visit(
+        node.block?.children ?? [],
+        node.type === 'Atrule' && node.name === 'container'
+          ? squash(String(node.prelude))
+          : query
+      );
     }
   };
-  visit(parseCss(css).children as unknown as CssNode[]);
+  visit(nodes, '');
   return rules;
 }
+
+const rulesOf = (css: string) =>
+  rulesIn(parseCss(css).children as unknown as CssNode[], css);
 
 /** A paint followed through the sheet's own declarations of what it reads. */
 function resolve(
@@ -101,12 +121,7 @@ function marksOf(source: string): Mark[] {
 }
 
 describe("Studio's pen marks", () => {
-  const marks = marksOf(
-    readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), 'style-studio.css'),
-      'utf8'
-    )
-  );
+  const marks = marksOf(readFileSync(SHEET, 'utf8'));
 
   it('finds the pen: the underlines, the circles, the frame and the dashes', () => {
     expect(new Set(marks.map((m) => m.shape))).toEqual(
@@ -149,5 +164,34 @@ describe('reading a mark', () => {
         '.b::after { /* background: var(--lp-mark-ink); */ background: var(--lp-accent); mask: var(--lp-mark-scribble); }'
       )
     ).toEqual(['var(--lp-accent)']);
+  });
+});
+
+describe("the portrait frame's room (Codex-61zsk.31)", () => {
+  it('keeps the frame clear of the words exactly where the guide stacks its portrait over them', () => {
+    // The guide sets its words beside the portrait from its split width;
+    // under it the portrait stacks over them, and Studio makes room below
+    // the print for the frame's foot. Where the stroke lands only a browser
+    // can see; that the two widths are one is what this pins.
+    const source = readFileSync(
+      join(STYLES, '..', 'blocks', 'instructor', 'InstructorBlock.svelte'),
+      'utf8'
+    );
+    const split = rulesIn(
+      (parse(source, { modern: true }).css?.children ?? []) as CssNode[],
+      source
+    ).find(
+      (r) =>
+        r.selector === '.guide-split:has(> .guide__portrait)' &&
+        r.decls.has('grid-template-columns')
+    );
+    const room = rulesOf(uncomment(readFileSync(SHEET, 'utf8'))).find(
+      (r) =>
+        r.selector.endsWith('.guide-split > .guide__portrait') &&
+        r.decls.has('margin-block-end')
+    );
+    const width = split?.query.match(/^\(min-width: ([\d.]+rem)\)$/)?.[1];
+    expect(width, `the guide's split: ${split?.query}`).toBeDefined();
+    expect(room?.query).toBe(`(width < ${width})`);
   });
 });
