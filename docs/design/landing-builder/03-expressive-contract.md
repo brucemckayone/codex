@@ -920,3 +920,41 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **The cost:** on narrow screens the print steps in to make room. The split print loses about
     68px of width at 390 and 84px at 820, and the centred one goes from 320 to 291px at 390. 1440
     is unchanged.
+- **X33 · 2026-09-29 · orchestrator + V4 · A Moving background reads as the brand, edge to edge
+  (Codex-61zsk.25).** Over a blurred org shader (Bloom), Clean, Soft and Quiet drew an atmosphere
+  section as a mottled grey band, with a pale frame at the window's edges.
+  - **The pale frame.**
+    - *Cause:* `filter: blur()` on the fixed shader box averages in the transparent pixels past
+      its edge. On the raw shader, L climbed from 0.27 to 0.63 over the outer ~130px, and an
+      atmosphere section, which clears the stack, shows that.
+    - *Fix* (`routes/_org/[slug]/+layout.svelte`): on a blurred atmosphere page only, the
+      canvas runs 2 × `--blur-2xl` (120px) past every edge, with `object-fit: cover`. The gate is
+      `.org-layout[data-hero-shader-active]:not(.org-layout--landing):has(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))`.
+    - *Render work is unchanged.* The canvas ELEMENT grows, not its box, so the drawing buffer
+      ShaderHero sizes from the box stays the window, and so does its under-768px resolution cap.
+      Only the composited area grows (+48% at 1440, +107% at 390).
+    - *Measured:* the edge dL went from +0.048 to 0.000 (light, 1440).
+    - *No sideways scroll:* at 390, each overscanned page (canvas at −120,−120, 630 × 1084) keeps
+      `scrollWidth` 390. Five pages outside the gate keep a window-sized canvas: no atmosphere,
+      a page brand, Cinematic's sharp background, org home and explore.
+  - **The grey band.**
+    - *Cause:* a light veil over a dark shader. 18% of a near-black field takes the ground to
+      L 0.87 at chroma 0.004, and at the proven veil strength even white can't clear L 0.88. So the
+      lever is colour, not lightness.
+    - *Fix:* a Style opts in with `--lp-atmosphere-ground: tint` (Clean, Soft and Quiet do). The
+      atmosphere section's `--lp-bg` becomes the Style's panel ground, the tint its own cards
+      carry. The live veil paints that at the same proven strength
+      (`rgb(from var(--lp-bg) r g b / var(--_atmos-s))`), and every word is computed against it.
+    - *Dark:* the dark panel ground reaches L 0.28, so a branchless pole step
+      (`clamp(0, (l - 0.5) * 1e6, 1)`) brings it to the edge of the band §5.1's proof holds for
+      (L ≤ 0.24, chroma ≤ 0.039). Light passes through unchanged.
+    - *Measured,* over 3 Styles × light/dark × 1440/390 × two brands (48 live runs):
+      - band chroma: crimson .003–.004 → .030–.043; teal .011–.014 → .018–.031;
+      - shader transmission unchanged (light .18, dark .14);
+      - all 104 text measurements ≥ 4.5 under the glyph ink, the tightest 4.78 (Quiet, light, 390);
+      - Bold, Path and Studio, and pages without an atmosphere section: unchanged.
+  - **Where it can't reach:**
+    - a browser without custom-property style queries keeps the old grey veil (the kit's
+      progressive-enhancement rule);
+    - Bold, Path and Studio draw the same plain veil, so they still show the grey band. Opting
+      them in is one line each, plus a measurement (filed as Codex-61zsk.35).

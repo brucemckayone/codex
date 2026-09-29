@@ -33,6 +33,12 @@
                                              inside the panel. A section whose
                                              content bleeds (`.lp-bleed`) keeps
                                              the section veil.
+     --lp-atmosphere-ground: tint            the veil's colour: the Style's
+                                             panel ground (the ground moved
+                                             toward the brand by
+                                             `--lp-tint-panel`) instead of the
+                                             plain ground, which a dark shader
+                                             greys. The section veil only.
      --lp-atmos-a / --lp-atmos-b             where the glow's two lights sit.
 
    Motion (E2) may drift `.lp-surface::after` (shapes) and the atmosphere
@@ -134,6 +140,36 @@
     .lp-section[data-lp-scheme='atmosphere']
     > .lp-surface::before {
     content: none;
+  }
+}
+
+/* TINT (`--lp-atmosphere-ground: tint`): the veil in the Style's panel
+   ground, the tint its own cards carry. A light veil lets a dark shader
+   through as grey (18% of a near-black field takes the platform ground to L
+   0.87 at chroma 0.004), and nothing in that grey is the brand; the panel
+   ground reads as the brand's colour with the shader moving in it. It
+   becomes the section's own ground, so every word is computed against it,
+   and the veil paints it at the same proven strength. §5.1's proof holds
+   for any ground in the pole's band (light L >= 0.9; dark L <= 0.24, chroma
+   <= 0.039 there). The light panel ground is inside it; the dark one reaches
+   L 0.28, so it is brought to the band's edge. The step reads the pole off
+   the panel ground itself: every light one is above L 0.9, every dark one
+   below 0.28. With no shader to see, the section is that ground under the
+   glow, so the canvas shows the page's colour too. */
+@container lp-page style(--lp-atmosphere-ground: tint) {
+  .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
+    --lp-bg: oklch(
+      from var(--_panel-g) min(l, calc(0.24 + clamp(0, (l - 0.5) * 1e6, 1)))
+        min(c, calc(0.039 + clamp(0, (l - 0.5) * 1e6, 1))) h
+    );
+  }
+
+  @supports (color: rgb(from red r g b / 0.5)) {
+    .org-layout[data-hero-shader-active]
+      .lp[data-lp-atmosphere]:not([data-lp-still])
+      .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
+      background: rgb(from var(--lp-bg) r g b / var(--_atmos-s));
+    }
   }
 }
 

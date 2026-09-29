@@ -72,6 +72,9 @@
 
   /* ── colour: a whisper of the brand on the tinted bands ───────────────── */
   --lp-tint-soft: 5%;
+  /* A Moving background in the tint of Clean's own cards: the org's shader
+     through the plain ground reads as a grey band. */
+  --lp-atmosphere-ground: tint;
 
   /* ── buttons ──────────────────────────────────────────────────────────── */
   --lp-button-weight: var(--font-semibold);

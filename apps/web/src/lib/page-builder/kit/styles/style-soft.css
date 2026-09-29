@@ -91,6 +91,9 @@
   --lp-shapes-strength: 0.7;
   --lp-edge: curve;
   --lp-edge-depth: clamp(var(--space-8), 4.5cqi, var(--space-16));
+  /* A Moving background in Soft's own panel tint, the shader moving in it,
+     never the grey the plain ground makes of it. */
+  --lp-atmosphere-ground: tint;
 
   /* ── the hero's one entrance: a slow, even rise ───────────────────────── */
   --lp-enter-headline: lp-rise-soft calc(var(--duration-slowest) * 1.25) var(--ease-out)

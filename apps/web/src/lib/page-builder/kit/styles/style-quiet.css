@@ -82,6 +82,12 @@
   --lp-measure: 60ch;
   --lp-measure-lead: 36ch;
 
+  /* ── a Moving background: the ground's tint, never a grey band ──────────── */
+  /* Quiet draws no surface of its own; when a creator picks the org's
+     shader, it shows through the tint of Quiet's cards, not the grey the
+     plain ground makes of it. */
+  --lp-atmosphere-ground: tint;
+
   /* ── the hero's one entrance: a slow fade ─────────────────────────────── */
   --lp-enter-headline: lp-fade calc(var(--duration-slowest) * 1.6) var(--ease-out) both;
   --lp-enter-copy: lp-fade calc(var(--duration-slowest) * 1.6) var(--ease-out)
