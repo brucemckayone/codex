@@ -100,7 +100,7 @@ app.post('/api/orgs/:id/logo',
 );
 ```
 
-File errors: `MissingFileError`, `FileTooLargeError`, `InvalidFileTypeError` — all extend `ValidationError`.
+File errors: `MissingFileError`, `FileTooLargeError`, `InvalidFileTypeError`, `FileContentMismatchError` — all extend `ValidationError`. A declared raster type (png/jpeg/webp/gif) must match its magic bytes; an empty or `application/octet-stream` type is sniffed (worker→worker re-forward). SVG is never inferred from bytes — it must be declared `image/svg+xml`, which selects sanitisation.
 
 ## Service Registry
 

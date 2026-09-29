@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   detectImageMimeType,
+  isSniffableImageMimeType,
   validateImageSignature,
   validateImageUpload,
 } from '../image';
@@ -128,6 +129,20 @@ describe('Image Validation', () => {
       // detectImageMimeType only covers binary raster formats; SVG must arrive
       // with an explicit image/svg+xml type so sanitisation is chosen on purpose.
       expect(detectImageMimeType(svg)).toBeNull();
+    });
+  });
+
+  describe('isSniffableImageMimeType', () => {
+    it('is true for the binary raster formats', () => {
+      for (const t of ['image/png', 'image/jpeg', 'image/webp', 'image/gif']) {
+        expect(isSniffableImageMimeType(t)).toBe(true);
+      }
+    });
+
+    it('is false for SVG, empty and unknown types', () => {
+      for (const t of ['image/svg+xml', '', 'application/octet-stream']) {
+        expect(isSniffableImageMimeType(t)).toBe(false);
+      }
     });
   });
 
