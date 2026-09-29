@@ -3,3 +3,6 @@ packages:
   - 'workers/*'
   - 'packages/*'
   - 'e2e'
+
+patchedDependencies:
+  '@inlang/paraglide-js@1.11.8': patches/@inlang__paraglide-js@1.11.8.patch
