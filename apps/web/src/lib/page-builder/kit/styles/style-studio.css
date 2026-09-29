@@ -183,12 +183,12 @@
   @container (min-width: 56rem) {
     :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(72 / var(--lp-heading-chars, 120), 0.38));
+      --lp-display-scale: min(1, pow(68 / var(--lp-heading-chars, 120), 0.34));
     }
 
     :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(42 / var(--lp-heading-chars, 120), 0.29));
+      --lp-display-scale: min(1, pow(31 / var(--lp-heading-chars, 120), 0.21));
     }
   }
 }

@@ -232,7 +232,7 @@
 
     :is(.lp, #lp-style)[data-lp-style='clean'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(85 / var(--lp-heading-chars, 120), 0.49));
+      --lp-display-scale: min(1, pow(81 / var(--lp-heading-chars, 120), 0.43));
     }
 
     :is(.lp, #lp-style)[data-lp-style='clean'] .lp-section[data-lp-type='hero']

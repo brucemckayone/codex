@@ -184,7 +184,7 @@
   @container (min-width: 56rem) {
     :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(56 / var(--lp-heading-chars, 120), 0.46));
+      --lp-display-scale: min(1, pow(54 / var(--lp-heading-chars, 120), 0.45));
     }
 
     :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
@@ -199,7 +199,7 @@
 
     :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
-      --lp-display-scale: calc(0.84 * min(1, pow(75 / var(--lp-heading-chars, 120), 0.88)));
+      --lp-display-scale: calc(0.84 * min(1, pow(73 / var(--lp-heading-chars, 120), 0.83)));
     }
   }
 }

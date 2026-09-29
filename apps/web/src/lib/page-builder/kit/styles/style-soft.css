@@ -124,7 +124,7 @@
 
     :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(73 / var(--lp-heading-chars, 120), 0.66));
+      --lp-display-scale: min(1, pow(39 / var(--lp-heading-chars, 120), 0.2));
     }
   }
 }

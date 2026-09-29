@@ -123,7 +123,7 @@
 
     :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(74 / var(--lp-heading-chars, 120), 0.68));
+      --lp-display-scale: min(1, pow(68 / var(--lp-heading-chars, 120), 0.57));
     }
 
     :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
@@ -133,7 +133,7 @@
 
     :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(25 / var(--lp-heading-chars, 120), 0.26));
+      --lp-display-scale: min(1, pow(16 / var(--lp-heading-chars, 120), 0.2));
     }
   }
 }

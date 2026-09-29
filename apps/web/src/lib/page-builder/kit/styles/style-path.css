@@ -536,12 +536,12 @@
 
     :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(70 / var(--lp-heading-chars, 120), 0.4));
+      --lp-display-scale: min(1, pow(65 / var(--lp-heading-chars, 120), 0.36));
     }
 
     :is(.lp, #lp-style)[data-lp-style='path'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
-      --lp-display-scale: min(1, pow(33 / var(--lp-heading-chars, 120), 0.26));
+      --lp-display-scale: min(1, pow(22 / var(--lp-heading-chars, 120), 0.2));
     }
   }
 }

@@ -985,14 +985,22 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
 
     | Style | statement | split | cover | centered | poster |
     |---|---|---|---|---|---|
-    | Bold | 50 / .54 | 31 / .36 (.7) | 19 / .39 | 57 / .55 (.84) | steps |
-    | Poster | 56 / .46 | 29 / .28 (.7) | 27 / .40 | 75 / .88 (.84) | steps |
-    | Cinematic | 85 / .39 | 78 / .51 (.7) | 45 / .38 (card 53 / .43, .82) | 110 / 1.96 (.84) | steps |
-    | Clean | — | 79 / .39 (.8) | 85 / .49 | — | 70 / .47 |
-    | Soft | — | — | 110 / 1.34 | — | 73 / .66 |
-    | Path | — | 91 / .32 (.7) | 70 / .40 | — | 33 / .26 |
-    | Studio | — | — | 72 / .38 | — | 42 / .29 |
-    | Quiet | 97 / .26 | 72 / .35 (.7) | 74 / .68 | 109 / .66 (.84) | 25 / .26 |
+    | Bold | 43 / .45 | 31 / .36 (.7) | 19 / .39 | 57 / .55 (.84) | steps |
+    | Poster | 54 / .45 | 29 / .28 (.7) | 27 / .40 | 73 / .83 (.84) | steps |
+    | Cinematic | 85 / .39 | 78 / .51 (.7) | 45 / .38 (card 53 / .43, .82) | 106 / 1.36 (.84) | steps |
+    | Clean | — | 79 / .39 (.8) | 81 / .43 | — | 70 / .47 |
+    | Soft | — | — | 110 / 1.34 | — | 39 / .20 |
+    | Path | — | 91 / .32 (.7) | 65 / .36 | — | 22 / .20 |
+    | Studio | — | — | 68 / .34 | — | 31 / .21 |
+    | Quiet | 97 / .26 | 72 / .35 (.7) | 68 / .57 | 109 / .66 (.84) | 16 / .20 |
+
+    **Refit after the first push.** The first fit sampled the long-word family (F2) only every 5
+    characters. At every length, brand 0 missed between the samples:
+    - past the fold, by 1–21px (Quiet's cover by up to 74);
+    - a split word at 42–43 characters in four unstepped posters.
+
+    These 12 rules were refitted against F2 at every length, and only their C and p moved. The
+    table shows the refitted values.
 
   - **The three stepped posters keep their steps** (Bold, Poster and Cinematic). Their limit is the
     longest word beside the picture, not the headline's length. A length-only curve that never
@@ -1005,7 +1013,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - Cinematic cover at 46–64 (−12.5%).
 
     Never smaller: Poster split, Cinematic statement and split.
-  - **Measured,** over 35 layout variants:
+  - **Measured,** over 35 layout variants, with both headline families at EVERY length from 20 to
+    120, in both brands:
     - 0 past the fold and 0 split words;
     - the size never grows with length;
     - geometry is identical up to each layout's C;
