@@ -41,11 +41,16 @@ describe('starterPage — the page a new journey starts with', () => {
     const resolved = resolveSections(page);
     resolved.forEach((section, i) => {
       expect(section.layout).toBe(STYLES[style].layouts[section.type]);
-      // The Style's colour, unless it would repeat the band above — then the
-      // Style's default steps back to base (resolve.ts keepBandsApart).
+      // The Style's colour, unless it would repeat the band above or put brand
+      // against contrast — then the Style's default steps back to base
+      // (resolve.ts keepBandsApart).
       const styled = STYLES[style].schemes[section.type];
-      const repeats = styled !== 'base' && resolved[i - 1]?.scheme === styled;
-      expect(section.scheme).toBe(repeats ? 'base' : styled);
+      const above = resolved[i - 1]?.scheme;
+      const repeats = styled !== 'base' && above === styled;
+      const smears =
+        (styled === 'brand' && above === 'contrast') ||
+        (styled === 'contrast' && above === 'brand');
+      expect(section.scheme).toBe(repeats || smears ? 'base' : styled);
     });
   });
 

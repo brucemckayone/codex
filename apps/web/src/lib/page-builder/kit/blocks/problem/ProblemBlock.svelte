@@ -12,6 +12,7 @@
   hero, pricing and call-to-action sections.
 -->
 <script lang="ts">
+  import { isLongHeading } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -26,7 +27,7 @@
   const points = $derived(content.points ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
   // A long sentence steps down a size so it stays a statement, not a wall.
-  const long = $derived((content.heading?.length ?? 0) > 64);
+  const long = $derived(isLongHeading(content.heading));
 </script>
 
 {#snippet eyebrow()}

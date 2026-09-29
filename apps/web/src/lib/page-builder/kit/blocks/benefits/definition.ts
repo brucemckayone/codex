@@ -13,7 +13,7 @@ import type { BlockDefinition } from '../../model/types';
 export interface BenefitItem {
   title: string;
   detail?: string;
-  /** Atop the tile in `grid` (contract A5). */
+  /** Atop the tile in `grid`; filling its tile in `bento` (contract A5). */
   image?: ImageRef;
 }
 
@@ -51,6 +51,11 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
       'Side by side',
       'Your words on one side, the list on the other.'
     ),
+    layout(
+      'bento',
+      'Mixed tiles',
+      'Tiles of different sizes, the first one large enough for a picture.'
+    ),
   ],
   fields: [
     eyebrowField,
@@ -73,9 +78,9 @@ export const benefitsDefinition: BlockDefinition<BenefitsProps> = {
         {
           key: 'image',
           label: 'Image',
-          hint: 'Optional. Shown at the top of this item in the grid.',
+          hint: 'Optional. Shown with this item in the grid and in the mixed tiles.',
           control: 'image',
-          layouts: ['grid'],
+          layouts: ['grid', 'bento'],
         },
       ],
     },

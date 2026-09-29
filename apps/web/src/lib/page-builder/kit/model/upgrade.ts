@@ -12,7 +12,9 @@
  *
  * TOTAL: never throws. `raw` is `unknown`-shaped by design (a legacy row is
  * untrusted jsonb) — every read below defends against the wrong type, `null`,
- * a nested array standing in for an object, and so on.
+ * a nested array standing in for an object, and so on — and every table is
+ * read through `own`, so a stored name that `Object.prototype` also has
+ * (`constructor`, `__proto__`…) is just another unknown name.
  *
  * WHERE THE LEGACY KNOWLEDGE LIVES: this file imports NOTHING from
  * `section-catalog.ts`, `render/coerce.ts` or `design-vocabulary.ts` — all
@@ -48,9 +50,24 @@ import { LEGACY_VARIANT_MAP } from './legacy/variant-map';
 import type { KitPage, KitSection, PageDesign, SectionStyle } from './types';
 
 /**
- * Resolve one section's v2 `type` and v2-shaped `props` together — they are
- * decided by the SAME question ("is this section legacy or v2?") and must
- * agree, so one function owns both rather than risking two answers drift.
+ * `table[key]` only when `key` is one of the table's OWN entries. Plain
+ * indexing reads `Object.prototype` too: a section stored with the type
+ * `'constructor'` would find `Object` in `LEGACY_TYPE_MAP`.
+ */
+function own<T>(
+  table: Readonly<Record<string, T>>,
+  key: string
+): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/**
+ * Resolve one section's v2 `type` and v2-shaped `props` together, and say
+ * which builder wrote it (`legacy`) — all three are decided by the SAME
+ * question ("is this section legacy or v2?") and must agree, so one function
+ * owns them rather than risking two answers drift. `legacy` is also the
+ * namespace `resolveLayout` reads the section's layout id in, so a section
+ * whose props pass through as v2 keeps its v2 layout id too.
  *
  * TWO OF THE ELEVEN LEGACY TYPES RENAME TO THE SAME STRING IN v2: legacy
  * `hero`→v2 `hero`, legacy `faq`→v2 `faq` (contract §2's "Replaces legacy"
@@ -73,15 +90,23 @@ import type { KitPage, KitSection, PageDesign, SectionStyle } from './types';
  * The structural tell is only the FALLBACK. A page whose `design.style` is a
  * valid Style id was written by v2 code (the legacy builder never wrote
  * `style`), so on such a page `hero`/`faq` are v2 by provenance — a v2 faq
- * whose creator emptied `items` must not be re-read as legacy `q1/a1…`.
+ * whose creator emptied `items` must not be re-read as legacy `q1/a1…`. The
+ * converse does not hold: a page WITHOUT a valid Style can still be v2 (the
+ * save schema degrades a Style id this build does not know — deploy skew, a
+ * Style retired later — to absent), so there a `hero`/`faq` is legacy only
+ * when its props look legacy.
  */
 function resolveTypeAndProps(
   rawType: string,
   rawProps: Record<string, unknown>,
   pageIsV2: boolean
-): { type: SectionTypeId; props: Record<string, unknown> } | null {
+): {
+  type: SectionTypeId;
+  props: Record<string, unknown>;
+  legacy: boolean;
+} | null {
   const isV2Name = isSectionTypeId(rawType);
-  const legacyTarget = LEGACY_TYPE_MAP[rawType];
+  const legacyTarget = own(LEGACY_TYPE_MAP, rawType);
   const isLegacyName = legacyTarget !== undefined;
 
   if (!isV2Name && !isLegacyName) return null; // Unknown type — dropped.
@@ -89,7 +114,7 @@ function resolveTypeAndProps(
   if (isV2Name && !isLegacyName) {
     // Unambiguously v2: one of the 11 renamed types under its NEW name, or
     // one of the 3 v2-only types (`cta`, `stats`, `text`).
-    return { type: rawType, props: rawProps };
+    return { type: rawType, props: rawProps, legacy: false };
   }
 
   if (!isV2Name && isLegacyName) {
@@ -98,46 +123,56 @@ function resolveTypeAndProps(
     return {
       type: legacyTarget,
       props: mapLegacyProps(rawType, rawProps) ?? {},
+      legacy: true,
     };
   }
 
   // Both true: `rawType` is `'hero'` or `'faq'` (the only two identity
   // mappings — see this function's header). The v2 TYPE is unambiguous
-  // either way (`legacyTarget === rawType` for both); only the props SHAPE
-  // needs the structural tell.
-  const isLegacyShaped =
+  // either way (`legacyTarget === rawType` for both); which builder wrote
+  // the section needs the provenance check and then the structural tell.
+  const legacy =
     !pageIsV2 &&
     (rawType === 'hero'
       ? typeof rawProps.headline === 'string'
       : !Array.isArray(rawProps.items)); // rawType === 'faq'
   return {
     type: legacyTarget, // === rawType for both.
-    props: isLegacyShaped
-      ? (mapLegacyProps(rawType, rawProps) ?? {})
-      : rawProps,
+    props: legacy ? (mapLegacyProps(rawType, rawProps) ?? {}) : rawProps,
+    legacy,
   };
 }
 
 /**
- * One section's v2 layout id, or undefined. Tries "already a valid v2
- * layout for this type" FIRST (handles v2 pass-through, and the rare case
- * where a legacy and a v2 composition id are the SAME string for the SAME
- * type — e.g. `faq: 'accordion'` is a legal id on both sides), then the
- * legacy retirement/rename table keyed by the RAW stored type (current
- * composition ids AND retired ones — see `variant-map.ts`'s header), then
- * absent — never the type's default; that is `resolve.ts`'s (WP2) job.
+ * One section's v2 layout id, or undefined — never the type's default; that
+ * is `resolve.ts`'s (WP2) job.
+ *
+ * `legacy` says which composition NAMESPACE the stored id is in — the answer
+ * `resolveTypeAndProps` gave for the same section's props. A v2 id passes
+ * through first, then the legacy retirement/rename table (keyed by the
+ * RAW stored type — current composition ids AND retired ones, see
+ * `variant-map.ts`'s header) catches retired ids. A LEGACY id goes through the
+ * table first: once v2 gained layouts, some old ids became v2 ids for a
+ * DIFFERENT design — the old hero `poster` was a framed media plate (→ `cover`),
+ * the new one sets type around an image (03 §13 X14). Names shared with the
+ * same meaning (`faq: 'accordion'`) are table entries too, so they still land
+ * where they did.
  */
 function resolveLayout(
   rawType: string,
   v2Type: SectionTypeId,
-  rawVariant: unknown
+  rawVariant: unknown,
+  legacy: boolean
 ): string | undefined {
   if (typeof rawVariant !== 'string' || rawVariant.length === 0) {
     return undefined;
   }
+  const renames = own(LEGACY_VARIANT_MAP, rawType);
+  const mapped = renames ? own(renames, rawVariant) : undefined;
+  const fromTable = mapped && isLayoutOf(v2Type, mapped) ? mapped : undefined;
+  if (legacy && fromTable) return fromTable;
   if (isLayoutOf(v2Type, rawVariant)) return rawVariant;
-  const mapped = LEGACY_VARIANT_MAP[rawType]?.[rawVariant];
-  return mapped && isLayoutOf(v2Type, mapped) ? mapped : undefined;
+  return fromTable;
 }
 
 /**
@@ -154,14 +189,14 @@ function resolveSectionStyle(rawDesign: unknown): SectionStyle | undefined {
   if (isColourSchemeId(bag.scheme)) {
     style.scheme = bag.scheme;
   } else if (typeof bag.surface === 'string') {
-    const scheme = SURFACE_TO_SCHEME[bag.surface];
+    const scheme = own(SURFACE_TO_SCHEME, bag.surface);
     if (scheme) style.scheme = scheme;
   }
 
   if (isSectionSpacingId(bag.spacing)) {
     style.spacing = bag.spacing;
   } else if (typeof bag.density === 'string') {
-    const spacing = DENSITY_TO_SPACING[bag.density];
+    const spacing = own(DENSITY_TO_SPACING, bag.density);
     if (spacing) style.spacing = spacing;
   }
 
@@ -185,7 +220,7 @@ function resolvePageDesign(rawDesign: unknown): PageDesign {
   }
   const preset = matchLegacyLook(rawDesign);
   const style: PageStyleId = preset
-    ? (LOOK_ID_TO_STYLE[preset.id] ?? UNRECOGNISED_STYLE)
+    ? (own(LOOK_ID_TO_STYLE, preset.id) ?? UNRECOGNISED_STYLE)
     : UNRECOGNISED_STYLE;
   return { style };
 }
@@ -212,7 +247,15 @@ function upgradeSection(raw: unknown, pageIsV2: boolean): KitSection | null {
     props: resolved.props,
   };
 
-  const variant = resolveLayout(rawType, resolved.type, raw.variant);
+  // Whoever wrote the props wrote the layout id. "The page has no v2 Style" is
+  // not enough on its own: a v2 page that lost its Style still has v2 heroes,
+  // and read through the legacy table their `poster` would become `cover`.
+  const variant = resolveLayout(
+    rawType,
+    resolved.type,
+    raw.variant,
+    resolved.legacy
+  );
   if (variant) section.variant = variant;
 
   const name =

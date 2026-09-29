@@ -11,12 +11,14 @@ import { benefitsDefinition } from '../blocks/benefits/definition';
 import { ctaDefinition } from '../blocks/cta/definition';
 import { curriculumDefinition } from '../blocks/curriculum/definition';
 import { faqDefinition } from '../blocks/faq/definition';
+import { galleryDefinition } from '../blocks/gallery/definition';
 import { heroDefinition } from '../blocks/hero/definition';
 import { instructorDefinition } from '../blocks/instructor/definition';
 import { previewDefinition } from '../blocks/preview/definition';
 import { pricingDefinition } from '../blocks/pricing/definition';
 import { problemDefinition } from '../blocks/problem/definition';
 import { statsDefinition } from '../blocks/stats/definition';
+import { storyDefinition } from '../blocks/story/definition';
 import { testimonialsDefinition } from '../blocks/testimonials/definition';
 import { textDefinition } from '../blocks/text/definition';
 import { transformationDefinition } from '../blocks/transformation/definition';
@@ -39,6 +41,8 @@ export const DEFINITIONS: Readonly<Record<SectionTypeId, BlockDefinition>> = {
   cta: ctaDefinition,
   stats: statsDefinition,
   text: textDefinition,
+  story: storyDefinition,
+  gallery: galleryDefinition,
 };
 
 /** Gallery groups, in the order the add-section gallery shows them. */

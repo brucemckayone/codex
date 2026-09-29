@@ -54,6 +54,16 @@ export const testimonialsDefinition: BlockDefinition<TestimonialsProps> = {
       'Big quote',
       'Your first quote as large as it goes, centred. Any others follow quietly beneath.'
     ),
+    layout(
+      'marquee',
+      'Moving strip',
+      'Your quotes drift slowly across the page, with a button to pause them.'
+    ),
+    layout(
+      'wall',
+      'Wall',
+      'Every quote on one wall of tiles, the first highlighted and short ones set large.'
+    ),
   ],
   fields: [
     eyebrowField,

@@ -2,6 +2,7 @@ import type { PageBuilderState, PageSection } from '@codex/shared-types';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sampleContext } from '$lib/page-builder/kit';
+import { SECTION_LAYOUTS } from '$lib/page-builder/kit/model/ids';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -12,6 +13,26 @@ import {
 import Inspector from './Inspector.svelte';
 
 const PAGE_ID = '00000000-0000-4000-8000-0000000000a8';
+
+// Most sections now carry an image field (their background), and `$app/server`
+// cannot resolve in jsdom: the `.for()` surface ImageField touches, inert.
+vi.mock('$lib/remote/page-images.remote', () => {
+  const instance = {
+    result: undefined,
+    pending: 0,
+    fields: {
+      pageId: {
+        as: (type: string, value: string) => ({ type, name: 'pageId', value }),
+      },
+      image: {
+        as: (type: string) => ({ type, name: 'image' }),
+        issues: () => undefined,
+      },
+    },
+    enhance: () => ({ method: 'POST' }),
+  };
+  return { uploadPageImageForm: { for: () => instance } };
+});
 
 let app: ReturnType<typeof mount> | null = null;
 
@@ -137,10 +158,7 @@ describe('Inspector — section', () => {
       ...document.querySelectorAll<HTMLButtonElement>('.layout'),
     ];
     expect(layouts.map((b) => b.dataset.layout)).toEqual([
-      'statement',
-      'split',
-      'cover',
-      'centered',
+      ...SECTION_LAYOUTS.hero,
     ]);
     // The thumbnail is the kit's own markup, with the section's own words.
     expect(
@@ -204,6 +222,45 @@ describe('Inspector — section', () => {
     expect(
       el('.swatch[data-scheme="base"]').getAttribute('aria-label')
     ).toContain('default');
+  });
+
+  it('draws every swatch as a real band, surface included, inside a page', () => {
+    render([{ id: 'f', type: 'faq', enabled: true, props: {} }]);
+    const swatches = [...document.querySelectorAll<HTMLElement>('.swatch')];
+    expect(swatches.map((s) => s.dataset.scheme)).toEqual([
+      'base',
+      'soft',
+      'contrast',
+      'brand',
+      'accent',
+      'atmosphere',
+    ]);
+    for (const swatch of swatches) {
+      // The kit's surface rules (the Moving glow, a Style's texture) and its
+      // page-level style queries only reach a section inside `.lp-page`.
+      const band = el(
+        `.swatch[data-scheme="${swatch.dataset.scheme}"] .lp[data-lp-style="bold"] > .lp-page > .lp-section`
+      );
+      expect(band.dataset.lpScheme).toBe(swatch.dataset.scheme);
+      expect(band.querySelector(':scope > .lp-surface')).toBeTruthy();
+    }
+  });
+
+  it('says in words what Moving does: tooltip, description, and on screen once chosen', () => {
+    render([{ id: 'f', type: 'faq', enabled: true, props: {} }]);
+    const hint =
+      'Your organisation’s moving background, set in Brand. Without one, a soft glow of your colours.';
+    const moving = el('.swatch[data-scheme="atmosphere"]');
+    expect(moving.title).toBe(hint);
+    const note = document.getElementById(
+      moving.getAttribute('aria-describedby') ?? ''
+    );
+    expect(note?.textContent?.trim()).toBe(hint);
+    expect(note?.hidden).toBe(true);
+
+    click('.swatch[data-scheme="atmosphere"]');
+    expect(stored('f').design).toEqual({ scheme: 'atmosphere' });
+    expect(el('.swatches__note').hidden).toBe(false);
   });
 
   it('shows the resolved spacing: a compact layout sits small until chosen', () => {

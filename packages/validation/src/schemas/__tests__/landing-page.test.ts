@@ -3,8 +3,10 @@
  * against `apps/web/src/lib/page-builder/kit/model/ids.ts` is checked in
  * that file's `ids.parity.test.ts` (a `@codex/validation` package test
  * cannot import an apps/web `$lib` module the other direction). These tests
- * cover this package's OWN write-boundary behaviour: the two schemas degrade
- * rather than reject, exactly like the legacy `designAxis` idiom they mirror.
+ * cover this package's OWN write-boundary behaviour: `sectionStyleSchema`
+ * degrades an unknown value, exactly like the legacy `designAxis` idiom it
+ * mirrors. `pageDesignSchema.style` is the one exception — it REJECTS an
+ * unrecognised value instead (owner decision 2026-09-28, Codex-61zsk.29).
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -20,7 +22,8 @@ import {
 describe('SECTION_LAYOUTS / SECTION_TYPE_IDS', () => {
   it('derives the type ids from the layout record keys, in declaration order', () => {
     expect(SECTION_TYPE_IDS).toEqual(Object.keys(SECTION_LAYOUTS));
-    expect(SECTION_TYPE_IDS).toHaveLength(14);
+    // 14 from 01-contract §2, + story and gallery (03-expressive-contract §3).
+    expect(SECTION_TYPE_IDS).toHaveLength(16);
   });
 
   it("every type's layout list is non-empty", () => {
@@ -67,10 +70,21 @@ describe('pageDesignSchema', () => {
     }
   });
 
-  it('degrades an unknown Style to undefined rather than rejecting', () => {
-    expect(
-      pageDesignSchema.parse({ style: 'not-a-style' }).style
-    ).toBeUndefined();
+  // Owner decision 2026-09-28 (Codex-61zsk.29): "Reject the save." Was:
+  // 'degrades an unknown Style to undefined rather than rejecting' — kept in
+  // sync with journeys.ts's `sectionDesignSchema.style`, its twin, which
+  // rejects for the same reason (see that file's test for the rationale).
+  it('REJECTS an unknown Style instead of degrading it', () => {
+    const result = pageDesignSchema.safeParse({ style: 'not-a-style' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find(
+        (i) => i.path.join('.') === 'style'
+      );
+      expect(issue?.message).toBe(
+        'Unknown page Style. Refresh and choose a Style again.'
+      );
+    }
   });
 
   it('accepts an empty bag', () => {

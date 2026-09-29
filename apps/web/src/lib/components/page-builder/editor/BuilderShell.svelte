@@ -347,7 +347,9 @@
           />
         </Tabs.Content>
         <Tabs.Content value="style">
-          {#if session.page}
+          <!-- Mounted only while open: a hidden panel's eight live thumbnails
+               would otherwise stay rendered, re-drawing on every edit. -->
+          {#if tab === 'style' && session.page}
             <StylePanel
               page={session.page}
               context={session.context}
@@ -435,8 +437,8 @@
             <EmptyPage
               mode={sections.length === 0 ? 'empty' : 'hidden'}
               {styleLabel}
-              onTemplate={() => {
-                session.startFromTemplate();
+              onStart={(recipe) => {
+                session.startFromTemplate(recipe);
                 reveal(pageBuilder.selectedSectionId ?? '');
               }}
               onAddHero={() => reveal(session.insertSection('hero', null))}
@@ -533,9 +535,13 @@
     border-inline-end: var(--border-width) var(--border-style) var(--color-border);
   }
 
+  /* Above the panel's own positioned content (the Style tab's thumbnails
+     scroll under it), and below every overlay: a font menu opening upward
+     must still cover it. */
   .shell__side-head {
     position: sticky;
     inset-block-start: 0;
+    z-index: 1;
     display: flex;
     align-items: center;
     padding: var(--space-2);

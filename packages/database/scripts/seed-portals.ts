@@ -7,7 +7,8 @@
  * world. That is the wrong tool for "give this org more portals so the library
  * looks realistic" — it would destroy the org being worked on. This script only
  * INSERTS, never truncates, and is idempotent: a portal whose slug already
- * exists is left alone and only its enrollment/progress state is reconciled.
+ * exists keeps its course and practices, and its page, price, cover,
+ * enrollment and progress are reconciled to the spec below.
  *
  * ## What it produces
  *
@@ -48,7 +49,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +70,8 @@ import {
   content,
   courseEnrollments,
   courseStages,
+  courseSubscriptionPlans,
+  courseSubscriptions,
   courses,
   entitlements,
   landingPages,
@@ -68,9 +80,77 @@ import {
   practiceCompletions,
   stagePractices,
 } from '../src/schema';
+import { CATEGORIES } from './seed/constants';
 
 /** Practices attached per portal. */
 const PRACTICES_PER_PORTAL = 4;
+
+/**
+ * The starting pages the portals use, as the page kit defines them
+ * (`apps/web/src/lib/page-builder/kit/model/recipes.ts`, 03 §8): section
+ * types in order, and a layout only where the recipe's point depends on one —
+ * stored as the section's `variant`, exactly as a page started from that
+ * recipe stores it, so every other layout still comes from the portal's
+ * Style. Each recipe ends in testimonials there; here they are left out,
+ * because these portals have no live testimonials (see `buildSections`).
+ */
+const RECIPES = {
+  full: [
+    { type: 'hero' },
+    { type: 'problem' },
+    { type: 'transformation' },
+    { type: 'benefits' },
+    { type: 'curriculum' },
+    { type: 'instructor' },
+    { type: 'pricing' },
+    { type: 'faq' },
+    { type: 'cta' },
+  ],
+  short: [
+    { type: 'hero' },
+    { type: 'benefits' },
+    { type: 'pricing' },
+    { type: 'faq' },
+    { type: 'cta' },
+  ],
+  journey: [
+    { type: 'hero' },
+    { type: 'story', layout: 'scroll' },
+    { type: 'curriculum', layout: 'map' },
+    { type: 'instructor' },
+    { type: 'pricing' },
+    { type: 'cta' },
+  ],
+  show: [
+    { type: 'hero' },
+    { type: 'gallery' },
+    { type: 'text' },
+    { type: 'pricing' },
+    { type: 'cta' },
+  ],
+} as const satisfies Record<
+  string,
+  readonly { type: string; layout?: string }[]
+>;
+
+type RecipeId = keyof typeof RECIPES;
+
+/** Every section type a recipe here names. */
+type SeededType = (typeof RECIPES)[RecipeId][number]['type'];
+
+/**
+ * A picture the main seed already uploads: the category covers
+ * (`seed/r2.ts`), the six committed mockup photographs
+ * (`docs/design/mockup-assets`) as full sm/md/lg variant sets, so every size a
+ * block asks for resolves — through dev-cdn locally, and through the page's
+ * designed picture plate wherever no image store is running.
+ */
+function picture(
+  category: keyof typeof CATEGORIES,
+  alt: string
+): { key: string; alt: string } {
+  return { key: `categories/${CATEGORIES[category].id}/cover`, alt };
+}
 
 interface StageSpec {
   name: string;
@@ -84,12 +164,33 @@ interface PortalSpec {
   lede: string;
   /**
    * The page-kit v2 Style this portal's sell page renders in
-   * (`docs/design/landing-builder/01-contract.md` §2/§3, BINDING). Each of
-   * the four portals gets a DIFFERENT one on purpose (WP-9b) — four
-   * identical-looking seeded pages would prove nothing about how the Styles
-   * actually differ.
+   * (`docs/design/landing-builder/03-expressive-contract.md` §3/§4.1,
+   * BINDING). Each of the four portals gets a DIFFERENT one on purpose, the
+   * one that suits its subject — four identical-looking seeded pages would
+   * prove nothing about how the Styles actually differ.
    */
-  style: 'bold' | 'clean' | 'soft' | 'cinematic';
+  style:
+    | 'bold'
+    | 'clean'
+    | 'soft'
+    | 'cinematic'
+    | 'path'
+    | 'poster'
+    | 'studio'
+    | 'quiet';
+  /**
+   * The starting page this portal's sections follow (03 §8, {@link RECIPES}),
+   * so a visitor to the four portals sees different pages, not one skeleton
+   * in four colours.
+   */
+  recipe: RecipeId;
+  /**
+   * Layouts this page sets for itself, over its recipe's: the sections the
+   * browser suite tests (`apps/web/e2e/page-kit/interactive-components.spec.ts`)
+   * are pinned here, so a change to a Style's defaults can never take a
+   * test's subject away.
+   */
+  pins?: Partial<Record<SeededType, string>>;
   stages: [StageSpec, StageSpec, StageSpec];
   /** How many of this portal's practices are marked complete. */
   completions: number;
@@ -116,7 +217,11 @@ const PORTALS: PortalSpec[] = [
     title: 'Bone Deep',
     kicker: 'A four-practice descent',
     lede: 'Where the body keeps what the mind has agreed to forget. Slow work, close to the bone.',
+    // A descent: dark and immersive, told in pictures.
     style: 'cinematic',
+    recipe: 'show',
+    // The pictures swiped through (Cinematic's own choice too).
+    pins: { gallery: 'strip' },
     stages: [
       { name: 'Arriving', gloss: 'Settling into the body you actually have.' },
       { name: 'Listening', gloss: 'What the tissue says before language.' },
@@ -132,7 +237,9 @@ const PORTALS: PortalSpec[] = [
     title: 'Tending the Grief',
     kicker: 'For the weight you carry',
     lede: 'Grief is not a problem to be solved. These practices make room for it to move.',
-    style: 'clean',
+    // Room and quiet, no colour bands, and a short page: enough for a hard week.
+    style: 'quiet',
+    recipe: 'short',
     stages: [
       { name: 'Naming', gloss: 'Saying the thing plainly.' },
       { name: 'Holding', gloss: 'Company for what cannot be fixed.' },
@@ -147,7 +254,11 @@ const PORTALS: PortalSpec[] = [
     title: 'Ancestral Threads',
     kicker: 'Meeting the lineage that made you',
     lede: 'Every body is an inheritance. This is a way of asking what you were handed, and what you will hand on.',
-    style: 'bold',
+    // Family history kept by hand: prints, pen marks and paper.
+    style: 'studio',
+    recipe: 'full',
+    // What is handed down, and what is chosen: the before and after as a switch.
+    pins: { transformation: 'toggle' },
     stages: [
       { name: 'The near ones', gloss: 'Parents, and their weather.' },
       { name: 'The far ones', gloss: 'Names you were never told.' },
@@ -163,7 +274,12 @@ const PORTALS: PortalSpec[] = [
     title: 'Return to the Shoreline',
     kicker: 'A closing rite',
     lede: 'For the end of a long walk — marking what happened, and coming back up into ordinary light.',
-    style: 'soft',
+    // The end of a walk: the course as a route, down to the shoreline.
+    style: 'path',
+    recipe: 'journey',
+    // The journey recipe's own pin too; set here so the test survives a
+    // change of recipe.
+    pins: { curriculum: 'map' },
     stages: [
       { name: 'Looking back', gloss: 'What the walking changed.' },
       { name: 'Marking it', gloss: 'A rite so the body knows it ended.' },
@@ -364,6 +480,8 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
     // than inserting inside `createPortal`) is what makes the fix reach rows that
     // already exist.
     await reconcilePage(org.id, userId, courseId, spec);
+    await reconcilePrice(courseId, spec);
+    await retirePlans(courseId, spec);
     await reconcileCover(courseId, spec);
     await reconcileEnrollment(userId, org.id, courseId, spec);
     await reconcileCompletions(userId, courseId, spec.completions);
@@ -383,9 +501,10 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
  * the landing rail: `listPublishedJourneys` returns `landingPages.title`, and
  * only the COURSE had been retitled.
  *
- * `sections` is rewritten every run so a copy change here reaches already-seeded
- * rows. Safe precisely because these are seed-owned demo pages — never call this
- * against a page a human has edited.
+ * `sections`, the Style, the page's own brand overrides and its offer are
+ * rewritten every run, so a copy change here reaches already-seeded rows and a
+ * stray edit never survives one. Safe precisely because these are seed-owned
+ * demo pages — never call this against a page a human means to keep.
  */
 async function reconcilePage(
   organizationId: string,
@@ -420,6 +539,14 @@ async function reconcilePage(
     // Style in the builder's Style tab instead of a picker that looks dead over
     // a page rendering at the `bold` default (A21).
     design: { style: spec.style } as const,
+    // The rest of the page's look and offer, back to the seed's design every
+    // run: a builder edit to a demo page's own fonts or colours, or to its
+    // offer, would otherwise outlive the re-seed and leave a hybrid (a Style
+    // in fonts it never chose). `null` is each column's designed default —
+    // the org's brand, and no page offer, so the page sells at the course's
+    // own price (reset with it in `reconcilePrice`).
+    brandOverrides: null,
+    offer: null,
   };
 
   if (existing) {
@@ -500,6 +627,24 @@ const PAGE_COPY: Record<
       contactHref: string;
     };
     cta: { heading: string; body: string; ctaLabel: string; note: string };
+    /** Only where the portal's recipe has one: the journey told in moments. */
+    story?: {
+      heading: string;
+      steps: {
+        heading: string;
+        body: string;
+        image: { key: string; alt: string };
+      }[];
+    };
+    /** Only where the portal's recipe has one: the pictures, captioned or not. */
+    gallery?: {
+      eyebrow: string;
+      heading: string;
+      body: string;
+      items: { image: { key: string; alt: string }; caption?: string }[];
+    };
+    /** Only where the portal's recipe has one: a few words beside the pictures. */
+    text?: { heading: string; body: string };
   }
 > = {
   'bone-deep': {
@@ -591,6 +736,41 @@ const PAGE_COPY: Record<
       body: 'Begin whenever you are ready — the four practices wait for you exactly as they are.',
       ctaLabel: 'Begin the descent',
       note: 'No countdown. Start when it is time.',
+    },
+    gallery: {
+      eyebrow: 'Inside the practice',
+      heading: 'What the descent is like',
+      body: 'Three stages, taken as slowly as the body needs. Nothing here is timed against you.',
+      items: [
+        {
+          image: picture(
+            'somatics',
+            'A road through an avenue of trees, fading into fog'
+          ),
+          caption: 'Arriving: you do not need to see the whole way down',
+        },
+        {
+          image: picture('breathwork', 'A pine forest in morning mist'),
+          caption: 'Listening: what the body says before words reach it',
+        },
+        {
+          image: picture(
+            'healing',
+            'Storm clouds over a dark sea, waves breaking on the shore'
+          ),
+          caption: 'Staying: the practice of not leaving',
+        },
+        {
+          image: picture(
+            'ceremony',
+            'Someone in a scarf, seen from behind, looking out to sea at sunset'
+          ),
+        },
+      ],
+    },
+    text: {
+      heading: 'Why it goes slowly',
+      body: 'Understanding a pattern rarely loosens it. The jaw stays tight and the shoulders stay guarded until you go where they live, and that cannot be rushed.\n\nSo each practice waits for you. Stay in a stage for as long as it asks, and move on when the body is ready.',
     },
   },
   'tending-the-grief': {
@@ -870,16 +1050,47 @@ const PAGE_COPY: Record<
       ctaLabel: 'Walk to the shoreline',
       note: 'One payment, yours to repeat.',
     },
+    story: {
+      heading: 'The last stretch of the walk',
+      steps: [
+        {
+          heading: 'Looking back down the road',
+          body: 'You begin by noticing what the walking changed, before it blurs into ordinary weeks.',
+          image: picture(
+            'somatics',
+            'A road through an avenue of trees, fading into fog'
+          ),
+        },
+        {
+          heading: 'Marking it at the water',
+          body: 'A small, deliberate rite, so the body registers that something has ended and can stop bracing for it.',
+          image: picture(
+            'healing',
+            'Storm clouds over a dark sea, waves breaking on the shore'
+          ),
+        },
+        {
+          heading: 'Coming up into ordinary light',
+          body: 'You come back gently, with room to arrive before anyone asks anything of you.',
+          image: picture(
+            'ceremony',
+            'Someone in a scarf, seen from behind, looking out to sea at sunset'
+          ),
+        },
+      ],
+    },
   },
 };
 
 /**
- * The sell-page body for a seeded portal — a full v2 page (`docs/design/
+ * The sell-page body for a seeded portal — a v2 page (`docs/design/
  * landing-builder/01-contract.md` §2/§3, BINDING; WP-9b): v2 section types,
- * v2 prop keys, no legacy axes, and NO `variant` — every layout is left unset
- * so it resolves from the portal's own Style (`PortalSpec.style`), which is
- * the whole point of seeding four DIFFERENT Styles rather than one shared
- * bundle.
+ * v2 prop keys and no legacy axes. The sections follow the portal's recipe
+ * (03 §8, `PortalSpec.recipe`), and a layout is stored (`variant`) only where
+ * that recipe or the portal itself (`PortalSpec.pins`, the browser suite's
+ * subjects) pins one; every other layout is left unset so it resolves from
+ * the portal's own Style (`PortalSpec.style`), which is the whole point of
+ * seeding four DIFFERENT Styles rather than one shared bundle.
  *
  * WHY A PAGE AT ALL: a portal is a COURSE plus a published `course`-type LANDING
  * PAGE, and the public rails are built from the page, not the course.
@@ -896,10 +1107,11 @@ const PAGE_COPY: Record<
  * specific copy is the whole point of this seed, and genuinely good copy is
  * what the owner will actually look at.
  *
- * NO testimonials section: the type's `items[]` are "merged after live
- * testimonials" (contract §2), and no `courseTestimonials` rows exist for
- * these portals — an authored decoration with nothing live behind it would
- * misrepresent what the page can show.
+ * NO testimonials section, although every recipe has one: the type's `items[]`
+ * are "merged after live testimonials" (contract §2), and no
+ * `courseTestimonials` rows exist for these portals — an authored decoration
+ * with nothing live behind it would misrepresent what the page can show, and
+ * with no quotes at all the section is only a heading.
  *
  * NO `offers[]` on pricing and NO price/cadence claims in its copy — price and
  * cadence come only from the live offer (contract principles); a seeded
@@ -913,13 +1125,22 @@ function buildSections(spec: PortalSpec) {
       `buildSections: no v2 copy authored for portal "${spec.slug}"`
     );
   }
+  const authored = <T>(value: T | undefined, type: SeededType): T => {
+    if (value === undefined) {
+      throw new Error(
+        `buildSections: "${spec.slug}" follows the ${spec.recipe} recipe, which has a ${type} section, but no ${type} copy is authored for it`
+      );
+    }
+    return value;
+  };
 
-  return [
-    {
-      id: crypto.randomUUID(),
-      type: 'hero',
+  /** Each section type the recipes use, in this portal's own words. */
+  const sections: Record<
+    SeededType,
+    () => { name: string; props: Record<string, unknown> }
+  > = {
+    hero: () => ({
       name: 'Hero',
-      enabled: true,
       props: {
         eyebrow: spec.kicker,
         heading: spec.title,
@@ -927,24 +1148,18 @@ function buildSections(spec: PortalSpec) {
         ctaLabel: copy.hero.ctaLabel,
         note: copy.hero.note,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'problem',
+    }),
+    problem: () => ({
       name: 'The problem',
-      enabled: true,
       props: {
         eyebrow: copy.problem.eyebrow,
         heading: copy.problem.heading,
         body: copy.problem.body,
         points: copy.problem.points,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'transformation',
+    }),
+    transformation: () => ({
       name: 'Before and after',
-      enabled: true,
       props: {
         heading: copy.transformation.heading,
         beforeLabel: copy.transformation.beforeLabel,
@@ -952,32 +1167,23 @@ function buildSections(spec: PortalSpec) {
         before: copy.transformation.before,
         after: copy.transformation.after,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'benefits',
+    }),
+    benefits: () => ({
       name: "What's included",
-      enabled: true,
       props: {
         heading: copy.benefits.heading,
         items: copy.benefits.items,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'curriculum',
+    }),
+    curriculum: () => ({
       name: 'Curriculum',
-      enabled: true,
       props: {
         heading: copy.curriculum.heading,
         body: copy.curriculum.body,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'instructor',
+    }),
+    instructor: () => ({
       name: 'About you',
-      enabled: true,
       props: {
         heading: 'Meet your guide',
         body: `${GUIDE_BIO_OPENING} ${copy.instructor.bridge}`,
@@ -986,43 +1192,65 @@ function buildSections(spec: PortalSpec) {
         credentials: GUIDE_CREDENTIALS,
         quote: copy.instructor.quote,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'pricing',
+    }),
+    pricing: () => ({
       name: 'Pricing',
-      enabled: true,
       props: {
         heading: copy.pricing.heading,
         body: copy.pricing.body,
         ctaLabel: copy.pricing.ctaLabel,
         ...(copy.pricing.note ? { note: copy.pricing.note } : {}),
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'faq',
+    }),
+    faq: () => ({
       name: 'Questions',
-      enabled: true,
       props: {
         items: copy.faq.items,
         contactLabel: copy.faq.contactLabel,
         contactHref: copy.faq.contactHref,
       },
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'cta',
+    }),
+    cta: () => ({
       name: 'Call to action',
-      enabled: true,
       props: {
         heading: copy.cta.heading,
         body: copy.cta.body,
         ctaLabel: copy.cta.ctaLabel,
         note: copy.cta.note,
       },
-    },
-  ];
+    }),
+    story: () => ({ name: 'The story', props: authored(copy.story, 'story') }),
+    gallery: () => ({
+      name: 'Pictures',
+      props: authored(copy.gallery, 'gallery'),
+    }),
+    text: () => ({ name: 'A few words', props: authored(copy.text, 'text') }),
+  };
+
+  const recipe: readonly {
+    readonly type: SeededType;
+    readonly layout?: string;
+  }[] = RECIPES[spec.recipe];
+  // A pin on a section the recipe does not have would quietly pin nothing.
+  for (const type of Object.keys(spec.pins ?? {})) {
+    if (!recipe.some((section) => section.type === type)) {
+      throw new Error(
+        `buildSections: "${spec.slug}" pins a ${type} layout, but the ${spec.recipe} recipe has no ${type} section`
+      );
+    }
+  }
+  return recipe.map(({ type, layout: recipeLayout }) => {
+    const { name, props } = sections[type]();
+    const layout = spec.pins?.[type] ?? recipeLayout;
+    return {
+      id: crypto.randomUUID(),
+      type,
+      name,
+      enabled: true,
+      ...(layout ? { variant: layout } : {}),
+      props,
+    };
+  });
 }
 
 /** Insert the course, its three stages, and the stage→practice links. */
@@ -1175,6 +1403,85 @@ async function deriveCoverKey(
 
 function run(command: string): void {
   execSync(command, { stdio: 'pipe' });
+}
+
+/**
+ * Put the course's own price back to the portal's (`PortalSpec.priceCents`).
+ *
+ * The studio's offer editor (`updateJourneyOffer`) writes the page's `offer`
+ * AND `courses.price_cents` in one transaction, so clearing only the page's
+ * offer (`reconcilePage`) would leave half of a stray edit behind: the page
+ * would sell at the edited price. Setting the same value each run keeps this
+ * idempotent.
+ */
+async function reconcilePrice(
+  courseId: string,
+  spec: PortalSpec
+): Promise<void> {
+  await dbWs
+    .update(courses)
+    .set({ priceCents: spec.priceCents, updatedAt: new Date() })
+    .where(eq(courses.id, courseId));
+}
+
+/**
+ * Retire any course subscription plan on a seeded portal: the seed designs at
+ * most a one-off price, and the offer editor creates a plan when a page turns
+ * its course subscription on — the other half of a stray offer edit. Soft,
+ * like every removal here (`is_active` off, `deleted_at` set), so it can be
+ * undone; the plan's Stripe product is left as it is. A no-op once retired,
+ * and in CI, where no seeded portal has a plan.
+ *
+ * A plan someone still subscribes to is KEPT, with a warning: its subscribers
+ * hold a `planId` to it and must keep renewing, which is why the service's own
+ * `deactivatePlan` never deletes one either. Every `course_subscriptions`
+ * status but `cancelled` counts — `paused` can resume and `incomplete` can
+ * still be paid, so neither has ended.
+ *
+ * Tier access (`course_tier_access`) is NOT reset: that join table has no
+ * soft delete, and this seed never hard-deletes.
+ */
+async function retirePlans(courseId: string, spec: PortalSpec): Promise<void> {
+  const held = await dbWs
+    .selectDistinct({ id: courseSubscriptionPlans.id })
+    .from(courseSubscriptionPlans)
+    .innerJoin(
+      courseSubscriptions,
+      eq(courseSubscriptions.planId, courseSubscriptionPlans.id)
+    )
+    .where(
+      and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt),
+        ne(courseSubscriptions.status, 'cancelled')
+      )
+    );
+  const heldIds = held.map((plan) => plan.id);
+  for (const id of heldIds) {
+    console.log(
+      `    ! kept course subscription plan ${id} on ${spec.slug}: it still has a live subscription`
+    );
+  }
+
+  const now = new Date();
+  const retired = await dbWs
+    .update(courseSubscriptionPlans)
+    .set({ isActive: false, deletedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt),
+        heldIds.length > 0
+          ? notInArray(courseSubscriptionPlans.id, heldIds)
+          : sql`true`
+      )
+    )
+    .returning({ id: courseSubscriptionPlans.id });
+  for (const plan of retired) {
+    console.log(
+      `    (retired course subscription plan ${plan.id} on ${spec.slug})`
+    );
+  }
 }
 
 /**

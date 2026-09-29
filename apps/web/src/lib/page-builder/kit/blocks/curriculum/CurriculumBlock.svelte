@@ -7,6 +7,8 @@
                 stage's practices beside it
     accordion — one numbered row per stage, opening to its practices
     cards     — each stage its own tile, side by side
+    map       — the stages as stops on a drawn route, each opening to its
+                practices (StageMap)
 
   A practice's kind reads by its icon's shape. A join button appears only when
   the creator writes one. No stages yet: the public page keeps only the words;
@@ -21,6 +23,7 @@
   import { CURRICULUM_EMPTY, curriculumDefinition } from './definition';
   import StageAccordion from './StageAccordion.svelte';
   import StageCards from './StageCards.svelte';
+  import StageMap from './StageMap.svelte';
   import StageTimeline from './StageTimeline.svelte';
   import { orderedStages } from './stages';
 
@@ -29,7 +32,9 @@
   const content = $derived(curriculumDefinition.coerce(props));
   const stages = $derived(orderedStages(context.stages));
   const layout = $derived(
-    section.layout === 'accordion' || section.layout === 'cards' ? section.layout : 'timeline'
+    section.layout === 'accordion' || section.layout === 'cards' || section.layout === 'map'
+      ? section.layout
+      : 'timeline'
   );
   const asks = $derived(Boolean(content.ctaLabel || content.note));
   const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
@@ -63,6 +68,8 @@
     <StageAccordion {stages} {level} anchor={section.anchor} />
   {:else if layout === 'cards'}
     <StageCards {stages} {level} />
+  {:else if layout === 'map'}
+    <StageMap {stages} {level} />
   {:else}
     <StageTimeline {stages} {level} />
   {/if}

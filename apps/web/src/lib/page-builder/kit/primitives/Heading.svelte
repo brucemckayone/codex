@@ -8,10 +8,15 @@
   Never faux-bold: `font-synthesis: none` lets a single-weight display face
   (Archivo Black, Anton…) render its real weight instead of a smeared
   synthetic one when the Style or brand asks for a heavier weight than exists.
+
+  `build` makes it enter as ONE element as it scrolls into view
+  (`styles/motion.css`). Its text is never split into words or letters: the
+  canvas must keep identical markup, and a screen reader must meet one line.
 -->
 <script lang="ts">
   import type { SectionTypeId } from '../model/ids';
   import type { BlockEdit } from '../model/types';
+  import type { Build } from '../motion/attributes';
   import { editAttrs } from './edit';
 
   interface Props {
@@ -22,6 +27,7 @@
     /** The props key this heading edits inline on the canvas. */
     field?: string;
     edit?: BlockEdit | null;
+    build?: Build;
     id?: string;
     class?: string;
   }
@@ -33,6 +39,7 @@
     type,
     field,
     edit = null,
+    build,
     id,
     class: className,
   }: Props = $props();
@@ -46,6 +53,7 @@
   {id}
   class="lp-heading {className ?? ''}"
   data-size={size}
+  data-lp-build={build}
   {...attrs}>{text}</svelte:element
 >
 

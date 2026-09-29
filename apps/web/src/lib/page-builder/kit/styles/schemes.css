@@ -3,8 +3,8 @@
 
    A section sets `data-lp-scheme`; the scheme sets the ONLY colour tokens a
    block reads: --lp-bg, --lp-ink, --lp-ink-soft, --lp-line, --lp-panel,
-   --lp-panel-ink, --lp-accent, --lp-button-bg, --lp-button-ink,
-   --lp-button-line and --lp-focus.
+   --lp-panel-ink, --lp-accent, --lp-mark-ink, --lp-button-bg,
+   --lp-button-ink, --lp-button-line and --lp-focus.
 
    HOW THE FLOORS ARE MET FOR ANY BRAND. Three facts, each measured by
    `schemes.test.ts` over a 140 608-colour sRGB sweep:
@@ -23,7 +23,10 @@
    3. Knowing the polarity, the brand is moved in linear light only as far as
       it must: accent text to Y <= 0.105 on light / >= 0.30 on dark, buttons to
       Y <= 0.155 on light (a white label) / >= 0.24 on dark (a black label),
-      >= 3.7:1 against the worst surface in the band. A brand
+      >= 3.7:1 against the worst surface in the band. A MARK — a line, a stop,
+      a ring; never text or a button — needs 3:1 (WCAG 1.4.11), so it moves
+      only to Y <= 0.18 / >= 0.185, >= 3.3:1 against that surface: text grade
+      turns a bright amber brown, graphic grade keeps it amber. A brand
       that already passes is left exactly as the creator picked it.
 
    FRAGMENTS. The `--_*` properties below are unevaluated token streams that
@@ -43,12 +46,33 @@
   --lp-tint-panel: 14%;
 
   --lp-brand: var(--brand-color, var(--color-brand-primary));
-  --lp-brand-2: var(
-    --brand-secondary,
-    var(
-      --brand-accent,
-      oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45))
-    )
+  /* THE SECOND COLOUR MUST BE A COLOUR (03 §13 X19). The brand editor's default
+     secondary is #737373, so most orgs carry a grey they never chose; painted
+     as a "second colour" it reads as switched off. So: the secondary if it has
+     real chroma, else the accent, else the primary turned 45°. The switch is a
+     premultiplied color-mix (S1's proof, measured in Chrome): the candidate's
+     alpha is 1 when c > 0.02 and 0 when not, and it is mixed half-and-half
+     with the fallback at alpha 0.004 — the result is the candidate within
+     1/255, or the fallback exactly, and `/ 1` makes it opaque again. The dark
+     pole redefines only the inputs; this rule resolves against them. */
+  --_second-shift: oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45));
+  --_accent-in: var(--brand-accent, var(--_second-shift));
+  --_second-in: var(--brand-secondary, var(--_accent-in));
+  --_second-or-shift: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--_accent-in) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--_second-shift) r g b / 0.004) 50%
+      )
+      r g b / 1
+  );
+  --lp-brand-2: rgb(
+    from color-mix(
+        in srgb,
+        oklch(from var(--_second-in) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%,
+        rgb(from var(--_second-or-shift) r g b / 0.004) 50%
+      )
+      r g b / 1
   );
   /* The raw light pole rather than `--color-background`: that token is the
      VIEWER's, and is dark inside a light preview on a dark-theme viewer. */
@@ -69,15 +93,55 @@
   --_panel-i: oklch(from var(--lp-brand) 0.265 min(c * 0.35, 0.043) h);
   --_scrim: oklch(from var(--lp-brand) 0.16 min(c * 0.25, 0.027) h);
 
-  --_acc-light: color-mix(in oklab, var(--lp-brand) 55%, black);
-  --_acc-dark: color-mix(in oklab, var(--lp-brand) 55%, white);
+  /* THE ACCENT'S SOURCE, a Style's hook: the colour the accent and the marks
+     are moved from (Path draws its route in the second colour). Buttons stay
+     the brand. Set it on the Style's root — every recipe below resolves it
+     there, on the element that declares them. */
+  --lp-accent-source: var(--lp-brand);
+
+  /* The source 55% of the way from black / to white in OKLab — the same
+     mixes, written from it so no literal colour appears. On this path a mark
+     is the accent: text grade is graphic grade too. */
+  --_acc-light: oklch(from var(--lp-accent-source) calc(l * 0.55) calc(c * 0.55) h);
+  --_acc-dark: oklch(from var(--lp-accent-source) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
+  --_mark-light: var(--_acc-light);
+  --_mark-dark: var(--_acc-dark);
   --_btn-light: var(--lp-brand);
   --_btn-dark: var(--lp-brand);
 
   --_accent-g: var(--_acc-light);
   --_accent-i: var(--_acc-dark);
+  --_mark-g: var(--_mark-light);
+  --_mark-i: var(--_mark-dark);
   --_button-g: var(--_btn-light);
   --_button-i: var(--_btn-dark);
+
+  /* Atmosphere (03 §5.1). On this fallback path its scrim is fully opaque —
+     the section renders as `base` — because the lighter scrim is only proven
+     for the exact path's moved brand (see the atmosphere scheme below). */
+  --_atm-acc-light: var(--_acc-light);
+  --_atm-acc-dark: var(--_acc-dark);
+  --_atm-mark-light: var(--_mark-light);
+  --_atm-mark-dark: var(--_mark-dark);
+  --_atm-btn-light: var(--_btn-light);
+  --_atm-btn-dark: var(--_btn-dark);
+  --_atmos-min-light: 1;
+  --_atmos-min-dark: 1;
+
+  --_atmos-accent: var(--_atm-acc-light);
+  --_atmos-mark: var(--_atm-mark-light);
+  --_atmos-button: var(--_atm-btn-light);
+  --_atmos-accent-i: var(--_atm-acc-dark);
+  --_atmos-mark-i: var(--_atm-mark-dark);
+  --_atmos-button-i: var(--_atm-btn-dark);
+  --_atmos-min: var(--_atmos-min-light);
+  /* The glow that stands in for the shader where none runs: the brand's hue
+     at a fixed lightness near the ground's, so it reads as COLOUR rather than
+     light and barely moves the text's contrast (`schemes.test.ts` §5). Off
+     on this fallback path, where the moved brand it is proven with is not. */
+  --_glow-l: 0.89;
+  --_glow-c: 0.08;
+  --_glow-strength: 0;
 
   background: var(--lp-ground);
 }
@@ -92,19 +156,9 @@
 .lp[data-lp-theme='dark'],
 .lp[data-lp-style='cinematic'] {
   --lp-brand: var(--brand-color-dark, var(--brand-color, var(--color-brand-primary)));
-  --lp-brand-2: var(
-    --brand-secondary-dark,
-    var(
-      --brand-secondary,
-      var(
-        --brand-accent-dark,
-        var(
-          --brand-accent,
-          oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45))
-        )
-      )
-    )
-  );
+  /* The second colour's dark inputs; `.lp` above picks among them (03 X19). */
+  --_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-shift)));
+  --_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
      property, so a Style never has to out-specify this selector list. */
   --_ground-in: var(
@@ -130,8 +184,20 @@
 
   --_accent-g: var(--_acc-dark);
   --_accent-i: var(--_acc-light);
+  --_mark-g: var(--_mark-dark);
+  --_mark-i: var(--_mark-light);
   --_button-g: var(--_btn-dark);
   --_button-i: var(--_btn-light);
+
+  --_atmos-accent: var(--_atm-acc-dark);
+  --_atmos-mark: var(--_atm-mark-dark);
+  --_atmos-button: var(--_atm-btn-dark);
+  --_atmos-accent-i: var(--_atm-acc-light);
+  --_atmos-mark-i: var(--_atm-mark-light);
+  --_atmos-button-i: var(--_atm-btn-light);
+  --_atmos-min: var(--_atmos-min-dark);
+  --_glow-l: 0.3;
+  --_glow-c: 0.08;
 }
 
 /* ── Scheme tokens (fallback path) ───────────────────────────────────────── */
@@ -143,6 +209,9 @@
   --lp-panel-ink: oklch(from var(--lp-panel) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
   --lp-button-ink: oklch(from var(--lp-button-bg) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --lp-focus: var(--lp-ink);
+  /* What a Style's texture and shapes are drawn in (`surfaces.css`). */
+  --_tex-ink: var(--lp-line);
+  --_shape-ink: var(--lp-accent);
 }
 
 /* ── The exact path ──────────────────────────────────────────────────────── */
@@ -194,12 +263,77 @@
     --_btn-lt-r: max(0, 255 * (1.055 * pow(var(--_btn-lt-1r) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1r)), 1 / 2.4) - 0.055));
     --_btn-lt-g: max(0, 255 * (1.055 * pow(var(--_btn-lt-1g) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1g)), 1 / 2.4) - 0.055));
     --_btn-lt-b: max(0, 255 * (1.055 * pow(var(--_btn-lt-1b) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1b)), 1 / 2.4) - 0.055));
+    --_mark-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.18 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_mark-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.18 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_mark-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.18 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_mark-lt-s: max(1, 0.185 / max(var(--_y), 1e-6));
+    --_mark-lt-1r: min(1, var(--_lr) * var(--_mark-lt-s));
+    --_mark-lt-1g: min(1, var(--_lg) * var(--_mark-lt-s));
+    --_mark-lt-1b: min(1, var(--_lb) * var(--_mark-lt-s));
+    --_mark-lt-y1: (0.2126 * var(--_mark-lt-1r) + 0.7152 * var(--_mark-lt-1g) + 0.0722 * var(--_mark-lt-1b));
+    --_mark-lt-k: max(0, (0.185 - var(--_mark-lt-y1)) / max(1 - var(--_mark-lt-y1), 1e-6));
+    --_mark-lt-r: max(0, 255 * (1.055 * pow(var(--_mark-lt-1r) + var(--_mark-lt-k) * (1 - var(--_mark-lt-1r)), 1 / 2.4) - 0.055));
+    --_mark-lt-g: max(0, 255 * (1.055 * pow(var(--_mark-lt-1g) + var(--_mark-lt-k) * (1 - var(--_mark-lt-1g)), 1 / 2.4) - 0.055));
+    --_mark-lt-b: max(0, 255 * (1.055 * pow(var(--_mark-lt-1b) + var(--_mark-lt-k) * (1 - var(--_mark-lt-1b)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.06 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-s: max(1, 0.41 / max(var(--_y), 1e-6));
+    --_atm-acc-lt-1r: min(1, var(--_lr) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-1g: min(1, var(--_lg) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-1b: min(1, var(--_lb) * var(--_atm-acc-lt-s));
+    --_atm-acc-lt-y1: (0.2126 * var(--_atm-acc-lt-1r) + 0.7152 * var(--_atm-acc-lt-1g) + 0.0722 * var(--_atm-acc-lt-1b));
+    --_atm-acc-lt-k: max(0, (0.41 - var(--_atm-acc-lt-y1)) / max(1 - var(--_atm-acc-lt-y1), 1e-6));
+    --_atm-acc-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1r) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1r)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1g) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1g)), 1 / 2.4) - 0.055));
+    --_atm-acc-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-acc-lt-1b) + var(--_atm-acc-lt-k) * (1 - var(--_atm-acc-lt-1b)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.115 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-s: max(1, 0.26 / max(var(--_y), 1e-6));
+    --_atm-btn-lt-1r: min(1, var(--_lr) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-1g: min(1, var(--_lg) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-1b: min(1, var(--_lb) * var(--_atm-btn-lt-s));
+    --_atm-btn-lt-y1: (0.2126 * var(--_atm-btn-lt-1r) + 0.7152 * var(--_atm-btn-lt-1g) + 0.0722 * var(--_atm-btn-lt-1b));
+    --_atm-btn-lt-k: max(0, (0.26 - var(--_atm-btn-lt-y1)) / max(1 - var(--_atm-btn-lt-y1), 1e-6));
+    --_atm-btn-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1r) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1r)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1g) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1g)), 1 / 2.4) - 0.055));
+    --_atm-btn-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-btn-lt-1b) + var(--_atm-btn-lt-k) * (1 - var(--_atm-btn-lt-1b)), 1 / 2.4) - 0.055));
+    --_atm-mark-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.11 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-mark-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.11 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-mark-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.11 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_atm-mark-lt-s: max(1, 0.27 / max(var(--_y), 1e-6));
+    --_atm-mark-lt-1r: min(1, var(--_lr) * var(--_atm-mark-lt-s));
+    --_atm-mark-lt-1g: min(1, var(--_lg) * var(--_atm-mark-lt-s));
+    --_atm-mark-lt-1b: min(1, var(--_lb) * var(--_atm-mark-lt-s));
+    --_atm-mark-lt-y1: (0.2126 * var(--_atm-mark-lt-1r) + 0.7152 * var(--_atm-mark-lt-1g) + 0.0722 * var(--_atm-mark-lt-1b));
+    --_atm-mark-lt-k: max(0, (0.27 - var(--_atm-mark-lt-y1)) / max(1 - var(--_atm-mark-lt-y1), 1e-6));
+    --_atm-mark-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1r) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1r)), 1 / 2.4) - 0.055));
+    --_atm-mark-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1g) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1g)), 1 / 2.4) - 0.055));
+    --_atm-mark-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1b) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1b)), 1 / 2.4) - 0.055));
 
-    /* The brand, moved only as far as each polarity requires. */
-    --_acc-light: rgb(from var(--lp-brand) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
-    --_acc-dark: rgb(from var(--lp-brand) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
+    /* The accent's source and the brand, each moved only as far as each
+       polarity requires: the accent and the marks from the source, the
+       buttons from the brand. */
+    --_acc-light: rgb(from var(--lp-accent-source) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
+    --_acc-dark: rgb(from var(--lp-accent-source) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
+    --_mark-light: rgb(from var(--lp-accent-source) var(--_mark-dk-r) var(--_mark-dk-g) var(--_mark-dk-b));
+    --_mark-dark: rgb(from var(--lp-accent-source) var(--_mark-lt-r) var(--_mark-lt-g) var(--_mark-lt-b));
     --_btn-light: rgb(from var(--lp-brand) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));
     --_btn-dark: rgb(from var(--lp-brand) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));
+
+    /* Moved further for atmosphere, and the smallest scrims that then hold
+       every floor over a pure black and a pure white backdrop. The same moves
+       hold a mark over a texture or shapes (a decorated page, below). */
+    --_atm-acc-light: rgb(from var(--lp-accent-source) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));
+    --_atm-acc-dark: rgb(from var(--lp-accent-source) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));
+    --_atm-mark-light: rgb(from var(--lp-accent-source) var(--_atm-mark-dk-r) var(--_atm-mark-dk-g) var(--_atm-mark-dk-b));
+    --_atm-mark-dark: rgb(from var(--lp-accent-source) var(--_atm-mark-lt-r) var(--_atm-mark-lt-g) var(--_atm-mark-lt-b));
+    --_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));
+    --_atm-btn-dark: rgb(from var(--lp-brand) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b));
+    --_atmos-min-light: 0.82;
+    --_atmos-min-dark: 0.86;
+    --_glow-strength: 0.9;
   }
 
   .lp :is([data-lp-scheme], [data-lp-on-media]) {
@@ -215,20 +349,44 @@
 /* ── The five schemes ─────────────────────────────────────────────────────
    `base` / `soft` sit on the ground's polarity and `contrast` on the other,
    so each takes the matching brand treatment. `brand` / `accent` are filled
-   with an arbitrary colour: their accent and button are the ink itself (the
-   contract's "button inverted"), whose label is the fill — the same pair as
-   ink-on-fill, so >= 4.58:1 by construction. */
+   with an arbitrary colour: their accent, mark and button are the ink itself
+   (the contract's "button inverted"), whose label is the fill — the same
+   pair as ink-on-fill, so >= 4.58:1 by construction. */
 .lp [data-lp-scheme='base'] {
   --lp-bg: var(--lp-ground);
   --lp-panel: var(--_panel-g);
   --lp-accent: var(--_accent-g);
+  --lp-mark-ink: var(--_mark-g);
   --lp-button-bg: var(--_button-g);
+}
+
+/* ATMOSPHERE (03 §5.1) — the org's own shader seen through the section.
+   Every colour is measured against the pole's GROUND. Where the shader runs,
+   the section paints that ground as a uniform veil of strength `--_atmos-s`
+   over it, so every floor must hold over the two worst backdrops, pure black
+   and pure white; where it does not, the section is the opaque ground under
+   a glow whose own colours are measured (`surfaces.css`, `--_glow-*` above).
+   Ink and soft ink are the usual ones; the accent, mark
+   and button are moved further (`--_atm-*`) and the ghost button's
+   line is the soft ink — which is what lets the veil stop at 0.82 (light) /
+   0.86 (dark) instead of 0.97. A Style may thicken the veil with
+   `--lp-atmosphere-scrim` (0–1), never thin it. */
+.lp [data-lp-scheme='atmosphere'] {
+  --lp-bg: var(--lp-ground);
+  --lp-panel: var(--_panel-g);
+  --lp-accent: var(--_atmos-accent);
+  --lp-mark-ink: var(--_atmos-mark);
+  --lp-button-bg: var(--_atmos-button);
+  --lp-button-line: var(--lp-ink-soft);
+  --_atmos-s: max(var(--_atmos-min), var(--lp-atmosphere-scrim, 0));
+  --_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));
 }
 
 .lp [data-lp-scheme='soft'] {
   --lp-bg: var(--_soft-bg);
   --lp-panel: var(--lp-ground);
   --lp-accent: var(--_accent-g);
+  --lp-mark-ink: var(--_mark-g);
   --lp-button-bg: var(--_button-g);
 }
 
@@ -236,6 +394,7 @@
   --lp-bg: var(--_contrast-bg);
   --lp-panel: var(--_panel-i);
   --lp-accent: var(--_accent-i);
+  --lp-mark-ink: var(--_mark-i);
   --lp-button-bg: var(--_button-i);
 }
 
@@ -244,12 +403,41 @@
   --lp-bg: var(--lp-brand);
   --lp-panel: var(--lp-ground);
   --lp-accent: var(--lp-ink);
+  --lp-mark-ink: var(--lp-ink);
   --lp-button-bg: var(--lp-ink);
   --lp-button-ink: var(--lp-bg);
+  /* This ink sits as close as 4.58:1, so a texture or shapes behind it may
+     only move AWAY from it: toward white under dark ink, black under light. */
+  --_anti-ink: oklch(from var(--lp-ink) clamp(0, (0.5 - l) * 1000, 1) 0 0);
+  --_tex-ink: color-mix(in oklab, var(--lp-bg), var(--_anti-ink) 40%);
+  --_shape-ink: var(--_anti-ink);
 }
 
 .lp [data-lp-scheme='accent'] {
   --lp-bg: var(--lp-brand-2);
+}
+
+/* DECORATED (03 §5.2) — a page whose Style draws a texture or shapes behind
+   the text. Its base / soft / contrast sections take atmosphere's moved
+   accent, mark and button and its soft-ink ghost line, so a texture in the
+   line colour holds every floor at any strength and shapes up to their alpha;
+   brand / accent bands draw away from their ink (above). `schemes.test.ts`
+   measures both. A PAGE-level choice: the queries read `.lp-page` (see
+   `surfaces.css`). */
+@container lp-page style(--lp-texture: grain) or style(--lp-texture: paper) or style(--lp-texture: contour) or style(--lp-shapes: blobs) {
+  .lp :is([data-lp-scheme='base'], [data-lp-scheme='soft']) {
+    --lp-accent: var(--_atmos-accent);
+    --lp-mark-ink: var(--_atmos-mark);
+    --lp-button-bg: var(--_atmos-button);
+    --lp-button-line: var(--lp-ink-soft);
+  }
+
+  .lp [data-lp-scheme='contrast'] {
+    --lp-accent: var(--_atmos-accent-i);
+    --lp-mark-ink: var(--_atmos-mark-i);
+    --lp-button-bg: var(--_atmos-button-i);
+    --lp-button-line: var(--lp-ink-soft);
+  }
 }
 
 /* Text laid over imagery. Ink is measured against the scrim colour and the
@@ -262,6 +450,7 @@
   --lp-bg: var(--_scrim);
   --lp-ink-soft: var(--lp-ink);
   --lp-accent: var(--lp-ink);
+  --lp-mark-ink: var(--lp-ink);
   --lp-button-bg: var(--lp-ink);
   --lp-button-ink: var(--_scrim);
   --lp-button-line: var(--lp-ink);

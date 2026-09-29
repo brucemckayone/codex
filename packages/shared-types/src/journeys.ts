@@ -150,11 +150,19 @@ export interface SectionDesign {
   // above are already duplicated the same way against `SECTION_DESIGN_VALUES`
   // in `section-catalog.ts`. Legacy axis fields are unchanged and still valid.
   /** A section's v2 colour scheme. Mirrors `ColourSchemeId` in `kit/model/ids.ts`. */
-  scheme?: 'base' | 'soft' | 'contrast' | 'brand' | 'accent';
+  scheme?: 'base' | 'soft' | 'contrast' | 'brand' | 'accent' | 'atmosphere';
   /** A section's v2 vertical rhythm. Mirrors `SectionSpacingId` in `kit/model/ids.ts`. */
   spacing?: 'compact' | 'regular' | 'spacious';
   /** A page's v2 Style. Mirrors `PageStyleId` in `kit/model/ids.ts`. Page-only. */
-  style?: 'bold' | 'clean' | 'soft' | 'cinematic';
+  style?:
+    | 'bold'
+    | 'clean'
+    | 'soft'
+    | 'cinematic'
+    | 'path'
+    | 'poster'
+    | 'studio'
+    | 'quiet';
 }
 
 /**

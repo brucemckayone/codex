@@ -12,12 +12,14 @@ import BenefitsBlock from './blocks/benefits/BenefitsBlock.svelte';
 import CtaBlock from './blocks/cta/CtaBlock.svelte';
 import CurriculumBlock from './blocks/curriculum/CurriculumBlock.svelte';
 import FaqBlock from './blocks/faq/FaqBlock.svelte';
+import GalleryBlock from './blocks/gallery/GalleryBlock.svelte';
 import HeroBlock from './blocks/hero/HeroBlock.svelte';
 import InstructorBlock from './blocks/instructor/InstructorBlock.svelte';
 import PreviewBlock from './blocks/preview/PreviewBlock.svelte';
 import PricingBlock from './blocks/pricing/PricingBlock.svelte';
 import ProblemBlock from './blocks/problem/ProblemBlock.svelte';
 import StatsBlock from './blocks/stats/StatsBlock.svelte';
+import StoryBlock from './blocks/story/StoryBlock.svelte';
 import TestimonialsBlock from './blocks/testimonials/TestimonialsBlock.svelte';
 import TextBlock from './blocks/text/TextBlock.svelte';
 import TransformationBlock from './blocks/transformation/TransformationBlock.svelte';
@@ -43,6 +45,8 @@ export const BLOCKS: Readonly<Record<SectionTypeId, KitBlockComponent>> = {
   cta: CtaBlock,
   stats: StatsBlock,
   text: TextBlock,
+  story: StoryBlock,
+  gallery: GalleryBlock,
 };
 
 export interface KitBlock {

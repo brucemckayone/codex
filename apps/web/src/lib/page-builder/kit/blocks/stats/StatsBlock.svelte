@@ -11,9 +11,13 @@
   is set at one size — the largest at which its longest value fits its cell —
   so "4,000+" and "6" stand at the same height. No figures: the public page
   shows only the words; the canvas says how to add some.
+
+  A figure that is one amount counts up the first time it comes into view
+  (`motion/count-up.ts`); its HTML is always the final value.
 -->
 <script lang="ts">
   import type { BlockProps } from '../../model/types';
+  import { countUp, parseFigure } from '../../motion/count-up';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -74,7 +78,11 @@
     <ul class="stats__list" data-count={figures.length} style:--_chars={longest}>
       {#each figures as figure (figure.key)}
         <li class="stat">
-          <span class="stat__value">{figure.value}</span>
+          <span
+            class="stat__value"
+            data-lp-count={parseFigure(figure.value) ? '' : undefined}
+            {@attach countUp(figure.value)}>{figure.value}</span
+          >
           <span class="stat__label">{figure.label}</span>
         </li>
       {/each}

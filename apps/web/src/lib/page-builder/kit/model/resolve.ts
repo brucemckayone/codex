@@ -113,17 +113,25 @@ export function resolveSections(page: KitPage): ResolvedSection[] {
 /**
  * Two identical COLOURED bands in a row read as one oversized slab (a
  * contrast "problem" straight into a contrast "before and after", or a CTA
- * dropped under a brand hero). A Style DEFAULT that would repeat the band
- * above steps back to `base`; a scheme the creator chose is never overridden,
- * and base-after-base is how plain sections are meant to flow.
+ * dropped under a brand hero), and a brand band against a contrast band
+ * smears into one block when the brand is very dark — the two are then
+ * near-identical. A Style DEFAULT that would do either steps back to `base`.
+ * A Style's own `order` is designed apart (catalog.test.ts), but a starter, a
+ * creator's reorder or a hidden section between two bands brings them
+ * together, and only this sees the page as it renders. A scheme the creator
+ * chose is never overridden, and base-after-base is how plain sections are
+ * meant to flow.
  */
 function keepBandsApart(
   scheme: ColourSchemeId,
   previous: ColourSchemeId | null,
   chosen: boolean
 ): ColourSchemeId {
-  if (chosen || scheme === 'base' || scheme !== previous) return scheme;
-  return 'base';
+  if (chosen || scheme === 'base' || previous === null) return scheme;
+  const smears =
+    (scheme === 'brand' && previous === 'contrast') ||
+    (scheme === 'contrast' && previous === 'brand');
+  return scheme === previous || smears ? 'base' : scheme;
 }
 
 /** The scheme a featured card renders in, inside a section of `scheme`. */

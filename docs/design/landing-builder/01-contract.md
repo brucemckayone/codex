@@ -339,6 +339,13 @@ _(append here: `A<n> · <date> · <WP> · what changed · why`)_
   (which already falls back to its plate on a failed load). An empty/absent ref renders exactly as
   today. `alt` is required for a non-decorative image (the field prompts for it); a hero/background
   image is decorative by default.
+- **A6 · 2026-09-27 · orchestrator · Expressive Styles and storytelling.** `03-expressive-contract.md`
+  is BINDING and replaces, for all later work: §1 "Motion is one moment" (now "motion follows the
+  story"), §4's "No second WebGL canvas. Atmosphere is CSS" (still no second canvas; the org's own
+  shader shows through the new `atmosphere` scheme), §4's Radius row (now bent from the brand
+  radius), and the Style and scheme lists of §2 and §5 (8 Styles, 6 schemes, `story` and `gallery`
+  types). Why: the owner asked for "a set of really different styles … more interfactive components …
+  awwwards level without the usabliitiy issues", always conforming to brand settings.
 
 ---
 
