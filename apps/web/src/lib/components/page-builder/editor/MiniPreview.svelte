@@ -1,0 +1,153 @@
+<!--
+  @component MiniPreview
+
+  Real kit output, small. The kit's own `PageRenderer` lays the page out at a
+  fixed VIRTUAL width — so its container queries pick the desktop layout —
+  and the result is scaled down to the thumbnail's width, cropped from the
+  top when it is taller than the frame and centred when it is shorter.
+
+  It is a picture, not a page: inert, hidden from assistive tech, rendered
+  only once it scrolls near the viewport, and never playing a clip (the hero
+  loop is swapped for its still). Ids inside it are dropped so the canvas's
+  own `aria-labelledby` / `#anchor` references can never resolve into a
+  thumbnail; SVG ids stay, since a filter is referenced by `url(#id)`.
+-->
+<script module lang="ts">
+  import type { JourneySalesContext, SellPreview } from '$lib/page-builder/render/types';
+
+  // One still-only promise per source promise: the blocks `{#await}` it, and
+  // a fresh promise on every context rebuild would re-run their media.
+  const stills = new WeakMap<Promise<SellPreview | null>, Promise<SellPreview | null>>();
+
+  function stillsOf(source: JourneySalesContext['sellPreview']): Promise<SellPreview | null> {
+    let still = stills.get(source);
+    if (!still) {
+      still = source
+        .then((preview) =>
+          preview
+            ? {
+                ...preview,
+                heroClip: null,
+                heroImageUrl: preview.heroImageUrl ?? preview.heroClip?.posterUrl ?? null,
+              }
+            : null
+        )
+        .catch(() => null);
+      stills.set(source, still);
+    }
+    return still;
+  }
+</script>
+
+<script lang="ts">
+  import type { BrandTokenOverrides } from '$lib/page-builder';
+  import { type KitPage, PageRenderer } from '$lib/page-builder/kit';
+
+  interface Props {
+    page: KitPage;
+    context: JourneySalesContext;
+    brandOverrides?: BrandTokenOverrides | null;
+    theme?: 'light' | 'dark';
+    /** The width the page is laid out at before scaling, in CSS pixels. */
+    width?: number;
+    /** The frame's shape (CSS `aspect-ratio`). */
+    ratio?: string;
+    class?: string;
+  }
+
+  const {
+    page,
+    context,
+    brandOverrides = null,
+    theme,
+    width = 1200,
+    ratio = '16 / 10',
+    class: className,
+  }: Props = $props();
+
+  let near = $state(false);
+  let frameWidth = $state(0);
+  let frameHeight = $state(0);
+  let contentHeight = $state(0);
+
+  const scale = $derived(frameWidth > 0 ? frameWidth / width : 0);
+  const offset = $derived(Math.max(0, (frameHeight - contentHeight * scale) / 2));
+  const thumbContext = $derived({ ...context, sellPreview: stillsOf(context.sellPreview) });
+
+  /** Render once the frame comes within 200px of the viewport, then stay. */
+  function whenNear(node: HTMLElement) {
+    if (typeof IntersectionObserver === 'undefined') {
+      near = true;
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          near = true;
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }
+
+  function stripIds(root: HTMLElement) {
+    const strip = () => {
+      for (const element of root.querySelectorAll('[id]')) {
+        if (!(element instanceof SVGElement)) element.removeAttribute('id');
+      }
+    };
+    strip();
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(strip);
+    observer.observe(root, { subtree: true, childList: true, attributeFilter: ['id'] });
+    return () => observer.disconnect();
+  }
+</script>
+
+<div
+  class="mini {className ?? ''}"
+  style:aspect-ratio={ratio}
+  inert
+  aria-hidden="true"
+  {@attach whenNear}
+  bind:clientWidth={frameWidth}
+  bind:clientHeight={frameHeight}
+>
+  {#if near}
+    <div
+      class="mini__stage"
+      data-measured={scale > 0 ? '' : undefined}
+      style:inline-size="{width}px"
+      style:transform="translateY({offset}px) scale({scale})"
+      {@attach stripIds}
+      bind:offsetHeight={contentHeight}
+    >
+      <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} />
+    </div>
+  {/if}
+</div>
+
+<style>
+  .mini {
+    position: relative;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+    background: color-mix(in oklab, var(--color-text) 5%, transparent);
+  }
+
+  .mini__stage {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    transform-origin: 0 0;
+    visibility: hidden;
+  }
+
+  .mini__stage[data-measured] {
+    visibility: visible;
+  }
+</style>

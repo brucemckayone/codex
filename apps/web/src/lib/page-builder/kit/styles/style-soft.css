@@ -1,0 +1,52 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — SOFT
+
+   Rounded, tinted, calm. The boldness is spent on SHAPES AND TINT: large
+   radii whatever the brand's own radius, pill buttons and labels, and tinted
+   bands with a stronger brand tint than the other Styles. Type is gentle —
+   lighter, looser, never tight.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='soft'] {
+  --lp-tint-soft: 16%;
+  --lp-tint-panel: 22%;
+
+  --lp-size-display: calc(clamp(2.4rem, 1rem + 4.6cqi, 4.75rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.8rem, 1rem + 2.6cqi, 3rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.15rem, 1rem + 0.7cqi, 1.45rem) * var(--lp-scale));
+
+  --lp-leading-display: 1.08;
+  --lp-leading-heading: 1.12;
+  --lp-leading-title: 1.25;
+  --lp-leading-body: 1.65;
+
+  --lp-tracking-display: -0.012em;
+  --lp-tracking-heading: -0.008em;
+  --lp-tracking-title: 0em;
+
+  --lp-weight-display: var(--heading-weight, var(--font-semibold));
+  --lp-weight-heading: var(--heading-weight, var(--font-semibold));
+  --lp-weight-label: var(--font-medium);
+
+  /* Soft whatever the brand radius is: a sharp brand still gets round cards. */
+  --lp-radius-card: max(var(--radius-xl), var(--space-6));
+  --lp-radius-media: max(var(--radius-xl), var(--space-8));
+  --lp-radius-button: var(--radius-full);
+  --lp-radius-chip: var(--radius-full);
+
+  --lp-eyebrow-fill: 1;
+  --lp-eyebrow-pad: var(--space-1) var(--space-3);
+  --lp-eyebrow-radius: var(--radius-full);
+
+  --lp-button-pad: var(--space-7);
+  --lp-container: 68rem;
+  --lp-measure-lead: 40ch;
+
+  /* One slow, even fade: nothing leaps. */
+  --lp-enter-headline: lp-rise-soft calc(var(--duration-slowest) * 1.25) var(--ease-out)
+    both;
+  --lp-enter-copy: lp-fade calc(var(--duration-slowest) * 1.25) var(--ease-out)
+    calc(var(--lp-stagger) * 2) both;
+  --lp-enter-media: lp-fade calc(var(--duration-slowest) * 1.5) var(--ease-out)
+    calc(var(--lp-stagger) * 3) both;
+}

@@ -133,6 +133,17 @@ export interface JourneyCourseView {
    * worker deployment simply omits it and the head emits no `og:image`.
    */
   coverImageUrl?: string | null;
+  /**
+   * UPLOADED hero-image CDN URL (`courses.heroImageKey` → `lg.webp`), null
+   * when unset (Codex-490z7, A32). Rides the AWAITED envelope (Codex-61zsk.6
+   * · WP-6) so the hero `<img>` is in the SSR HTML for LCP, instead of only
+   * on the streamed `SellPreview.heroImageUrl`. UPLOAD ONLY — deliberately
+   * not the streamed field's full poster-frame fallback chain; see
+   * `@codex/shared-types` `JourneyCourseView.heroImageUrl` for the reasoning.
+   * OPTIONAL-additive: an older worker omits it and the hero keeps reading
+   * the streamed field.
+   */
+  heroImageUrl?: string | null;
 }
 
 export interface JourneyTestimonialView {
@@ -166,6 +177,13 @@ export interface JourneyCoursePage {
   course: JourneyCourseView;
   stages: JourneyStageView[];
   testimonials: JourneyTestimonialView[];
+  /**
+   * The CDN base a page-kit block resolves a page-image `ImageRef` against
+   * (`resolvePageImageUrl`, contract A3 · Codex-61zsk.10/.6) — the SAME
+   * `R2_PUBLIC_URL_BASE` `course.coverImageUrl`/`heroImageUrl` resolve
+   * against. Null with no configured base. OPTIONAL-additive.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 /** Studio home / index row, with `live` reporting rollups. */

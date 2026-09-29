@@ -11,8 +11,9 @@ import type {
   OrphanStatus,
 } from '@codex/database';
 
-import { and, eq, lt, schema, sql } from '@codex/database';
+import { and, eq, inArray, lt, schema, sql } from '@codex/database';
 import { BaseService } from '@codex/service-errors';
+import { pageIdOfPageImageKey } from './page-image-keys';
 
 export interface RecordOrphanInput {
   r2Key: string;
@@ -52,6 +53,21 @@ const MAX_CLEANUP_ATTEMPTS = 3;
  * Default batch size for cleanup operations
  */
 const DEFAULT_BATCH_SIZE = 50;
+
+/**
+ * How long a `page_image` orphan waits before the sweep may act on it.
+ *
+ * A page-image row is a CANDIDATE, not a verdict: it is written when an image
+ * is uploaded and again when a save drops it, and the sweep deletes the object
+ * only if no page references it by then ({@link
+ * OrphanedFileService.isPageImageReferenced}). The wait keeps that check from
+ * running while a reference is still on its way back — an undo in the editor,
+ * or an edit to a PUBLISHED page, which autosave never writes and which
+ * reaches the row only when the creator publishes it. A week of unused bytes
+ * costs next to nothing; deleting an image a page is about to show costs the
+ * creator their page.
+ */
+export const PAGE_IMAGE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export class OrphanedFileService extends BaseService {
   /**
@@ -127,24 +143,76 @@ export class OrphanedFileService extends BaseService {
    * Get pending orphans for cleanup
    *
    * Orders by orphanedAt (oldest first) to ensure FIFO processing.
-   * Only returns orphans with attempts < MAX_CLEANUP_ATTEMPTS.
+   * Only returns orphans with attempts < MAX_CLEANUP_ATTEMPTS, and a
+   * `page_image` orphan only once {@link PAGE_IMAGE_GRACE_MS} has passed.
    */
   async getPendingOrphans(
-    limit: number = DEFAULT_BATCH_SIZE
+    limit: number = DEFAULT_BATCH_SIZE,
+    now: Date = new Date()
   ): Promise<OrphanedFileRecord[]> {
+    const pageImagesDueBefore = new Date(now.getTime() - PAGE_IMAGE_GRACE_MS);
     const orphans = await this.db
       .select()
       .from(schema.orphanedImageFiles)
       .where(
         and(
           eq(schema.orphanedImageFiles.status, 'pending'),
-          lt(schema.orphanedImageFiles.cleanupAttempts, MAX_CLEANUP_ATTEMPTS)
+          lt(schema.orphanedImageFiles.cleanupAttempts, MAX_CLEANUP_ATTEMPTS),
+          // A `sql` fragment, not `or(...)`: drizzle types `or()` as
+          // `SQL | undefined`, and `and()` drops an undefined argument
+          // silently, which here would sweep page images with no wait.
+          sql`(${schema.orphanedImageFiles.imageType} <> 'page_image' OR ${schema.orphanedImageFiles.orphanedAt} < ${pageImagesDueBefore})`
         )
       )
       .orderBy(schema.orphanedImageFiles.orphanedAt)
       .limit(limit);
 
     return orphans as OrphanedFileRecord[];
+  }
+
+  /**
+   * Whether any landing page still references a page image — the check the
+   * sweep makes before it deletes one, and the only authority on it.
+   *
+   * The save-time diff that queues a page image cannot be: undo re-adds a key
+   * after the save that dropped it, a duplicated page renders its source's
+   * keys, and two overlapping saves diff against the same old row. So the
+   * question is asked again, of the rows as they are now, immediately before
+   * the delete.
+   *
+   * Searches the pages of the org that owns the key's page (the page id is
+   * part of the key), because that is where a legitimate reference can be:
+   * the page itself, or a page duplicated from it. Soft-deleted pages count,
+   * since a restore brings their images back. A key pasted into another org's
+   * page does not keep the image alive, and never gets it deleted either:
+   * only its own org's pages decide.
+   *
+   * @param baseKey - The base key a block stores (`ImageRef.key`), not an
+   *   object key
+   * @returns `true` when a page references it, and for a key whose page
+   *   cannot be read from it — a key this service cannot place is kept
+   */
+  async isPageImageReferenced(baseKey: string): Promise<boolean> {
+    const pageId = pageIdOfPageImageKey(baseKey);
+    if (!pageId) return true;
+
+    const owningOrg = this.db
+      .select({ organizationId: schema.landingPages.organizationId })
+      .from(schema.landingPages)
+      .where(eq(schema.landingPages.id, pageId));
+
+    const references = await this.db
+      .select({ id: schema.landingPages.id })
+      .from(schema.landingPages)
+      .where(
+        and(
+          inArray(schema.landingPages.organizationId, owningOrg),
+          sql`strpos(${schema.landingPages.sections}::text, ${baseKey}) > 0`
+        )
+      )
+      .limit(1);
+
+    return references.length > 0;
   }
 
   /**

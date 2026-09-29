@@ -10,13 +10,18 @@
  */
 
 import { APP_SUBDOMAINS, CACHE_PRESETS, COOKIES } from '@codex/constants';
-import type { Handle, HandleServerError } from '@sveltejs/kit';
+import type {
+  Handle,
+  HandleServerError,
+  HandleValidationError,
+} from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { nanoid } from 'nanoid';
 import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { isPublicCdnHost, tryServeCdnAsset } from '$lib/server/cdn-proxy';
+import { validationErrorFor } from '$lib/server/validation-error';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
 /**
@@ -303,3 +308,10 @@ export const handleError: HandleServerError = async ({ error, event }) => {
     code: 'INTERNAL_ERROR',
   };
 };
+
+/**
+ * A remote function's input failed its schema: say which part and why, not
+ * SvelteKit's bare "Bad Request" (see `validationErrorFor`).
+ */
+export const handleValidationError: HandleValidationError = ({ issues }) =>
+  validationErrorFor(issues);

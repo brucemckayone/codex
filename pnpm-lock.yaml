@@ -373,6 +373,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../database
+      '@codex/image-processing':
+        specifier: workspace:*
+        version: link:../image-processing
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability

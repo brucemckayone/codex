@@ -72,12 +72,19 @@ describe('sections array is capped', () => {
   });
 
   it('still accepts a REAL page — the largest stored today has four sections', () => {
-    const real = ['hero', 'ache', 'map', 'invite'].map((type, i) => ({
-      ...SECTION,
-      id: `sec-${i}`,
-      type,
-      variant: undefined,
-    }));
+    // v2 types (WP-9b): `problem`/`curriculum`/`pricing` are `ache`/`map`/
+    // `invite`'s v2 names (contract Appendix A.1) — `type` is now a closed v2
+    // enum on WRITE, so the legacy names themselves would 400 here; a page
+    // still carrying them is upgraded to these names on load before its next
+    // save (`kit/model/upgrade.ts`).
+    const real = ['hero', 'problem', 'curriculum', 'pricing'].map(
+      (type, i) => ({
+        ...SECTION,
+        id: `sec-${i}`,
+        type,
+        variant: undefined,
+      })
+    );
     const parsed = saveJourneyPageBodySchema.safeParse(body(real));
     expect(parsed.success).toBe(true);
   });

@@ -63,6 +63,19 @@
 @font-face {
   font-family: 'Inter-fallback';
   src: local('Arial');
+  font-weight: 400;
+  ascent-override: 90%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+  size-adjust: 107%;
+}
+
+/* Its bold twin: without one, a heading that forbids synthesis
+   (`font-synthesis: none`) renders the regular face while the webfont loads. */
+@font-face {
+  font-family: 'Inter-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT');
+  font-weight: 700;
   ascent-override: 90%;
   descent-override: 22%;
   line-gap-override: 0%;

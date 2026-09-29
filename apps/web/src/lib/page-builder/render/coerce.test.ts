@@ -8,14 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  aliasKeys,
-  asBool,
   asObjectArray,
-  asParagraphsFrom,
   asString,
-  asStringArray,
-  asStringFrom,
-  asStringsFrom,
   fieldBool,
   fieldString,
   SECTION_PROP_ALIASES,
@@ -28,21 +22,6 @@ describe('asString', () => {
     expect(asString({ x: '   ' }, 'x')).toBeUndefined();
     expect(asString({ x: 42 }, 'x')).toBeUndefined();
     expect(asString({}, 'x')).toBeUndefined();
-  });
-});
-
-describe('asStringArray', () => {
-  it('keeps only non-empty strings, trims, drops non-strings', () => {
-    expect(asStringArray({ x: ['a', ' b ', 3, '', null] }, 'x')).toEqual([
-      'a',
-      'b',
-    ]);
-  });
-
-  it('returns undefined for non-arrays or all-empty arrays', () => {
-    expect(asStringArray({ x: 'a' }, 'x')).toBeUndefined();
-    expect(asStringArray({ x: ['', '  '] }, 'x')).toBeUndefined();
-    expect(asStringArray({}, 'x')).toBeUndefined();
   });
 });
 
@@ -67,14 +46,8 @@ describe('asObjectArray', () => {
   });
 });
 
-describe('asBool / fieldBool', () => {
-  it('asBool honours booleans and the fallback', () => {
-    expect(asBool({ x: true }, 'x')).toBe(true);
-    expect(asBool({ x: 'true' }, 'x')).toBe(false);
-    expect(asBool({}, 'x', true)).toBe(true);
-  });
-
-  it('fieldBool is strict-true only', () => {
+describe('fieldBool', () => {
+  it('is strict-true only', () => {
     expect(fieldBool({ x: true }, 'x')).toBe(true);
     expect(fieldBool({ x: 'true' }, 'x')).toBe(false);
     expect(fieldBool({}, 'x')).toBe(false);
@@ -82,70 +55,14 @@ describe('asBool / fieldBool', () => {
 });
 
 // ── The builder→renderer bridge (Codex-tqr51) ────────────────────────────────
+//
+// `asStringFrom`/`asStringsFrom`/`asParagraphsFrom`/`aliasKeys` and their tests
+// were deleted with the legacy renderer (WP-9a) — their only callers were the
+// legacy sections and `JourneyRenderer`/`section-registry`. `SECTION_PROP_ALIASES`
+// itself stayed: `kit/model/legacy/prop-mappers.ts` and `render/editable.ts`
+// still read the table directly.
 
-describe('asStringFrom', () => {
-  it('takes the first non-empty key in preference order', () => {
-    expect(
-      asStringFrom({ ctaLabel: 'Go', button: 'Get started' }, [
-        'ctaLabel',
-        'button',
-      ])
-    ).toBe('Go');
-    // The real case: only the BUILDER's key is stored, so the alias must win.
-    expect(
-      asStringFrom({ button: 'Get started' }, ['ctaLabel', 'button'])
-    ).toBe('Get started');
-  });
-
-  it('skips blank and non-string values rather than stopping at them', () => {
-    expect(asStringFrom({ a: '   ', b: 42, c: 'ok' }, ['a', 'b', 'c'])).toBe(
-      'ok'
-    );
-    expect(asStringFrom({}, ['a', 'b'])).toBeUndefined();
-  });
-});
-
-describe('asStringsFrom', () => {
-  it('synthesises a list from discrete flat fields, in key order', () => {
-    expect(
-      asStringsFrom({ heading: 'H', body: 'B' }, ['heading', 'body'])
-    ).toEqual(['H', 'B']);
-    expect(asStringsFrom({ body: 'B' }, ['heading', 'body'])).toEqual(['B']);
-    expect(asStringsFrom({}, ['heading', 'body'])).toBeUndefined();
-  });
-});
-
-describe('asParagraphsFrom', () => {
-  it('splits a textarea string into paragraphs on any newline run', () => {
-    // The guide case: the builder writes ONE `body` textarea; the renderer reads
-    // `bio` as a string array, and `asStringArray` discarded the string outright,
-    // so the guide's entire biography rendered as nothing.
-    expect(
-      asParagraphsFrom({ body: 'One\n\nTwo\nThree' }, ['bio', 'body'])
-    ).toEqual(['One', 'Two', 'Three']);
-    expect(
-      asParagraphsFrom({ body: 'Just the one line' }, ['bio', 'body'])
-    ).toEqual(['Just the one line']);
-  });
-
-  it('handles CRLF and trims each paragraph', () => {
-    expect(asParagraphsFrom({ body: '  A  \r\n\r\n  B  ' }, ['body'])).toEqual([
-      'A',
-      'B',
-    ]);
-  });
-
-  it('prefers an earlier key and degrades to undefined', () => {
-    expect(
-      asParagraphsFrom({ bio: 'B1', body: 'B2' }, ['bio', 'body'])
-    ).toEqual(['B1']);
-    expect(asParagraphsFrom({ body: '   \n  \n ' }, ['body'])).toBeUndefined();
-    expect(asParagraphsFrom({ body: 42 }, ['body'])).toBeUndefined();
-    expect(asParagraphsFrom({}, ['body'])).toBeUndefined();
-  });
-});
-
-describe('SECTION_PROP_ALIASES / aliasKeys', () => {
+describe('SECTION_PROP_ALIASES', () => {
   it('covers all 11 catalogue types so a missing entry is visible, not silent', () => {
     expect(Object.keys(SECTION_PROP_ALIASES).sort()).toEqual(
       [
@@ -196,21 +113,5 @@ describe('SECTION_PROP_ALIASES / aliasKeys', () => {
     expect(SECTION_PROP_ALIASES.map.foot).toEqual(['foot', 'note']);
     expect(SECTION_PROP_ALIASES.guide.bio).toEqual(['bio', 'body']);
     expect(SECTION_PROP_ALIASES.guide.eyebrow).toEqual(['eyebrow', 'role']);
-  });
-
-  it('aliasKeys is total — an undeclared type or prop yields the prop itself', () => {
-    expect(aliasKeys('hero', 'ctaLabel')).toEqual(['ctaLabel', 'button']);
-    expect(aliasKeys('hero', 'headline')).toEqual(['headline']);
-    expect(aliasKeys('retreat-x', 'anything')).toEqual(['anything']);
-  });
-
-  it('resolves the golden page’s stored hero CTA through the alias', () => {
-    // End-to-end of the bridge: the golden page stores `button: "Get started"`,
-    // the component read only `ctaLabel`, and the served HTML showed the
-    // hardcoded 'Begin the journey'.
-    const stored = { headline: 'The ground', button: 'Get started' };
-    expect(asStringFrom(stored, aliasKeys('hero', 'ctaLabel'))).toBe(
-      'Get started'
-    );
   });
 });

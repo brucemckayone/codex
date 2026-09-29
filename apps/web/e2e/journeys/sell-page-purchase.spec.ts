@@ -30,7 +30,6 @@
 import { expect, test } from '@playwright/test';
 import {
   expectSellPageRendered,
-  forceRevealsIn,
   journeyFixture,
   journeyUrl,
 } from '../helpers/journeys';
@@ -49,7 +48,6 @@ test.describe('journey sell page · a purchasable course', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, PURCHASABLE));
     await expectSellPageRendered(page, PURCHASABLE);
-    await forceRevealsIn(page);
 
     const affordances = await page.evaluate(() => {
       const hrefs = (selector: string) =>
@@ -58,8 +56,12 @@ test.describe('journey sell page · a purchasable course', () => {
         );
       return {
         hero: hrefs('.hero__actions a[href*="/checkout"]'),
-        pill: hrefs('.floatcta a[href*="/checkout"]'),
-        invite: hrefs('[data-section-type="invite"] a[href*="/checkout"]'),
+        // `StickyCta` (kit) replaces `FloatingCta`/`.floatcta`; `.lp-sticky`.
+        pill: hrefs('.lp-sticky a[href*="/checkout"]'),
+        // `invite` renamed to `pricing` in the v2 kit (contract §2); the kit's
+        // `SectionShell` publishes the resolved type as `data-lp-type`, not
+        // the legacy renderer's `data-section-type`.
+        invite: hrefs('[data-lp-type="pricing"] a[href*="/checkout"]'),
       };
     });
 
@@ -103,7 +105,6 @@ test.describe('journey sell page · a purchasable course', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, PURCHASABLE));
     await expectSellPageRendered(page, PURCHASABLE);
-    await forceRevealsIn(page);
 
     await page.locator('.hero__actions a[href*="/checkout"]').first().click();
     // 30s, not the 5s `expect` default: the checkout is a separate route with its
@@ -141,17 +142,22 @@ test.describe('journey sell page · a course with no way in', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
     await expectSellPageRendered(page, NOT_PURCHASABLE);
-    await forceRevealsIn(page);
 
-    // Counted in the DOM rather than asserted `toBeHidden`: the pill is rendered
-    // parked off-screen and `inert` on a page that DOES sell, so "not visible"
-    // would pass for the wrong reason. The fix removes the element.
+    // The kit's `HeroBlock` renders `.hero__actions` UNCONDITIONALLY (it also
+    // holds the secondary link / watch button, neither gated on purchasability)
+    // — unlike the legacy `HeroSection`, which omitted the whole wrapper when it
+    // had nothing to hold. So the affordance under test is the checkout ANCHOR
+    // inside it, not the wrapper's mere existence. `StickyCta`, by contrast,
+    // still renders its root `<aside>` only `{#if cta.href}` — same
+    // conditionality as the legacy `.floatcta` — so counting the element itself
+    // still proves the negative there.
     const counts = await page.evaluate(() => ({
-      heroActions: document.querySelectorAll('.hero__actions').length,
-      pill: document.querySelectorAll('.floatcta').length,
+      heroCta: document.querySelectorAll('.hero__actions a[href*="/checkout"]')
+        .length,
+      pill: document.querySelectorAll('.lp-sticky').length,
     }));
     expect(
-      counts.heroActions,
+      counts.heroCta,
       'the hero is selling a course the checkout cannot sell'
     ).toBe(0);
     expect(
@@ -195,15 +201,14 @@ test.describe('journey sell page · a course with no way in', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(journeyUrl(baseURL as string, NOT_PURCHASABLE));
     await expectSellPageRendered(page, NOT_PURCHASABLE);
-    await forceRevealsIn(page);
 
     const checkoutLinks = await page.evaluate(() =>
       [...document.querySelectorAll('a[href*="/checkout"]')].map((element) => ({
         href: element.getAttribute('href'),
+        // `data-lp-type` (kit `SectionShell`), not the legacy `data-section-type`.
         section:
-          element
-            .closest('[data-section-type]')
-            ?.getAttribute('data-section-type') ?? 'page',
+          element.closest('[data-lp-type]')?.getAttribute('data-lp-type') ??
+          'page',
         text: (element.textContent ?? '').trim(),
       }))
     );

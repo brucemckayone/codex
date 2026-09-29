@@ -64,6 +64,14 @@ export interface BuilderContextInput {
   offer?: CourseOffer | null;
   /** Resolved sell-preview media, when the studio has it. */
   sellPreview?: SellPreview | null;
+  /**
+   * The page-image CDN base (contract A3), for a kit block previewed inside
+   * the studio to resolve its own `ImageRef`s. Defaults to null — WP-9 wires
+   * a real value in at the builder load (contract §3, "WP9 at the builder
+   * load"); until then the canvas renders every page-image block's designed
+   * empty state, same as an older worker deployment omitting the field.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 /** `EditorPracticeView` → the public `JourneyPracticeView` it is a superset of. */
@@ -161,5 +169,6 @@ export function builderSalesContext(
     // not a silently missing button on the canvas.
     purchasable: true,
     sellPreview: Promise.resolve(input.sellPreview ?? null),
+    mediaBaseUrl: input.mediaBaseUrl ?? null,
   };
 }

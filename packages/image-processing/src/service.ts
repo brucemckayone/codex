@@ -20,9 +20,11 @@ import {
   validateImageSignature,
 } from '@codex/validation';
 import type { OrphanedFileService } from './orphaned-file-service';
+import { pageImageKey, pageImageObjectKeys } from './page-image-keys';
 import { processImageVariants } from './processor';
 import {
   recordOrphansOrLog,
+  stillVariantKeys,
   uploadImageVariants,
   type VariantKeys,
   withDbUpdateOrphanCleanup,
@@ -105,19 +107,6 @@ async function validateImageFile(
 /** Helper: collect a `VariantKeys` object as a flat `string[]` in sm/md/lg order. */
 function variantKeyList(keys: VariantKeys): string[] {
   return [keys.sm, keys.md, keys.lg];
-}
-
-/**
- * The three variant keys under a still's BASE key (`categories/{id}/cover`,
- * `courses/{id}/hero`, ...). One definition, so the upload that writes the
- * objects and the cleanup that may delete them can never disagree on a key.
- */
-function stillVariantKeys(baseKey: string): VariantKeys {
-  return {
-    sm: `${baseKey}/sm.webp`,
-    md: `${baseKey}/md.webp`,
-    lg: `${baseKey}/lg.webp`,
-  };
 }
 
 /** Orphan classification for the four stills whose DB write the caller owns. */
@@ -753,5 +742,150 @@ export class ImageProcessingService extends BaseService {
       .update(schema.users)
       .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(schema.users.id, userId));
+  }
+
+  /**
+   * Process and store a PAGE IMAGE — free-placement uploads for the
+   * landing-page builder's blocks (Codex-61zsk.10, contract amendment A3).
+   *
+   * DELIBERATELY NOT ANOTHER STILL SLOT. `processCourseCover` /
+   * `processCourseHero` / `processCourseSignature` above each own exactly one
+   * deterministic key per course, so a re-upload overwrites in place and the
+   * caller persists the key to one named column. A page image has no column
+   * and no 1:1 slot: `imageId` is a FRESH uuid the caller mints per upload, so
+   * every call produces its own key and nothing is ever overwritten. A page
+   * may hold arbitrarily many, referenced from anywhere in its `sections`
+   * jsonb as an `ImageRef = { key, alt? }` (`props.image`, `props.background`,
+   * `items[].image`, ...) — this method has no idea which prop, or even which
+   * block, the caller will put the key into.
+   *
+   * Consequently this method has no `persistWithOrphanCleanup` counterpart:
+   * there is no column to write, so nothing a DB failure could roll back.
+   * Instead the three objects are recorded as PENDING `page_image` orphans
+   * the moment they land. That is what reclaims an upload no page ever
+   * references (the creator picked an image and then left): the sweep acts
+   * on a page image only after `PAGE_IMAGE_GRACE_MS`, and only if no page in
+   * its org still references it (`OrphanedFileService.isPageImageReferenced`),
+   * so recording an image that does get used is safe — it is retained, never
+   * deleted. `CourseJourneyService.saveJourneyPage` nominates the images a
+   * save drops the same way.
+   *
+   * Keys are namespaced by `pageId` AND `imageId` (`page-image-keys.ts`), so
+   * unlike every still above, replacing a value in a block means uploading a
+   * NEW image and writing its (different) key over the old one — the old
+   * key's bytes are untouched here and become the save-time diff's job to
+   * notice.
+   *
+   * @param pageId - Owning landing page (keys are namespaced under it)
+   * @param imageId - Caller-minted uuid; unique per upload, never reused or
+   *   overwritten
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the md CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `key` to address a specific variant — the same
+   *   convention `lib/page-builder/page-images.ts`'s `resolvePageImageUrl`
+   *   reproduces on the web side.
+   */
+  async processPageImage(
+    pageId: string,
+    imageId: string,
+    file: File
+  ): Promise<{
+    key: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only),
+    // same posture and same reason as every still above: `processImageVariants`
+    // decodes via Photon, which cannot rasterise SVG.
+    const { buffer } = await validateImageFile(file);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const key = pageImageKey(pageId, imageId);
+    const keys = stillVariantKeys(key);
+    const objectKeys = pageImageObjectKeys(key);
+
+    try {
+      await uploadImageVariants({
+        keys,
+        variants,
+        r2: this.r2Service,
+        failureLabel: 'Page image',
+        obs: this.obs,
+      });
+    } catch (error) {
+      // `uploadImageVariants` deletes nothing on a partial failure, which is
+      // right for a deterministic key: a retry re-puts the same three and
+      // converges. This key never converges. It is a fresh uuid nothing
+      // references, and a retry mints another, so whatever did land is
+      // removed here and anything that cannot be removed is queued.
+      await this.discardPageImageObjects(pageId, objectKeys);
+      throw error;
+    }
+
+    await this.recordPageImageObjects(pageId, objectKeys, 'page-image-upload');
+
+    return {
+      key,
+      // The md variant — a reasonable general-purpose default for an
+      // immediately-usable preview URL. A block that wants `sm`/`lg` resolves
+      // its own via `resolvePageImageUrl`, exactly as it would for any other
+      // stored `ImageRef`.
+      url: `${this.r2PublicUrlBase}/${keys.md}`,
+      size: variants.md.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
+   * Queue a page image's objects for the sweep, which keeps them for as long
+   * as a page references them (see {@link processPageImage}). Never throws.
+   */
+  private async recordPageImageObjects(
+    pageId: string,
+    r2Keys: string[],
+    context: string
+  ): Promise<void> {
+    if (!this.orphanedFileService) {
+      this.obs.warn('Page image not tracked for cleanup, no orphan service', {
+        context,
+        pageId,
+        r2Keys,
+      });
+      return;
+    }
+    await recordOrphansOrLog(
+      this.orphanedFileService,
+      r2Keys.map((r2Key) => ({
+        r2Key,
+        imageType: 'page_image' as const,
+        entityId: pageId,
+        entityType: 'landing_page' as const,
+      })),
+      this.obs,
+      context
+    );
+  }
+
+  /** Delete a failed upload's objects now; queue any delete that fails. */
+  private async discardPageImageObjects(
+    pageId: string,
+    r2Keys: string[]
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      r2Keys.map((r2Key) => this.r2Service.delete(r2Key))
+    );
+    const failedKeys = r2Keys.filter(
+      (_, i) => results[i]?.status === 'rejected'
+    );
+    if (failedKeys.length > 0) {
+      await this.recordPageImageObjects(
+        pageId,
+        failedKeys,
+        'page-image-upload-failed'
+      );
+    }
   }
 }

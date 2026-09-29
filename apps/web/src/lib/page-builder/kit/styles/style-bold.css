@@ -1,0 +1,55 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — BOLD (the default and the flagship)
+
+   The headline IS the hero. All of this Style's boldness is spent on TYPE:
+   the largest display size in the kit, leading under 1, hard edges, big
+   rectangular buttons. Everything else stays disciplined — no shadows, no
+   rounded cards, no decoration — so the type and the full-bleed colour bands
+   carry the page.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='bold'] {
+  --lp-size-display: calc(clamp(3.25rem, 0.5rem + 9.6cqi, 8.5rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(2.1rem, 0.9rem + 4.6cqi, 5rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.3rem, 1rem + 1.2cqi, 1.9rem) * var(--lp-scale));
+  /* Copy scaled to the type it sits under: a real lead, and body a step past
+     the other Styles' — supporting text is quiet by colour, never by size. */
+  --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.75cqi, 1.625rem) * var(--lp-scale));
+  --lp-size-body: calc(clamp(1.125rem, 1rem + 0.35cqi, 1.3125rem) * var(--lp-scale));
+  --lp-size-price: calc(clamp(3.4rem, 1.6rem + 6cqi, 6.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.6rem, 0.6rem + 7cqi, 7rem) * var(--lp-scale));
+
+  --lp-leading-display: 0.9;
+  --lp-leading-heading: 0.95;
+  --lp-leading-title: 1.1;
+  --lp-leading-lead: 1.35;
+
+  --lp-tracking-display: -0.035em;
+  --lp-tracking-heading: -0.03em;
+  --lp-tracking-title: -0.015em;
+  --lp-weight-label: var(--font-bold);
+
+  --lp-radius-card: var(--radius-none);
+  --lp-radius-media: var(--radius-none);
+  --lp-radius-button: var(--radius-none);
+  --lp-radius-chip: var(--radius-none);
+  --lp-rule: var(--border-width-thick);
+
+  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  --lp-button-pad: var(--space-8);
+  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
+  --lp-button-weight: var(--font-bold);
+  --lp-button-tracking: -0.01em;
+
+  --lp-pad-regular: clamp(var(--space-16), var(--space-6) + 7cqi, var(--space-32));
+  --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 10cqi, calc(var(--space-32) * 1.25));
+  --lp-container: 82rem;
+  --lp-measure-lead: 36ch;
+
+  /* Headline first, then everything it supports, then the image. */
+  --lp-enter-headline: lp-rise var(--duration-slowest) var(--ease-smooth) both;
+  --lp-enter-copy: lp-rise-soft var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 2) both;
+  --lp-enter-media: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 3) both;
+}

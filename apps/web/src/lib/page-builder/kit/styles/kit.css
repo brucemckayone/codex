@@ -1,0 +1,263 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAGE KIT — BASE TOKENS AND FRAME (contract §4, §6)
+
+   The `--lp-*` token system every primitive and block reads. These are the
+   neutral defaults; each Style (`style-<id>.css`) re-sets them on
+   `.lp[data-lp-style=…]`. Sizes are CONTAINER-relative (`cqi`) so a section
+   lays out by the width it is given — a 390px canvas frame gets the phone
+   layout even inside a desktop window — and scale with the brand's text scale.
+
+   Colour lives in `schemes.css`; nothing here names a colour.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp {
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-font-display: var(--font-heading);
+  --lp-font-body: var(--font-body, var(--font-sans));
+  --lp-scale: var(--text-scale, 1);
+
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 6.4cqi, 6.5rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 3.2cqi, 3.5rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1rem + 0.9cqi, 1.6rem) * var(--lp-scale));
+  /* Supporting text is quiet by colour and weight, never by size: body never
+     drops below 1.125rem, and the smallest line on a page is 0.9375rem. */
+  --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.5cqi, 1.5rem) * var(--lp-scale));
+  --lp-size-body: calc(clamp(1.125rem, 1.05rem + 0.2cqi, 1.25rem) * var(--lp-scale));
+  --lp-size-small: calc(clamp(1rem, 0.96rem + 0.1cqi, 1.0625rem) * var(--lp-scale));
+  --lp-size-label: calc(clamp(0.9375rem, 0.9rem + 0.08cqi, 1rem) * var(--lp-scale));
+  --lp-size-price: calc(clamp(2.75rem, 1.6rem + 4cqi, 4.75rem) * var(--lp-scale));
+  /* The closing call to action's heading: one step up from a section heading. */
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4.2cqi, 4.5rem) * var(--lp-scale));
+
+  --lp-leading-display: 1;
+  --lp-leading-heading: 1.05;
+  --lp-leading-title: 1.2;
+  --lp-leading-lead: 1.45;
+  --lp-leading-body: 1.6;
+
+  --lp-tracking-display: -0.025em;
+  --lp-tracking-heading: -0.02em;
+  --lp-tracking-title: -0.01em;
+  --lp-tracking-label: 0em;
+
+  /* A brand that set a heading weight keeps it in every Style. */
+  --lp-weight-display: var(--heading-weight, var(--font-bold));
+  --lp-weight-heading: var(--heading-weight, var(--font-bold));
+  --lp-weight-title: var(--heading-weight, var(--font-semibold));
+  --lp-weight-body: var(--body-weight, var(--font-normal));
+  --lp-weight-label: var(--font-semibold);
+  --lp-case-display: none;
+  --lp-case-label: none;
+  /* In em, so a lead's paragraphs part further than body copy's. */
+  --lp-paragraph-gap: 0.9em;
+  --lp-underline-offset: 0.3em;
+
+  /* ── eyebrow (optional label) ─────────────────────────────────────────── */
+  /* A NUMBER, not a colour: the fill is the eyebrow's own scheme's panel, and
+     a scheme token can only be read below a scheme element, never here. */
+  --lp-eyebrow-fill: 0;
+  --lp-eyebrow-pad: 0;
+  --lp-eyebrow-radius: 0;
+
+  /* ── shape ────────────────────────────────────────────────────────────── */
+  --lp-radius-card: var(--radius-lg);
+  --lp-radius-media: var(--radius-lg);
+  --lp-radius-button: var(--radius-md);
+  --lp-radius-chip: var(--radius-full);
+  --lp-border: var(--border-width);
+  --lp-rule: var(--border-width);
+
+  /* ── buttons ──────────────────────────────────────────────────────────── */
+  --lp-button-height: max(var(--tap-target-min), var(--space-12));
+  --lp-button-pad: var(--space-6);
+  /* Its own step: a button label follows the body only so far. */
+  --lp-button-size: calc(clamp(1.0625rem, 1rem + 0.15cqi, 1.125rem) * var(--lp-scale));
+  --lp-button-weight: var(--font-semibold);
+  --lp-button-tracking: 0em;
+
+  /* ── rhythm ───────────────────────────────────────────────────────────── */
+  --lp-pad-compact: clamp(var(--space-10), var(--space-6) + 3cqi, var(--space-16));
+  --lp-pad-regular: clamp(var(--space-16), var(--space-8) + 5cqi, var(--space-24));
+  --lp-pad-spacious: clamp(var(--space-20), var(--space-10) + 8cqi, var(--space-32));
+  --lp-container: 76rem;
+  --lp-measure: 62ch;
+  --lp-measure-lead: 44ch;
+  --lp-gutter: clamp(var(--space-4), 4.5cqi, var(--space-12));
+  --lp-gap: clamp(var(--space-6), var(--space-4) + 2cqi, var(--space-12));
+  --lp-stack: clamp(var(--space-4), var(--space-3) + 0.8cqi, var(--space-6));
+
+  /* ── media ────────────────────────────────────────────────────────────── */
+  --lp-media-scrim: color-mix(in oklab, var(--_scrim) 72%, transparent);
+
+  /* ── the one hero entrance (a Style names its keyframes) ──────────────── */
+  --lp-enter-headline: none;
+  --lp-enter-copy: none;
+  --lp-enter-media: none;
+  --lp-stagger: calc(var(--duration-fast) * 1.2);
+
+  position: relative;
+  isolation: isolate;
+  font-family: var(--lp-font-body);
+  font-weight: var(--lp-weight-body);
+  color: var(--color-text);
+  /* Clip, never hidden: no scroll container, so nothing breaks sticky. */
+  overflow-x: clip;
+}
+
+/* The query container sections measure against. The root is deliberately NOT
+   one: size containment implies layout containment, which makes an element the
+   containing block of its `position: fixed` descendants — the sticky CTA would
+   pin to the page instead of the viewport. It renders beside `.lp-page`. */
+.lp-page {
+  container-type: inline-size;
+}
+
+/* ── sections ────────────────────────────────────────────────────────────── */
+.lp-section {
+  container-type: inline-size;
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  padding-block: var(--lp-pad);
+  background: var(--lp-bg);
+  color: var(--lp-ink);
+  --lp-pad: var(--lp-pad-regular);
+}
+
+.lp-section[data-lp-spacing='compact'] {
+  --lp-pad: var(--lp-pad-compact);
+}
+
+.lp-section[data-lp-spacing='spacious'] {
+  --lp-pad: var(--lp-pad-spacious);
+}
+
+.lp-section:target,
+.lp-section[id] {
+  scroll-margin-top: var(--space-6);
+}
+
+/* Content column with full-bleed tracks either side: a child sits in the
+   container unless it asks for the edges with `.lp-bleed`. */
+.lp-inner {
+  display: grid;
+  grid-template-columns:
+    [bleed-start] minmax(var(--lp-gutter), 1fr)
+    [content-start] minmax(0, var(--lp-container))
+    [content-end] minmax(var(--lp-gutter), 1fr)
+    [bleed-end];
+  row-gap: var(--lp-gap);
+}
+
+.lp-inner > * {
+  grid-column: content;
+  min-width: 0;
+}
+
+.lp-inner > .lp-bleed {
+  grid-column: bleed;
+}
+
+.lp-page :focus-visible {
+  outline: var(--border-width-thick) solid var(--lp-focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── atmosphere — the SubscribeCTA recipe, CSS only (contract §4) ─────────
+   Glows are the brand mixed with WHITE, so a dark brand still reads as light
+   on a dark ground; never brand-into-transparent over a veil, which vanishes
+   on dark brands. Used on dark surfaces only: on a light one a glow is a
+   gradient wash, which the kit does not do. */
+.lp-atmos {
+  position: absolute;
+  inset: -15%;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--lp-atmos-strength, 0.42);
+  /* A block may move the lights off its words (`--lp-atmos-a/-b`). */
+  background:
+    radial-gradient(
+      ellipse 50% 60% at var(--lp-atmos-a, 20% 24%),
+      color-mix(in oklch, var(--lp-brand) 55%, white 45%) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 44% 56% at var(--lp-atmos-b, 82% 76%),
+      color-mix(in oklch, var(--lp-brand-2) 52%, white 45%) 0%,
+      transparent 60%
+    );
+  filter: blur(var(--blur-2xl));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lp:not([data-lp-still]) .lp-atmos[data-drift] {
+    animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth)
+      infinite alternate;
+  }
+}
+
+/* ── the entrance keyframes a Style can name ─────────────────────────────── */
+@keyframes lp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.35em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-rise-soft {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes lp-settle {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-reveal {
+  from {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-2%, 2%, 0) scale(1.05);
+  }
+  100% {
+    transform: translate3d(2%, -1%, 0) scale(1.02);
+  }
+}

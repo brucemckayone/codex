@@ -40,9 +40,25 @@
  * here, deliberately, and the allowed import direction (editor UI may import the
  * public tree, never the reverse) is what a round-trip guard would use to pin the
  * two together — see the handoff on {@link editFieldLabel}.
+ *
+ * `editFieldName` USED TO ALSO import `../section-catalog` for the SECTION half
+ * of the name (`findSectionDefinition(type)?.label`, e.g. "The ache"). That
+ * pulled the entire legacy catalogue — every section's copy, variants and
+ * design defaults — into the PUBLIC bundle for a string only ever read inside
+ * the STUDIO canvas (`editable: false` on the public page returns `{}` before
+ * any label is built). Dropped (Codex-61zsk.6 · WP-6): the section half is now
+ * the plain humanised type id (`humaniseKey('ache')` → "Ache"), which is a
+ * strictly worse label for the ELEVEN LEGACY sections that still call
+ * `editFieldAttrs` directly today ("Ache — Heading" vs "The ache — Heading")
+ * and no change at all for the kit, whose own `editAttrs`
+ * (`kit/primitives/edit.ts`) already OVERWRITES this module's `aria-label` with
+ * one built from its own `DEFINITIONS[type].label` — the two keys collide in
+ * an object spread and the kit's own always wins, so the catalogue lookup this
+ * module used to do for the kit was dead code, computed and discarded on every
+ * edit. The legacy section components retire in WP-9; this is that trade,
+ * taken deliberately rather than silently.
  */
 import type { HTMLAttributes } from 'svelte/elements';
-import { findSectionDefinition } from '../section-catalog';
 
 /** What a section's `onEdit` prop accepts: one `props` key, one plain string. */
 export type EditFieldCommit = (key: string, value: string) => void;
@@ -147,14 +163,14 @@ export function editFieldLabel(type: string, key: string): string {
 /**
  * The accessible name for one editable field: which section, then which field.
  *
- * The section half comes from the catalogue the studio itself draws the rail from
- * (`Hero`, `The ache`, `Intro video`), so the name a screen reader reads is the name
- * on screen. An unknown type degrades to the raw type rather than dropping the
- * qualifier, because "Heading" alone on a page of eleven sections names nothing.
+ * The section half is the plain humanised type id ("Ache", "Intro video") —
+ * see the module header for why this dropped the legacy catalogue's own
+ * labels ("The ache") rather than importing it for a string the kit path
+ * never uses. Still never dropped, because "Heading" alone on a page of
+ * eleven sections names nothing.
  */
 export function editFieldName(type: string, key: string): string {
-  const label = findSectionDefinition(type)?.label ?? type;
-  return `${label} — ${editFieldLabel(type, key)}`;
+  return `${humaniseKey(type)} — ${editFieldLabel(type, key)}`;
 }
 
 /**
@@ -190,6 +206,54 @@ function insertTextAtCaret(el: HTMLElement, text: string): void {
 }
 
 /**
+ * How many characters a field may hold, counted the way it is STORED. A
+ * multi-paragraph field is stored with a blank line between paragraphs, which
+ * `textContent` does not show, so it brings its own measure.
+ */
+export interface EditLimit {
+  maxLength: number;
+  measure?: (el: HTMLElement) => number;
+}
+
+/** Characters currently selected inside `el` (0 for a caret, or outside it). */
+function selectedLength(el: HTMLElement): number {
+  const selection = el.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0) return 0;
+  const range = selection.getRangeAt(0);
+  return el.contains(range.commonAncestorContainer)
+    ? range.toString().length
+    : 0;
+}
+
+/** How many more characters `el` can take, counting a selection as replaced. */
+function roomLeft(el: HTMLElement, limit: EditLimit): number {
+  const length = limit.measure
+    ? limit.measure(el)
+    : (el.textContent ?? '').length;
+  return limit.maxLength - (length - selectedLength(el));
+}
+
+/**
+ * Stop typing at the field's limit, the way the inspector's `maxlength` does.
+ *
+ * Without it the canvas took any length and the block cut the text at render,
+ * so the end of what a creator typed vanished on blur while the store and the
+ * server kept all of it (Codex-61zsk review). A paste is trimmed in
+ * {@link pastePlainText}. IME composition cannot be cancelled from
+ * `beforeinput`, which is why the commit clamps as well.
+ */
+function holdAtLimit(event: InputEvent, limit: EditLimit): void {
+  const { inputType } = event;
+  if (!inputType.startsWith('insert') || inputType === 'insertFromPaste') {
+    return;
+  }
+  const adding = event.data?.length ?? 1;
+  if (adding > roomLeft(event.currentTarget as HTMLElement, limit)) {
+    event.preventDefault();
+  }
+}
+
+/**
  * Take a paste as PLAIN TEXT, and make it produce exactly ONE store update.
  *
  * `oninput` below is the seam's only writer, and both paths here go through it:
@@ -204,13 +268,19 @@ function insertTextAtCaret(el: HTMLElement, text: string): void {
  * and the field keeps what it had, unmarked-dirty. Refusing the paste is the safe
  * failure here — the alternative is the injection this whole handler exists to stop.
  */
-function pastePlainText(event: ClipboardEvent): void {
+function pastePlainText(event: ClipboardEvent, limit?: EditLimit): void {
   // FIRST, and whatever happens next: the default action is a rich-HTML insert.
   event.preventDefault();
 
   const el = event.currentTarget as HTMLElement | null;
-  const text = event.clipboardData?.getData('text/plain') ?? '';
-  if (!el || text.length === 0) return;
+  const pasted = event.clipboardData?.getData('text/plain') ?? '';
+  if (!el || pasted.length === 0) return;
+
+  // A paste past the field's limit keeps what fits, like a `maxlength` input.
+  const text = limit
+    ? pasted.slice(0, Math.max(0, roomLeft(el, limit)))
+    : pasted;
+  if (text.length === 0) return;
 
   const doc = el.ownerDocument;
   if (
@@ -265,7 +335,8 @@ export function editFieldAttrs(
   type: string,
   key: string,
   editable: boolean,
-  onEdit?: EditFieldCommit
+  onEdit?: EditFieldCommit,
+  limit?: EditLimit
 ): HTMLAttributes<HTMLElement> {
   if (!editable) return {};
 
@@ -275,8 +346,11 @@ export function editFieldAttrs(
     role: 'textbox',
     'aria-label': editFieldName(type, key),
     'data-field': key,
-    oninput: (e) =>
-      onEdit?.(key, (e.currentTarget as HTMLElement).textContent ?? ''),
-    onpaste: pastePlainText,
+    ...(limit ? { onbeforeinput: (e) => holdAtLimit(e, limit) } : {}),
+    oninput: (e) => {
+      const text = (e.currentTarget as HTMLElement).textContent ?? '';
+      onEdit?.(key, limit ? text.slice(0, limit.maxLength) : text);
+    },
+    onpaste: (e) => pastePlainText(e, limit),
   };
 }

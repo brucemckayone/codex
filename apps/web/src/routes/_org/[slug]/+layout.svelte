@@ -233,10 +233,12 @@
     if (darkOverrides) injectDarkTokenOverrides(el, darkOverrides);
   });
 
-  // Build Google Fonts URL from selected font families
+  // Build Google Fonts URL from the brand's font families. An org that never
+  // picked a font still RENDERS in the tokens' default, 'Inter' (typography.css),
+  // so load it — otherwise every such org falls back to the one-weight
+  // Arial-based 'Inter-fallback' face and a heading can never be bold.
   const googleFontsUrl = $derived.by(() => {
-    const families = [...new Set([brandFontBody, brandFontHeading].filter(Boolean))] as string[];
-    if (families.length === 0) return undefined;
+    const families = [...new Set([brandFontBody ?? 'Inter', brandFontHeading ?? 'Inter'])];
     const params = families
       .map((f) => `family=${encodeURIComponent(f)}:wght@400;500;600;700`)
       .join('&');

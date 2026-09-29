@@ -26,15 +26,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PageSection } from '@codex/shared-types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  flushSync,
-  mount,
-  unmount,
-} from '$tests/utils/component-test-utils.svelte';
-import type { JourneyCoursePage } from './journey-queries';
-import JourneyRenderer from './render/JourneyRenderer.svelte';
 
 vi.mock('$app/state', () => ({
   page: { url: new URL('http://of-blood-and-bones.lvh.me:3000/journeys/demo') },
@@ -42,23 +34,6 @@ vi.mock('$app/state', () => ({
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(join(HERE, rel), 'utf8');
-
-/**
- * Every `.svelte` file in the section render tree, so the axis-emission guard can
- * be stated over the WHOLE surface rather than over a hand-kept list a new
- * component would quietly miss. Enumerated rather than named for the same reason
- * the guard derives the emitter from its markup: the invariant has to survive
- * someone moving the seam.
- *
- * There is one tree now. `render-edit/` was the second, and it is deleted — the
- * canvas and the public page mount the same `SectionFrame`.
- */
-const SECTION_TREE_FILES: string[] = ['render', 'render/sections'].flatMap(
-  (dir) =>
-    readdirSync(join(HERE, dir))
-      .filter((name) => name.endsWith('.svelte'))
-      .map((name) => `${dir}/${name}`)
-);
 
 /**
  * Every `.svelte` file under `src`, and a reader for them.
@@ -78,27 +53,6 @@ const ALL_SVELTE = walkSvelte('');
 const readSrc = (rel: string): string => readFileSync(join(SRC, rel), 'utf8');
 
 const PALETTE = read('journey-palette.css');
-
-/**
- * All the section CSS, for "the ladder is not restated here".
- *
- * This used to be `render-edit/journey-sections.css` plus its nine per-type
- * partials. That tree is deleted, and section CSS now lives in
- * `journey-sections-shared.css` and in each public component's Svelte `<style>`
- * block — so the guard is stated over BOTH. Leaving the components out would be
- * the vacuous version of it: they are where new section CSS actually gets
- * written, and the shared file alone declares very little.
- *
- * `journey-design.css` is deliberately NOT folded in. `surface: tint|panel|invert`
- * re-point `--jp-ink` there ON PURPOSE — that re-point is what makes `invert`
- * cycle-free (research §2.4) — so including it would assert against the design
- * instead of against divergence.
- */
-const SECTION_STYLE_SOURCES = [
-  'journey-sections-shared.css',
-  ...SECTION_TREE_FILES.filter((f) => f.startsWith('render/sections/')),
-];
-const SECTIONS_ALL = SECTION_STYLE_SOURCES.map(read).join('\n');
 
 /** Comment-free view, for anything that locates a SELECTOR by substring. */
 const PALETTE_CODE = PALETTE.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -155,12 +109,9 @@ describe('journey palette — one derivation, three surfaces', () => {
     // is consequently declared ONCE here.
     expect(declarationsOf(PALETTE, '--jp-pole-a')).toHaveLength(2);
     expect(declarationsOf(PALETTE, '--jp-ink')).toEqual(['var(--jp-pole-a)']);
-    // Guards the guard: an empty source set would make the next three
-    // assertions pass trivially. Eleven section components + the shared file.
-    expect(SECTION_STYLE_SOURCES).toHaveLength(12);
-    expect(declarationsOf(SECTIONS_ALL, '--jp-pole-a')).toEqual([]);
-    expect(declarationsOf(SECTIONS_ALL, '--jp-ink')).toEqual([]);
-    expect(declarationsOf(SECTIONS_ALL, '--jp-heading')).toEqual([]);
+    // The "never leaks into section CSS" half of this guard (SECTIONS_ALL,
+    // eleven components + the shared file) was deleted with the legacy renderer
+    // (WP-9a) — there is no more section CSS for the axis ladder to leak into.
   });
 
   it('derives the ladder input from the brand BACKGROUND, not the brand primary, in BOTH themes', () => {
@@ -298,41 +249,12 @@ describe('journey palette — one derivation, three surfaces', () => {
     // since none of them parse CSS. These files reach their consumers as
     // Svelte/Vite `import` statements, which have no such ordering rule.
     // Reintroducing `@import` would reintroduce the failure mode.
-    for (const rel of [
-      'journey-palette.css',
-      'journey-design.css',
-      'journey-sections-shared.css',
-    ]) {
-      const code = read(rel).replace(/\/\*[\s\S]*?\*\//g, '');
-      expect(code, rel).not.toContain('@import');
-    }
-  });
-
-  it('imports the axis substrate in the very component that emits the axes', () => {
-    // The invariant: whatever emits `data-jp-*` must also carry the stylesheet
-    // that reads it, so no surface can end up with the markup and not the rules.
-    // Without it, F-B2's design panel would have a control with no CSS behind it
-    // in the one place a creator is looking while they use it.
-    //
-    // This asserts the RELATIONSHIP rather than a filename. It used to name
-    // `render/SectionRenderer.svelte` on one side and the canvas's own
-    // stylesheet on the other, because there were two section trees; the emitter
-    // now lives in one place (`SectionFrame`, mounted by both the public
-    // renderer and the studio canvas), and deriving the file from the emission
-    // means a future move of the seam fails here instead of silently shipping
-    // attributes with no rules.
-    const frame = read('render/SectionFrame.svelte');
-    expect(frame).toContain('data-jp-');
-    expect(frame).toContain("import '../journey-design.css'");
-    expect(frame).toContain("import '../journey-sections-shared.css'");
-
-    // And nothing ELSE may emit the axes without importing the substrate.
-    const emitters = SECTION_TREE_FILES.filter((file) =>
-      read(file).includes('data-jp-width=')
-    );
-    expect(emitters, 'exactly one component emits the axis attributes').toEqual(
-      ['render/SectionFrame.svelte']
-    );
+    // `journey-design.css` and `journey-sections-shared.css` were deleted with
+    // the legacy renderer (WP-9a) — the nine-axis system they carried, and the
+    // `SectionFrame` that emitted `data-jp-*`, no longer exist. This file
+    // remains because checkout and the member dashboard import it directly.
+    const code = read('journey-palette.css').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(code, 'journey-palette.css').not.toContain('@import');
   });
 });
 
@@ -450,10 +372,10 @@ describe('the ladder re-derives PER SECTION, not once per page', () => {
   });
 
   it('re-derives the SEMANTIC tokens per section too, or the axis is inert', () => {
-    // Contract A11: `--jp-*` appears 0x in `render/sections/*` — the public
-    // sections speak `--color-*`. Without the section twin, `surface: invert`
-    // would flip the `--jp-*` ladder and leave every section reading the PAGE's
-    // colours, i.e. the axis would do nothing in the one tree it exists for.
+    // Contract A11: the public sections speak `--color-*`, never `--jp-*`
+    // directly. Without the section twin, `surface: invert` would flip the
+    // `--jp-*` ladder and leave every section reading the PAGE's colours, i.e.
+    // the axis would do nothing in the one tree it exists for.
     for (const semantic of [
       '--color-heading',
       '--color-text',
@@ -530,133 +452,11 @@ describe('member dashboard consumes the shared palette (Codex-4i8x5)', () => {
   });
 });
 
-const coursePage = (
-  brandOverrides: JourneyCoursePage['page']['brandOverrides'] = null,
-  sections: PageSection[] = []
-): JourneyCoursePage => ({
-  page: {
-    id: 'p1',
-    organizationId: 'o1',
-    publishedAt: '2026-07-29T00:00:00.000Z',
-    pageType: 'course',
-    slug: 'demo',
-    title: 'Demo course',
-    status: 'published',
-    subjectType: 'course',
-    subjectId: 'c1',
-    brandOverrides,
-    sections,
-  },
-  course: {
-    id: 'c1',
-    slug: 'demo',
-    title: 'Demo course',
-    kicker: 'A course',
-    lede: 'A short lede.',
-    status: 'published',
-    priceCents: 2499,
-    stageCount: 0,
-    practiceCount: 0,
-  },
-  stages: [],
-  testimonials: [],
-});
-
-/**
- * THE MOUNT IMPORT IS STATIC (line 37), AND THAT IS THE WHOLE MITIGATION
- * (Codex-prblb). Do not turn it back into `await import()` inside `render`.
- *
- * This block used to carry `{ timeout: 45000 }` against a 15000ms global budget
- * (`vite.config.ts` `testTimeout`), justified by measurements of the first mount:
- * 13190ms on a cold Vite cache, 6641ms warmest, 33138ms on a loaded box. Those
- * numbers were real, but the diagnosis was one level off. The cost is Vite
- * TRANSFORMING the `JourneyRenderer` graph — `render/section-registry.ts`
- * statically imports all eleven section components — and a dynamic
- * `await import()` inside the test body charged that transform to the TEST's
- * timer. Nothing about the mount itself is slow.
- *
- * Re-measured on a loaded box (8 cores, load average 13–46), same file,
- * back-to-back:
- *   dynamic import inside `render`   first mount 12065 / 13556 / 4890 ms
- *   static import at module scope    first mount    28 /    35 ms
- * The transform cost does not vanish, it moves to `collect` (1.4→6.5s), which no
- * per-test timeout governs — which is exactly where the four other files that
- * pull the same eleven-component graph have always paid it
- * (render/SectionRenderer.svelte.test.ts, render/brand-overrides.test.ts,
- * components/page-builder/canvas-public-parity.svelte.test.ts and
- * preset-emission.svelte.test.ts all import it statically and all pass at 15000ms).
- * So the override was covering a self-inflicted charge, not a slow assertion.
- *
- * NOT a weakened test: every assertion below is unchanged, and the graph is still
- * fully transformed and mounted. The PRODUCTION cost of those eleven static
- * imports is separately measured and still open as Codex-ug311 — 171,088 B raw
- * (77,990 JS + 93,098 CSS) shipped eagerly to the public sell page — and this
- * change neither fixes nor hides it.
- */
-describe('JourneyRenderer (mount)', () => {
-  afterEach(() => {
-    document.body.innerHTML = '';
-  });
-
-  /** Elements whose class attribute contains the given class as an exact token. */
-  const withClass = (cls: string): Element[] =>
-    [...document.body.querySelectorAll('[class]')].filter((el) =>
-      (el.getAttribute('class') ?? '').split(/\s+/).includes(cls)
-    );
-
-  const render = (page: JourneyCoursePage) => {
-    const component = mount(JourneyRenderer, {
-      target: document.body,
-      props: { coursePage: page, sellPreview: Promise.resolve(null) },
-    });
-    flushSync();
-    return component;
-  };
-
-  it('puts the ladder on the wrapper and the re-points on a DESCENDANT', async () => {
-    const component = render(coursePage());
-
-    const base = withClass('journey-palette');
-    const page = withClass('journey-palette--page');
-    expect(base).toHaveLength(1);
-    expect(page).toHaveLength(1);
-
-    // The whole point: different elements, and the modifier is INSIDE the base
-    // so it inherits an already-resolved `--jp-ink`.
-    expect(page[0]).not.toBe(base[0]);
-    expect(base[0].contains(page[0])).toBe(true);
-
-    unmount(component);
-  });
-
-  it('never carries both palette classes on one element', async () => {
-    const component = render(coursePage());
-
-    const both = [...document.body.querySelectorAll('[class]')].filter((el) => {
-      const tokens = (el.getAttribute('class') ?? '').split(/\s+/);
-      return (
-        tokens.includes('journey-palette') &&
-        tokens.includes('journey-palette--page')
-      );
-    });
-    expect(both).toEqual([]);
-
-    unmount(component);
-  });
-
-  it('still injects per-page brand overrides onto the wrapper', async () => {
-    // The overrides were always computed and injected correctly — the bug was
-    // that `.journey-page` overwrote them one level down. Assert they survive.
-    const component = render(coursePage({ backgroundColor: '#F3F0E7' }));
-
-    const [base] = withClass('journey-palette');
-    expect(base.getAttribute('style')).toContain('--brand-bg');
-    expect(base.getAttribute('style')).toContain('#F3F0E7');
-    expect(base.hasAttribute('data-org-brand')).toBe(true);
-
-    unmount(component);
-  });
-});
+// `JourneyRenderer (mount)` (the DOM-level checks that the palette classes land
+// on the right elements) was deleted with the legacy renderer (WP-9a) — its
+// `coursePage()` fixture had no other caller. The static-vs-dynamic-import
+// performance note it carried (Codex-prblb) no longer applies to any surviving
+// test in this file.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // `--jp-on-ember` — the on-accent label, and the @supports mirror that pins it

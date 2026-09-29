@@ -34,9 +34,9 @@ describe('brandOverridesToCssVars', () => {
     expect(vars['--brand-bg']).toBe('#0b0b0b');
   });
 
-  it('maps numeric radius + density inputs', () => {
+  it('maps numeric radius + density inputs (radius as a rem length, like the org layout)', () => {
     const vars = brandOverridesToCssVars({ radius: 0.75, density: 1.1 });
-    expect(vars['--brand-radius']).toBe('0.75');
+    expect(vars['--brand-radius']).toBe('0.75rem');
     expect(vars['--brand-density']).toBe('1.1');
   });
 
@@ -47,6 +47,22 @@ describe('brandOverridesToCssVars', () => {
     });
     expect(vars['--brand-font-heading']).toBe('"Playfair Display"');
     expect(vars['--brand-font-body']).toBe('Inter');
+  });
+
+  it('carries a page brand colour into dark mode unless the page sets its own dark value', () => {
+    const carried = brandOverridesToCssVars({
+      primaryColor: '#1f6f5c',
+      backgroundColor: '#fafafa',
+    });
+    expect(carried['--brand-color-dark']).toBe('#1f6f5c');
+    // A light background is never mirrored into dark mode.
+    expect(carried).not.toHaveProperty('--brand-bg-dark');
+
+    const explicit = brandOverridesToCssVars({
+      primaryColor: '#1f6f5c',
+      darkOverrides: { primaryColor: '#7fd1bd' },
+    });
+    expect(explicit['--brand-color-dark']).toBe('#7fd1bd');
   });
 
   it('emits dark colour variants under the -dark suffix', () => {
@@ -86,6 +102,45 @@ describe('brandOverridesToCssVars', () => {
     } as BrandTokenOverrides);
     expect(vars).not.toHaveProperty('--brand-color');
   });
+
+  describe('keeps every value inside its own declaration', () => {
+    it.each([
+      ['a second declaration', 'red; position: fixed; inset: 0'],
+      ['a fetched url', 'url(https://pub-x.r2.dev/p.png)'],
+      ['a block', 'red} body{display:none'],
+      ['an escape', 'red\\3b position: fixed'],
+      ['markup', '<b>red</b>'],
+      ['a newline', 'red\nposition: fixed'],
+    ])('drops a value carrying %s', (_label, value) => {
+      const vars = brandOverridesToCssVars({ primaryColor: value });
+      expect(vars).not.toHaveProperty('--brand-color');
+      expect(Object.values(vars).join(' ')).not.toContain(value);
+    });
+
+    it('drops a token whose NAME would inject', () => {
+      const vars = brandOverridesToCssVars({
+        tokenOverrides: {
+          'x: y; position: fixed; --z': 'red',
+          'heading-weight': '400',
+        },
+      });
+      expect(Object.keys(vars)).toEqual(['--brand-heading-weight']);
+    });
+
+    it('keeps the colours, families and numbers the brand controls write', () => {
+      expect(
+        brandOverridesToCssVars({
+          primaryColor: 'oklch(0.62 0.19 35 / 90%)',
+          fontHeading: 'Playfair Display',
+          radius: 0.5,
+        })
+      ).toMatchObject({
+        '--brand-color': 'oklch(0.62 0.19 35 / 90%)',
+        '--brand-font-heading': '"Playfair Display"',
+        '--brand-radius': '0.5rem',
+      });
+    });
+  });
 });
 
 describe('brandOverridesToStyleAttr', () => {
@@ -100,7 +155,7 @@ describe('brandOverridesToStyleAttr', () => {
       radius: 0.5,
     });
     expect(style).toContain('--brand-color: #3355ff');
-    expect(style).toContain('--brand-radius: 0.5');
+    expect(style).toContain('--brand-radius: 0.5rem');
     expect(style).toMatch(/;\s/); // multiple declarations joined by "; "
   });
 });

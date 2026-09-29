@@ -18,20 +18,6 @@ export function asString(props: SectionProps, key: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-/** An array of non-empty strings (drops non-string / blank entries), or undefined. */
-export function asStringArray(
-  props: SectionProps,
-  key: string
-): string[] | undefined {
-  const value = props[key];
-  if (!Array.isArray(value)) return undefined;
-  const out = value
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  return out.length > 0 ? out : undefined;
-}
-
 /**
  * An array of plain objects, each mapped through `map` and kept only when the
  * mapper returns a non-null value. Returns undefined when nothing survives, so
@@ -60,45 +46,17 @@ export function asObjectArray<T>(
  *
  * The page builder + `section-catalog` `defaultProps` author sections as FLAT,
  * numbered keys (`{kicker, heading, body}`, `{q1, a1, q2, a2, …}`), while the
- * public sections below read the richer array shapes (`beats[]`, `items[]`,
+ * public sections read the richer array shapes (`beats[]`, `items[]`,
  * `testimonials[]`). Nothing ever reconciled the two contracts, so a creator
  * could fill a section in the builder, publish, and watch it vanish from the
  * public page (the array was never written → the section self-hid).
  *
- * These three readers close that gap at the READ boundary: the array shape still
- * wins when present, and the flat keys are the fallback. No migration, no change
- * to the sections' own prop contracts, and existing pages start rendering on the
- * next load.
+ * This reader closes that gap at the READ boundary for the numbered-group shape.
+ * Its siblings for the single-string and string-array shapes (`asStringFrom`,
+ * `asStringsFrom`) were deleted with the legacy renderer (WP-9a); this one
+ * stayed because `kit/model/legacy/read-helpers.ts` still calls it to read old
+ * rows' numbered groups during the v1→v2 upgrade.
  */
-
-/** First non-empty string among `keys`, in preference order. */
-export function asStringFrom(
-  props: SectionProps,
-  keys: readonly string[]
-): string | undefined {
-  for (const key of keys) {
-    const value = asString(props, key);
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
-
-/**
- * Every non-empty string at `keys`, in order — used to synthesise a short list
- * from discrete flat fields (e.g. ache `beats` ← `[heading, body]`). Undefined
- * when none are present, so callers keep their `{#if list}` self-hide guard.
- */
-export function asStringsFrom(
-  props: SectionProps,
-  keys: readonly string[]
-): string[] | undefined {
-  const out: string[] = [];
-  for (const key of keys) {
-    const value = asString(props, key);
-    if (value !== undefined) out.push(value);
-  }
-  return out.length > 0 ? out : undefined;
-}
 
 /**
  * Collect numbered sibling keys into an array of records — the builder's
@@ -130,34 +88,6 @@ export function asNumberedGroups<T>(
 }
 
 /**
- * The first non-empty string among `keys`, split into PARAGRAPHS — the bridge for
- * a builder `textarea` field whose renderer counterpart is a string array.
- *
- * Added for `guide`: the builder's field is labelled "Bio" and writes the flat
- * string `body`, while `GuideSection` reads `bio` as a `string[]`. `asStringArray`
- * discards a plain string outright, so the guide's ENTIRE biography rendered as
- * nothing — the most severe of the seven copy-loss cases in `Codex-tqr51`.
- *
- * Splits on any run of newlines, so a creator who presses Enter once between
- * paragraphs gets two paragraphs and one who presses it twice gets the same. A
- * single-line value yields a one-entry array, which is exactly what the array
- * shape means. Undefined when nothing survives, so callers keep their `{#if}`
- * self-hide guard.
- */
-export function asParagraphsFrom(
-  props: SectionProps,
-  keys: readonly string[]
-): string[] | undefined {
-  const text = asStringFrom(props, keys);
-  if (text === undefined) return undefined;
-  const out = text
-    .split(/[\r\n]+/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  return out.length > 0 ? out : undefined;
-}
-
-/**
  * THE BUILDER→RENDERER KEY MAP — the read-boundary reconciliation, in one place.
  *
  * Verified against the database (audit §B): the builder's names ARE what is stored
@@ -175,8 +105,12 @@ export function asParagraphsFrom(
  * WHY A TABLE and not 15 inline literals: seven component work-packages read
  * these keys in seven worktrees. A hand-copied preference list drifts, and a
  * drifted list is invisible — it degrades to the hardcoded fallback rather than
- * failing. One table also gives `section-fields.test.ts` a machine-readable
- * source for the round-trip guard ("every writable key is read").
+ * failing.
+ *
+ * Read by `kit/model/legacy/prop-mappers.ts` and `render/editable.ts` — both
+ * survived the legacy renderer's deletion (WP-9a); `aliasKeys()`, the wrapper
+ * function that used to read this table for the legacy sections, did not (its
+ * only callers were `JourneyRenderer`/`section-registry`, deleted with them).
  *
  * NOT here, deliberately:
  *   - `invite.price` — pricing comes ONLY from `JourneySalesContext.offer`
@@ -222,25 +156,6 @@ export const SECTION_PROP_ALIASES: Readonly<
     priceNote: ['priceNote', 'risk'],
   },
 };
-
-/**
- * The preference list for one section type's prop — the {@link SECTION_PROP_ALIASES}
- * entry, or just the prop's own name when no alias is declared. Total, so a call
- * site never has to branch on whether an alias exists.
- */
-export function aliasKeys(type: string, prop: string): readonly string[] {
-  return SECTION_PROP_ALIASES[type]?.[prop] ?? [prop];
-}
-
-/** A boolean prop with an explicit default (non-boolean values fall back). */
-export function asBool(
-  props: SectionProps,
-  key: string,
-  fallback = false
-): boolean {
-  const value = props[key];
-  return typeof value === 'boolean' ? value : fallback;
-}
 
 /** Field-level string reader for the object-array mappers above. */
 export function fieldString(
