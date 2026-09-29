@@ -104,6 +104,31 @@
     calc(var(--lp-stagger) * 3) both;
 }
 
+/* ── a long headline comes down, character by character ─────────────────── */
+/* At full size a headline runs the poster past the first screen from 85
+   characters and, in long words, the cover from 115. Past C characters it
+   falls as (C / length)^p, from the length HeroBlock sets on the layout's
+   words, `--lp-heading-chars`, so every headline up to the field's longest
+   (120) ends, lede and buttons with it, above a 1440 × 900 fold with no
+   word split, in Archivo Black and Syne: C and p fitted, 1% to spare, under
+   the largest scale measured to hold each length. Up to C the full size
+   stands. A browser without `pow()` fails the test and keeps the full size,
+   as before; the test names a real property, because a custom one takes
+   any value. An unset length counts as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(110 / var(--lp-heading-chars, 120), 1.34));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='hero']
+      .hero-poster:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(73 / var(--lp-heading-chars, 120), 0.66));
+    }
+  }
+}
+
 /* ── the shapes: a different arrangement band to band ────────────────────── */
 /* The layer reaches past the band, so the shapes (sized by the band's width,
    placed against the layer) peek in from its edges and leave the words in

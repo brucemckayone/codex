@@ -958,3 +958,63 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       progressive-enhancement rule);
     - Bold, Path and Studio draw the same plain veil, so they still show the grey band. Opting
       them in is one line each, plus a measurement (filed as Codex-61zsk.35).
+- **X34 · 2026-09-29 · orchestrator + V5 · A hero headline is sized continuously by its length
+  (Codex-61zsk.34).** The owner's decision, verbatim: "we move to co timuous layout scalle use
+  subagents preserve context do this before pushing prs". It replaces X27's and X31's steps as
+  the primary scale. They were one shared line for every layout, and the size jumped as a
+  creator typed past it.
+  - **The signal.** HeroBlock sets the drawn headline's length (the course title when the heading
+    is empty) as `--lp-heading-chars` on each layout's words root. The poster's root is inside
+    HeroPoster, so for the poster the property sits on a plain box around it. Codex-61zsk.36 moves
+    it to a HeroPoster prop.
+  - **The scale.** Per Style and layout, at ≥ 56rem, on the same parent the steps use:
+    `<base> * min(1, pow(C / var(--lp-heading-chars, 120), p))`.
+    - It sits inside `@supports (line-height: pow(2, 0.5))`, a probe on a real property; a
+      custom-property probe always passes. A browser without `pow()` keeps X27/X31's steps, which
+      stay as the fallback.
+    - The continuous selector (1,5,0) beats the steps' (1,4,0).
+    - An unset length counts as 120, the smallest size.
+  - **The fit.**
+    - B(n) is the largest scale that ends within the 900px fold with 0 split words. It was found
+      by binary search, as the minimum over brands 0 and 3 and over two headline families: F1 is
+      V3's headline, and F2 is the same with longer words.
+    - Each curve sits under 0.99 · B(n), moves at most 3% per character, and has the most area
+      over 20–120 characters.
+    - Gap to the boundary: at least 1.0–2.5%. The largest one-character move: 1.9%.
+  - **28 rules across all 8 Styles** (C / p, with the layout's base where it isn't 1):
+
+    | Style | statement | split | cover | centered | poster |
+    |---|---|---|---|---|---|
+    | Bold | 50 / .54 | 31 / .36 (.7) | 19 / .39 | 57 / .55 (.84) | steps |
+    | Poster | 56 / .46 | 29 / .28 (.7) | 27 / .40 | 75 / .88 (.84) | steps |
+    | Cinematic | 85 / .39 | 78 / .51 (.7) | 45 / .38 (card 53 / .43, .82) | 110 / 1.96 (.84) | steps |
+    | Clean | — | 79 / .39 (.8) | 85 / .49 | — | 70 / .47 |
+    | Soft | — | — | 110 / 1.34 | — | 73 / .66 |
+    | Path | — | 91 / .32 (.7) | 70 / .40 | — | 33 / .26 |
+    | Studio | — | — | 72 / .38 | — | 42 / .29 |
+    | Quiet | 97 / .26 | 72 / .35 (.7) | 74 / .68 | 109 / .66 (.84) | 25 / .26 |
+
+  - **The three stepped posters keep their steps** (Bold, Poster and Cinematic). Their limit is the
+    longest word beside the picture, not the headline's length. A length-only curve that never
+    splits a word lost to the steps at most lengths. A word-length signal belongs to
+    Codex-61zsk.33. The structural test pins them as stepped only.
+  - **Smaller than today's step at some lengths.** In each case today's step was either tight or
+    splitting long words:
+    - Bold statement at 115–120 characters (−11%);
+    - Bold cover at 48–64 (−11% at 64, where today ended at 895 of 900);
+    - Cinematic cover at 46–64 (−12.5%).
+
+    Never smaller: Poster split, Cinematic statement and split.
+  - **Measured,** over 35 layout variants:
+    - 0 past the fold and 0 split words;
+    - the size never grows with length;
+    - geometry is identical up to each layout's C;
+    - 390: 7,888 of 7,888 rows identical;
+    - 1440, layouts without a rule: 2,968 rows identical;
+    - the stepped posters: 732 rows identical.
+  - **Known gaps:**
+    - a poster's lede can still run under its picture's foot. The cause is HeroPoster's
+      negative float margin, which predates X34. Its rows went 22 → 16, and 2 of those 16 are
+      new, at 120 characters (Codex-61zsk.36);
+    - not measured: 1024 wide, containers of 50–56rem, the public page's header, and the editor
+      canvas.

@@ -96,6 +96,48 @@
     calc(var(--lp-stagger) * 5) both;
 }
 
+/* ── a long headline comes down, character by character ─────────────────── */
+/* At full size a headline runs the hero past the first screen from 45
+   characters in the poster (where a long word also splits beside the
+   picture), 80 in the cover, 85 in the split, 110 in the statement and, in
+   long words, 115 in the centred hero. Past C characters it falls as
+   (C / length)^p, from the length HeroBlock sets on the layout's words,
+   `--lp-heading-chars`, so every headline up to the field's longest (120)
+   ends, lede and buttons with it, above a 1440 × 900 fold with no word
+   split, in Archivo Black and Syne: C and p fitted, 1% to spare, under the
+   largest scale measured to hold each length. Up to C the full size stands.
+   A browser without `pow()` fails the test and keeps the full size, as
+   before; the test names a real property, because a custom one takes any
+   value. An unset length counts as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
+      .hero-statement:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(97 / var(--lp-heading-chars, 120), 0.26));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.7 * min(1, pow(72 / var(--lp-heading-chars, 120), 0.35)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(74 / var(--lp-heading-chars, 120), 0.68));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
+      .hero-centered:has(> .hero__headline) {
+      --lp-display-scale: calc(0.84 * min(1, pow(109 / var(--lp-heading-chars, 120), 0.66)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-section[data-lp-type='hero']
+      .hero-poster:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(25 / var(--lp-heading-chars, 120), 0.26));
+    }
+  }
+}
+
 /* ── one hairline between two plain sections ─────────────────────────────── */
 /* Across the content column, at the top of the lower one — room does the
    rest. Only real sections (the editor's colour tiles are `.lp-section`s

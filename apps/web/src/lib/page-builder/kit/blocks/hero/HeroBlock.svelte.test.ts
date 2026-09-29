@@ -265,7 +265,7 @@ describe('HeroBlock', () => {
     expect(edits).toEqual([['heading', 'New headline']]);
   });
 
-  describe('a medium or long headline (Codex-61zsk.23, Codex-61zsk.30)', () => {
+  describe('a medium or long headline (Codex-61zsk.23, .30, .34)', () => {
     const LONG =
       'Twenty quiet minutes every morning, for six weeks, until calm is simply how you begin';
     const MEDIUM = 'Twenty minutes a morning, for a calmer and steadier you';
@@ -275,7 +275,8 @@ describe('HeroBlock', () => {
     // The element each layout sets its display scale on: a Style steps a
     // headline down with `<parent>:has(> .hero__headline[data-medium])` (or
     // `[data-long]`), so the poster's picture — which drops by one headline
-    // line — steps with it.
+    // line — steps with it. Its continuous scale is computed there too, from
+    // `--lp-heading-chars`, so that must be set on the parent or above it.
     const PARENT: Record<string, string> = {
       statement: 'hero-statement',
       split: 'hero-split__copy',
@@ -326,6 +327,60 @@ describe('HeroBlock', () => {
       unmount(app);
       await render({}, { context: sampleContext({ course: { title: LONG } }) });
       expect(marks()).toEqual(['data-long']);
+    });
+
+    // The nearest `--lp-heading-chars` at or above an element: the value a
+    // rule on that element computes with.
+    const charsAt = (element: Element | null | undefined) => {
+      for (let node = element; node; node = node.parentElement) {
+        const value =
+          node instanceof HTMLElement
+            ? node.style.getPropertyValue('--lp-heading-chars')
+            : '';
+        if (value) return value;
+      }
+      return null;
+    };
+
+    // Where each layout carries it: on its own root, and nowhere else. The
+    // poster's root is HeroPoster's, so a plain box round it carries it.
+    const ROOT: Record<string, string> = {
+      statement: 'hero-statement',
+      split: 'hero-split',
+      cover: 'hero-cover__copy',
+      centered: 'hero-centered',
+    };
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: gives its scaled parent the drawn headline’s length, character by character', async (layout) => {
+      for (const heading of ['Find your steady ground', MEDIUM, LONG]) {
+        if (app) unmount(app);
+        await render({ heading }, { layout });
+        const parent = headline()?.parentElement;
+        expect(parent?.classList.contains(PARENT[layout])).toBe(true);
+        expect(charsAt(parent), `${heading.length} characters`).toBe(
+          String(heading.length)
+        );
+        const carriers = [
+          ...document.body.querySelectorAll<HTMLElement>('*'),
+        ].filter((node) => node.style.getPropertyValue('--lp-heading-chars'));
+        expect(carriers).toHaveLength(1);
+        if (layout === 'poster')
+          expect(
+            carriers[0].firstElementChild?.classList.contains('hero-poster')
+          ).toBe(true);
+        else expect(carriers[0].classList.contains(ROOT[layout])).toBe(true);
+      }
+    });
+
+    it('counts the course title when the headline is left empty', async () => {
+      for (const title of [MEDIUM, LONG]) {
+        if (app) unmount(app);
+        await render({}, { context: sampleContext({ course: { title } }) });
+        expect(document.body.querySelector('h1')?.textContent).toBe(title);
+        expect(charsAt(headline()?.parentElement)).toBe(String(title.length));
+      }
     });
   });
 

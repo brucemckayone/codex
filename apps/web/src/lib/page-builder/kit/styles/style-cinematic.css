@@ -161,6 +161,52 @@
   }
 }
 
+/* ── the size follows the headline ───────────────────────────────────────── */
+/* Where the browser can compute it, the steps above give way to a size that
+   follows the headline character by character, so it never jumps as a
+   creator types: full size up to C characters, then (C / length)^p, from
+   the length HeroBlock sets on the layout's words, `--lp-heading-chars`.
+   C and p are fitted, 1% to spare, under the largest scale measured to hold
+   every length from 20 to 120, lede and buttons with it, above a 1440 × 900
+   fold with no word split, in Archivo Black and Syne. The cover's two
+   arrangements part here: the pictured cover holds its full size to 45
+   characters, the opening card (0.82, above) to 53. The centred hero, which
+   the steps leave at its size, keeps it to 110, past which a headline in
+   long words ran below the fold. The section type in the
+   selector lifts each rule over both steps. A browser without `pow()` fails
+   the test and keeps the steps; it would read the formula as an invalid
+   size and drop the display to the body's. The test names a real property,
+   because a custom one takes any value. An unset length counts as the
+   longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+      .hero-statement:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(85 / var(--lp-heading-chars, 120), 0.39));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.7 * min(1, pow(78 / var(--lp-heading-chars, 120), 0.51)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy[data-lp-on-media]:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(45 / var(--lp-heading-chars, 120), 0.38));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline) {
+      --lp-display-scale: calc(0.82 * min(1, pow(53 / var(--lp-heading-chars, 120), 0.43)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+      .hero-centered:has(> .hero__headline) {
+      --lp-display-scale: calc(0.84 * min(1, pow(110 / var(--lp-heading-chars, 120), 1.96)));
+    }
+  }
+}
+
 /* Each card is a plate with a rim. Over the org's shader the smoked card
    stands clear on its own; over the glow that stands in for it (no preset, a
    page's own colours, the editing canvas, every thumbnail) it is the ground

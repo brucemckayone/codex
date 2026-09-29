@@ -184,6 +184,43 @@
   }
 }
 
+/* ── the size follows the headline ───────────────────────────────────────── */
+/* Where the browser can compute it, the two steps above give way to a size
+   that follows the headline character by character, so it never jumps as a
+   creator types. HeroBlock sets the length it draws, `--lp-heading-chars`,
+   on the layout's words. Each layout keeps its full size up to C characters
+   and past them falls as (C / length)^p: C and p fitted, 1% to spare, under
+   the largest scale measured to hold every length from 20 to 120, lede and
+   buttons with it, above a 1440 × 900 fold with no word split, in Archivo
+   Black and Syne. The section type in the selector lifts each rule over both
+   steps. A browser without `pow()` fails the test and keeps the steps; it
+   would read the formula as an invalid size and drop the display to the
+   body's. The test names a real property, because a custom one takes any
+   value. An unset length counts as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-statement:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(50 / var(--lp-heading-chars, 120), 0.54));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.7 * min(1, pow(31 / var(--lp-heading-chars, 120), 0.36)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(19 / var(--lp-heading-chars, 120), 0.39));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-centered:has(> .hero__headline) {
+      --lp-display-scale: calc(0.84 * min(1, pow(57 / var(--lp-heading-chars, 120), 0.55)));
+    }
+  }
+}
+
 /* Every other headline lifts the same way. The kit's `rise` is a fade under a
    short lift — on every section heading, the generic fade-up (03 §6) — so a
    heading the stage armed through that hook takes Bold's keyframes instead:

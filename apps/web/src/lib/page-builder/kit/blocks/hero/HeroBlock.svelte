@@ -20,7 +20,10 @@
   A medium or a long headline is marked `data-medium` / `data-long` (the
   kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
   Style whose display would make it a wall steps it down on the headline's
-  parent, `<parent>:has(> .hero__headline[data-medium])`.
+  parent, `<parent>:has(> .hero__headline[data-medium])`. The layout's words
+  also carry the drawn headline's length, `--lp-heading-chars`, so a Style
+  can scale it character by character on that parent where the browser can
+  compute it (`pow()`); the two marks are then its fallback.
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
@@ -44,6 +47,7 @@
   const content = $derived(heroDefinition.coerce(props));
   const heading = $derived(content.heading ?? context.course.title);
   const length = $derived(headingLength(heading));
+  const chars = $derived(heading.length);
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
   let watching = $state<PreviewMedia | null>(null);
@@ -168,23 +172,32 @@
       {/if}
     </div>
   {/if}
-  <div class="hero-cover__copy" data-lp-on-media={coverOwnsBand ? '' : undefined}>
+  <div
+    class="hero-cover__copy"
+    data-lp-on-media={coverOwnsBand ? '' : undefined}
+    style:--lp-heading-chars={chars}
+  >
     {@render copy('start')}
     {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
   </div>
 {:else if layout === 'poster'}
   <!-- With no still known as it draws, the picture's place is held (the clip
-       or the plate fills it), so nothing moves when the stream settles. -->
-  <HeroPoster
-    still={settled.still}
-    clip={settled.clip}
-    reserve={!syncStill && mode !== 'none'}
-    {alt}
-    {copy}
-    watch={posterWatch}
-  />
+       or the plate fills it), so nothing moves when the stream settles. The
+       poster's own box is the headline's parent, where a Style scales it;
+       this plain box only hands it the headline's length, and the section's
+       grid places it as it placed the poster. -->
+  <div style:--lp-heading-chars={chars}>
+    <HeroPoster
+      still={settled.still}
+      clip={settled.clip}
+      reserve={!syncStill && mode !== 'none'}
+      {alt}
+      {copy}
+      watch={posterWatch}
+    />
+  </div>
 {:else if layout === 'split'}
-  <div class="hero-split">
+  <div class="hero-split" style:--lp-heading-chars={chars}>
     <div class="hero-split__copy">{@render copy('start')}</div>
     {#if mode !== 'none'}
       <div class="hero-split__media hero__enter-m">
@@ -197,7 +210,7 @@
     {/if}
   </div>
 {:else if layout === 'centered'}
-  <div class="hero-centered">{@render copy('center')}</div>
+  <div class="hero-centered" style:--lp-heading-chars={chars}>{@render copy('center')}</div>
   {#if mode !== 'none'}
     <div class="hero-centered__media hero__enter-m">
       {#await context.sellPreview}
@@ -208,7 +221,7 @@
     </div>
   {/if}
 {:else}
-  <div class="hero-statement">{@render copy('start')}</div>
+  <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
   {#await context.sellPreview}
     {#if syncStill}
       <div class="hero-statement__media hero__enter-m">
