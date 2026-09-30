@@ -4,19 +4,23 @@
   One quote and who said it. `grid` and `quiet` set it in the body face to be
   read; `lead` and `monument` set it like a heading, a step smaller the more it
   says, so a long quote stays a readable measure and a short one fills its
-  stage. The opening mark hangs outside the text's edge so the words line up;
-  the monument stands its mark above it instead.
+  stage. `wall` sets it by its length within a narrow tile: a short quote, or
+  the `featured` one, in the display face; a long one in the body face. The
+  opening mark hangs outside the text's edge so the words line up; the
+  monument stands its mark above it instead.
 -->
 <script lang="ts">
   import type { Testimonial } from './voices';
 
   interface Props {
     voice: Testimonial;
-    size?: 'grid' | 'quiet' | 'lead' | 'monument';
+    size?: 'grid' | 'quiet' | 'lead' | 'monument' | 'wall';
     centred?: boolean;
+    /** `wall` only: the featured tile's quote, set large whatever its length. */
+    featured?: boolean;
   }
 
-  const { voice, size = 'grid', centred = false }: Props = $props();
+  const { voice, size = 'grid', centred = false, featured = false }: Props = $props();
 </script>
 
 <figure
@@ -24,6 +28,7 @@
   data-size={size}
   data-length={voice.length}
   data-centred={centred ? '' : undefined}
+  data-featured={featured ? '' : undefined}
 >
   <blockquote class="voice__quote"><p>{voice.quote}</p></blockquote>
   {#if voice.name || voice.detail}
@@ -140,6 +145,32 @@
 
   .voice[data-size='monument'] p::after {
     content: no-close-quote;
+  }
+
+  /* ── wall: set by its length, in a narrow tile ─────────────────────────── */
+  .voice[data-size='wall'][data-length='long'] p {
+    font-size: var(--lp-size-body);
+    line-height: var(--lp-leading-body);
+  }
+
+  /* A short quote, and the featured one, take the display face: the few
+     words that land hardest take the most room. */
+  .voice[data-size='wall']:is([data-length='short'], [data-featured]) p {
+    font-family: var(--lp-font-display);
+    font-size: var(--lp-size-title);
+    font-weight: var(--lp-weight-title);
+    font-synthesis: none;
+    line-height: var(--lp-leading-title);
+    letter-spacing: var(--lp-tracking-title);
+    text-wrap: balance;
+    text-indent: -0.42em;
+  }
+
+  .voice[data-size='wall'][data-featured]:not([data-length='long']) p {
+    font-size: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+    font-weight: var(--lp-weight-heading);
+    line-height: var(--lp-leading-heading);
+    letter-spacing: var(--lp-tracking-heading);
   }
 
   .voice[data-centred] {

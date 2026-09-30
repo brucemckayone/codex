@@ -1,23 +1,36 @@
 <!--
   @component HeroBlock
 
-  The page's promise and its first way in. Four layouts:
+  The page's promise and its first way in. Five layouts:
     statement — the headline IS the hero; the image runs full width below it
     split     — words and image side by side (half-bleed in Bold)
-    cover     — the image fills the band; luminous words over a scrim
+    cover     — the image fills the band; luminous words over a scrim. On a
+                Moving background with no image, the band is the section's:
+                the org's shader (or its glow) under the scheme's own veil
     centered  — centred words over a wide image
+    poster    — the headline at full size set round a picture that runs off
+                the band's edge (HeroPoster)
 
   The one sanctioned fallback in the kit: an empty headline renders the course
   title. Media arrives on the streamed `sellPreview`; each layout holds its
   space while it loads. Structure is identical in every Style — the Style
   changes it through tokens and a few `[data-lp-style]` rules — so switching
   Style never re-mounts the block.
+
+  A medium or a long headline is marked `data-medium` / `data-long` (the
+  kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
+  Style whose display would make it a wall steps it down on the headline's
+  parent, `<parent>:has(> .hero__headline[data-medium])`. The layout's words
+  also carry the drawn headline's length, `--lp-heading-chars`, so a Style
+  can scale it character by character on that parent where the browser can
+  compute it (`pow()`); the two marks are then its fallback.
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
   import { resolvePageImageUrl } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
+  import { headingLength } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -26,11 +39,15 @@
   import Text from '../../primitives/Text.svelte';
   import WatchButton from '../../primitives/WatchButton.svelte';
   import { heroDefinition } from './definition';
+  import HeroPoster from './HeroPoster.svelte';
+  import { settled as settledValue } from './settled.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
 
   const content = $derived(heroDefinition.coerce(props));
   const heading = $derived(content.heading ?? context.course.title);
+  const length = $derived(headingLength(heading));
+  const chars = $derived(heading.length);
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
   let watching = $state<PreviewMedia | null>(null);
@@ -66,6 +83,21 @@
   function watch(clip: PreviewMedia) {
     if (!edit) watching = clip;
   }
+
+  // The streamed preview once it settles, for the two layouts whose shape
+  // depends on whether there is media at all (cover, poster) — read in place,
+  // never through `{#await}` (`settled.svelte.ts`). Until it settles, and on
+  // the server, the media is the synchronous still.
+  const preview = $derived(settledValue(context.sellPreview));
+  const settled = $derived<HeroMedia>(
+    preview === undefined ? { still: syncStill, clip: null } : pick(preview)
+  );
+  const hasMedia = $derived(Boolean(settled.still || settled.clip));
+  // A cover with nothing to show on a Moving background leaves the band to
+  // the section: the org's shader (or the glow standing in for it) under the
+  // scheme's own veil and ink. Otherwise it draws its own band — the image,
+  // or its glow — under the media colours.
+  const coverOwnsBand = $derived(section.scheme !== 'atmosphere' || hasMedia);
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
@@ -74,7 +106,11 @@
       <Eyebrow text={content.eyebrow} type="hero" {edit} />
     </div>
   {/if}
-  <div class="hero__headline hero__enter-h">
+  <div
+    class="hero__headline hero__enter-h"
+    data-medium={length === 'medium' ? '' : undefined}
+    data-long={length === 'long' ? '' : undefined}
+  >
     <Heading
       level={section.headingLevel}
       size="display"
@@ -122,33 +158,46 @@
   {/if}
 {/snippet}
 
+{#snippet posterWatch()}{@render watchControl(settled)}{/snippet}
+
 {#if layout === 'cover'}
-  <div class="hero-cover lp-bleed" data-lp-on-media>
-    <div class="hero-cover__media hero__enter-m">
-      {#await context.sellPreview}
-        {#if syncStill}
-          <Media image={syncStill} priority {alt} />
-        {:else}
-          <span class="lp-atmos" aria-hidden="true"></span>
-        {/if}
-      {:then preview}
-        {@const media = pick(preview)}
-        {#if media.still || media.clip}
-          <Media image={media.still} clip={media.clip} priority {alt} />
-        {:else}
-          <span class="lp-atmos" data-drift aria-hidden="true"></span>
-        {/if}
-      {/await}
+  <!-- Only the media bleeds (03 X10): the words keep the content column, so
+       a Style's atmosphere panel can hold them. -->
+  {#if coverOwnsBand}
+    <div class="hero-cover__media lp-bleed hero__enter-m" data-lp-on-media>
+      {#if hasMedia}
+        <Media image={settled.still} clip={settled.clip} priority {alt} />
+      {:else}
+        <span class="lp-atmos" data-drift aria-hidden="true"></span>
+      {/if}
     </div>
-    <div class="hero-cover__copy">
-      {@render copy('start')}
-      {#await context.sellPreview then preview}
-        <div class="hero__enter-c">{@render watchControl(pick(preview))}</div>
-      {/await}
-    </div>
+  {/if}
+  <div
+    class="hero-cover__copy"
+    data-lp-on-media={coverOwnsBand ? '' : undefined}
+    style:--lp-heading-chars={chars}
+  >
+    {@render copy('start')}
+    {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
+  </div>
+{:else if layout === 'poster'}
+  <!-- With no still known as it draws, the picture's place is held (the clip
+       or the plate fills it), so nothing moves when the stream settles. The
+       poster's own box is the headline's parent, where a Style scales it;
+       this plain box only hands it the headline's length, and the section's
+       grid places it as it placed the poster. -->
+  <div style:--lp-heading-chars={chars}>
+    <HeroPoster
+      still={settled.still}
+      clip={settled.clip}
+      reserve={!syncStill && mode !== 'none'}
+      {alt}
+      {copy}
+      watch={posterWatch}
+    />
   </div>
 {:else if layout === 'split'}
-  <div class="hero-split">
+  <div class="hero-split" style:--lp-heading-chars={chars}>
     <div class="hero-split__copy">{@render copy('start')}</div>
     {#if mode !== 'none'}
       <div class="hero-split__media hero__enter-m">
@@ -161,7 +210,7 @@
     {/if}
   </div>
 {:else if layout === 'centered'}
-  <div class="hero-centered">{@render copy('center')}</div>
+  <div class="hero-centered" style:--lp-heading-chars={chars}>{@render copy('center')}</div>
   {#if mode !== 'none'}
     <div class="hero-centered__media hero__enter-m">
       {#await context.sellPreview}
@@ -172,7 +221,7 @@
     </div>
   {/if}
 {:else}
-  <div class="hero-statement">{@render copy('start')}</div>
+  <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
   {#await context.sellPreview}
     {#if syncStill}
       <div class="hero-statement__media hero__enter-m">
@@ -297,23 +346,44 @@
     }
   }
 
+  /* From there until the words' column is as wide as a phone (it reaches
+     30rem at about 69–71rem), the column is narrower than one — the editor's
+     Tablet frame, 820px, is in between — so its buttons keep ButtonRow's
+     phone rule: they share the row, or each takes a full row, and a
+     link-styled way in keeps its width. Never a ragged stack, in any Style.
+     ButtonRow measures the section, so it cannot see this column. */
+  @container (50rem <= width < 70rem) {
+    .hero-split__copy :global(.lp-actions__row) {
+      justify-self: stretch;
+    }
+
+    .hero-split__copy :global(.lp-actions__row > .lp-button) {
+      flex: 1 1 auto;
+    }
+
+    .hero-split__copy :global(.lp-actions__row > .lp-button[data-variant='quiet']),
+    :global(.lp[data-lp-style='bold'])
+      .hero-split__copy
+      :global(.lp-actions__row > .lp-button[data-variant='secondary']) {
+      flex: 0 0 auto;
+    }
+  }
+
   /* ── cover ─────────────────────────────────────────────────────────────── */
-  .hero-cover {
-    position: relative;
-    display: grid;
-    grid-template-columns: inherit;
+  /* Two layers in one row of the section's grid, each through the band's own
+     padding: the media edge to edge behind, the words in the content column. */
+  .hero-cover__media,
+  .hero-cover__copy {
+    grid-row: 1;
     margin-block: calc(-1 * var(--lp-pad));
-    background: var(--lp-bg);
-    color: var(--lp-ink);
-    isolation: isolate;
   }
 
   /* With no image the glow IS the hero: stronger, and lit opposite the words. */
   .hero-cover__media {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
+    position: relative;
     display: grid;
+    background: var(--lp-bg);
+    isolation: isolate;
     --lp-atmos-strength: 0.7;
     --lp-atmos-a: 78% 30%;
     --lp-atmos-b: 34% 92%;
@@ -325,20 +395,22 @@
 
   .hero-cover__copy {
     position: relative;
-    grid-column: content;
     display: grid;
     align-content: end;
     gap: var(--lp-stack);
     max-inline-size: 60rem;
     min-block-size: clamp(32rem, 56cqi, 48rem);
     padding-block: calc(var(--lp-pad) * 1.5) var(--lp-pad);
+    color: var(--lp-ink);
+    isolation: isolate;
   }
 
   /* A scrim shaped to the WORDS: every line sits on at least 72% of the scrim
      colour however the headline wraps, and it fades out to the right and at
      the top so the rest of the image stays bright. It starts at the band's
-     left edge (100cqi is the section), so it never shows a seam. */
-  .hero-cover__copy::before {
+     left edge (100cqi is the section), so it never shows a seam. Only over
+     the cover's own band: on a Moving background the section's veil does it. */
+  .hero-cover__copy[data-lp-on-media]::before {
     content: '';
     position: absolute;
     z-index: -1;

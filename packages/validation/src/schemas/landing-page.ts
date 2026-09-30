@@ -21,7 +21,16 @@ import { z } from 'zod';
 // ─── Enum twins of ids.ts ──────────────────────────────────────────────────
 
 /** A page's Style — one complete, brand-driven design system. */
-export const PAGE_STYLE_IDS = ['bold', 'clean', 'soft', 'cinematic'] as const;
+export const PAGE_STYLE_IDS = [
+  'bold',
+  'clean',
+  'soft',
+  'cinematic',
+  'path',
+  'poster',
+  'studio',
+  'quiet',
+] as const;
 export type PageStyleId = (typeof PAGE_STYLE_IDS)[number];
 
 /** A section's colour scheme — each derived from the org brand at render time. */
@@ -31,6 +40,7 @@ export const COLOUR_SCHEME_IDS = [
   'contrast',
   'brand',
   'accent',
+  'atmosphere',
 ] as const;
 export type ColourSchemeId = (typeof COLOUR_SCHEME_IDS)[number];
 
@@ -44,20 +54,22 @@ export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
  * Twin of `ids.ts` `SECTION_LAYOUTS` — `ids.parity.test.ts` asserts equality.
  */
 export const SECTION_LAYOUTS = {
-  hero: ['statement', 'split', 'cover', 'centered'],
+  hero: ['statement', 'split', 'cover', 'centered', 'poster'],
   video: ['theatre', 'split'],
   problem: ['statement', 'list', 'split'],
-  transformation: ['columns', 'steps', 'statement'],
-  benefits: ['grid', 'checklist', 'split'],
-  curriculum: ['timeline', 'accordion', 'cards'],
+  transformation: ['columns', 'steps', 'statement', 'toggle'],
+  benefits: ['grid', 'checklist', 'split', 'bento'],
+  curriculum: ['timeline', 'accordion', 'cards', 'map'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
-  testimonials: ['grid', 'featured', 'quote'],
+  testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
   faq: ['accordion', 'columns'],
   pricing: ['cards', 'focus', 'band'],
   cta: ['band', 'split', 'compact'],
   stats: ['row', 'grid'],
   text: ['statement', 'columns', 'centered'],
+  story: ['scroll', 'chapters', 'strip'],
+  gallery: ['mosaic', 'strip', 'grid'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;
@@ -71,6 +83,13 @@ export const SECTION_TYPE_IDS = Object.keys(SECTION_LAYOUTS) as SectionTypeId[];
  * import: that helper is three lines, and re-declaring three lines here is
  * cheaper than a cross-file coupling between two independently-owned schema
  * modules for a helper this small.
+ *
+ * Used by {@link sectionStyleSchema}'s `scheme`/`spacing` only. The PAGE's
+ * `style` (in {@link pageDesignSchema} below) does NOT use this helper — it
+ * REJECTS an unrecognised value instead of degrading (owner decision
+ * 2026-09-28, Codex-61zsk.29), for the same reason `journeys.ts`'s
+ * `designAxis` comment gives: degrading Style would silently turn the whole
+ * page's look into Bold, worse than a failed save the creator can retry.
  */
 const closedEnum = <const T extends readonly [string, ...string[]]>(
   values: T
@@ -92,8 +111,19 @@ export const sectionStyleSchema = z.object({
 });
 export type SectionStyleBody = z.infer<typeof sectionStyleSchema>;
 
-/** A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above. */
+/**
+ * A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above.
+ *
+ * `style` REJECTS an unrecognised value instead of degrading — same
+ * exception as `journeys.ts`'s `sectionDesignSchema.style` (owner decision
+ * 2026-09-28, Codex-61zsk.29), kept in sync even though this schema isn't
+ * wired to a live route yet.
+ */
 export const pageDesignSchema = z.object({
-  style: closedEnum(PAGE_STYLE_IDS),
+  style: z
+    .enum(PAGE_STYLE_IDS, {
+      error: 'Unknown page Style. Refresh and choose a Style again.',
+    })
+    .optional(),
 });
 export type PageDesignBody = z.infer<typeof pageDesignSchema>;

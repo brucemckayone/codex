@@ -10,7 +10,12 @@
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sampleContext } from '$lib/page-builder/kit';
+import {
+  DEFINITIONS,
+  PageRenderer,
+  SECTION_TYPE_IDS,
+  sampleContext,
+} from '$lib/page-builder/kit';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -185,5 +190,75 @@ describe('a write that arrives after the creator has moved on', () => {
 
     expect(stored('hero-a')).toBeUndefined();
     expect(stored('hero-b')?.props.image).toBeUndefined();
+  });
+});
+
+describe('the background image, a control every section shares', () => {
+  const backgroundControl = () =>
+    document.body.querySelector<HTMLElement>('[data-control="background"]');
+
+  it('is offered exactly where the page draws one: every type but the hero and the call to action', () => {
+    // Nothing here needs the layout thumbnails, so they never come on screen.
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+    );
+    const offered: string[] = [];
+    const drawn: string[] = [];
+    for (const type of SECTION_TYPE_IDS) {
+      const section = {
+        id: `s-${type}`,
+        type,
+        enabled: true,
+        props: { ...DEFINITIONS[type].sample, background: { key: KEY } },
+      };
+      render([section], section.id);
+      if (backgroundControl()) offered.push(type);
+      if (app) unmount(app);
+      pageBuilder.close();
+
+      app = mount(PageRenderer, {
+        target: document.body,
+        props: {
+          page: { design: { style: 'bold' }, sections: [section] },
+          context: sampleContext({ mediaBaseUrl: 'https://cdn.test' }),
+          still: true,
+        },
+      });
+      flushSync();
+      if (document.body.querySelector('.lp-section[data-lp-on-media]'))
+        drawn.push(type);
+      unmount(app);
+      app = null;
+      document.body.innerHTML = '';
+    }
+    expect(offered).toEqual(
+      SECTION_TYPE_IDS.filter((t) => t !== 'hero' && t !== 'cta')
+    );
+    expect(offered).toEqual(drawn);
+  });
+
+  it('uploads a decorative background under one label, and removes it', async () => {
+    render([{ id: 'f', type: 'faq', enabled: true, props: {} }], 'f');
+    const control = backgroundControl();
+    const group = control?.querySelector<HTMLElement>('.image[role="group"]');
+    const heading = document.getElementById(
+      group?.getAttribute('aria-labelledby') ?? ''
+    );
+    expect(heading?.textContent?.trim()).toBe('Background image');
+    // The heading names the field; the field draws no second label.
+    expect(control?.querySelector('.image__label')).toBeNull();
+
+    startUpload();
+    await finishUpload();
+    expect(stored('f')?.props.background).toEqual({ key: KEY });
+
+    control?.querySelector<HTMLButtonElement>('.image__btn--quiet')?.click();
+    flushSync();
+    expect(stored('f')?.props).not.toHaveProperty('background');
   });
 });

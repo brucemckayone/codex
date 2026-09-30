@@ -1,0 +1,371 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — POSTER (03-expressive-contract §4.1)
+
+   A run of printed sheets pasted up the page. Loud, flat, graphic.
+
+   PALETTE. Both brand colours as whole fields: `brand` and `accent` take
+   turns down the page with paper (`base`) between them, and never a
+   `contrast` band — so a dark brand can never smear into its inverse. The
+   short, loud sections (hero, the sting of the problem, the before/after,
+   the strip of praise, the numbers, the ask) take the colour; long reading
+   sits on paper. Brand also lives in the chrome round a photograph: each is
+   printed over a block of the OTHER colour, set off its corner like a
+   misregistered print (never over the photo — no photograph is recoloured).
+
+   TYPE. Capitals, crowding the sheet: display and section headings upper
+   case, leading under 0.9 (capitals have no descenders, so it holds in any
+   face), set as large as the column allows. Titles and body stay sentence
+   case, so the long reading is never shouted. Emphasis is size, case and
+   leading only — never weight, so a one-weight face (Anton, Archivo Black)
+   is never smeared.
+
+   LAYOUT. Sheets cut on the angle (`--lp-edge: angle`); photographs meet the
+   band's foot so the next sheet's cut runs across them. Small rotated
+   labels — the eyebrow, "Recommended", the before/after labels — are
+   stickers in the scheme's button pair (≥ 3:1 against the sheet, label
+   ≥ 4.5:1 on the sticker). Rules are printed: thick, and strong in ink.
+
+   MOTION. The hero headline wipes on like a sheet unrolled; the page's other
+   big-type moments — the problem's display line and the closing ask — close
+   up their tracking once as they arrive (`track`, X12). The strip of praise
+   runs a little quicker than the kit's pace. Nothing else moves.
+
+   SIGNATURE. The poster hero: the headline in capitals at full scale, set
+   round a photograph that runs off the sheet, a sticker on top.
+
+   Corners: the brand radius bent by 0.25 and capped at `--radius-sm`
+   (03 §4.2); stickers are pills only if the brand is rounded at all.
+   Fonts: suggests Anton over Roboto; designed to hold in the brand's own.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='poster'] {
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(2.75rem, 0.4rem + 8.8cqi, 8.25rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(2.1rem, 0.7rem + 4.4cqi, 5.25rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.25rem, 0.95rem + 1.1cqi, 1.85rem) * var(--lp-scale));
+  --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.6cqi, 1.625rem) * var(--lp-scale));
+  --lp-size-price: calc(clamp(3.5rem, 1.2rem + 7.5cqi, 8rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.75rem, 0.4rem + 8cqi, 7.5rem) * var(--lp-scale));
+
+  --lp-leading-display: 0.88;
+  --lp-leading-heading: 0.92;
+  --lp-leading-title: 1.08;
+  --lp-leading-lead: 1.38;
+
+  --lp-tracking-display: -0.015em;
+  --lp-tracking-heading: -0.01em;
+  --lp-tracking-title: -0.01em;
+  --lp-tracking-label: 0.02em;
+  --lp-case-display: uppercase;
+  --lp-weight-label: var(--font-bold);
+
+  /* ── shape: the brand radius bent by 0.25, never past `--radius-sm` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
+  --lp-border: var(--border-width-thick);
+  --lp-rule: var(--border-width-thick);
+
+  /* ── buttons: heavy, in capitals ──────────────────────────────────────── */
+  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  --lp-button-pad: var(--space-8);
+  --lp-button-weight: var(--font-bold);
+  --lp-button-tracking: 0.05em;
+
+  /* ── rhythm: dense sheets, a wide column the type can crowd ───────────── */
+  --lp-pad-regular: clamp(var(--space-14), var(--space-6) + 6cqi, var(--space-24));
+  --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 9cqi, var(--space-32));
+  --lp-container: 80rem;
+  --lp-measure-lead: 38ch;
+
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --lp-edge: angle;
+  /* A Moving background shows sharp round one pasted-up panel (03 X9). */
+  --lp-atmosphere-veil: panel;
+
+  /* ── motion ───────────────────────────────────────────────────────────── */
+  /* The headline unrolls from its start edge; the picture and the words
+     follow it on. */
+  --lp-enter-headline: lp-wipe var(--duration-slowest) var(--ease-smooth) both;
+  --lp-enter-media: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 2) both;
+  --lp-enter-copy: lp-fade var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 4) both;
+  --lp-build-display: track;
+  --lp-marquee-pace: calc(var(--duration-slowest) * 13);
+}
+
+/* ── capitals ────────────────────────────────────────────────────────────── */
+/* Section headings join the display line in capitals; titles, the reading
+   voice of cards and questions, stay in sentence case. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .lp-heading[data-size='heading'] {
+  text-transform: uppercase;
+}
+
+/* A phone column is narrow for a long word in capitals: break it where a
+   dictionary would, never mid-letter, and only words of ten letters or more. */
+@container (width < 32rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster']
+    .lp-heading:is([data-size='display'], [data-size='heading']) {
+    hyphens: auto;
+    hyphenate-limit-chars: 10 4 4;
+  }
+}
+
+/* ── a long headline steps down ──────────────────────────────────────────── */
+/* In capitals at this size a headline the hero marks long (`data-long`, over
+   64 characters) runs to six lines and more, and breaks words beside the
+   poster's picture. Wide, it steps down as far as each layout's measure
+   needs for the longest headline the field takes (120 characters) to end,
+   lede and buttons with it, above the fold of a 1440 × 900 screen in the
+   widest face measured (Archivo Black). On the headline's parent, so the
+   poster's picture, which drops by one headline line, steps with it. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-centered:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.62;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.55;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.5;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.45;
+  }
+}
+
+/* A medium headline (`data-medium`, 25–64 characters) splits words beside
+   the poster's picture from 27 characters, and passes the fold in the cover
+   from 32, the split from 55 and the statement from 59. Wide, each steps it
+   down as far as the medium's longest (64 characters) needs to end, lede and
+   buttons with it, above a 1440 × 900 fold in Archivo Black with no word
+   split — a step above the long one. The centred hero holds. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-statement:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.75;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.6;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.55;
+  }
+}
+
+/* ── the size follows the headline ───────────────────────────────────────── */
+/* Where the browser can compute it, the steps above give way to a size that
+   follows the headline character by character, so it never jumps as a
+   creator types: full size up to C characters, then (C / length)^p, from
+   the length HeroBlock sets on the layout's words, `--lp-heading-chars`.
+   C and p are fitted, 1% to spare, under the largest scale measured to hold
+   every length from 20 to 120, lede and buttons with it, above a 1440 × 900
+   fold with no word split, in Archivo Black and Syne. The section type in
+   the selector lifts each rule over both steps. A browser without `pow()`
+   fails the test and keeps the steps; it would read the formula as an
+   invalid size and drop the display to the body's. The test names a real
+   property, because a custom one takes any value. An unset length counts
+   as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+      .hero-statement:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(54 / var(--lp-heading-chars, 120), 0.45));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.7 * min(1, pow(29 / var(--lp-heading-chars, 120), 0.28)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(27 / var(--lp-heading-chars, 120), 0.4));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='hero']
+      .hero-centered:has(> .hero__headline) {
+      --lp-display-scale: calc(0.84 * min(1, pow(73 / var(--lp-heading-chars, 120), 0.83)));
+    }
+  }
+}
+
+/* ── printed rules: every line on the page in a strong tone of the ink ──── */
+:is(.lp, #lp-style)[data-lp-style='poster'] :is([data-lp-scheme], [data-lp-on-media]) {
+  --lp-line: color-mix(in oklab, var(--lp-ink) 40%, var(--lp-bg));
+}
+
+/* ── stickers: small rotated labels in the scheme's button pair ─────────── */
+:is(.lp, #lp-style)[data-lp-style='poster'] :is(.lp-eyebrow, .offer__badge, .tf-label) {
+  inline-size: fit-content;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--lp-radius-pill-if-rounded);
+  background: var(--lp-button-bg);
+  color: var(--lp-button-ink);
+  font-weight: var(--font-bold);
+  letter-spacing: var(--lp-tracking-label);
+  rotate: -2deg;
+  transform-origin: 0 100%;
+}
+
+:is(.lp, #lp-style)[data-lp-style='poster'] .offer__badge {
+  rotate: 3deg;
+  transform-origin: 100% 100%;
+}
+
+/* "Before" is the plain sticker, "After" the loud one. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .tf-label[data-side='before'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 var(--border-width-thick) var(--lp-ink);
+  color: var(--lp-ink);
+}
+
+:is(.lp, #lp-style)[data-lp-style='poster'] .tf-label[data-side='after'] {
+  rotate: 2deg;
+}
+
+/* A sticker stands clear of the rule its list starts with. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .tf-label {
+  margin-block-end: var(--space-3);
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+:is(.lp, #lp-style)[data-lp-style='poster'] :is(.lp-button, .tf-toggle__tab, .tm-marquee__toggle) {
+  text-transform: uppercase;
+}
+
+/* Outlines print in the ink; the pointer knocks a sticker askew instead of
+   lifting a shadow (the colours never change, so neither does contrast). */
+:is(.lp, #lp-style)[data-lp-style='poster']
+  .lp-button:is([data-variant='secondary'], [data-variant='outline']) {
+  border-color: var(--lp-ink);
+}
+
+@media (hover: hover) {
+  :is(.lp, #lp-style)[data-lp-style='poster']
+    .lp-button:is([data-variant='primary'], [data-variant='secondary'], [data-variant='outline']):hover {
+    transform: rotate(-2deg) scale(1.03);
+    box-shadow: none;
+  }
+}
+
+/* ── photographs printed over a block of the other colour ───────────────── */
+/* The block sits under the picture, set off its inner corner; only its edge
+   shows. The field's own colour is never the block's: an accent field takes
+   the primary, every other the secondary. */
+:is(.lp, #lp-style)[data-lp-style='poster'] [data-lp-scheme] {
+  --_poster-block: var(--lp-brand-2);
+}
+
+:is(.lp, #lp-style)[data-lp-style='poster'] [data-lp-scheme='accent'] {
+  --_poster-block: var(--lp-brand);
+}
+
+/* The guide's portrait is already positioned (sticky, wide) and isolated. */
+:is(.lp, #lp-style)[data-lp-style='poster']
+  :is(.hero-poster__reveal, .hero-split__media, .hero-statement__media, .hero-centered__media, .text__media) {
+  position: relative;
+  isolation: isolate;
+}
+
+/* How far the block sits out from its photo — set on the photo, so the room
+   made for it below reads the same value. */
+:is(.lp, #lp-style)[data-lp-style='poster']
+  :is(
+    .hero-poster__reveal,
+    .hero-split__media,
+    .hero-statement__media,
+    .hero-centered__media,
+    .guide__portrait[data-layout='split'],
+    .text__media
+  ) {
+  --_off: clamp(var(--space-3), 1.4cqi, var(--space-6));
+}
+
+:is(.lp, #lp-style)[data-lp-style='poster']
+  :is(
+    .hero-poster__reveal,
+    .hero-split__media,
+    .hero-statement__media,
+    .hero-centered__media,
+    .guide__portrait[data-layout='split'],
+    .text__media
+  )::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  translate: calc(-1 * var(--_off)) calc(-1 * var(--_off));
+  border-radius: var(--lp-radius-media);
+  background: var(--_poster-block);
+  pointer-events: none;
+}
+
+/* A photo set under words in its own column (the text block's columns) is
+   pushed down by the block's rise, so the block never runs into the words:
+   measured, it caught a heading's last line at 2.15:1. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .text__head > .text__media {
+  margin-block-start: var(--_off);
+}
+
+/* A hero's wide picture meets the sheet's foot, so the next sheet's cut runs
+   across it. */
+:is(.lp, #lp-style)[data-lp-style='poster'] :is(.hero-statement__media, .hero-centered__media) {
+  margin-block-end: calc(-1 * var(--lp-pad));
+}
+
+/* Narrow, the poster hero's picture runs edge to edge: its block would show
+   only as a bar across the top. */
+@container (width < 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='poster'] .hero-poster__media .hero-poster__reveal::before {
+    content: none;
+  }
+}
+
+/* ── benefits bento: the lead sheet shouts ──────────────────────────────── */
+:is(.lp, #lp-style)[data-lp-style='poster'] .benefits-bento__tile[data-lead] .lp-heading {
+  text-transform: uppercase;
+  line-height: var(--lp-leading-heading);
+}
+
+/* ── the strip of praise: short quotes set like headlines ───────────────── */
+:is(.lp, #lp-style)[data-lp-style='poster']
+  .tm-marquee .voice:not([data-length='long']) .voice__quote p {
+  font-family: var(--lp-font-display);
+  font-size: var(--lp-size-title);
+  font-weight: var(--lp-weight-title);
+  font-synthesis: none;
+  line-height: var(--lp-leading-title);
+  letter-spacing: var(--lp-tracking-title);
+}
+
+/* …so the room the strip makes for their hanging mark is a title's too. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .tm-marquee__card > .voice:not([data-length='long']) {
+  padding-inline-start: calc(var(--lp-size-title) * 0.4);
+}
+
+/* ── story chapters: the step's number is the poster's big figure ───────── */
+:is(.lp, #lp-style)[data-lp-style='poster'] .story-chapter__num {
+  font-size: var(--lp-size-display);
+  line-height: var(--lp-leading-display);
+}
+
+/* ── the closing ask builds, as the headline did ────────────────────────── */
+:is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='cta'] {
+  --lp-build-heading: track;
+}

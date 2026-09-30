@@ -3,8 +3,8 @@
 
   Everything about the selected section, top to bottom in the order a creator
   decides it: which section it is (and its own name in the outline), how it
-  is arranged, what colour its band is, how much room it has, then its words
-  and media, then duplicate · hide · delete.
+  is arranged, what colour its band is and any picture behind it, how much
+  room it has, then its words and media, then duplicate · hide · delete.
 
   Every value SHOWN is the resolved one — what the canvas draws — including
   a Style default that steps back to the page colour so two identical bands
@@ -16,6 +16,7 @@
   import { CopyIcon, EyeIcon, EyeOffIcon, TrashIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
+    type BlockField,
     DEFINITIONS,
     type KitPage,
     type KitSection,
@@ -24,12 +25,14 @@
     resolveSections,
     resolveSpacing,
     resolveStyle,
+    type SectionTypeId,
   } from '$lib/page-builder/kit';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import type { JourneySalesContext } from '$lib/page-builder/render/types';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
   import { fieldsForLayout, sameValue } from './field-values';
+  import ImageField from './ImageField.svelte';
   import LayoutPicker from './LayoutPicker.svelte';
   import { sectionIcon } from './outline';
   import SchemeSwatches from './SchemeSwatches.svelte';
@@ -58,6 +61,20 @@
   }: Props = $props();
 
   const id = $props.id();
+
+  /**
+   * Types with a backdrop of their own — the hero's media, the call to
+   * action's own background field (01 A5) — take no generic one. The list
+   * `SectionShell` draws by; a test holds the two together.
+   */
+  const OWN_BACKDROP: readonly SectionTypeId[] = ['hero', 'cta'];
+  const BACKGROUND: BlockField = {
+    key: 'background',
+    label: m.studio_page_editor_background_title(),
+    hint: m.studio_page_editor_background_hint(),
+    control: 'image',
+    decorative: true,
+  };
 
   // Pinned for the life of this inspector, which Inspector re-creates for
   // every section (`{#key section.id}`). A write that arrives after the
@@ -191,6 +208,22 @@
       onReset={() => pageBuilder.setSectionStyle(section.id, { scheme: undefined })}
     />
   </section>
+
+  {#if !OWN_BACKDROP.includes(section.type)}
+    <div class="section-inspector__group" data-control="background">
+      <h3 class="section-inspector__group-title" id="{id}-background">
+        {BACKGROUND.label}
+      </h3>
+      <ImageField
+        field={BACKGROUND}
+        value={valueOf(BACKGROUND.key)}
+        onChange={(next) => writeProp(BACKGROUND.key, next)}
+        mediaBaseUrl={context.mediaBaseUrl}
+        decorative
+        labelledby="{id}-background"
+      />
+    </div>
+  {/if}
 
   <section class="section-inspector__group" aria-labelledby="{id}-spacing">
     <h3 class="section-inspector__group-title" id="{id}-spacing">

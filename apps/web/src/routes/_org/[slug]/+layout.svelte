@@ -582,6 +582,47 @@
     background: transparent;
   }
 
+  /* A sales page with a "Moving background" section (landing-builder 03
+     §5.1): for the life of that page, clear the stack above the org's shader
+     so the section's own veil sits on the shader itself. The kit clears its
+     root and keeps every other section opaque (`kit/styles/surfaces.css`). A
+     Style that asks for a sharp background lifts the blur as well. */
+  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+    background: transparent;
+  }
+
+  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='sharp']))
+    :global(.shader-hero--fullpage) {
+    filter: none;
+  }
+
+  /* Blurred, the canvas fades out toward the window's edges: the blur averages
+     in the transparent pixels beyond its box, so within twice the radius of an
+     edge the page's background shows through, a pale frame the cleared stack
+     puts in plain view. So on such a page the canvas runs twice the radius
+     past every edge (0.977 opaque at the window's edge), drawn from the SAME
+     drawing buffer: ShaderHero sizes that from its box, which stays the
+     window, so the frame the GPU renders each tick and its mobile resolution
+     cap are unchanged. `cover` keeps the shader's aspect; its crop is off
+     screen. The reset caps a canvas at `max-width: 100%`. */
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
+      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
+    )
+    :global(.shader-hero--fullpage) {
+    overflow: visible;
+  }
+
+  .org-layout[data-hero-shader-active]:not(.org-layout--landing):has(
+      :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
+    )
+    :global(.shader-hero--fullpage canvas) {
+    width: calc(100% + 4 * var(--blur-2xl));
+    max-width: none;
+    height: calc(100% + 4 * var(--blur-2xl));
+    margin: calc(-2 * var(--blur-2xl));
+    object-fit: cover;
+  }
+
 
   @media (--below-md) {
     .org-main {
@@ -591,6 +632,13 @@
 
     .org-main--studio {
       padding-bottom: 0;
+    }
+
+    /* The page ends above that clearance, so it keeps its usual cover: the
+       shader is seen through the page's own veil, never raw below it. */
+    .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
+      background: linear-gradient(color-mix(in srgb, var(--color-background) 80%, transparent) 0 0)
+        bottom / 100% var(--space-20) no-repeat;
     }
   }
 

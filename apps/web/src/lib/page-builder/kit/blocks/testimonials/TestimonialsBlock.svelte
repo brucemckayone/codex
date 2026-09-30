@@ -2,12 +2,16 @@
   @component TestimonialsBlock
 
   What members say: the course's own testimonials first, then any the creator
-  adds. Three layouts, and none drops a voice:
+  adds. Five layouts, and none drops a voice:
     grid     — every quote given the same space, under a rule; no cards
     featured — the first quote large in the section's one filled panel, the
                others in a quieter row beneath
     quote    — the first quote as the monument, centred (lit from behind in
                Cinematic); the others follow quietly under it
+    marquee  — the quotes drift slowly across the page on a strip that runs
+               to its edges, with a pause button (TestimonialsMarquee)
+    wall     — every quote on one masonry wall, the first featured
+               (TestimonialsWall)
 
   No star ratings, no invented avatars. No quotes at all: the public page
   keeps only the words; the canvas asks for some.
@@ -21,8 +25,12 @@
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
   import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
+  import TestimonialsMarquee from './TestimonialsMarquee.svelte';
+  import TestimonialsWall from './TestimonialsWall.svelte';
   import Voice from './Voice.svelte';
   import { type Testimonial, voices } from './voices';
+
+  const LAYOUTS = ['grid', 'featured', 'quote', 'marquee', 'wall'] as const;
 
   const { props, section, context, edit }: BlockProps = $props();
 
@@ -30,7 +38,7 @@
   const content = $derived(testimonialsDefinition.coerce(props));
   const all = $derived(voices(context.testimonials, content.items));
   const layout = $derived(
-    section.layout === 'featured' || section.layout === 'quote' ? section.layout : 'grid'
+    LAYOUTS.find((id) => id === section.layout) ?? 'grid'
   );
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const asks = $derived(Boolean(content.ctaLabel || content.note));
@@ -45,7 +53,7 @@
   </ul>
 {/snippet}
 
-<div class="tm" data-layout={layout}>
+<div class="tm" class:lp-bleed={layout === 'marquee'} data-layout={layout}>
   {#if headed}
     <header class="tm__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="testimonials" {edit} />{/if}
@@ -79,6 +87,10 @@
       <Voice voice={all[0]} size="lead" />
     </div>
     {#if all.length > 1}{@render list(all.slice(1), 'quiet', false)}{/if}
+  {:else if layout === 'marquee'}
+    <TestimonialsMarquee voices={all} />
+  {:else if layout === 'wall'}
+    <TestimonialsWall voices={all} {featured} />
   {:else}
     {@render list(all, 'grid', false)}
   {/if}
@@ -105,6 +117,24 @@
 
   .tm {
     gap: var(--lp-gap);
+  }
+
+  /* The moving strip runs to the section's edges (it carries words there, so
+     the block is `.lp-bleed`, 03 X10); everything else keeps the column. The
+     section's own tracks, with no column gap, which would narrow the content
+     track and push it off the section's. */
+  .tm.lp-bleed {
+    grid-template-columns: inherit;
+    column-gap: 0;
+  }
+
+  .tm.lp-bleed > :global(*) {
+    grid-column: content;
+    min-inline-size: 0;
+  }
+
+  .tm.lp-bleed > :global(.tm-marquee) {
+    grid-column: bleed;
   }
 
   /* The heading measures itself in its own `ch`, not the body face's. */

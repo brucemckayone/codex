@@ -3,8 +3,9 @@
 
   One image or ambient clip, at an aspect ratio, in the Style's media shape.
   With nothing to show it draws a designed PLATE — the scheme's panel colour
-  with a brand disc and ring (glows in Cinematic) — so an image-led layout
-  still looks composed before its image exists. A grey box reads as broken.
+  with a disc and ring watermarked in the panel's own ink (glows in
+  Cinematic) — so an image-led layout still looks composed before its image
+  exists, or without one. A blank box reads as broken.
 
   The clip is decoration (`HeroLoopVideo` is silent, `aria-hidden`, and shows
   its still under reduced motion); anything meant to be watched is a separate
@@ -99,18 +100,24 @@
     object-fit: cover;
   }
 
-  /* Half a hairline past each hard stop, so the disc and ring edges anti-alias. */
+  /* The marks are the PANEL's ink mixed into the panel, so they are measured
+     against the surface they sit on in every scheme and theme — a watermark
+     that says a picture goes here, quieter than any word (about 1.5:1 and
+     2.2:1). Never the section's accent: on a brand band that is the band's
+     ink, white on a near-white panel. Half a hairline past each hard stop, so
+     the disc and ring edges anti-alias. */
   .lp-media__plate {
     --_aa: calc(var(--border-width) / 2);
+    --_disc: color-mix(in oklab, var(--lp-panel-ink) 18%, var(--lp-panel));
+    --_ring: color-mix(in oklab, var(--lp-panel-ink) 32%, var(--lp-panel));
     position: absolute;
     inset: 0;
     background:
-      radial-gradient(circle at 70% 36%, var(--lp-accent) 0 17%, transparent calc(17% + var(--_aa))),
+      radial-gradient(circle at 70% 36%, var(--_disc) 0 17%, transparent calc(17% + var(--_aa))),
       radial-gradient(
         circle at 38% 62%,
         transparent 0 27%,
-        color-mix(in oklab, var(--lp-accent) 60%, transparent) 27%
-          calc(27% + var(--border-width-thick)),
+        var(--_ring) 27% calc(27% + var(--border-width-thick)),
         transparent calc(27% + var(--border-width-thick) + var(--_aa))
       ),
       var(--lp-panel);

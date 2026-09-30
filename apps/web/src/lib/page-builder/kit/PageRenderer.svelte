@@ -15,6 +15,15 @@
 
   `theme` is a SCOPED preview (`data-lp-theme`) for thumbnails and the dev
   route; it never touches `<html data-theme>` (ref 11-theming §4).
+
+  ATMOSPHERE (03 §5.1): `data-lp-atmosphere` marks a live page with a "Moving
+  background" section, so the org layout clears the stack above its shader
+  for this page only. Never set while editing or still — the canvas and
+  thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+
+  ENTRANCES (03 X13): the root hosts the page's stage (`motion/entrances.ts`),
+  which plays each reveal, build and mark once as the visitor reaches it.
+  Nothing is staged while still.
 -->
 <script lang="ts">
   import type { BrandTokenOverrides } from '$lib/page-builder';
@@ -25,17 +34,25 @@
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import { resolveSections, resolveStyle } from './model/resolve';
+  import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
+  import { entrances } from './motion/entrances';
   import { type PageEdit, setKitPage } from './page-context';
   import { BLOCKS } from './registry';
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
   import './styles/kit.css';
   import './styles/schemes.css';
+  import './styles/surfaces.css';
+  import './styles/motion.css';
   import './styles/style-bold.css';
   import './styles/style-clean.css';
   import './styles/style-soft.css';
   import './styles/style-cinematic.css';
+  import './styles/style-path.css';
+  import './styles/style-poster.css';
+  import './styles/style-studio.css';
+  import './styles/style-quiet.css';
 
   interface Props {
     page: KitPage;
@@ -97,6 +114,16 @@
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
+  // The org's shader draws in the ORG's colours, so a page with its own
+  // colours shows the glow (which follows them) rather than clash (03 X11).
+  const ownColours = $derived(
+    Boolean(brandOverrides?.primaryColor || brandOverrides?.secondaryColor)
+  );
+  const atmosphere = $derived(
+    edit || still || ownColours || !sections.some((s) => s.scheme === 'atmosphere')
+      ? undefined
+      : (STYLES[style].atmosphere ?? 'soft')
+  );
 </script>
 
 <svelte:head>
@@ -109,13 +136,21 @@
   data-lp-theme={theme}
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
+  data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
+  {@attach entrances(still || !!edit)}
 >
   <div class="lp-page">
     {#each sections as section (section.id)}
       {@const Block = BLOCKS[section.type]}
-      <SectionShell {section} editing={!!edit} selected={selectedId === section.id}>
+      <SectionShell
+        {section}
+        background={propsById.get(section.id)?.background}
+        mediaBaseUrl={context.mediaBaseUrl}
+        editing={!!edit}
+        selected={selectedId === section.id}
+      >
         <Block
           props={propsById.get(section.id) ?? {}}
           {section}
@@ -130,7 +165,7 @@
       {context}
       label={stickyLabel}
       priceLine={stickyPrice}
-      scheme={style === 'cinematic' ? 'soft' : 'contrast'}
+      scheme={STYLES[style].sticky ?? 'contrast'}
       {signature}
     />
   {/if}

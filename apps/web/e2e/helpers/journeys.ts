@@ -62,8 +62,8 @@ export interface JourneyFixture {
   readonly purchasable: boolean;
   /**
    * The STORED section types, in stored order — v2 kit ids since WP-9b
-   * (`db:seed:portals` writes the same nine for every page), which is also
-   * exactly what the kit renders as `data-lp-type`. Refresh with:
+   * (`db:seed:portals` writes each page from its portal's own recipe), which
+   * is also exactly what the kit renders as `data-lp-type`. Refresh with:
    *   psql -h db.localtest.me -p 5432 -U postgres -d main -At -c "select o.slug
    *     ||' '||lp.slug||' '||(select string_agg(s->>'type', ',' order by ord)
    *     from jsonb_array_elements(lp.sections) with ordinality t(s, ord))
@@ -84,18 +84,38 @@ export interface JourneyFixture {
  * palette) and the only org with purchasable courses.
  */
 
-/** The nine v2 sections `db:seed:portals` writes for every seeded page. */
-const SEEDED_SECTIONS: readonly string[] = [
-  'hero',
-  'problem',
-  'transformation',
-  'benefits',
-  'curriculum',
-  'instructor',
-  'pricing',
-  'faq',
-  'cta',
-];
+/**
+ * The v2 sections `db:seed:portals` writes for each seeded page, by page slug:
+ * each portal opens from its own recipe (03 §8, `PortalSpec.recipe`), less the
+ * testimonials, which the seed leaves out (no live testimonials behind them).
+ */
+const SEEDED_SECTIONS = {
+  // Cinematic · show
+  'bone-deep': ['hero', 'gallery', 'text', 'pricing', 'cta'],
+  // Quiet · short
+  'tending-the-grief': ['hero', 'benefits', 'pricing', 'faq', 'cta'],
+  // Studio · full
+  'ancestral-threads': [
+    'hero',
+    'problem',
+    'transformation',
+    'benefits',
+    'curriculum',
+    'instructor',
+    'pricing',
+    'faq',
+    'cta',
+  ],
+  // Path · journey (story `scroll` and curriculum `map` pinned)
+  'return-to-the-shoreline': [
+    'hero',
+    'story',
+    'curriculum',
+    'instructor',
+    'pricing',
+    'cta',
+  ],
+} as const satisfies Record<string, readonly string[]>;
 
 export const JOURNEY_FIXTURES: readonly JourneyFixture[] = [
   {
@@ -103,49 +123,49 @@ export const JOURNEY_FIXTURES: readonly JourneyFixture[] = [
     pageSlug: 'ancestral-threads',
     owner: 'luzura@test.com',
     purchasable: true,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['ancestral-threads'],
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'return-to-the-shoreline',
     owner: 'luzura@test.com',
     purchasable: true,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['return-to-the-shoreline'],
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'bone-deep',
     owner: 'luzura@test.com',
     purchasable: false,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['bone-deep'],
   },
   {
     org: 'of-blood-and-bones',
     pageSlug: 'tending-the-grief',
     owner: 'luzura@test.com',
     purchasable: false,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['tending-the-grief'],
   },
   {
     org: 'studio-alpha',
     pageSlug: 'bone-deep',
     owner: 'creator@test.com',
     purchasable: false,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['bone-deep'],
   },
   {
     org: 'studio-alpha',
     pageSlug: 'tending-the-grief',
     owner: 'creator@test.com',
     purchasable: false,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['tending-the-grief'],
   },
   {
     org: 'studio-beta',
     pageSlug: 'bone-deep',
     owner: 'admin@test.com',
     purchasable: false,
-    sections: SEEDED_SECTIONS,
+    sections: SEEDED_SECTIONS['bone-deep'],
   },
 ];
 

@@ -37,14 +37,16 @@ import {
 import {
   DEFINITIONS,
   type KitPage,
-  resolveStyle,
   type SectionTypeId,
-  starterPage,
   starterSection,
   type TemplateContext,
   validateKitShape,
 } from '$lib/page-builder/kit';
 import { isSectionTypeId } from '$lib/page-builder/kit/model/ids';
+import {
+  type RecipeId,
+  recipeSections,
+} from '$lib/page-builder/kit/model/recipes';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -110,7 +112,8 @@ export interface BuilderSession {
   unpublish(): Promise<boolean>;
   preview(): Promise<void>;
   insertSection(type: SectionTypeId, afterId: string | null): string;
-  startFromTemplate(): void;
+  /** Fill the page from a starting page (`recipes.ts`), as one undoable step. */
+  startFromTemplate(recipe: RecipeId): void;
 }
 
 /** Key-order-insensitive JSON form, `undefined` keys dropped as JSON does. */
@@ -683,12 +686,12 @@ export function createBuilderSession(options: {
     return section.id;
   }
 
-  function startFromTemplate(): void {
-    const starter = starterPage(template, {
-      style: resolveStyle(kitPage?.design),
-    });
-    pageBuilder.updateMeta('sections', starter.sections);
-    pageBuilder.selectSection(starter.sections[0]?.id ?? null);
+  // The recipe names the sections; the page's Style lays out and colours
+  // every one it does not pin, so no Style is read here.
+  function startFromTemplate(recipe: RecipeId): void {
+    const sections = recipeSections(recipe, template);
+    pageBuilder.updateMeta('sections', sections);
+    pageBuilder.selectSection(sections[0]?.id ?? null);
   }
 
   // ── Guards ───────────────────────────────────────────────────────────────

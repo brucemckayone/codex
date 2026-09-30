@@ -93,6 +93,30 @@
     return () => observer.disconnect();
   }
 
+  /**
+   * Sizes come from a ResizeObserver, which reports after layout. The
+   * `bind:clientWidth` family reads each size synchronously as it mounts, and
+   * every read restyles the stage — so with eight thumbnails mounting at once,
+   * each read forced a fresh layout of the whole editor (574ms of forced
+   * reflow opening the Style tab, measured in a trace).
+   */
+  function sized(report: (box: DOMRectReadOnly) => void) {
+    return (node: HTMLElement) => {
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(([entry]) => report(entry.contentRect));
+      observer.observe(node);
+      return () => observer.disconnect();
+    };
+  }
+
+  const measureFrame = sized((box) => {
+    frameWidth = box.width;
+    frameHeight = box.height;
+  });
+  const measureStage = sized((box) => {
+    contentHeight = box.height;
+  });
+
   function stripIds(root: HTMLElement) {
     const strip = () => {
       for (const element of root.querySelectorAll('[id]')) {
@@ -113,8 +137,7 @@
   inert
   aria-hidden="true"
   {@attach whenNear}
-  bind:clientWidth={frameWidth}
-  bind:clientHeight={frameHeight}
+  {@attach measureFrame}
 >
   {#if near}
     <div
@@ -123,7 +146,7 @@
       style:inline-size="{width}px"
       style:transform="translateY({offset}px) scale({scale})"
       {@attach stripIds}
-      bind:offsetHeight={contentHeight}
+      {@attach measureStage}
     >
       <PageRenderer page={page} context={thumbContext} {brandOverrides} {theme} still sticky={false} />
     </div>

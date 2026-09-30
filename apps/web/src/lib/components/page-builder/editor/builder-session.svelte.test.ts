@@ -7,6 +7,7 @@ import type { PageSection } from '@codex/shared-types';
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JourneyPageRecord } from '$lib/page-builder';
+import { RECIPE_IDS, RECIPES } from '$lib/page-builder/kit/model/recipes';
 
 const remotes = vi.hoisted(() => ({
   getJourneyForBuilder: vi.fn(),
@@ -1111,13 +1112,25 @@ describe('sections', () => {
     ]);
   });
 
-  it('fills an empty page from the Style’s template', () => {
+  it.each(
+    RECIPE_IDS
+  )('fills an empty page from the %s starting page as ONE undoable step', (recipe) => {
     const session = start(record({ sections: [] }));
-    session.startFromTemplate();
+    session.startFromTemplate(recipe);
     flushSync();
-    const types = pageBuilder.pending?.sections.map((s) => s.type) ?? [];
-    expect(types[0]).toBe('hero');
-    expect(types.length).toBeGreaterThan(3);
-    expect(pageBuilder.pending?.sections[0].props.heading).toBe('Bone Deep');
+    const sections = pageBuilder.pending?.sections ?? [];
+    expect(sections.map((s) => s.type)).toEqual(
+      RECIPES[recipe].sections.map((s) => s.type)
+    );
+    // Only the layouts the recipe pins; the Style decides the rest.
+    expect(sections.map((s) => s.variant)).toEqual(
+      RECIPES[recipe].sections.map((s) => s.layout)
+    );
+    expect(sections[0].props.heading).toBe('Bone Deep');
+    expect(pageBuilder.selectedSectionId).toBe(sections[0].id);
+
+    pageBuilder.undo();
+    expect(pageBuilder.pending?.sections).toEqual([]);
+    expect(pageBuilder.canUndo).toBe(false);
   });
 });
