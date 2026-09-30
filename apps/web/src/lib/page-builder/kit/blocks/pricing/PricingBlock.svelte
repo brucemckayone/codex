@@ -7,6 +7,11 @@
     focus — the recommended path large, the others listed beneath
     band  — one strip: price, button, and the other paths in a line
 
+  The small print beside a price is always that path's own billing line
+  (`derivedNote`), so it follows the offer when the recommended one changes.
+  The creator's note is the section's own words, under the lede, and only
+  while there is something to buy.
+
   And, in every layout, the states that are not "priced": an enrolled viewer
   gets a way back in, a course with no way in says so, and a failed offer read
   gets a price-less button — never an invented price.
@@ -31,6 +36,8 @@
   const page = getKitPage();
   const content = $derived(pricingDefinition.coerce(props));
   const view = $derived(pricingView(context, content));
+  // The note reassures a buyer: it has no place once there is nothing to buy.
+  const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const label = $derived(content.ctaLabel ?? COPY.cta.buy);
 </script>
@@ -49,6 +56,9 @@
     {/if}
     {#if content.body}
       <Text text={content.body} size="lead" type="pricing" field="body" {edit} />
+    {/if}
+    {#if content.note && selling}
+      <Text text={content.note} type="pricing" field="note" {edit} />
     {/if}
   </header>
 {/snippet}
@@ -80,13 +90,9 @@
     </div>
   {:else if view.state !== 'priced' || !view.featured}
     <div class="pricing__state">
-      <ButtonRow
-        {context}
-        section="pricing"
-        label={content.ctaLabel}
-        note={content.note ?? COPY.pricing.atCheckout}
-        {edit}
-      />
+      <ButtonRow {context} section="pricing" label={content.ctaLabel} {edit} />
+      <!-- The kit's own line, so never an editable field. -->
+      {#if view.state === 'unpriced'}<p class="pricing__note">{COPY.pricing.atCheckout}</p>{/if}
     </div>
   {:else if section.layout === 'focus'}
     <div class="pricing__focus">
@@ -94,7 +100,6 @@
         path={view.featured}
         {context}
         {label}
-        note={content.note ?? derivedNote(view.featured)}
         scheme={featured}
         badge={view.paths.length > 1}
         size="focus"
@@ -118,7 +123,7 @@
           field="ctaLabel"
           {edit}
         />
-        <p class="pricing__note">{content.note ?? derivedNote(view.featured)}</p>
+        <p class="pricing__note">{derivedNote(view.featured)}</p>
       </div>
     </div>
     {@render others()}
@@ -129,7 +134,6 @@
           {path}
           {context}
           {label}
-          note={derivedNote(path)}
           scheme={path.best ? featured : undefined}
           badge={view.paths.length > 1}
           editable={path.best}
@@ -137,7 +141,6 @@
         />
       {/each}
     </div>
-    {#if content.note}<p class="pricing__note">{content.note}</p>{/if}
   {/if}
 </div>
 
@@ -185,6 +188,14 @@
   }
 
   /* ── non-priced states ─────────────────────────────────────────────────── */
+  /* The state's own line keeps to its button, wherever the Style aligns it. */
+  .pricing__state {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: var(--lp-actions-align, start);
+    text-align: var(--lp-actions-align, start);
+  }
+
   .pricing__panel {
     display: grid;
     gap: var(--space-3);

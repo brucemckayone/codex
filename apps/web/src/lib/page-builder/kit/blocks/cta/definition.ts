@@ -5,10 +5,10 @@ import {
   eyebrowField,
   headingField,
   layout,
-  noteField,
 } from '../../model/fields';
 import { compact, readText } from '../../model/read';
 import type { BlockDefinition } from '../../model/types';
+import { offerNoteField } from '../pricing/definition';
 
 export type CtaProps = {
   eyebrow?: string;
@@ -48,7 +48,7 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
     headingField(100),
     { ...bodyField, maxLength: 300 },
     ctaLabelField,
-    noteField,
+    offerNoteField,
     {
       key: 'background',
       label: 'Background image',

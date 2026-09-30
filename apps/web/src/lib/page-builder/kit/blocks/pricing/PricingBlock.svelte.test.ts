@@ -131,13 +131,13 @@ describe('PricingBlock — priced only from the live offer', () => {
     }
   });
 
-  it('derives a note from the path kind when the creator wrote none', async () => {
+  it('bills each price by its own offer, whatever the note says', async () => {
     await render({}, 'focus', 'sub');
     expect(text()).toContain('Billed monthly.');
     unmount(app);
     await render({ note: 'Try it for a week.' }, 'focus', 'sub');
     expect(text()).toContain('Try it for a week.');
-    expect(text()).not.toContain('Billed monthly.');
+    expect(text()).toContain('Billed monthly.');
   });
 
   it('recommends only when there is a choice', async () => {
@@ -160,5 +160,93 @@ describe('PricingBlock — priced only from the live offer', () => {
     expect(
       document.body.querySelectorAll('[data-field="ctaLabel"]')
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * The smallest box that holds this price and a way to buy it: the offer as a
+ * visitor reads it. No class names, so it finds the same box in any markup.
+ */
+function offerUnit(price: string): Element | null {
+  const leaf = [...document.body.querySelectorAll('*')].find(
+    (el) => el.children.length === 0 && el.textContent?.includes(price)
+  );
+  for (
+    let el = leaf?.parentElement;
+    el && el !== document.body;
+    el = el.parentElement
+  ) {
+    if (el.querySelector('a[href*="/checkout"]')) return el;
+  }
+  return null;
+}
+
+// Codex-61zsk.38: the creator's note sat under whichever offer was featured, so
+// "One payment, yours to repeat." described a £15 monthly membership.
+describe('PricingBlock — the words beside a price describe that price', () => {
+  const NOTE = 'One payment, yours to repeat.';
+  // The featured offer moves from the one-off to the membership.
+  const FEATURED = {
+    buy: { price: '£49', print: 'Pay once and keep it for good.' },
+    tiers: {
+      price: '£15',
+      print: 'Billed monthly as part of Studio membership.',
+    },
+  } as const;
+
+  it.each(
+    SECTION_LAYOUTS.pricing
+  )('%s: the small print follows the featured offer; the note stays in the words', async (layout) => {
+    for (const offer of ['buy', 'tiers'] as const) {
+      await render(
+        { heading: 'Join', body: 'Pick your way in.', note: NOTE },
+        layout,
+        offer
+      );
+      const { price, print } = FEATURED[offer];
+      const other = FEATURED[offer === 'buy' ? 'tiers' : 'buy'].print;
+      const unit = offerUnit(price);
+      expect(
+        unit,
+        `${layout} · ${offer}: ${price} and its way in`
+      ).not.toBeNull();
+      expect(unit?.textContent).toContain(print);
+      expect(unit?.textContent).not.toContain(other);
+      expect(unit?.textContent).not.toContain(NOTE);
+      // The creator's words: in the heading's own box, and only once.
+      expect(
+        document.body.querySelector('h2')?.parentElement?.textContent
+      ).toContain(NOTE);
+      expect(text().split(NOTE)).toHaveLength(2);
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it('keeps "you will see the price" when the offer could not be read, with the note in the words', async () => {
+    await render({ heading: 'Join', note: NOTE }, 'cards', 'unknown');
+    expect(text()).toContain(COPY.pricing.atCheckout);
+    expect(
+      document.body.querySelector('h2')?.parentElement?.textContent
+    ).toContain(NOTE);
+  });
+
+  it.each([
+    'enrolled',
+    'unavailable',
+  ] as const)('drops the note, which sells, when there is nothing to buy (%s)', async (offer) => {
+    await render({ heading: 'Join', note: NOTE }, 'cards', offer);
+    expect(text()).not.toContain(NOTE);
+  });
+
+  it('lets the canvas edit the note in the words, never the kit’s billing line', async () => {
+    await render({ heading: 'Join', note: NOTE }, 'focus', 'tiers', {
+      commit: () => {},
+    });
+    const notes = [...document.body.querySelectorAll('[data-field="note"]')];
+    expect(notes.map((el) => el.textContent?.trim())).toEqual([NOTE]);
+    const unit = offerUnit('£15');
+    expect(unit?.textContent).toContain(FEATURED.tiers.print);
+    expect(unit?.querySelector('[data-field="note"]')).toBeNull();
   });
 });
