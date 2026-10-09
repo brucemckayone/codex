@@ -797,3 +797,119 @@ for (const theme of ['light', 'dark'] as const) {
     if (read.watch) expect(read.watch, why).toBe(read.ink);
   });
 }
+
+// ── labels: the org's own case and tracking ──────────────────────────────────
+// The org sets its labels' case in one token, `--text-transform-label`
+// (uppercase unless it chose otherwise), and has no tracking token of its own
+// for them: its uppercase labels pair the case with `--tracking-wider` (the
+// floating bar's, the pricing page's, the catalogue tile's). The kit's
+// eyebrow is its kicker, so on every page it is drawn the same way. On
+// explore, Tending the Grief's card reads "FOR THE WEIGHT YOU CARRY"; its
+// page's hero must read the same.
+
+/** Each eyebrow's case and tracking beside the org's, resolved in place. */
+function readLabels() {
+  const main = document.querySelector('main#main-content, .org-main');
+  if (!main) throw new Error('no org main');
+  const probe = document.createElement('span');
+  probe.style.cssText = 'text-transform: var(--text-transform-label)';
+  main.appendChild(probe);
+  const orgCase = getComputedStyle(probe).textTransform;
+  probe.remove();
+  return {
+    orgCase,
+    // The Style's own label tracking, as it sets it on the page root.
+    styleTracking: getComputedStyle(
+      document.querySelector('.lp') ?? main
+    ).getPropertyValue('--lp-tracking-label'),
+    eyebrows: [
+      ...document.querySelectorAll<HTMLElement>('.lp .lp-eyebrow'),
+    ].map((el) => {
+      // A tracking token resolved at the eyebrow's own size.
+      const at = (value: string) => {
+        const span = document.createElement('span');
+        span.style.letterSpacing = value;
+        el.appendChild(span);
+        const px = getComputedStyle(span).letterSpacing;
+        span.remove();
+        return px;
+      };
+      const style = getComputedStyle(el);
+      return {
+        text: el.innerText,
+        case: style.textTransform,
+        tracking: style.letterSpacing,
+        wider: at('var(--tracking-wider)'),
+        styleOwn: at(
+          getComputedStyle(
+            document.querySelector('.lp') ?? el
+          ).getPropertyValue('--lp-tracking-label')
+        ),
+      };
+    }),
+  };
+}
+
+for (const item of CASES) {
+  test(`${item.org}/${item.slug}: every eyebrow is in the org's label case and tracking`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openAs(browser, baseURL as string, item, 'light');
+    await apply(page, { drawAs: item.drawAs });
+    const read = await page.evaluate(readLabels);
+    await page.context().close();
+    const why = JSON.stringify(read);
+    expect(read.orgCase, why).toBe('uppercase');
+    expect(read.eyebrows.length, why).toBeGreaterThan(0);
+    for (const eyebrow of read.eyebrows)
+      expect({ case: eyebrow.case, tracking: eyebrow.tracking }, why).toEqual({
+        case: read.orgCase,
+        tracking: eyebrow.wider,
+      });
+  });
+}
+
+test('studio-alpha/tending-the-grief: the hero’s eyebrow reads as its explore card’s kicker', async ({
+  browser,
+  baseURL,
+}) => {
+  const item = CASES[2];
+  if (item?.slug !== 'tending-the-grief') throw new Error('no case');
+  const page = await openAs(browser, baseURL as string, item, 'light');
+  const eyebrow = page
+    .locator(".lp-section[data-lp-type='hero'] .lp-eyebrow")
+    .first();
+  const onPage = await eyebrow.evaluate((el) => (el as HTMLElement).innerText);
+  await page.goto(`${new URL(page.url()).origin}/explore`);
+  const kicker = page
+    .locator('.jec__kicker')
+    .filter({ hasText: /for the weight you carry/i })
+    .first();
+  await expect(kicker).toBeVisible();
+  const onExplore = await kicker.evaluate(
+    (el) => (el as HTMLElement).innerText
+  );
+  await page.context().close();
+  expect(onExplore).toBe('FOR THE WEIGHT YOU CARRY');
+  expect(onPage).toBe(onExplore);
+});
+
+test('studio-alpha/tending-the-grief: a page that sets its labels in sentence case keeps them, at its Style’s tracking', async ({
+  browser,
+  baseURL,
+}) => {
+  const item = CASES[2];
+  if (!item) throw new Error('no case');
+  const page = await openAs(browser, baseURL as string, item, 'light');
+  await apply(page, { carrier: '--brand-text-transform-label: none' });
+  const read = await page.evaluate(readLabels);
+  await page.context().close();
+  const why = JSON.stringify(read);
+  expect(read.eyebrows.length, why).toBeGreaterThan(0);
+  for (const eyebrow of read.eyebrows)
+    expect({ case: eyebrow.case, tracking: eyebrow.tracking }, why).toEqual({
+      case: 'none',
+      tracking: eyebrow.styleOwn,
+    });
+});

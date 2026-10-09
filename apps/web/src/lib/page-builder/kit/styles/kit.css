@@ -47,7 +47,10 @@
   --lp-weight-body: var(--body-weight, var(--font-normal));
   --lp-weight-label: var(--font-semibold);
   --lp-case-display: none;
-  --lp-case-label: none;
+  /* A label (the eyebrow, the kit's kicker) is in the org's own label case:
+     uppercase unless the org or the page chose otherwise. An uppercase label
+     takes the org's tracking for it (after `.lp-page`, below). */
+  --lp-case-label: var(--text-transform-label, none);
   /* In em, so a lead's paragraphs part further than body copy's. */
   --lp-paragraph-gap: 0.9em;
   --lp-underline-offset: 0.3em;
@@ -127,6 +130,18 @@
    (`surfaces.css`); unnamed size queries still find the section. */
 .lp-page {
   container: lp-page / inline-size;
+}
+
+/* An uppercase label is tracked open the way the org tracks its own. The org
+   has no label-tracking token; its uppercase labels (the floating bar's, the
+   pricing page's, the catalogue tile's) pair the case with `--tracking-wider`.
+   A label in any other case keeps its Style's tracking. Declared on each
+   section, so it outranks the Style's root value; a browser without style
+   queries keeps the Style's. */
+@container lp-page style(--lp-case-label: uppercase) {
+  .lp-section {
+    --lp-tracking-label: var(--tracking-wider);
+  }
 }
 
 /* ── sections ────────────────────────────────────────────────────────────── */

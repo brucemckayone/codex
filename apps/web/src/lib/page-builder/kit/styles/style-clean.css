@@ -17,9 +17,10 @@
    a dark room are the whole palette.
 
    TYPE. A neutral grotesk, set semibold and tight: display to 5.5rem at
-   leading 1, section headings to 3.25rem, titles to 1.5rem, the reading
-   body at 1.62. Sentence case; labels tracked a hair open. Emphasis is size
-   and tracking only — never weight on a one-weight face.
+   leading 1, section headings to 3.25rem, titles to 1.5rem, the reading body
+   at 1.62. Sentence case; labels in the org's case (`kit.css`), tracked a
+   hair open when not uppercase. Emphasis is size and tracking only — never
+   weight on a one-weight face.
 
    LAYOUT. Heads read across one row: the heading on the left, its lead
    level with the heading's last line on the right. A split gives the

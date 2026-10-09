@@ -13,11 +13,11 @@
    a bright one (a gold, an amber) moves to brown on a light ground, and on
    a default org it is the platform's amber, not the brand.
 
-   TYPE. Light and large: display and headings at the regular weight (a
-   brand that set a heading weight keeps it), generous leading, a reading
-   body of 1.72 on a 60ch measure, modest section headings. The text
-   statement is a passage set large in the reading face. Sentence case;
-   emphasis is size and leading, never weight.
+   TYPE. Light and large: display and headings at the regular weight (a brand
+   that set a heading weight keeps it), generous leading, a reading body of
+   1.72 on a 60ch measure, modest section headings. The text statement is a
+   passage set large in the reading face. Sentence case, labels in the org's
+   case (`kit.css`); emphasis is size and leading, never weight.
 
    LAYOUT. A narrow column (64rem) and the most room between sections of any
    Style; centred where a passage stands alone (the hero, the quotes, the

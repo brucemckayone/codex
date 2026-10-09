@@ -14,9 +14,10 @@
    The ground and a tint of it take turns, one stretch per stop; two dark
    stretches and the arrival in the brand's own colour.
 
-   TYPE. Signpost type: sentence case, clear steps between display, heading
-   and title, leading just over 1, and a body with room to read (1.62).
-   Emphasis is size and leading, never weight, so a one-weight face holds.
+   TYPE. Signpost type: sentence case (labels in the org's, `kit.css`), clear
+   steps between display, heading and title, leading just over 1, and a body
+   with room to read (1.62). Emphasis is size and leading, never weight, so a
+   one-weight face holds.
 
    LAYOUT. A narrower column (70rem) with the route in a lane of its own in
    the gutter, so the words never share their space with it. The course is
