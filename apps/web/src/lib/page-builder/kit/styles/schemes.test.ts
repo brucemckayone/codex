@@ -84,6 +84,16 @@ const TARGET = {
   orgDecTextDark: 0.33,
   orgDecLargeLight: 0.155,
   orgDecLargeDark: 0.203,
+  // Keep white (owner, D8): a mid-tone button the org's label rule turns
+  // black darkens to Y 0.181, just inside white's 4.5:1 (Y 0.1833) with
+  // room for the 8-bit rounding of the fill as painted (§11 measures it).
+  // Only a fill white already holds 3:1 on moves (Y <= 0.30). The label is
+  // white up to 0.182: past the target by the knee-less curve's floor (a
+  // channel darkened to 0 still reads 0.0008), which 0.1811 missed — a
+  // pure red took a grey label (§4's sweep caught it).
+  orgWhiteLabel: 0.181,
+  orgWhiteLabelCut: 0.3,
+  orgWhiteLabelInk: 0.182,
 };
 
 // ── 1. parity ────────────────────────────────────────────────────────────────
@@ -147,6 +157,12 @@ function fragments(): string[] {
     ...lighten('odt-lt', TARGET.orgDecTextDark),
     ...darken('odl-dk', TARGET.orgDecLargeLight),
     ...lighten('odl-lt', TARGET.orgDecLargeDark),
+    `--_wl-f: max(min(1, ${TARGET.orgWhiteLabel} / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - ${TARGET.orgWhiteLabelCut}) * 1e6, 1));`,
+    ...channels.map(
+      (c) =>
+        `--_wlm-${c}: max(0, 255 * (1.055 * pow(var(--_l${c}) * var(--_wl-f), 1 / 2.4) - 0.055));`
+    ),
+    `--_wk: clamp(0, (${TARGET.orgWhiteLabelInk} - var(--_y)) * 1e6, 1);`,
   ];
 }
 
@@ -194,8 +210,8 @@ const RECIPES = [
   '--lp-heading-ink: rgb(from var(--_org-heading) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
   '--lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
   // the org's button, its label rule, its accent text, and the marks (§10)
-  '--lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
-  '--lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_w)) calc(255 * var(--_w)) calc(255 * var(--_w)));',
+  '--lp-button-bg: rgb( from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b)) var(--_wl-r) var(--_wl-g) var(--_wl-b) );',
+  '--lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));',
   '--lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
   '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
   '--lp-panel-ink: var(--lp-ink);',
@@ -354,10 +370,13 @@ describe('schemes.css ↔ model parity', () => {
     expect(fallback).toContain('--lp-accent: var(--_org-button);');
     expect(fallback).toContain('--lp-mark-ink: var(--lp-accent-source);');
     expect(fallback).not.toContain('--lp-button-ink');
-    // With it, moved only as far as each grade needs, and the label is
-    // org-brand.css's luminance step from the fill as drawn.
+    // With it, moved only as far as each grade needs, then kept white on a
+    // mid-tone (§11); the label is the step from the fill as drawn.
     expect(exact).toContain(
-      '--lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
+      '--lp-button-bg: rgb( from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b)) var(--_wl-r) var(--_wl-g) var(--_wl-b) );'
+    );
+    expect(exact).toContain(
+      '--lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));'
     );
     expect(exact).toContain(
       '--lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));'
@@ -719,6 +738,34 @@ function orgMove(
   return mode === 'light' ? darken(colour, yLight) : lighten(colour, yDark);
 }
 
+/** Keep white (owner, D8), after the grade's move: a fill the org's label
+ * rule turns black, but white holds 3:1 on (0.181 < Y <= 0.30), darkens —
+ * its linear channels scaled, so hue and chroma keep — to Y 0.181, and the
+ * label is white up to 0.182. Off on a decorated dark page (`--_wld-*`),
+ * whose grade keeps a button at Y >= 0.203, where white cannot hold. */
+function keepWhite(
+  mode: Mode,
+  fill: Rgb,
+  decorated: boolean
+): { fill: Rgb; label: Rgb } {
+  const kneeY = (rgb: Rgb) => {
+    const [r, g, b] = clip(rgb).map(kneeLin);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  let out = fill;
+  if (mode === 'light' || !decorated) {
+    const L = clip(fill).map(kneeLin);
+    const y = kneeY(fill);
+    const f = Math.max(
+      Math.min(1, TARGET.orgWhiteLabel / Math.max(y, 1e-6)),
+      clampTo(0, (y - TARGET.orgWhiteLabelCut) * 1e6, 1)
+    );
+    out = triple((i) => unit(kneeInv(L[i] * f)));
+  }
+  const w = clampTo(0, (TARGET.orgWhiteLabelInk - kneeY(out)) * 1e6, 1);
+  return { fill: out, label: [w, w, w] };
+}
+
 interface SchemeTokens {
   bg: Rgb;
   ink: Rgb;
@@ -861,7 +908,11 @@ function schemeTokens(
     return { ...kit, heading: kit.ink, title: kit.ink, focus: kit.ink };
   const { org, decorated } = page;
   const orgInk = orgMove(mode, org.ink, 'text', decorated);
-  const orgButton = orgMove(mode, org.button, 'large', decorated);
+  const orgButton = keepWhite(
+    mode,
+    orgMove(mode, org.button, 'large', decorated),
+    decorated
+  );
   return {
     ...kit,
     ink: orgInk,
@@ -870,10 +921,11 @@ function schemeTokens(
     heading: orgMove(mode, org.heading, 'large', decorated),
     title: orgMove(mode, org.heading, 'text', decorated),
     focus: orgMove(mode, org.focus, 'large', decorated),
-    // The org's button and label rule, its accent text, and the marks in
-    // the colour the Style draws them in, each at its grade.
-    button: orgButton,
-    buttonInk: pivot(orgButton),
+    // The org's button and label rule (white kept on a mid-tone), its
+    // accent text, and the marks in the colour the Style draws them in,
+    // each at its grade.
+    button: orgButton.fill,
+    buttonInk: orgButton.label,
     accent: orgMove(mode, org.button, 'text', decorated),
     mark: orgMove(mode, source, 'large', decorated),
   };
@@ -1786,6 +1838,7 @@ describe('textures and shapes — behind the words', () => {
     for (const c of ['r', 'g', 'b']) {
       expect(softBase).toContain(`--_ot-${c}: var(--_odt-${c})`);
       expect(softBase).toContain(`--_ol-${c}: var(--_odl-${c})`);
+      expect(softBase).toContain(`--_wl-${c}: var(--_wld-${c})`);
     }
     expect(contrast).toContain('--lp-accent: var(--_atmos-accent-i)');
     expect(contrast).toContain('--lp-mark-ink: var(--_atmos-mark-i)');
@@ -2704,4 +2757,159 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       expect(ratio(looser, worstSurface('light', false))).toBeLessThan(4.5);
     }
   );
+});
+
+// ── 11. keep white (owner, D8) ──────────────────────────────────────────────
+describe('keep white — a mid-tone button darkens a little rather than take a black label (owner, D8)', () => {
+  const WHITE: Rgb = [1, 1, 1];
+  const kneeY = (rgb: Rgb) => {
+    const [r, g, b] = clip(rgb).map(kneeLin);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  /** The fill as painted: each channel rounded to a byte. */
+  const painted = (rgb: Rgb): Rgb =>
+    triple((i) => Math.round(unit(rgb[i]) * 255) / 255);
+  const same = (a: Rgb, b: Rgb) =>
+    [0, 1, 2].every(
+      (i) => Math.abs(a[i as 0 | 1 | 2] - b[i as 0 | 1 | 2]) < 1e-9
+    );
+  const hueOf = (rgb: Rgb) => {
+    const [, a, b] = toLab(rgb);
+    return { h: Math.atan2(b, a), c: Math.hypot(a, b) };
+  };
+  const cube = (step: number) => {
+    const out: Rgb[] = [];
+    for (let r = 0; r < 256; r += step)
+      for (let g = 0; g < 256; g += step)
+        for (let b = 0; b < 256; b += step)
+          out.push([r / 255, g / 255, b / 255]);
+    return out;
+  };
+
+  it('routes the move on, and switches it off on a decorated dark page', () => {
+    expect(CODE).toContain(
+      squash(
+        '--_wl-r: var(--_wlm-r); --_wl-g: var(--_wlm-g); --_wl-b: var(--_wlm-b); --_wld-r: var(--_wlm-r); --_wld-g: var(--_wlm-g); --_wld-b: var(--_wlm-b);'
+      )
+    );
+    expect(POLE.dark).toContain(
+      squash('--_wld-r: r; --_wld-g: g; --_wld-b: b;')
+    );
+    expect(POLE.light).not.toContain('--_wld-r: r;');
+    // White cannot reach 4.5:1 above Y 0.1833, and the decorated dark grade
+    // holds a button at or above 0.203 — so that move would break its 3:1.
+    expect(1.05 / (TARGET.orgDecLargeDark + 0.05)).toBeLessThan(4.5);
+  });
+
+  it(
+    'every mid-tone ends white at >= 4.5:1 as painted, by the kit’s own darken, hue kept and its grade held; every other fill keeps the org’s rule; nothing that holds moves',
+    { timeout: 60_000 },
+    () => {
+      const counts = { whitened: 0, alreadyWhite: 0, orgRule: 0 };
+      let lowest = Number.POSITIVE_INFINITY;
+      let hueShift = 0;
+      for (const c of cube(15))
+        for (const band of ['light', 'dark'] as const)
+          for (const decorated of [false, true]) {
+            const before = orgMove(band, c, 'large', decorated);
+            const y0 = kneeY(before);
+            const { fill, label } = keepWhite(band, before, decorated);
+            const on = band === 'light' || !decorated;
+            if (on && y0 > 0.1791 && y0 <= TARGET.orgWhiteLabelCut) {
+              // The range: the org's rule gives black, white holds 3:1.
+              expect(label).toEqual(WHITE);
+              const drawn = ratio(WHITE, painted(fill));
+              lowest = Math.min(lowest, drawn);
+              expect(drawn, `${band} ${c}`).toBeGreaterThanOrEqual(4.5);
+              // Only as far as white needs, by the kit's own darken (linear
+              // channels scaled): a fill white already holds stays put.
+              expect(same(fill, darken(before, TARGET.orgWhiteLabel))).toBe(
+                true
+              );
+              if (y0 <= TARGET.orgWhiteLabel)
+                expect(same(fill, before)).toBe(true);
+              else {
+                // At the target, give or take a channel clipped at 0.
+                expect(kneeY(fill)).toBeGreaterThan(
+                  TARGET.orgWhiteLabel - 1e-9
+                );
+                expect(kneeY(fill)).toBeLessThan(
+                  TARGET.orgWhiteLabel + kneeLin(0)
+                );
+              }
+              const [h0, h1] = [hueOf(before), hueOf(fill)];
+              // The move scales the curve's linear channels; oklab reads the
+              // true curve, which differs below its knee, so a hair moves.
+              if (h0.c > 0.02)
+                hueShift = Math.max(
+                  hueShift,
+                  (Math.abs(h1.h - h0.h) * 180) / Math.PI
+                );
+              // The grade still holds: a darker fill only helps on a light
+              // band, and on a dark one 0.181 sits above the 3:1 target.
+              if (band === 'dark')
+                expect(kneeY(fill)).toBeGreaterThanOrEqual(TARGET.orgLargeDark);
+              if (y0 <= TARGET.orgWhiteLabel) counts.alreadyWhite++;
+              else counts.whitened++;
+            } else {
+              // Outside it, the org's rule on the org's fill, unmoved.
+              expect(same(fill, before)).toBe(true);
+              expect(label).toEqual(pivot(before));
+              counts.orgRule++;
+            }
+          }
+      // Painted white never drops below 4.5:1; at the 0.1833 limit itself the
+      // rounding would (next test).
+      expect(lowest).toBeGreaterThanOrEqual(4.5);
+      expect(hueShift).toBeLessThan(0.05);
+      expect(counts.whitened).toBeGreaterThan(500);
+      expect(counts.orgRule).toBeGreaterThan(500);
+    }
+  );
+
+  it('has teeth: darkened only to white’s 4.5:1 limit, the painted fill falls short', () => {
+    let short = 0;
+    for (const c of cube(15)) {
+      const y = kneeY(c);
+      if (y <= 0.1833 || y > TARGET.orgWhiteLabelCut) continue;
+      if (ratio(WHITE, painted(darken(c, 0.1833))) < 4.5) short++;
+    }
+    expect(short).toBeGreaterThan(0);
+  });
+
+  it('draws Tending the Grief’s own brand a little darker, with a white label', () => {
+    // of-blood-and-bones' page sets only its brand, #EF3D0B (Y 0.217): its
+    // interactive colour and focus ring; the ground and heading stay the
+    // org's, light in both themes (the org's background has no dark one).
+    const brand = hex('#EF3D0B');
+    const outcome: Record<string, string> = {};
+    const bytes = (rgb: Rgb) =>
+      `#${clip(rgb)
+        .map((v) =>
+          Math.round(v * 255)
+            .toString(16)
+            .padStart(2, '0')
+        )
+        .join('')}`;
+    for (const theme of ['light', 'dark'] as const) {
+      const org = orgFromBg(theme, hex('#F3F0E7'), hex('#A62B0C'), brand);
+      const t = schemeTokens(
+        'light',
+        'base',
+        orgGround('light', org),
+        brand,
+        DEFAULT_TINT,
+        brand,
+        { org, decorated: false }
+      );
+      outcome[theme] = `${bytes(t.button)} ${bytes(t.buttonInk)}`;
+      expect(ratio(t.buttonInk, painted(t.button))).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(t.button, t.bg)).toBeGreaterThanOrEqual(3);
+    }
+    // Was #e43a0a with a black label (the org's rule after the large grade).
+    expect(outcome).toEqual({
+      light: '#dd3809 #ffffff',
+      dark: '#dd3809 #ffffff',
+    });
+  });
 });

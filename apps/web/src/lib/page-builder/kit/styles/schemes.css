@@ -180,6 +180,17 @@
   --_odl-g: var(--_odl-dk-g);
   --_odl-b: var(--_odl-dk-b);
 
+  /* KEEP WHITE (owner, D8): the org's button moves on to `--_wl-*`, which
+     darkens a mid-tone just far enough for a white label. A decorated page
+     re-routes to `--_wld-*`, which the dark pole switches off: its grade
+     keeps a button at Y >= 0.203, where white cannot reach 4.5:1. */
+  --_wl-r: var(--_wlm-r);
+  --_wl-g: var(--_wlm-g);
+  --_wl-b: var(--_wlm-b);
+  --_wld-r: var(--_wlm-r);
+  --_wld-g: var(--_wlm-g);
+  --_wld-b: var(--_wlm-b);
+
   /* Atmosphere (03 §5.1). On this fallback path its scrim is fully opaque —
      the section renders as `base` — because the lighter scrim is only proven
      for the exact path's moved colours (see the atmosphere scheme below). */
@@ -300,6 +311,9 @@
   --_odl-r: var(--_odl-lt-r);
   --_odl-g: var(--_odl-lt-g);
   --_odl-b: var(--_odl-lt-b);
+  --_wld-r: r;
+  --_wld-g: g;
+  --_wld-b: b;
 
   --_atmos-accent: var(--_atm-acc-dark);
   --_atmos-mark: var(--_atm-mark-dark);
@@ -601,6 +615,11 @@
     --_odl-lt-r: max(0, 255 * (1.055 * pow(var(--_odl-lt-1r) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1r)), 1 / 2.4) - 0.055));
     --_odl-lt-g: max(0, 255 * (1.055 * pow(var(--_odl-lt-1g) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1g)), 1 / 2.4) - 0.055));
     --_odl-lt-b: max(0, 255 * (1.055 * pow(var(--_odl-lt-1b) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1b)), 1 / 2.4) - 0.055));
+    --_wl-f: max(min(1, 0.181 / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - 0.3) * 1e6, 1));
+    --_wlm-r: max(0, 255 * (1.055 * pow(var(--_lr) * var(--_wl-f), 1 / 2.4) - 0.055));
+    --_wlm-g: max(0, 255 * (1.055 * pow(var(--_lg) * var(--_wl-f), 1 / 2.4) - 0.055));
+    --_wlm-b: max(0, 255 * (1.055 * pow(var(--_lb) * var(--_wl-f), 1 / 2.4) - 0.055));
+    --_wk: clamp(0, (0.182 - var(--_y)) * 1e6, 1);
 
     /* The brand and the marks' source, each moved only as far as each
        polarity requires: the accent and the buttons from the brand, the
@@ -639,7 +658,13 @@
      surface of the band (a no-op for a colour that holds). The button's
      label is `org-brand.css`'s rule for `--color-on-interactive` — white
      below luminance 0.1791, black above, so >= 4.58:1 either side — taken
-     from the fill as drawn, so a moved fill keeps a legible label. */
+     from the fill as drawn, so a moved fill keeps a legible label. One
+     exception (owner, D8): a mid-tone fill (0.181 < Y <= 0.30, white
+     already >= 3:1) darkens to Y 0.181 and keeps a white label (4.55:1),
+     rather than taking black: the label is white up to 0.182, just past
+     the move's target (and the 0.0008 a channel darkened to 0 still reads
+     on this curve), so only a fill white holds on takes it. Brighter fills
+     keep the org's rule. */
   .lp:not([data-lp-style='cinematic'])
     :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
     --lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));
@@ -649,8 +674,11 @@
     --lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));
     --lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));
     --lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));
-    --lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));
-    --lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_w)) calc(255 * var(--_w)) calc(255 * var(--_w)));
+    --lp-button-bg: rgb(
+      from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b))
+      var(--_wl-r) var(--_wl-g) var(--_wl-b)
+    );
+    --lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));
     --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
   }
 }
@@ -749,6 +777,9 @@
     --_ol-r: var(--_odl-r);
     --_ol-g: var(--_odl-g);
     --_ol-b: var(--_odl-b);
+    --_wl-r: var(--_wld-r);
+    --_wl-g: var(--_wld-g);
+    --_wl-b: var(--_wld-b);
   }
 
   .lp [data-lp-scheme='contrast'] {

@@ -448,3 +448,63 @@ test('a dark preview on a light viewer resolves a page carrier’s DARK brand to
     JSON.stringify({ expected, reading })
   ).toEqual([]);
 });
+
+// ── keep white: a mid-tone button darkens a little (owner, D8) ────────────────
+// of-blood-and-bones' Tending the Grief sets its own brand, #ef3d0b (Y
+// 0.217): a mid-tone the org's label rule gives a black label, though white
+// reaches 4.5:1 a little darker. The owner chose white: the fill darkens,
+// its lightness only, as far as white needs. That page's sections were
+// edited past its seed, so its carrier is put on the org's other Path page,
+// as the page renders it. `schemes.test.ts` §11 sweeps every colour.
+const MID_TONE_CARRIER = '--brand-color: #ef3d0b; --brand-color-dark: #ef3d0b';
+
+/** sRGB channels of a `#rrggbb`, linearised. */
+const linear = (hex: string) =>
+  [1, 3, 5].map((i) => {
+    const c = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+const luminance = (hex: string) => {
+  const [r = 0, g = 0, b = 0] = linear(hex);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+/** OKLab hue, in degrees. */
+const hueOf = (hex: string) => {
+  const [r = 0, g = 0, b = 0] = linear(hex);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return (Math.atan2(bb, a) * 180) / Math.PI;
+};
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`${theme}: Tending the Grief’s mid-tone brand darkens a little and keeps a white label`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const item = CASES[0];
+    if (!item) throw new Error('no case');
+    const page = await openAs(browser, baseURL as string, item, theme);
+    // The page's own derivation, on its carrier.
+    const reading = await measure(page, { carrier: MID_TONE_CARRIER }, 'root');
+    const context = JSON.stringify(reading);
+    const own = reading.org['--color-interactive'];
+    const fill = reading.kit.button;
+    if (!own || !fill) throw new Error(`no button colours: ${context}`);
+    expect(own, 'the page’s own brand').toBe('#ef3d0b');
+    expect(
+      reading.org['--color-on-interactive'],
+      'the org’s rule gives it black'
+    ).toBe('#000000');
+    expect(reading.kit['button label'], context).toBe('#ffffff');
+    const white = 1.05 / (luminance(fill) + 0.05);
+    expect(white, `${fill}: white holds`).toBeGreaterThanOrEqual(4.5);
+    expect(white, `${fill}: darkened only a little`).toBeLessThan(4.6);
+    expect(
+      Math.abs(hueOf(fill) - hueOf(own)),
+      `${fill}: the brand's hue`
+    ).toBeLessThan(1.5);
+  });
+}
