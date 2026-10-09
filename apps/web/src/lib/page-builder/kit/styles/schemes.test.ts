@@ -1046,29 +1046,31 @@ describe('the second colour skips a neutral secondary (03 X19)', () => {
   const PICK = (candidate: string, fallback: string) =>
     `rgb( from color-mix( in srgb, oklch(from var(${candidate}) l c h / clamp(0, (c - 0.02) * 1000, 1)) 50%, rgb(from var(${fallback}) r g b / 0.004) 50% ) r g b / 1 )`;
 
-  it('picks the secondary if it has chroma, else the accent, else the primary turned', () => {
+  it('picks the secondary if it has chroma, else the accent, else a tone of the primary', () => {
     expect(CODE).toContain(
-      `--lp-brand-2: ${PICK('--_second-in', '--_second-or-shift')};`
+      `--lp-brand-2: ${PICK('--_second-in', '--_second-or-tone')};`
     );
     expect(CODE).toContain(
-      `--_second-or-shift: ${PICK('--_accent-in', '--_second-shift')};`
+      `--_second-or-tone: ${PICK('--_accent-in', '--_second-tone')};`
     );
     expect(CODE).toContain(
-      '--_second-shift: oklch(from var(--lp-brand) l min(c, 0.17 * l, 0.46 * (1 - l)) calc(h + 45));'
+      '--_second-tone: oklch( from var(--lp-brand) calc(var(--_tone-l)) min(c, 0.17 * var(--_tone-l), 0.46 * (1 - var(--_tone-l))) h );'
     );
+    // No hue is invented any more (owner, D11).
+    expect(CODE).not.toContain('calc(h + 45)');
   });
 
   it('reads each pole’s own inputs, falling through unset ones', () => {
     const light = rule('.lp {');
     expect(light).toContain(
-      '--_accent-in: var(--brand-accent, var(--_second-shift));'
+      '--_accent-in: var(--brand-accent, var(--_second-tone));'
     );
     expect(light).toContain(
       '--_second-in: var(--brand-secondary, var(--_accent-in));'
     );
     const dark = rule(".lp[data-lp-style='cinematic'] {");
     expect(dark).toContain(
-      '--_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-shift)));'
+      '--_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-tone)));'
     );
     expect(dark).toContain(
       '--_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));'
@@ -2958,5 +2960,155 @@ describe('keep white — a mid-tone button darkens a little rather than take a b
       light: '#dd3809 #ffffff',
       dark: '#dd3809 #ffffff',
     });
+  });
+});
+
+// ── 12. the second colour's tone (owner, D11) ───────────────────────────────
+// An org that set no second colour used to get its primary turned 45° (of-
+// blood-and-bones' rust became an ochre, #765821). It gets a TONE now: the
+// primary's hue, its lightness moved 0.2 toward the ground, or the other way
+// where there is no room, its chroma capped for the gamut there.
+const TONE = { step: 0.2, lightRoom: 0.78, darkRoom: 0.25 } as const;
+
+function toneL(pole: Mode, l: number): number {
+  return pole === 'light'
+    ? l + TONE.step - 2 * TONE.step * clampTo(0, (l - TONE.lightRoom) * 1e6, 1)
+    : l - TONE.step + 2 * TONE.step * clampTo(0, (TONE.darkRoom - l) * 1e6, 1);
+}
+
+/** `--_second-tone` on a pole: Chrome clips what the cap leaves out of gamut
+ * (calibrated live: #a62b0c → #d67d68, #2563eb → #293958 on the dark pole). */
+function secondTone(pole: Mode, brand: Rgb): Rgb {
+  return clip(
+    oklchFrom(
+      brand,
+      (l) => toneL(pole, l),
+      (l, c) => {
+        const t = toneL(pole, l);
+        return Math.min(c, 0.17 * t, 0.46 * (1 - t));
+      }
+    )
+  );
+}
+
+describe('the second colour’s tone — the org’s own hue, apart from it (owner, D11)', () => {
+  const dE = (a: Rgb, b: Rgb) => {
+    const [x, y] = [toLab(a), toLab(b)];
+    return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+  };
+  const chroma = (rgb: Rgb) => {
+    const [, a, b] = toLab(rgb);
+    return Math.hypot(a, b);
+  };
+  const hueGap = (a: Rgb, b: Rgb) => {
+    const [, a1, b1] = toLab(a);
+    const [, a2, b2] = toLab(b);
+    const d = Math.abs(Math.atan2(b1, a1) - Math.atan2(b2, a2));
+    return (Math.min(d, 2 * Math.PI - d) * 180) / Math.PI;
+  };
+  const bytes = (rgb: Rgb) =>
+    `#${clip(rgb)
+      .map((v) =>
+        Math.round(v * 255)
+          .toString(16)
+          .padStart(2, '0')
+      )
+      .join('')}`;
+  /** Every primary with a hue to give (a grey has none: X19 skips it). */
+  const PRIMARIES: Rgb[] = [];
+  for (let r = 0; r < 256; r += 17)
+    for (let g = 0; g < 256; g += 17)
+      for (let b = 0; b < 256; b += 17) {
+        const c: Rgb = [r / 255, g / 255, b / 255];
+        if (chroma(c) >= 0.03) PRIMARIES.push(c);
+      }
+
+  it('is written per pole, toward its ground', () => {
+    expect(POLE.light).toContain(
+      `--_tone-l: (l + ${TONE.step} - ${2 * TONE.step} * clamp(0, (l - ${TONE.lightRoom}) * 1e6, 1));`
+    );
+    expect(POLE.dark).toContain(
+      `--_tone-l: (l - ${TONE.step} + ${2 * TONE.step} * clamp(0, (${TONE.darkRoom} - l) * 1e6, 1));`
+    );
+  });
+
+  it(
+    'keeps the hue, and stays apart from the primary: by 0.19 as fills side by side, by 0.08 as drawn on the org’s surfaces',
+    { timeout: 60_000 },
+    () => {
+      const lowest: Record<string, number> = {};
+      const low = (key: string, value: number) => {
+        lowest[key] = Math.min(lowest[key] ?? Number.POSITIVE_INFINITY, value);
+      };
+      for (const pole of ['light', 'dark'] as const)
+        for (const brand of PRIMARIES) {
+          const tone = secondTone(pole, brand);
+          // Fills that touch: Poster's primary and accent fields, the block
+          // under a photo on its field, an accent band beside a brand band.
+          low(`${pole} fills`, dE(tone, brand));
+          if (chroma(tone) > 0.02)
+            low(`${pole} hue kept`, -hueGap(tone, brand));
+          // Path's route beside the words' accent, each moved by its grade.
+          for (const decorated of [false, true])
+            low(
+              `${pole} drawn${decorated ? ' decorated' : ''}`,
+              dE(
+                orgMove(pole, tone, 'large', decorated),
+                orgMove(pole, brand, 'text', decorated)
+              )
+            );
+        }
+      for (const pole of ['light', 'dark'] as const) {
+        expect(lowest[`${pole} fills`], pole).toBeGreaterThanOrEqual(0.19);
+        expect(-lowest[`${pole} hue kept`], pole).toBeLessThan(2);
+        expect(lowest[`${pole} drawn`], pole).toBeGreaterThanOrEqual(0.08);
+        expect(lowest[`${pole} drawn decorated`], pole).toBeGreaterThanOrEqual(
+          0.08
+        );
+      }
+    }
+  );
+
+  it('has teeth: a tone moved AWAY from the ground merges with the primary once drawn', () => {
+    let lowest = Number.POSITIVE_INFINITY;
+    for (const brand of PRIMARIES) {
+      const away = clip(
+        oklchFrom(
+          brand,
+          (l) => toneL('dark', l),
+          (l, c) => {
+            const t = toneL('dark', l);
+            return Math.min(c, 0.17 * t, 0.46 * (1 - t));
+          }
+        )
+      );
+      lowest = Math.min(
+        lowest,
+        dE(
+          orgMove('light', away, 'large', false),
+          orgMove('light', brand, 'text', false)
+        )
+      );
+    }
+    expect(lowest).toBeLessThan(0.02);
+  });
+
+  it('draws the seeded orgs’ tones, and an org’s own second colour is untouched', () => {
+    // of-blood-and-bones' rust, on the light pole in both themes (its
+    // background has no dark one); studio-beta's blue on each pole.
+    expect({
+      'of-blood-and-bones': bytes(secondTone('light', hex('#A62B0C'))),
+      'studio-beta light': bytes(secondTone('light', hex('#2563EB'))),
+      'studio-beta dark': bytes(secondTone('dark', hex('#2563EB'))),
+    }).toEqual({
+      'of-blood-and-bones': '#d67d68',
+      'studio-beta light': '#85acf7',
+      'studio-beta dark': '#293958',
+    });
+    // The tone is only the last fallback: a chromatic secondary or accent
+    // is the pick (the X19 switch above).
+    expect(CODE).toContain(
+      '--_second-in: var(--brand-secondary, var(--_accent-in));'
+    );
   });
 });

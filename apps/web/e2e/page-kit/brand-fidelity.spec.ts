@@ -598,3 +598,80 @@ test('studio-alpha light: a dark-only page background gives way to the org’s l
   expect(mismatches(reading, expected.org), context).toEqual([]);
   expect(orgTokens(reading), context).toEqual(orgTokens(expected));
 });
+
+// ── Path's second colour: a tone of the org's own (owner, D11) ────────────────
+// of-blood-and-bones set no second colour, so the kit used to invent one —
+// its rust turned 45° (#765821, an ochre). It is a tone of the rust now: the
+// same hue, its lightness moved toward the ground, and Path's route is drawn
+// in it, visibly apart from the rust of the words beside it.
+// `schemes.test.ts` proves both minimums for every brand.
+for (const theme of ['light', 'dark'] as const) {
+  test(`of-blood-and-bones/return-to-the-shoreline ${theme}: Path's route is a tone of the org's colour`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const item = CASES[0];
+    if (!item) throw new Error('no case');
+    const page = await openAs(browser, baseURL as string, item, theme);
+    const read = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('no 2d context');
+      const hex = (css: string) => {
+        ctx.globalCompositeOperation = 'copy';
+        ctx.fillStyle = '#000000';
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+        return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+      };
+      const token = (host: Element, name: string) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${name})`;
+        host.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return hex(value);
+      };
+      const root = document.querySelector('.lp');
+      const section = document.querySelector(
+        ".lp-page > .lp-section[data-lp-scheme='base']:not([data-lp-on-media])"
+      );
+      if (!root || !section) throw new Error('no root or base section');
+      return {
+        style: (root as HTMLElement).dataset.lpStyle,
+        brand: token(root, '--lp-brand'),
+        second: token(root, '--lp-brand-2'),
+        mark: token(section, '--lp-mark-ink'),
+        accent: token(section, '--lp-accent'),
+      };
+    });
+    await page.context().close();
+    const context = JSON.stringify(read);
+    expect(read.style, context).toBe('path');
+    expect(read.brand, 'the org’s rust').toBe('#a62b0c');
+    const [brand, second, mark, accent] = [
+      read.brand,
+      read.second,
+      read.mark,
+      read.accent,
+    ].map(oklab) as [number, number, number][];
+    const hueGap = (x: string, y: string) => {
+      const d = Math.abs(hueOf(x) - hueOf(y)) % 360;
+      return Math.min(d, 360 - d);
+    };
+    // A tone: the rust's hue, its lightness well apart.
+    expect(hueGap(read.second, read.brand), context).toBeLessThan(3);
+    expect(Math.abs(second[0] - brand[0]), context).toBeGreaterThanOrEqual(
+      0.19
+    );
+    // The route, as drawn, beside the words' rust.
+    expect(hueGap(read.mark, read.brand), context).toBeLessThan(3);
+    expect(
+      Math.hypot(...mark.map((v, i) => v - (accent[i] ?? 0))),
+      context
+    ).toBeGreaterThanOrEqual(0.08);
+  });
+}
