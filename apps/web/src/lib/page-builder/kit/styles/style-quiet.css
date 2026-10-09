@@ -71,7 +71,6 @@
 
   /* ── buttons: unhurried ───────────────────────────────────────────────── */
   --lp-button-pad: var(--space-7);
-  --lp-button-weight: var(--font-medium);
   --lp-button-tracking: 0.01em;
 
   /* ── rhythm: the most room of any Style ───────────────────────────────── */
@@ -205,12 +204,10 @@
   }
 }
 
-/* ── the floating bar: the page's own ground, not a dark band ─────────────── */
+/* ── the floating bar: the page's own ground, rimmed in its hairline ──────── */
+/* Its colours are base's (`quiet.ts` names the scheme): the org's ground and
+   the org's own button. Only the rim is Quiet's. */
 :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-sticky[data-lp-scheme] {
-  --lp-bg: var(--lp-ground);
-  --lp-panel: var(--_panel-g);
-  --lp-accent: var(--_accent-g);
-  --lp-button-bg: var(--_button-g);
   box-shadow:
     0 0 0 var(--border-width) var(--lp-line),
     var(--shadow-lg);

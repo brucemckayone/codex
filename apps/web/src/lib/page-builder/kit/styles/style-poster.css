@@ -67,10 +67,11 @@
   --lp-border: var(--border-width-thick);
   --lp-rule: var(--border-width-thick);
 
-  /* ── buttons: heavy, in capitals ──────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: in capitals, tracked open ───────────────────────────────── */
+  /* The org's button height (kit.css), at the weight the org gives its
+     loudest call, its home hero's (semibold). */
   --lp-button-pad: var(--space-8);
-  --lp-button-weight: var(--font-bold);
+  --lp-button-weight: var(--font-semibold);
   --lp-button-tracking: 0.05em;
 
   /* ── rhythm: dense sheets, a wide column the type can crowd ───────────── */

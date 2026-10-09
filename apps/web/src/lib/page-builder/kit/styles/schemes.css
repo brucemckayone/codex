@@ -21,26 +21,33 @@
       the gamut (an out-of-gamut origin would hand `rgb(from …)` channels
       outside 0–255).
    3. Knowing the polarity, the brand is moved in linear light only as far as
-      it must: accent text to Y <= 0.105 on light / >= 0.30 on dark, buttons to
-      Y <= 0.155 on light (a white label) / >= 0.24 on dark (a black label),
-      >= 3.7:1 against the worst surface in the band. A MARK — a line, a stop,
-      a ring; never text or a button — needs 3:1 (WCAG 1.4.11), so it moves
-      only to Y <= 0.18 / >= 0.185, >= 3.28:1 against that surface (any
-      colour the band can hold, since an org's surface can be): text grade
-      turns a bright amber brown, graphic grade keeps it amber. A brand
-      that already passes is left exactly as the creator picked it.
+      it must: accent text to Y <= 0.105 on light / >= 0.30 on dark; a button
+      needs 3:1 against its band (WCAG 1.4.11), so it moves only to
+      Y <= 0.248 on a light band / >= 0.175 on a dark one, 2% past the worst
+      surface a kit band can hold, and its label is the side of the 0.1791
+      crossover it lands on (white below it, so a rust on a dark band keeps
+      its white label). A MARK — a line, a stop, a ring; never text or a
+      button — needs 3:1 too, and moves only to Y <= 0.18 / >= 0.185,
+      >= 3.3:1 against the worst kit surface: text grade turns a bright amber
+      brown, graphic grade keeps it amber. A brand that already passes is
+      left exactly as the creator picked it.
 
    THE ORG IS THE SOURCE (phase 3a, findings §6). A base or soft section
    draws the org's own derived tokens — its ground, soft surface, card, text,
-   secondary text, hairline, heading and focus — so a sales page reads as the
-   org's site does, in both themes and whichever polarity the org's ground
-   has. Facts 2 and 3 are then the SAFETY NET, never the source: an org
-   surface outside its band is moved into it, and an org ink is moved in
-   linear light toward a fixed luminance (`--_ot-*`, `--_ol-*` and their
-   decorated grades) that holds 4.5:1 for text and 3:1 for large text and the
-   focus ring against the WORST surface the band allows. An org colour that
-   already holds is drawn exactly. Every other scheme, Cinematic's room, and
-   atmosphere (whose veil is proven with the kit's own inks) keep them.
+   secondary text, hairline, heading, focus and interactive colour — so a
+   sales page reads as the org's site does, in both themes and whichever
+   polarity the org's ground has. Its button is the org's interactive colour
+   with the org's label rule, its accent text is that colour too, and its
+   marks are the brand's colours. Facts 2 and 3 are then the SAFETY NET,
+   never the source: an org surface outside its band is moved into it, and
+   an org colour is moved in linear light toward a fixed luminance (`--_ot-*`
+   for text, `--_ol-*` for large text, a button, a mark and the focus ring,
+   and their decorated grades) that holds 4.5:1 or 3:1 against the WORST
+   surface the band allows. An org colour that already holds is drawn
+   exactly. Every other scheme, Cinematic's room, and atmosphere (whose veil
+   is proven with the kit's own moves) keep the kit's moves of the brand,
+   which is the org's interactive colour by another name (both are
+   `--brand-color`, or the platform primary, in each theme).
 
    FRAGMENTS. The `--_*` properties below are unevaluated token streams that
    use the relative-colour channel keywords `r g b`. They are declared once on
@@ -93,7 +100,8 @@
      a nested `[data-org-brand]` carrier, and that is where its tokens are
      derived. They are the VIEWER's theme's, so a scoped preview of the other
      theme re-states them (the preview blocks below). An org with no heading
-     colour of its own heads in its text colour. */
+     colour of its own heads in its text colour. `--_org-button` is what the
+     org fills its buttons with (`ui/Button` primary). */
   --_org-ground: var(--color-background);
   --_org-soft: var(--color-surface-secondary);
   --_org-card: var(--color-surface-card);
@@ -102,6 +110,7 @@
   --_org-line: var(--color-border);
   --_org-heading: var(--color-heading, var(--color-text));
   --_org-focus: var(--color-focus);
+  --_org-button: var(--color-interactive);
 
   /* The ground and the org's surfaces, each moved into the light band
      (L >= 0.9, chroma capped only when moved) ONLY when outside it. */
@@ -129,19 +138,21 @@
   --_panel-i: oklch(from var(--lp-brand) 0.265 min(c * 0.35, 0.043) h);
   --_scrim: oklch(from var(--lp-brand) 0.16 min(c * 0.25, 0.027) h);
 
-  /* THE ACCENT'S SOURCE, a Style's hook: the colour the accent and the marks
-     are moved from (Path draws its route in the second colour). Buttons stay
-     the brand. Set it on the Style's root — every recipe below resolves it
-     there, on the element that declares them. */
+  /* THE MARKS' SOURCE, a Style's hook: the brand colour the marks are moved
+     from (Path draws its route in the second colour). Accent TEXT and the
+     buttons are the org's interactive colour — the brand — in every Style
+     (findings §6), so a page's words and its asks are one colour; the name
+     predates that split. Set it on the Style's root — every recipe
+     below resolves it there, on the element that declares them. */
   --lp-accent-source: var(--lp-brand);
 
-  /* The source 55% of the way from black / to white in OKLab — the same
+  /* The colour 55% of the way from black / to white in OKLab — the same
      mixes, written from it so no literal colour appears. On this path a mark
-     is the accent: text grade is graphic grade too. */
-  --_acc-light: oklch(from var(--lp-accent-source) calc(l * 0.55) calc(c * 0.55) h);
-  --_acc-dark: oklch(from var(--lp-accent-source) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
-  --_mark-light: var(--_acc-light);
-  --_mark-dark: var(--_acc-dark);
+     takes the accent's mix: text grade is graphic grade too. */
+  --_acc-light: oklch(from var(--lp-brand) calc(l * 0.55) calc(c * 0.55) h);
+  --_acc-dark: oklch(from var(--lp-brand) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
+  --_mark-light: oklch(from var(--lp-accent-source) calc(l * 0.55) calc(c * 0.55) h);
+  --_mark-dark: oklch(from var(--lp-accent-source) calc(l * 0.55 + 0.45) calc(c * 0.55) h);
   --_btn-light: var(--lp-brand);
   --_btn-dark: var(--lp-brand);
 
@@ -171,7 +182,7 @@
 
   /* Atmosphere (03 §5.1). On this fallback path its scrim is fully opaque —
      the section renders as `base` — because the lighter scrim is only proven
-     for the exact path's moved brand (see the atmosphere scheme below). */
+     for the exact path's moved colours (see the atmosphere scheme below). */
   --_atm-acc-light: var(--_acc-light);
   --_atm-acc-dark: var(--_acc-dark);
   --_atm-mark-light: var(--_mark-light);
@@ -332,6 +343,7 @@
   --_org-line: var(--color-neutral-700);
   --_org-heading: var(--_org-ink);
   --_org-focus: var(--color-primary-400);
+  --_org-button: var(--color-primary-400);
 }
 
 :is(
@@ -340,6 +352,7 @@
 ):is([data-org-brand] .lp, [data-org-brand]) {
   --_org-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--_org-ink)));
   --_org-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --_org-button: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
 }
 
 :is(
@@ -367,6 +380,7 @@
   --_org-line: var(--color-neutral-200);
   --_org-heading: var(--_org-ink);
   --_org-focus: var(--color-primary-500);
+  --_org-button: var(--color-primary-500);
 }
 
 :is(
@@ -376,6 +390,7 @@
 ):is([data-org-brand] .lp, [data-org-brand]) {
   --_org-heading: var(--brand-heading-color, var(--_org-ink));
   --_org-focus: var(--brand-color, var(--color-primary-500));
+  --_org-button: var(--brand-color, var(--color-primary-500));
 }
 
 :is(
@@ -412,11 +427,16 @@
 
 /* ── The org's inks on the org's surfaces ─────────────────────────────────
    Base and soft draw the org's text, secondary text, hairline, heading and
-   focus colours: here exactly, and on the exact path moved only as far as
-   each floor needs. A heading at title size is text, not large text, so it
-   takes the text grade. The hairline is decoration (no floor) and is the
-   org's exactly; a texture stays in the kit's own line, the one its proof
-   is drawn in. Cinematic keeps the kit's inks, for its room (below). */
+   focus colours, and its button: here exactly, and on the exact path moved
+   only as far as each floor needs. A heading at title size is text, not
+   large text, so it takes the text grade; a button, a mark and the focus
+   ring need 3:1, the large grade. The button is the org's interactive fill
+   under the org's label rule (on this path the platform's lightness step,
+   `--color-on-interactive`'s own here), the accent text is that colour
+   too, and a mark is the brand colour the Style draws its marks in. The
+   hairline is decoration (no floor) and is the org's exactly; a texture
+   stays in the kit's own line, the one its proof is drawn in. Cinematic
+   keeps the kit's inks, for its room (below). */
 .lp:not([data-lp-style='cinematic'])
   :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
   --lp-ink: var(--_org-ink);
@@ -426,6 +446,9 @@
   --lp-heading-ink: var(--_org-heading);
   --lp-title-ink: var(--_org-heading);
   --lp-focus: var(--_org-focus);
+  --lp-accent: var(--_org-button);
+  --lp-mark-ink: var(--lp-accent-source);
+  --lp-button-bg: var(--_org-button);
   --_tex-ink: color-mix(
     in oklab,
     oklch(from var(--lp-bg) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h) 16%,
@@ -470,15 +493,15 @@
     --_acc-lt-r: max(0, 255 * (1.055 * pow(var(--_acc-lt-1r) + var(--_acc-lt-k) * (1 - var(--_acc-lt-1r)), 1 / 2.4) - 0.055));
     --_acc-lt-g: max(0, 255 * (1.055 * pow(var(--_acc-lt-1g) + var(--_acc-lt-k) * (1 - var(--_acc-lt-1g)), 1 / 2.4) - 0.055));
     --_acc-lt-b: max(0, 255 * (1.055 * pow(var(--_acc-lt-1b) + var(--_acc-lt-k) * (1 - var(--_acc-lt-1b)), 1 / 2.4) - 0.055));
-    --_btn-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_btn-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_btn-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_btn-lt-s: max(1, 0.24 / max(var(--_y), 1e-6));
+    --_btn-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.248 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_btn-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.248 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_btn-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.248 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_btn-lt-s: max(1, 0.175 / max(var(--_y), 1e-6));
     --_btn-lt-1r: min(1, var(--_lr) * var(--_btn-lt-s));
     --_btn-lt-1g: min(1, var(--_lg) * var(--_btn-lt-s));
     --_btn-lt-1b: min(1, var(--_lb) * var(--_btn-lt-s));
     --_btn-lt-y1: (0.2126 * var(--_btn-lt-1r) + 0.7152 * var(--_btn-lt-1g) + 0.0722 * var(--_btn-lt-1b));
-    --_btn-lt-k: max(0, (0.24 - var(--_btn-lt-y1)) / max(1 - var(--_btn-lt-y1), 1e-6));
+    --_btn-lt-k: max(0, (0.175 - var(--_btn-lt-y1)) / max(1 - var(--_btn-lt-y1), 1e-6));
     --_btn-lt-r: max(0, 255 * (1.055 * pow(var(--_btn-lt-1r) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1r)), 1 / 2.4) - 0.055));
     --_btn-lt-g: max(0, 255 * (1.055 * pow(var(--_btn-lt-1g) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1g)), 1 / 2.4) - 0.055));
     --_btn-lt-b: max(0, 255 * (1.055 * pow(var(--_btn-lt-1b) + var(--_btn-lt-k) * (1 - var(--_btn-lt-1b)), 1 / 2.4) - 0.055));
@@ -579,11 +602,11 @@
     --_odl-lt-g: max(0, 255 * (1.055 * pow(var(--_odl-lt-1g) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1g)), 1 / 2.4) - 0.055));
     --_odl-lt-b: max(0, 255 * (1.055 * pow(var(--_odl-lt-1b) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1b)), 1 / 2.4) - 0.055));
 
-    /* The accent's source and the brand, each moved only as far as each
-       polarity requires: the accent and the marks from the source, the
-       buttons from the brand. */
-    --_acc-light: rgb(from var(--lp-accent-source) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
-    --_acc-dark: rgb(from var(--lp-accent-source) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
+    /* The brand and the marks' source, each moved only as far as each
+       polarity requires: the accent and the buttons from the brand, the
+       marks from the source. */
+    --_acc-light: rgb(from var(--lp-brand) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));
+    --_acc-dark: rgb(from var(--lp-brand) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));
     --_mark-light: rgb(from var(--lp-accent-source) var(--_mark-dk-r) var(--_mark-dk-g) var(--_mark-dk-b));
     --_mark-dark: rgb(from var(--lp-accent-source) var(--_mark-lt-r) var(--_mark-lt-g) var(--_mark-lt-b));
     --_btn-light: rgb(from var(--lp-brand) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));
@@ -592,8 +615,8 @@
     /* Moved further for atmosphere, and the smallest scrims that then hold
        every floor over a pure black and a pure white backdrop. The same moves
        hold a mark over a texture or shapes (a decorated page, below). */
-    --_atm-acc-light: rgb(from var(--lp-accent-source) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));
-    --_atm-acc-dark: rgb(from var(--lp-accent-source) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));
+    --_atm-acc-light: rgb(from var(--lp-brand) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));
+    --_atm-acc-dark: rgb(from var(--lp-brand) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));
     --_atm-mark-light: rgb(from var(--lp-accent-source) var(--_atm-mark-dk-r) var(--_atm-mark-dk-g) var(--_atm-mark-dk-b));
     --_atm-mark-dark: rgb(from var(--lp-accent-source) var(--_atm-mark-lt-r) var(--_atm-mark-lt-g) var(--_atm-mark-lt-b));
     --_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));
@@ -613,7 +636,10 @@
   }
 
   /* The org's inks, each moved only where it would fail on the worst
-     surface of the band (a no-op for a colour that holds). */
+     surface of the band (a no-op for a colour that holds). The button's
+     label is `org-brand.css`'s rule for `--color-on-interactive` — white
+     below luminance 0.1791, black above, so >= 4.58:1 either side — taken
+     from the fill as drawn, so a moved fill keeps a legible label. */
   .lp:not([data-lp-style='cinematic'])
     :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
     --lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));
@@ -621,6 +647,10 @@
     --lp-title-ink: rgb(from var(--_org-heading) var(--_ot-r) var(--_ot-g) var(--_ot-b));
     --lp-heading-ink: rgb(from var(--_org-heading) var(--_ol-r) var(--_ol-g) var(--_ol-b));
     --lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));
+    --lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_w)) calc(255 * var(--_w)) calc(255 * var(--_w)));
     --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
   }
 }
@@ -701,10 +731,11 @@
    accent, mark and button and its soft-ink ghost line, so in the kit's inks
    a texture in the line colour holds every floor at any strength and shapes
    up to their alpha; brand / accent bands draw away from their ink (above).
-   The org's inks on base / soft take their decorated grade, which holds over
-   the decorations the Styles ship, at the strengths they ship — so a Style
-   that ships a stronger one must be re-proven. `schemes.test.ts` measures
-   all three. A PAGE-level choice: the queries read `.lp-page` (see
+   The org's colours on base / soft — its inks, button, accent and marks,
+   outside Cinematic's room — take their decorated grade instead, which holds
+   over the decorations the Styles ship, at the strengths they ship — so a
+   Style that ships a stronger one must be re-proven. `schemes.test.ts`
+   measures all three. A PAGE-level choice: the queries read `.lp-page` (see
    `surfaces.css`). */
 @container lp-page style(--lp-texture: grain) or style(--lp-texture: paper) or style(--lp-texture: contour) or style(--lp-shapes: blobs) {
   .lp :is([data-lp-scheme='base'], [data-lp-scheme='soft']) {

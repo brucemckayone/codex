@@ -6,10 +6,11 @@
    at every section, and it draws itself as they scroll.
 
    PALETTE. The route, its stops and every marker are the SECOND brand
-   colour: this Style makes it the kit's accent source (below), so they are
+   colour: this Style makes it the kit's mark source (below), so they are
    drawn in the kit's mark (`--lp-mark-ink`), moved only as far as a graphic
-   needs (3:1, so an amber stays amber), and the words it colours in the
-   accent, moved to the text floor. The calls to action stay in the PRIMARY.
+   needs (3:1, so an amber stays amber). The words it colours take the
+   org's own accent, its interactive colour, as the calls to action do: the
+   PRIMARY, so a page's words and its asks are one colour (phase 3a).
    The ground and a tint of it take turns, one stretch per stop; two dark
    stretches and the arrival in the brand's own colour.
 
@@ -85,8 +86,8 @@
     calc(var(--lp-stagger) * 3) both;
 
   /* ── the second colour ────────────────────────────────────────────────── */
-  /* The kit moves its accent and its marks from this, in every scheme and
-     both poles (`schemes.css`); the buttons stay the brand's. */
+  /* The kit moves its marks from this, in every scheme and both poles
+     (`schemes.css`); its accent text and buttons stay the org's primary. */
   --lp-accent-source: var(--lp-brand-2);
 }
 

@@ -76,11 +76,18 @@
   --lp-rule: var(--border-width);
 
   /* ── buttons ──────────────────────────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-12));
+  /* The org's own buttons (`ui/Button`), in every Style: a call to action is
+     the org's large button (`--space-11`, 44px, never under the tap target)
+     and a leading one (`size="lg"`: the hero's, the closing band's, a
+     featured offer's) its extra large (`--space-12`, 48px), both scaled by
+     the brand's density, at the org's medium weight. A Style keeps the
+     label's size, tracking and padding. */
+  --lp-button-height: var(--tap-target-min);
+  --lp-button-height-lg: max(var(--tap-target-min), var(--space-12));
   --lp-button-pad: var(--space-6);
   /* Its own step: a button label follows the body only so far. */
   --lp-button-size: calc(clamp(1.0625rem, 1rem + 0.15cqi, 1.125rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-semibold);
+  --lp-button-weight: var(--font-medium);
   --lp-button-tracking: 0em;
 
   /* ── rhythm ───────────────────────────────────────────────────────────── */

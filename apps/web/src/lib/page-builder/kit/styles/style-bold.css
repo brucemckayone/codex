@@ -75,11 +75,12 @@
   --lp-rule: calc(var(--border-width-thick) * 1.5);
   --_bold-slab: calc(var(--border-width-thick) * 3);
 
-  /* ── buttons: large, square-shouldered, solid ─────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: square-shouldered, solid ────────────────────────────────── */
+  /* The org's button height (kit.css), at the weight the org gives its
+     loudest call, its home hero's (semibold); wide, with a larger label. */
   --lp-button-pad: var(--space-8);
   --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-bold);
+  --lp-button-weight: var(--font-semibold);
   --lp-button-tracking: -0.01em;
 
   /* ── rhythm: the widest column, room for the type to be big ───────────── */

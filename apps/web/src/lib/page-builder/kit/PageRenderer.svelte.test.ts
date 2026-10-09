@@ -336,10 +336,10 @@ describe('PageRenderer', () => {
     const root = await render({ page: samplePage(style) });
     expect(
       root.querySelector('.lp-sticky')?.getAttribute('data-lp-scheme')
-    ).toBe(STYLES[style].sticky ?? 'contrast');
+    ).toBe(STYLES[style].sticky ?? 'base');
   });
 
-  it('floats Quiet’s bar on its own ground and Cinematic’s on its tint; the rest on contrast', async () => {
+  it('floats the bar on the org’s ground unless a Style names a band: Cinematic’s on its tint', async () => {
     const bars: Record<string, string | null | undefined> = {};
     for (const style of ['quiet', 'cinematic', 'bold'] as const) {
       const root = await render({ page: samplePage(style) });
@@ -352,7 +352,7 @@ describe('PageRenderer', () => {
     expect(bars).toEqual({
       quiet: 'base',
       cinematic: 'soft',
-      bold: 'contrast',
+      bold: 'base',
     });
   });
 });

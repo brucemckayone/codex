@@ -76,9 +76,6 @@
      through the plain ground reads as a grey band. */
   --lp-atmosphere-ground: tint;
 
-  /* ── buttons ──────────────────────────────────────────────────────────── */
-  --lp-button-weight: var(--font-semibold);
-
   /* ── rhythm: generous air, a wide column for the pictures ─────────────── */
   --lp-pad-compact: clamp(var(--space-12), var(--space-8) + 3cqi, var(--space-20));
   --lp-pad-regular: clamp(var(--space-20), var(--space-10) + 6cqi, calc(var(--space-32) * 1.1));

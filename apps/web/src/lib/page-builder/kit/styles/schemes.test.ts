@@ -53,11 +53,16 @@ const INK = { ink: 17, soft: 7, edge: 3.2, line: 1.45 } as const;
 const TARGET = {
   accentLight: 0.105,
   accentDark: 0.3,
-  buttonLight: 0.155,
-  buttonDark: 0.24,
+  // A button on a kit band (contrast, Cinematic's room) needs 3:1 against
+  // it, and its label is whichever side of the 0.1791 crossover it lands
+  // on, so it moves only to 2% past the worst surface a kit band can hold
+  // (§4 measures both): a rust lightened onto a dark band keeps white.
+  buttonLight: 0.248,
+  buttonDark: 0.175,
   // A mark (a route, a stop, a ring) needs 3:1, not 4.5:1, so it moves less:
-  // >= 3.3:1 against the worst surface of its band, the accent's own ~10%
-  // margin (§8 below measures it for any source colour).
+  // >= 3.3:1 against the worst kit surface of its band, the accent's own
+  // ~10% margin (§8 below measures it for any source colour). On the org's
+  // surfaces a mark takes the org's large grade instead (§10).
   markLight: 0.18,
   markDark: 0.185,
   // Atmosphere's brand is moved further so its veil can be thinner (§5 below).
@@ -182,25 +187,32 @@ const RECIPES = [
   '--_org-line: var(--color-border);',
   '--_org-heading: var(--color-heading, var(--color-text));',
   '--_org-focus: var(--color-focus);',
+  '--_org-button: var(--color-interactive);',
   '--lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
   '--lp-ink-soft: rgb(from var(--_org-ink-soft) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
   '--lp-title-ink: rgb(from var(--_org-heading) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
   '--lp-heading-ink: rgb(from var(--_org-heading) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
   '--lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
+  // the org's button, its label rule, its accent text, and the marks (§10)
+  '--lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
+  '--lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_w)) calc(255 * var(--_w)) calc(255 * var(--_w)));',
+  '--lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
+  '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
   '--lp-panel-ink: var(--lp-ink);',
   '--lp-line: var(--_org-line);',
   '--_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));',
   '--_btn-light: rgb(from var(--lp-brand) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));',
   '--_btn-dark: rgb(from var(--lp-brand) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));',
-  // the accent and the marks, from the accent's source (the brand unless a Style says)
+  // the accent from the brand; the marks from their source (the brand
+  // unless a Style says)
   '--lp-accent-source: var(--lp-brand);',
-  '--_acc-light: rgb(from var(--lp-accent-source) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));',
-  '--_acc-dark: rgb(from var(--lp-accent-source) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));',
+  '--_acc-light: rgb(from var(--lp-brand) var(--_acc-dk-r) var(--_acc-dk-g) var(--_acc-dk-b));',
+  '--_acc-dark: rgb(from var(--lp-brand) var(--_acc-lt-r) var(--_acc-lt-g) var(--_acc-lt-b));',
   '--_mark-light: rgb(from var(--lp-accent-source) var(--_mark-dk-r) var(--_mark-dk-g) var(--_mark-dk-b));',
   '--_mark-dark: rgb(from var(--lp-accent-source) var(--_mark-lt-r) var(--_mark-lt-g) var(--_mark-lt-b));',
   // atmosphere
-  '--_atm-acc-light: rgb(from var(--lp-accent-source) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));',
-  '--_atm-acc-dark: rgb(from var(--lp-accent-source) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));',
+  '--_atm-acc-light: rgb(from var(--lp-brand) var(--_atm-acc-dk-r) var(--_atm-acc-dk-g) var(--_atm-acc-dk-b));',
+  '--_atm-acc-dark: rgb(from var(--lp-brand) var(--_atm-acc-lt-r) var(--_atm-acc-lt-g) var(--_atm-acc-lt-b));',
   '--_atm-mark-light: rgb(from var(--lp-accent-source) var(--_atm-mark-dk-r) var(--_atm-mark-dk-g) var(--_atm-mark-dk-b));',
   '--_atm-mark-dark: rgb(from var(--lp-accent-source) var(--_atm-mark-lt-r) var(--_atm-mark-lt-g) var(--_atm-mark-lt-b));',
   '--_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));',
@@ -272,9 +284,14 @@ describe('schemes.css ↔ model parity', () => {
         `--_atmos-mark-i: var(--_atm-mark-${other})`
       );
     }
-    // Without pow() a mark is the accent: text grade is graphic grade too.
-    expect(POLE.light).toContain('--_mark-light: var(--_acc-light);');
-    expect(POLE.light).toContain('--_mark-dark: var(--_acc-dark);');
+    // Without pow() a mark takes the accent's mix (text grade is graphic
+    // grade too), from the marks' own source.
+    expect(POLE.light).toContain(
+      '--_mark-light: oklch(from var(--lp-accent-source) calc(l * 0.55) calc(c * 0.55) h);'
+    );
+    expect(POLE.light).toContain(
+      '--_mark-dark: oklch(from var(--lp-accent-source) calc(l * 0.55 + 0.45) calc(c * 0.55) h);'
+    );
   });
 
   it('draws the org on base and soft — its surfaces, and its inks moved toward the side the ground is on', () => {
@@ -325,7 +342,42 @@ describe('schemes.css ↔ model parity', () => {
     expect(POLE.dark).not.toContain('--lp-brand:');
   });
 
-  it('moves the accent and the marks from the source, the buttons from the brand — on both paths', () => {
+  it('draws the org’s button, accent text and marks on base and soft — on both paths', () => {
+    const ORG =
+      ".lp:not([data-lp-style='cinematic']) :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {";
+    const [, fallback = '', exact = ''] = CODE.split(ORG).map(
+      (rest) => rest.match(/^([^}]*)\}/)?.[1] ?? ''
+    );
+    // Without pow(), exactly the org's (the label is the generic step, the
+    // platform's own `--color-on-interactive` on this path).
+    expect(fallback).toContain('--lp-button-bg: var(--_org-button);');
+    expect(fallback).toContain('--lp-accent: var(--_org-button);');
+    expect(fallback).toContain('--lp-mark-ink: var(--lp-accent-source);');
+    expect(fallback).not.toContain('--lp-button-ink');
+    // With it, moved only as far as each grade needs, and the label is
+    // org-brand.css's luminance step from the fill as drawn.
+    expect(exact).toContain(
+      '--lp-button-bg: rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
+    );
+    expect(exact).toContain(
+      '--lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));'
+    );
+    expect(exact).toContain(
+      '--lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));'
+    );
+    const step =
+      'calc(255 * clamp(0, (0.1791 - (0.2126 * pow((r / 255 + 0.055) / 1.055, 2.4) + 0.7152 * pow((g / 255 + 0.055) / 1.055, 2.4) + 0.0722 * pow((b / 255 + 0.055) / 1.055, 2.4))) * 1e6, 1))';
+    expect(ORG_BRAND).toContain(
+      `--color-on-interactive: rgb( from var(--color-interactive) ${step} ${step} ${step} );`
+    );
+    // The kit's `--_w` is that step, written once from the same fragments.
+    expect(EXACT).toContain('--_w: clamp(0, (0.1791 - var(--_y)) * 1e6, 1);');
+    expect(EXACT).toContain(
+      '--_lr: pow((clamp(0, r, 255) / 255 + 0.055) / 1.055, 2.4);'
+    );
+  });
+
+  it('moves the accent and the buttons from the brand, the marks from their source — on both paths', () => {
     // Every relative-colour recipe for a name, fallback and exact path alike.
     const froms = (name: string) =>
       [
@@ -337,12 +389,8 @@ describe('schemes.css ↔ model parity', () => {
         ),
       ].map((m) => m[1]);
     for (const name of [
-      '--_acc-light',
-      '--_acc-dark',
       '--_mark-light',
       '--_mark-dark',
-      '--_atm-acc-light',
-      '--_atm-acc-dark',
       '--_atm-mark-light',
       '--_atm-mark-dark',
     ]) {
@@ -351,6 +399,10 @@ describe('schemes.css ↔ model parity', () => {
         expect(source, name).toBe('--lp-accent-source');
     }
     for (const name of [
+      '--_acc-light',
+      '--_acc-dark',
+      '--_atm-acc-light',
+      '--_atm-acc-dark',
       '--_btn-light',
       '--_btn-dark',
       '--_atm-btn-light',
@@ -359,8 +411,10 @@ describe('schemes.css ↔ model parity', () => {
       expect(froms(name).length, name).toBeGreaterThan(0);
       for (const source of froms(name)) expect(source, name).toBe('--lp-brand');
     }
-    // The fallback path's accent reads it too (its button is the plain brand).
+    // The fallback path's accent and marks read theirs too (its button is
+    // the plain brand).
     expect(froms('--_acc-light')).toHaveLength(2);
+    expect(froms('--_mark-light')).toHaveLength(2);
   });
 });
 
@@ -458,6 +512,16 @@ function ink(bgIn: Rgb, t: number): Rgb {
   );
 }
 
+/** A button's label: `org-brand.css`'s step for `--color-on-interactive`
+ * (the kit's `--_w`), white below luminance 0.1791 and black above, in the
+ * same knee-less curve — so >= 4.58:1 on any fill. */
+function pivot(fill: Rgb): Rgb {
+  const L = clip(fill).map(kneeLin);
+  const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
+  const w = Math.min(1, Math.max(0, (0.1791 - y) * 1e6));
+  return [w, w, w];
+}
+
 function darken(rgb: Rgb, yMax: number): Rgb {
   const L = clip(rgb).map(kneeLin);
   const y = 0.2126 * L[0] + 0.7152 * L[1] + 0.0722 * L[2];
@@ -517,6 +581,8 @@ interface Org {
   line: Rgb;
   heading: Rgb;
   focus: Rgb;
+  /** `--color-interactive`: the org's button fill and accent text. */
+  button: Rgb;
 }
 
 const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -554,10 +620,17 @@ const PLATFORM_TOKENS = {
   inkSoft: '--color-text-secondary',
   line: '--color-border',
   focus: '--color-focus',
+  button: '--color-interactive',
 } as const;
 
-/** An org with no background: the platform theme. It sets no heading colour. */
-function platformOrg(theme: Mode, heading?: Rgb, focus?: Rgb): Org {
+/** An org with no background: the platform theme. It sets no heading colour.
+ * A brand sets its focus ring and interactive colour (`org-brand.css`). */
+function platformOrg(
+  theme: Mode,
+  heading?: Rgb,
+  focus?: Rgb,
+  button?: Rgb
+): Org {
   const t = (key: keyof typeof PLATFORM_TOKENS) =>
     hex(paletteHex(themeValue(theme, PLATFORM_TOKENS[key])));
   const ink = t('ink');
@@ -570,11 +643,10 @@ function platformOrg(theme: Mode, heading?: Rgb, focus?: Rgb): Org {
     line: t('line'),
     heading: heading ?? ink,
     focus: focus ?? t('focus'),
+    button: button ?? t('button'),
   };
 }
 
-/** `org-brand.css`'s `[data-org-bg]` rule for `theme`, from the background it
- * reads (the dark rule reads `--brand-bg-dark`, else the light one). */
 /** The `[data-org-bg]` rule's parameters per theme: each surface's lightness
  * step and chroma share from the background, and the text's share in the
  * secondary text. §10 rebuilds the rule's text from these. */
@@ -584,7 +656,17 @@ const ORG_BG = {
 } as const;
 const ORG_CHROMA = { soft: 0.5, card: 0.2, line: 0.3 } as const;
 
-function orgFromBg(theme: Mode, bg: Rgb, heading: Rgb, focus: Rgb): Org {
+/** `org-brand.css`'s `[data-org-bg]` rule for `theme`, from the background it
+ * reads (the dark rule reads `--brand-bg-dark`, else the light one). A
+ * branded org's interactive colour is its focus ring's chain
+ * (`--brand-color`, else the platform primary). */
+function orgFromBg(
+  theme: Mode,
+  bg: Rgb,
+  heading: Rgb,
+  focus: Rgb,
+  button: Rgb = focus
+): Org {
   const p = ORG_BG[theme];
   // oklch() clamps its lightness to 0–1.
   const at = (key: keyof typeof ORG_CHROMA) =>
@@ -608,6 +690,7 @@ function orgFromBg(theme: Mode, bg: Rgb, heading: Rgb, focus: Rgb): Org {
     line: at('line'),
     heading,
     focus,
+    button,
   };
 }
 
@@ -653,9 +736,10 @@ interface SchemeTokens {
   focus: Rgb;
 }
 
-/** `source` is `--lp-accent-source`: the brand, unless a Style points it
- * elsewhere. `page` is the org's page a base / soft section draws; without
- * one they are the kit's (atmosphere's ground; Cinematic's room, dark only). */
+/** `source` is `--lp-accent-source`, the marks' source: the brand, unless a
+ * Style points it elsewhere. `page` is the org's page a base / soft section
+ * draws; without one they are the kit's (atmosphere's ground; Cinematic's
+ * room, dark only). */
 function schemeTokens(
   mode: Mode,
   scheme: Scheme,
@@ -666,13 +750,14 @@ function schemeTokens(
   page: Page | null = null
 ): SchemeTokens {
   const light = mode === 'light';
+  // The accent and the button from the brand, the mark from its source.
   const onLight = {
-    accent: darken(source, TARGET.accentLight),
+    accent: darken(brand, TARGET.accentLight),
     mark: darken(source, TARGET.markLight),
     button: darken(brand, TARGET.buttonLight),
   };
   const onDark = {
-    accent: lighten(source, TARGET.accentDark),
+    accent: lighten(brand, TARGET.accentDark),
     mark: lighten(source, TARGET.markDark),
     button: lighten(brand, TARGET.buttonDark),
   };
@@ -776,6 +861,7 @@ function schemeTokens(
     return { ...kit, heading: kit.ink, title: kit.ink, focus: kit.ink };
   const { org, decorated } = page;
   const orgInk = orgMove(mode, org.ink, 'text', decorated);
+  const orgButton = orgMove(mode, org.button, 'large', decorated);
   return {
     ...kit,
     ink: orgInk,
@@ -784,6 +870,12 @@ function schemeTokens(
     heading: orgMove(mode, org.heading, 'large', decorated),
     title: orgMove(mode, org.heading, 'text', decorated),
     focus: orgMove(mode, org.focus, 'large', decorated),
+    // The org's button and label rule, its accent text, and the marks in
+    // the colour the Style draws them in, each at its grade.
+    button: orgButton,
+    buttonInk: pivot(orgButton),
+    accent: orgMove(mode, org.button, 'text', decorated),
+    mark: orgMove(mode, source, 'large', decorated),
   };
 }
 
@@ -862,7 +954,7 @@ const GROUNDS: Record<Mode, Record<string, string>> = {
 };
 
 /** The org whose page draws a GROUNDS entry, with `brand` as its heading
- * colour and focus ring — any colour, as the brand is. */
+ * colour, focus ring and interactive colour — any colour, as the brand is. */
 function orgFor(
   mode: Mode,
   groundName: string,
@@ -870,7 +962,7 @@ function orgFor(
   brand: Rgb
 ): Org {
   return groundName === 'platform'
-    ? platformOrg(mode, brand, brand)
+    ? platformOrg(mode, brand, brand, brand)
     : orgFromBg(mode, hex(groundHex), brand, brand);
 }
 
@@ -1018,15 +1110,42 @@ describe('the §5 floors — named brand matrix', () => {
   }
 
   it('leaves a brand that already passes exactly as the creator picked it', () => {
-    const g = ground('light', hex('#fafafa'));
     const blue = hex('#2563EB');
-    const t = schemeTokens('light', 'base', g, blue, DEFAULT_TINT, blue, {
-      org: platformOrg('light'),
-      decorated: false,
-    });
-    expect(t.button.map((c) => Math.round(c * 255))).toEqual([
-      0x25, 0x63, 0xeb,
-    ]);
+    const bytes = (rgb: Rgb) => rgb.map((c) => Math.round(c * 255));
+    // On the org's ground, as the org's own button…
+    const t = schemeTokens(
+      'light',
+      'base',
+      ground('light', hex('#fafafa')),
+      blue,
+      DEFAULT_TINT,
+      blue,
+      { org: platformOrg('light', undefined, blue, blue), decorated: false }
+    );
+    expect(bytes(t.button)).toEqual([0x25, 0x63, 0xeb]);
+    expect(bytes(t.buttonInk)).toEqual([255, 255, 255]);
+    // …and on a light kit band (the dark pole's contrast), where the old
+    // white-label grade (Y <= 0.155) needed no move either but a rose did.
+    const band = schemeTokens(
+      'dark',
+      'contrast',
+      ground('dark', hex('#171717')),
+      blue,
+      DEFAULT_TINT
+    );
+    expect(bytes(band.button)).toEqual([0x25, 0x63, 0xeb]);
+    const rose = hex('#E11D48');
+    expect(
+      bytes(
+        schemeTokens(
+          'dark',
+          'contrast',
+          ground('dark', hex('#171717')),
+          rose,
+          DEFAULT_TINT
+        ).button
+      )
+    ).toEqual([0xe1, 0x1d, 0x48]);
   });
 
   it('keeps every surface the kit derives or moves inside sRGB, so relative colour never sees a channel outside 0–255', () => {
@@ -1099,7 +1218,7 @@ describe('the §5 floors — generated sweep of the sRGB cube', () => {
           for (let b = 0; b < 256; b += step) {
             const brand = [r / 255, gr / 255, b / 255] as const;
             // The brand as the org's heading colour and focus ring too.
-            const org = platformOrg(mode, brand, brand);
+            const org = platformOrg(mode, brand, brand, brand);
             for (const page of pagesOn(mode, org))
               for (const scheme of SCHEMES) {
                 const values = ratios(
@@ -1129,6 +1248,112 @@ describe('the §5 floors — generated sweep of the sRGB cube', () => {
     }
     // The brand fill's own ink is the provable 4.58:1 luminance crossover.
     expect(worst.ink).toBeGreaterThan(4.57);
+  });
+});
+
+// ── 4b. a button on a kit band moves only as far as 3:1 needs ───────────────
+/*
+ * A kit band (contrast, Cinematic's room) is drawn from the brand at a fixed
+ * lightness with its chroma capped, so every colour it can be is a hue ring
+ * at each lightness its recipe reaches. Its button needs 3:1 against the
+ * worst of them, cards included, and its label is whichever side of the
+ * 0.1791 crossover it lands on — so the move needs no margin for the label,
+ * and goes 2% past the floor, as the org's grades do (§10).
+ */
+describe('a button on a kit band — 3:1 on the worst surface it can sit on, and no further', () => {
+  const ring = (L: number, cap: number): Rgb[] => {
+    const out: Rgb[] = [];
+    for (let h = 0; h < 360; h += 2)
+      for (let k = 0; k <= 8; k++) {
+        const c = (cap * k) / 8;
+        const a = (h * Math.PI) / 180;
+        out.push(clip(toRgb([L, c * Math.cos(a), c * Math.sin(a)])));
+      }
+    return out;
+  };
+  const span = (lo: number, hi: number, capPerL: number): Rgb[] => {
+    const out: Rgb[] = [];
+    for (let L = lo; L <= hi + 1e-9; L += 0.01)
+      out.push(...ring(L, L * capPerL));
+    return out;
+  };
+  const KIT_BANDS: Record<Mode, Rgb[]> = {
+    // The dark pole's contrast band and its panel.
+    light: [...ring(0.955, 0.02), ...ring(0.985, 0.0068)],
+    // The light pole's contrast band and its panel; Cinematic's soft band
+    // and panel over their lightness range.
+    dark: [
+      ...ring(0.2, 0.033),
+      ...ring(0.265, 0.043),
+      ...span(0.12, 0.27, 0.165),
+      ...span(0.2, 0.28, 0.165),
+    ],
+  };
+  const worst = (band: Mode) => {
+    const ys = KIT_BANDS[band].map(lum);
+    // Cinematic's ground is any colour the dark band can hold.
+    return band === 'light'
+      ? Math.min(...ys)
+      : Math.max(...ys, lum(worstOf('dark')));
+  };
+
+  it(
+    'holds 3:1 on the worst kit band surface, within 3% of what it needs',
+    { timeout: 60_000 },
+    () => {
+      const light = (worst('light') + 0.05) / (TARGET.buttonLight + 0.05);
+      const dark = (TARGET.buttonDark + 0.05) / (worst('dark') + 0.05);
+      for (const [name, at] of [
+        ['light', light],
+        ['dark', dark],
+      ] as const) {
+        expect(at / 3, name).toBeGreaterThanOrEqual(1);
+        expect(at / 3, name).toBeLessThanOrEqual(1.03);
+      }
+    }
+  );
+
+  it('has teeth: the rings hold every band the recipes draw, for every brand', () => {
+    const lightY = worst('light');
+    const darkY = Math.max(...KIT_BANDS.dark.map(lum));
+    for (const brandHex of Object.values(BRANDS)) {
+      const brand = hex(brandHex);
+      const onDark = schemeTokens(
+        'dark',
+        'contrast',
+        ground('dark', hex('#171717')),
+        brand,
+        DEFAULT_TINT
+      );
+      expect(lum(onDark.bg)).toBeGreaterThanOrEqual(lightY - 1e-9);
+      expect(lum(onDark.panel)).toBeGreaterThanOrEqual(lightY - 1e-9);
+      for (const tint of Object.values(STYLE_TINTS)) {
+        const room = schemeTokens(
+          'dark',
+          'soft',
+          ground('dark', hex('#171717')),
+          brand,
+          tint
+        );
+        expect(lum(room.bg)).toBeLessThanOrEqual(darkY + 1e-9);
+      }
+    }
+  });
+
+  it('keeps a rust’s white label on a dark band, where the old grade turned it black', () => {
+    const rust = hex('#A62B0C');
+    const t = schemeTokens(
+      'light',
+      'contrast',
+      ground('light', hex('#F3F0E7')),
+      rust,
+      DEFAULT_TINT
+    );
+    expect(ratio(t.button, t.bg)).toBeGreaterThanOrEqual(3);
+    expect(lum(t.button)).toBeLessThan(0.1791);
+    expect(lum(t.buttonInk)).toBeGreaterThan(0.99);
+    // At the old 0.24 the same rust needed a black label.
+    expect(lum(lighten(rust, 0.24))).toBeGreaterThan(0.1791);
   });
 });
 
@@ -1344,8 +1569,9 @@ describe('atmosphere — the glow where no shader runs', () => {
  * it. On a decorated page base / soft / contrast take atmosphere's moved
  * brand and the soft-ink ghost line; brand / accent bands paint AWAY from
  * their ink (white under dark ink, black under light), which only raises
- * every ratio. The kit's inks hold at ANY strength; the org's inks on base /
- * soft take a decorated grade proven at the strengths the Styles ship.
+ * every ratio. The kit's inks hold at ANY strength; the org's colours on
+ * base / soft (inks, button, accent, marks) take a decorated grade proven at
+ * the strengths the Styles ship.
  */
 const SURFACES = squash(
   readFileSync(
@@ -1379,6 +1605,11 @@ function decoratedTokens(
   // The kit's own line, on the org's surfaces too (`--_tex-ink`).
   const line = ink(t.bg, INK.line);
   if (!moved) return { ...t, texture: line, shape: t.accent };
+  // On the org's page base / soft keep the org's button, accent and marks at
+  // their decorated grade (`schemeTokens`); only the ghost line is the
+  // container query's, the soft ink.
+  if (page && (scheme === 'base' || scheme === 'soft'))
+    return { ...t, edge: t.soft, texture: line, shape: t.accent };
   // base / soft sit on the ground's polarity, contrast on the other.
   const light = (mode === 'light') !== (scheme === 'contrast');
   const accent = light
@@ -1448,7 +1679,7 @@ function decoratedCases(mode: Mode): [Rgb, Rgb, Tint, Org][] {
           platform,
           brand,
           DEFAULT_TINT,
-          platformOrg(mode, brand, brand),
+          platformOrg(mode, brand, brand, brand),
         ]);
       }
   return cases;
@@ -1743,9 +1974,10 @@ describe('the accent source is free — any colour, on the worst backdrop of its
     for (const mode of ['light', 'dark'] as const)
       for (const [g, brand, tint] of atmosphereCases(mode)) {
         for (const scheme of ['base', 'soft', 'contrast'] as const) {
-          // The light pole's soft band is the org's — any colour in the
-          // band, so it is measured from the band itself (below).
-          if (scheme === 'soft' && mode === 'light') continue;
+          // The light pole's base and soft are the org's, whose accent and
+          // marks take the org's grades (§10): the kit's sit only on its
+          // own bands — contrast, and on the dark pole Cinematic's room.
+          if (scheme !== 'contrast' && mode === 'light') continue;
           const bg = schemeTokens(mode, scheme, g, brand, tint).bg;
           const band: Band =
             (mode === 'light') !== (scheme === 'contrast') ? 'light' : 'dark';
@@ -1773,12 +2005,14 @@ describe('the accent source is free — any colour, on the worst backdrop of its
         );
         keep(worst.atmosphere, mode, over(glow, GLOW.strength, g));
       }
-    // The org's surfaces can be any colour in their band (§10): every one.
-    for (const band of ['light', 'dark'] as const)
+    // Cinematic's room is the org's dark background, else the brand taken
+    // down, moved into the dark band: any colour the band can hold.
+    for (const band of ['dark'] as const)
       for (const bg of bandSurfaces()[band]) {
         keep(worst.plain, band, bg);
         const line = ink(bg, INK.line);
-        const shape: Rgb = band === 'light' ? [0, 0, 0] : [1, 1, 1];
+        // The room is only ever dark, so its shapes are drawn light.
+        const shape: Rgb = [1, 1, 1];
         for (const strength of [0.25, 0.5, 0.75, 1])
           keep(worst.decorated, band, over(line, strength, bg));
         const shaped = over(shape, SHAPE_ALPHA, bg);
@@ -1823,7 +2057,10 @@ describe('the accent source is free — any colour, on the worst backdrop of its
       const { plain, decorated } = backdrops();
       if (!plain.light || !plain.dark || !decorated.light || !decorated.dark)
         throw new Error('a band has no backdrop');
-      expect(lum(plain.light)).toBeLessThan(0.75);
+      // The light kit band is the dark pole's contrast (L 0.955, a trace of
+      // chroma); the dark one reaches the room's soft band and the band's
+      // saturated edge.
+      expect(lum(plain.light)).toBeLessThan(0.87);
       expect(lum(plain.dark)).toBeGreaterThan(0.015);
       expect(lum(decorated.light)).toBeLessThan(lum(plain.light));
       expect(lum(decorated.dark)).toBeGreaterThan(lum(plain.dark));
@@ -1831,17 +2068,15 @@ describe('the accent source is free — any colour, on the worst backdrop of its
   );
 
   it(
-    'holds the accent (4.5:1) and the mark (3.28:1, its margin) on any section surface',
+    'holds the accent (4.5:1) and the mark (3.3:1, its margin) on any kit surface',
     TIMEOUT,
     () => {
       expect(
         lowest('plain', TARGET.accentLight, TARGET.accentDark)
       ).toBeGreaterThanOrEqual(4.5);
-      // 3.28:1 since the org's surfaces may be any colour in the band (§10),
-      // down to its darkest edge (Y 0.705); the kit's own surfaces gave 3.3.
       expect(
         lowest('plain', TARGET.markLight, TARGET.markDark)
-      ).toBeGreaterThanOrEqual(3.28);
+      ).toBeGreaterThanOrEqual(3.3);
     }
   );
 
@@ -2075,6 +2310,7 @@ const ORG_NAMES: Record<string, string> = {
   '--color-border': '--_org-line',
   '--color-heading': '--_org-heading',
   '--color-focus': '--_org-focus',
+  '--color-interactive': '--_org-button',
 };
 
 /** `org-brand.css` text as a scoped preview re-states it: the kit's names,
@@ -2153,6 +2389,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       line: '#e5e5e5',
       heading: '#171717',
       focus: '#c24129',
+      button: '#c24129',
     });
     expect(asHex(platformOrg('dark'))).toEqual({
       ground: '#171717',
@@ -2163,6 +2400,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       line: '#404040',
       heading: '#fafafa',
       focus: '#f47d67',
+      button: '#f47d67',
     });
     for (const theme of ['light', 'dark'] as const) {
       // No platform heading colour: a heading is the text, as `--color-text-primary`.
@@ -2173,7 +2411,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
     }
   });
 
-  it('reads exactly the eight tokens the org’s site paints with', () => {
+  it('reads exactly the nine tokens the org’s site paints with', () => {
     for (const [name, own] of Object.entries(ORG_NAMES)) {
       const fallback = name === '--color-heading' ? ', var(--color-text)' : '';
       expect(POLE.light).toContain(`${own}: var(${name}${fallback});`);
@@ -2226,6 +2464,9 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
         asPreview(chain('--color-heading'))
       );
       expect(branded['--_org-focus']).toBe(asPreview(chain('--color-focus')));
+      expect(branded['--_org-button']).toBe(
+        asPreview(chain('--color-interactive'))
+      );
       // A background: `org-brand.css`'s rule for the theme.
       const own = decls(
         body(`${LAST[theme]}:is([data-org-bg] .lp, [data-org-bg]) {`)
@@ -2273,7 +2514,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
               : undefined;
           const org = seed.bg
             ? orgFromBg(theme, hex(seed.bg), heading ?? brand, brand)
-            : platformOrg(theme, heading, brand);
+            : platformOrg(theme, heading, brand, brand);
           // An org background with no dark one stays light in dark mode.
           const pole: Mode = seed.bg ? 'light' : theme;
           for (const decorated of [false, true]) {
@@ -2306,28 +2547,62 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
               ['heading', base.heading, org.heading],
               ['title', base.title, org.heading],
               ['focus', base.focus, org.focus],
+              ['button', base.button, org.button],
+              ['button label', base.buttonInk, pivot(org.button)],
+              ['accent', base.accent, org.button],
+              ['mark', base.mark, brand],
             ];
             report[`${name} ${theme}${decorated ? ' decorated' : ''}`] = drawn
               .filter(([, kit, own]) => moved(kit, own))
               .map(([token]) => token);
           }
         }
+      // Every button, label and mark is the org's own on its plain pages.
+      // The accent is text, so an interactive colour that is only large-text
+      // safe moves for it (rose and blue, both themes); the rust holds.
       expect(report).toEqual({
         'of-blood-and-bones light': [],
         'of-blood-and-bones dark': [],
-        // Studio's paper: a title in #A62B0C (Y 0.099) is text, not large.
-        'of-blood-and-bones light decorated': ['title'],
-        'of-blood-and-bones dark decorated': ['title'],
+        // Studio's paper: a title or accent in #A62B0C (Y 0.099) is text,
+        // not large.
+        'of-blood-and-bones light decorated': ['title', 'accent'],
+        'of-blood-and-bones dark decorated': ['title', 'accent'],
         // #E11D48 is large text on #fafafa (4.47:1), but a title is not.
-        'studio-alpha light': ['title'],
+        'studio-alpha light': ['title', 'accent'],
         // The platform's dark surfaces (#404040, L 0.37) sit above the dark band.
-        'studio-alpha dark': ['soft band', 'panel'],
-        'studio-alpha light decorated': ['heading', 'title', 'focus'],
-        'studio-alpha dark decorated': ['soft band', 'panel', 'title', 'focus'],
-        'studio-beta light': [],
-        'studio-beta dark': ['soft band', 'panel'],
-        'studio-beta light decorated': [],
-        'studio-beta dark decorated': ['soft band', 'panel', 'focus'],
+        'studio-alpha dark': ['soft band', 'panel', 'accent'],
+        // Under paper, a rose fill needs the decorated large grade: it
+        // darkens (light) or lightens past the crossover to a black label.
+        'studio-alpha light decorated': [
+          'heading',
+          'title',
+          'focus',
+          'button',
+          'accent',
+          'mark',
+        ],
+        'studio-alpha dark decorated': [
+          'soft band',
+          'panel',
+          'title',
+          'focus',
+          'button',
+          'button label',
+          'accent',
+          'mark',
+        ],
+        'studio-beta light': ['accent'],
+        'studio-beta dark': ['soft band', 'panel', 'accent'],
+        'studio-beta light decorated': ['accent'],
+        'studio-beta dark decorated': [
+          'soft band',
+          'panel',
+          'focus',
+          'button',
+          'button label',
+          'accent',
+          'mark',
+        ],
       });
     }
   );

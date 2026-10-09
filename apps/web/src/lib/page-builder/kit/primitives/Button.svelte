@@ -71,7 +71,9 @@
     gap: var(--space-2);
     min-block-size: var(--lp-button-height);
     min-inline-size: var(--tap-target-min);
-    padding: var(--space-3) var(--lp-button-pad);
+    /* Block padding only for a label that wraps: one line sits inside the
+       org's button height (kit.css) at every Style's label size. */
+    padding: var(--space-2) var(--lp-button-pad);
     border: var(--border-width-thick) var(--border-style) transparent;
     border-radius: var(--lp-radius-button);
     font-family: var(--lp-font-body);
@@ -88,7 +90,7 @@
   }
 
   .lp-button[data-size='lg'] {
-    min-block-size: calc(var(--lp-button-height) + var(--space-2));
+    min-block-size: var(--lp-button-height-lg);
     padding-inline: calc(var(--lp-button-pad) * 1.25);
   }
 

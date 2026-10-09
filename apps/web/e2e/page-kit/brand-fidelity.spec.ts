@@ -12,8 +12,10 @@
  *
  * So this spec measures what a visitor's browser RESOLVES, not what a
  * stylesheet says. For a base section it reads the kit's ground, ink, soft
- * ink, hairline, heading and focus ring, and the org's own tokens where the
- * org's pages read them (`.org-main`), and holds them equal. A CSS string
+ * ink, hairline, heading, focus ring and button (fill and label), and the
+ * org's own tokens where the org's pages read them (`.org-main`), and holds
+ * them equal. The floating bar draws the org's own button on the org's own
+ * ground, and every call to action is the org's button height and weight. A CSS string
  * check cannot do this: one `var()` hop and it is reading a name, not a colour.
  *
  * Colours are normalised through a canvas readback, never parsed by hand;
@@ -88,6 +90,15 @@ const MAPPING = [
   ['line', '--color-border'],
   ['heading', '--color-heading'],
   ['focus', '--color-focus'],
+  ['button', '--color-interactive'],
+  ['button label', '--color-on-interactive'],
+] as const;
+
+/** The floating bar, where the page has one: the org's ground and button. */
+const STICKY_MAPPING = [
+  ['bar ground', '--color-background'],
+  ['bar button', '--color-interactive'],
+  ['bar button label', '--color-on-interactive'],
 ] as const;
 
 interface Setup {
@@ -173,6 +184,8 @@ function readColours(orgHost: 'main' | 'root'): Reading {
     '--color-border',
     '--color-heading',
     '--color-focus',
+    '--color-interactive',
+    '--color-on-interactive',
   ])
     org[name] = token(host, name);
 
@@ -198,19 +211,29 @@ function readColours(orgHost: 'main' | 'root'): Reading {
     line: token(section, '--lp-line'),
     heading: heading ? hexOf(getComputedStyle(heading).color) : null,
     focus: token(section, '--lp-focus'),
+    button: token(section, '--lp-button-bg'),
+    'button label': token(section, '--lp-button-ink'),
   };
+  // The bar is rendered, styled and measurable before it is shown.
+  const bar = root.querySelector<HTMLElement>('.lp-sticky');
+  if (bar) {
+    kit['bar ground'] = hexOf(getComputedStyle(bar).backgroundColor);
+    kit['bar button'] = token(bar, '--lp-button-bg');
+    kit['bar button label'] = token(bar, '--lp-button-ink');
+  }
   return { org, kit };
 }
 
 /** Each kit colour against the org token it maps to, within 1/255 a channel. */
 function mismatches(
   reading: Reading,
-  orgSide: Reading['org'] = reading.org
+  orgSide: Reading['org'] = reading.org,
+  mapping: readonly (readonly [string, string])[] = MAPPING
 ): string[] {
   const channels = (hex: string) =>
     [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
   const out: string[] = [];
-  for (const [kitName, orgName] of MAPPING) {
+  for (const [kitName, orgName] of mapping) {
     const kit = reading.kit[kitName];
     const org = orgSide[orgName];
     if (!kit || !org) {
@@ -278,6 +301,86 @@ for (const item of CASES) {
     }
   });
 }
+
+// ── the floating bar, and the button's shape ──────────────────────────────────
+// of-blood-and-bones' pages sell, so they carry the bar (the seeded Quiet and
+// Cinematic pages have no offer on sale, and so no bar). It used to be a dark
+// band, where the rust brand had to turn #ff481b with a black label.
+const SELLING = CASES.filter((item) => item.org === 'of-blood-and-bones');
+
+for (const item of SELLING) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`${item.org}/${item.slug} ${theme}: the floating bar is the org’s ground and button`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await openAs(browser, baseURL as string, item, theme);
+      const reading = await measure(page, {}, 'main');
+      expect(
+        reading.kit['bar button'],
+        'the page has a floating bar'
+      ).toBeTruthy();
+      expect(
+        mismatches(reading, reading.org, STICKY_MAPPING),
+        JSON.stringify(reading)
+      ).toEqual([]);
+    });
+  }
+}
+
+test('every call to action is the org’s button height and weight', async ({
+  browser,
+  baseURL,
+}) => {
+  const item = SELLING[0];
+  if (!item) throw new Error('no case');
+  const page = await openAs(browser, baseURL as string, item, 'light');
+  await apply(page, {});
+  const found = await page.evaluate(() => {
+    const main = document.querySelector('main#main-content, .org-main');
+    if (!main) throw new Error('no org main');
+    // The org's button tokens, resolved where its pages read them: its
+    // large and extra-large heights (never under the tap target) and the
+    // weight `ui/Button` sets.
+    const probe = (css: string, read: (s: CSSStyleDeclaration) => string) => {
+      const el = document.createElement('div');
+      el.style.cssText = `position:absolute;${css}`;
+      main.appendChild(el);
+      const value = read(getComputedStyle(el));
+      el.remove();
+      return value;
+    };
+    const org = {
+      md: probe('block-size: var(--tap-target-min)', (s) => s.blockSize),
+      lg: probe(
+        'block-size: max(var(--tap-target-min), var(--space-12))',
+        (s) => s.blockSize
+      ),
+      weight: probe('font-weight: var(--font-medium)', (s) => s.fontWeight),
+    };
+    const kit = [
+      ...document.querySelectorAll<HTMLElement>(
+        ".lp .lp-button[data-variant='primary']"
+      ),
+    ].map((el) => ({
+      size: el.dataset.size ?? 'md',
+      height: `${el.getBoundingClientRect().height}px`,
+      weight: getComputedStyle(el).fontWeight,
+      text: (el.textContent ?? '').trim(),
+    }));
+    return { org, kit };
+  });
+  await page.context().close();
+  expect(found.kit.length, 'the page has calls to action').toBeGreaterThan(1);
+  expect(found.org.md).toBe('44px');
+  for (const button of found.kit) {
+    const want = button.size === 'lg' ? found.org.lg : found.org.md;
+    expect(
+      { height: button.height, weight: button.weight },
+      `${button.size} “${button.text}”`
+    ).toEqual({ height: want, weight: found.org.weight });
+  }
+});
 
 // ── the editor's preview in the other theme ───────────────────────────────────
 const PREVIEWED = CASES.filter((item) => item.slug !== 'ancestral-threads');
