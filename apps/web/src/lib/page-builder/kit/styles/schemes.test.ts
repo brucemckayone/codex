@@ -48,6 +48,20 @@ const EXACT =
     /@supports \(color: rgb\(from red calc\(255 \* pow\(r \/ 255, 2\)\) 0 0\)\) \{ \.lp \{([^}]*)\}/
   )?.[1] ?? '';
 
+/** The org's button: one rule, for the org's surfaces and the hero's main
+ * button over a photo (§13). Empty when that rule is not written so. */
+const ORG_SURFACES =
+  ".lp:not([data-lp-style='cinematic']) :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media])";
+const HERO_OVER_PHOTO =
+  ".lp .lp-section[data-lp-type='hero'] [data-lp-on-media] .lp-button[data-variant='primary']";
+const ORG_BUTTON_RULE = () => {
+  const head = `${ORG_SURFACES}, ${HERO_OVER_PHOTO} {`;
+  if (!CODE.includes(head)) return '';
+  return (
+    CODE.slice(CODE.indexOf(head) + head.length).match(/^([^}]*)\}/)?.[1] ?? ''
+  );
+};
+
 // ── the parameters the stylesheet is generated from ─────────────────────────
 const INK = { ink: 17, soft: 7, edge: 3.2, line: 1.45 } as const;
 const TARGET = {
@@ -371,13 +385,16 @@ describe('schemes.css ↔ model parity', () => {
     expect(fallback).toContain('--lp-mark-ink: var(--lp-accent-source);');
     expect(fallback).not.toContain('--lp-button-ink');
     // With it, moved only as far as each grade needs, then kept white on a
-    // mid-tone (§11); the label is the step from the fill as drawn.
-    expect(exact).toContain(
+    // mid-tone (§11); the label is the step from the fill as drawn. The
+    // button is written once, shared with the hero over a photo (§13).
+    const button = ORG_BUTTON_RULE();
+    expect(button).toContain(
       '--lp-button-bg: rgb( from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b)) var(--_wl-r) var(--_wl-g) var(--_wl-b) );'
     );
-    expect(exact).toContain(
+    expect(button).toContain(
       '--lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));'
     );
+    expect(exact).not.toContain('--lp-button-bg');
     expect(exact).toContain(
       '--lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));'
     );
@@ -3110,5 +3127,54 @@ describe('the second colour’s tone — the org’s own hue, apart from it (own
     expect(CODE).toContain(
       '--_second-in: var(--brand-secondary, var(--_accent-in));'
     );
+  });
+});
+
+// ── 13. the hero's main button over a photo (owner, D10) ────────────────────
+// It used to be the on-media ink (#efefef on Tending the Grief). The owner
+// chose the org's own button there, exactly as the page's own sections draw
+// it and with nothing added: WCAG 1.4.11 asks a control with visible text for
+// no contrasting edge, only a legible label and a focus ring that holds where
+// it sits (https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html
+// #boundaries). So the fill and label are not proven against the photo; they
+// are the org's, proven on its surfaces (§10, §11).
+describe('the hero’s main button over a photo is the org’s own button (owner, D10)', () => {
+  it('shares the org’s surfaces’ one definition: a fill or label edited for one is edited for both', () => {
+    // One rule, both selectors, exactly the two declarations…
+    expect(ORG_BUTTON_RULE().trim()).toBe(
+      squash(
+        '--lp-button-bg: rgb( from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b)) var(--_wl-r) var(--_wl-g) var(--_wl-b) ); --lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));'
+      )
+    );
+    // …the hero's selector named nowhere else, so no second copy can drift…
+    expect(CODE.split(HERO_OVER_PHOTO).length - 1).toBe(1);
+    // …and the org's button fill written once in the whole stylesheet.
+    expect(
+      CODE.match(/--lp-button-bg: rgb\( from rgb\(from var\(--_org-button\)/g)
+    ).toHaveLength(1);
+    // No floor of its own against the scrim any more.
+    expect(CODE).not.toContain('--_omb-');
+  });
+
+  it('keeps its focus ring the on-media ink, which holds 3:1 on the lightest surface any brand’s scrim allows', () => {
+    // The shared rule sets no ring, so the button takes the hero copy's.
+    expect(ORG_BUTTON_RULE()).not.toContain('--lp-focus');
+    let lowest = Number.POSITIVE_INFINITY;
+    const brands: Rgb[] = Object.values(BRANDS).map(hex);
+    for (let r = 0; r < 256; r += 51)
+      for (let g = 0; g < 256; g += 51)
+        for (let b = 0; b < 256; b += 51)
+          brands.push([r / 255, g / 255, b / 255]);
+    for (const brand of brands) {
+      const scrim = oklchFrom(
+        brand,
+        () => 0.16,
+        (_, c) => Math.min(c * 0.25, 0.027)
+      );
+      // 72% of the scrim over a pure white photo: its lightest surface.
+      const lightest = triple((i) => scrim[i] * 0.72 + (1 - 0.72));
+      lowest = Math.min(lowest, ratio(ink(scrim, INK.ink), lightest));
+    }
+    expect(lowest).toBeGreaterThanOrEqual(3);
   });
 });

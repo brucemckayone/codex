@@ -745,7 +745,7 @@
      rather than taking black: the label is white up to 0.182, just past
      the move's target (and the 0.0008 a channel darkened to 0 still reads
      on this curve), so only a fill white holds on takes it. Brighter fills
-     keep the org's rule. */
+     keep the org's rule. The button itself is written once, below. */
   .lp:not([data-lp-style='cinematic'])
     :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
     --lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));
@@ -755,12 +755,32 @@
     --lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));
     --lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));
     --lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
+  }
+
+  /* THE ORG'S BUTTON — written once, for both places it is drawn: the org's
+     surfaces (above), and the hero's main button over a photo. There the
+     owner chose the org's own button, exactly as the page draws it on its
+     own sections and with nothing added (D10), over the on-media ink it
+     used to be. WCAG 1.4.11 asks a control with visible text for no
+     contrasting edge against what it sits on — only its label against its
+     fill (>= 4.5:1 by the step above) and its focus ring against its
+     surroundings. The ring stays the on-media ink: >= 6.9:1 on the lightest
+     surface any brand's scrim allows over any photo (`schemes.test.ts` §13;
+     7.0:1 measured on Tending the Grief):
+     https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html#boundaries
+     The fill takes the grade the hero's own band routes (`--_ol-*`, and
+     `--_wl-*` for D8), as the page's other sections do. Only the primary
+     button over the photo: the secondary, the quiet link, the watch control
+     and the words keep the on-media ink. */
+  .lp:not([data-lp-style='cinematic'])
+    :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]),
+  .lp .lp-section[data-lp-type='hero'] [data-lp-on-media] .lp-button[data-variant='primary'] {
     --lp-button-bg: rgb(
       from rgb(from var(--_org-button) var(--_ol-r) var(--_ol-g) var(--_ol-b))
       var(--_wl-r) var(--_wl-g) var(--_wl-b)
     );
     --lp-button-ink: rgb(from var(--lp-button-bg) calc(255 * var(--_wk)) calc(255 * var(--_wk)) calc(255 * var(--_wk)));
-    --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
   }
 }
 

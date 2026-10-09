@@ -675,3 +675,125 @@ for (const theme of ['light', 'dark'] as const) {
     ).toBeGreaterThanOrEqual(0.08);
   });
 }
+
+// ── the hero's main button over a photo is the org's own button (owner, D10) ──
+// Tending the Grief's cover hero sets its words over its photo, on 72% of the
+// scrim. Its main button used to be the on-media ink (#efefef). The owner
+// chose the org's own button there, exactly as the page draws it on its own
+// surfaces, with nothing added: WCAG 1.4.11 asks a control with visible text
+// for no contrasting edge, only a legible label and a focus ring that holds
+// 3:1 where it sits. The secondary controls and the words keep the ink. This
+// page's sections were edited past its seed, so it is opened without the
+// stored-order check; it is the one live cover hero over a photo.
+for (const theme of ['light', 'dark'] as const) {
+  test(`of-blood-and-bones/tending-the-grief ${theme}: the hero's main button over its photo is the button its own sections draw`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const url = journeyUrl(
+      baseURL as string,
+      journeyFixture('of-blood-and-bones', 'tending-the-grief')
+    );
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      colorScheme: theme,
+      reducedMotion: 'reduce',
+    });
+    await context.addCookies([
+      { name: 'theme', value: theme, url: new URL(url).origin },
+    ]);
+    const page = await context.newPage();
+    await page.goto(url);
+    const copy =
+      ".lp-section[data-lp-type='hero'] .hero-cover__copy[data-lp-on-media]";
+    const hero = page.locator(`${copy} .lp-button[data-variant='primary']`);
+    await expect(hero).toBeVisible();
+    await apply(page, {});
+    // The ring as a keyboard user sees it (script focus with no pointer
+    // interaction matches :focus-visible).
+    await hero.focus();
+    const read = await page.evaluate((selector) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('no 2d context');
+      const hex = (css: string) => {
+        ctx.globalCompositeOperation = 'copy';
+        ctx.fillStyle = '#000000';
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+        return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+      };
+      const token = (host: Element, name: string) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${name})`;
+        host.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return hex(value);
+      };
+      const host = document.querySelector(selector);
+      const button = host?.querySelector<HTMLElement>(
+        ".lp-button[data-variant='primary']"
+      );
+      // The same page's own button: a base section's, not over a picture.
+      const own = [
+        ...document.querySelectorAll<HTMLElement>(
+          ".lp-page > .lp-section[data-lp-scheme='base']:not([data-lp-on-media]) .lp-button[data-variant='primary']"
+        ),
+      ].find((b) => !b.closest('[data-lp-on-media]'));
+      if (!host || !button || !own) throw new Error('no hero or base button');
+      const ring = getComputedStyle(button);
+      return {
+        fill: hex(getComputedStyle(button).backgroundColor),
+        label: hex(getComputedStyle(button).color),
+        ownFill: hex(getComputedStyle(own).backgroundColor),
+        ownLabel: hex(getComputedStyle(own).color),
+        focused: button.matches(':focus-visible'),
+        ring: ring.outlineStyle === 'none' ? null : hex(ring.outlineColor),
+        scrim: token(host, '--_scrim'),
+        ink: token(host, '--lp-ink'),
+        heading: hex(
+          getComputedStyle(host.querySelector('.lp-heading') ?? host).color
+        ),
+        watch: (() => {
+          const icon = host.querySelector('.lp-watch__icon');
+          return icon ? hex(getComputedStyle(icon).backgroundColor) : null;
+        })(),
+      };
+    }, copy);
+    await context.close();
+    const why = JSON.stringify(read);
+    // The very button the page's own sections draw…
+    expect({ fill: read.fill, label: read.label }, why).toEqual({
+      fill: read.ownFill,
+      label: read.ownLabel,
+    });
+    // …which is Tending the Grief's (D8: a little darker, keeping white).
+    expect({ fill: read.fill, label: read.label }, why).toEqual({
+      fill: '#dd3809',
+      label: '#ffffff',
+    });
+    // Its focus ring holds 3:1 on the lightest surface the scrim allows
+    // over any photo: 72% of it over pure white.
+    const surface = `#${[1, 3, 5]
+      .map((i) => Number.parseInt(read.scrim.slice(i, i + 2), 16))
+      .map((c) => Math.round(c * 0.72 + 255 * 0.28))
+      .map((n) => n.toString(16).padStart(2, '0'))
+      .join('')}`;
+    const on = (x: string, y: string) => {
+      const [hi = 0, lo = 0] = [luminance(x), luminance(y)].sort(
+        (p, q) => q - p
+      );
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    expect(read.focused, why).toBe(true);
+    expect(read.ring, why).not.toBeNull();
+    expect(on(read.ring ?? read.scrim, surface), why).toBeGreaterThanOrEqual(3);
+    // The words and the watch control keep the on-media ink.
+    expect(read.heading, why).toBe(read.ink);
+    if (read.watch) expect(read.watch, why).toBe(read.ink);
+  });
+}
