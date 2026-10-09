@@ -2520,9 +2520,20 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       expect(branded['--_org-button']).toBe(
         asPreview(chain('--color-interactive'))
       );
-      // A background: `org-brand.css`'s rule for the theme.
+      // The org's background: `org-brand.css`'s rule for the theme, from
+      // the org's own inputs, so a page background with no twin for this
+      // theme does not shadow them (owner, D7)…
+      const fromOrg = decls(body(`${LAST[theme]}:is([data-org-bg] .lp) {`));
+      for (const [name, value] of Object.entries(orgBgRecipes(theme)))
+        expect(fromOrg[ORG_NAMES[name]], `${theme} ${name}`).toBe(
+          asPreview(value)
+            .replace(/var\(--brand-bg-dark,/g, 'var(--_org-bg-dark-in,')
+            .replace(/var\(--brand-bg,/g, 'var(--_org-bg-in,')
+        );
+      // …and the page's own, where it sets one for this theme.
+      const twin = theme === 'dark' ? '--brand-bg-dark:' : '--brand-bg:';
       const own = decls(
-        body(`${LAST[theme]}:is([data-org-bg] .lp, [data-org-bg]) {`)
+        body(`${LAST[theme]}:is(.lp[data-org-bg][style*='${twin}']) {`)
       );
       for (const [name, value] of Object.entries(orgBgRecipes(theme)))
         expect(own[ORG_NAMES[name]], `${theme} ${name}`).toBe(asPreview(value));
@@ -2536,14 +2547,46 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       'var(--brand-bg-dark, var(--brand-bg,'
     );
     // So the dark pole excludes it on each of the dark theme's three
-    // selectors (org or page override), and nowhere else; Cinematic's room
-    // is dark in every theme.
-    for (const exclusion of [
-      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])",
-      ".lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)",
-    ])
-      expect(CODE.split(exclusion).length - 1, exclusion).toBe(3);
+    // selectors, and nowhere else; Cinematic's room is dark in every theme.
+    // It is the ORG's background that decides: a page's own light one with
+    // no dark twin takes the org's dark mode (owner, D7), so the page
+    // override is no longer an exclusion of its own.
+    const org =
+      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])";
+    expect(CODE.split(org).length - 1).toBe(3);
+    expect(CODE).not.toContain(
+      ".lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)"
+    );
     expect(POLE.dark).toContain('--lp-ground:');
+  });
+
+  it('gives a page background with no twin back to the org in the other theme (owner, D7)', () => {
+    // Every token org-brand.css's background rules set, light and dark.
+    const names = (rule: string) => [
+      ...new Set([...rule.matchAll(/(--[\w-]+):/g)].map((m) => m[1])),
+    ];
+    const union = [
+      ...new Set([...names(ORG_BG_RULE.light), ...names(ORG_BG_RULE.dark)]),
+    ];
+    expect(union.length).toBeGreaterThan(15);
+    const head =
+      ":is(.dark, [data-theme='dark']) .lp[data-org-bg][style*='--brand-bg:']:not( [style*='--brand-bg-dark:'], [data-lp-theme='light'], [data-editing-theme='light'] .lp ), " +
+      ":root:not(.dark, [data-theme='dark']) .lp[data-org-bg][style*='--brand-bg-dark:']:not( [style*='--brand-bg:'], [data-lp-theme='dark'], [data-editing-theme='dark'] .lp ) {";
+    expect(CODE.split(head).length - 1).toBe(1);
+    const rule =
+      CODE.slice(CODE.indexOf(head) + head.length).match(/^([^}]*)\}/)?.[1] ??
+      '';
+    expect(rule.trim()).toBe(
+      union.map((name) => `${name}: inherit;`).join(' ')
+    );
+    // Beats org-brand.css's rules on the carrier whatever the order: (0,6,0)
+    // and up, against its `.dark [data-org-bg]` (0,2,0); no @layer here.
+    expect(CSS).not.toContain('@layer');
+    // A preview of that theme reads the org's own inputs, captured above
+    // the carrier.
+    expect(CODE).toContain(
+      '[data-org-bg]:not(.lp) { --_org-bg-in: var(--brand-bg); --_org-bg-dark-in: var(--brand-bg-dark); }'
+    );
   });
 
   it(

@@ -8,9 +8,10 @@
   `[data-org-brand]` carrying only the overridden `--brand-*` inputs
   (`render/brand-overrides.ts`); anything unset inherits the org. A page
   that sets its own background also carries `data-org-bg`, so the org's
-  surfaces, text and border are derived from it — the kit draws those
-  tokens (`styles/schemes.css`). The page's own fonts are loaded here,
-  because the org layout loads only the org's.
+  surfaces, text and border are derived from it in that background's theme
+  — the kit draws those tokens (`styles/schemes.css`), and gives the other
+  theme back to the org's when the page sets no twin for it. The page's
+  own fonts are loaded here, because the org layout loads only the org's.
 
   EDITING changes attributes, never structure: with `edit` the text fields
   carry the inline-edit seam, the root is still (no entrance), sections carry
@@ -103,7 +104,8 @@
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
   // `org-brand.css` derives the surfaces, text and border from the background
   // only under `[data-org-bg]`, which has no page-override twin: a page that
-  // sets its own background carries the attribute, so they follow it.
+  // sets its own background carries the attribute, so they follow it — in
+  // that background's own theme only (`schemes.css`, owner D7).
   const ownBackground = $derived.by(() => {
     const vars = brandOverridesToCssVars(brandOverrides);
     return '--brand-bg' in vars || '--brand-bg-dark' in vars;

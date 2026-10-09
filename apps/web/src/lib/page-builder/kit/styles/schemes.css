@@ -241,25 +241,24 @@
    DARK MODE FOLLOWS THE ORG (phase 3a, D1): `org-brand.css` paints an org
    that sets a background and no dark background in that same light ground
    in dark mode (of-blood-and-bones stays parchment), and its sales page does
-   too, on the light pole. That is `data-org-bg` — on the org, or on a page
-   override that sets a background (`PageRenderer`) — with `--brand-bg-dark`
-   neither on it nor on the page. Cinematic's room is dark in every theme. */
+   too, on the light pole. That is `data-org-bg` on the org with
+   `--brand-bg-dark` neither on it nor on the page. A page's own background
+   applies only to its own theme (owner, D7): one with no dark twin takes the
+   ORG's dark mode, so it is on this pole exactly when the org is. Cinematic's
+   room is dark in every theme. */
 :is(.dark, [data-theme='dark'])
   .lp:not(
     [data-lp-theme='light'],
     [data-editing-theme='light'] .lp,
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
-    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
   ),
 [data-editing-theme='dark']
   .lp:not(
     [data-lp-theme='light'],
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
-    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
   ),
 .lp[data-lp-theme='dark']:not(
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
-    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
   ),
 .lp[data-lp-style='cinematic'] {
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
@@ -335,6 +334,56 @@
   --_base-panel: var(--_panel-g);
 }
 
+/* ── A page background with no twin (owner, D7) ────────────────────────────
+   A page's own background applies only to its own theme. `org-brand.css`
+   derives a carrier's surfaces, text and border from its `--brand-bg` in
+   BOTH themes (its dark rule falls back to the light value), so in the
+   other theme the carrier takes back the org's, exactly as if the page had
+   set no background: every token `org-brand.css`'s `[data-org-bg]` rules
+   set (`schemes.test.ts` holds the list to them). A scoped preview of that
+   theme is re-stated below, for the kit. */
+:is(.dark, [data-theme='dark'])
+  .lp[data-org-bg][style*='--brand-bg:']:not(
+    [style*='--brand-bg-dark:'],
+    [data-lp-theme='light'],
+    [data-editing-theme='light'] .lp
+  ),
+:root:not(.dark, [data-theme='dark'])
+  .lp[data-org-bg][style*='--brand-bg-dark:']:not(
+    [style*='--brand-bg:'],
+    [data-lp-theme='dark'],
+    [data-editing-theme='dark'] .lp
+  ) {
+  --color-background: inherit;
+  --color-surface: inherit;
+  --color-surface-secondary: inherit;
+  --color-surface-tertiary: inherit;
+  --color-surface-elevated: inherit;
+  --color-surface-card: inherit;
+  --color-text: inherit;
+  --color-text-primary: inherit;
+  --color-text-secondary: inherit;
+  --color-text-muted: inherit;
+  --color-border: inherit;
+  --color-border-strong: inherit;
+  --color-border-subtle: inherit;
+  --color-text-tertiary: inherit;
+  --color-text-disabled: inherit;
+  --color-text-inverse: inherit;
+  --color-border-hover: inherit;
+  --color-surface-overlay: inherit;
+  --color-surface-variant: inherit;
+  --material-glass: inherit;
+  --material-glass-border: inherit;
+}
+
+/* The org's own background inputs, before a page carrier shadows them: a
+   preview of the theme a page's background has no twin for reads these. */
+[data-org-bg]:not(.lp) {
+  --_org-bg-in: var(--brand-bg);
+  --_org-bg-dark-in: var(--brand-bg-dark);
+}
+
 /* ── Scoped previews: the org's tokens for the theme previewed ────────────
    The org's `--color-*` are derived for the VIEWER's theme, so a preview of
    the other one — the kit's `data-lp-theme`, or the brand editor's
@@ -372,7 +421,20 @@
 :is(
   :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
-):is([data-org-bg] .lp, [data-org-bg]) {
+):is([data-org-bg] .lp) {
+  --_org-ground: var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900)));
+  --_org-soft: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
+  --_org-card: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
+  --_org-ink: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
+  --_org-line: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.12) calc(c * 0.3) h);
+}
+
+/* …unless the page sets its own dark background. */
+:is(
+  :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+  :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
+):is(.lp[data-org-bg][style*='--brand-bg-dark:']) {
   --_org-ground: var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)));
   --_org-soft: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
   --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
@@ -411,7 +473,21 @@
   :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
   :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
-):is([data-org-bg] .lp, [data-org-bg]) {
+):is([data-org-bg] .lp) {
+  --_org-ground: var(--_org-bg-in, var(--color-neutral-0));
+  --_org-soft: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
+  --_org-card: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
+  --_org-ink: oklch(from var(--_org-bg-in, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
+  --_org-line: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l - 0.12) calc(c * 0.3) h);
+}
+
+/* …unless the page sets its own light background. */
+:is(
+  :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+  :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+  [data-editing-theme='dark'] .lp[data-lp-theme='light']
+):is(.lp[data-org-bg][style*='--brand-bg:']) {
   --_org-ground: var(--brand-bg, var(--color-neutral-0));
   --_org-soft: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
   --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);

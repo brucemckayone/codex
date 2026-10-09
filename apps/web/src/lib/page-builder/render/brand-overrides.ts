@@ -122,7 +122,9 @@ export function brandOverridesToCssVars(
   // A page that re-colours the brand must not keep the ORG's dark-mode colour
   // (an org `--brand-color-dark` would otherwise win in dark previews): without
   // its own dark value, the page's colour carries into dark. Background is
-  // exempt — a light page background must never paint dark mode.
+  // exempt — a light page background must never paint dark mode, nor a dark
+  // one light mode: a background with no twin applies only to its own theme,
+  // and the other takes the org's (`kit/styles/schemes.css`, owner D7).
   for (const field of ['primaryColor', 'secondaryColor', 'accentColor']) {
     const light = out[CORE_LIGHT[field]];
     const darkProp = CORE_DARK[field];

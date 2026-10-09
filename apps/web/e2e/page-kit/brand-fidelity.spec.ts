@@ -125,6 +125,9 @@ async function apply(page: Page, setup: Setup): Promise<void> {
     if (s.carrier) {
       root.setAttribute('data-org-brand', '');
       root.setAttribute('style', s.carrier);
+      // A page that sets a background of its own also carries data-org-bg.
+      if (/--brand-bg(-dark)?:/.test(s.carrier))
+        root.setAttribute('data-org-bg', '');
     }
   }, setup);
   await page.evaluate(
@@ -508,3 +511,74 @@ for (const theme of ['light', 'dark'] as const) {
     ).toBeLessThan(1.5);
   });
 }
+
+// ── a page background with no twin (owner, D7) ───────────────────────────────
+// A page's own background applies only to its own theme. One that sets a
+// light background and no dark one shows the org's dark mode in dark mode —
+// its surfaces, text and border, as if the page had set no background — in
+// the viewer's dark theme and in a dark preview; one that sets only a dark
+// background shows the org's light mode in light mode. The colours are a
+// page's choice in the test, never the kit's.
+const LIGHT_ONLY = '--brand-bg: #e9f1ea';
+const DARK_ONLY = '--brand-bg-dark: #10202a';
+// of-blood-and-bones' dark mode is its light parchment; studio-alpha's is
+// the platform's dark theme.
+const NO_TWIN = [CASES[0], CASES[2]].filter((c): c is Case => !!c);
+
+/** The org's own tokens as the carrier's root resolves them, exactly. */
+const ORG_TOKENS = [
+  '--color-background',
+  '--color-text',
+  '--color-text-secondary',
+  '--color-border',
+] as const;
+const orgTokens = (reading: Reading) =>
+  Object.fromEntries(ORG_TOKENS.map((name) => [name, reading.org[name]]));
+
+for (const item of NO_TWIN) {
+  test(`${item.org}/${item.slug} dark: a light-only page background gives way to the org’s dark mode`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const truth = await openAs(browser, baseURL as string, item, 'dark');
+    const expected = await measure(truth, {}, 'main');
+    const page = await openAs(browser, baseURL as string, item, 'dark');
+    const reading = await measure(page, { carrier: LIGHT_ONLY }, 'root');
+    const context = JSON.stringify({ expected, reading });
+    expect(mismatches(reading, expected.org), context).toEqual([]);
+    expect(orgTokens(reading), context).toEqual(orgTokens(expected));
+  });
+
+  test(`${item.org}/${item.slug}: a dark preview on a light viewer gives a light-only page background way to the org’s dark mode`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const truth = await openAs(browser, baseURL as string, item, 'dark');
+    const expected = await measure(truth, {}, 'main');
+    const page = await openAs(browser, baseURL as string, item, 'light');
+    const reading = await measure(
+      page,
+      { carrier: LIGHT_ONLY, preview: 'dark' },
+      'root'
+    );
+    expect(
+      mismatches(reading, expected.org),
+      JSON.stringify({ expected, reading })
+    ).toEqual([]);
+  });
+}
+
+test('studio-alpha light: a dark-only page background gives way to the org’s light mode', async ({
+  browser,
+  baseURL,
+}) => {
+  const item = CASES[2];
+  if (!item) throw new Error('no case');
+  const truth = await openAs(browser, baseURL as string, item, 'light');
+  const expected = await measure(truth, {}, 'main');
+  const page = await openAs(browser, baseURL as string, item, 'light');
+  const reading = await measure(page, { carrier: DARK_ONLY }, 'root');
+  const context = JSON.stringify({ expected, reading });
+  expect(mismatches(reading, expected.org), context).toEqual([]);
+  expect(orgTokens(reading), context).toEqual(orgTokens(expected));
+});
