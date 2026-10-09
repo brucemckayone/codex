@@ -25,9 +25,22 @@
       Y <= 0.155 on light (a white label) / >= 0.24 on dark (a black label),
       >= 3.7:1 against the worst surface in the band. A MARK — a line, a stop,
       a ring; never text or a button — needs 3:1 (WCAG 1.4.11), so it moves
-      only to Y <= 0.18 / >= 0.185, >= 3.3:1 against that surface: text grade
+      only to Y <= 0.18 / >= 0.185, >= 3.28:1 against that surface (any
+      colour the band can hold, since an org's surface can be): text grade
       turns a bright amber brown, graphic grade keeps it amber. A brand
       that already passes is left exactly as the creator picked it.
+
+   THE ORG IS THE SOURCE (phase 3a, findings §6). A base or soft section
+   draws the org's own derived tokens — its ground, soft surface, card, text,
+   secondary text, hairline, heading and focus — so a sales page reads as the
+   org's site does, in both themes and whichever polarity the org's ground
+   has. Facts 2 and 3 are then the SAFETY NET, never the source: an org
+   surface outside its band is moved into it, and an org ink is moved in
+   linear light toward a fixed luminance (`--_ot-*`, `--_ol-*` and their
+   decorated grades) that holds 4.5:1 for text and 3:1 for large text and the
+   focus ring against the WORST surface the band allows. An org colour that
+   already holds is drawn exactly. Every other scheme, Cinematic's room, and
+   atmosphere (whose veil is proven with the kit's own inks) keep them.
 
    FRAGMENTS. The `--_*` properties below are unevaluated token streams that
    use the relative-colour channel keywords `r g b`. They are declared once on
@@ -42,7 +55,9 @@
 
 /* ── Poles and fallbacks (engines without pow() in relative colour) ───────── */
 .lp {
-  --lp-tint-soft: 8%;
+  /* The soft band is the org's own soft surface; a Style that is designed
+     around a tinted band (Soft, Clean, Cinematic) declares its own tint. */
+  --lp-tint-soft: 0%;
   --lp-tint-panel: 14%;
 
   --lp-brand: var(--brand-color, var(--color-brand-primary));
@@ -74,17 +89,38 @@
       )
       r g b / 1
   );
-  /* The raw light pole rather than `--color-background`: that token is the
-     VIEWER's, and is dark inside a light preview on a dark-theme viewer. */
-  --_ground-in: var(--brand-bg, var(--color-neutral-50));
+  /* THE ORG'S TOKENS, read here on the root: a page override makes the root
+     a nested `[data-org-brand]` carrier, and that is where its tokens are
+     derived. They are the VIEWER's theme's, so a scoped preview of the other
+     theme re-states them (the preview blocks below). An org with no heading
+     colour of its own heads in its text colour. */
+  --_org-ground: var(--color-background);
+  --_org-soft: var(--color-surface-secondary);
+  --_org-card: var(--color-surface-card);
+  --_org-ink: var(--color-text);
+  --_org-ink-soft: var(--color-text-secondary);
+  --_org-line: var(--color-border);
+  --_org-heading: var(--color-heading, var(--color-text));
+  --_org-focus: var(--color-focus);
+
+  /* The ground and the org's surfaces, each moved into the light band
+     (L >= 0.9, chroma capped only when moved) ONLY when outside it. */
+  --_ground-in: var(--_org-ground);
   --lp-ground: oklch(
     from var(--_ground-in) clamp(0.9, l, 1)
       calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
   );
-  --_soft-bg: oklch(
-    from color-mix(in oklab, var(--lp-ground), var(--lp-brand) var(--lp-tint-soft))
-      clamp(0.9, l - 0.025, 0.97) min(c, (1 - clamp(0.9, l - 0.025, 0.97)) * 0.46) h
+  --_org-soft-bg: oklch(
+    from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft))
+      clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
   );
+  --_org-panel: oklch(
+    from var(--_org-card) clamp(0.9, l, 1)
+      calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
+  );
+  /* The soft band and base's panel: the org's, except in Cinematic's room. */
+  --_soft-ground: var(--_org-soft-bg);
+  --_base-panel: var(--_org-panel);
   --_contrast-bg: oklch(from var(--lp-brand) 0.2 min(c * 0.3, 0.033) h);
   --_panel-g: oklch(
     from color-mix(in oklab, var(--lp-ground), var(--lp-brand) var(--lp-tint-panel))
@@ -116,6 +152,23 @@
   --_button-g: var(--_btn-light);
   --_button-i: var(--_btn-dark);
 
+  /* The org's inks' moves (the exact path's `--_ot-*` text grade, `--_ol-*`
+     large grade, and the decorated `--_odt-*` / `--_odl-*`), routed to the
+     side the ground is on. A decorated page re-routes text and large grade
+     to its own (below). */
+  --_ot-r: var(--_ot-dk-r);
+  --_ot-g: var(--_ot-dk-g);
+  --_ot-b: var(--_ot-dk-b);
+  --_ol-r: var(--_ol-dk-r);
+  --_ol-g: var(--_ol-dk-g);
+  --_ol-b: var(--_ol-dk-b);
+  --_odt-r: var(--_odt-dk-r);
+  --_odt-g: var(--_odt-dk-g);
+  --_odt-b: var(--_odt-dk-b);
+  --_odl-r: var(--_odl-dk-r);
+  --_odl-g: var(--_odl-dk-g);
+  --_odl-b: var(--_odl-dk-b);
+
   /* Atmosphere (03 §5.1). On this fallback path its scrim is fully opaque —
      the section renders as `base` — because the lighter scrim is only proven
      for the exact path's moved brand (see the atmosphere scheme below). */
@@ -146,11 +199,12 @@
   background: var(--lp-ground);
 }
 
-/* The dark pole: the viewer's dark theme, the brand editor's scoped preview
+/* THE DARK THEME: the viewer's dark theme, the brand editor's scoped preview
    (`data-editing-theme` on an ancestor), the kit's own scoped preview
    (`data-lp-theme` on the root — never `<html data-theme>`, ref 11-theming §4)
    and Cinematic, which is dark by identity (contract §4). A preview of either
-   kind outranks the viewer's persisted theme. */
+   kind outranks the viewer's persisted theme. The theme picks the brand's
+   DARK inputs; which pole the ground is on is decided below, by the org. */
 :is(.dark, [data-theme='dark']) .lp:not([data-lp-theme='light'], [data-editing-theme='light'] .lp),
 [data-editing-theme='dark'] .lp:not([data-lp-theme='light']),
 .lp[data-lp-theme='dark'],
@@ -159,14 +213,48 @@
   /* The second colour's dark inputs; `.lp` above picks among them (03 X19). */
   --_accent-in: var(--brand-accent-dark, var(--brand-accent, var(--_second-shift)));
   --_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));
+}
+
+/* THE DARK POLE: the dark theme, EXCEPT where the org's ground stays light.
+   DARK MODE FOLLOWS THE ORG (phase 3a, D1): `org-brand.css` paints an org
+   that sets a background and no dark background in that same light ground
+   in dark mode (of-blood-and-bones stays parchment), and its sales page does
+   too, on the light pole. That is `data-org-bg` — on the org, or on a page
+   override that sets a background (`PageRenderer`) — with `--brand-bg-dark`
+   neither on it nor on the page. Cinematic's room is dark in every theme. */
+:is(.dark, [data-theme='dark'])
+  .lp:not(
+    [data-lp-theme='light'],
+    [data-editing-theme='light'] .lp,
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
+    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+  ),
+[data-editing-theme='dark']
+  .lp:not(
+    [data-lp-theme='light'],
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
+    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+  ),
+.lp[data-lp-theme='dark']:not(
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:']),
+    .lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)
+  ),
+.lp[data-lp-style='cinematic'] {
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
      property, so a Style never has to out-specify this selector list. */
-  --_ground-in: var(
-    --lp-dark-ground-in,
-    var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)))
-  );
+  --_ground-in: var(--lp-dark-ground-in, var(--_org-ground));
   --lp-ground: oklch(
     from var(--_ground-in) min(l, 0.24)
+      calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
+  );
+  /* The org's surfaces in the dark band, which is the ground's (L <= 0.24):
+     one band, so one worst surface for every ink on it. */
+  --_org-soft-bg: oklch(
+    from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft))
+      min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
+  );
+  --_org-panel: oklch(
+    from var(--_org-card) min(l, 0.24)
       calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
   );
   --_soft-bg: oklch(
@@ -189,6 +277,19 @@
   --_button-g: var(--_btn-dark);
   --_button-i: var(--_btn-light);
 
+  --_ot-r: var(--_ot-lt-r);
+  --_ot-g: var(--_ot-lt-g);
+  --_ot-b: var(--_ot-lt-b);
+  --_ol-r: var(--_ol-lt-r);
+  --_ol-g: var(--_ol-lt-g);
+  --_ol-b: var(--_ol-lt-b);
+  --_odt-r: var(--_odt-lt-r);
+  --_odt-g: var(--_odt-lt-g);
+  --_odt-b: var(--_odt-lt-b);
+  --_odl-r: var(--_odl-lt-r);
+  --_odl-g: var(--_odl-lt-g);
+  --_odl-b: var(--_odl-lt-b);
+
   --_atmos-accent: var(--_atm-acc-dark);
   --_atmos-mark: var(--_atm-mark-dark);
   --_atmos-button: var(--_atm-btn-dark);
@@ -200,6 +301,96 @@
   --_glow-c: 0.08;
 }
 
+/* CINEMATIC'S DARK ROOM IS DELIBERATE (contract §4; phase 3a keeps it). It
+   is the one Style whose ground is not the org's: a room in the brand's own
+   dark (`style-cinematic.css`), in either theme, with the kit's tinted soft
+   band, panel and inks drawn for that room rather than the org's surfaces. */
+.lp[data-lp-style='cinematic'] {
+  --_soft-ground: var(--_soft-bg);
+  --_base-panel: var(--_panel-g);
+}
+
+/* ── Scoped previews: the org's tokens for the theme previewed ────────────
+   The org's `--color-*` are derived for the VIEWER's theme, so a preview of
+   the other one — the kit's `data-lp-theme`, or the brand editor's
+   `data-editing-theme` — would read the viewer's (the editor's gate never
+   re-derives the platform surfaces, nor a nested page-override carrier,
+   which falls back to LIGHT). These re-state them as the previewed theme
+   derives them: the platform theme (`themes/light.css`, `themes/dark.css`)
+   for an org with no background, `org-brand.css`'s rules for a branded org
+   and for one that sets a background. `schemes.test.ts` holds each line to
+   the text it mirrors. */
+:is(
+  :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+  :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
+) {
+  --_org-ground: var(--color-neutral-900);
+  --_org-soft: var(--color-neutral-700);
+  --_org-card: var(--color-neutral-700);
+  --_org-ink: var(--color-neutral-50);
+  --_org-ink-soft: var(--color-neutral-300);
+  --_org-line: var(--color-neutral-700);
+  --_org-heading: var(--_org-ink);
+  --_org-focus: var(--color-primary-400);
+}
+
+:is(
+  :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+  :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
+):is([data-org-brand] .lp, [data-org-brand]) {
+  --_org-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--_org-ink)));
+  --_org-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+}
+
+:is(
+  :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
+  :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
+):is([data-org-bg] .lp, [data-org-bg]) {
+  --_org-ground: var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)));
+  --_org-soft: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
+  --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
+  --_org-ink: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
+  --_org-line: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.12) calc(c * 0.3) h);
+}
+
+:is(
+  :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+  :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+  [data-editing-theme='dark'] .lp[data-lp-theme='light']
+) {
+  --_org-ground: var(--color-neutral-50);
+  --_org-soft: var(--color-neutral-100);
+  --_org-card: var(--color-neutral-0);
+  --_org-ink: var(--color-neutral-900);
+  --_org-ink-soft: var(--color-neutral-600);
+  --_org-line: var(--color-neutral-200);
+  --_org-heading: var(--_org-ink);
+  --_org-focus: var(--color-primary-500);
+}
+
+:is(
+  :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+  :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+  [data-editing-theme='dark'] .lp[data-lp-theme='light']
+):is([data-org-brand] .lp, [data-org-brand]) {
+  --_org-heading: var(--brand-heading-color, var(--_org-ink));
+  --_org-focus: var(--brand-color, var(--color-primary-500));
+}
+
+:is(
+  :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
+  :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
+  [data-editing-theme='dark'] .lp[data-lp-theme='light']
+):is([data-org-bg] .lp, [data-org-bg]) {
+  --_org-ground: var(--brand-bg, var(--color-neutral-0));
+  --_org-soft: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
+  --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
+  --_org-ink: oklch(from var(--brand-bg, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
+  --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
+  --_org-line: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.12) calc(c * 0.3) h);
+}
+
 /* ── Scheme tokens (fallback path) ───────────────────────────────────────── */
 .lp :is([data-lp-scheme], [data-lp-on-media]) {
   --lp-ink: oklch(from var(--lp-bg) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
@@ -209,9 +400,37 @@
   --lp-panel-ink: oklch(from var(--lp-panel) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h);
   --lp-button-ink: oklch(from var(--lp-button-bg) clamp(0, (0.62 - l) * 1000, 1) 0 0);
   --lp-focus: var(--lp-ink);
+  /* A heading is the section's ink (`Heading.svelte`), unless the org's
+     surfaces carry the org's heading colour (below). Re-stated on every
+     scheme element, so a nested scheme never inherits its parent's. */
+  --lp-heading-ink: currentColor;
+  --lp-title-ink: currentColor;
   /* What a Style's texture and shapes are drawn in (`surfaces.css`). */
   --_tex-ink: var(--lp-line);
   --_shape-ink: var(--lp-accent);
+}
+
+/* ── The org's inks on the org's surfaces ─────────────────────────────────
+   Base and soft draw the org's text, secondary text, hairline, heading and
+   focus colours: here exactly, and on the exact path moved only as far as
+   each floor needs. A heading at title size is text, not large text, so it
+   takes the text grade. The hairline is decoration (no floor) and is the
+   org's exactly; a texture stays in the kit's own line, the one its proof
+   is drawn in. Cinematic keeps the kit's inks, for its room (below). */
+.lp:not([data-lp-style='cinematic'])
+  :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
+  --lp-ink: var(--_org-ink);
+  --lp-ink-soft: var(--_org-ink-soft);
+  --lp-panel-ink: var(--lp-ink);
+  --lp-line: var(--_org-line);
+  --lp-heading-ink: var(--_org-heading);
+  --lp-title-ink: var(--_org-heading);
+  --lp-focus: var(--_org-focus);
+  --_tex-ink: color-mix(
+    in oklab,
+    oklch(from var(--lp-bg) clamp(0.16, (0.62 - l) * 1000, 0.97) calc(c * 0.2) h) 16%,
+    var(--lp-bg)
+  );
 }
 
 /* ── The exact path ──────────────────────────────────────────────────────── */
@@ -311,6 +530,54 @@
     --_atm-mark-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1r) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1r)), 1 / 2.4) - 0.055));
     --_atm-mark-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1g) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1g)), 1 / 2.4) - 0.055));
     --_atm-mark-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1b) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1b)), 1 / 2.4) - 0.055));
+    --_ot-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-lt-s: max(1, 0.25 / max(var(--_y), 1e-6));
+    --_ot-lt-1r: min(1, var(--_lr) * var(--_ot-lt-s));
+    --_ot-lt-1g: min(1, var(--_lg) * var(--_ot-lt-s));
+    --_ot-lt-1b: min(1, var(--_lb) * var(--_ot-lt-s));
+    --_ot-lt-y1: (0.2126 * var(--_ot-lt-1r) + 0.7152 * var(--_ot-lt-1g) + 0.0722 * var(--_ot-lt-1b));
+    --_ot-lt-k: max(0, (0.25 - var(--_ot-lt-y1)) / max(1 - var(--_ot-lt-y1), 1e-6));
+    --_ot-lt-r: max(0, 255 * (1.055 * pow(var(--_ot-lt-1r) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1r)), 1 / 2.4) - 0.055));
+    --_ot-lt-g: max(0, 255 * (1.055 * pow(var(--_ot-lt-1g) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1g)), 1 / 2.4) - 0.055));
+    --_ot-lt-b: max(0, 255 * (1.055 * pow(var(--_ot-lt-1b) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1b)), 1 / 2.4) - 0.055));
+    --_ol-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-lt-s: max(1, 0.15 / max(var(--_y), 1e-6));
+    --_ol-lt-1r: min(1, var(--_lr) * var(--_ol-lt-s));
+    --_ol-lt-1g: min(1, var(--_lg) * var(--_ol-lt-s));
+    --_ol-lt-1b: min(1, var(--_lb) * var(--_ol-lt-s));
+    --_ol-lt-y1: (0.2126 * var(--_ol-lt-1r) + 0.7152 * var(--_ol-lt-1g) + 0.0722 * var(--_ol-lt-1b));
+    --_ol-lt-k: max(0, (0.15 - var(--_ol-lt-y1)) / max(1 - var(--_ol-lt-y1), 1e-6));
+    --_ol-lt-r: max(0, 255 * (1.055 * pow(var(--_ol-lt-1r) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1r)), 1 / 2.4) - 0.055));
+    --_ol-lt-g: max(0, 255 * (1.055 * pow(var(--_ol-lt-1g) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1g)), 1 / 2.4) - 0.055));
+    --_ol-lt-b: max(0, 255 * (1.055 * pow(var(--_ol-lt-1b) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1b)), 1 / 2.4) - 0.055));
+    --_odt-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-lt-s: max(1, 0.33 / max(var(--_y), 1e-6));
+    --_odt-lt-1r: min(1, var(--_lr) * var(--_odt-lt-s));
+    --_odt-lt-1g: min(1, var(--_lg) * var(--_odt-lt-s));
+    --_odt-lt-1b: min(1, var(--_lb) * var(--_odt-lt-s));
+    --_odt-lt-y1: (0.2126 * var(--_odt-lt-1r) + 0.7152 * var(--_odt-lt-1g) + 0.0722 * var(--_odt-lt-1b));
+    --_odt-lt-k: max(0, (0.33 - var(--_odt-lt-y1)) / max(1 - var(--_odt-lt-y1), 1e-6));
+    --_odt-lt-r: max(0, 255 * (1.055 * pow(var(--_odt-lt-1r) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1r)), 1 / 2.4) - 0.055));
+    --_odt-lt-g: max(0, 255 * (1.055 * pow(var(--_odt-lt-1g) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1g)), 1 / 2.4) - 0.055));
+    --_odt-lt-b: max(0, 255 * (1.055 * pow(var(--_odt-lt-1b) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1b)), 1 / 2.4) - 0.055));
+    --_odl-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-lt-s: max(1, 0.203 / max(var(--_y), 1e-6));
+    --_odl-lt-1r: min(1, var(--_lr) * var(--_odl-lt-s));
+    --_odl-lt-1g: min(1, var(--_lg) * var(--_odl-lt-s));
+    --_odl-lt-1b: min(1, var(--_lb) * var(--_odl-lt-s));
+    --_odl-lt-y1: (0.2126 * var(--_odl-lt-1r) + 0.7152 * var(--_odl-lt-1g) + 0.0722 * var(--_odl-lt-1b));
+    --_odl-lt-k: max(0, (0.203 - var(--_odl-lt-y1)) / max(1 - var(--_odl-lt-y1), 1e-6));
+    --_odl-lt-r: max(0, 255 * (1.055 * pow(var(--_odl-lt-1r) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1r)), 1 / 2.4) - 0.055));
+    --_odl-lt-g: max(0, 255 * (1.055 * pow(var(--_odl-lt-1g) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1g)), 1 / 2.4) - 0.055));
+    --_odl-lt-b: max(0, 255 * (1.055 * pow(var(--_odl-lt-1b) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1b)), 1 / 2.4) - 0.055));
 
     /* The accent's source and the brand, each moved only as far as each
        polarity requires: the accent and the marks from the source, the
@@ -344,6 +611,18 @@
     --lp-panel-ink: rgb(from var(--lp-panel) var(--_ink-r) var(--_ink-g) var(--_ink-b));
     --lp-button-ink: rgb(from var(--lp-button-bg) var(--_ink-r) var(--_ink-g) var(--_ink-b));
   }
+
+  /* The org's inks, each moved only where it would fail on the worst
+     surface of the band (a no-op for a colour that holds). */
+  .lp:not([data-lp-style='cinematic'])
+    :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
+    --lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));
+    --lp-ink-soft: rgb(from var(--_org-ink-soft) var(--_ot-r) var(--_ot-g) var(--_ot-b));
+    --lp-title-ink: rgb(from var(--_org-heading) var(--_ot-r) var(--_ot-g) var(--_ot-b));
+    --lp-heading-ink: rgb(from var(--_org-heading) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));
+    --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
+  }
 }
 
 /* ── The five schemes ─────────────────────────────────────────────────────
@@ -354,7 +633,7 @@
    pair as ink-on-fill, so >= 4.58:1 by construction. */
 .lp [data-lp-scheme='base'] {
   --lp-bg: var(--lp-ground);
-  --lp-panel: var(--_panel-g);
+  --lp-panel: var(--_base-panel);
   --lp-accent: var(--_accent-g);
   --lp-mark-ink: var(--_mark-g);
   --lp-button-bg: var(--_button-g);
@@ -383,7 +662,7 @@
 }
 
 .lp [data-lp-scheme='soft'] {
-  --lp-bg: var(--_soft-bg);
+  --lp-bg: var(--_soft-ground);
   --lp-panel: var(--lp-ground);
   --lp-accent: var(--_accent-g);
   --lp-mark-ink: var(--_mark-g);
@@ -419,10 +698,13 @@
 
 /* DECORATED (03 §5.2) — a page whose Style draws a texture or shapes behind
    the text. Its base / soft / contrast sections take atmosphere's moved
-   accent, mark and button and its soft-ink ghost line, so a texture in the
-   line colour holds every floor at any strength and shapes up to their alpha;
-   brand / accent bands draw away from their ink (above). `schemes.test.ts`
-   measures both. A PAGE-level choice: the queries read `.lp-page` (see
+   accent, mark and button and its soft-ink ghost line, so in the kit's inks
+   a texture in the line colour holds every floor at any strength and shapes
+   up to their alpha; brand / accent bands draw away from their ink (above).
+   The org's inks on base / soft take their decorated grade, which holds over
+   the decorations the Styles ship, at the strengths they ship — so a Style
+   that ships a stronger one must be re-proven. `schemes.test.ts` measures
+   all three. A PAGE-level choice: the queries read `.lp-page` (see
    `surfaces.css`). */
 @container lp-page style(--lp-texture: grain) or style(--lp-texture: paper) or style(--lp-texture: contour) or style(--lp-shapes: blobs) {
   .lp :is([data-lp-scheme='base'], [data-lp-scheme='soft']) {
@@ -430,6 +712,12 @@
     --lp-mark-ink: var(--_atmos-mark);
     --lp-button-bg: var(--_atmos-button);
     --lp-button-line: var(--lp-ink-soft);
+    --_ot-r: var(--_odt-r);
+    --_ot-g: var(--_odt-g);
+    --_ot-b: var(--_odt-b);
+    --_ol-r: var(--_odl-r);
+    --_ol-g: var(--_odl-g);
+    --_ol-b: var(--_odl-b);
   }
 
   .lp [data-lp-scheme='contrast'] {

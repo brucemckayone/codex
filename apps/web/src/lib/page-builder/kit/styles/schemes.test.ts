@@ -27,11 +27,22 @@ const CSS = readFileSync(
 const squash = (s: string) => s.replace(/\s+/g, ' ');
 const CODE = squash(CSS.replace(/\/\*[\s\S]*?\*\//g, ''));
 
-/** The two pole blocks (the root `.lp` rule comes first) and the exact path's root. */
+/**
+ * The two pole blocks (the root `.lp` rule comes first) and the exact path's
+ * root. The dark THEME (the brand's dark inputs) and the dark POLE (the bands
+ * and routing) are separate rules since the ground's polarity follows the
+ * org: the theme's selector list ends `.lp[data-lp-theme='dark'], .lp[…
+ * cinematic]`, the pole's `…), .lp[…cinematic]`, after its exclusions.
+ */
 const POLE = {
   light: CODE.match(/\.lp \{([^}]*)\}/)?.[1] ?? '',
-  dark: CODE.match(/\.lp\[data-lp-style='cinematic'\] \{([^}]*)\}/)?.[1] ?? '',
+  dark:
+    CODE.match(/\), \.lp\[data-lp-style='cinematic'\] \{([^}]*)\}/)?.[1] ?? '',
 };
+const DARK_THEME =
+  CODE.match(
+    /\.lp\[data-lp-theme='dark'\], \.lp\[data-lp-style='cinematic'\] \{([^}]*)\}/
+  )?.[1] ?? '';
 const EXACT =
   CODE.match(
     /@supports \(color: rgb\(from red calc\(255 \* pow\(r \/ 255, 2\)\) 0 0\)\) \{ \.lp \{([^}]*)\}/
@@ -57,6 +68,17 @@ const TARGET = {
   // …and its mark, which also serves a decorated page (§6, §8 below).
   atmosMarkLight: 0.11,
   atmosMarkDark: 0.27,
+  // The org's inks (§10): text grade 4.5:1 and large grade 3:1 against the
+  // worst surface of the band, plain or under the decorations that ship —
+  // each 2% past what that surface needs, which §10 measures.
+  orgTextLight: 0.114,
+  orgTextDark: 0.25,
+  orgLargeLight: 0.196,
+  orgLargeDark: 0.15,
+  orgDecTextLight: 0.086,
+  orgDecTextDark: 0.33,
+  orgDecLargeLight: 0.155,
+  orgDecLargeDark: 0.203,
 };
 
 // ── 1. parity ────────────────────────────────────────────────────────────────
@@ -112,20 +134,35 @@ function fragments(): string[] {
     ...lighten('atm-btn-lt', TARGET.atmosButtonDark),
     ...darken('atm-mark-dk', TARGET.atmosMarkLight),
     ...lighten('atm-mark-lt', TARGET.atmosMarkDark),
+    ...darken('ot-dk', TARGET.orgTextLight),
+    ...lighten('ot-lt', TARGET.orgTextDark),
+    ...darken('ol-dk', TARGET.orgLargeLight),
+    ...lighten('ol-lt', TARGET.orgLargeDark),
+    ...darken('odt-dk', TARGET.orgDecTextLight),
+    ...lighten('odt-lt', TARGET.orgDecTextDark),
+    ...darken('odl-dk', TARGET.orgDecLargeLight),
+    ...lighten('odl-lt', TARGET.orgDecLargeDark),
   ];
 }
 
 /** The recipes the model below implements, as the stylesheet spells them. */
 const RECIPES = [
   // light pole
+  '--_ground-in: var(--_org-ground);',
   '--lp-ground: oklch( from var(--_ground-in) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
-  '--_soft-bg: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) var(--lp-tint-soft)) clamp(0.9, l - 0.025, 0.97) min(c, (1 - clamp(0.9, l - 0.025, 0.97)) * 0.46) h );',
+  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
+  '--_org-panel: oklch( from var(--_org-card) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
   '--_contrast-bg: oklch(from var(--lp-brand) 0.2 min(c * 0.3, 0.033) h);',
   '--_panel-g: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) var(--lp-tint-panel)) clamp(0.9, l, 0.965) min(c, (1 - clamp(0.9, l, 0.965)) * 0.46) h );',
   '--_panel-i: oklch(from var(--lp-brand) 0.265 min(c * 0.35, 0.043) h);',
   '--_scrim: oklch(from var(--lp-brand) 0.16 min(c * 0.25, 0.027) h);',
   // dark pole
+  '--_ground-in: var(--lp-dark-ground-in, var(--_org-ground));',
   '--lp-ground: oklch( from var(--_ground-in) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
+  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
+  '--_org-panel: oklch( from var(--_org-card) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
+  // Cinematic's room (the only dark-pole soft band and panel a base / soft
+  // section draws that is not the org's)
   '--_soft-bg: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) calc(var(--lp-tint-soft) + 2%)) clamp(0.12, l + 0.035, 0.27) min(c, clamp(0.12, l + 0.035, 0.27) * 0.165) h );',
   '--_contrast-bg: oklch(from var(--lp-brand) 0.955 min(c * 0.12, 0.02) h);',
   '--_panel-g: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) calc(var(--lp-tint-panel) + 2%)) clamp(0.2, l + 0.03, 0.28) min(c, clamp(0.2, l + 0.03, 0.28) * 0.165) h );',
@@ -136,6 +173,23 @@ const RECIPES = [
   '--lp-button-line: rgb(from var(--lp-bg) var(--_edge-r) var(--_edge-g) var(--_edge-b));',
   '--lp-panel-ink: rgb(from var(--lp-panel) var(--_ink-r) var(--_ink-g) var(--_ink-b));',
   '--lp-button-ink: rgb(from var(--lp-button-bg) var(--_ink-r) var(--_ink-g) var(--_ink-b));',
+  // the org's tokens and inks (§10)
+  '--_org-ground: var(--color-background);',
+  '--_org-soft: var(--color-surface-secondary);',
+  '--_org-card: var(--color-surface-card);',
+  '--_org-ink: var(--color-text);',
+  '--_org-ink-soft: var(--color-text-secondary);',
+  '--_org-line: var(--color-border);',
+  '--_org-heading: var(--color-heading, var(--color-text));',
+  '--_org-focus: var(--color-focus);',
+  '--lp-ink: rgb(from var(--_org-ink) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
+  '--lp-ink-soft: rgb(from var(--_org-ink-soft) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
+  '--lp-title-ink: rgb(from var(--_org-heading) var(--_ot-r) var(--_ot-g) var(--_ot-b));',
+  '--lp-heading-ink: rgb(from var(--_org-heading) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
+  '--lp-focus: rgb(from var(--_org-focus) var(--_ol-r) var(--_ol-g) var(--_ol-b));',
+  '--lp-panel-ink: var(--lp-ink);',
+  '--lp-line: var(--_org-line);',
+  '--_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));',
   '--_btn-light: rgb(from var(--lp-brand) var(--_btn-dk-r) var(--_btn-dk-g) var(--_btn-dk-b));',
   '--_btn-dark: rgb(from var(--lp-brand) var(--_btn-lt-r) var(--_btn-lt-g) var(--_btn-lt-b));',
   // the accent and the marks, from the accent's source (the brand unless a Style says)
@@ -221,6 +275,54 @@ describe('schemes.css ↔ model parity', () => {
     // Without pow() a mark is the accent: text grade is graphic grade too.
     expect(POLE.light).toContain('--_mark-light: var(--_acc-light);');
     expect(POLE.light).toContain('--_mark-dark: var(--_acc-dark);');
+  });
+
+  it('draws the org on base and soft — its surfaces, and its inks moved toward the side the ground is on', () => {
+    const rule = (selector: string) =>
+      CODE.match(
+        new RegExp(`${selector.replace(/[[\]().*]/g, '\\$&')} \\{([^}]*)\\}`)
+      )?.[1] ?? '';
+    expect(rule(".lp [data-lp-scheme='base']")).toContain(
+      '--lp-panel: var(--_base-panel)'
+    );
+    expect(rule(".lp [data-lp-scheme='soft']")).toContain(
+      '--lp-bg: var(--_soft-ground)'
+    );
+    expect(POLE.light).toContain('--_soft-ground: var(--_org-soft-bg);');
+    expect(POLE.light).toContain('--_base-panel: var(--_org-panel);');
+    // Each grade, each channel, to its own pole's move.
+    for (const grade of ['ot', 'ol', 'odt', 'odl'])
+      for (const c of ['r', 'g', 'b']) {
+        expect(POLE.light).toContain(
+          `--_${grade}-${c}: var(--_${grade}-dk-${c});`
+        );
+        expect(POLE.dark).toContain(
+          `--_${grade}-${c}: var(--_${grade}-lt-${c});`
+        );
+      }
+    // Only base and soft, never on imagery, and never in Cinematic's room —
+    // on both paths.
+    const ORG =
+      ".lp:not([data-lp-style='cinematic']) :is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {";
+    expect(CODE.split(ORG).length - 1).toBe(2);
+    // Its own rule, not the end of the dark theme's selector list.
+    const room =
+      CODE.match(/\} \.lp\[data-lp-style='cinematic'\] \{([^}]*)\}/)?.[1] ?? '';
+    expect(room).toContain('--_soft-ground: var(--_soft-bg);');
+    expect(room).toContain('--_base-panel: var(--_panel-g);');
+    // The tint default is the kit's: none, so the soft band is the org's own.
+    expect(POLE.light).toContain(
+      `--lp-tint-soft: ${DEFAULT_TINT.soft * 100}%;`
+    );
+  });
+
+  it('takes the brand’s dark inputs in the dark theme, and the dark bands only on the dark pole', () => {
+    expect(DARK_THEME).toContain(
+      '--lp-brand: var(--brand-color-dark, var(--brand-color, var(--color-brand-primary)));'
+    );
+    expect(DARK_THEME).not.toContain('--lp-ground');
+    expect(POLE.dark).toContain('min(l, 0.24)');
+    expect(POLE.dark).not.toContain('--lp-brand:');
   });
 
   it('moves the accent and the marks from the source, the buttons from the brand — on both paths', () => {
@@ -380,7 +482,8 @@ interface Tint {
   panel: number;
 }
 
-const DEFAULT_TINT: Tint = { soft: 0.08, panel: 0.14 };
+// The soft band is the org's own surface unless a Style tints it (§10).
+const DEFAULT_TINT: Tint = { soft: 0, panel: 0.14 };
 const clampTo = (lo: number, v: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
 
@@ -398,6 +501,141 @@ function ground(mode: Mode, input: Rgb): Rgb {
       );
 }
 
+/*
+ * THE ORG'S TOKENS, as the CONSUMER reads them: base and soft draw
+ * `--color-*` (§10), so the model derives them the way the org's site does —
+ * the platform theme (`themes/*.css`) for an org with no background, else
+ * `org-brand.css`'s `[data-org-bg]` rule for the theme, from the background
+ * that rule reads. §10 holds every line of both to the text it mirrors.
+ */
+interface Org {
+  ground: Rgb;
+  soft: Rgb;
+  card: Rgb;
+  ink: Rgb;
+  inkSoft: Rgb;
+  line: Rgb;
+  heading: Rgb;
+  focus: Rgb;
+}
+
+const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const sheet = (path: string) =>
+  squash(
+    readFileSync(join(LIB, path), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  );
+const PALETTE = sheet('styles/tokens/colors.css');
+const THEMES: Record<Mode, string> = {
+  light: sheet('styles/themes/light.css'),
+  dark: sheet('styles/themes/dark.css'),
+};
+
+/** A palette reference (or a literal) as the hex it resolves to. */
+function paletteHex(value: string): string {
+  const name = value.trim().match(/^var\((--color-[\w-]+)\)$/)?.[1];
+  if (!name) return value.trim().toLowerCase();
+  const found = PALETTE.match(new RegExp(`${name}: (#[0-9a-fA-F]{6});`))?.[1];
+  if (!found) throw new Error(`${name} is not in the palette`);
+  return found.toLowerCase();
+}
+
+/** A platform theme token's declared value (its first declaration). */
+function themeValue(theme: Mode, name: string): string {
+  const value = THEMES[theme].match(new RegExp(`${name}: ([^;]+);`))?.[1];
+  if (!value) throw new Error(`${name} is not in themes/${theme}.css`);
+  return value.trim();
+}
+
+const PLATFORM_TOKENS = {
+  ground: '--color-background',
+  soft: '--color-surface-secondary',
+  card: '--color-surface-card',
+  ink: '--color-text',
+  inkSoft: '--color-text-secondary',
+  line: '--color-border',
+  focus: '--color-focus',
+} as const;
+
+/** An org with no background: the platform theme. It sets no heading colour. */
+function platformOrg(theme: Mode, heading?: Rgb, focus?: Rgb): Org {
+  const t = (key: keyof typeof PLATFORM_TOKENS) =>
+    hex(paletteHex(themeValue(theme, PLATFORM_TOKENS[key])));
+  const ink = t('ink');
+  return {
+    ground: t('ground'),
+    soft: t('soft'),
+    card: t('card'),
+    ink,
+    inkSoft: t('inkSoft'),
+    line: t('line'),
+    heading: heading ?? ink,
+    focus: focus ?? t('focus'),
+  };
+}
+
+/** `org-brand.css`'s `[data-org-bg]` rule for `theme`, from the background it
+ * reads (the dark rule reads `--brand-bg-dark`, else the light one). */
+/** The `[data-org-bg]` rule's parameters per theme: each surface's lightness
+ * step and chroma share from the background, and the text's share in the
+ * secondary text. §10 rebuilds the rule's text from these. */
+const ORG_BG = {
+  light: { soft: -0.03, card: 0.05, line: -0.12, textShare: 0.62 },
+  dark: { soft: 0.04, card: 0.07, line: 0.12, textShare: 0.7 },
+} as const;
+const ORG_CHROMA = { soft: 0.5, card: 0.2, line: 0.3 } as const;
+
+function orgFromBg(theme: Mode, bg: Rgb, heading: Rgb, focus: Rgb): Org {
+  const p = ORG_BG[theme];
+  // oklch() clamps its lightness to 0–1.
+  const at = (key: keyof typeof ORG_CHROMA) =>
+    oklchFrom(
+      bg,
+      (l) => clampTo(0, l + p[key], 1),
+      (_, c) => c * ORG_CHROMA[key]
+    );
+  const ink = oklchFrom(
+    bg,
+    (l) => clampTo(0.05, (0.6 - l) * 1000, 0.9),
+    () => 0
+  );
+  return {
+    ground: bg,
+    soft: at('soft'),
+    card: at('card'),
+    ink,
+    // `color-mix(in oklab, var(--color-text) <share>, var(--color-background))`.
+    inkSoft: mix(ink, bg, 1 - p.textShare),
+    line: at('line'),
+    heading,
+    focus,
+  };
+}
+
+/** A base / soft section on an org's page; `null` is the kit's own inks
+ * (atmosphere's ground, and Cinematic's room). */
+interface Page {
+  org: Org;
+  decorated: boolean;
+}
+
+/** The safety net: an org colour moved toward its pole's side only as far as
+ * the grade needs (`--_ot-*`, `--_ol-*`, `--_odt-*`, `--_odl-*`). */
+function orgMove(
+  mode: Mode,
+  colour: Rgb,
+  grade: 'text' | 'large',
+  decorated: boolean
+): Rgb {
+  const [yLight, yDark] = decorated
+    ? grade === 'text'
+      ? [TARGET.orgDecTextLight, TARGET.orgDecTextDark]
+      : [TARGET.orgDecLargeLight, TARGET.orgDecLargeDark]
+    : grade === 'text'
+      ? [TARGET.orgTextLight, TARGET.orgTextDark]
+      : [TARGET.orgLargeLight, TARGET.orgLargeDark];
+  return mode === 'light' ? darken(colour, yLight) : lighten(colour, yDark);
+}
+
 interface SchemeTokens {
   bg: Rgb;
   ink: Rgb;
@@ -409,16 +647,23 @@ interface SchemeTokens {
   buttonInk: Rgb;
   panel: Rgb;
   panelInk: Rgb;
+  /** Heading ink at display / heading size (large text) and at title size. */
+  heading: Rgb;
+  title: Rgb;
+  focus: Rgb;
 }
 
-/** `source` is `--lp-accent-source`: the brand, unless a Style points it elsewhere. */
+/** `source` is `--lp-accent-source`: the brand, unless a Style points it
+ * elsewhere. `page` is the org's page a base / soft section draws; without
+ * one they are the kit's (atmosphere's ground; Cinematic's room, dark only). */
 function schemeTokens(
   mode: Mode,
   scheme: Scheme,
   g: Rgb,
   brand: Rgb,
   tint: Tint,
-  source: Rgb = brand
+  source: Rgb = brand,
+  page: Page | null = null
 ): SchemeTokens {
   const light = mode === 'light';
   const onLight = {
@@ -433,17 +678,12 @@ function schemeTokens(
   };
   const groundSide = light ? onLight : onDark;
   const inverseSide = light ? onDark : onLight;
-  const softBg = light
-    ? oklchFrom(
-        mix(g, brand, tint.soft),
-        (l) => clampTo(0.9, l - 0.025, 0.97),
-        (l, c) => Math.min(c, (1 - clampTo(0.9, l - 0.025, 0.97)) * 0.46)
-      )
-    : oklchFrom(
-        mix(g, brand, tint.soft + 0.02),
-        (l) => clampTo(0.12, l + 0.035, 0.27),
-        (l, c) => Math.min(c, clampTo(0.12, l + 0.035, 0.27) * 0.165)
-      );
+  // The kit's own soft band exists only in Cinematic's room, on the dark pole.
+  const roomSoft = oklchFrom(
+    mix(g, brand, tint.soft + 0.02),
+    (l) => clampTo(0.12, l + 0.035, 0.27),
+    (l, c) => Math.min(c, clampTo(0.12, l + 0.035, 0.27) * 0.165)
+  );
   const panelG = light
     ? oklchFrom(
         mix(g, brand, tint.panel),
@@ -485,8 +725,20 @@ function schemeTokens(
   let button: Rgb;
   let buttonInk: Rgb;
   if (scheme === 'base' || scheme === 'soft') {
-    bg = scheme === 'base' ? g : softBg;
-    panel = scheme === 'base' ? panelG : g;
+    if (page) {
+      // The org's surfaces, banded as the ground is (`--_org-soft-bg`,
+      // `--_org-panel`): `ground()` is that recipe.
+      bg =
+        scheme === 'base'
+          ? g
+          : ground(mode, mix(page.org.soft, brand, tint.soft));
+      panel = scheme === 'base' ? ground(mode, page.org.card) : g;
+    } else {
+      if (light && scheme === 'soft')
+        throw new Error('the light pole has no kit soft band: it is the org’s');
+      bg = scheme === 'base' ? g : roomSoft;
+      panel = scheme === 'base' ? panelG : g;
+    }
     accent = groundSide.accent;
     mark = groundSide.mark;
     button = groundSide.button;
@@ -507,7 +759,7 @@ function schemeTokens(
     button = accent;
     buttonInk = bg;
   }
-  return {
+  const kit = {
     bg,
     ink: ink(bg, INK.ink),
     soft: ink(bg, INK.soft),
@@ -519,7 +771,24 @@ function schemeTokens(
     panel,
     panelInk: ink(panel, INK.ink),
   };
+  if (!page || (scheme !== 'base' && scheme !== 'soft'))
+    // A heading is the section's ink (`currentColor`), as is the focus ring.
+    return { ...kit, heading: kit.ink, title: kit.ink, focus: kit.ink };
+  const { org, decorated } = page;
+  const orgInk = orgMove(mode, org.ink, 'text', decorated);
+  return {
+    ...kit,
+    ink: orgInk,
+    soft: orgMove(mode, org.inkSoft, 'text', decorated),
+    panelInk: orgInk,
+    heading: orgMove(mode, org.heading, 'large', decorated),
+    title: orgMove(mode, org.heading, 'text', decorated),
+    focus: orgMove(mode, org.focus, 'large', decorated),
+  };
 }
+
+/** A base / soft section's ground on an org's page. */
+const orgGround = (mode: Mode, org: Org) => ground(mode, org.ground);
 
 const FLOORS = {
   ink: 4.5,
@@ -531,6 +800,11 @@ const FLOORS = {
   buttonInk: 4.5,
   edge: 3,
   panelInk: 4.5,
+  // Display and heading size are large text; a title is not.
+  heading: 3,
+  title: 4.5,
+  // WCAG 1.4.11, like the mark.
+  focus: 3,
 };
 
 function ratios(t: SchemeTokens) {
@@ -543,6 +817,9 @@ function ratios(t: SchemeTokens) {
     buttonInk: ratio(t.buttonInk, t.button),
     edge: ratio(t.edge, t.bg),
     panelInk: ratio(t.panelInk, t.panel),
+    heading: ratio(t.heading, t.bg),
+    title: ratio(t.title, t.bg),
+    focus: ratio(t.focus, t.bg),
   };
 }
 
@@ -564,7 +841,11 @@ const BRANDS = {
   'pure red': '#EC0008',
 } as const;
 
-/** Page grounds as the org layout or a page override supplies them. */
+/** Page grounds on each POLE as the org layout or a page override supplies
+ * them: `platform` is an org with no background, the rest the background
+ * `org-brand.css` derives from on that pole. (A cream with no dark value is on
+ * the LIGHT pole in dark mode — §10; on the dark pole it is a cream set as
+ * the dark background, which the band moves.) */
 const GROUNDS: Record<Mode, Record<string, string>> = {
   light: {
     platform: '#fafafa',
@@ -576,9 +857,29 @@ const GROUNDS: Record<Mode, Record<string, string>> = {
     platform: '#171717',
     'deep red': '#200000',
     navy: '#101018',
-    'cream (no dark)': '#F6EFE6',
+    'cream as dark': '#F6EFE6',
   },
 };
+
+/** The org whose page draws a GROUNDS entry, with `brand` as its heading
+ * colour and focus ring — any colour, as the brand is. */
+function orgFor(
+  mode: Mode,
+  groundName: string,
+  groundHex: string,
+  brand: Rgb
+): Org {
+  return groundName === 'platform'
+    ? platformOrg(mode, brand, brand)
+    : orgFromBg(mode, hex(groundHex), brand, brand);
+}
+
+/** The base / soft sections a pole ships: the org's page, and on the dark
+ * pole Cinematic's room as well (the kit's inks). */
+function pagesOn(mode: Mode, org: Org): (Page | null)[] {
+  const own: Page = { org, decorated: false };
+  return mode === 'dark' ? [own, null] : [own];
+}
 
 /** Every tint a Style ships, keyed by Style id; `default` is the kit's own.
  * 'models every tint a Style ships' holds this to the stylesheets. */
@@ -691,17 +992,21 @@ describe('the §5 floors — named brand matrix', () => {
         const g = ground(mode, hex(groundHex));
         const failures: string[] = [];
         for (const [brandName, brandHex] of Object.entries(BRANDS)) {
-          for (const [styleName, tint] of Object.entries(STYLE_TINTS)) {
-            for (const scheme of SCHEMES) {
-              const r = ratios(
-                schemeTokens(mode, scheme, g, hex(brandHex), tint)
-              );
-              for (const [token, floor] of Object.entries(FLOORS)) {
-                const value = r[token as keyof typeof r];
-                if (value < floor) {
-                  failures.push(
-                    `${brandName}/${styleName}/${scheme} ${token} ${value.toFixed(2)}`
-                  );
+          const brand = hex(brandHex);
+          const org = orgFor(mode, groundName, groundHex, brand);
+          for (const page of pagesOn(mode, org)) {
+            for (const [styleName, tint] of Object.entries(STYLE_TINTS)) {
+              for (const scheme of SCHEMES) {
+                const r = ratios(
+                  schemeTokens(mode, scheme, g, brand, tint, brand, page)
+                );
+                for (const [token, floor] of Object.entries(FLOORS)) {
+                  const value = r[token as keyof typeof r];
+                  if (value < floor) {
+                    failures.push(
+                      `${brandName}/${styleName}/${page ? 'org' : 'room'}/${scheme} ${token} ${value.toFixed(2)}`
+                    );
+                  }
                 }
               }
             }
@@ -714,25 +1019,49 @@ describe('the §5 floors — named brand matrix', () => {
 
   it('leaves a brand that already passes exactly as the creator picked it', () => {
     const g = ground('light', hex('#fafafa'));
-    const t = schemeTokens('light', 'base', g, hex('#2563EB'), DEFAULT_TINT);
+    const blue = hex('#2563EB');
+    const t = schemeTokens('light', 'base', g, blue, DEFAULT_TINT, blue, {
+      org: platformOrg('light'),
+      decorated: false,
+    });
     expect(t.button.map((c) => Math.round(c * 255))).toEqual([
       0x25, 0x63, 0xeb,
     ]);
   });
 
-  it('keeps every derived surface inside sRGB, so relative colour never sees a channel outside 0–255', () => {
+  it('keeps every surface the kit derives or moves inside sRGB, so relative colour never sees a channel outside 0–255', () => {
+    // On the org's page base / soft draw the org's own surfaces as its site
+    // paints them (a card at L 1 with a trace of chroma is the org's, and the
+    // ink fragments clamp a channel anyway); a surface the BAND moved is the
+    // kit's, and must be inside sRGB like every surface the kit derives.
     const outside: string[] = [];
     for (const mode of ['light', 'dark'] as const) {
-      for (const groundHex of Object.values(GROUNDS[mode])) {
+      for (const [groundName, groundHex] of Object.entries(GROUNDS[mode])) {
         const g = ground(mode, hex(groundHex));
         for (const brandHex of Object.values(BRANDS)) {
-          for (const scheme of ['base', 'soft', 'contrast'] as const) {
+          const brand = hex(brandHex);
+          const org = orgFor(mode, groundName, groundHex, brand);
+          for (const from of [
+            org.ground,
+            org.card,
+            mix(org.soft, brand, STYLE_TINTS.soft.soft),
+          ]) {
+            const banded = ground(mode, from);
+            const moved = banded.some((c, i) => Math.abs(c - from[i]) > 1e-6);
+            if (moved && !inGamut(banded))
+              outside.push(`${mode}/${groundHex}/${brandHex}/org band`);
+          }
+          const kit: [Scheme, Page | null][] = [['contrast', null]];
+          if (mode === 'dark') kit.push(['base', null], ['soft', null]);
+          for (const [scheme, page] of kit) {
             const t = schemeTokens(
               mode,
               scheme,
               g,
-              hex(brandHex),
-              STYLE_TINTS.soft
+              brand,
+              STYLE_TINTS.soft,
+              brand,
+              page
             );
             if (!inGamut(t.bg) || !inGamut(t.panel))
               outside.push(`${mode}/${groundHex}/${brandHex}/${scheme}`);
@@ -769,17 +1098,28 @@ describe('the §5 floors — generated sweep of the sRGB cube', () => {
         for (let gr = 0; gr < 256; gr += step) {
           for (let b = 0; b < 256; b += step) {
             const brand = [r / 255, gr / 255, b / 255] as const;
-            for (const scheme of SCHEMES) {
-              const values = ratios(
-                schemeTokens(mode, scheme, g, brand, DEFAULT_TINT)
-              );
-              for (const [token, value] of Object.entries(values)) {
-                worst[token] = Math.min(
-                  worst[token] ?? Number.POSITIVE_INFINITY,
-                  value
+            // The brand as the org's heading colour and focus ring too.
+            const org = platformOrg(mode, brand, brand);
+            for (const page of pagesOn(mode, org))
+              for (const scheme of SCHEMES) {
+                const values = ratios(
+                  schemeTokens(
+                    mode,
+                    scheme,
+                    g,
+                    brand,
+                    DEFAULT_TINT,
+                    brand,
+                    page
+                  )
                 );
+                for (const [token, value] of Object.entries(values)) {
+                  worst[token] = Math.min(
+                    worst[token] ?? Number.POSITIVE_INFINITY,
+                    value
+                  );
+                }
               }
-            }
           }
         }
       }
@@ -1004,7 +1344,8 @@ describe('atmosphere — the glow where no shader runs', () => {
  * it. On a decorated page base / soft / contrast take atmosphere's moved
  * brand and the soft-ink ghost line; brand / accent bands paint AWAY from
  * their ink (white under dark ink, black under light), which only raises
- * every ratio.
+ * every ratio. The kit's inks hold at ANY strength; the org's inks on base /
+ * soft take a decorated grade proven at the strengths the Styles ship.
  */
 const SURFACES = squash(
   readFileSync(
@@ -1026,14 +1367,16 @@ function decoratedTokens(
   g: Rgb,
   brand: Rgb,
   tint: Tint,
-  moved = true
+  moved = true,
+  page: Page | null = null
 ): Decorated {
-  const t = schemeTokens(mode, scheme, g, brand, tint);
+  const t = schemeTokens(mode, scheme, g, brand, tint, brand, page);
   if (scheme === 'brand' || scheme === 'accent') {
     // `oklch(from var(--lp-ink) clamp(0, (0.5 - l) * 1000, 1) 0 0)`.
     const anti: Rgb = toLab(t.ink)[0] < 0.5 ? [1, 1, 1] : [0, 0, 0];
     return { ...t, texture: mix(t.bg, anti, 0.4), shape: anti };
   }
+  // The kit's own line, on the org's surfaces too (`--_tex-ink`).
   const line = ink(t.bg, INK.line);
   if (!moved) return { ...t, texture: line, shape: t.accent };
   // base / soft sit on the ground's polarity, contrast on the other.
@@ -1058,6 +1401,9 @@ function decoratedTokens(
   };
 }
 
+/** Floors over a decorated surface: atmosphere's, and the headings'. */
+const BEHIND = { ...OVER_BACKDROP, heading: 3, title: 4.5 } as const;
+
 /** Floors against the section colour with `layers` painted over it, in order. */
 function behindFailures(t: Decorated, layers: [Rgb, number][]): string[] {
   let seen = clip(t.bg);
@@ -1070,41 +1416,126 @@ function behindFailures(t: Decorated, layers: [Rgb, number][]): string[] {
     mark: ratio(t.mark, seen),
     button: ratio(t.button, seen),
     edge: ratio(t.edge, seen),
-    focus: ratio(t.ink, seen),
+    focus: ratio(t.focus, seen),
+    heading: ratio(t.heading, seen),
+    title: ratio(t.title, seen),
   };
-  return Object.entries(OVER_BACKDROP)
+  return Object.entries(BEHIND)
     .filter(([token, floor]) => r[token as keyof typeof r] < floor)
     .map(([token]) => token);
 }
 
-function decoratedCases(mode: Mode): [Rgb, Rgb, Tint][] {
-  const cases: [Rgb, Rgb, Tint][] = [];
-  for (const groundHex of Object.values(GROUNDS[mode]))
+/** [ground, brand, tint, the org whose page it is]. */
+function decoratedCases(mode: Mode): [Rgb, Rgb, Tint, Org][] {
+  const cases: [Rgb, Rgb, Tint, Org][] = [];
+  for (const [groundName, groundHex] of Object.entries(GROUNDS[mode]))
     for (const brandHex of Object.values(BRANDS))
-      for (const tint of Object.values(STYLE_TINTS))
-        cases.push([ground(mode, hex(groundHex)), hex(brandHex), tint]);
+      for (const tint of Object.values(STYLE_TINTS)) {
+        const brand = hex(brandHex);
+        cases.push([
+          ground(mode, hex(groundHex)),
+          brand,
+          tint,
+          orgFor(mode, groundName, groundHex, brand),
+        ]);
+      }
   const platform = ground(mode, hex(mode === 'light' ? '#fafafa' : '#171717'));
   for (let r = 0; r < 256; r += 17)
     for (let gr = 0; gr < 256; gr += 17)
-      for (let b = 0; b < 256; b += 17)
-        cases.push([platform, [r / 255, gr / 255, b / 255], DEFAULT_TINT]);
+      for (let b = 0; b < 256; b += 17) {
+        const brand: Rgb = [r / 255, gr / 255, b / 255];
+        cases.push([
+          platform,
+          brand,
+          DEFAULT_TINT,
+          platformOrg(mode, brand, brand),
+        ]);
+      }
   return cases;
 }
+
+/**
+ * `kit`: the sections drawn in the kit's own inks — contrast, brand and
+ * accent everywhere, and on the dark pole Cinematic's room. `org`: base and
+ * soft on the org's page, in the org's inks at their decorated grade.
+ */
+type DecoratedSet = 'kit' | 'org';
 
 function surfaceFailures(
   mode: Mode,
   layers: (t: Decorated) => [Rgb, number][],
-  moved = true
+  moved = true,
+  set: DecoratedSet = 'kit'
 ): string[] {
   const out: string[] = [];
-  for (const [g, brand, tint] of decoratedCases(mode))
+  for (const [g, brand, tint, org] of decoratedCases(mode))
     for (const scheme of SCHEMES) {
-      const t = decoratedTokens(mode, scheme, g, brand, tint, moved);
+      const own = scheme === 'base' || scheme === 'soft';
+      if (set === 'org' && !own) continue;
+      if (set === 'kit' && own && mode === 'light') continue;
+      const page = set === 'org' ? { org, decorated: true } : null;
+      const t = decoratedTokens(mode, scheme, g, brand, tint, moved, page);
       for (const token of behindFailures(t, layers(t)))
-        out.push(`${scheme} ${token}`);
+        out.push(`${set} ${scheme} ${token}`);
     }
   return out;
 }
+
+/**
+ * Each Style's decorations as it SHIPS them: its texture at its own
+ * strength (else the texture's), its shapes at their share of the proven
+ * alpha. The org's decorated grade is proven at these, not at any strength.
+ */
+interface Shipped {
+  id: string;
+  texture: number;
+  shapes: number;
+}
+const SHIPPED: Shipped[] = (() => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const byId = new Map<string, string>();
+  for (const file of readdirSync(dir)) {
+    const id = file.match(/^style-([a-z]+)(?:-[a-z]+)?\.css$/)?.[1];
+    if (!id) continue;
+    const css = squash(
+      readFileSync(join(dir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    );
+    byId.set(id, `${byId.get(id) ?? ''} ${css}`);
+  }
+  return [...byId].flatMap(([id, css]) => {
+    const texture = css.match(/--lp-texture: ([a-z]+);/)?.[1];
+    const shapes = css.match(/--lp-shapes: ([a-z]+);/)?.[1];
+    if (!texture && !shapes) return [];
+    const own = (name: string) =>
+      css.match(new RegExp(`${name}: ([\\d.]+);`))?.[1];
+    const intrinsic = texture
+      ? SURFACES.match(
+          new RegExp(
+            `style\\(--lp-texture: ${texture}\\) \\{ \\.lp-surface \\{[^}]*--_texture-strength: ([\\d.]+);`
+          )
+        )?.[1]
+      : undefined;
+    return [
+      {
+        id,
+        texture: texture
+          ? Number(own('--lp-texture-strength') ?? intrinsic)
+          : 0,
+        shapes: shapes
+          ? Number(own('--lp-shapes-strength') ?? 1) * SHAPE_ALPHA
+          : 0,
+      },
+    ];
+  });
+})();
+
+/** A Style's layers: the texture (`::before`), then the shapes over it. */
+const shippedLayers =
+  (style: Shipped) =>
+  (t: Decorated): [Rgb, number][] => [
+    ...(style.texture ? ([[t.texture, style.texture]] as [Rgb, number][]) : []),
+    ...(style.shapes ? ([[t.shape, style.shapes]] as [Rgb, number][]) : []),
+  ];
 
 describe('textures and shapes — behind the words', () => {
   it('draws them only where the decorated treatment applies', () => {
@@ -1120,6 +1551,11 @@ describe('textures and shapes — behind the words', () => {
     expect(softBase).toContain('--lp-mark-ink: var(--_atmos-mark)');
     expect(softBase).toContain('--lp-button-bg: var(--_atmos-button)');
     expect(softBase).toContain('--lp-button-line: var(--lp-ink-soft)');
+    // The org's inks take their decorated grade on the same sections.
+    for (const c of ['r', 'g', 'b']) {
+      expect(softBase).toContain(`--_ot-${c}: var(--_odt-${c})`);
+      expect(softBase).toContain(`--_ol-${c}: var(--_odl-${c})`);
+    }
     expect(contrast).toContain('--lp-accent: var(--_atmos-accent-i)');
     expect(contrast).toContain('--lp-mark-ink: var(--_atmos-mark-i)');
     expect(contrast).toContain('--lp-button-bg: var(--_atmos-button-i)');
@@ -1134,6 +1570,18 @@ describe('textures and shapes — behind the words', () => {
       expect(CODE).toContain(recipe);
   });
 
+  it('reads the decorations each Style ships', () => {
+    // Studio's paper and Soft's shapes, today; a Style that adds one is
+    // proven at its strength below without an edit here.
+    const ids = SHIPPED.map((s) => s.id).sort();
+    expect(ids).toEqual(['soft', 'studio']);
+    for (const style of SHIPPED) {
+      expect(style.texture + style.shapes, style.id).toBeGreaterThan(0);
+      expect(style.texture, style.id).toBeLessThanOrEqual(1);
+      expect(style.shapes, style.id).toBeLessThanOrEqual(SHAPE_ALPHA);
+    }
+  });
+
   // Each sweep runs the 4 096-brand cube once per strength or layering: ~8s
   // on a quiet machine, past the 15s default at a load average of 24–41
   // (S3's runs). The work is fixed and deterministic, so the limit is sized
@@ -1142,7 +1590,7 @@ describe('textures and shapes — behind the words', () => {
 
   for (const mode of ['light', 'dark'] as const) {
     it(
-      `${mode}: a texture at any strength holds every floor`,
+      `${mode}: a texture at any strength holds every floor in the kit's inks`,
       { timeout: SWEEP_TIMEOUT },
       () => {
         for (const strength of [0.25, 0.5, 0.75, 1])
@@ -1153,7 +1601,7 @@ describe('textures and shapes — behind the words', () => {
     );
 
     it(
-      `${mode}: shapes at their alpha, and a texture over them, hold every floor`,
+      `${mode}: shapes at their alpha, and a texture over them, hold every floor in the kit's inks`,
       { timeout: SWEEP_TIMEOUT },
       () => {
         for (const layers of [
@@ -1169,6 +1617,18 @@ describe('textures and shapes — behind the words', () => {
           ],
         ])
           expect(surfaceFailures(mode, layers)).toEqual([]);
+      }
+    );
+
+    it(
+      `${mode}: the org's inks hold every floor over each decoration a Style ships, at its strength`,
+      { timeout: SWEEP_TIMEOUT },
+      () => {
+        for (const style of SHIPPED)
+          expect(
+            surfaceFailures(mode, shippedLayers(style), true, 'org'),
+            style.id
+          ).toEqual([]);
       }
     );
   }
@@ -1189,6 +1649,17 @@ describe('textures and shapes — behind the words', () => {
       ].length
     ).toBeGreaterThan(0);
   });
+
+  it(
+    'has teeth: the org’s decorated grade holds at the strength a Style ships, not at full strength',
+    { timeout: SWEEP_TIMEOUT },
+    () => {
+      const full = (t: Decorated): [Rgb, number][] => [[t.texture, 1]];
+      expect(
+        surfaceFailures('light', full, true, 'org').length
+      ).toBeGreaterThan(0);
+    }
+  );
 });
 
 // ── 7. the atmosphere panel (03 X9) ─────────────────────────────────────────
@@ -1272,6 +1743,9 @@ describe('the accent source is free — any colour, on the worst backdrop of its
     for (const mode of ['light', 'dark'] as const)
       for (const [g, brand, tint] of atmosphereCases(mode)) {
         for (const scheme of ['base', 'soft', 'contrast'] as const) {
+          // The light pole's soft band is the org's — any colour in the
+          // band, so it is measured from the band itself (below).
+          if (scheme === 'soft' && mode === 'light') continue;
           const bg = schemeTokens(mode, scheme, g, brand, tint).bg;
           const band: Band =
             (mode === 'light') !== (scheme === 'contrast') ? 'light' : 'dark';
@@ -1298,6 +1772,22 @@ describe('the accent source is free — any colour, on the worst backdrop of its
           (_, c) => Math.min(c, GLOW[mode].c)
         );
         keep(worst.atmosphere, mode, over(glow, GLOW.strength, g));
+      }
+    // The org's surfaces can be any colour in their band (§10): every one.
+    for (const band of ['light', 'dark'] as const)
+      for (const bg of bandSurfaces()[band]) {
+        keep(worst.plain, band, bg);
+        const line = ink(bg, INK.line);
+        const shape: Rgb = band === 'light' ? [0, 0, 0] : [1, 1, 1];
+        for (const strength of [0.25, 0.5, 0.75, 1])
+          keep(worst.decorated, band, over(line, strength, bg));
+        const shaped = over(shape, SHAPE_ALPHA, bg);
+        for (const seen of [
+          over(shape, SHAPE_ALPHA / 2, bg),
+          shaped,
+          over(line, 0.5, shaped),
+        ])
+          keep(worst.decorated, band, seen);
       }
     measured = worst;
     return worst;
@@ -1341,15 +1831,17 @@ describe('the accent source is free — any colour, on the worst backdrop of its
   );
 
   it(
-    'holds the accent (4.5:1) and the mark (3.3:1, its margin) on any section surface',
+    'holds the accent (4.5:1) and the mark (3.28:1, its margin) on any section surface',
     TIMEOUT,
     () => {
       expect(
         lowest('plain', TARGET.accentLight, TARGET.accentDark)
       ).toBeGreaterThanOrEqual(4.5);
+      // 3.28:1 since the org's surfaces may be any colour in the band (§10),
+      // down to its darkest edge (Y 0.705); the kit's own surfaces gave 3.3.
       expect(
         lowest('plain', TARGET.markLight, TARGET.markDark)
-      ).toBeGreaterThanOrEqual(3.3);
+      ).toBeGreaterThanOrEqual(3.28);
     }
   );
 
@@ -1435,4 +1927,506 @@ describe('the mark is graphic grade only', () => {
         .map((file) => file.slice(KIT.length + 1))
     ).toEqual([]);
   });
+});
+
+// ── 10. the org is the source (phase 3a, findings §6) ───────────────────────
+/*
+ * Base and soft draw the org's own tokens (`--_org-*` ← `--color-*`). The
+ * model computes them as the CONSUMER does — through `org-brand.css`'s
+ * derivation, or the platform theme for an org with no background — so those
+ * are held to their text first. Then the bands and the safety-net moves are
+ * measured against EVERY colour a band can hold, not a sample: an org's
+ * background, and so its surfaces, can be any colour.
+ */
+const ORG_BRAND = sheet('styles/tokens/org-brand.css');
+
+/** Every 8-bit sRGB colour inside each band, and each band's moved edge. */
+let bandCache: Record<Mode, Rgb[]> | null = null;
+function bandSurfaces(): Record<Mode, Rgb[]> {
+  if (bandCache) return bandCache;
+  const lin = Float64Array.from({ length: 256 }, (_, i) => srgbToLin(i / 255));
+  const out: Record<Mode, Rgb[]> = { light: [], dark: [] };
+  for (let r = 0; r < 256; r++)
+    for (let g = 0; g < 256; g++)
+      for (let b = 0; b < 256; b++) {
+        const [R, G, B] = [lin[r], lin[g], lin[b]];
+        const L =
+          0.2104542553 *
+            Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B) +
+          0.793617785 *
+            Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B) -
+          0.0040720468 *
+            Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+        if (L >= 0.9) out.light.push([r / 255, g / 255, b / 255]);
+        else if (L <= 0.24) out.dark.push([r / 255, g / 255, b / 255]);
+      }
+  // A colour moved into a band lands on its edge, chroma capped (`ground()`).
+  for (const [band, L, cap] of [
+    ['light', 0.9, 0.046],
+    ['dark', 0.24, 0.039],
+  ] as const)
+    for (let h = 0; h < 360; h += 2)
+      for (let k = 0; k <= 8; k++) {
+        const c = (cap * k) / 8;
+        const a = (h * Math.PI) / 180;
+        out[band].push(clip(toRgb([L, c * Math.cos(a), c * Math.sin(a)])));
+      }
+  bandCache = out;
+  return out;
+}
+
+const towardInk = (band: Mode, y: number, than: number) =>
+  band === 'light' ? y < than : y > than;
+
+/** The surface `band` can hold that is nearest its ink, as `seen` paints it. */
+function worstOf(band: Mode, seen: (s: Rgb) => Rgb[] = (s) => [s]): Rgb {
+  let worst: Rgb = band === 'light' ? [1, 1, 1] : [0, 0, 0];
+  let wy = lum(worst);
+  for (const s of bandSurfaces()[band])
+    for (const v of seen(s)) {
+      const y = lum(v);
+      if (towardInk(band, y, wy)) {
+        worst = v;
+        wy = y;
+      }
+    }
+  return worst;
+}
+
+/** Under each Style's shipped decorations: its texture in the kit's line,
+ * then its shapes in any colour (a moved accent can be black or white). */
+function decoratedSeen(band: Mode, s: Rgb): Rgb[] {
+  const shape: Rgb = band === 'light' ? [0, 0, 0] : [1, 1, 1];
+  const over = (paint: Rgb, alpha: number, under: Rgb): Rgb =>
+    triple((i) => alpha * clip(paint)[i] + (1 - alpha) * clip(under)[i]);
+  return SHIPPED.map((style) => {
+    let seen = s;
+    if (style.texture) seen = over(ink(s, INK.line), style.texture, seen);
+    if (style.shapes) seen = over(shape, style.shapes, seen);
+    return seen;
+  });
+}
+
+const worstCache = new Map<string, Rgb>();
+function worstSurface(band: Mode, decorated: boolean): Rgb {
+  const key = `${band}/${decorated}`;
+  let worst = worstCache.get(key);
+  if (!worst) {
+    worst = decorated
+      ? worstOf(band, (s) => decoratedSeen(band, s))
+      : worstOf(band);
+    worstCache.set(key, worst);
+  }
+  return worst;
+}
+
+const GRADES = [
+  { name: 'text', grade: 'text', floor: 4.5, decorated: false },
+  { name: 'large', grade: 'large', floor: 3, decorated: false },
+  { name: 'decorated text', grade: 'text', floor: 4.5, decorated: true },
+  { name: 'decorated large', grade: 'large', floor: 3, decorated: true },
+] as const;
+const target = (band: Mode, g: (typeof GRADES)[number]) => {
+  const light = band === 'light';
+  if (g.decorated)
+    return g.grade === 'text'
+      ? light
+        ? TARGET.orgDecTextLight
+        : TARGET.orgDecTextDark
+      : light
+        ? TARGET.orgDecLargeLight
+        : TARGET.orgDecLargeDark;
+  return g.grade === 'text'
+    ? light
+      ? TARGET.orgTextLight
+      : TARGET.orgTextDark
+    : light
+      ? TARGET.orgLargeLight
+      : TARGET.orgLargeDark;
+};
+
+/** The `[data-org-bg]` rule as `org-brand.css` spells it, from ORG_BG. */
+function orgBgRecipes(theme: Mode): Record<string, string> {
+  const bg =
+    theme === 'light'
+      ? 'var(--brand-bg, white)'
+      : 'var(--brand-bg-dark, var(--brand-bg, #1a1a2e))';
+  const p = ORG_BG[theme];
+  const step = (d: number) => `calc(l ${d < 0 ? '-' : '+'} ${Math.abs(d)})`;
+  const at = (key: keyof typeof ORG_CHROMA) =>
+    `oklch(from ${bg} ${step(p[key])} calc(c * ${ORG_CHROMA[key]}) h)`;
+  return {
+    '--color-background': bg,
+    '--color-surface-secondary': at('soft'),
+    '--color-surface-card': at('card'),
+    '--color-text': `oklch(from ${bg} clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0)`,
+    '--color-text-secondary': `color-mix(in oklab, var(--color-text) ${Math.round(p.textShare * 100)}%, var(--color-background))`,
+    '--color-border': at('line'),
+  };
+}
+
+/** The `--_org-*` name each `--color-*` the kit reads is re-stated as. */
+const ORG_NAMES: Record<string, string> = {
+  '--color-background': '--_org-ground',
+  '--color-surface-secondary': '--_org-soft',
+  '--color-surface-card': '--_org-card',
+  '--color-text': '--_org-ink',
+  '--color-text-secondary': '--_org-ink-soft',
+  '--color-border': '--_org-line',
+  '--color-heading': '--_org-heading',
+  '--color-focus': '--_org-focus',
+};
+
+/** `org-brand.css` text as a scoped preview re-states it: the kit's names,
+ * and palette tokens for its literals (the kit takes no literal colour;
+ * `#1a1a2e` is the fallback for a `data-org-bg` with no background, which
+ * the org layout never renders). */
+const asPreview = (value: string) =>
+  value
+    .replace(/\bwhite\b/g, 'var(--color-neutral-0)')
+    .replace(/#1a1a2e/g, 'var(--color-neutral-900)')
+    .replace(/var\(--color-text-secondary\)/g, 'var(--_org-ink-soft)')
+    .replace(/var\(--color-text(?:-primary)?\)/g, 'var(--_org-ink)')
+    .replace(/var\(--color-background\)/g, 'var(--_org-ground)');
+
+/** The org's tokens on the seeded dev orgs, as measured on their explore
+ * pages (`scratchpad/3a/before`, 2026-10-09). */
+const SEEDED = {
+  'of-blood-and-bones': { bg: '#F3F0E7', brand: '#A62B0C', heading: '#A62B0C' },
+  'studio-alpha': {
+    bg: null,
+    brand: '#E11D48',
+    heading: '#E11D48',
+    headingDark: '#FF4C64',
+  },
+  'studio-beta': { bg: null, brand: '#2563EB' },
+} as const;
+
+describe('the org is the source — its tokens, drawn exactly unless a floor fails (phase 3a)', () => {
+  const block = (pattern: RegExp) => ORG_BRAND.match(pattern)?.[1] ?? '';
+  const ORG_BG_RULE = {
+    light: block(/\} \[data-org-bg\] \{([^}]*)\}/),
+    dark: block(/\[data-editing-theme='dark'\]\[data-org-bg\] \{([^}]*)\}/),
+  };
+
+  it('models org-brand.css: the surfaces, text and border it derives from the background', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      expect(ORG_BG_RULE[theme].length, theme).toBeGreaterThan(0);
+      for (const [name, value] of Object.entries(orgBgRecipes(theme)))
+        expect(ORG_BG_RULE[theme], `${theme} ${name}`).toContain(
+          `${name}: ${value};`
+        );
+      // A heading with no colour of its own is the text (`--color-text-primary`).
+      expect(ORG_BG_RULE[theme]).toContain(
+        `--color-text-primary: ${orgBgRecipes(theme)['--color-text']};`
+      );
+    }
+    for (const chain of [
+      '--color-heading: var(--brand-heading-color, var(--color-text-primary));',
+      '--color-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--color-text-primary)));',
+      '--color-focus: var(--brand-color, var(--color-primary-500));',
+      '--color-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));',
+    ])
+      expect(ORG_BRAND).toContain(chain);
+  });
+
+  it('models the platform theme for an org with no background (calibrated against the dev stack)', () => {
+    const asHex = (org: Org) =>
+      Object.fromEntries(
+        Object.entries(org).map(([k, v]) => [
+          k,
+          `#${v
+            .map((c: number) =>
+              Math.round(c * 255)
+                .toString(16)
+                .padStart(2, '0')
+            )
+            .join('')}`,
+        ])
+      );
+    expect(asHex(platformOrg('light'))).toEqual({
+      ground: '#fafafa',
+      soft: '#f5f5f5',
+      card: '#ffffff',
+      ink: '#171717',
+      inkSoft: '#525252',
+      line: '#e5e5e5',
+      heading: '#171717',
+      focus: '#c24129',
+    });
+    expect(asHex(platformOrg('dark'))).toEqual({
+      ground: '#171717',
+      soft: '#404040',
+      card: '#404040',
+      ink: '#fafafa',
+      inkSoft: '#d4d4d4',
+      line: '#404040',
+      heading: '#fafafa',
+      focus: '#f47d67',
+    });
+    for (const theme of ['light', 'dark'] as const) {
+      // No platform heading colour: a heading is the text, as `--color-text-primary`.
+      expect(THEMES[theme]).not.toContain('--color-heading:');
+      expect(paletteHex(themeValue(theme, '--color-text-primary'))).toBe(
+        paletteHex(themeValue(theme, '--color-text'))
+      );
+    }
+  });
+
+  it('reads exactly the eight tokens the org’s site paints with', () => {
+    for (const [name, own] of Object.entries(ORG_NAMES)) {
+      const fallback = name === '--color-heading' ? ', var(--color-text)' : '';
+      expect(POLE.light).toContain(`${own}: var(${name}${fallback});`);
+    }
+  });
+
+  it('re-states them for a scoped preview exactly as the previewed theme derives them', () => {
+    const LAST = {
+      dark: ".lp:not([data-lp-theme='light']) )",
+      light: "[data-editing-theme='dark'] .lp[data-lp-theme='light'] )",
+    };
+    const body = (head: string) => {
+      expect(CODE.split(head).length - 1, head).toBe(1);
+      return (
+        CODE.slice(CODE.indexOf(head) + head.length).match(/^([^}]*)\}/)?.[1] ??
+        ''
+      );
+    };
+    const decls = (text: string) =>
+      Object.fromEntries(
+        [...text.matchAll(/(--_org-[\w-]+): ([^;]+);/g)].map((m) => [
+          m[1],
+          m[2].trim(),
+        ])
+      );
+    for (const theme of ['light', 'dark'] as const) {
+      // No background: the platform theme.
+      const platform = decls(body(`${LAST[theme]} {`));
+      for (const name of Object.values(PLATFORM_TOKENS)) {
+        if (name === '--color-focus') continue;
+        expect(paletteHex(platform[ORG_NAMES[name]]), `${theme} ${name}`).toBe(
+          paletteHex(themeValue(theme, name))
+        );
+      }
+      expect(platform['--_org-heading']).toBe('var(--_org-ink)');
+      expect(platform['--_org-focus']).toBe(themeValue(theme, '--color-focus'));
+      // A branded org: its heading colour and focus ring, by the theme's chain.
+      const branded = decls(
+        body(`${LAST[theme]}:is([data-org-brand] .lp, [data-org-brand]) {`)
+      );
+      const chain = (name: string) =>
+        [
+          ...ORG_BRAND.matchAll(
+            new RegExp(`${name}: (var\\(--brand-[^;]+);`, 'g')
+          ),
+        ]
+          .map((m) => m[1])
+          .find((v) => (theme === 'dark') === v.includes('-dark,')) ?? '';
+      expect(branded['--_org-heading']).toBe(
+        asPreview(chain('--color-heading'))
+      );
+      expect(branded['--_org-focus']).toBe(asPreview(chain('--color-focus')));
+      // A background: `org-brand.css`'s rule for the theme.
+      const own = decls(
+        body(`${LAST[theme]}:is([data-org-bg] .lp, [data-org-bg]) {`)
+      );
+      for (const [name, value] of Object.entries(orgBgRecipes(theme)))
+        expect(own[ORG_NAMES[name]], `${theme} ${name}`).toBe(asPreview(value));
+    }
+    expect(paletteHex('var(--color-neutral-0)')).toBe('#ffffff');
+  });
+
+  it('keeps the light pole where the org’s dark ground is its light one, as org-brand.css paints it', () => {
+    // No dark background: the dark rule paints the light one.
+    expect(orgBgRecipes('dark')['--color-background']).toContain(
+      'var(--brand-bg-dark, var(--brand-bg,'
+    );
+    // So the dark pole excludes it on each of the dark theme's three
+    // selectors (org or page override), and nowhere else; Cinematic's room
+    // is dark in every theme.
+    for (const exclusion of [
+      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])",
+      ".lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)",
+    ])
+      expect(CODE.split(exclusion).length - 1, exclusion).toBe(3);
+    expect(POLE.dark).toContain('--lp-ground:');
+  });
+
+  it(
+    'draws the seeded orgs exactly, light and dark, and moves only what fails',
+    { timeout: 60_000 },
+    () => {
+      const byte = (rgb: Rgb) => clip(rgb).map((c) => Math.round(c * 255));
+      const moved = (a: Rgb, b: Rgb) =>
+        byte(a).some((v, i) => Math.abs(v - byte(b)[i]) > 1);
+      const report: Record<string, string[]> = {};
+      for (const [name, seed] of Object.entries(SEEDED))
+        for (const theme of ['light', 'dark'] as const) {
+          const brand = hex(seed.brand);
+          const heading =
+            'heading' in seed
+              ? hex(
+                  theme === 'dark' && 'headingDark' in seed
+                    ? seed.headingDark
+                    : seed.heading
+                )
+              : undefined;
+          const org = seed.bg
+            ? orgFromBg(theme, hex(seed.bg), heading ?? brand, brand)
+            : platformOrg(theme, heading, brand);
+          // An org background with no dark one stays light in dark mode.
+          const pole: Mode = seed.bg ? 'light' : theme;
+          for (const decorated of [false, true]) {
+            const page = { org, decorated };
+            const g = orgGround(pole, org);
+            const base = schemeTokens(
+              pole,
+              'base',
+              g,
+              brand,
+              DEFAULT_TINT,
+              brand,
+              page
+            );
+            const soft = schemeTokens(
+              pole,
+              'soft',
+              g,
+              brand,
+              DEFAULT_TINT,
+              brand,
+              page
+            );
+            const drawn: [string, Rgb, Rgb][] = [
+              ['ground', base.bg, org.ground],
+              ['soft band', soft.bg, org.soft],
+              ['panel', base.panel, org.card],
+              ['ink', base.ink, org.ink],
+              ['soft ink', base.soft, org.inkSoft],
+              ['heading', base.heading, org.heading],
+              ['title', base.title, org.heading],
+              ['focus', base.focus, org.focus],
+            ];
+            report[`${name} ${theme}${decorated ? ' decorated' : ''}`] = drawn
+              .filter(([, kit, own]) => moved(kit, own))
+              .map(([token]) => token);
+          }
+        }
+      expect(report).toEqual({
+        'of-blood-and-bones light': [],
+        'of-blood-and-bones dark': [],
+        // Studio's paper: a title in #A62B0C (Y 0.099) is text, not large.
+        'of-blood-and-bones light decorated': ['title'],
+        'of-blood-and-bones dark decorated': ['title'],
+        // #E11D48 is large text on #fafafa (4.47:1), but a title is not.
+        'studio-alpha light': ['title'],
+        // The platform's dark surfaces (#404040, L 0.37) sit above the dark band.
+        'studio-alpha dark': ['soft band', 'panel'],
+        'studio-alpha light decorated': ['heading', 'title', 'focus'],
+        'studio-alpha dark decorated': ['soft band', 'panel', 'title', 'focus'],
+        'studio-beta light': [],
+        'studio-beta dark': ['soft band', 'panel'],
+        'studio-beta light decorated': [],
+        'studio-beta dark decorated': ['soft band', 'panel', 'focus'],
+      });
+    }
+  );
+
+  it('never moves an org colour that already holds', () => {
+    const kneeY = (rgb: Rgb) => {
+      const [r, g, b] = clip(rgb).map(kneeLin);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    let kept = 0;
+    let movedCount = 0;
+    for (let r = 0; r < 256; r += 15)
+      for (let g = 0; g < 256; g += 15)
+        for (let b = 0; b < 256; b += 15) {
+          const c: Rgb = [r / 255, g / 255, b / 255];
+          for (const band of ['light', 'dark'] as const)
+            for (const grade of GRADES) {
+              const t = target(band, grade);
+              const holds = band === 'light' ? kneeY(c) <= t : kneeY(c) >= t;
+              const out = orgMove(band, c, grade.grade, grade.decorated);
+              if (holds) {
+                kept++;
+                for (const i of [0, 1, 2] as const)
+                  expect(Math.abs(out[i] - c[i])).toBeLessThan(1e-9);
+              } else movedCount++;
+            }
+        }
+    expect(kept).toBeGreaterThan(1000);
+    expect(movedCount).toBeGreaterThan(1000);
+  });
+
+  it(
+    'holds every floor for ANY org colour, on the worst surface its band can hold',
+    { timeout: 60_000 },
+    () => {
+      const sources: Rgb[] = Object.values(BRANDS).map(hex);
+      for (let r = 0; r < 256; r += 17)
+        for (let g = 0; g < 256; g += 17)
+          for (let b = 0; b < 256; b += 17)
+            sources.push([r / 255, g / 255, b / 255]);
+      const lowest: Record<string, number> = {};
+      for (const band of ['light', 'dark'] as const)
+        for (const grade of GRADES) {
+          const worst = worstSurface(band, grade.decorated);
+          let low = Number.POSITIVE_INFINITY;
+          for (const s of sources)
+            low = Math.min(
+              low,
+              ratio(orgMove(band, s, grade.grade, grade.decorated), worst)
+            );
+          lowest[`${band} ${grade.name}`] = low;
+          expect(low, `${band} ${grade.name}`).toBeGreaterThanOrEqual(
+            grade.floor
+          );
+        }
+      expect(Object.keys(lowest)).toHaveLength(8);
+    }
+  );
+
+  it(
+    'moves no further than that: each target within 3% of what the worst surface needs',
+    { timeout: 60_000 },
+    () => {
+      for (const band of ['light', 'dark'] as const)
+        for (const grade of GRADES) {
+          const yw = lum(worstSurface(band, grade.decorated));
+          const t = target(band, grade);
+          const at =
+            band === 'light'
+              ? (yw + 0.05) / (t + 0.05)
+              : (t + 0.05) / (yw + 0.05);
+          expect(
+            at / grade.floor,
+            `${band} ${grade.name}`
+          ).toBeGreaterThanOrEqual(1);
+          expect(at / grade.floor, `${band} ${grade.name}`).toBeLessThanOrEqual(
+            1.03
+          );
+        }
+    }
+  );
+
+  it(
+    'has teeth: the band holds surfaces darker / lighter than any sampled ground, and a looser move fails them',
+    { timeout: 60_000 },
+    () => {
+      // The darkest light surface and the lightest dark one: a saturated
+      // colour at the band's edge, which no grey or sampled ground reaches.
+      expect(lum(worstSurface('light', false))).toBeLessThan(0.71);
+      expect(lum(worstSurface('dark', false))).toBeGreaterThan(0.015);
+      expect(lum(worstSurface('light', true))).toBeLessThan(
+        lum(worstSurface('light', false))
+      );
+      // 3% looser than the text grade fails the worst surface.
+      const looser = darken(
+        [1, 1, 1],
+        (TARGET.orgTextLight + 0.05) * 1.03 - 0.05
+      );
+      expect(ratio(looser, worstSurface('light', false))).toBeLessThan(4.5);
+    }
+  );
 });

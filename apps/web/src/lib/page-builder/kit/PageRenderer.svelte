@@ -6,8 +6,11 @@
 
   PAGE BRAND OVERRIDES keep today's mechanism: the root becomes a nested
   `[data-org-brand]` carrying only the overridden `--brand-*` inputs
-  (`render/brand-overrides.ts`); anything unset inherits the org. The page's
-  own fonts are loaded here, because the org layout loads only the org's.
+  (`render/brand-overrides.ts`); anything unset inherits the org. A page
+  that sets its own background also carries `data-org-bg`, so the org's
+  surfaces, text and border are derived from it — the kit draws those
+  tokens (`styles/schemes.css`). The page's own fonts are loaded here,
+  because the org layout loads only the org's.
 
   EDITING changes attributes, never structure: with `edit` the text fields
   carry the inline-edit seam, the root is still (no entrance), sections carry
@@ -32,7 +35,10 @@
 -->
 <script lang="ts">
   import type { BrandTokenOverrides } from '$lib/page-builder';
-  import { brandOverridesToStyleAttr } from '../render/brand-overrides';
+  import {
+    brandOverridesToCssVars,
+    brandOverridesToStyleAttr,
+  } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
   import { priceWithCadence } from './model/copy';
   import { brandFontsHref } from './model/fonts';
@@ -95,6 +101,13 @@
     )
   );
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
+  // `org-brand.css` derives the surfaces, text and border from the background
+  // only under `[data-org-bg]`, which has no page-override twin: a page that
+  // sets its own background carries the attribute, so they follow it.
+  const ownBackground = $derived.by(() => {
+    const vars = brandOverridesToCssVars(brandOverrides);
+    return '--brand-bg' in vars || '--brand-bg-dark' in vars;
+  });
   const fontsHref = $derived(brandFontsHref(brandOverrides));
 
   setKitPage({
@@ -147,6 +160,7 @@
   data-lp-editing={edit ? '' : undefined}
   data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
+  data-org-bg={ownBackground ? '' : undefined}
   style={brandStyle}
   {@attach entrances(still || !!edit)}
 >

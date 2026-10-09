@@ -5,6 +5,12 @@
   purpose: the page has one `<h1>` (the hero) whatever size it is drawn at,
   and a section heading may be drawn at display size without becoming an h1.
 
+  COLOUR is the section's heading ink (`styles/schemes.css`): on the org's
+  own surfaces, the org's heading colour — at display and heading size the
+  large-text grade, at title size the text grade, since a title is not large
+  text — and elsewhere the section's ink. A block that colours a heading
+  itself still wins.
+
   Never faux-bold: `font-synthesis: none` lets a single-weight display face
   (Archivo Black, Anton…) render its real weight instead of a smeared
   synthetic one when the Style or brand asks for a heavier weight than exists.
@@ -62,7 +68,7 @@
     margin: 0;
     font-family: var(--lp-font-display);
     font-synthesis: none;
-    color: inherit;
+    color: var(--lp-heading-ink, currentColor);
     text-wrap: balance;
     overflow-wrap: break-word;
     hyphens: manual;
@@ -88,6 +94,7 @@
 
   .lp-heading[data-size='title'] {
     font-size: var(--lp-size-title);
+    color: var(--lp-title-ink, currentColor);
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
     letter-spacing: var(--lp-tracking-title);

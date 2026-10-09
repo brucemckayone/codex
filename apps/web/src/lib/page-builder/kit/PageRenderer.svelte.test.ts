@@ -157,6 +157,20 @@ describe('PageRenderer', () => {
         'link[href*="fonts.googleapis.com"][href*="Syne"]'
       )
     ).not.toBeNull();
+    // No background of its own: the org's surfaces are inherited, not re-derived.
+    expect(root.hasAttribute('data-org-bg')).toBe(false);
+  });
+
+  it('re-derives the org’s surfaces on the carrier when the page sets its own background, light or dark', async () => {
+    let root = await render({ brandOverrides: { backgroundColor: '#F6EFE6' } });
+    expect(root.hasAttribute('data-org-brand')).toBe(true);
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    unmount(app);
+    root = await render({
+      brandOverrides: { darkOverrides: { backgroundColor: '#101018' } },
+    });
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    expect(root.getAttribute('style')).toContain('--brand-bg-dark: #101018');
   });
 
   it('previews a theme on its own root, never on <html>', async () => {
