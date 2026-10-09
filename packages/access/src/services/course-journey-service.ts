@@ -40,11 +40,18 @@ import {
   stagePractices,
   videoPlayback,
 } from '@codex/database/schema';
+import type { OrphanedFileService } from '@codex/image-processing';
+import {
+  pageIdOfPageImageKey,
+  pageImageObjectKeys,
+  recordOrphansOrLog,
+} from '@codex/image-processing';
 import {
   BaseService,
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
 import type {
@@ -83,6 +90,7 @@ import type {
   PracticeContentType,
   SectionDesign,
 } from '@codex/shared-types';
+import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 /**
@@ -177,6 +185,66 @@ function resolveCourseSignatureUrl(
 }
 
 /**
+ * Deep-scan arbitrary `sections` content for page-image keys (contract
+ * amendment A3, Codex-61zsk.10).
+ *
+ * NO PER-TYPE SCHEMA KNOWLEDGE, deliberately. A page image is referenced as
+ * an `ImageRef = { key: string; alt?: string }` from anywhere a block author
+ * chooses — `props.image`, `props.background`, `items[].image`, one nested
+ * inside another — and this file has no catalogue of block prop shapes (that
+ * lives in `apps/web`'s page-kit). So rather than name known keys, this walks
+ * every string LEAF in the tree and keeps the ones that are EXACTLY a key the
+ * upload route mints (`pageIdOfPageImageKey`). Page copy, a CTA href or a
+ * string that merely shares the prefix is inert.
+ *
+ * Any page's key counts, not only this page's: a duplicated page renders its
+ * source's keys, and dropping one must still nominate it. Nominating is all a
+ * save does. The sweep deletes a page image only after a grace period, and
+ * only if no page in the key's own org references it
+ * (`OrphanedFileService.isPageImageReferenced`), so a key pasted in from
+ * another org can neither keep that org's image nor lose it.
+ *
+ * Takes `unknown` rather than `PageSection[]` on purpose: it is called once
+ * for the OLD stored value (whatever an earlier, possibly different, version
+ * of the type persisted) and once for the NEW input, and a shape it does not
+ * recognise should be walked past, never thrown on.
+ */
+function collectPageImageKeys(
+  value: unknown,
+  into: Set<string> = new Set()
+): Set<string> {
+  if (typeof value === 'string') {
+    if (pageIdOfPageImageKey(value)) into.add(value);
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectPageImageKeys(item, into);
+  } else if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) {
+      collectPageImageKeys(nested, into);
+    }
+  }
+  return into;
+}
+
+/**
+ * Whether a stored page `design` is the page kit's: a v2 Style id under
+ * `style`. Anything else — the legacy axes object, or NULL from before the
+ * column existed — is a legacy row.
+ */
+function isPageKitDesign(design: unknown): boolean {
+  if (typeof design !== 'object' || design === null) return false;
+  const style: unknown = (design as { style?: unknown }).style;
+  return (PAGE_STYLE_IDS as readonly unknown[]).includes(style);
+}
+
+/**
+ * The most page images one save may nominate for cleanup. A save that drops
+ * more nominates the first this many and logs the rest, which then stay in R2:
+ * the safe direction for a bound whose job is to keep any one page from
+ * flooding the orphan queue every tenant's cleanup shares.
+ */
+const MAX_PAGE_IMAGES_NOMINATED_PER_SAVE = 100;
+
+/**
  * Summarise the member-library journey-card rollup from the SAME curriculum +
  * completion shapes the dashboard uses (`practice_completions ⋈ stage_practices`,
  * SPEC §11). Flattens the curriculum in course order (stage → practice
@@ -219,7 +287,25 @@ function rollUpEnrollment(
   };
 }
 
+/**
+ * Adds ONE optional field over the base config: an orphan-record PRODUCER for
+ * the media-api `OrphanedFileCleanupDO` sweep (Codex-61zsk.10), mirroring how
+ * `ImageProcessingService` takes the same dependency. Optional because most
+ * call sites (every read, every write that isn't `saveJourneyPage`) never
+ * touch it — only `saveJourneyPage`'s page-image orphan scan does.
+ */
+interface CourseJourneyServiceConfig extends ServiceConfig {
+  orphanedFileService?: OrphanedFileService;
+}
+
 export class CourseJourneyService extends BaseService {
+  private orphanedFileService?: OrphanedFileService;
+
+  constructor(config: CourseJourneyServiceConfig) {
+    super(config);
+    this.orphanedFileService = config.orphanedFileService;
+  }
+
   /**
    * The transaction-capable WS client. The registry injects `getSharedDb()` (the
    * WS driver) as `this.db`, but `BaseService.db`'s static type doesn't expose the
@@ -392,6 +478,10 @@ export class CourseJourneyService extends BaseService {
           status: courses.status,
           priceCents: courses.priceCents,
           coverImageKey: courses.coverImageKey,
+          // A32 (Codex-490z7): the UPLOADED hero still, joined onto the
+          // AWAITED envelope for the same reason `coverImageKey` is — see
+          // `course.heroImageUrl` below (Codex-61zsk.6 · WP-6).
+          heroImageKey: courses.heroImageKey,
         })
         .from(courses)
         .where(
@@ -468,9 +558,24 @@ export class CourseJourneyService extends BaseService {
             courseRow.coverImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.6 (WP-6): the hero still, on the AWAITED envelope so
+          // the kit's hero block can put an `<img>` in the SSR HTML instead
+          // of waiting on the STREAMED `CourseSellPreview.heroImageUrl` —
+          // see the field comment on `JourneyCourseView.heroImageUrl` for why
+          // this is the upload-only resolution, not that field's full A32
+          // fallback chain. Null with no upload OR no configured base.
+          heroImageUrl: resolveCourseHeroUrl(
+            courseRow.heroImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
+        // The SAME base every still on this envelope already resolved
+        // against, echoed onto the envelope (contract amendment A3) so a
+        // page-kit block can resolve its own `ImageRef`s without the web
+        // needing a second copy of this env value. Null with none configured.
+        mediaBaseUrl: r2PublicUrlBase ?? null,
       };
     } catch (error) {
       this.handleError(error, 'getCoursePage');
@@ -539,6 +644,8 @@ export class CourseJourneyService extends BaseService {
           status: courses.status,
           priceCents: courses.priceCents,
           coverImageKey: courses.coverImageKey,
+          // A32 (Codex-490z7) — see `getCoursePage`'s identical projection.
+          heroImageKey: courses.heroImageKey,
         })
         .from(courses)
         .where(
@@ -613,9 +720,15 @@ export class CourseJourneyService extends BaseService {
             courseRow.coverImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.6 (WP-6) — see `getCoursePage`'s identical projection.
+          heroImageUrl: resolveCourseHeroUrl(
+            courseRow.heroImageKey,
+            r2PublicUrlBase
+          ),
         },
         stages,
         testimonials,
+        mediaBaseUrl: r2PublicUrlBase ?? null,
       };
     } catch (error) {
       this.handleError(error, 'getCoursePagePreview');
@@ -1639,37 +1752,31 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
-   * The design bundle a NEW page is born with — **Signal** (research §4.8), the
-   * recommended platform default: a contemporary/product look for the creator
-   * with no design opinion.
+   * The design bundle a NEW page is born with — the page-kit v2 Style `bold`
+   * (`docs/design/landing-builder/01-contract.md` §2/§3, BINDING): the owner's
+   * chosen platform default for a creator with no design opinion, and
+   * `kit/model/ids.ts`'s `DEFAULT_PAGE_STYLE`.
    *
-   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left to
-   * `SECTION_DESIGN_DEFAULTS`: an implicit default is invisible. A page storing no
-   * `design` renders *like something* while the builder's preset picker shows
-   * NOTHING selected — so the creator sees a control that appears dead, and the
-   * first preset they pick looks like it changed the page when it merely made the
-   * existing look explicit. An explicit stored bundle is inspectable, diffable and
-   * editable. Same argument as the Candlelit migration, applied to new pages
-   * instead of old ones.
+   * WHY IT IS WRITTEN EXPLICITLY (amendment A21) rather than left absent: an
+   * implicit default is invisible. A page storing no `design.style` still
+   * resolves to `bold` (`kit/model/resolve.ts`'s `resolveStyle`), but the
+   * builder's Style tab would show nothing selected — so the creator sees a
+   * control that appears dead, and the first Style they pick looks like it
+   * changed the page when it merely made the existing look explicit. An
+   * explicit stored value is inspectable, diffable and editable.
    *
-   * These nine values are ALSO declared in the builder's preset table
-   * (`apps/web/src/lib/components/page-builder/design-vocabulary.ts` →
-   * `SECTION_DESIGN_PRESETS` → `signal`), because a package cannot import from
-   * `apps/web` and the presets are builder-UI vocabulary. `design-vocabulary.test.ts`
-   * pins that copy to these exact values, so a drift fails `pnpm --filter web test`
-   * rather than silently making a new page's stored bundle match no preset in the
-   * picker.
+   * `sections: []` below is left EMPTY on purpose (contract §3, WP-9b): the
+   * new canvas-first editor's empty state offers this Style's starter template
+   * (`kit/model/template.ts` `starterPage`) in one click, so a blank page is a
+   * deliberate, visible choice rather than nine invisible legacy axis values.
+   *
+   * This used to be the nine legacy design axes (**Signal**, research §4.8) —
+   * that vocabulary is superseded by the page-kit contract for all new work;
+   * an existing row carrying it still upgrades to a v2 Style on load
+   * (`kit/model/upgrade.ts`).
    */
   private static readonly NEW_PAGE_DESIGN: SectionDesign = {
-    width: 'wide',
-    density: 'regular',
-    surface: 'panel',
-    edge: 'hairline',
-    align: 'start',
-    type: 'balanced',
-    accent: 'fill',
-    motion: 'rise',
-    media: 'frame',
+    style: 'bold',
   };
 
   /**
@@ -1802,6 +1909,42 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * Assert a journey page exists, is org-scoped, and is not soft-deleted —
+   * the ownership check a page-image upload needs BEFORE any R2 write, so a
+   * foreign or missing page 404s and never seeds an orphaned object.
+   *
+   * Deliberately NOT a course resolution like the still-image routes use
+   * (e.g. `getCourseStillImageKeys`): a page image belongs to the PAGE
+   * itself (contract amendment A3), not to a `subjectType: 'course'`
+   * subject, so this makes no assumption about the page's subject and works
+   * for every `pageType`.
+   */
+  async assertJourneyPageInOrg(
+    organizationId: string,
+    pageId: string
+  ): Promise<void> {
+    try {
+      const [existing] = await this.db
+        .select({ id: landingPages.id })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.id, pageId),
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!existing) {
+        throw new NotFoundError('Journey page not found');
+      }
+    } catch (error) {
+      this.handleError(error, 'assertJourneyPageInOrg');
+    }
+  }
+
+  /**
    * Persist the builder's draft (the frozen save command). Scoped to `(id, org)`
    * among non-deleted pages — a foreign/missing id throws `NotFoundError` (never a
    * silent cross-org write). A changed slug is collision-checked against the org's
@@ -1854,6 +1997,11 @@ export class CourseJourneyService extends BaseService {
       seo?: PageSeo;
     }
   ): Promise<void> {
+    // Captured inside the transaction below and read AFTER it commits — see
+    // the page-image orphan scan following the try/catch for why acting on
+    // "the old sections are gone" has to wait until they really are.
+    let oldSections: PageSection[] | undefined;
+
     try {
       const status: PageStatus = record.status;
       const nextSlug = record.slug.trim();
@@ -1869,6 +2017,9 @@ export class CourseJourneyService extends BaseService {
             publishedAt: landingPages.publishedAt,
             subjectType: landingPages.subjectType,
             subjectId: landingPages.subjectId,
+            sections: landingPages.sections,
+            design: landingPages.design,
+            legacySnapshot: landingPages.legacySnapshot,
           })
           .from(landingPages)
           .where(
@@ -1883,6 +2034,20 @@ export class CourseJourneyService extends BaseService {
         if (!existing) {
           throw new NotFoundError('Journey page not found');
         }
+        oldSections = existing.sections;
+
+        // The first page-kit save of a LEGACY row keeps what it replaces
+        // (`LegacyPageSnapshot`): the upgraded form the editor saves has no
+        // home for some authored content, and this write is where that content
+        // would otherwise be lost for good. Written once, never overwritten.
+        const legacySnapshot =
+          existing.legacySnapshot || isPageKitDesign(existing.design)
+            ? undefined
+            : {
+                sections: existing.sections,
+                design: existing.design ?? null,
+                archivedAt: new Date().toISOString(),
+              };
 
         const subjectCourseId =
           existing.subjectType === 'course' ? existing.subjectId : null;
@@ -1940,6 +2105,7 @@ export class CourseJourneyService extends BaseService {
             ...(record.design ? { design: record.design } : {}),
             ...(record.seo ? { seo: record.seo } : {}),
             ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
+            ...(legacySnapshot ? { legacySnapshot } : {}),
           })
           .where(
             and(
@@ -1962,6 +2128,90 @@ export class CourseJourneyService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'saveJourneyPage');
+    }
+
+    // Page images (contract amendment A3 · Codex-61zsk.10): an uploaded image
+    // is referenced from ANYWHERE in `sections` as an `ImageRef = { key,
+    // alt? }`, with no per-type schema knowledge, so finding what changed
+    // means deep-scanning both trees for page-image keys rather than diffing
+    // named columns — see {@link collectPageImageKeys}.
+    //
+    // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
+    // page and two overlapping saves can all put a reference back after the
+    // save that dropped it, so the sweep re-checks the pages before it
+    // deletes anything (`OrphanedFileService.isPageImageReferenced`). The
+    // rows name each image's three R2 OBJECTS, not the base key a block
+    // stores, because nothing lives at the base key: queueing it deleted
+    // nothing while marking the row done.
+    //
+    // Runs AFTER the transaction above, not inside it, and in its OWN
+    // try/catch that only logs: by this point the save has already
+    // committed (a throw in the block above exits via `handleError` and
+    // never reaches here), so a page a creator successfully saved must never
+    // be reported back to them as a failure because a best-effort cleanup
+    // side-channel had a bug. Scanning against a row that instead ROLLED
+    // BACK would be actively wrong — it would queue a key the (unchanged)
+    // old sections still hold.
+    //
+    // Recording never throws (`recordOrphansOrLog` swallows and logs), so the
+    // outer try here is defensive insurance around the scan itself, not
+    // around the record call.
+    try {
+      const oldKeys = collectPageImageKeys(oldSections);
+      const newKeys = collectPageImageKeys(record.sections);
+      const removedKeys = [...oldKeys].filter((key) => !newKeys.has(key));
+
+      if (removedKeys.length === 0) {
+        return;
+      }
+
+      const nominated = removedKeys.slice(
+        0,
+        MAX_PAGE_IMAGES_NOMINATED_PER_SAVE
+      );
+      if (removedKeys.length > nominated.length) {
+        this.obs.warn('Page image nominations capped for one save', {
+          context: 'landing-page-image',
+          pageId: record.id,
+          removed: removedKeys.length,
+          nominated: nominated.length,
+        });
+      }
+      const r2Keys = nominated.flatMap(pageImageObjectKeys);
+
+      if (this.orphanedFileService) {
+        await recordOrphansOrLog(
+          this.orphanedFileService,
+          r2Keys.map((r2Key) => ({
+            r2Key,
+            imageType: 'page_image' as const,
+            entityId: record.id,
+            entityType: 'landing_page' as const,
+          })),
+          this.obs,
+          'landing-page-image'
+        );
+      } else {
+        // The registry always supplies one (service-registry.ts, the
+        // `courseJourney` getter). This degraded warn exists for instances
+        // built directly, such as tests, and mirrors the one
+        // `ImageProcessingService` logs in the same situation.
+        this.obs.warn(
+          'Page image orphan(s) detected, no orphan service configured',
+          {
+            context: 'landing-page-image',
+            pageId: record.id,
+            r2Keys,
+          }
+        );
+      }
+    } catch (scanError) {
+      this.obs.error('Page image orphan scan failed after a successful save', {
+        context: 'landing-page-image',
+        pageId: record.id,
+        error:
+          scanError instanceof Error ? scanError.message : String(scanError),
+      });
     }
   }
 

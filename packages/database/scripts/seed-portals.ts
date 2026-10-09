@@ -7,7 +7,8 @@
  * world. That is the wrong tool for "give this org more portals so the library
  * looks realistic" — it would destroy the org being worked on. This script only
  * INSERTS, never truncates, and is idempotent: a portal whose slug already
- * exists is left alone and only its enrollment/progress state is reconciled.
+ * exists keeps its course and practices, and its page, price, cover,
+ * enrollment and progress are reconciled to the spec below.
  *
  * ## What it produces
  *
@@ -48,7 +49,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { and, asc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +70,8 @@ import {
   content,
   courseEnrollments,
   courseStages,
+  courseSubscriptionPlans,
+  courseSubscriptions,
   courses,
   entitlements,
   landingPages,
@@ -68,9 +80,77 @@ import {
   practiceCompletions,
   stagePractices,
 } from '../src/schema';
+import { CATEGORIES } from './seed/constants';
 
 /** Practices attached per portal. */
 const PRACTICES_PER_PORTAL = 4;
+
+/**
+ * The starting pages the portals use, as the page kit defines them
+ * (`apps/web/src/lib/page-builder/kit/model/recipes.ts`, 03 §8): section
+ * types in order, and a layout only where the recipe's point depends on one —
+ * stored as the section's `variant`, exactly as a page started from that
+ * recipe stores it, so every other layout still comes from the portal's
+ * Style. Each recipe ends in testimonials there; here they are left out,
+ * because these portals have no live testimonials (see `buildSections`).
+ */
+const RECIPES = {
+  full: [
+    { type: 'hero' },
+    { type: 'problem' },
+    { type: 'transformation' },
+    { type: 'benefits' },
+    { type: 'curriculum' },
+    { type: 'instructor' },
+    { type: 'pricing' },
+    { type: 'faq' },
+    { type: 'cta' },
+  ],
+  short: [
+    { type: 'hero' },
+    { type: 'benefits' },
+    { type: 'pricing' },
+    { type: 'faq' },
+    { type: 'cta' },
+  ],
+  journey: [
+    { type: 'hero' },
+    { type: 'story', layout: 'scroll' },
+    { type: 'curriculum', layout: 'map' },
+    { type: 'instructor' },
+    { type: 'pricing' },
+    { type: 'cta' },
+  ],
+  show: [
+    { type: 'hero' },
+    { type: 'gallery' },
+    { type: 'text' },
+    { type: 'pricing' },
+    { type: 'cta' },
+  ],
+} as const satisfies Record<
+  string,
+  readonly { type: string; layout?: string }[]
+>;
+
+type RecipeId = keyof typeof RECIPES;
+
+/** Every section type a recipe here names. */
+type SeededType = (typeof RECIPES)[RecipeId][number]['type'];
+
+/**
+ * A picture the main seed already uploads: the category covers
+ * (`seed/r2.ts`), the six committed mockup photographs
+ * (`docs/design/mockup-assets`) as full sm/md/lg variant sets, so every size a
+ * block asks for resolves — through dev-cdn locally, and through the page's
+ * designed picture plate wherever no image store is running.
+ */
+function picture(
+  category: keyof typeof CATEGORIES,
+  alt: string
+): { key: string; alt: string } {
+  return { key: `categories/${CATEGORIES[category].id}/cover`, alt };
+}
 
 interface StageSpec {
   name: string;
@@ -82,6 +162,35 @@ interface PortalSpec {
   title: string;
   kicker: string;
   lede: string;
+  /**
+   * The page-kit v2 Style this portal's sell page renders in
+   * (`docs/design/landing-builder/03-expressive-contract.md` §3/§4.1,
+   * BINDING). Each of the four portals gets a DIFFERENT one on purpose, the
+   * one that suits its subject — four identical-looking seeded pages would
+   * prove nothing about how the Styles actually differ.
+   */
+  style:
+    | 'bold'
+    | 'clean'
+    | 'soft'
+    | 'cinematic'
+    | 'path'
+    | 'poster'
+    | 'studio'
+    | 'quiet';
+  /**
+   * The starting page this portal's sections follow (03 §8, {@link RECIPES}),
+   * so a visitor to the four portals sees different pages, not one skeleton
+   * in four colours.
+   */
+  recipe: RecipeId;
+  /**
+   * Layouts this page sets for itself, over its recipe's: the sections the
+   * browser suite tests (`apps/web/e2e/page-kit/interactive-components.spec.ts`)
+   * are pinned here, so a change to a Style's defaults can never take a
+   * test's subject away.
+   */
+  pins?: Partial<Record<SeededType, string>>;
   stages: [StageSpec, StageSpec, StageSpec];
   /** How many of this portal's practices are marked complete. */
   completions: number;
@@ -108,6 +217,11 @@ const PORTALS: PortalSpec[] = [
     title: 'Bone Deep',
     kicker: 'A four-practice descent',
     lede: 'Where the body keeps what the mind has agreed to forget. Slow work, close to the bone.',
+    // A descent: dark and immersive, told in pictures.
+    style: 'cinematic',
+    recipe: 'show',
+    // The pictures swiped through (Cinematic's own choice too).
+    pins: { gallery: 'strip' },
     stages: [
       { name: 'Arriving', gloss: 'Settling into the body you actually have.' },
       { name: 'Listening', gloss: 'What the tissue says before language.' },
@@ -123,6 +237,9 @@ const PORTALS: PortalSpec[] = [
     title: 'Tending the Grief',
     kicker: 'For the weight you carry',
     lede: 'Grief is not a problem to be solved. These practices make room for it to move.',
+    // Room and quiet, no colour bands, and a short page: enough for a hard week.
+    style: 'quiet',
+    recipe: 'short',
     stages: [
       { name: 'Naming', gloss: 'Saying the thing plainly.' },
       { name: 'Holding', gloss: 'Company for what cannot be fixed.' },
@@ -137,6 +254,11 @@ const PORTALS: PortalSpec[] = [
     title: 'Ancestral Threads',
     kicker: 'Meeting the lineage that made you',
     lede: 'Every body is an inheritance. This is a way of asking what you were handed, and what you will hand on.',
+    // Family history kept by hand: prints, pen marks and paper.
+    style: 'studio',
+    recipe: 'full',
+    // What is handed down, and what is chosen: the before and after as a switch.
+    pins: { transformation: 'toggle' },
     stages: [
       { name: 'The near ones', gloss: 'Parents, and their weather.' },
       { name: 'The far ones', gloss: 'Names you were never told.' },
@@ -152,6 +274,12 @@ const PORTALS: PortalSpec[] = [
     title: 'Return to the Shoreline',
     kicker: 'A closing rite',
     lede: 'For the end of a long walk — marking what happened, and coming back up into ordinary light.',
+    // The end of a walk: the course as a route, down to the shoreline.
+    style: 'path',
+    recipe: 'journey',
+    // The journey recipe's own pin too; set here so the test survives a
+    // change of recipe.
+    pins: { curriculum: 'map' },
     stages: [
       { name: 'Looking back', gloss: 'What the walking changed.' },
       { name: 'Marking it', gloss: 'A rite so the body knows it ended.' },
@@ -352,6 +480,8 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
     // than inserting inside `createPortal`) is what makes the fix reach rows that
     // already exist.
     await reconcilePage(org.id, userId, courseId, spec);
+    await reconcilePrice(courseId, spec);
+    await retirePlans(courseId, spec);
     await reconcileCover(courseId, spec);
     await reconcileEnrollment(userId, org.id, courseId, spec);
     await reconcileCompletions(userId, courseId, spec.completions);
@@ -371,9 +501,10 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
  * the landing rail: `listPublishedJourneys` returns `landingPages.title`, and
  * only the COURSE had been retitled.
  *
- * `sections` is rewritten every run so a copy change here reaches already-seeded
- * rows. Safe precisely because these are seed-owned demo pages — never call this
- * against a page a human has edited.
+ * `sections`, the Style, the page's own brand overrides and its offer are
+ * rewritten every run, so a copy change here reaches already-seeded rows and a
+ * stray edit never survives one. Safe precisely because these are seed-owned
+ * demo pages — never call this against a page a human means to keep.
  */
 async function reconcilePage(
   organizationId: string,
@@ -399,22 +530,23 @@ async function reconcilePage(
     subjectType: 'course' as const,
     subjectId: courseId,
     sections: buildSections(spec),
-    // CANDLELIT (research §4.1) — the same bundle migration 0084 wrote onto every
-    // pre-existing page, because a seeded portal's body copy IS the cinematic
-    // family the golden page belongs to. Explicit rather than left NULL so a
-    // re-seeded page shows a SELECTED preset in the builder instead of a picker
-    // that looks dead over a page rendering at the neutral defaults (A21).
-    design: {
-      width: 'narrow',
-      density: 'airy',
-      surface: 'media',
-      edge: 'none',
-      align: 'center',
-      type: 'monumental',
-      accent: 'glow',
-      motion: 'drift',
-      media: 'bleed',
-    } as const,
+    // The page-kit v2 STYLE (`docs/design/landing-builder/01-contract.md`
+    // §2/§3, BINDING; WP-9b) — each portal's OWN choice (see `PortalSpec.style`),
+    // not a single shared bundle. This used to be one legacy nine-axis bundle
+    // (Candlelit, research §4.1) copied onto every seeded page, which is exactly
+    // the kind of uniformity that proves nothing about how the Styles differ.
+    // Explicit rather than left absent so a re-seeded page shows a SELECTED
+    // Style in the builder's Style tab instead of a picker that looks dead over
+    // a page rendering at the `bold` default (A21).
+    design: { style: spec.style } as const,
+    // The rest of the page's look and offer, back to the seed's design every
+    // run: a builder edit to a demo page's own fonts or colours, or to its
+    // offer, would otherwise outlive the re-seed and leave a hybrid (a Style
+    // in fonts it never chose). `null` is each column's designed default —
+    // the org's brand, and no page offer, so the page sells at the course's
+    // own price (reset with it in `reconcilePrice`).
+    brandOverrides: null,
+    offer: null,
   };
 
   if (existing) {
@@ -434,7 +566,531 @@ async function reconcilePage(
 }
 
 /**
- * The sell-page body for a seeded portal.
+ * The shared guide identity behind every Of Blood & Bones portal — one
+ * creator, so the `instructor` section reads as the same voice across all
+ * four pages rather than four unrelated bios.
+ */
+const GUIDE_NAME = 'Nell Ashworth';
+const GUIDE_ROLE = 'Somatic guide, Of Blood & Bones';
+const GUIDE_BIO_OPENING =
+  'I have spent fifteen years learning what the body already knows — in studios, in hospices, and on the shoreline where I now teach.';
+const GUIDE_CREDENTIALS = [
+  'Fifteen years in somatic and ancestral practice',
+  'Trained in craniosacral work and grief tending',
+  'Living and teaching on the Stonehaven shoreline',
+];
+
+/**
+ * Per-portal, per-section v2 COPY (contract §2 prop keys) — WP-9b. Bespoke,
+ * not interpolated: `spec.kicker`/`spec.lede` already carry the portal's own
+ * voice and are reused verbatim for the hero (see `buildSections`), but
+ * everything below is written FOR this specific page, because "genuinely
+ * good, specific copy" is the point of a seed a real owner will look at —
+ * generic copy generated from `spec.title` alone was the exact failure mode
+ * `seed-journey-content.ts`'s own header describes ("reads as scaffolding").
+ */
+const PAGE_COPY: Record<
+  string,
+  {
+    hero: { ctaLabel: string; note: string };
+    problem: {
+      eyebrow: string;
+      heading: string;
+      body: string;
+      points: [string, string, string];
+    };
+    transformation: {
+      heading: string;
+      beforeLabel: string;
+      afterLabel: string;
+      before: [string, string, string];
+      after: [string, string, string];
+    };
+    benefits: {
+      heading: string;
+      items: [
+        { title: string; detail: string },
+        { title: string; detail: string },
+        { title: string; detail: string },
+      ];
+    };
+    curriculum: { heading: string; body: string };
+    instructor: { bridge: string; quote: string };
+    pricing: { heading: string; body: string; ctaLabel: string; note?: string };
+    faq: {
+      items: [
+        { question: string; answer: string },
+        { question: string; answer: string },
+        { question: string; answer: string },
+      ];
+      contactLabel: string;
+      contactHref: string;
+    };
+    cta: { heading: string; body: string; ctaLabel: string; note: string };
+    /** Only where the portal's recipe has one: the journey told in moments. */
+    story?: {
+      heading: string;
+      steps: {
+        heading: string;
+        body: string;
+        image: { key: string; alt: string };
+      }[];
+    };
+    /** Only where the portal's recipe has one: the pictures, captioned or not. */
+    gallery?: {
+      eyebrow: string;
+      heading: string;
+      body: string;
+      items: { image: { key: string; alt: string }; caption?: string }[];
+    };
+    /** Only where the portal's recipe has one: a few words beside the pictures. */
+    text?: { heading: string; body: string };
+  }
+> = {
+  'bone-deep': {
+    hero: {
+      ctaLabel: 'Begin the descent',
+      note: 'Four practices. Go as slowly as the work asks.',
+    },
+    problem: {
+      eyebrow: 'Why this exists',
+      heading: 'You have already tried to think your way out of it',
+      body: 'The tightness in your jaw, the guard in your shoulders, the breath that never quite finishes — none of that moved when you understood it better. It moves when you go where it lives.',
+      points: [
+        'You can explain your patterns and still be run by them',
+        'Rest arrives and the body does not believe it is safe yet',
+        'You have done the talking. The tissue is still waiting.',
+      ],
+    },
+    transformation: {
+      heading: 'From holding to arriving',
+      beforeLabel: 'Where you are now',
+      afterLabel: 'Four practices in',
+      before: [
+        'Bracing that runs quietly all day',
+        'A body you manage rather than live in',
+        'Calm that never reaches past the neck',
+      ],
+      after: [
+        'A first exhale that actually finishes',
+        'A body that tells you what it needs',
+        'Calm that reaches all the way down',
+      ],
+    },
+    benefits: {
+      heading: 'What the descent includes',
+      items: [
+        {
+          title: 'Three stages, one practice',
+          detail: 'Arriving, listening, staying — each one built on the last.',
+        },
+        {
+          title: 'Four guided sessions',
+          detail: 'Slow, close-focus practice you can return to at any depth.',
+        },
+        {
+          title: 'No pace to keep',
+          detail:
+            'Stay in a stage as long as it asks. Nothing here is timed against you.',
+        },
+      ],
+    },
+    curriculum: {
+      heading: 'How the descent unfolds',
+      body: 'Arriving settles you into the body you actually have today. Listening asks what the tissue says before language reaches it. Staying is the practice of not leaving once it gets uncomfortable.',
+    },
+    instructor: {
+      bridge:
+        'Bone Deep is the practice I return to myself, on the days the ground feels unfamiliar.',
+      quote:
+        'The body remembers what the mind was never told. Go slowly enough and it will tell you.',
+    },
+    pricing: {
+      heading: 'Join Bone Deep',
+      body: 'However you join, all four practices open at once, at whatever pace the work asks of you.',
+      ctaLabel: 'Begin the descent',
+    },
+    faq: {
+      items: [
+        {
+          question: 'Do I need any experience with somatic work?',
+          answer:
+            'None. Arriving starts from wherever your body is today — that is the whole first stage.',
+        },
+        {
+          question: 'How long does each practice take?',
+          answer:
+            'Twenty to thirty minutes, unhurried. Give it a room where you will not be interrupted.',
+        },
+        {
+          question: 'What if it brings something up?',
+          answer:
+            'That is not a wrong turn — it is what Staying is for. Go at the pace that lets you keep breathing.',
+        },
+      ],
+      contactLabel: 'Ask before you begin',
+      contactHref: 'mailto:hello@ofbloodandbones.test',
+    },
+    cta: {
+      heading: 'The ground is still there. Go find it.',
+      body: 'Begin whenever you are ready — the four practices wait for you exactly as they are.',
+      ctaLabel: 'Begin the descent',
+      note: 'No countdown. Start when it is time.',
+    },
+    gallery: {
+      eyebrow: 'Inside the practice',
+      heading: 'What the descent is like',
+      body: 'Three stages, taken as slowly as the body needs. Nothing here is timed against you.',
+      items: [
+        {
+          image: picture(
+            'somatics',
+            'A road through an avenue of trees, fading into fog'
+          ),
+          caption: 'Arriving: you do not need to see the whole way down',
+        },
+        {
+          image: picture('breathwork', 'A pine forest in morning mist'),
+          caption: 'Listening: what the body says before words reach it',
+        },
+        {
+          image: picture(
+            'healing',
+            'Storm clouds over a dark sea, waves breaking on the shore'
+          ),
+          caption: 'Staying: the practice of not leaving',
+        },
+        {
+          image: picture(
+            'ceremony',
+            'Someone in a scarf, seen from behind, looking out to sea at sunset'
+          ),
+        },
+      ],
+    },
+    text: {
+      heading: 'Why it goes slowly',
+      body: 'Understanding a pattern rarely loosens it. The jaw stays tight and the shoulders stay guarded until you go where they live, and that cannot be rushed.\n\nSo each practice waits for you. Stay in a stage for as long as it asks, and move on when the body is ready.',
+    },
+  },
+  'tending-the-grief': {
+    hero: {
+      ctaLabel: 'Begin tending',
+      note: 'Come as you are. There is no version of grief that disqualifies you.',
+    },
+    problem: {
+      eyebrow: 'What grief actually asks for',
+      heading: 'You have been told to move on. Nothing here asks that.',
+      body: 'Most of what passes for grief support is a push toward closure. This is the opposite: practices built to keep company with what will not resolve on schedule.',
+      points: [
+        'You are exhausted from performing "fine"',
+        'Nobody around you seems to know what to say any more',
+        'You want somewhere to put it down, even briefly',
+      ],
+    },
+    transformation: {
+      heading: 'From carrying alone to being held',
+      beforeLabel: 'Where grief sits now',
+      afterLabel: 'With these practices',
+      before: [
+        'Grief carried silently, on your own',
+        'A weight you brace against daily',
+        'No language for what this actually is',
+      ],
+      after: [
+        'A regular place to set it down',
+        'Company for what cannot be fixed',
+        'Words that finally fit the shape of it',
+      ],
+    },
+    benefits: {
+      heading: "What's included",
+      items: [
+        {
+          title: 'Three stages of tending',
+          detail:
+            'Naming, holding, and letting move — no fixed timeline between them.',
+        },
+        {
+          title: 'Four guided practices',
+          detail: 'Short enough for a hard week, honest enough for a long one.',
+        },
+        {
+          title: 'Return whenever grief does',
+          detail: 'Grief is not linear, and neither is access to this.',
+        },
+      ],
+    },
+    curriculum: {
+      heading: 'How tending unfolds',
+      body: 'Naming says the thing plainly, without softening it. Holding offers company for what cannot be fixed. Letting move treats grief as water, not stone — something that is allowed to travel.',
+    },
+    instructor: {
+      bridge:
+        'Tending the Grief comes from sitting with more grief than I expected to, and learning what actually helps.',
+      quote:
+        'Grief tended is not grief gone. It is grief that finally has somewhere to stand.',
+    },
+    pricing: {
+      heading: 'Join Tending the Grief',
+      body: 'Every stage opens as soon as you begin — go at whatever pace tending asks.',
+      ctaLabel: 'Begin tending',
+    },
+    faq: {
+      items: [
+        {
+          question: 'Is this therapy?',
+          answer:
+            'No. It is a practice, not a treatment — a good companion to therapy, not a replacement for it.',
+        },
+        {
+          question: "What if I'm not ready to feel this?",
+          answer:
+            'Naming starts small, on purpose. You only go as deep as a session that day can hold.',
+        },
+        {
+          question: 'Can I come back to this months from now?',
+          answer:
+            'Yes. Grief does not follow a syllabus, and neither does access to this.',
+        },
+      ],
+      contactLabel: 'Write to us first',
+      contactHref: 'mailto:hello@ofbloodandbones.test',
+    },
+    cta: {
+      heading: 'You do not have to carry this alone today',
+      body: 'Begin whenever tending is what the day calls for.',
+      ctaLabel: 'Begin tending',
+      note: 'Pause or return any time — nothing here is timed against you.',
+    },
+  },
+  'ancestral-threads': {
+    hero: {
+      ctaLabel: 'Take up the thread',
+      note: 'Three stages back, one stage forward.',
+    },
+    problem: {
+      eyebrow: 'What you inherited',
+      heading: 'Some of what you carry was never yours to begin with',
+      body: 'A temper, a silence, a way of flinching before anything has happened — patterns like these are rarely invented. They are handed down, usually without a word, and they can be met instead of just repeated.',
+      points: [
+        'You react in ways that feel older than you are',
+        'Family stories thin out right where they matter most',
+        'You want to choose what you pass on, not just repeat it',
+      ],
+    },
+    transformation: {
+      heading: 'From repeating to choosing',
+      beforeLabel: 'What gets handed down unexamined',
+      afterLabel: 'What Ancestral Threads makes possible',
+      before: [
+        'Patterns you repeat without noticing',
+        'A lineage that stays a rumour',
+        'Weather passed on with no name',
+      ],
+      after: [
+        'Patterns you can finally see and meet',
+        'A lineage you have actually looked at',
+        'A choice about what continues',
+      ],
+    },
+    benefits: {
+      heading: "What's included",
+      items: [
+        {
+          title: 'Three stages of lineage work',
+          detail:
+            'The near ones, the far ones, and the thread you carry forward.',
+        },
+        {
+          title: 'Four practices for tracing inheritance',
+          detail:
+            'Structured enough to hold difficult material, open enough to fit your own family.',
+        },
+        {
+          title: 'A record you keep',
+          detail:
+            'Notes and reflections that are yours to return to, long after the course ends.',
+        },
+      ],
+    },
+    curriculum: {
+      heading: 'How the thread unfolds',
+      body: 'It begins with the near ones: parents, and their weather. Then the far ones, the names you were never told. Last, the thread forward: what you choose, deliberately, to carry.',
+    },
+    instructor: {
+      bridge:
+        'Ancestral Threads started as my own attempt to trace what I had inherited without asking for it.',
+      quote:
+        'You did not invent your patterns. You inherited them — and you can meet them.',
+    },
+    pricing: {
+      heading: 'Join Ancestral Threads',
+      body: 'A one-off payment opens the whole lineage practice, once and for good.',
+      ctaLabel: 'Take up the thread',
+      note: 'One payment. Yours to keep and return to.',
+    },
+    faq: {
+      items: [
+        {
+          question: 'What if I know very little about my family history?',
+          answer:
+            'The far ones is built for exactly that gap. Not knowing names is itself part of what the practice works with.',
+        },
+        {
+          question: 'Is this genealogy research?',
+          answer:
+            'No records, no archives — this is felt and somatic, not documentary. What surfaces is impression, not proof.',
+        },
+        {
+          question: 'What if my family history is difficult?',
+          answer:
+            'Most are. Each stage lets you go only as close as feels workable, and no practice requires contact with anyone living.',
+        },
+      ],
+      contactLabel: 'Ask a question first',
+      contactHref: 'mailto:hello@ofbloodandbones.test',
+    },
+    cta: {
+      heading: 'The thread is still in your hands',
+      body: 'Begin tracing what you were handed — and decide, deliberately, what you hand on.',
+      ctaLabel: 'Take up the thread',
+      note: 'One payment, no deadline to finish.',
+    },
+  },
+  'return-to-the-shoreline': {
+    hero: {
+      ctaLabel: 'Walk to the shoreline',
+      note: 'A short practice for the end of something long.',
+    },
+    problem: {
+      eyebrow: "What's missing at the end",
+      heading: 'Most journeys end without ending',
+      body: 'You finish the retreat, the therapy block, the hard year — and then Monday just starts again, as if nothing happened. Nothing marks the change, so the body files it as unfinished.',
+      points: [
+        'A long chapter closed with no ceremony at all',
+        'You feel different but nothing around you acknowledges it',
+        "Ordinary life resumed before you'd actually landed",
+      ],
+    },
+    transformation: {
+      heading: 'From unfinished to arrived',
+      beforeLabel: 'How most endings land',
+      afterLabel: 'After the shoreline',
+      before: [
+        'A change nobody marked',
+        'Re-entry that felt too sudden',
+        'A body still braced for what just ended',
+      ],
+      after: [
+        'An ending your body actually registers',
+        'A gentler return to ordinary days',
+        'Room to arrive before you are asked to perform',
+      ],
+    },
+    benefits: {
+      heading: "What's included",
+      items: [
+        {
+          title: 'Three short stages',
+          detail:
+            'Looking back, marking it, and coming up — walked in one sitting or spread over days.',
+        },
+        {
+          title: 'Four closing practices',
+          detail:
+            'Gentle enough for whatever you are closing, specific enough to actually help.',
+        },
+        {
+          title: 'A rite you can repeat',
+          detail:
+            'Return to Return to the Shoreline at the end of the next long thing, too.',
+        },
+      ],
+    },
+    curriculum: {
+      heading: 'How the closing rite unfolds',
+      body: 'Looking back asks what the walking actually changed. Marking it is a rite so the body knows it ended. Coming up is re-entry, gently, back into ordinary light.',
+    },
+    instructor: {
+      bridge:
+        'I built Return to the Shoreline because every other course I taught ended and just... stopped.',
+      quote: 'An ending done well is not the same as an ending rushed.',
+    },
+    pricing: {
+      heading: 'Join Return to the Shoreline',
+      body: 'A short, complete rite — use it once, or at the end of every long chapter.',
+      ctaLabel: 'Walk to the shoreline',
+      note: 'One payment, yours to repeat.',
+    },
+    faq: {
+      items: [
+        {
+          question: 'What kind of ending is this for?',
+          answer:
+            'Any of them — a course, a grief, a relationship, a hard year. The rite does not need to know which.',
+        },
+        {
+          question: 'How long does it take?',
+          answer:
+            'Under an hour in total, across three short stages. Some people walk it in one sitting.',
+        },
+        {
+          question: 'Can I use this more than once?',
+          answer:
+            'Yes — that is the design. Come back to it at the close of the next long thing, too.',
+        },
+      ],
+      contactLabel: 'Ask before you begin',
+      contactHref: 'mailto:hello@ofbloodandbones.test',
+    },
+    cta: {
+      heading: 'Let this one actually end',
+      body: 'Walk the three stages, and come back up into ordinary light on purpose.',
+      ctaLabel: 'Walk to the shoreline',
+      note: 'One payment, yours to repeat.',
+    },
+    story: {
+      heading: 'The last stretch of the walk',
+      steps: [
+        {
+          heading: 'Looking back down the road',
+          body: 'You begin by noticing what the walking changed, before it blurs into ordinary weeks.',
+          image: picture(
+            'somatics',
+            'A road through an avenue of trees, fading into fog'
+          ),
+        },
+        {
+          heading: 'Marking it at the water',
+          body: 'A small, deliberate rite, so the body registers that something has ended and can stop bracing for it.',
+          image: picture(
+            'healing',
+            'Storm clouds over a dark sea, waves breaking on the shore'
+          ),
+        },
+        {
+          heading: 'Coming up into ordinary light',
+          body: 'You come back gently, with room to arrive before anyone asks anything of you.',
+          image: picture(
+            'ceremony',
+            'Someone in a scarf, seen from behind, looking out to sea at sunset'
+          ),
+        },
+      ],
+    },
+  },
+};
+
+/**
+ * The sell-page body for a seeded portal — a v2 page (`docs/design/
+ * landing-builder/01-contract.md` §2/§3, BINDING; WP-9b): v2 section types,
+ * v2 prop keys and no legacy axes. The sections follow the portal's recipe
+ * (03 §8, `PortalSpec.recipe`), and a layout is stored (`variant`) only where
+ * that recipe or the portal itself (`PortalSpec.pins`, the browser suite's
+ * subjects) pins one; every other layout is left unset so it resolves from
+ * the portal's own Style (`PortalSpec.style`), which is the whole point of
+ * seeding four DIFFERENT Styles rather than one shared bundle.
  *
  * WHY A PAGE AT ALL: a portal is a COURSE plus a published `course`-type LANDING
  * PAGE, and the public rails are built from the page, not the course.
@@ -445,104 +1101,156 @@ async function reconcilePage(
  * `listPublishedCourses`, the /explore rail, left-joins and shows it anyway,
  * which is why this gap looked like it worked.)
  *
- * Copy is drawn from the portal's OWN kicker/lede rather than lorem or
- * "Section title here" placeholders. Codex-maf0y exists because placeholder
- * section copy on a published page gets served to real visitors — demo data
- * that reads as real copy at real lengths is the whole point of this seed, and
- * it keeps that bead's failure mode out of the seeded rows.
+ * Copy is bespoke per portal (`PAGE_COPY`), not interpolated from a single
+ * template. Codex-maf0y exists because placeholder section copy on a
+ * published page gets served to real visitors — demo data that reads as real,
+ * specific copy is the whole point of this seed, and genuinely good copy is
+ * what the owner will actually look at.
  *
- * A deliberately SMALL set (hero → ache → map → invite): enough that clicking a
- * card lands on a page with a shape, without pretending to be a finished sales
- * page nobody wrote.
+ * NO testimonials section, although every recipe has one: the type's `items[]`
+ * are "merged after live testimonials" (contract §2), and no
+ * `courseTestimonials` rows exist for these portals — an authored decoration
+ * with nothing live behind it would misrepresent what the page can show, and
+ * with no quotes at all the section is only a heading.
+ *
+ * NO `offers[]` on pricing and NO price/cadence claims in its copy — price and
+ * cadence come only from the live offer (contract principles); a seeded
+ * `courses.priceCents` (or its absence) is what actually drives the CTA a
+ * visitor sees, and the framing text here stays honest against either state.
  */
 function buildSections(spec: PortalSpec) {
-  // NO `price` PROP. The invite section renders every price and path from the
-  // AUTHORITATIVE offer (`deriveOfferPaths(context.offer, ...)`), never from an
-  // authored string, and `price` is declared ZERO times in SECTION_FIELDS — so a
-  // seeded `price` was unreachable from the editor, invisible on the page, and
-  // permanent, because the store's save spreads props key-by-key and never drops
-  // an undeclared one. It also MISLED the creator: the builder canvas used to
-  // preview that string while the page published the real Stripe offer
-  // (Codex-bb445). Seeding it re-created the defect on every run, which is why
-  // this generator had to change alongside the data migration.
-  return [
-    {
-      id: crypto.randomUUID(),
+  const copy = PAGE_COPY[spec.slug];
+  if (!copy) {
+    throw new Error(
+      `buildSections: no v2 copy authored for portal "${spec.slug}"`
+    );
+  }
+  const authored = <T>(value: T | undefined, type: SeededType): T => {
+    if (value === undefined) {
+      throw new Error(
+        `buildSections: "${spec.slug}" follows the ${spec.recipe} recipe, which has a ${type} section, but no ${type} copy is authored for it`
+      );
+    }
+    return value;
+  };
+
+  /** Each section type the recipes use, in this portal's own words. */
+  const sections: Record<
+    SeededType,
+    () => { name: string; props: Record<string, unknown> }
+  > = {
+    hero: () => ({
       name: 'Hero',
-      type: 'hero',
       props: {
         eyebrow: spec.kicker,
-        headline: spec.title,
-        sub: spec.lede,
-        button: 'Begin',
-        bg: 'ember',
-      },
-      enabled: true,
-      // `stage`, NOT the old `split`. This line used to write `split`, and because
-      // the public renderer ignored `variant` entirely until Codex-qcgo3 was fixed,
-      // every seeded page stored a split hero while rendering a centred stage — all
-      // seven real journey pages. The moment the variant plumbing landed, all seven
-      // would have flipped to a two-column split hero that no creator ever chose or
-      // saw. Migration 0087 corrected the stored rows; this stops a re-seed
-      // reintroducing it. `split-media` stays fully available — as a choice made in
-      // the builder, not a seed default.
-      variant: 'stage',
-    },
-    {
-      id: crypto.randomUUID(),
-      name: 'The ache',
-      type: 'ache',
-      props: {
-        eyebrow: 'Why this',
-        heading: 'You already know the shape of it.',
-        sub: spec.lede,
-      },
-      enabled: true,
-      // `column`, NOT `default`. `default` is not an ache composition id at all —
-      // it fell through `legacySectionVariant()` to `def.defaultVariant`, which
-      // IS `column`, so it rendered correctly only because a fallback caught it.
-      // Writing the resolved id makes the intent explicit and stops a change to
-      // `defaultVariant` silently re-composing every seeded page. Same class as
-      // the hero and invite lines above (migrations 0087 / 0089), and the stored
-      // rows are corrected by the migration that accompanies this change.
-      variant: 'column',
-    },
-    {
-      id: crypto.randomUUID(),
-      name: 'The map',
-      type: 'map',
-      props: {
-        eyebrow: 'The whole path',
-        heading: "Everything you'll walk.",
-        sub: spec.stages.map((s) => s.name).join(' · '),
-        note: 'The first ground is already open.',
-      },
-      enabled: true,
-      // `spine`, NOT `descent` — same story as the ache line above. `descent` is
-      // the section's PROSE name, not a composition id; it resolved to `spine`
-      // only via `defaultVariant`.
-      variant: 'spine',
-    },
-    {
-      id: crypto.randomUUID(),
-      name: 'The invite',
-      type: 'invite',
-      props: {
-        eyebrow: 'Begin',
         heading: spec.title,
-        accent: 'is waiting.',
-        sub: 'One key opens everything that grows from here.',
-        risk: 'Cancel anytime',
-        button: 'Begin',
+        body: spec.lede,
+        ctaLabel: copy.hero.ctaLabel,
+        note: copy.hero.note,
       },
+    }),
+    problem: () => ({
+      name: 'The problem',
+      props: {
+        eyebrow: copy.problem.eyebrow,
+        heading: copy.problem.heading,
+        body: copy.problem.body,
+        points: copy.problem.points,
+      },
+    }),
+    transformation: () => ({
+      name: 'Before and after',
+      props: {
+        heading: copy.transformation.heading,
+        beforeLabel: copy.transformation.beforeLabel,
+        afterLabel: copy.transformation.afterLabel,
+        before: copy.transformation.before,
+        after: copy.transformation.after,
+      },
+    }),
+    benefits: () => ({
+      name: "What's included",
+      props: {
+        heading: copy.benefits.heading,
+        items: copy.benefits.items,
+      },
+    }),
+    curriculum: () => ({
+      name: 'Curriculum',
+      props: {
+        heading: copy.curriculum.heading,
+        body: copy.curriculum.body,
+      },
+    }),
+    instructor: () => ({
+      name: 'About you',
+      props: {
+        heading: 'Meet your guide',
+        body: `${GUIDE_BIO_OPENING} ${copy.instructor.bridge}`,
+        name: GUIDE_NAME,
+        role: GUIDE_ROLE,
+        credentials: GUIDE_CREDENTIALS,
+        quote: copy.instructor.quote,
+      },
+    }),
+    pricing: () => ({
+      name: 'Pricing',
+      props: {
+        heading: copy.pricing.heading,
+        body: copy.pricing.body,
+        ctaLabel: copy.pricing.ctaLabel,
+        ...(copy.pricing.note ? { note: copy.pricing.note } : {}),
+      },
+    }),
+    faq: () => ({
+      name: 'Questions',
+      props: {
+        items: copy.faq.items,
+        contactLabel: copy.faq.contactLabel,
+        contactHref: copy.faq.contactHref,
+      },
+    }),
+    cta: () => ({
+      name: 'Call to action',
+      props: {
+        heading: copy.cta.heading,
+        body: copy.cta.body,
+        ctaLabel: copy.cta.ctaLabel,
+        note: copy.cta.note,
+      },
+    }),
+    story: () => ({ name: 'The story', props: authored(copy.story, 'story') }),
+    gallery: () => ({
+      name: 'Pictures',
+      props: authored(copy.gallery, 'gallery'),
+    }),
+    text: () => ({ name: 'A few words', props: authored(copy.text, 'text') }),
+  };
+
+  const recipe: readonly {
+    readonly type: SeededType;
+    readonly layout?: string;
+  }[] = RECIPES[spec.recipe];
+  // A pin on a section the recipe does not have would quietly pin nothing.
+  for (const type of Object.keys(spec.pins ?? {})) {
+    if (!recipe.some((section) => section.type === type)) {
+      throw new Error(
+        `buildSections: "${spec.slug}" pins a ${type} layout, but the ${spec.recipe} recipe has no ${type} section`
+      );
+    }
+  }
+  return recipe.map(({ type, layout: recipeLayout }) => {
+    const { name, props } = sections[type]();
+    const layout = spec.pins?.[type] ?? recipeLayout;
+    return {
+      id: crypto.randomUUID(),
+      type,
+      name,
       enabled: true,
-      // `pool` is what the public page has always RENDERED. The seeder wrote
-      // `card` here while the renderer discarded `variant` entirely, so all
-      // seven seeded pages stored a composition no visitor ever saw — see
-      // migration 0089, and 0087 for the identical hero case (contract A33).
-      variant: 'pool',
-    },
-  ];
+      ...(layout ? { variant: layout } : {}),
+      props,
+    };
+  });
 }
 
 /** Insert the course, its three stages, and the stage→practice links. */
@@ -695,6 +1403,85 @@ async function deriveCoverKey(
 
 function run(command: string): void {
   execSync(command, { stdio: 'pipe' });
+}
+
+/**
+ * Put the course's own price back to the portal's (`PortalSpec.priceCents`).
+ *
+ * The studio's offer editor (`updateJourneyOffer`) writes the page's `offer`
+ * AND `courses.price_cents` in one transaction, so clearing only the page's
+ * offer (`reconcilePage`) would leave half of a stray edit behind: the page
+ * would sell at the edited price. Setting the same value each run keeps this
+ * idempotent.
+ */
+async function reconcilePrice(
+  courseId: string,
+  spec: PortalSpec
+): Promise<void> {
+  await dbWs
+    .update(courses)
+    .set({ priceCents: spec.priceCents, updatedAt: new Date() })
+    .where(eq(courses.id, courseId));
+}
+
+/**
+ * Retire any course subscription plan on a seeded portal: the seed designs at
+ * most a one-off price, and the offer editor creates a plan when a page turns
+ * its course subscription on — the other half of a stray offer edit. Soft,
+ * like every removal here (`is_active` off, `deleted_at` set), so it can be
+ * undone; the plan's Stripe product is left as it is. A no-op once retired,
+ * and in CI, where no seeded portal has a plan.
+ *
+ * A plan someone still subscribes to is KEPT, with a warning: its subscribers
+ * hold a `planId` to it and must keep renewing, which is why the service's own
+ * `deactivatePlan` never deletes one either. Every `course_subscriptions`
+ * status but `cancelled` counts — `paused` can resume and `incomplete` can
+ * still be paid, so neither has ended.
+ *
+ * Tier access (`course_tier_access`) is NOT reset: that join table has no
+ * soft delete, and this seed never hard-deletes.
+ */
+async function retirePlans(courseId: string, spec: PortalSpec): Promise<void> {
+  const held = await dbWs
+    .selectDistinct({ id: courseSubscriptionPlans.id })
+    .from(courseSubscriptionPlans)
+    .innerJoin(
+      courseSubscriptions,
+      eq(courseSubscriptions.planId, courseSubscriptionPlans.id)
+    )
+    .where(
+      and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt),
+        ne(courseSubscriptions.status, 'cancelled')
+      )
+    );
+  const heldIds = held.map((plan) => plan.id);
+  for (const id of heldIds) {
+    console.log(
+      `    ! kept course subscription plan ${id} on ${spec.slug}: it still has a live subscription`
+    );
+  }
+
+  const now = new Date();
+  const retired = await dbWs
+    .update(courseSubscriptionPlans)
+    .set({ isActive: false, deletedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt),
+        heldIds.length > 0
+          ? notInArray(courseSubscriptionPlans.id, heldIds)
+          : sql`true`
+      )
+    )
+    .returning({ id: courseSubscriptionPlans.id });
+  for (const plan of retired) {
+    console.log(
+      `    (retired course subscription plan ${plan.id} on ${spec.slug})`
+    );
+  }
 }
 
 /**

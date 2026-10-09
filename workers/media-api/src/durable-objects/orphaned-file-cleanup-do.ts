@@ -21,7 +21,11 @@
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { R2Service } from '@codex/cloudflare-clients';
 import { createDbClient } from '@codex/database';
-import { OrphanedFileService } from '@codex/image-processing';
+import {
+  type OrphanedFileRecord,
+  OrphanedFileService,
+  pageImageKeyOfObject,
+} from '@codex/image-processing';
 import { ObservabilityClient } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
 
@@ -63,11 +67,11 @@ const REUPLOAD_CLOCK_SKEW_MS = 5 * 60 * 1000;
  * orphaned, which means it holds new bytes rather than the orphan
  * (Codex-r85jo.6).
  *
- * Every image key is a pure function of an entity id and is overwritten in
- * place: a content thumbnail, avatar, cover or logo is re-uploaded to the
- * SAME key it was deleted from. So an orphan recorded when a delete failed can
- * be re-occupied by the next upload before the sweep runs, and deleting it
- * then destroys the image the row now points at.
+ * Every image key except a page image's is a pure function of an entity id
+ * and is overwritten in place: a content thumbnail, avatar, cover or logo is
+ * re-uploaded to the SAME key it was deleted from. So an orphan recorded when
+ * a delete failed can be re-occupied by the next upload before the sweep
+ * runs, and deleting it then destroys the image the row now points at.
  */
 export function wasRewrittenAfterOrphaning(
   uploaded: Date,
@@ -76,11 +80,44 @@ export function wasRewrittenAfterOrphaning(
   return uploaded.getTime() > orphanedAt.getTime() - REUPLOAD_CLOCK_SKEW_MS;
 }
 
+/**
+ * Why the object at an orphan's key must stay, or `null` to delete it.
+ *
+ * A page image (Codex-61zsk.10) is decided differently. Its key is minted
+ * fresh per upload and never re-written, so the re-upload check can only
+ * misfire on it — an image replaced minutes after its upload would be kept
+ * for good. What decides a page image is whether a page still shows it, and
+ * the row that queued it cannot say: undo, duplicated pages and overlapping
+ * saves all put a reference back after the save that dropped it.
+ */
+export async function reasonToKeep(
+  orphan: OrphanedFileRecord,
+  r2Service: R2Service,
+  orphanedFileService: OrphanedFileService
+): Promise<string | null> {
+  if (orphan.imageType === 'page_image') {
+    const baseKey = pageImageKeyOfObject(orphan.r2Key);
+    if (!baseKey) return 'not a page-image object key; left for review';
+    return (await orphanedFileService.isPageImageReferenced(baseKey))
+      ? 'still referenced by a landing page'
+      : null;
+  }
+
+  const current = await r2Service.head(orphan.r2Key);
+  return current &&
+    wasRewrittenAfterOrphaning(current.uploaded, orphan.orphanedAt)
+    ? 'key re-written after it was orphaned; it holds a live upload'
+    : null;
+}
+
 interface CleanupRunResult {
   success: boolean;
   processed: number;
   deleted: number;
-  /** Keys kept because a later upload re-occupied them (Codex-r85jo.6). */
+  /**
+   * Keys kept because a later upload re-occupied them (Codex-r85jo.6), or
+   * because a page still references them (page images, Codex-61zsk.10).
+   */
   retained: number;
   failed: number;
   errors: string[];
@@ -250,15 +287,9 @@ export class OrphanedFileCleanupDO implements DurableObject {
       try {
         // Checked per orphan, immediately before its delete. A batch-wide check
         // up front would leave the whole run as the window for a re-upload.
-        const current = await r2Service.head(orphan.r2Key);
-        if (
-          current &&
-          wasRewrittenAfterOrphaning(current.uploaded, orphan.orphanedAt)
-        ) {
-          await orphanedFileService.markRetained(
-            orphan.id,
-            'key re-written after it was orphaned; it holds a live upload'
-          );
+        const keep = await reasonToKeep(orphan, r2Service, orphanedFileService);
+        if (keep) {
+          await orphanedFileService.markRetained(orphan.id, keep);
           retained++;
           continue;
         }

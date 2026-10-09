@@ -29,16 +29,97 @@ import type {
   SectionProps,
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
+import { toPersistedOffer } from './builder-save';
+import { DEFINITIONS } from './kit/model/catalog';
 import {
-  createSection,
-  findSectionDefinition,
-  resolveDesign,
-} from './section-catalog';
-import { sectionDesignForType } from './section-design-defaults';
+  isColourSchemeId,
+  isLayoutOf,
+  isSectionSpacingId,
+  isSectionTypeId,
+  type PageStyleId,
+  type SectionTypeId,
+} from './kit/model/ids';
+import type { SectionStyle } from './kit/model/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'codex:page-builder';
+
+// ── Crash recovery ──────────────────────────────────────────────────────────
+// The tab keeps its unsaved draft in sessionStorage, so a reload or a crash
+// does not lose it. A draft is only safe to restore over the page it was
+// edited FROM: once another tab has saved the page, the draft is stale, and
+// restoring it would autosave the old page over the newer one. So the row
+// carries a fingerprint of the saved page it was written against, and `open`
+// restores it only when that still matches what the server holds.
+
+/** What {@link open} did with the tab's crash-recovery row. */
+export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+
+interface RecoveryRow {
+  pageId?: string;
+  /** {@link fingerprint} of the saved page the draft was edited from. */
+  baseline?: string;
+  pending?: PageBuilderState;
+  selectedSectionId?: string | null;
+}
+
+/** JSON with every object's keys sorted, because jsonb does not keep order. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+      return inner;
+    }
+    const bag = inner as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(bag)
+        .sort()
+        .map((key) => [key, bag[key]])
+    );
+  });
+}
+
+/** A 53-bit string hash (cyrb53): a short fingerprint, not a security check. */
+function hash(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * A saved page's fingerprint, taken the way the SERVER will hand the page
+ * back, so a page this tab saved matches its own next load.
+ *
+ * The save is lossy in three known ways, each normalised here: the save body
+ * trims the title, the slug and the SEO text; the offer is stored as a TOTAL
+ * bag, so "no bag" and "every way in off" are the same offer; and jsonb does
+ * not keep key order.
+ */
+function fingerprint(page: PageBuilderState): string {
+  const seo = page.seo && {
+    ...page.seo,
+    title: page.seo.title?.trim(),
+    description: page.seo.description?.trim(),
+  };
+  return hash(
+    canonicalJson({
+      ...page,
+      title: page.title.trim(),
+      slug: page.slug.trim(),
+      seo,
+      offer: toPersistedOffer(page.offer ?? {}),
+    })
+  );
+}
 
 // ── ID factory (injectable for tests) ───────────────────────────────────────
 // Defaults to crypto.randomUUID (present in the SvelteKit + Node runtimes).
@@ -77,6 +158,11 @@ const isDirty = $derived.by(() => {
   return JSON.stringify(state.saved) !== JSON.stringify(state.pending);
 });
 
+/** Moves only when `saved` does — never once per keystroke. */
+const savedFingerprint = $derived(
+  state.saved ? fingerprint(state.saved) : null
+);
+
 const sections = $derived<PageSection[]>(state.pending?.sections ?? []);
 
 const selectedSection = $derived.by<PageSection | null>(
@@ -98,15 +184,20 @@ function initEffects(): void {
     // not opened a page must never write a recovery row.
     $effect(() => {
       if (!browser || !state.pageId || !state.pending) return;
+      // Only UNSAVED work gets a row. A clean one could only ever restore the
+      // saved page — or, once another tab has saved over it, a stale copy.
+      if (!isDirty || !savedFingerprint) {
+        clearStorage();
+        return;
+      }
+      const row: RecoveryRow = {
+        pageId: state.pageId,
+        baseline: savedFingerprint,
+        pending: state.pending,
+        selectedSectionId: state.selectedSectionId,
+      };
       try {
-        sessionStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            pageId: state.pageId,
-            pending: state.pending,
-            selectedSectionId: state.selectedSectionId,
-          })
-        );
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(row));
       } catch {
         // sessionStorage full/unavailable — crash recovery is best-effort.
       }
@@ -127,11 +218,10 @@ function indexOf(id: string): number {
 }
 
 /**
- * Whole-bag equality over two axis bags — same keys, same values, ABSENCE
- * INCLUDED. Used for provenance ({@link setPageDesign}) and for the
- * look-signature validity check ({@link applyLookSignature}); per-axis
- * comparison cannot serve either, because absence is overloaded here (see the
- * long note in `setPageDesign`).
+ * Whole-bag equality over two style/axis bags — same keys, same values,
+ * ABSENCE INCLUDED. Used by {@link setSectionStyle} to detect a no-op patch;
+ * per-axis comparison cannot serve this, because absence is overloaded (a
+ * missing key means "inherited", never "cleared").
  */
 function sameBag(
   a: Readonly<SectionDesign> | undefined,
@@ -143,24 +233,6 @@ function sameBag(
   const ky = Object.keys(y);
   return kx.length === ky.length && kx.every((k) => x[k] === y[k]);
 }
-
-/**
- * THE LOOK'S PER-TYPE SIGNATURE (`SectionDesignPreset.designByType`), remembered
- * from the creator's last look pick, together with the page bag it was picked
- * with.
- *
- * Session-scoped on purpose: the persisted page row carries only the nine axes,
- * so there is nothing on a loaded draft to recover a signature FROM, and the
- * nine-axis -> signature map lives in `$lib/components/page-builder` which this
- * module may never import (CE-4). {@link applyLookSignature} states the
- * consequence.
- */
-let lookSignature: {
-  /** The page look this signature was picked with — the validity check. */
-  readonly design: Readonly<SectionDesign>;
-  /** The look's opinion per section type, which wins over the shared rhythm. */
-  readonly byType: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
-} | null = null;
 
 // ── Undo / redo (whole-draft history) ────────────────────────────────────────
 // snapshot() captures `pending` BEFORE a discrete action; snapshotEdit() coalesces
@@ -180,6 +252,9 @@ let lookSignature: {
 // its call site is keystroke-driven (`oninput`), `snapshot()` for a discrete
 // action. When in doubt use `snapshotEdit()`: over-coalescing costs granularity,
 // under-recording costs the author their work.
+//
+// The one field outside the history is `status`: it is the server's publish
+// state, not an edit, and undo/redo never move it (see {@link undo}).
 
 const history = $state<{ undo: PageBuilderState[]; redo: PageBuilderState[] }>({
   undo: [],
@@ -255,23 +330,40 @@ function ensureSelection(): void {
   }
 }
 
-/** Step back one discrete edit (Cmd/Ctrl+Z). */
+/**
+ * Step back one discrete edit (Cmd/Ctrl+Z).
+ *
+ * THE STATUS IS NOT PART OF THE HISTORY, and a restored snapshot keeps the
+ * CURRENT one. `status` is what the server holds — live or draft — and only
+ * Publish and Unpublish change it (never as an undo step). A snapshot's status
+ * is whatever it was when some other edit was made, so restoring it would
+ * unpublish a live page through Cmd+Z, or show "Live" over a draft.
+ */
 function undo(): void {
   if (!state.pending || history.undo.length === 0) return;
   // Seal any in-flight typing burst so it is its own step before walking back.
   sealBurst();
   history.redo.push(clone(state.pending));
   const prev = history.undo.pop();
-  if (prev) state.pending = prev;
+  if (prev) {
+    prev.status = state.pending.status;
+    state.pending = prev;
+  }
   ensureSelection();
 }
 
-/** Re-apply the last undone edit (Cmd/Ctrl+Shift+Z / Ctrl+Y). */
+/**
+ * Re-apply the last undone edit (Cmd/Ctrl+Shift+Z / Ctrl+Y). Keeps the current
+ * status, for the reason {@link undo} gives.
+ */
 function redo(): void {
   if (!state.pending || history.redo.length === 0) return;
   history.undo.push(clone(state.pending));
   const next = history.redo.pop();
-  if (next) state.pending = next;
+  if (next) {
+    next.status = state.pending.status;
+    state.pending = next;
+  }
   ensureSelection();
 }
 
@@ -279,42 +371,52 @@ function redo(): void {
 
 /**
  * Begin a builder session for a persisted page. Seeds `saved`/`pending` from the
- * loaded draft, restoring an in-flight `pending` from sessionStorage when it
- * matches this page (crash recovery), and focuses the first section.
+ * loaded draft and focuses the first section — then restores the tab's unsaved
+ * draft of this page, if it has one that is still safe to restore (see
+ * {@link recover}). Returns what happened to that draft, for the caller to say.
  */
-function open(pageId: string, saved: PageBuilderState): void {
+function open(pageId: string, saved: PageBuilderState): RecoveryOutcome {
   initEffects();
   clearHistory();
-  // A fresh session knows no signature — the row stores only the nine axes.
-  lookSignature = null;
   state.pageId = pageId;
   state.saved = clone(saved);
-
-  if (browser) {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const restored = JSON.parse(raw) as {
-          pageId?: string;
-          pending?: PageBuilderState;
-          selectedSectionId?: string | null;
-        };
-        if (restored.pageId === pageId && restored.pending) {
-          state.pending = restored.pending;
-          state.selectedSectionId =
-            restored.selectedSectionId ?? firstSectionId(restored.pending);
-          state.isOpen = true;
-          return;
-        }
-      }
-    } catch {
-      // Corrupt persisted state — fall through to a clean clone.
-    }
-  }
-
   state.pending = clone(saved);
   state.selectedSectionId = firstSectionId(state.pending);
   state.isOpen = true;
+  try {
+    return recover(pageId, saved);
+  } catch {
+    // Corrupt persisted state — the saved page stands.
+    return 'none';
+  }
+}
+
+/**
+ * Restore the tab's unsaved draft of `pageId`, but only over the page it was
+ * edited from. A row written against a different saved page is DISCARDED: the
+ * server's copy has moved on (another tab saved it), and restoring the draft
+ * would autosave the older page over the newer one.
+ *
+ * The draft never brings its STATUS. That is the server's, and a stale one
+ * would publish or unpublish the page on the draft's first save.
+ */
+function recover(pageId: string, saved: PageBuilderState): RecoveryOutcome {
+  if (!browser) return 'none';
+  const raw = sessionStorage.getItem(STORAGE_KEY);
+  const row = raw ? (JSON.parse(raw) as RecoveryRow) : null;
+  if (row?.pageId !== pageId || !row.pending) return 'none';
+  const baseline = fingerprint(saved);
+  const draft: PageBuilderState = { ...row.pending, status: saved.status };
+  // Nothing in it that the saved page does not already say.
+  if (fingerprint(draft) === baseline) return 'none';
+  if (row.baseline !== baseline) {
+    clearStorage();
+    return 'discarded';
+  }
+  const selected = row.selectedSectionId ?? firstSectionId(draft);
+  state.pending = draft;
+  state.selectedSectionId = selected;
+  return 'restored';
 }
 
 function firstSectionId(page: PageBuilderState): string | null {
@@ -325,7 +427,6 @@ function firstSectionId(page: PageBuilderState): string | null {
 function close(): void {
   clearStorage();
   clearHistory();
-  lookSignature = null;
   state.saved = null;
   state.pending = null;
   state.pageId = null;
@@ -346,17 +447,21 @@ function selectSection(id: string | null): void {
  * panel's slug input both fire on `oninput`, so a per-keystroke step would fill
  * the 80-step history with one sentence and evict every real edit behind it.
  *
- * A no-op write is dropped before the snapshot: `handlePublish` re-writes the
- * same status when it rolls back a failed publish, and a step that changes
- * nothing is a step the author has to press undo twice to get past.
+ * `record: false` writes without an undo step, mirroring {@link updateOffer}.
+ * A STATUS write must pass it: the status is outside the history (see
+ * {@link undo}), so a step recorded for it would restore nothing.
+ *
+ * A no-op write is dropped before the snapshot: a step that changes nothing is
+ * a step the author has to press undo twice to get past.
  */
 function updateMeta<K extends keyof PageBuilderState>(
   field: K,
-  value: PageBuilderState[K]
+  value: PageBuilderState[K],
+  options: { record?: boolean } = {}
 ): void {
   if (!state.pending) return;
   if (state.pending[field] === value) return;
-  snapshotEdit(`meta:${String(field)}`);
+  if (options.record !== false) snapshotEdit(`meta:${String(field)}`);
   state.pending[field] = value;
 }
 
@@ -407,105 +512,6 @@ function toggleSection(id: string): void {
 }
 
 /**
- * Insert a new section of `type` (seeded from the catalogue with its default
- * variant + placeholder copy) and focus it. Inserts AFTER `afterId` when given
- * (the add-picker/canvas "add after this" affordance), else appends. Returns the
- * new section's id so the caller can scroll/focus it. The renderer skips unknown
- * types, so `type` is a plain string (matches the contract).
- *
-/**
- * Layer the LOOK'S OWN SIGNATURE over the rhythm a just-created section carries.
- *
- * WHY THIS EXISTS AT ALL. `createSection` calls
- * `sectionDesignForType(type, inherited)` with TWO arguments
- * (`section-catalog.ts:1301`), so the third — `SectionDesignPreset.designByType`,
- * the axes that ARE a look — never reached a section the creator ADDED. Only
- * {@link setPageDesign} passed it, which made the whole mechanism reachable by
- * an explicit look pick and by nothing else. That is the dominant path, not an
- * edge: `createJourney` inserts `sections: []`, so EVERY section on a page
- * arrives through {@link addSection}.
- *
- * MEASURED on a Quiet Studio page, whose signature is `accent: 'none'` on every
- * type — the one axis value no other preset uses, and the reason
- * `design-vocabulary.ts:196` says the renouncement "cannot be partial".
- * `addSection('hero')` stored `{ width: 'full', edge: 'none', accent: 'glow',
- * motion: 'drift' }`: the rhythm's `accent: 'glow'` survived because it differs
- * from the page bag's `none`, and a section value beats a page value in
- * `resolveDesign`. `SectionFrame` then emitted `data-jp-accent="glow"`, which
- * resolves `--jp-accent-fill: var(--jp-ember)` and `--jp-accent-glow`
- * (`journey-design.css:932-943`) — Candlelit's ember bloom on the look built to
- * renounce it. `map` leaked the same way through `accent: 'edge'` plus
- * `motion: 'stagger'`, whose `--ease-bounce` overshoot is the opposite of quiet.
- *
- * IT ALSO UNFREEZES PROVENANCE, which is the half that would not have healed on
- * its own. {@link setPageDesign} re-diffs a section only when its stored bag
- * equals what the OUTGOING look would have written — computed WITH that look's
- * signature. A two-argument bag differs from that three-argument bag by exactly
- * the signature axes, so `sameBag` judged every added section creator-touched
- * and left it "completely alone" on this and every later look switch. Computing
- * the bag the same way here makes the two agree, so an untouched added section
- * moves with the look like any other. The agreement is exact because a page bag
- * is TOTAL — all eight presets and the service's `NEW_PAGE_DESIGN` state all
- * nine axes — so `resolveDesign` hands back the page's own values unchanged.
- *
- * RESIDUAL, stated so it is a decision rather than a surprise: the signature is
- * remembered from a pick in THIS session, never stored. After a reload the stash
- * is empty and an added section falls back to the shared rhythm until the
- * creator re-picks a look. Closing that needs the nine-axis -> signature map,
- * which lives in `$lib/components/page-builder/design-vocabulary.ts` and cannot
- * be imported here (CE-4), so it belongs either to that panel re-asserting the
- * look on load or to the two `addSection` call sites passing the bag.
- */
-function applyLookSignature(
-  section: PageSection,
-  pageDesign: SectionDesign | null
-): void {
-  if (!lookSignature) return;
-  if (!sameBag(lookSignature.design, pageDesign ?? undefined)) return;
-  const override = lookSignature.byType[section.type];
-  // A type the look states nothing about keeps `createSection`'s bag byte for
-  // byte — which is also why Candlelit, whose `designByType` is undefined, never
-  // reaches this line at all.
-  if (!override) return;
-  // The baseline is computed EXACTLY as `createSection` computes it — the
-  // resolved look, through the one resolver the renderer uses — so the only
-  // difference on this path is the third argument.
-  const inherited = resolveDesign(
-    { type: section.type, variant: section.variant },
-    { design: pageDesign ?? undefined }
-  );
-  const design = sectionDesignForType(section.type, inherited, override);
-  // Absence, not `{}`: the store's contract for "inherited", and the only
-  // round-trip-stable way to say it through the save.
-  if (design) section.design = design;
-  else delete section.design;
-}
-
-/**
- * THE PAGE'S OWN LOOK IS PASSED IN, and that is what gives a page RHYTHM. The
- * catalogue writes the new section a per-type axis bag
- * (`section-design-defaults.ts`), minus every axis the page already sets to the
- * same value — so the stored `design` holds only real exceptions and the
- * inspector's "Inherited" pills stay truthful. `$state.snapshot` because
- * `pending.design` is a rune proxy and the comparison must read plain values.
- * {@link applyLookSignature} then lets the LOOK overrule that rhythm where it
- * has an opinion — without it, a section added to a Quiet Studio page came back
- * wearing Candlelit's bloom.
- */
-function addSection(type: string, afterId?: string): string {
-  if (!state.pending) return '';
-  snapshot();
-  const pageDesign = $state.snapshot(state.pending.design) ?? null;
-  const section = createSection(type, makeId, pageDesign);
-  applyLookSignature(section, pageDesign);
-  const from = afterId ? indexOf(afterId) : -1;
-  const at = from >= 0 ? from + 1 : state.pending.sections.length;
-  state.pending.sections.splice(at, 0, section);
-  state.selectedSectionId = section.id;
-  return section.id;
-}
-
-/**
  * Duplicate a section in place (inserted directly after the source, focused).
  * The copy gets a fresh id and a " copy"-suffixed display name. Returns the new
  * id, or '' when the source is absent.
@@ -516,7 +522,9 @@ function duplicateSection(id: string): string {
   snapshot();
   const src = state.pending.sections[i];
   const baseName =
-    src.name ?? findSectionDefinition(src.type)?.label ?? src.type;
+    src.name ??
+    (isSectionTypeId(src.type) ? DEFINITIONS[src.type].label : undefined) ??
+    src.type;
   const copy: PageSection = {
     ...clone(src),
     id: makeId(),
@@ -527,193 +535,140 @@ function duplicateSection(id: string): string {
   return copy.id;
 }
 
-/** Switch a section's layout composition (§4.1 "options per component"). */
-function setSectionVariant(id: string, variant: string): void {
-  const i = indexOf(id);
-  if (i < 0 || !state.pending) return;
-  snapshot();
-  state.pending.sections[i].variant = variant;
-}
+// ── Page-kit v2 actions (docs/design/landing-builder/01-contract.md §3/§7,
+//    WP-7a) ────────────────────────────────────────────────────────────────
+// The NEW editor (WP7/WP8) calls `upgradePage()` before handing a page to
+// `open()`, so by the time these run `pending` already holds v2 vocabulary:
+// `design.style` (not the legacy nine axes), and each section's `variant` is
+// a LAYOUT id while its `design` is a `SectionStyle` (`{ scheme?, spacing? }`,
+// not the legacy axis bag). `SectionDesign` (`@codex/shared-types`) carries
+// both roles on one interface (see its own doc comment), which is what lets
+// `pending.design`/`section.design` hold either shape without a cast.
+//
+// These four REPLACE the legacy `setPageDesign` / `setSectionVariant` /
+// `setSectionDesignAxis` / `addSection` quartet (and the `applyLookSignature`
+// helper), removed in WP9c along with the `./section-catalog` and
+// `./section-design-defaults` imports they were the store's last callers of.
+// None of the four below calls `createSection`, `resolveDesign` or
+// `sectionDesignForType`: those three encoded the LEGACY nine-axis rhythm and
+// have no v2 concept at all (`kit/model/resolve.ts`, WP2, owns v2 resolution).
 
 /**
- * Set the PAGE's look — the whole nine-axis bundle the preset picker writes
- * (`docs/design/journey-sections/02-axis-contract.md` A21).
- *
- * Whole-bundle rather than per-axis because a preset IS a coherent set: writing
- * five of nine axes would leave the page half in one look and half in another,
- * which is the incoherence the preset exists to prevent. Per-axis freedom lives
- * at the SECTION level ({@link setSectionDesignAxis}), where a deliberate
- * exception (a vast hero over a compact FAQ) is good design.
+ * Set the page's v2 Style (`kit/model/ids.ts` `PageStyleId`) — the Style tab's
+ * write (contract §7). `design` is the same bag the legacy nine axes live on
+ * (see the section header above), so this MERGES rather than replaces: a page
+ * that still carries other `design` keys keeps them.
  */
-function setPageDesign(
-  design: SectionDesign,
-  compositions?: {
-    /** The look's per-type composition preferences (`SectionDesignPreset.variants`). */
-    next?: Readonly<Record<string, string>>;
-    /** The OUTGOING look's preferences, so a look-managed variant can be told
-        from a creator's choice. The panel knows this from `findDesignPreset`. */
-    previous?: Readonly<Record<string, string>>;
-    /**
-     * The look's per-type DESIGN preferences (`SectionDesignPreset.designByType`)
-     * — its signature axes, which win over the shared rhythm. Separate from
-     * `next` because a composition says WHICH BOXES a section draws and a design
-     * axis says HOW it is treated; the two are orthogonal and a look can state
-     * either without the other.
-     */
-    nextDesign?: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
-    /** The OUTGOING look's design preferences, for the same provenance reason
-        as `previous`: a bag that equals what the old look asked for is
-        look-managed and moves; anything else is the creator's and is left. */
-    previousDesign?: Readonly<Record<string, Readonly<Partial<SectionDesign>>>>;
-  }
-): void {
+function setPageStyle(style: PageStyleId): void {
   if (!state.pending) return;
+  if (state.pending.design?.style === style) return;
   snapshot();
-
-  // ── RE-DIFF THE RHYTHM AGAINST THE NEW LOOK ──────────────────────────────
-  // Without this, a page can have a RHYTHM or a LOOK, never both.
-  //
-  // `sectionDesignForType` stores each section's rhythm as a DIFF against
-  // whichever look was active at creation — `section-design-defaults.ts:259`,
-  // `if (inherited && inherited[key] === value) continue`. Absence means
-  // "inherited", which is correct and is what keeps the inspector's "Inherited"
-  // pill honest. But it makes the stored bag RELATIVE to one particular look,
-  // and this function used to move that look out from under it.
-  //
-  // The failure is silent and it UNDOES THE TABLE'S OWN STATED PURPOSE. That
-  // file exists to end "`surface: media` applied even to `ache` and `map`,
-  // which have no media at all" — yet create a page under a look whose surface
-  // is `bare` (so the table's `surface: bare` for `ache` matches and is
-  // omitted), then switch to Candlelit, and `ache` inherits `media` again. The
-  // exact absurdity, reintroduced by the diffing that was supposed to prevent it.
-  //
-  // HOW A RHYTHM BAG IS TOLD FROM A CREATOR'S. Per-axis comparison CANNOT do it,
-  // and that is worth stating because it is the obvious approach and it is wrong:
-  // ABSENCE IS OVERLOADED HERE. {@link setSectionDesignAxis} deletes the key to
-  // clear an override, so an absent axis means BOTH "the table never wrote it"
-  // and "the creator deliberately cleared it". Re-materialising absent axes
-  // therefore resurrects overrides a creator removed on purpose — a first cut of
-  // this did exactly that, and gave a section holding one deliberate
-  // `{ density: 'compact' }` six axes it had never asked for.
-  //
-  // So provenance is decided on the WHOLE BAG. If a section's stored design is
-  // exactly what the table would have written under the old look, no creator has
-  // touched it and it is safe to recompute wholesale. If it differs by even one
-  // axis, a human has been in there and the section is left completely alone.
-  // That fails SAFE in the direction that matters: the worst case is a page that
-  // keeps today's behaviour, never one that loses an authored choice.
-  //
-  // It also covers the case that motivated the fix, because on a freshly created
-  // page every section's bag is exactly the table's diff — so switching look
-  // re-materialises the axes the old look had made redundant, and `ache` keeps
-  // `surface: bare` instead of inheriting Candlelit's `media`.
-  //
-  // NOT RETROACTIVE, deliberately. This runs only when a creator picks a look,
-  // so it cannot alter what the 695 already-published pages render — those carry
-  // no section `design` keys at all and are a separate decision.
-  const previous = state.pending.design;
-
-  for (const section of state.pending.sections) {
-    // Provenance is computed against the OUTGOING look's own signature too, not
-    // just the shared rhythm — otherwise the first look switch makes every
-    // look-managed section look creator-touched and freezes it forever.
-    const wasRhythm = sectionDesignForType(
-      section.type,
-      previous,
-      compositions?.previousDesign?.[section.type]
-    );
-    // Untouched by a human? Then and only then, re-diff against the new look.
-    if (sameBag(section.design, wasRhythm)) {
-      // Absence, not an empty object: the store's own contract for "inherited",
-      // and the only round-trip-stable representation through the save.
-      //
-      // THE LOOK'S SIGNATURE WINS OVER THE RHYTHM. Without the third argument
-      // the incoming look reaches almost nothing: the rhythm states a value for
-      // 89 of 99 type/axis slots and a section's value beats the page's, so
-      // every look rendered Candlelit's treatment (`look-reach.test.ts`).
-      section.design = sectionDesignForType(
-        section.type,
-        design,
-        compositions?.nextDesign?.[section.type]
-      );
-    }
-
-    // ── THE COMPOSITION HALF ───────────────────────────────────────────────
-    // A `design` axis says HOW a section is treated; a `variant` says WHICH
-    // BOXES IT DRAWS. Until presets carried composition preferences, all eight
-    // looks rendered the SAME eleven compositions out of the catalogue's 63 —
-    // which is why they read as one design at eight settings rather than as
-    // eight designs.
-    //
-    // Provenance uses the OUTGOING look's preference, exactly as the axis half
-    // above uses the outgoing look's rhythm. A stored variant that equals what
-    // the previous look asked for is look-managed and moves; anything else is a
-    // composition the creator chose in the picker and is left alone. When the
-    // outgoing look pinned nothing, the catalogue default plays that role — and
-    // `undefined` counts as the default, because absence IS the default here
-    // (`resolveVariant` falls through to `defaultVariant`).
-    if (!compositions?.next && !compositions?.previous) continue;
-    const def = findSectionDefinition(section.type);
-    if (!def) continue;
-    const wasLookVariant =
-      compositions.previous?.[section.type] ?? def.defaultVariant;
-    const isCreatorChoice =
-      section.variant !== undefined && section.variant !== wasLookVariant;
-    if (isCreatorChoice) continue;
-    const wanted = compositions.next?.[section.type];
-    // Undefined means "this look pins nothing" (Candlelit, Signal) — fall back
-    // to the catalogue default rather than leaving the previous look's pick.
-    section.variant = wanted ?? def.defaultVariant;
-  }
-
-  state.pending.design = { ...design };
-
-  // REMEMBER THE SIGNATURE FOR WHATEVER IS ADDED NEXT ({@link addSection}).
-  // Stored WITH the page bag it was picked with, because undo / redo / discard
-  // can each walk `pending.design` back past this pick, and a signature applied
-  // over a look the page no longer wears would be worse than none. A look that
-  // states no signature (Candlelit, Signal) CLEARS it rather than leaving the
-  // outgoing look's opinion to outlive the switch. Cloned for the same reason
-  // the page bag is spread: the panel hands us a module constant, and a stash
-  // holds it across time rather than for the length of one call.
-  lookSignature = compositions?.nextDesign
-    ? {
-        design: { ...design },
-        byType: structuredClone(compositions.nextDesign),
-      }
-    : null;
+  state.pending.design = { ...state.pending.design, style };
 }
 
 /**
- * Override ONE axis on ONE section, or clear that override with `undefined`.
- *
- * Clearing DELETES the key rather than storing `undefined`, and drops the whole
- * `design` bag once it is empty, so "inherited" is represented by absence — the
- * shape `resolveDesign` already resolves and the shape a page stored before the
- * axes existed already has. A stored `{ width: undefined }` would serialise to
- * `{}` through the save anyway, so absence is also the only round-trip-stable
- * representation.
+ * Set one section's v2 layout (`variant` holds the layout id; contract §3).
+ * `isLayoutOf` is the single source of truth for which layouts exist per type
+ * (`kit/model/ids.ts`, mirrored by the server's write-time validator) — a
+ * layout invalid for this section's type is IGNORED rather than stored,
+ * matching the "never emit an attribute that matches no CSS rule" discipline
+ * `SectionDesign`'s own doc comment states for an unknown axis value.
+ * `section.type` is checked against `SectionTypeId` first because
+ * {@link PageSection.type} is a widenable `string` — a legacy row's raw type
+ * is never a valid layout target.
  */
-function setSectionDesignAxis<A extends keyof SectionDesign>(
-  id: string,
-  axis: A,
-  value: SectionDesign[A] | undefined
-): void {
+function setSectionLayout(id: string, layout: string): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
-  snapshot();
   const section = state.pending.sections[i];
-  const next: SectionDesign = { ...(section.design ?? {}) };
-  if (value === undefined) {
-    delete next[axis];
-  } else {
-    next[axis] = value;
+  if (!isSectionTypeId(section.type) || !isLayoutOf(section.type, layout)) {
+    return;
   }
-  if (Object.keys(next).length === 0) {
-    delete section.design;
-  } else {
-    section.design = next;
+  if (section.variant === layout) return;
+  snapshot();
+  section.variant = layout;
+}
+
+/**
+ * Merge a partial v2 `SectionStyle` (`{ scheme?, spacing? }`) into one
+ * section's `design` — the inspector's Colour/Spacing controls (contract §3,
+ * §7). Mirrors the removed `setSectionDesignAxis`'s absence-means-inherited
+ * contract exactly: a key patched to `undefined` is REMOVED (so "back to the
+ * Style default" is expressible — `kit/model/resolve.ts` resolves an absent
+ * key from the page's Style), and the whole bag is dropped once empty, since
+ * absence is the only round-trip-stable representation through the save.
+ *
+ * Each key is validated against its `kit/model/ids.ts` guard before being
+ * written. A `<select>`'s `.value` is always a plain `string`, so an invalid
+ * value can reach here even though the parameter's TYPE says otherwise; an
+ * invalid value is IGNORED — the existing value, if any, is left standing —
+ * matching {@link setSectionLayout}'s own "ignore, don't store" rule. If
+ * nothing in the patch was both valid and different, this takes no undo step
+ * and does not dirty the draft (the same no-op discipline
+ * {@link updateBrandOverrides}/{@link updateSeo}/{@link updateOffer} already
+ * apply to their own merges, needed here for the same reason: a `<select>`
+ * can re-fire its current value on mount).
+ */
+function setSectionStyle(id: string, patch: Partial<SectionStyle>): void {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return;
+  const section = state.pending.sections[i];
+  const current = section.design;
+  const next: SectionDesign = { ...(current ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete next[key as 'scheme' | 'spacing'];
+    } else if (key === 'scheme' && isColourSchemeId(value)) {
+      next.scheme = value;
+    } else if (key === 'spacing' && isSectionSpacingId(value)) {
+      next.spacing = value;
+    }
   }
+  if (sameBag(current, next)) return;
+  snapshot();
+  if (Object.keys(next).length === 0) delete section.design;
+  else section.design = next;
+}
+
+/**
+ * Insert a v2 section (contract §3): `{ id, type, enabled: true, props }` —
+ * deliberately NO `variant` and NO `design`. Both resolve from the page's
+ * Style the moment the renderer draws it (`kit/model/resolve.ts`), so a fresh
+ * v2 section carries no opinion until the creator picks one.
+ *
+ * This is why the removed `addSection`'s catalogue seeding (`createSection` +
+ * `applyLookSignature`) was the wrong shape for v2 rather than merely an
+ * unneeded one: that path existed to stamp a legacy RHYTHM bag onto a new
+ * section, and a v2 section has no rhythm bag to stamp — `design` staying
+ * absent is the correct starting state, not a gap to backfill.
+ *
+ * `props` is shallow-copied so a caller handing in a shared literal (a
+ * `definition.sample`/`starter()` return reused across the section gallery)
+ * can never be mutated through this section later — the same defensive
+ * posture {@link duplicateSection} takes with `clone(src)`.
+ *
+ * Inserts after `afterId` when given and found, else appends — matching
+ * the removed `addSection`'s own insertion rule. Focuses the new section and
+ * returns its id ('' when there is no open session).
+ */
+function addKitSection(
+  type: SectionTypeId,
+  props: Record<string, unknown>,
+  afterId?: string
+): string {
+  if (!state.pending) return '';
+  snapshot();
+  const section: PageSection = {
+    id: makeId(),
+    type,
+    enabled: true,
+    props: { ...props },
+  };
+  const from = afterId ? indexOf(afterId) : -1;
+  const at = from >= 0 ? from + 1 : state.pending.sections.length;
+  state.pending.sections.splice(at, 0, section);
+  state.selectedSectionId = section.id;
+  return section.id;
 }
 
 /** Move a section to an absolute index (the drag-reorder drop target). */
@@ -844,10 +799,20 @@ function updateSeo(patch: Partial<PageSeo>): void {
  * `syncOffer` calls this with the bag the server just persisted, immediately
  * before `markSaved()` clears the history, so the post-save write costs nothing.
  */
-function updateOffer(patch: Partial<PageOffer>): void {
+/**
+ * `record: false` is for adopting what the SERVER normalised after a save
+ * (e.g. offer flags false → null): it is not a creator edit, so it must not
+ * become an undo step that visibly does nothing.
+ */
+function updateOffer(
+  patch: Partial<PageOffer>,
+  options: { record?: boolean } = {}
+): void {
   if (!state.pending) return;
   if (patchIsNoop(state.pending.offer, patch)) return;
-  snapshotEdit(`offer:${Object.keys(patch).join(',')}`);
+  if (options.record !== false) {
+    snapshotEdit(`offer:${Object.keys(patch).join(',')}`);
+  }
   state.pending.offer = { ...(state.pending.offer ?? {}), ...patch };
 }
 
@@ -879,12 +844,24 @@ function getSavePayload(): PageBuilderState | null {
   return state.pending ? clone(state.pending) : null;
 }
 
-/** Mark the current pending draft as the new saved baseline (post-persist). */
-function markSaved(): void {
+/**
+ * Mark the current pending draft as the new saved baseline (post-persist).
+ *
+ * `keepHistory` is for AUTOSAVE: a save that fires ~1.5s after every edit must
+ * not erase the undo stack, or ⌘Z only ever reaches back to the last pause. An
+ * explicit Save (the legacy builder) still clears it, as before.
+ *
+ * `baseline` is what the server now holds, when that is NOT the current draft
+ * — a save overtaken by an edit made while it was in flight. The baseline
+ * moves to what landed, and the edit stays unsaved until a save sends it.
+ */
+function markSaved(
+  options: { keepHistory?: boolean; baseline?: PageBuilderState } = {}
+): void {
   if (!state.pending) return;
-  state.saved = clone(state.pending);
+  state.saved = clone(options.baseline ?? state.pending);
   clearStorage();
-  clearHistory();
+  if (!options.keepHistory) clearHistory();
 }
 
 function clearStorage(): void {
@@ -941,11 +918,12 @@ export const pageBuilder = {
   setSectionProps,
   setSectionProp,
   toggleSection,
-  addSection,
   duplicateSection,
-  setSectionVariant,
-  setPageDesign,
-  setSectionDesignAxis,
+  // Page-kit v2 (WP-7a) — additive; see the section header above.
+  setPageStyle,
+  setSectionLayout,
+  setSectionStyle,
+  addKitSection,
   removeSection,
   moveSection,
   moveSectionTo,

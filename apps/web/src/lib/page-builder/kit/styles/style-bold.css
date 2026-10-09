@@ -1,0 +1,395 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — BOLD (the default; 03-expressive-contract §4.1)
+
+   Said in headlines. Every section opens on its heading, set enormous, tight
+   and flush left, and everything else hangs from it on a hard grid. All the
+   volume is spent on TYPE and on whole slabs of colour: no texture, no
+   shapes, no tilt, no soft shadow.
+
+   PALETTE. One colour at full volume, and its inverse. The brand colour is
+   laid in full-bleed slabs where the page makes its three loudest claims —
+   the promise (hero), the proof (the numbers) and the ask (the close). Its
+   dark inverse (`contrast`) marks the turns: the problem, the change, the
+   course itself. Everything read at length sits on the brand's own ground.
+   A brand slab never meets a contrast slab. The second colour is left out
+   on purpose — two loud fields is Poster's page — though a creator can still
+   give any band to it. The one filled card of a section is a slab of the
+   other pole: the inverse on the ground, the ground on the inverse — never
+   the brand on the inverse, which vanishes for a very dark brand.
+
+   TYPE. The largest scale in the kit: display to 10rem, section headings to
+   5.75rem, leading under 1, tracking pulled in, in the brand's own face and
+   case. Supporting copy is big as well (lead to 1.625rem, body to 1.3rem),
+   quiet by colour, never by size. Emphasis is size and leading only — never
+   weight — so a one-weight face (Archivo Black, Anton) holds. A long
+   headline steps down on a wide screen, so the promise stays one screen.
+
+   LAYOUT. Hung heads: a heading spans its column and its lead hangs in the
+   right-hand five-twelfths under it, so the words step down the page on one
+   grid. Heavy ink rules top every item, stage, question and offer, and a
+   heavier one tops each section on the ground, so a run of them reads as
+   separate claims. Pictures bleed: the hero's photograph runs edge to edge
+   into the next slab, and the guide and the clips meet the page edge.
+   Corners bend a little: a quarter of the brand radius, never past
+   `--radius-sm`, never a pill (03 §4.2).
+
+   MOTION. Headlines BUILD. The hero's headline lifts out of its own baseline
+   as the page opens, the words and the picture after it; every other
+   headline lifts the same way, once, as the visitor reaches it (armed by
+   the kit's `rise` hook, X12/X13 — drawn with Bold's lift, not the kit's
+   fade). The numbers count up once (the kit's default), set at display
+   size. Nothing else moves.
+
+   SIGNATURE. Headlines that build, and numbers that count up.
+
+   Fonts: no suggestion — the brand's own face is the point.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='bold'] {
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.35rem, 1rem + 1.2cqi, 2rem) * var(--lp-scale));
+  --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.75cqi, 1.625rem) * var(--lp-scale));
+  --lp-size-body: calc(clamp(1.125rem, 1rem + 0.35cqi, 1.3125rem) * var(--lp-scale));
+  --lp-size-price: calc(clamp(3.5rem, 1.25rem + 6.8cqi, 7.5rem) * var(--lp-scale));
+  /* The close speaks nearly as loud as the promise. */
+  --lp-size-cta: calc(clamp(2.75rem, 0.25rem + 9cqi, 8.5rem) * var(--lp-scale));
+
+  --lp-leading-display: 0.9;
+  --lp-leading-heading: 0.94;
+  --lp-leading-title: 1.08;
+  --lp-leading-lead: 1.35;
+
+  --lp-tracking-display: -0.035em;
+  --lp-tracking-heading: -0.03em;
+  --lp-tracking-title: -0.015em;
+  --lp-weight-label: var(--font-bold);
+
+  /* ── shape: a quarter of the brand radius, never past `--radius-sm` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  --lp-radius-chip: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* Item rules, and the heavier one over a section on the ground. */
+  --lp-rule: calc(var(--border-width-thick) * 1.5);
+  --_bold-slab: calc(var(--border-width-thick) * 3);
+
+  /* ── buttons: large, square-shouldered, solid ─────────────────────────── */
+  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  --lp-button-pad: var(--space-8);
+  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
+  --lp-button-weight: var(--font-bold);
+  --lp-button-tracking: -0.01em;
+
+  /* ── rhythm: the widest column, room for the type to be big ───────────── */
+  --lp-pad-regular: clamp(var(--space-16), var(--space-6) + 7cqi, var(--space-32));
+  --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 10cqi, calc(var(--space-32) * 1.25));
+  --lp-container: 82rem;
+  --lp-measure-lead: 36ch;
+
+  /* ── motion ───────────────────────────────────────────────────────────── */
+  /* The hero's headline lifts out of its own baseline; the words under it
+     and the picture follow it up. */
+  --lp-enter-headline: lp-bold-lift calc(var(--duration-slowest) * 1.25) var(--ease-smooth) both;
+  --lp-enter-copy: lp-rise-soft var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 3) both;
+  --lp-enter-media: lp-rise-soft var(--duration-slowest) var(--ease-smooth)
+    calc(var(--lp-stagger) * 4) both;
+  /* Every other headline builds as the visitor reaches it: the hook arms it,
+     and Bold draws it with its own lift (below). */
+  --lp-build-display: rise;
+  --lp-build-heading: rise;
+}
+
+/* Risen from behind a line just under its own last baseline. The clip's foot
+   and the travel move by the same amount (100% + 0.3em between them at
+   every frame), so the line stands still while the words rise through it
+   and the first line surfaces first. The overhang is 0.3em of the HEADLINE
+   (its wrapper takes the display size below): at leading under 1 the
+   glyphs stand past their line box, and a clip in the body's em would keep
+   the descenders cut after the lift ends. */
+@keyframes lp-bold-lift {
+  from {
+    translate: 0 calc(100% + 0.6em);
+    clip-path: inset(-0.3em -0.15em calc(100% + 0.3em) -0.15em);
+  }
+
+  to {
+    translate: 0 0;
+    clip-path: inset(-0.3em -0.15em);
+  }
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
+  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+}
+
+/* ── a long promise steps down ───────────────────────────────────────────── */
+/* A headline the hero marks long (`data-long`, over 64 characters, the line
+   the problem statement draws) runs to five lines and more at this display
+   size: taller than the first screen, and a word to a line beside a picture.
+   Wide, it steps down as far as each layout's measure needs for the longest
+   headline the field takes (120 characters) to end, lede and buttons with
+   it, above the fold of a 1440 × 900 screen in the widest face measured
+   (Archivo Black). The step sits on the headline's parent, so the poster's
+   picture, which drops by one headline line, steps down with it. A phone
+   draws the display at its floor already, where a long headline runs on. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-centered:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.62;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.5;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.45;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
+    --lp-display-scale: 0.4;
+  }
+}
+
+/* A medium headline (`data-medium`, 25–64 characters) is held at full size
+   only by a short promise's layouts: in the cover it runs past the first
+   screen from 27 characters, beside the poster's picture it splits a word
+   from 28, in the split column it passes the fold from 41, and the
+   statement's five lines do from 50. Wide, each steps it down as far as the
+   medium's longest (64 characters) needs to end, lede and buttons with it,
+   above a 1440 × 900 fold in Archivo Black with no word split — always a
+   step above the long one, so a longer headline is never set larger. The
+   centred hero holds every medium headline at its own size. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.9;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.7;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.65;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+    --lp-display-scale: 0.55;
+  }
+}
+
+/* ── the size follows the headline ───────────────────────────────────────── */
+/* Where the browser can compute it, the two steps above give way to a size
+   that follows the headline character by character, so it never jumps as a
+   creator types. HeroBlock sets the length it draws, `--lp-heading-chars`,
+   on the layout's words. Each layout keeps its full size up to C characters
+   and past them falls as (C / length)^p: C and p fitted, 1% to spare, under
+   the largest scale measured to hold every length from 20 to 120, lede and
+   buttons with it, above a 1440 × 900 fold with no word split, in Archivo
+   Black and Syne. The section type in the selector lifts each rule over both
+   steps. A browser without `pow()` fails the test and keeps the steps; it
+   would read the formula as an invalid size and drop the display to the
+   body's. The test names a real property, because a custom one takes any
+   value. An unset length counts as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-statement:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(43 / var(--lp-heading-chars, 120), 0.45));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.7 * min(1, pow(31 / var(--lp-heading-chars, 120), 0.36)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(19 / var(--lp-heading-chars, 120), 0.39));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+      .hero-centered:has(> .hero__headline) {
+      --lp-display-scale: calc(0.84 * min(1, pow(57 / var(--lp-heading-chars, 120), 0.55)));
+    }
+  }
+}
+
+/* Every other headline lifts the same way. The kit's `rise` is a fade under a
+   short lift — on every section heading, the generic fade-up (03 §6) — so a
+   heading the stage armed through that hook takes Bold's keyframes instead:
+   in full ink throughout, it surfaces through a line under its own last
+   baseline, first line first. The stage still decides when and in what
+   order; without motion, script or style queries, or on a still page, the
+   heading is simply there. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root[data-theme]
+    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='bold']
+    .lp-section:not([data-lp-type='hero'])
+    .lp-heading:is([data-size='display'], [data-size='heading'])[data-lp-enter]:not(
+      [data-lp-build],
+      :is([data-lp-reveal], [data-lp-build], [data-lp-parallax]) *
+    ) {
+    animation-name: lp-bold-lift;
+    animation-duration: calc(var(--duration-slowest) * 1.25);
+  }
+}
+
+/* ── a slab over every section on the ground ─────────────────────────────── */
+/* Drawn in the section's own background, at the head of its content column,
+   so it moves nothing. Never on the first section (the hero), on a colour
+   slab (the colour already parts it), or over an image or the shader. The
+   structural `+` also keeps it off the editor's one-section colour tiles. */
+:is(.lp, #lp-style)[data-lp-style='bold']
+  .lp-section
+  + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
+  background:
+    linear-gradient(var(--lp-ink) 0 0) 50%
+      calc(var(--lp-pad) - clamp(var(--space-6), 2.4cqi, var(--space-10))) /
+      min(100% - 2 * var(--lp-gutter), var(--lp-container)) var(--_bold-slab) no-repeat,
+    var(--lp-bg);
+}
+
+/* ── hung heads ──────────────────────────────────────────────────────────── */
+/* Wide: the heading spans the column and its lead hangs in the right-hand
+   five-twelfths under it. Only heads that stand ABOVE their block's content;
+   one that sits beside it (pricing's focus, the stats grid) keeps its own. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head
+    ):has(> .lp-text) {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: var(--lp-gap);
+    max-inline-size: none;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head
+    ):has(> .lp-text)
+    > * {
+    grid-column: 1 / -1;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='bold']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head
+    )
+    > .lp-text {
+    grid-column: 2;
+  }
+}
+
+/* A heading that shares its row — with an offer, the numbers, a list, a
+   portrait — steps down one size, so it keeps to two or three lines in its
+   share of the column instead of breaking a word to a line. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold']
+    :is(
+      .pricing[data-layout='focus'] > .pricing__head,
+      .stats[data-layout='grid'] > .stats__head,
+      .text[data-layout='columns'] > .text__head,
+      .benefits[data-layout='split'] .benefits__words,
+      .problem[data-layout='split'] .problem__head,
+      .faq[data-sided] > .faq__side,
+      .guide-split:has(> .guide__portrait) > .guide__words,
+      .cta[data-layout='split'] .cta__words,
+      .preview-split__words,
+      .video-split__words
+    ) {
+    --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 3.9cqi, 4.25rem) * var(--lp-scale));
+  }
+}
+
+/* ── the course: stages numbered in solid blocks ─────────────────────────── */
+/* The in-block rule fills each marker with ink; here it grows into a block
+   the stage's name can stand beside, its number set in the display face. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .timeline {
+  --_marker: clamp(var(--space-12), 4.5cqi, var(--space-20));
+  --lp-size-title: calc(clamp(1.5rem, 1rem + 1.8cqi, 2.6rem) * var(--lp-scale));
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .timeline__marker {
+  font-size: calc(var(--_marker) * 0.6);
+  letter-spacing: var(--lp-tracking-display);
+}
+
+/* ── the story told as headlines ─────────────────────────────────────────── */
+/* Each moment's name at a heading's scale, so the scroll reads as a run of
+   headlines, each coming to full ink as it becomes the one in view. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .story-scroll {
+  --lp-size-title: calc(clamp(1.75rem, 0.9rem + 3cqi, 3.5rem) * var(--lp-scale));
+  --lp-leading-title: var(--lp-leading-heading);
+  --lp-tracking-title: var(--lp-tracking-heading);
+}
+
+/* A story in chapters is a run of full-bleed slabs. A moment with no picture
+   is a flat one — the kit's glow is Cinematic's light, not Bold's. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .story-chapter__glow {
+  display: none;
+}
+
+/* ── open cards under a heavy rule ───────────────────────────────────────── */
+/* Bold's cards are open: no box, a hard ink rule on top, the words on the
+   column line — as its offers, stages and questions are (in-block rules).
+   The one filled card of each keeps its slab; a pictured tile is topped by
+   its picture instead. */
+:is(.lp, #lp-style)[data-lp-style='bold']
+  :is(.tm-marquee__card, .tm-wall__tile:not([data-featured]), .benefits-bento__tile:not([data-lead])) {
+  padding-inline: 0;
+  border: none;
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+  border-radius: 0;
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .benefits-bento__tile[data-pictured]:not([data-lead]) {
+  padding-block-end: 0;
+  border-block-start: none;
+}
+
+/* ── the numbers: counted up, at display size ────────────────────────────── */
+/* Fewer to a line, so each figure can take the display size: four make two
+   pairs, never four small ones. Labels read at body size under them. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .stats[data-layout='row'] {
+  --_figure: var(--lp-size-display);
+}
+
+@container (min-width: 48rem) {
+  :is(.lp, #lp-style)[data-lp-style='bold']
+    .stats[data-layout='row']
+    .stats__list:is([data-count='2'], [data-count='4']) {
+    --_cols: 2;
+  }
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
+  max-inline-size: 24ch;
+  font-size: var(--lp-size-body);
+  font-weight: var(--lp-weight-label);
+  color: var(--lp-ink);
+}

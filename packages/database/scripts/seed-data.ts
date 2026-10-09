@@ -2,7 +2,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
-import { sql } from 'drizzle-orm';
+import { isNotNull, sql } from 'drizzle-orm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 // Load environment variables from .env.dev
 config({ path: path.resolve(__dirname, '../../../.env.dev') });
 
-import { dbWs } from '../src';
+import { dbWs, schema } from '../src';
 import { flushDevKv } from './seed/cache-flush';
 import { seedCategories } from './seed/categories';
 import { seedCommerce } from './seed/commerce';
@@ -90,6 +90,21 @@ async function seedData() {
     }
   }
 
+  // Step 0: Remember which Stripe products this database pointed at BEFORE
+  // the truncate erases the evidence. seedCommerce archives exactly those
+  // (when they carry this environment's `codex_seed_env` tag) instead of
+  // sweeping the shared Stripe test account (Codex-1ilxl). Deliberately
+  // unscoped: the seed owns the whole database it is about to wipe, and
+  // soft-deleted tiers still point at products this environment created.
+  const previousStripeProductIds = (
+    await dbWs
+      .select({ id: schema.subscriptionTiers.stripeProductId })
+      .from(schema.subscriptionTiers)
+      .where(isNotNull(schema.subscriptionTiers.stripeProductId))
+  )
+    .map((row) => row.id)
+    .filter((id): id is string => id !== null);
+
   // Step 1: Truncate all tables
   console.log('\n  [1/5] Resetting database...');
   const tableList = TABLES_TO_TRUNCATE.join(', ');
@@ -122,7 +137,7 @@ async function seedData() {
     // Categories + content⇄category joins for the org landing "Browse by
     // topic" module. MUST run after seedContent — join rows FK content ids.
     await seedCategories(db);
-    await seedCommerce(db);
+    await seedCommerce(db, { previousStripeProductIds });
     await seedPlayback(db);
   });
 

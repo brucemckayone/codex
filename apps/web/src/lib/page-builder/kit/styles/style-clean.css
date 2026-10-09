@@ -1,0 +1,303 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   STYLE — CLEAN (03-expressive-contract §4.1)
+
+   A portfolio. The pictures lead: every section that has one gives it the
+   larger share of the row, at the brand's own corners, and each opens as the
+   visitor reaches it. The words beside them are set crisp and compact, and
+   everything sits on one exact grid, parted by air rather than by rules.
+
+   PALETTE. Light and dry. The brand's own ground carries the page; a whisper
+   of the brand (`soft`, the ground only 5% toward the primary) marks the
+   passages that ask to be read — the story in words, what is included, the
+   voices, the offer. The dark inverse (`contrast`) is the screening room:
+   the film, the look inside, and the close, where the last ask sits in the
+   dark like a lit print. The brand colour itself is spent only on the ask —
+   buttons, links, the eyebrow — never as a band, so a picture is always the
+   loudest thing in its section. The second colour stays out: a whisper and
+   a dark room are the whole palette.
+
+   TYPE. A neutral grotesk, set semibold and tight: display to 5.5rem at
+   leading 1, section headings to 3.25rem, titles to 1.5rem, the reading
+   body at 1.62. Sentence case; labels tracked a hair open. Emphasis is size
+   and tracking only — never weight on a one-weight face.
+
+   LAYOUT. Heads read across one row: the heading on the left, its lead
+   level with the heading's last line on the right. A split gives the
+   picture seven-twelfths. Hairlines only where they carry meaning — under
+   a caption's picture, between the rows of a list. No cards with shadows,
+   no tilt, no texture, no shapes, straight edges.
+
+   MOTION. The pictures OPEN: each one is uncovered by a clean wipe from its
+   start edge as it enters, while the photograph inside settles from a
+   slight zoom to rest (`--lp-media-reveal: wipe`, X12/X13, and one settle
+   on the image itself, timed to the wipe). The hero's picture opens as the
+   page does, the words rising after it. Nothing else moves.
+
+   SIGNATURE. Image reveals, and the gallery grid.
+
+   Corners: the brand radius exactly (k 1, 03 §4.2). Fonts: suggests Plus
+   Jakarta Sans over Inter; designed to hold in the brand's own.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lp[data-lp-style='clean'] {
+  /* ── type ─────────────────────────────────────────────────────────────── */
+  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.5rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.9rem, 1.1rem + 2.4cqi, 3.25rem) * var(--lp-scale));
+  --lp-size-title: calc(clamp(1.2rem, 1.05rem + 0.55cqi, 1.5rem) * var(--lp-scale));
+  --lp-size-lead: calc(clamp(1.2rem, 1.05rem + 0.4cqi, 1.4rem) * var(--lp-scale));
+  --lp-size-price: calc(clamp(2.5rem, 1.5rem + 3.2cqi, 4.25rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.6cqi, 4.25rem) * var(--lp-scale));
+
+  --lp-leading-display: 1;
+  --lp-leading-heading: 1.06;
+  --lp-leading-title: 1.25;
+  --lp-leading-lead: 1.45;
+  --lp-leading-body: 1.62;
+
+  --lp-tracking-display: -0.032em;
+  --lp-tracking-heading: -0.024em;
+  --lp-tracking-title: -0.012em;
+  --lp-tracking-label: 0.01em;
+
+  /* A brand that set a heading weight keeps it; otherwise semibold, crisp. */
+  --lp-weight-display: var(--heading-weight, var(--font-semibold));
+  --lp-weight-heading: var(--heading-weight, var(--font-semibold));
+  --lp-weight-label: var(--font-medium);
+
+  /* ── shape: the brand's corners exactly ───────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  --lp-radius-chip: max(0rem, calc(var(--lp-brand-radius) * 1));
+
+  /* ── colour: a whisper of the brand on the tinted bands ───────────────── */
+  --lp-tint-soft: 5%;
+  /* A Moving background in the tint of Clean's own cards: the org's shader
+     through the plain ground reads as a grey band. */
+  --lp-atmosphere-ground: tint;
+
+  /* ── buttons ──────────────────────────────────────────────────────────── */
+  --lp-button-weight: var(--font-semibold);
+
+  /* ── rhythm: generous air, a wide column for the pictures ─────────────── */
+  --lp-pad-compact: clamp(var(--space-12), var(--space-8) + 3cqi, var(--space-20));
+  --lp-pad-regular: clamp(var(--space-20), var(--space-10) + 6cqi, calc(var(--space-32) * 1.1));
+  --lp-pad-spacious: clamp(var(--space-24), var(--space-12) + 9cqi, calc(var(--space-32) * 1.4));
+  --lp-container: 76rem;
+  --lp-measure: 60ch;
+  --lp-measure-lead: 40ch;
+  --lp-gap: clamp(var(--space-6), var(--space-4) + 2.4cqi, var(--space-16));
+
+  /* ── motion ───────────────────────────────────────────────────────────── */
+  /* The hero's picture opens first; the words rise after it. */
+  --lp-enter-media: lp-wipe calc(var(--duration-slowest) * 1.5) var(--ease-smooth) both;
+  --lp-enter-headline: lp-rise-soft var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 2) both;
+  --lp-enter-copy: lp-fade var(--duration-slower) var(--ease-smooth)
+    calc(var(--lp-stagger) * 4) both;
+  /* Every other picture opens as the visitor reaches it. */
+  --lp-media-reveal: wipe;
+}
+
+/* The photograph comes to rest inside its opening frame. */
+@keyframes lp-clean-settle {
+  from {
+    scale: 1.1;
+  }
+}
+
+/* One moment, not two: the settle runs on the image with the frame's own
+   timing — the hero's entrance, or the stage's wipe (whose order and play
+   state the image inherits from its frame) — so both end together. Where the
+   frame does not wipe (a picture a block already moves, a background plate)
+   the image is left alone. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  :root[data-theme] .lp[data-lp-style='clean']:not([data-lp-still]) .hero__enter-m .lp-media > img {
+    animation: lp-clean-settle calc(var(--duration-slowest) * 1.5) var(--ease-smooth) both;
+  }
+
+  :root[data-theme]
+    .lp[data-lp-style='clean']:not([data-lp-still])
+    .lp-section:not([data-lp-type='hero'])
+    .lp-media[data-lp-enter]:not(
+      [data-lp-reveal],
+      :is([data-lp-reveal], [data-lp-build], [data-lp-parallax], [data-lp-on-media]) *
+    )
+    > img {
+    animation: lp-clean-settle var(--duration-slowest) var(--ease-smooth)
+      calc(var(--lp-stagger) * var(--_lp-order, 0)) both var(--_lp-play, running);
+  }
+}
+
+/* ── heads across one row ────────────────────────────────────────────────── */
+/* Wide: the heading on the left, its lead on the right, level with the
+   heading's last line. Only heads that stand ABOVE their block's content. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='clean']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head,
+      .problem[data-layout='list'] > .problem__head
+    ):has(> .lp-text) {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: var(--lp-gap);
+    align-items: end;
+    max-inline-size: none;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head,
+      .problem[data-layout='list'] > .problem__head
+    ):has(> .lp-text)
+    > :not(.lp-heading, .lp-text) {
+    grid-column: 1 / -1;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean']
+    :is(
+      .benefits__head,
+      .curriculum__head,
+      .gallery__head,
+      .story__head,
+      .tf__head,
+      .tm:not([data-layout='quote']) > .tm__head,
+      .pricing[data-layout='cards'] > .pricing__head,
+      .problem[data-layout='list'] > .problem__head
+    )
+    > .lp-text {
+    grid-column: 2;
+  }
+}
+
+/* ── the hero: the picture takes the larger share, and runs off the page ── */
+/* The row reaches from the column's start to the page's end edge, so the
+   picture (never the words, which keep the content column, 03 X10) meets
+   the edge, square where it does, as the story's strip of prints does. */
+@container (min-width: 50rem) {
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split:has(> .hero-split__media) {
+    grid-column: content-start / bleed-end;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split__copy {
+    --lp-display-scale: 0.8;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split__media {
+    --_ratio: 1 / 1;
+  }
+
+  /* A set width, so the height cap crops the picture rather than narrowing
+     it off the page edge. */
+  :is(.lp, #lp-style)[data-lp-style='clean'] .hero-split__media .lp-media {
+    inline-size: 100%;
+    max-block-size: min(44rem, 82svh);
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
+}
+
+/* ── a long headline comes down, character by character ─────────────────── */
+/* At full size a headline runs the poster past the first screen from 85
+   characters, and the split and the cover from 95. Past C characters it
+   falls as (C / length)^p, from the length HeroBlock sets on the layout's
+   words, `--lp-heading-chars`, so every headline up to the field's longest
+   (120) ends, lede and buttons with it, above a 1440 × 900 fold with no
+   word split, in Archivo Black and Syne: C and p fitted, 1% to spare, under
+   the largest scale measured to hold each length. Up to C the full size
+   stands. A browser without `pow()` fails the test and keeps the full size,
+   as before; the test names a real property, because a custom one takes
+   any value. An unset length counts as the longest the field takes. */
+@supports (line-height: pow(2, 0.5)) {
+  @container (min-width: 56rem) {
+    :is(.lp, #lp-style)[data-lp-style='clean'] .lp-section[data-lp-type='hero']
+      .hero-split__copy:has(> .hero__headline) {
+      --lp-display-scale: calc(0.8 * min(1, pow(79 / var(--lp-heading-chars, 120), 0.39)));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='clean'] .lp-section[data-lp-type='hero']
+      .hero-cover__copy:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(81 / var(--lp-heading-chars, 120), 0.43));
+    }
+
+    :is(.lp, #lp-style)[data-lp-style='clean'] .lp-section[data-lp-type='hero']
+      .hero-poster:has(> .hero__headline) {
+      --lp-display-scale: min(1, pow(70 / var(--lp-heading-chars, 120), 0.47));
+    }
+  }
+}
+
+/* ── the story's moments: a strip of prints at a real size ───────────────── */
+:is(.lp, #lp-style)[data-lp-style='clean'] .story-strip {
+  --lp-strip-item: clamp(16rem, 34cqi, 28rem);
+}
+
+/* A picture answers the pointer: the photograph leans in a little inside
+   its frame. Decoration only — nothing is shown that is not already there. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still])
+    :is(.gallery-picture, .story-strip__card, .benefits-grid li)
+    .lp-media
+    > img {
+    transition: scale var(--duration-slower) var(--ease-smooth);
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still])
+    :is(.gallery-picture, .story-strip__card, .benefits-grid li):hover
+    .lp-media
+    > img {
+    scale: 1.04;
+  }
+}
+
+/* ── the gallery grid: prints at a real size, each on its caption rail ──── */
+/* The frame is clear, so a wipe opens onto the page, not onto a grey card
+   (the picture itself still holds the plate while it loads). */
+:is(.lp, #lp-style)[data-lp-style='clean'] .gallery-picture__frame {
+  background: transparent;
+}
+
+:is(.lp, #lp-style)[data-lp-style='clean'] .gallery-grid {
+  row-gap: clamp(var(--space-8), 3.5cqi, var(--space-14));
+}
+
+/* Never more than three to a row, and a set of six hangs in pairs: prints,
+   not thumbnails. */
+@container (min-width: 60rem) {
+  :is(.lp, #lp-style)[data-lp-style='clean'] .gallery-grid[data-columns='4'] {
+    --_columns: 3;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='clean'] .gallery-grid[data-count='6'] {
+    --_columns: 2;
+  }
+}
+
+/* The photographer's frame, 3 : 2; a lone picture keeps the grid's 16 : 9. */
+:is(.lp, #lp-style)[data-lp-style='clean']
+  .gallery-grid:not([data-count='1'])
+  .gallery-picture__frame {
+  aspect-ratio: 3 / 2;
+}
+
+:is(.lp, #lp-style)[data-lp-style='clean']
+  .gallery-picture[data-caption='under']
+  .gallery-picture__caption {
+  padding-block-start: var(--space-3);
+  border-block-start: var(--lp-border) var(--border-style) var(--lp-line);
+}

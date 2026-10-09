@@ -301,4 +301,36 @@ describe('monetisation store · save', () => {
 
     expect(updateCourseMonetisation).not.toHaveBeenCalled();
   });
+
+  it('keeps a price typed while the write is in flight, unsaved against the new baseline', async () => {
+    let answer: (state: JourneyMonetisation) => void = () => {};
+    updateCourseMonetisation.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      })
+    );
+
+    monetisation.setSubscriptionEnabled(true);
+    monetisation.setPriceMonthly(1200);
+    monetisation.setPriceAnnual(12000);
+    const saving = monetisation.save();
+    // Typed while Stripe is answering.
+    monetisation.setPriceMonthly(1500);
+    answer(
+      makeState({ subscription: { priceMonthly: 1200, priceAnnual: 12000 } })
+    );
+    await saving;
+
+    // The echo does not revert the newer price, and it is still to be sent.
+    expect(monetisation.draft.priceMonthlyCents).toBe(1500);
+    expect(monetisation.isDirty).toBe(true);
+    // The baseline DID move to what the server holds.
+    expect(monetisation.presentationOffer).toEqual({
+      tiersEnabled: false,
+      subscriptionEnabled: true,
+      subscriptionPriceCents: 1200,
+    });
+    monetisation.setPriceMonthly(1200);
+    expect(monetisation.isDirty).toBe(false);
+  });
 });

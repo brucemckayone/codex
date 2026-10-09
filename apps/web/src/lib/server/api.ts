@@ -1643,6 +1643,40 @@ export function createServerApi(
         ),
 
       /**
+       * Upload a FREE-PLACEMENT page image (contract amendment A3,
+       * Codex-61zsk.10) — not another named still slot like the three above.
+       * The kit's block inspector puts the returned `key` into whatever prop
+       * it belongs to and saves the page normally; there is deliberately no
+       * `deletePageImage` sibling, because there is no column to clear —
+       * `saveJourneyPage`'s own save-time diff is what notices a dropped
+       * reference and queues it for the orphan sweep.
+       *
+       * Same `forwardMultipartUpload` re-forward as `uploadJourneyHeroImage`
+       * above, for the same reason: a plain re-forward of a `File` from web
+       * to worker LOSES the filename in workerd and the worker 400s.
+       * `fieldName: 'image'` MUST match the worker's `files` key
+       * (`workers/content-api/src/routes/journeys.ts`, the `images` route).
+       */
+      uploadPageImage: (
+        organizationId: string,
+        pageId: string,
+        file: File
+      ): Promise<{ key: string; url: string }> =>
+        forwardMultipartUpload<{ key: string; url: string }>({
+          url: `${serverApiUrl(
+            platform,
+            'access'
+          )}/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/images?organizationId=${encodeURIComponent(organizationId)}`,
+          fieldName: 'image',
+          file,
+          fallbackFilename: 'page-image',
+          sessionCookie,
+          failureMessage: 'Page image upload failed',
+        }),
+
+      /**
        * Upload the course's SIGNATURE image — the third still-image slot, and the
        * one `guide.letter` needs to render what its name describes
        * (Codex-wqxv4 option A, contract A32).

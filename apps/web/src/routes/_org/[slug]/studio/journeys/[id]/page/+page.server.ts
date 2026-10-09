@@ -1,14 +1,15 @@
 /**
- * Journey sales-page builder — server load (admin/owner gate).
+ * The canvas-first page editor (WP-7b) — server load, admin/owner gate.
  *
- * A byte-clone of `studio/brand/+page.server.ts` (Codex-2pryk.3.3 · WP-5):
- * page *editing* is stricter than studio access — admin/owner only. We reuse the
- * `userRole` the studio `+layout.server.ts` resolves via getMyMembership, so
- * there is no second role source.
+ * Page editing is stricter than studio access, and the role comes from the
+ * studio layout's `getMyMembership` read, so there is one role source. It
+ * runs under the studio's `ssr = false` too — SvelteKit still calls it on
+ * navigation, so a non-privileged user is redirected before the editor
+ * renders.
  *
- * Runs under the studio's `ssr = false`: SvelteKit still executes this load (via
- * the data fetch) on navigation, so a non-privileged user is redirected before
- * the builder renders.
+ * This route replaced the legacy page builder wholesale (WP-9a): it moved
+ * here from `page-next/+page.server.ts` unchanged — the legacy route had the
+ * identical admin/owner gate, so there was no logic to merge.
  */
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';

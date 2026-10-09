@@ -124,11 +124,22 @@ function fieldStringArray(
     .filter((entry) => entry.length > 0);
 }
 
-/** The first enabled `invite` section, or undefined. */
+/**
+ * The first enabled offer-decorating section, or undefined. Matches the
+ * legacy `invite` type AND its v2 rename `pricing` (contract §2's "Replaces
+ * legacy" column, docs/design/landing-builder/01-contract.md — BINDING): an
+ * upgraded page (`kit/model/upgrade.ts`) stores its decorations under
+ * `type: 'pricing'`, in `props.offers`, the SAME `{id,name?,blurb?,bullets?,
+ * best?}` shape `readDecorations` below already reads (it drops the legacy
+ * `who` field for either type via a plain missing-key read, not a special
+ * case) — so no change to the reader was needed, only to this finder.
+ */
 export function findInviteSection(
   sections: PageSection[]
 ): PageSection | undefined {
-  return sections.find((s) => s.type === 'invite' && s.enabled !== false);
+  return sections.find(
+    (s) => (s.type === 'invite' || s.type === 'pricing') && s.enabled !== false
+  );
 }
 
 /**

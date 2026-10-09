@@ -9,13 +9,9 @@
  */
 
 import type { PageBuilderState, PageSection } from '@codex/shared-types';
+import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pageBuilder } from './page-builder-store.svelte';
-import { findSectionDefinition, resolveDesign } from './section-catalog';
-import {
-  SECTION_DESIGN_BY_TYPE,
-  sectionDesignForType,
-} from './section-design-defaults';
 
 const PAGE_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -52,7 +48,6 @@ function makeSaved(
 describe('pageBuilder — session lifecycle', () => {
   beforeEach(() => {
     pageBuilder.close();
-    // Deterministic ids for addSection assertions.
     let n = 0;
     pageBuilder.setIdFactory(() => `new-${++n}`);
   });
@@ -79,6 +74,18 @@ describe('pageBuilder — session lifecycle', () => {
     expect(pageBuilder.pageId).toBeNull();
     expect(pageBuilder.selectedSectionId).toBeNull();
   });
+
+  it('open() never fabricates a design key onto a section that stored none', () => {
+    // The seven published pages must render byte-identically, and `open()` is
+    // the path every one of them takes.
+    pageBuilder.open(PAGE_ID, makeSaved());
+    expect(pageBuilder.sections.map((s) => s.design)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(pageBuilder.isDirty).toBe(false);
+  });
 });
 
 describe('pageBuilder — section mutations', () => {
@@ -97,32 +104,6 @@ describe('pageBuilder — section mutations', () => {
     expect(pageBuilder.isDirty).toBe(true);
   });
 
-  it('addSection appends a seeded enabled section with the injected id and focuses it', () => {
-    const id = pageBuilder.addSection('faq');
-    expect(id).toBe('new-1');
-    const added = pageBuilder.sections.at(-1);
-    expect(added).toMatchObject({
-      id: 'new-1',
-      type: 'faq',
-      enabled: true,
-      variant: 'accordion',
-    });
-    // Seeded from the catalogue so it renders populated the moment it is added.
-    expect(added?.props.heading).toBeDefined();
-    expect(pageBuilder.selectedSectionId).toBe('new-1');
-  });
-
-  it('addSection(type, afterId) inserts directly after the anchor section', () => {
-    const id = pageBuilder.addSection('proof', 'sec-hero');
-    expect(id).toBe('new-1');
-    expect(pageBuilder.sections.map((s) => s.id)).toEqual([
-      'sec-hero',
-      'new-1',
-      'sec-ache',
-      'sec-invite',
-    ]);
-  });
-
   it('duplicateSection clones a section directly after it with a fresh id + copy name', () => {
     const id = pageBuilder.duplicateSection('sec-ache');
     expect(id).toBe('new-1');
@@ -138,12 +119,16 @@ describe('pageBuilder — section mutations', () => {
     expect(pageBuilder.selectedSectionId).toBe('new-1');
   });
 
-  it('setSectionVariant switches the composition and marks dirty', () => {
-    pageBuilder.setSectionVariant('sec-hero', 'split');
-    expect(pageBuilder.sections.find((s) => s.id === 'sec-hero')?.variant).toBe(
-      'split'
-    );
-    expect(pageBuilder.isDirty).toBe(true);
+  it('duplicateSection carries the source’s own design, not the type’s default', () => {
+    // A duplicate is a copy of a section the creator may have already tuned;
+    // the copy must carry that section's OWN scheme/spacing, not a fresh one
+    // resolved from the type. (Formerly exercised via the legacy addSection +
+    // setSectionDesignAxis pair — WP9c removed both; same property, v2 setup.)
+    const id = pageBuilder.addKitSection('faq', {});
+    pageBuilder.setSectionStyle(id, { spacing: 'spacious' });
+    const copyId = pageBuilder.duplicateSection(id);
+    const copy = pageBuilder.sections.find((s) => s.id === copyId);
+    expect(copy?.design?.spacing).toBe('spacious');
   });
 
   it('moveSectionTo reorders to an absolute index and clamps to range', () => {
@@ -261,444 +246,307 @@ describe('pageBuilder — section mutations', () => {
   });
 });
 
-describe('pageBuilder — design axes (F-B2)', () => {
-  beforeEach(() => {
-    pageBuilder.close();
-    pageBuilder.open(PAGE_ID, makeSaved({ design: { width: 'wide' } }));
-  });
-
-  it('setPageDesign replaces the page look wholesale and marks dirty', () => {
-    pageBuilder.setPageDesign({ width: 'narrow', density: 'vast' });
-    // Wholesale, NOT merged: a preset is a complete look, so the previous
-    // bundle's axes must not survive underneath the new one.
-    expect(pageBuilder.pending?.design).toEqual({
-      width: 'narrow',
-      density: 'vast',
-    });
-    expect(pageBuilder.isDirty).toBe(true);
-  });
-
-  it('RE-DIFFS the section rhythm when the look changes (the ache case)', () => {
-    // THE DEFECT. `sectionDesignForType` stores each section's rhythm as a DIFF
-    // against the look active at creation, so any axis where the two agreed is
-    // OMITTED. `setPageDesign` then moved the look out from under those bags,
-    // and the omitted axes silently inherited the NEW look.
-    //
-    // It undid `section-design-defaults.ts`'s own stated purpose. That table
-    // exists to end "`surface: media` applied even to `ache` and `map`, which
-    // have no media at all" — and this is the path that put it back.
-    //
-    // Built the way a creator hits it: create under a look whose surface is
-    // `bare`, so the table's `surface: bare` for `ache` MATCHES and is dropped
-    // from storage; then pick Candlelit, whose surface is `media`.
-    const bareLook = { surface: 'bare' as const };
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({
-        design: bareLook,
-        sections: [
-          {
-            ...makeSection({ id: 'sec-ache', type: 'ache' }),
-            design: sectionDesignForType('ache', bareLook),
-          },
-        ],
-      })
-    );
-
-    // Precondition, asserted so this test cannot pass vacuously: `surface` is
-    // genuinely ABSENT from storage, because it matched the creation look.
-    expect(pageBuilder.pending?.sections[0]?.design?.surface).toBeUndefined();
-    // And the table really does want `bare` there — otherwise there is nothing
-    // to preserve and the assertion below would prove nothing.
-    expect(SECTION_DESIGN_BY_TYPE.ache.surface).toBe('bare');
-
-    pageBuilder.setPageDesign({ surface: 'media' });
-
-    // THE FIX: the axis is re-materialised, so `ache` keeps the bare surface the
-    // rhythm chose instead of inheriting Candlelit's atmosphere layer.
-    expect(pageBuilder.pending?.sections[0]?.design?.surface).toBe('bare');
-  });
-
-  it('leaves a section a human has touched COMPLETELY alone', () => {
-    // Provenance is decided on the WHOLE BAG, not per axis, and this is why.
-    // `setSectionDesignAxis` DELETES a key to clear an override, so an absent
-    // axis means both "never written" and "deliberately cleared" — per-axis
-    // re-materialising therefore resurrects choices a creator removed. A first
-    // cut did exactly that and handed a section holding one deliberate
-    // `{ density: 'compact' }` six axes it never asked for.
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({
-        design: { surface: 'bare' },
-        sections: [
-          {
-            ...makeSection({ id: 'sec-ache', type: 'ache' }),
-            design: { density: 'compact' },
-          },
-        ],
-      })
-    );
-
-    pageBuilder.setPageDesign({ surface: 'media' });
-
-    // Untouched: still exactly the one axis the creator chose, and no more.
-    expect(pageBuilder.pending?.sections[0]?.design).toEqual({
-      density: 'compact',
-    });
-  });
-
-  it("applies the look's COMPOSITIONS, not just its axes", () => {
-    // The gap this closes: until presets carried composition preferences, all
-    // eight looks drew the SAME eleven compositions out of the catalogue's 63.
-    // A `design` axis says HOW a section is treated; a `variant` says WHICH
-    // BOXES IT DRAWS, and only the second makes eight looks eight designs.
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({
-        design: { surface: 'bare' },
-        sections: [
-          makeSection({ id: 'sec-hero', type: 'hero' }),
-          makeSection({ id: 'sec-ache', type: 'ache' }),
-        ],
-      })
-    );
-
-    // Precondition: neither section has a stored composition, so both resolve
-    // to the catalogue default. Asserted so this cannot pass vacuously.
-    expect(pageBuilder.pending?.sections[0]?.variant).toBeUndefined();
-
-    pageBuilder.setPageDesign(
-      { surface: 'panel' },
-      { next: { hero: 'banner', ache: 'checklist' } }
-    );
-
-    expect(pageBuilder.pending?.sections[0]?.variant).toBe('banner');
-    expect(pageBuilder.pending?.sections[1]?.variant).toBe('checklist');
-  });
-
-  it("gives a section added AFTER a look pick that look's signature, not just the rhythm", () => {
-    // THE GAP THIS CLOSES. `designByType` reaches a section two ways — a page
-    // created under a look, and a look SWITCH re-diffing the existing sections.
-    // Neither covers a section the creator adds LATER: `addSection` seeds from
-    // the page bag alone, so a new section carried the shared rhythm and NOT the
-    // look's signature. On Plain Facts that meant a section added after the look
-    // was picked came back with `motion` from the rhythm instead of the `none`
-    // the whole look is built on.
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({ design: { surface: 'bare' }, sections: [] })
-    );
-
-    // Pick a look whose signature says something the rhythm does not.
-    pageBuilder.setPageDesign(
-      { surface: 'panel', motion: 'none', edge: 'offset' },
-      { nextDesign: { faq: { motion: 'none', edge: 'offset' } } }
-    );
-
-    const id = pageBuilder.addSection('faq');
-    const added = pageBuilder.pending?.sections.find((s) => s.id === id);
-    const resolved = resolveDesign(
-      { design: added?.design, type: 'faq', variant: added?.variant },
-      { design: pageBuilder.pending?.design }
-    );
-    expect(
-      resolved.motion,
-      'the look renounces motion, so a new section must too'
-    ).toBe('none');
-    expect(
-      resolved.edge,
-      "the look's offset rule must reach a new section"
-    ).toBe('offset');
-  });
-
-  it('does NOT apply a remembered signature once the page bag has moved on', () => {
-    // The signature is only valid for the look it was picked with — it is stashed
-    // in module state, and a later hand-edit of the page axes means the stash no
-    // longer describes this page. Asserting the negative so the whole-bag
-    // validity check cannot rot into "apply it always".
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({ design: { surface: 'bare' }, sections: [] })
-    );
-    pageBuilder.setPageDesign(
-      { surface: 'panel', motion: 'none' },
-      { nextDesign: { faq: { motion: 'none' } } }
-    );
-    // A page-level edit that does not go through the look picker.
-    pageBuilder.setPageDesign({ surface: 'tint', motion: 'drift' });
-    const id = pageBuilder.addSection('faq');
-    const added = pageBuilder.pending?.sections.find((s) => s.id === id);
-    const resolved = resolveDesign(
-      { design: added?.design, type: 'faq', variant: added?.variant },
-      { design: pageBuilder.pending?.design }
-    );
-    // `fade`, not the page look's `drift`: `faq`'s own rhythm row pins
-    // `motion: 'fade'`, and with no signature to override it that is what the
-    // section gets. The assertion that carries the meaning is the NEGATIVE one —
-    // had the stale signature been applied it would be `none`.
-    expect(
-      resolved.motion,
-      'the stale signature must not survive a page-bag change'
-    ).not.toBe('none');
-    expect(resolved.motion, "so the rhythm's own value stands").toBe('fade');
-  });
-
-  it('never overwrites a composition the CREATOR picked', () => {
-    // Provenance uses the OUTGOING look's preference, exactly as the axis half
-    // uses the outgoing rhythm. `poster` is what the previous look asked for, so
-    // it is look-managed and moves; `descent` is a choice made in the picker and
-    // must survive a look change.
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({
-        design: { surface: 'bare' },
-        sections: [
-          {
-            ...makeSection({ id: 'sec-hero', type: 'hero' }),
-            variant: 'poster',
-          },
-          {
-            ...makeSection({ id: 'sec-ache', type: 'ache' }),
-            variant: 'descent',
-          },
-        ],
-      })
-    );
-
-    pageBuilder.setPageDesign(
-      { surface: 'panel' },
-      {
-        next: { hero: 'banner', ache: 'checklist' },
-        previous: { hero: 'poster', ache: 'statement' },
-      }
-    );
-
-    // hero matched the outgoing look -> managed, moved.
-    expect(pageBuilder.pending?.sections[0]?.variant).toBe('banner');
-    // ache did NOT -> the creator's `descent` is untouched.
-    expect(pageBuilder.pending?.sections[1]?.variant).toBe('descent');
-  });
-
-  it('a look that pins nothing RESTORES the catalogue default', () => {
-    // Candlelit and Signal carry no composition set. Switching to one of them
-    // must not leave the previous look's compositions stranded on the page.
-    pageBuilder.close();
-    pageBuilder.open(
-      PAGE_ID,
-      makeSaved({
-        design: { surface: 'bare' },
-        sections: [
-          {
-            ...makeSection({ id: 'sec-hero', type: 'hero' }),
-            variant: 'banner',
-          },
-        ],
-      })
-    );
-
-    pageBuilder.setPageDesign(
-      { surface: 'media' },
-      { previous: { hero: 'banner' } } // no `next` — the incoming look pins none
-    );
-
-    expect(pageBuilder.pending?.sections[0]?.variant).toBe(
-      findSectionDefinition('hero')?.defaultVariant
-    );
-  });
-
-  it('setPageDesign stores a COPY, so a later preset edit cannot mutate the draft', () => {
-    const bundle = { width: 'full' as const };
-    pageBuilder.setPageDesign(bundle);
-    bundle.width = 'narrow' as never;
-    expect(pageBuilder.pending?.design?.width).toBe('full');
-  });
-
-  it('setSectionDesignAxis overrides ONE axis, leaving the others inherited', () => {
-    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
-    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
-    expect(hero?.design).toEqual({ density: 'vast' });
-    // The page-level bundle is untouched — inheritance is per axis, so a section
-    // opinion must never be promoted to the page.
-    expect(pageBuilder.pending?.design).toEqual({ width: 'wide' });
-    expect(pageBuilder.isDirty).toBe(true);
-  });
-
-  it('a second axis merges rather than replacing the first', () => {
-    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
-    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', 'none');
-    expect(
-      pageBuilder.sections.find((s) => s.id === 'sec-hero')?.design
-    ).toEqual({ density: 'vast', accent: 'none' });
-  });
-
-  it('clearing an axis DELETES the key, and the last one drops the whole bag', () => {
-    pageBuilder.setSectionDesignAxis('sec-hero', 'density', 'vast');
-    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', 'none');
-
-    pageBuilder.setSectionDesignAxis('sec-hero', 'accent', undefined);
-    const partial = pageBuilder.sections.find((s) => s.id === 'sec-hero');
-    // Deleted, not stored as `undefined`: "inherited" is represented by ABSENCE —
-    // the shape `resolveDesign` resolves and the only one that survives a JSON
-    // round trip through the save.
-    expect(partial?.design).toEqual({ density: 'vast' });
-    expect(Object.keys(partial?.design ?? {})).not.toContain('accent');
-
-    pageBuilder.setSectionDesignAxis('sec-hero', 'density', undefined);
-    const cleared = pageBuilder.sections.find((s) => s.id === 'sec-hero');
-    expect(cleared?.design).toBeUndefined();
-    expect(JSON.stringify(cleared)).not.toContain('design');
-  });
-
-  it('both design writes are undoable discrete steps', () => {
-    pageBuilder.setPageDesign({ width: 'narrow' });
-    pageBuilder.setSectionDesignAxis('sec-hero', 'motion', 'none');
-
-    pageBuilder.undo();
-    expect(
-      pageBuilder.sections.find((s) => s.id === 'sec-hero')?.design
-    ).toBeUndefined();
-    expect(pageBuilder.pending?.design).toEqual({ width: 'narrow' });
-
-    pageBuilder.undo();
-    expect(pageBuilder.pending?.design).toEqual({ width: 'wide' });
-  });
-
-  it('is a no-op for an unknown section id', () => {
-    pageBuilder.setSectionDesignAxis('sec-nope', 'width', 'full');
-    expect(pageBuilder.isDirty).toBe(false);
-  });
-
-  it('the save payload carries the page look and the section overrides', () => {
-    pageBuilder.setPageDesign({ width: 'narrow', motion: 'drift' });
-    pageBuilder.setSectionDesignAxis('sec-ache', 'density', 'compact');
-
-    const payload = pageBuilder.getSavePayload();
-    expect(payload?.design).toEqual({ width: 'narrow', motion: 'drift' });
-    expect(payload?.sections.find((s) => s.id === 'sec-ache')?.design).toEqual({
-      density: 'compact',
-    });
-  });
-});
-
-// ── A page gets its RHYTHM as sections are added ─────────────────────────────
-//
-// The store is where the page look and the section factory meet, and it is the
-// only place that can strip a redundant key: `section-design-defaults.ts` knows
-// the house rhythm and `section-catalog.ts` knows how to resolve an inherited
-// value, but only `addSection` knows what THIS page inherits.
-describe('pageBuilder — a new section arrives with a rhythm', () => {
+/**
+ * Page-kit v2 actions (docs/design/landing-builder/01-contract.md, WP-7a) —
+ * the additive counterparts of setPageDesign/setSectionVariant/
+ * setSectionDesignAxis/addSection the NEW editor drives. `open()` here is
+ * fed pages already shaped as `upgradePage()` would leave them — a
+ * `design.style` rather than the legacy nine axes, and a `variant` that is a
+ * LAYOUT id — exactly what the new editor's route hands the store.
+ */
+describe('pageBuilder — page-kit v2 actions (WP-7a)', () => {
   beforeEach(() => {
     pageBuilder.close();
     let n = 0;
     pageBuilder.setIdFactory(() => `new-${++n}`);
-  });
-
-  it('addSection stores the type’s rhythm on a page with no look of its own', () => {
-    pageBuilder.open(PAGE_ID, makeSaved());
-    pageBuilder.addSection('faq');
-    const faq = pageBuilder.sections.at(-1);
-    expect(faq?.design).toEqual({
-      density: 'compact',
-      align: 'start',
-      type: 'restrained',
-      accent: 'none',
-      motion: 'fade',
-    });
-  });
-
-  it('addSection writes ONLY the axes the page look does not already set', () => {
-    // The look every seeded page carries, measured live before this change.
     pageBuilder.open(
       PAGE_ID,
       makeSaved({
-        design: {
-          width: 'narrow',
-          density: 'airy',
-          surface: 'media',
-          edge: 'none',
-          align: 'center',
-          type: 'monumental',
-          accent: 'glow',
-          motion: 'drift',
-          media: 'bleed',
-        },
+        design: { style: 'clean' },
+        sections: [
+          makeSection({ id: 'sec-hero', type: 'hero' }),
+          makeSection({ id: 'sec-benefits', type: 'benefits' }),
+        ],
       })
     );
-    pageBuilder.addSection('hero');
-    expect(pageBuilder.sections.at(-1)?.design).toEqual({
-      width: 'full',
-      density: 'vast',
+  });
+
+  describe('setPageStyle', () => {
+    it('sets the page Style and marks dirty', () => {
+      pageBuilder.setPageStyle('bold');
+      expect(pageBuilder.pending?.design?.style).toBe('bold');
+      expect(pageBuilder.isDirty).toBe(true);
     });
-    // And the FAQ is an exception on eight axes against that same look, which is
-    // the whole point: the page finally varies.
-    pageBuilder.addSection('faq');
-    const faq = pageBuilder.sections.at(-1);
-    expect(Object.keys(faq?.design ?? {}).length).toBeGreaterThanOrEqual(7);
-    expect(faq?.design?.media).toBeUndefined();
+
+    it('merges onto an existing design bag rather than replacing it', () => {
+      pageBuilder.close();
+      pageBuilder.open(
+        PAGE_ID,
+        makeSaved({ design: { width: 'wide' }, sections: [] })
+      );
+      pageBuilder.setPageStyle('soft');
+      expect(pageBuilder.pending?.design).toEqual({
+        width: 'wide',
+        style: 'soft',
+      });
+    });
+
+    it('is a no-op when the Style is already set — no undo step, not dirty', () => {
+      pageBuilder.setPageStyle('clean'); // already the current style
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.setPageStyle('cinematic');
+      pageBuilder.undo();
+      expect(pageBuilder.pending?.design?.style).toBe('clean');
+    });
   });
 
-  it('two added sections do not read as one design — the defect, inverted', () => {
-    pageBuilder.open(PAGE_ID, makeSaved());
-    pageBuilder.addSection('hero');
-    pageBuilder.addSection('faq');
-    const [hero, faq] = pageBuilder.sections.slice(-2);
-    expect(JSON.stringify(hero.design)).not.toBe(JSON.stringify(faq.design));
-    expect(hero.design?.density).toBe('vast');
-    expect(faq.design?.density).toBe('compact');
+  describe('setSectionLayout', () => {
+    it('sets a valid layout for the section’s type', () => {
+      pageBuilder.setSectionLayout('sec-benefits', 'checklist');
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBe('checklist');
+      expect(pageBuilder.isDirty).toBe(true);
+    });
+
+    it('ignores a layout that does not belong to the section’s type', () => {
+      // 'theatre' is a `video` layout, not a `benefits` one.
+      pageBuilder.setSectionLayout('sec-benefits', 'theatre');
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBeUndefined();
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is a no-op for an unknown section id', () => {
+      pageBuilder.setSectionLayout('sec-nope', 'grid');
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.setSectionLayout('sec-benefits', 'split');
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.variant
+      ).toBeUndefined();
+    });
   });
 
-  it('the creator can still clear every axis back to inherited', () => {
-    // The rhythm is a DEFAULT, never a lock: the inspector's clear must empty the
-    // bag completely, so the section falls back to the page look.
-    pageBuilder.open(PAGE_ID, makeSaved());
-    const id = pageBuilder.addSection('faq');
-    const axes = Object.keys(
-      pageBuilder.sections.at(-1)?.design ?? {}
-    ) as (keyof NonNullable<PageSection['design']>)[];
-    expect(axes.length).toBeGreaterThan(0);
-    for (const axis of axes) {
-      pageBuilder.setSectionDesignAxis(id, axis, undefined);
-    }
-    const cleared = pageBuilder.sections.find((s) => s.id === id);
-    expect(cleared?.design).toBeUndefined();
-    expect(JSON.stringify(cleared)).not.toContain('design');
+  describe('setSectionStyle', () => {
+    it('merges scheme and spacing independently', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      pageBuilder.setSectionStyle('sec-benefits', { spacing: 'spacious' });
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand', spacing: 'spacious' });
+    });
+
+    it('a key patched to undefined is REMOVED, not stored as undefined', () => {
+      pageBuilder.setSectionStyle('sec-benefits', {
+        scheme: 'brand',
+        spacing: 'spacious',
+      });
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: undefined });
+      const section = pageBuilder.sections.find((s) => s.id === 'sec-benefits');
+      expect(section?.design).toEqual({ spacing: 'spacious' });
+      expect(Object.keys(section?.design ?? {})).not.toContain('scheme');
+    });
+
+    it('clearing the last key drops the whole design bag', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'soft' });
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: undefined });
+      const section = pageBuilder.sections.find((s) => s.id === 'sec-benefits');
+      expect(section?.design).toBeUndefined();
+      expect(JSON.stringify(section)).not.toContain('design');
+    });
+
+    it('ignores an invalid id for a key and leaves the existing value standing', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      // @ts-expect-error — proving a runtime-invalid value (e.g. a stale
+      // <select>'s .value) is ignored rather than stored.
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'not-a-scheme' });
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand' });
+    });
+
+    it('takes no undo step and does not dirty the draft when nothing valid changes', () => {
+      // @ts-expect-error — same invalid-value proof as above, from a clean draft.
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'nonsense' });
+      expect(pageBuilder.canUndo).toBe(false);
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is a no-op for an unknown section id', () => {
+      pageBuilder.setSectionStyle('sec-nope', { scheme: 'brand' });
+      expect(pageBuilder.isDirty).toBe(false);
+    });
+
+    it('is undoable as one discrete step per call', () => {
+      pageBuilder.setSectionStyle('sec-benefits', { scheme: 'brand' });
+      pageBuilder.setSectionStyle('sec-benefits', { spacing: 'compact' });
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toEqual({ scheme: 'brand' });
+      pageBuilder.undo();
+      expect(
+        pageBuilder.sections.find((s) => s.id === 'sec-benefits')?.design
+      ).toBeUndefined();
+    });
   });
 
-  it('an unknown/widened type still stores no design key', () => {
-    pageBuilder.open(PAGE_ID, makeSaved());
-    pageBuilder.addSection('retreat-schedule');
-    const added = pageBuilder.sections.at(-1);
-    expect(added?.type).toBe('retreat-schedule');
-    expect(added?.design).toBeUndefined();
+  describe('addKitSection', () => {
+    it('inserts exactly {id, type, enabled, props} — no variant, no design', () => {
+      const id = pageBuilder.addKitSection('cta', { heading: 'Join now' });
+      expect(id).toBe('new-1');
+      const added = pageBuilder.sections.find((s) => s.id === id);
+      expect(added).toEqual({
+        id: 'new-1',
+        type: 'cta',
+        enabled: true,
+        props: { heading: 'Join now' },
+      });
+      expect(pageBuilder.selectedSectionId).toBe('new-1');
+    });
+
+    it('never goes through the legacy rhythm path — no design key materialises', () => {
+      // Falsifiable against the now-removed `addSection`'s own behaviour: on an
+      // equivalent page shape it used to stamp several axes onto a new `hero`
+      // section (WP9c deleted that path and its proving test). addKitSection
+      // must not.
+      const id = pageBuilder.addKitSection('hero', {});
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.design
+      ).toBeUndefined();
+    });
+
+    it('inserts after afterId, else appends', () => {
+      pageBuilder.addKitSection('cta', {}, 'sec-hero');
+      expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+        'sec-hero',
+        'new-1',
+        'sec-benefits',
+      ]);
+      pageBuilder.addKitSection('faq', {});
+      expect(pageBuilder.sections.at(-1)?.id).toBe('new-2');
+    });
+
+    it('shallow-copies props so a shared literal cannot be mutated through the store', () => {
+      const sample = { heading: 'Original' };
+      const id = pageBuilder.addKitSection('cta', sample);
+      sample.heading = 'Mutated after the fact';
+      expect(pageBuilder.sections.find((s) => s.id === id)?.props.heading).toBe(
+        'Original'
+      );
+    });
+
+    it('is undoable as one discrete step', () => {
+      pageBuilder.addKitSection('cta', {});
+      expect(pageBuilder.sections).toHaveLength(3);
+      pageBuilder.undo();
+      expect(pageBuilder.sections).toHaveLength(2);
+    });
+
+    it('setSectionProp keystroke bursts still coalesce for a v2 section', () => {
+      const id = pageBuilder.addKitSection('benefits', {});
+      pageBuilder.setSectionProp(id, 'heading', 'W');
+      pageBuilder.setSectionProp(id, 'heading', 'Wh');
+      pageBuilder.setSectionProp(id, 'heading', 'What you get');
+      pageBuilder.undo(); // undoes the whole typing burst, one step
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.props.heading
+      ).toBeUndefined();
+      pageBuilder.undo(); // undoes the add itself
+      expect(pageBuilder.sections.find((s) => s.id === id)).toBeUndefined();
+    });
+
+    it('setSectionProps round-trips a v2 array-of-objects prop', () => {
+      const items = [
+        { title: 'Weekly calls', detail: 'Live, recorded' },
+        { title: 'Workbook', detail: undefined },
+      ];
+      const id = pageBuilder.addKitSection('benefits', {});
+      pageBuilder.setSectionProps(id, { items });
+      expect(
+        pageBuilder.sections.find((s) => s.id === id)?.props.items
+      ).toEqual(items);
+    });
+  });
+});
+
+/**
+ * v2 (page-kit) pages pass through open()/getSavePayload()/resetSection()/
+ * discard() untouched. These four are the ones WP-7a's brief called out for
+ * audit: NONE of them calls `createSection`/`resolveDesign`/
+ * `sectionDesignForType` (confirmed by reading — those three names appear
+ * nowhere near open/resetSection/discard/getSavePayload in this file), so
+ * each is a pure structural clone regardless of vocabulary. These tests prove
+ * that conclusion rather than just asserting it: a v2 page's `design.style`
+ * and a v2 section's `scheme`/`spacing` survive every one of these paths
+ * byte-for-byte, with no legacy axis key ever materialising alongside them.
+ * (The sessionStorage crash-recovery effect is the same kind of pure
+ * `JSON.stringify`/`JSON.parse` round trip and is not separately exercised
+ * here, matching the rest of this file's own choice not to drive it directly.)
+ */
+describe('pageBuilder — v2 (page-kit) pages pass through untouched', () => {
+  function makeV2Saved(): PageBuilderState {
+    return makeSaved({
+      design: { style: 'clean' },
+      sections: [
+        {
+          id: 'sec-hero',
+          type: 'hero',
+          enabled: true,
+          variant: 'split',
+          design: { scheme: 'brand', spacing: 'spacious' },
+          props: { heading: 'Come home' },
+        },
+      ],
+    });
+  }
+
+  beforeEach(() => {
+    pageBuilder.close();
   });
 
-  it('does NOT retro-fit a rhythm onto the sections the page already stored', () => {
-    // Creation only. The seven published pages must render byte-identically, and
-    // `open()` is the path every one of them takes.
-    pageBuilder.open(PAGE_ID, makeSaved());
-    expect(pageBuilder.sections.map((s) => s.design)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-    ]);
+  it('open() seeds pending byte-identical to a v2 saved page', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    expect(pageBuilder.pending).toEqual(saved);
     expect(pageBuilder.isDirty).toBe(false);
   });
 
-  it('duplicateSection carries the source’s rhythm, not the type’s', () => {
-    // A duplicate is a copy of a section the creator may have already tuned; the
-    // table must not overwrite their choices on the way through.
-    pageBuilder.open(PAGE_ID, makeSaved());
-    const faqId = pageBuilder.addSection('faq');
-    pageBuilder.setSectionDesignAxis(faqId, 'density', 'vast');
-    const copyId = pageBuilder.duplicateSection(faqId);
-    const copy = pageBuilder.sections.find((s) => s.id === copyId);
-    expect(copy?.design?.density).toBe('vast');
+  it('getSavePayload returns the v2 shape verbatim', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    expect(pageBuilder.getSavePayload()).toEqual(saved);
+  });
+
+  it('resetSection restores a v2 section’s exact saved bag, no legacy axis keys', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    pageBuilder.setSectionStyle('sec-hero', { scheme: 'accent' });
+    pageBuilder.resetSection('sec-hero');
+    const hero = pageBuilder.sections.find((s) => s.id === 'sec-hero');
+    expect(hero?.design).toEqual({ scheme: 'brand', spacing: 'spacious' });
+    expect(Object.keys(hero?.design ?? {}).sort()).toEqual([
+      'scheme',
+      'spacing',
+    ]);
+  });
+
+  it('discard restores the whole v2 page, no legacy axis keys introduced', () => {
+    const saved = makeV2Saved();
+    pageBuilder.open(PAGE_ID, saved);
+    pageBuilder.setPageStyle('bold');
+    pageBuilder.setSectionLayout('sec-hero', 'cover');
+    pageBuilder.discard();
+    expect(pageBuilder.pending).toEqual(saved);
   });
 });
 
@@ -710,7 +558,7 @@ describe('pageBuilder — revert paths', () => {
 
   it('discard restores pending to the saved baseline', () => {
     pageBuilder.setSectionProp('sec-hero', 'headline', 'edited');
-    pageBuilder.addSection('proof');
+    pageBuilder.addKitSection('cta', {});
     expect(pageBuilder.isDirty).toBe(true);
 
     pageBuilder.discard();
@@ -742,7 +590,7 @@ describe('pageBuilder — revert paths', () => {
   it('resetSection is a no-op for a section absent from saved (a newly added one)', () => {
     let n = 0;
     pageBuilder.setIdFactory(() => `new-${++n}`);
-    const id = pageBuilder.addSection('faq');
+    const id = pageBuilder.addKitSection('faq', {});
     pageBuilder.setSectionProp(id, 'q', 'How long?');
 
     pageBuilder.resetSection(id);
@@ -771,6 +619,130 @@ describe('pageBuilder — save + preview applier', () => {
       headline: 'edited',
     });
   });
+
+  it('markSaved({ baseline }) moves the baseline to what landed, and a newer edit stays unsaved', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.updateMeta('title', 'Sent');
+    const sent = pageBuilder.getSavePayload() as PageBuilderState;
+    pageBuilder.updateMeta('title', 'Typed while it was saving');
+
+    pageBuilder.markSaved({ baseline: sent });
+
+    expect(pageBuilder.saved?.title).toBe('Sent');
+    expect(pageBuilder.pending?.title).toBe('Typed while it was saving');
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+});
+
+/**
+ * CRASH RECOVERY. The tab's sessionStorage row keeps its UNSAVED draft across a
+ * reload, and is restored only over the page it was edited FROM. Once another
+ * tab has saved the page, the draft is stale: restoring it would autosave the
+ * older page over the newer one, with nothing on screen to say so.
+ */
+describe('pageBuilder — crash recovery', () => {
+  const KEY = 'codex:page-builder';
+
+  /** Open, edit, then "crash": the tab keeps the row a reload would find. */
+  function editThenCrash(edit: () => void): string | null {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    edit();
+    flushSync();
+    const row = sessionStorage.getItem(KEY);
+    pageBuilder.close();
+    if (row) sessionStorage.setItem(KEY, row);
+    return row;
+  }
+
+  beforeEach(() => {
+    pageBuilder.close();
+    sessionStorage.clear();
+  });
+
+  it('restores an unsaved draft over the page it was edited from', () => {
+    editThenCrash(() => pageBuilder.updateMeta('title', 'Bone Deep'));
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('restored');
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+
+  it('discards a draft edited from a page the server no longer holds', () => {
+    editThenCrash(() => pageBuilder.updateMeta('title', 'Bone Deep'));
+
+    // Another tab saved the page in the meantime.
+    const newer = makeSaved({ title: 'Stillness, revised' });
+    expect(pageBuilder.open(PAGE_ID, newer)).toBe('discarded');
+    expect(pageBuilder.pending?.title).toBe('Stillness, revised');
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('never takes the status from the row', () => {
+    editThenCrash(() => {
+      pageBuilder.updateMeta('status', 'published', { record: false });
+      pageBuilder.updateMeta('title', 'Bone Deep');
+    });
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('restored');
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.pending?.status).toBe('draft');
+  });
+
+  it('discards a row with no baseline to check it against', () => {
+    // The shape the previous editor wrote: a draft with nothing to say what
+    // it was edited from.
+    sessionStorage.setItem(
+      KEY,
+      JSON.stringify({
+        pageId: PAGE_ID,
+        pending: makeSaved({ title: 'From an older editor' }),
+      })
+    );
+
+    expect(pageBuilder.open(PAGE_ID, makeSaved())).toBe('discarded');
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+  });
+
+  it('keeps a row only while something is unsaved', () => {
+    pageBuilder.open(PAGE_ID, makeSaved());
+    pageBuilder.selectSection('sec-ache');
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).not.toBeNull();
+
+    pageBuilder.markSaved();
+    flushSync();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('a page this tab saved still matches the copy the server hands back', () => {
+    // The server trims the title, and a page whose offer was never sent has
+    // no bag at all — neither is the byte-for-byte page this tab saved.
+    const row = editThenCrash(() => {
+      pageBuilder.updateMeta('title', 'Bone Deep ');
+      pageBuilder.updateOffer(
+        {
+          tiersEnabled: false,
+          subscriptionEnabled: false,
+          subscriptionPriceCents: null,
+          oneOffEnabled: false,
+          oneOffPriceCents: null,
+        },
+        { record: false }
+      );
+      pageBuilder.markSaved();
+      pageBuilder.setSectionProp('sec-hero', 'heading', 'Typed after the save');
+    });
+    expect(row).not.toBeNull();
+
+    const reloaded = makeSaved({ title: 'Bone Deep' });
+    expect(pageBuilder.open(PAGE_ID, reloaded)).toBe('restored');
+    expect(pageBuilder.sections[0].props.heading).toBe('Typed after the save');
+  });
 });
 
 describe('pageBuilder — undo / redo', () => {
@@ -787,7 +759,7 @@ describe('pageBuilder — undo / redo', () => {
   });
 
   it('undo reverts a discrete action and redo re-applies it', () => {
-    pageBuilder.addSection('faq');
+    pageBuilder.addKitSection('faq', {});
     expect(pageBuilder.sections).toHaveLength(4);
     expect(pageBuilder.canUndo).toBe(true);
 
@@ -817,11 +789,11 @@ describe('pageBuilder — undo / redo', () => {
   });
 
   it('a new action clears the redo stack', () => {
-    pageBuilder.addSection('faq');
+    pageBuilder.addKitSection('faq', {});
     pageBuilder.undo();
     expect(pageBuilder.canRedo).toBe(true);
 
-    pageBuilder.addSection('proof');
+    pageBuilder.addKitSection('cta', {});
     expect(pageBuilder.canRedo).toBe(false);
   });
 
@@ -835,14 +807,28 @@ describe('pageBuilder — undo / redo', () => {
   });
 
   it('discard and markSaved both clear the history', () => {
-    pageBuilder.addSection('faq');
+    pageBuilder.addKitSection('faq', {});
     expect(pageBuilder.canUndo).toBe(true);
     pageBuilder.discard();
     expect(pageBuilder.canUndo).toBe(false);
 
-    pageBuilder.addSection('proof');
+    pageBuilder.addKitSection('cta', {});
     pageBuilder.markSaved();
     expect(pageBuilder.canUndo).toBe(false);
+  });
+
+  it('an autosave checkpoint (keepHistory) keeps undo reaching past it', () => {
+    pageBuilder.addKitSection('faq', {});
+    pageBuilder.addKitSection('cta', {});
+    const count = pageBuilder.sections.length;
+    pageBuilder.markSaved({ keepHistory: true });
+    expect(pageBuilder.isDirty).toBe(false);
+    expect(pageBuilder.canUndo).toBe(true);
+    pageBuilder.undo();
+    pageBuilder.undo();
+    expect(pageBuilder.sections.length).toBe(count - 2);
+    // Undoing past the checkpoint is a real change again.
+    expect(pageBuilder.isDirty).toBe(true);
   });
 });
 
@@ -887,6 +873,15 @@ describe('pageBuilder — page-level edits are part of the history', () => {
     expect(pageBuilder.canUndo).toBe(true);
   });
 
+  it('adopting the server-normalised offer (record: false) adds no undo step', () => {
+    pageBuilder.updateMeta('title', 'Renamed');
+    pageBuilder.updateOffer({ oneOffEnabled: null }, { record: false });
+    expect(pageBuilder.pending?.offer?.oneOffEnabled).toBeNull();
+    pageBuilder.undo();
+    // The one undo reaches the creator's real edit, not the invisible sync.
+    expect(pageBuilder.pending?.title).not.toBe('Renamed');
+  });
+
   it('an undo aimed at the last edit does not destroy the title or the price behind it', () => {
     // The exact sequence from the report: edit a section, then rename the page and
     // set a one-off price, then press Cmd+Z once to take back the last thing.
@@ -903,12 +898,12 @@ describe('pageBuilder — page-level edits are part of the history', () => {
 
   it('an undo of a title edit leaves a price set BEFORE it untouched', () => {
     pageBuilder.updateOffer({ oneOffPriceCents: 2700 });
-    pageBuilder.updateMeta('status', 'published');
+    pageBuilder.updateMeta('title', 'Bone Deep');
 
     pageBuilder.undo();
 
-    expect(pageBuilder.pending?.status).toBe('draft');
-    // £27 was entered before the status change and must survive its undo.
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+    // £27 was entered before the rename and must survive its undo.
     expect(pageBuilder.pending?.offer?.oneOffPriceCents).toBe(2700);
   });
 
@@ -925,14 +920,50 @@ describe('pageBuilder — page-level edits are part of the history', () => {
   });
 
   it('a write that changes nothing takes no step and does not dirty the draft', () => {
-    // `handlePublish` re-writes the same status when it rolls back a failed
-    // publish, and a colour input echoes its own value while the picker is open.
+    // A title input re-fires its own value, and a colour input echoes its own
+    // value while the picker is open.
     pageBuilder.updateMeta('title', 'Stillness');
     pageBuilder.updateOffer({});
     pageBuilder.updateBrandOverrides({ primaryColor: undefined });
 
     expect(pageBuilder.canUndo).toBe(false);
     expect(pageBuilder.isDirty).toBe(false);
+  });
+});
+
+/**
+ * The STATUS is outside the history. It is the server's publish state, and a
+ * snapshot's status is whatever it was when some OTHER edit was made — so an
+ * undo that restored it would unpublish a live page through Cmd+Z, or show
+ * "Live" over a draft.
+ */
+describe('pageBuilder — the status is outside the history', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    pageBuilder.open(PAGE_ID, makeSaved());
+  });
+
+  it('a status write with record: false takes no undo step', () => {
+    pageBuilder.updateMeta('status', 'published', { record: false });
+
+    expect(pageBuilder.pending?.status).toBe('published');
+    expect(pageBuilder.canUndo).toBe(false);
+  });
+
+  it('undo and redo walk the edits and keep the current status', () => {
+    pageBuilder.updateMeta('title', 'Bone Deep');
+    pageBuilder.updateMeta('status', 'published', { record: false });
+
+    pageBuilder.undo();
+    // The rename is taken back; the page stays live.
+    expect(pageBuilder.pending?.title).toBe('Stillness');
+    expect(pageBuilder.pending?.status).toBe('published');
+
+    pageBuilder.updateMeta('status', 'draft', { record: false });
+    pageBuilder.redo();
+    // Redo re-applies the rename and never re-publishes.
+    expect(pageBuilder.pending?.title).toBe('Bone Deep');
+    expect(pageBuilder.pending?.status).toBe('draft');
   });
 });
 
@@ -949,8 +980,9 @@ describe('pageBuilder — page-level edits are part of the history', () => {
  * change, which is how a creator learns to click through the prompt that is
  * supposed to protect their work.
  *
- * The fix is the representation {@link setSectionDesignAxis} already uses:
- * absence, and `null` once the bag is empty.
+ * The fix is the same absence-means-cleared representation
+ * {@link setSectionStyle} uses for a section's own design bag: absence, and
+ * `null` once the bag is empty.
  */
 describe('pageBuilder — brand overrides round-trip', () => {
   beforeEach(() => {

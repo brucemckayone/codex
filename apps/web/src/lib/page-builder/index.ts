@@ -5,8 +5,7 @@
  * INERT by design: types + pure helpers only. It re-exports the cross-worker
  * journey contracts from `@codex/shared-types` (so the FE has ONE import surface,
  * the same pattern as `$lib/utils/subdomain` re-exporting `@codex/urls`) and adds
- * the FE-only inert helpers (section catalogue, preview protocol, remote-function
- * contracts).
+ * the FE-only inert helpers (preview protocol, remote-function contracts).
  *
  * IMPORT BOUNDARY (CE-4 gate): this module is a scanned PUBLIC_LIB_ROOT — it must
  * NEVER statically import the heavy editor UI (`$lib/components/page-builder`).
@@ -69,34 +68,3 @@ export type {
   LibraryAccessSource,
   ListJourneysQuery,
 } from './journey-queries';
-// Section model — the catalogue + ordering + search + variants + design axes +
-// factories. `resolveDesign` / `SECTION_DESIGN_*` are the design-language half
-// (`docs/design/journey-sections/02-axis-contract.md`); they sit beside
-// `resolveVariant` because both are pure, DOM-free and public-bundle safe.
-export {
-  createDefaultSections,
-  createSection,
-  defaultSectionOrder,
-  findSectionDefinition,
-  firstSectionMatch,
-  listSectionDefinitions,
-  resolveDesign,
-  resolveVariant,
-  SECTION_CATALOG,
-  SECTION_DESIGN_AXES,
-  SECTION_DESIGN_DEFAULTS,
-  SECTION_DESIGN_VALUES,
-  type SectionDefinition,
-  type SectionDesignAxis,
-  type SectionVariant,
-  type SeededSection,
-  sectionMatchesQuery,
-  // The unauthored-copy check (Codex-maf0y), with its `SeededSection` row above.
-  // Re-exported HERE and not only from `section-catalog` because its one intended
-  // consumer is the studio PUBLISH path, which imports this barrel: while it was
-  // absent from here, the only file in the repo that reached it was its own unit
-  // test, and a pure advisory function nothing calls is indistinguishable from an
-  // unfinished one — its docstring described a confirm that did not exist.
-  seededSections,
-  variantsForType,
-} from './section-catalog';

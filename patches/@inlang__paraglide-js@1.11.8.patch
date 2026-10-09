@@ -1,0 +1,16 @@
+diff --git a/dist/index.js b/dist/index.js
+index 3740f4bee18e734050e10eb8adb8e0ceac1df8b3..5d7c56ff37f9f5e904937277a88c12a468abd234 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -268,7 +268,10 @@ const posthog = new PostHog(posthogToken, {
+   // are short-lived, see https://posthog.com/docs/libraries/node.
+   flushAt: 1,
+   flushInterval: 0,
+-  requestTimeout: 1e3
++  requestTimeout: 1e3,
++  // Codex patch: paraglide-js 1.x has no telemetry opt-out; its per-compile
++  // capture timed out in CI and printed PostHog errors into build/deploy logs.
++  disabled: true
+ });
+ const telemetry = new Proxy(posthog, {
+   get(target, prop) {

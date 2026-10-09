@@ -64,6 +64,16 @@ const EMPTY_DRAFT: MonetisationDraft = {
   tierIds: [],
 };
 
+/** Same plan and tier set. `tierIds` is kept sorted, so order never counts. */
+function sameDraft(a: MonetisationDraft, b: MonetisationDraft): boolean {
+  return (
+    a.subscriptionEnabled === b.subscriptionEnabled &&
+    a.priceMonthlyCents === b.priceMonthlyCents &&
+    a.priceAnnualCents === b.priceAnnualCents &&
+    a.tierIds.join(',') === b.tierIds.join(',')
+  );
+}
+
 class MonetisationStore {
   /** The course whose monetisation is loaded; null when closed or page-only. */
   #courseId = $state<string | null>(null);
@@ -109,14 +119,7 @@ class MonetisationStore {
    */
   get isDirty(): boolean {
     if (!this.#loaded) return false;
-    const a = this.#pending;
-    const b = this.#saved;
-    return (
-      a.subscriptionEnabled !== b.subscriptionEnabled ||
-      a.priceMonthlyCents !== b.priceMonthlyCents ||
-      a.priceAnnualCents !== b.priceAnnualCents ||
-      a.tierIds.join(',') !== b.tierIds.join(',')
-    );
+    return !sameDraft(this.#pending, this.#saved);
   }
 
   /** Is this tier currently selected as a way in? */
@@ -226,20 +229,28 @@ class MonetisationStore {
     const courseId = this.#courseId;
     if (!courseId || !this.#loaded || !this.isDirty) return;
 
+    // Frozen: the creator can keep typing while Stripe answers.
+    const sent: MonetisationDraft = {
+      ...this.#pending,
+      tierIds: [...this.#pending.tierIds],
+    };
     const persisted = await updateCourseMonetisation({
       courseId,
-      subscriptionEnabled: this.#pending.subscriptionEnabled,
-      subscriptionPriceMonthly: this.#pending.priceMonthlyCents,
-      subscriptionPriceAnnual: this.#pending.priceAnnualCents,
-      tierIds: this.#pending.tierIds,
+      subscriptionEnabled: sent.subscriptionEnabled,
+      subscriptionPriceMonthly: sent.priceMonthlyCents,
+      subscriptionPriceAnnual: sent.priceAnnualCents,
+      tierIds: sent.tierIds,
     });
 
-    this.#adopt({
-      subscriptionEnabled: persisted.subscription !== null,
-      priceMonthlyCents: persisted.subscription?.priceMonthly ?? null,
-      priceAnnualCents: persisted.subscription?.priceAnnual ?? null,
-      tierIds: persisted.tierIds,
-    });
+    this.#adopt(
+      {
+        subscriptionEnabled: persisted.subscription !== null,
+        priceMonthlyCents: persisted.subscription?.priceMonthly ?? null,
+        priceAnnualCents: persisted.subscription?.priceAnnual ?? null,
+        tierIds: persisted.tierIds,
+      },
+      sent
+    );
   }
 
   /** Reset to the closed state (the route calls this on destroy). */
@@ -254,25 +265,31 @@ class MonetisationStore {
   }
 
   /**
-   * Make `state` both the draft and the baseline — the shape after a load or a
-   * successful save, when there is by definition nothing unsaved.
+   * Make `state` the baseline, and the draft too — unless the creator has
+   * edited the draft since `sent` went out.
+   *
+   * After a load (no `sent`) there is by definition nothing unsaved. After a
+   * save, an edit made while the write was in flight is NEWER than the echo:
+   * adopting the echo would revert it and read clean, so the queued save would
+   * find nothing to send and report "Saved" over the old price. Left dirty
+   * against the new baseline, it is what the next save sends.
    *
    * A withdrawn plan comes back as `subscription: null`, which loses the prices
    * the creator typed. Those are kept so re-listing is one click: the plan row
    * itself is retained on withdrawal (only `isActive` flips), so the prices are
    * not lost server-side either.
    */
-  #adopt(state: MonetisationDraft): void {
+  #adopt(state: MonetisationDraft, sent?: MonetisationDraft): void {
+    const typed = sent ?? this.#pending;
     const normalised: MonetisationDraft = {
       subscriptionEnabled: state.subscriptionEnabled,
-      priceMonthlyCents:
-        state.priceMonthlyCents ?? this.#pending.priceMonthlyCents,
-      priceAnnualCents:
-        state.priceAnnualCents ?? this.#pending.priceAnnualCents,
+      priceMonthlyCents: state.priceMonthlyCents ?? typed.priceMonthlyCents,
+      priceAnnualCents: state.priceAnnualCents ?? typed.priceAnnualCents,
       tierIds: [...state.tierIds].sort(),
     };
-    this.#pending = { ...normalised };
     this.#saved = { ...normalised };
+    if (sent && !sameDraft(this.#pending, sent)) return;
+    this.#pending = { ...normalised };
   }
 }
 

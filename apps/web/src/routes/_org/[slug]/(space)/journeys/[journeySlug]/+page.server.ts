@@ -21,6 +21,7 @@
 import { extractPlainText } from '@codex/validation';
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
+import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
@@ -72,6 +73,22 @@ export const load: PageServerLoad = async (event) => {
   if (!coursePage) {
     throw error(404, 'This portal could not be found.');
   }
+
+  // ── UPGRADE AT THE LOAD CHOKE POINT (Codex-61zsk.6 · WP-6, contract §3) ─────
+  // A page's stored `sections`/`design` may be in EITHER vocabulary — legacy
+  // (pre-kit) or v2 — and `upgradePage` is a pure, total, idempotent function
+  // that accepts both and always returns a v2 `KitPage`. This is the ONE
+  // place a public read normalises it: the server stays vocabulary-agnostic
+  // everywhere else (contract §3 "Where applied"), and a legacy row is
+  // rewritten to v2 for real only on its next save (WP-9). `coursePage.page`
+  // itself is passed through UNCHANGED below — `+page.svelte`'s SEO/JSON-LD
+  // derivation reads its raw `sections` directly, because `findInviteSection`
+  // already recognises both the legacy `invite` type and the v2 `pricing`
+  // rename, so re-deriving offers from the upgraded shape would buy nothing.
+  const kitPage = upgradePage({
+    design: coursePage.page.design,
+    sections: coursePage.page.sections,
+  });
 
   // ── START THE HERO'S MEDIA READ NOW, NOT AT THE END OF THE LOAD ─────────────
   // Still STREAMED (it is returned unawaited below, and the intro/reel/hero
@@ -341,6 +358,10 @@ export const load: PageServerLoad = async (event) => {
 
   return {
     coursePage,
+    // The upgraded, kit-shaped page — computed once, above. `coursePage.page`
+    // stays the raw envelope for SEO/JSON-LD; this is what `+page.svelte`
+    // hands to `PageRenderer`.
+    kitPage,
     enrolled,
     // Rendered by the ROOT layout, once, so the page overrides rather than
     // duplicates. See the derivation above.

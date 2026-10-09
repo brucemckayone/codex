@@ -33,6 +33,8 @@ export * from './schemas/fee-config';
 export * from './schemas/file-upload';
 // Journey member-surface route schemas (Codex-2pryk Round-D)
 export * from './schemas/journeys';
+// Page-kit v2 vocabulary — zod twin of kit/model/ids.ts (landing-builder contract §2)
+export * from './schemas/landing-page';
 // Notification schemas
 export * from './schemas/notifications';
 // Organization member schemas

@@ -78,15 +78,35 @@ export type SectionProps = Record<string, unknown>;
  * exactly as {@link PageSection.variant} already is. A value this build does not
  * know resolves to the axis DEFAULT rather than reaching the DOM, so the renderer
  * never emits an attribute that matches no CSS rule.
+ *
+ * SUPERSEDED (`docs/design/landing-builder/01-contract.md` §2/§3 — BINDING,
+ * WP-9b): these nine axes are the LEGACY vocabulary the page-kit Style system
+ * (below) replaces for all new work. `@codex/validation`'s `sectionDesignSchema`
+ * no longer accepts them on a WRITE — they are kept here, still typed and still
+ * optional, only because an existing row's `design` bag may still carry them
+ * until its next save; the web upgrades such a row to v2 on load
+ * (`kit/model/upgrade.ts`). Each is marked `@deprecated` below.
  */
 export interface SectionDesign {
-  /** Content measure: `narrow` 46ch · `text` 64ch · `wide` 78ch · `full` bleed. */
+  /**
+   * Content measure: `narrow` 46ch · `text` 64ch · `wide` 78ch · `full` bleed.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   width?: 'narrow' | 'text' | 'wide' | 'full';
-  /** Vertical-rhythm multiplier, applied ON TOP of the org's brand density. */
+  /**
+   * Vertical-rhythm multiplier, applied ON TOP of the org's brand density.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   density?: 'compact' | 'regular' | 'airy' | 'vast';
-  /** Section backdrop: none / tinted / panelled / inverted / media-backed. */
+  /**
+   * Section backdrop: none / tinted / panelled / inverted / media-backed.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   surface?: 'bare' | 'tint' | 'panel' | 'invert' | 'media';
-  /** Border weight FUSED with elevation — they co-vary, so one axis owns both. */
+  /**
+   * Border weight FUSED with elevation — they co-vary, so one axis owns both.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   edge?: 'none' | 'hairline' | 'soft' | 'heavy' | 'offset';
   /**
    * Text/box alignment, and it deletes ~8 alignment-only variants. `end` is
@@ -94,29 +114,81 @@ export interface SectionDesign {
    * while the text stays left-aligned, because a right-ragged body column is a
    * readability regression. WIDENING ONLY — every persisted `start`/`center`
    * stays valid.
+   * @deprecated legacy axis — read-only, upgraded on load
    */
   align?: 'start' | 'center' | 'end';
-  /** Type-scale character, from utilitarian to display-led. */
+  /**
+   * Type-scale character, from utilitarian to display-led.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   type?: 'restrained' | 'balanced' | 'expressive' | 'monumental';
-  /** How the ember accent is spent. `none` still leaves a price-bearing CTA filled. */
+  /**
+   * How the ember accent is spent. `none` still leaves a price-bearing CTA filled.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   accent?: 'text' | 'fill' | 'edge' | 'glow' | 'none';
-  /** Reveal choreography. `none` is an authored value, not just reduced-motion. */
+  /**
+   * Reveal choreography. `none` is an authored value, not just reduced-motion.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   motion?: 'none' | 'fade' | 'rise' | 'stagger' | 'drift';
-  /** How media sits in the section. Inert on the types that carry no media. */
+  /**
+   * How media sits in the section. Inert on the types that carry no media.
+   * @deprecated legacy axis — read-only, upgraded on load
+   */
   media?: 'bleed' | 'frame' | 'mask' | 'inset' | 'none';
+
+  // ── Page-kit v2 (docs/design/landing-builder/01-contract.md §2/§3 — BINDING,
+  // supersedes the nine axes above for new work). `scheme?`/`spacing?` are a
+  // SECTION's v2 style; `style?` is the PAGE's v2 look. Both land on this one
+  // interface because `PageBuilderState.design` already reuses `SectionDesign`
+  // for the page-level bag exactly as `pageSectionSchema.design` reuses
+  // `sectionDesignSchema` for both roles — a section never sets `style` and a
+  // page never sets `scheme`/`spacing`. The string unions are duplicated from
+  // `kit/model/ids.ts` rather than imported: that file is a `$lib` module a
+  // BE-safe foundation package cannot depend on, and the nine legacy axes
+  // above are already duplicated the same way against `SECTION_DESIGN_VALUES`
+  // in `section-catalog.ts`. Legacy axis fields are unchanged and still valid.
+  /** A section's v2 colour scheme. Mirrors `ColourSchemeId` in `kit/model/ids.ts`. */
+  scheme?: 'base' | 'soft' | 'contrast' | 'brand' | 'accent' | 'atmosphere';
+  /** A section's v2 vertical rhythm. Mirrors `SectionSpacingId` in `kit/model/ids.ts`. */
+  spacing?: 'compact' | 'regular' | 'spacious';
+  /** A page's v2 Style. Mirrors `PageStyleId` in `kit/model/ids.ts`. Page-only. */
+  style?:
+    | 'bold'
+    | 'clean'
+    | 'soft'
+    | 'cinematic'
+    | 'path'
+    | 'poster'
+    | 'studio'
+    | 'quiet';
 }
 
 /**
- * A FULLY RESOLVED {@link SectionDesign} — every axis populated, because the
- * renderer emits one `data-jp-<axis>` attribute per axis and an absent value
- * would emit an EMPTY attribute that matches no CSS rule.
+ * A FULLY RESOLVED {@link SectionDesign} — every LEGACY axis populated,
+ * because the renderer emits one `data-jp-<axis>` attribute per axis and an
+ * absent value would emit an EMPTY attribute that matches no CSS rule.
  *
  * Produced by `resolveDesign(section, page)` in
  * `apps/web/src/lib/page-builder/section-catalog.ts`, which resolves per axis
  * (section override → page default → axis default) and drops unknown values.
  * This is the shape a section component receives as its `design` prop.
+ *
+ * `Omit`s the three page-kit v2 keys (`scheme`/`spacing`/`style`) —
+ * DELIBERATELY, not an oversight. `Required<SectionDesign>` would otherwise
+ * demand all three on every literal typed as `ResolvedSectionDesign`
+ * (`design-vocabulary.ts`'s eight presets, `section-catalog.ts`'s own
+ * `SECTION_DESIGN_DEFAULTS`, and every `*Section.svelte.test.ts` fixture —
+ * none of which is page-kit code and none of which this contract's WP may
+ * touch). `resolveDesign()` has no v2 concept at all; the v2 resolution
+ * (`scheme`/`spacing`/`style`) is `kit/model/resolve.ts`'s (WP2) entirely
+ * separate function, over the entirely separate `SectionStyle`/`PageDesign`
+ * types in `kit/model/types.ts`.
  */
-export type ResolvedSectionDesign = Required<SectionDesign>;
+export type ResolvedSectionDesign = Required<
+  Omit<SectionDesign, 'scheme' | 'spacing' | 'style'>
+>;
 
 /**
  * One composable section INSTANCE (SPEC §4.1). Order is array position;
@@ -758,6 +830,28 @@ export interface JourneyCourseView {
    * worker deployment simply omits it and the head emits no `og:image`.
    */
   coverImageUrl?: string | null;
+  /**
+   * UPLOADED hero-image CDN URL (`courses.heroImageKey` → `lg.webp`), or null
+   * when the creator has uploaded no hero image (Codex-490z7, A32). Rides the
+   * AWAITED envelope for the SAME reason {@link coverImageUrl} does (Codex-61zsk.6
+   * · WP-6): the hero still otherwise arrives only on the STREAMED
+   * `CourseSellPreview.heroImageUrl`, which a first-paint `<img>` cannot wait
+   * on without becoming the page's LCP bottleneck.
+   *
+   * THE UPLOAD ONLY, deliberately NOT `CourseSellPreview.heroImageUrl`'s full
+   * A32 fallback chain (which also resolves a hero VIDEO's poster frame via a
+   * `media_items` join) — the same "upload only" split
+   * {@link JourneySellMedia.heroImageUrl} already documents, kept cheap here on
+   * purpose: this field costs no extra join, because `heroImageKey` is a plain
+   * column already read for {@link coverImageUrl}. A hero that is a video with
+   * no uploaded still stays exactly as fast as before (the streamed poster
+   * frame), it just cannot join the awaited envelope too.
+   *
+   * OPTIONAL-additive (like {@link CourseSellPreview.heroImageUrl}): an older
+   * worker deployment simply omits it and the hero block keeps reading the
+   * streamed field.
+   */
+  heroImageUrl?: string | null;
 }
 
 /** One testimonial rendered by the `proof` section. */
@@ -1027,6 +1121,19 @@ export interface JourneyCoursePage {
   course: JourneyCourseView;
   stages: JourneyStageView[];
   testimonials: JourneyTestimonialView[];
+  /**
+   * The CDN base a page-kit block resolves a page-image `ImageRef` against
+   * (`resolvePageImageUrl`, contract amendment A3 of
+   * `docs/design/landing-builder/01-contract.md`, Codex-61zsk.10/.6) — the
+   * SAME env-owned `R2_PUBLIC_URL_BASE` {@link JourneyCourseView.coverImageUrl}
+   * and {@link JourneyCourseView.heroImageUrl} already resolve against,
+   * echoed here so the web never needs its own copy of the value. Null with
+   * no configured base.
+   *
+   * OPTIONAL-additive: an older worker deployment omits it and every
+   * page-image block renders its designed empty state.
+   */
+  mediaBaseUrl?: string | null;
 }
 
 /**

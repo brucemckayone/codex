@@ -27,6 +27,14 @@ export const ORPHANED_IMAGE_TYPES = [
   'course_cover',
   'course_hero',
   'course_signature',
+  // Free-placement landing-page images (Codex-61zsk.10, contract amendment
+  // A3). UNLIKE the seven types above, this one has no DB column at all —
+  // `imageId` is a fresh uuid per upload, so there is nothing to overwrite in
+  // place, and a key becomes orphaned only when `CourseJourneyService.
+  // saveJourneyPage` finds it no longer referenced anywhere in the page's
+  // `sections` jsonb. Without this entry the CHECK below rejects those orphan
+  // rows and `recordOrphansOrLog` falls back to a log line nothing sweeps.
+  'page_image',
 ] as const;
 
 export type OrphanedImageType = (typeof ORPHANED_IMAGE_TYPES)[number];
@@ -41,6 +49,10 @@ export const ORPHANED_ENTITY_TYPES = [
   'media_item',
   'category',
   'course',
+  // Owns `page_image` orphans (Codex-61zsk.10) — the landing page itself, NOT
+  // its subject course, since a page image can sit on any block regardless of
+  // what (or whether) the page presents.
+  'landing_page',
 ] as const;
 
 export type OrphanedEntityType = (typeof ORPHANED_ENTITY_TYPES)[number];
@@ -132,11 +144,11 @@ export const orphanedImageFiles = pgTable(
     // CHECK constraints
     check(
       'check_image_type',
-      sql`${table.imageType} IN ('avatar', 'logo', 'content_thumbnail', 'transcoding_artifact', 'category_cover', 'course_cover', 'course_hero', 'course_signature')`
+      sql`${table.imageType} IN ('avatar', 'logo', 'content_thumbnail', 'transcoding_artifact', 'category_cover', 'course_cover', 'course_hero', 'course_signature', 'page_image')`
     ),
     check(
       'check_entity_type',
-      sql`${table.originalEntityType} IS NULL OR ${table.originalEntityType} IN ('user', 'organization', 'content', 'media_item', 'category', 'course')`
+      sql`${table.originalEntityType} IS NULL OR ${table.originalEntityType} IN ('user', 'organization', 'content', 'media_item', 'category', 'course', 'landing_page')`
     ),
     check(
       'check_orphan_status',

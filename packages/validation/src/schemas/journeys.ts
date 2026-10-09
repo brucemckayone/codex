@@ -1,6 +1,12 @@
-import type { BrandTokenOverrides } from '@codex/shared-types';
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
+import {
+  COLOUR_SCHEME_IDS,
+  PAGE_STYLE_IDS,
+  SECTION_SPACING_IDS,
+  SECTION_TYPE_IDS,
+  type SectionTypeId,
+} from './landing-page';
 
 /**
  * Journey member-surface route inputs (Codex-2pryk · Round-D · Codex-776gg).
@@ -205,7 +211,8 @@ export const createJourneyBodySchema = z.object({
 export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
 
 /**
- * One design AXIS: a CLOSED enum that DEGRADES instead of rejecting.
+ * One SECTION design axis (`scheme`/`spacing`): a CLOSED enum that DEGRADES
+ * instead of rejecting.
  *
  * `.optional().catch(undefined)` is the whole point. A future client sending an
  * axis value this deployment does not know must not fail the entire page save —
@@ -218,26 +225,61 @@ export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
  * arbitrary string reaching `resolveDesign` and being emitted as a `data-jp-*`
  * attribute value that matches no CSS rule, so the section silently renders with
  * defaults and the creator sees a control that appears to do nothing.
+ *
+ * The PAGE's `style` (in {@link sectionDesignSchema} below) does NOT use this
+ * helper — it is the one axis that REJECTS an unrecognised value instead of
+ * degrading (owner decision 2026-09-28, Codex-61zsk.29). Degrading `style`
+ * would silently turn the whole page's look into Bold, which is a far bigger,
+ * more visible change than one section losing an axis — worse than a failed
+ * save the creator can retry, because the editor keeps their edits and
+ * reports the failure rather than changing what they see.
  */
 const designAxis = <const T extends readonly [string, ...string[]]>(
   values: T
 ) => z.enum(values).optional().catch(undefined);
 
 /**
- * The nine design axes (`docs/design/journey-sections/02-axis-contract.md` A5).
- * Mirrors `SectionDesign` in `@codex/shared-types`; unknown KEYS are stripped by
- * `z.object`'s default behaviour and unknown VALUES by the per-axis `.catch`.
+ * A section's or page's v2 STYLE bag (`docs/design/landing-builder/
+ * 01-contract.md` §2/§3 — BINDING) — the ONLY `design` shape a WRITE may
+ * persist as of WP-9b. Mirrors `SectionDesign` in `@codex/shared-types`
+ * (whose nine legacy fields now carry a `@deprecated` note). Unknown KEYS are
+ * stripped by `z.object`'s default behaviour; unknown VALUES degrade via the
+ * per-axis `.catch` for `scheme`/`spacing`, and REJECT for `style` (owner
+ * decision 2026-09-28, Codex-61zsk.29 — see {@link designAxis} above).
+ *
+ * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
+ * (this one object backs both `pageSectionSchema.design` and
+ * `saveJourneyPageBodySchema.design`, exactly as it already backed both roles
+ * for the nine legacy axes). A section never sets `style` and a page never
+ * sets `scheme`/`spacing`; nothing reads the unused one for either role, so
+ * the extra optional keys are harmless.
+ *
+ * PRUNED (contract §3: "the server ... validates writes (v2 keys added by
+ * WP1, legacy keys pruned by WP9)"): the nine legacy design axes
+ * (`width`/`density`/`surface`/`edge`/`align`/`type`/`accent`/`motion`/`media`)
+ * are gone from this schema. They are not REJECTED — a stale client sending
+ * them still saves; the axis KEYS are silently stripped as unknown, exactly
+ * like a key this schema never heard of always was. Reads are unaffected: an
+ * existing row's legacy `design` bag is untouched by this schema (validation
+ * only runs on the write path), and the web upgrades it to v2 on load
+ * (`kit/model/upgrade.ts`) — so the row is pruned for real on its next save.
+ * Structurally this is `landing-page.ts`'s `sectionStyleSchema` +
+ * `pageDesignSchema` merged into one object; that file's doc comment called
+ * itself "the standalone v2-only twin ... for any future v2-native write
+ * path" — this schema is that path, now that it exists.
  */
 export const sectionDesignSchema = z.object({
-  width: designAxis(['narrow', 'text', 'wide', 'full']),
-  density: designAxis(['compact', 'regular', 'airy', 'vast']),
-  surface: designAxis(['bare', 'tint', 'panel', 'invert', 'media']),
-  edge: designAxis(['none', 'hairline', 'soft', 'heavy', 'offset']),
-  align: designAxis(['start', 'center', 'end']),
-  type: designAxis(['restrained', 'balanced', 'expressive', 'monumental']),
-  accent: designAxis(['text', 'fill', 'edge', 'glow', 'none']),
-  motion: designAxis(['none', 'fade', 'rise', 'stagger', 'drift']),
-  media: designAxis(['bleed', 'frame', 'mask', 'inset', 'none']),
+  scheme: designAxis(COLOUR_SCHEME_IDS),
+  spacing: designAxis(SECTION_SPACING_IDS),
+  // The PAGE's v2 Style REJECTS an unrecognised value instead of degrading —
+  // the exception to `designAxis` above (owner decision 2026-09-28,
+  // Codex-61zsk.29). Absent still passes (`.optional()`); only a
+  // present-but-unknown value 400s.
+  style: z
+    .enum(PAGE_STYLE_IDS, {
+      error: 'Unknown page Style. Refresh and choose a Style again.',
+    })
+    .optional(),
 });
 export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
 
@@ -249,17 +291,27 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * so adding `design` to the TypeScript interface would have bought no validation
  * at all.
  *
- * Three fields stay deliberately LOOSE, and tightening any of them would reject
- * data the platform already stores:
- *   - `type` is an OPEN string. The renderer skips an unrecognised type rather
- *     than erroring (that is what makes a future page template additive), so the
- *     schema must accept one too.
- *   - `variant` is an OPEN string for the same reason, and concretely: the seeded
- *     `studio-alpha` page stores `variant: "default"`, which is not a declared
- *     variant of any type. An enum here would 400 a real page on save.
+ * TWO fields stay deliberately LOOSE, and tightening either would reject data
+ * the platform already stores:
+ *   - `variant` is an OPEN string. The renderer/resolver falls back to the
+ *     type's default layout on an unrecognised one (that is what makes a
+ *     future layout additive), and concretely: the seeded `studio-alpha` page
+ *     stores `variant: "default"`, which is not a declared variant of any
+ *     type. An enum here would 400 a real page on save.
  *   - `props` is a PASSTHROUGH record. Its per-type shape is owned by the renderer
  *     + editor, not by this contract, and `render/coerce.ts` already treats every
  *     field as untrusted at the read boundary.
+ *
+ * `type` is now the CLOSED v2 vocabulary instead (`SECTION_TYPE_IDS`,
+ * `docs/design/landing-builder/01-contract.md` §2 — BINDING; WP-9b). It used
+ * to be an open string for the same "renderer skips what it doesn't
+ * recognise" reason `variant` still is — that stayed true for READS (an
+ * existing legacy-typed row keeps rendering; the web upgrades it to v2 on
+ * load, `kit/model/upgrade.ts`) but stopped being the right rule for WRITES:
+ * v2 is now the only vocabulary this platform adds section types to, so a
+ * save naming a type outside that closed set is a client bug — an old
+ * builder build or a hand-crafted request — not a future template, and it
+ * 400s rather than persisting a type the new kit will never render.
  *
  * `props` carries `.default({})` rather than being required: `.default()` only
  * widens the INPUT type while the output stays required, so the inferred body is
@@ -273,8 +325,9 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * frozen contract fails `pnpm typecheck` at that call site.
  */
 export const pageSectionSchema = z.object({
-  id: z.string().min(1),
-  type: z.string().min(1).max(60),
+  // Capped like every other string here; the builder mints uuids (36 chars).
+  id: z.string().min(1).max(100),
+  type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
   enabled: z.boolean(),
   variant: z.string().max(60).optional(),
   name: z.string().max(200).optional(),
@@ -337,12 +390,65 @@ export const pageSeoSchema = z
   .strict();
 export type PageSeoBody = z.infer<typeof pageSeoSchema>;
 
+/** One brand value: a CSS colour, a font family name, a small token value. */
+const brandValueSchema = z.string().max(200);
+
+/** A brand editor token-override map (`tokenOverrides` / `darkTokenOverrides`). */
+const brandTokenMapSchema = z
+  .record(z.string().regex(/^[a-z0-9-]{1,64}$/), brandValueSchema.nullable())
+  .refine(
+    (map) => Object.keys(map).length <= 100,
+    'Too many token overrides (100 limit)'
+  );
+
+/**
+ * A page's brand overrides (`BrandTokenOverrides`) — BOUNDED. This was
+ * `z.custom()`, which checks nothing: any JSON of any size persisted, and was
+ * re-served in every public page payload (Codex-61zsk review).
+ *
+ * Sizes and shapes only, never a colour or font grammar. The values are CSS
+ * values the brand controls write (hex colours, family names, small numbers),
+ * and the bag round-trips — the builder loads it whole and sends it whole back
+ * — so a grammar stricter than what rendering accepts would make an
+ * otherwise-valid page unsaveable. What stops a value breaking out of its CSS
+ * declaration is the renderer's own check at the sink
+ * (`apps/web/src/lib/page-builder/render/brand-overrides.ts`), which also
+ * covers rows stored before this schema existed.
+ *
+ * Unknown keys are STRIPPED, not rejected, unlike {@link pageSeoSchema}: every
+ * key the renderer reads is declared here, so a stripped key is one nothing
+ * could show, and rejecting it would lock a creator out of a page they can see.
+ */
+export const brandTokenOverridesSchema = z.object({
+  primaryColor: brandValueSchema.optional(),
+  secondaryColor: brandValueSchema.nullable().optional(),
+  accentColor: brandValueSchema.nullable().optional(),
+  backgroundColor: brandValueSchema.nullable().optional(),
+  fontBody: brandValueSchema.nullable().optional(),
+  fontHeading: brandValueSchema.nullable().optional(),
+  radius: z.number().min(0).max(10).optional(),
+  density: z.number().min(0).max(10).optional(),
+  logoUrl: z.string().max(2048).nullable().optional(),
+  tokenOverrides: brandTokenMapSchema.optional(),
+  darkOverrides: z
+    .object({
+      primaryColor: brandValueSchema.optional(),
+      secondaryColor: brandValueSchema.nullable().optional(),
+      accentColor: brandValueSchema.nullable().optional(),
+      backgroundColor: brandValueSchema.nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  darkTokenOverrides: brandTokenMapSchema.nullable().optional(),
+  heroLayout: z.string().max(64).optional(),
+});
+
 /**
  * Save-journey-page body — the editable page record (frozen `JourneyPageRecord`
  * minus the server-owned `organizationId`/`publishedAt`, which the service
- * derives). `sections` is validated structurally by {@link pageSectionSchema};
- * `brandOverrides` still carries its FE type via `z.custom` so the inferred type
- * is assignable to the service input with no boundary cast.
+ * derives). `sections` is validated structurally by {@link pageSectionSchema},
+ * `brandOverrides` by {@link brandTokenOverridesSchema}; both infer types
+ * assignable to the service input with no boundary cast.
  *
  * `.strict()` because this endpoint does NOT own the whole builder draft. The
  * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema` — under Zod's
@@ -390,7 +496,7 @@ export const saveJourneyPageBodySchema = z
     status: journeyPageStatusSchema,
     subjectType: z.string().max(30).nullable(),
     subjectId: uuidSchema.nullable(),
-    brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
+    brandOverrides: brandTokenOverridesSchema.nullable(),
     // CAPPED (Codex-us9ay residual 1). An unbounded array on a jsonb column is an
     // unbounded write; the idiom is already in this file at
     // `saveCurriculumStageSchema` (`.max(100)`). 60 is ~5x the eleven-entry

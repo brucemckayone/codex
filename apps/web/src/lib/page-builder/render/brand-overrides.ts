@@ -51,6 +51,25 @@ const CORE_DARK: Record<string, string> = {
 
 const FONT_FIELDS = new Set(['fontBody', 'fontHeading']);
 
+/** A custom property the page may set: `--` and kebab-case, nothing else. */
+const SAFE_PROPERTY = /^--[a-z0-9-]+$/;
+
+/**
+ * Anything that would carry a value out of its own declaration. These values
+ * come from a creator-editable jsonb column and are joined into a `style`
+ * attribute on the PUBLIC page, so a `;` starts a new declaration
+ * (`red; position: fixed; inset: 0`) and `url(` fetches whatever it names —
+ * nothing a colour, a family name or a scale needs. Checked here, at the sink,
+ * so it also covers rows stored before the save schema was bounded.
+ */
+const UNSAFE_VALUE = /[;{}<>\\]|url\(|expression\(|@import|\p{Cc}/iu;
+
+function isSafeDeclaration([prop, value]: [string, string]): boolean {
+  return (
+    SAFE_PROPERTY.test(prop) && value.length <= 200 && !UNSAFE_VALUE.test(value)
+  );
+}
+
 /**
  * Font-family values must be quoted when they contain whitespace/commas so the
  * emitted `--brand-font-*` value composes cleanly into org-brand.css's
@@ -83,7 +102,9 @@ export function brandOverridesToCssVars(
 
   // ── Numeric inputs: radius + density feed the radius/spacing scales ──
   if (typeof overrides.radius === 'number') {
-    out['--brand-radius'] = String(overrides.radius);
+    // A length, like the org layout's `${radius}rem` — a bare number makes
+    // `--radius-base` an invalid length and breaks every radius token.
+    out['--brand-radius'] = `${overrides.radius}rem`;
   }
   if (typeof overrides.density === 'number') {
     out['--brand-density'] = String(overrides.density);
@@ -98,6 +119,16 @@ export function brandOverridesToCssVars(
     }
   }
 
+  // A page that re-colours the brand must not keep the ORG's dark-mode colour
+  // (an org `--brand-color-dark` would otherwise win in dark previews): without
+  // its own dark value, the page's colour carries into dark. Background is
+  // exempt — a light page background must never paint dark mode.
+  for (const field of ['primaryColor', 'secondaryColor', 'accentColor']) {
+    const light = out[CORE_LIGHT[field]];
+    const darkProp = CORE_DARK[field];
+    if (light && !(darkProp in out)) out[darkProp] = light;
+  }
+
   // ── Fine-tune token overrides (canonical prefix split + null-skip) ──
   if (overrides.tokenOverrides) {
     Object.assign(out, tokenOverridesToCssVars(overrides.tokenOverrides));
@@ -109,7 +140,7 @@ export function brandOverridesToCssVars(
     );
   }
 
-  return out;
+  return Object.fromEntries(Object.entries(out).filter(isSafeDeclaration));
 }
 
 /**

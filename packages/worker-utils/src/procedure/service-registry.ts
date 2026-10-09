@@ -1088,6 +1088,8 @@ export async function createServiceRegistry(
         _courseJourney = new CourseJourneyService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          // Page images removed from a saved page are queued for the sweep.
+          orphanedFileService: getOrphanedFileService(),
         });
       }
       return _courseJourney;

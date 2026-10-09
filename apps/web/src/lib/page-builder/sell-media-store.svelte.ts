@@ -133,6 +133,13 @@ const EMPTY_SLOTS: SellMediaSlots = {
   signatureMediaId: null,
 };
 
+/** Every slot holds the same media. */
+function sameSlots(a: SellMediaSlots, b: SellMediaSlots): boolean {
+  return (Object.keys(a) as JourneySellMediaSlot[]).every(
+    (slot) => a[slot] === b[slot]
+  );
+}
+
 class SellMediaStore {
   /** The page whose media is loaded; null when closed. */
   #pageId = $state<string | null>(null);
@@ -267,9 +274,7 @@ class SellMediaStore {
    */
   get isDirty(): boolean {
     if (!this.#loaded) return false;
-    return (Object.keys(this.#pending) as JourneySellMediaSlot[]).some(
-      (slot) => this.#pending[slot] !== this.#saved[slot]
-    );
+    return !sameSlots(this.#pending, this.#saved);
   }
 
   /** True once the attached media has been read back — see {@link #loaded}. */
@@ -402,16 +407,19 @@ class SellMediaStore {
    * Errors PROPAGATE — the caller reports them. Swallowing here is exactly how
    * the pricing panel came to report success on a failed save, so this method
    * only marks the baseline once the write has actually come back.
+   *
+   * The baseline always moves to the echo; the draft does only if no slot was
+   * picked while the write was in flight. That pick is NEWER than the echo, and
+   * adopting the echo over it would revert it and read clean — so the queued
+   * save would send nothing and report "Saved".
    */
   async save(): Promise<void> {
     const pageId = this.#pageId;
     // `isDirty` already carries the `#loaded` gate; the check is spelled out
     // again here because this is the method that would do the damage.
     if (!pageId || !this.#loaded || !this.isDirty) return;
-    const persisted = await updateJourneySellMedia({
-      pageId,
-      media: this.#pending,
-    });
+    const sent: SellMediaSlots = { ...this.#pending };
+    const persisted = await updateJourneySellMedia({ pageId, media: sent });
     const slots: SellMediaSlots = {
       introVideoMediaId: persisted.introVideoMediaId,
       previewVideoMediaId: persisted.previewVideoMediaId,
@@ -420,8 +428,8 @@ class SellMediaStore {
       heroMediaId: persisted.heroMediaId,
       signatureMediaId: persisted.signatureMediaId,
     };
-    this.#pending = { ...slots };
     this.#saved = { ...slots };
+    if (sameSlots(this.#pending, sent)) this.#pending = { ...slots };
     // The write path does not touch any of the three uploaded stills, but the
     // service echoes all three resolved from the row it just wrote — so this is a
     // refresh, not a clobber. `?? null` for the same optional-additive reason as

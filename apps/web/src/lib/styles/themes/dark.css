@@ -58,6 +58,8 @@
   --color-brand-accent: var(--color-warning);
   --color-brand-accent-hover: var(--color-warning-600);
   --color-brand-accent-subtle: var(--color-warning-700);
+  /* See light.css — re-declared here because --color-brand-accent is. */
+  --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments (ContentCard shape system) — see light.css for
      the rationale. Same derivation; the dark --color-background makes the

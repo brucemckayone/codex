@@ -64,6 +64,12 @@
   --color-brand-accent: var(--color-warning);
   --color-brand-accent-hover: var(--color-warning-600);
   --color-brand-accent-subtle: var(--color-warning-100);
+  /* Ink for text sitting ON a --color-brand-accent fill (the content page's
+     purchase CTA). --color-text-inverse inverts the PAGE, not the swatch, so it
+     painted white on the amber default (2.15:1) and near-black on a dark org's
+     saturated red (Codex-1g5lh.18). Same step function and same per-scope
+     re-declaration rule as --color-on-interactive above. */
+  --color-text-on-accent: oklch(from var(--color-brand-accent) clamp(0, (0.62 - l) * 1000, 1) 0 0);
 
   /* Media cover treatments (ContentCard shape system).
      --media-scrim darkens the bottom of a media tile so overlaid text
