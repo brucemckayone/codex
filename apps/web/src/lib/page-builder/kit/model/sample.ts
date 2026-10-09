@@ -14,6 +14,7 @@ import type {
   JourneyTestimonialView,
 } from '$lib/page-builder';
 import { deriveOfferPaths } from '../../offer-paths';
+import type { ImageRef } from '../../page-images';
 import type {
   JourneySalesContext,
   PreviewMedia,
@@ -276,5 +277,87 @@ export function samplePage(
       enabled: true,
       props: { ...DEFINITIONS[type].sample },
     })),
+  };
+}
+
+/** A picture a preview can show, and the caption a gallery may give it. */
+export interface SamplePicture {
+  image: ImageRef;
+  caption?: string;
+}
+
+type Entry = Record<string, unknown>;
+
+/** Each record of a list prop, remade; anything else is left as it is. */
+function eachEntry(value: unknown, remake: (entry: Entry) => Entry): unknown {
+  return Array.isArray(value)
+    ? value.map((entry) =>
+        typeof entry === 'object' && entry !== null
+          ? remake(entry as Entry)
+          : entry
+      )
+    : value;
+}
+
+/**
+ * The page with a picture in every picture field — each moment of a story,
+ * each benefit, the text's image, and a gallery holding every picture — so a
+ * Style's frames, mosaics and strips can be judged on real photographs. The
+ * pictures are dealt in turn down the page, so no section repeats one while
+ * another goes unused. Only a caller whose pictures really exist passes any
+ * (the dev gallery): the definitions' own samples carry none, so a thumbnail
+ * never requests a made-up URL.
+ */
+export function withSamplePictures(
+  page: KitPage,
+  pictures: readonly SamplePicture[]
+): KitPage {
+  if (pictures.length === 0) return page;
+  let dealt = 0;
+  const next = () => pictures[dealt++ % pictures.length];
+  return {
+    ...page,
+    sections: page.sections.map((section) => {
+      const props = section.props;
+      switch (section.type) {
+        case 'story':
+          return {
+            ...section,
+            props: {
+              ...props,
+              steps: eachEntry(props.steps, (step) => ({
+                ...step,
+                image: next().image,
+              })),
+            },
+          };
+        case 'benefits':
+          return {
+            ...section,
+            props: {
+              ...props,
+              items: eachEntry(props.items, (item) => ({
+                ...item,
+                image: next().image,
+              })),
+            },
+          };
+        case 'text':
+          return { ...section, props: { ...props, image: next().image } };
+        case 'gallery':
+          return {
+            ...section,
+            props: {
+              ...props,
+              items: pictures.map(() => {
+                const { image, caption } = next();
+                return caption ? { image, caption } : { image };
+              }),
+            },
+          };
+        default:
+          return section;
+      }
+    }),
   };
 }

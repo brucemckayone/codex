@@ -1,11 +1,16 @@
 <!--
   @component SchemeSwatches
 
-  The section's colour: the five schemes as REAL scheme tiles — each one a
-  `.lp[data-lp-style]` root in the page's Style, theme and brand, with a
-  `data-lp-scheme` tile the kit's own recipes paint — so a swatch is exactly
-  the band the section would become. The tiles are the one place the editor
-  shows the page's colours; the buttons around them stay studio chrome.
+  The section's colour: the six schemes as REAL bands. Each tile is a small
+  `.lp-section` with its `.lp-surface`, inside an `.lp-page`, under an
+  `.lp[data-lp-style]` root in the page's Style, theme and brand — so the
+  kit paints it exactly as it paints the section: its scheme's colours, the
+  colours a textured Style moves them to, the texture itself, and the glow a
+  Moving background shows where the organisation's own cannot (every still
+  render, this one included). The buttons around the tiles stay studio chrome.
+
+  "Moving" says what it is in words as well: in its tooltip, to assistive
+  tech, and on screen once chosen, since a touch has no hover.
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
@@ -44,12 +49,15 @@
     onReset,
   }: Props = $props();
 
+  const uid = $props.id();
+
   const SHORT_NAMES: Record<ColourSchemeId, () => string> = {
     base: () => m.studio_page_editor_scheme_base(),
     soft: () => m.studio_page_editor_scheme_soft(),
     contrast: () => m.studio_page_editor_scheme_contrast(),
     brand: () => m.studio_page_editor_scheme_brand(),
     accent: () => m.studio_page_editor_scheme_accent(),
+    atmosphere: () => m.studio_page_editor_scheme_atmosphere(),
   };
 
   const brandStyle = $derived(brandOverridesToStyleAttr(brandOverrides));
@@ -61,6 +69,7 @@
   <div class="swatches__row" role="group" aria-label={m.studio_page_editor_colour_title()}>
     {#each COLOUR_SCHEME_IDS as id (id)}
       {@const isDefault = id === styleDefault}
+      {@const moving = id === 'atmosphere'}
       <button
         type="button"
         class="swatch"
@@ -69,7 +78,8 @@
         aria-label={isDefault
           ? m.studio_page_editor_with_default({ name: fullName(id) })
           : fullName(id)}
-        title={fullName(id)}
+        aria-describedby={moving ? `${uid}-moving` : undefined}
+        title={moving ? m.studio_page_editor_scheme_atmosphere_hint() : fullName(id)}
         onclick={() => onChoose(id)}
       >
         <span
@@ -80,12 +90,15 @@
           style={brandStyle}
           aria-hidden="true"
         >
-          <span class="swatch__tile" data-lp-scheme={id}>
-            <span class="swatch__aa">Aa</span>
-            <span class="swatch__chip"></span>
-            {#if value === id}
-              <span class="swatch__check"><CheckIcon size={12} /></span>
-            {/if}
+          <span class="lp-page swatch__page">
+            <span class="lp-section swatch__tile" data-lp-scheme={id}>
+              <span class="lp-surface"></span>
+              <span class="swatch__aa">Aa</span>
+              <span class="swatch__chip"></span>
+              {#if value === id}
+                <span class="swatch__check"><CheckIcon size={12} /></span>
+              {/if}
+            </span>
           </span>
         </span>
         <span class="swatch__name" aria-hidden="true">{SHORT_NAMES[id]()}</span>
@@ -95,6 +108,9 @@
       </button>
     {/each}
   </div>
+  <p class="swatches__note" id="{uid}-moving" hidden={value !== 'atmosphere'}>
+    {m.studio_page_editor_scheme_atmosphere_hint()}
+  </p>
   {#if chosen}
     <button type="button" class="swatches__reset" onclick={onReset}>
       {m.studio_page_editor_colour_reset()}
@@ -110,7 +126,7 @@
 
   .swatches__row {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-1);
   }
 
@@ -144,23 +160,28 @@
     outline-offset: var(--focus-offset);
   }
 
-  .swatch__lp {
+  .swatch__lp,
+  .swatch__page {
     display: block;
     inline-size: 100%;
   }
 
-  /* The kit's scheme tokens paint the tile; nothing here names a colour. */
+  /* A band in miniature: the kit's section rules paint it (ground, ink,
+     surface); only its box is the swatch's. The line is a border, not an
+     inset shadow, so the section's surface layer cannot cover it. The
+     Moving glow's blur is sized for a full band (about an eighth of its
+     height); at a tile's size that smears both lights to nothing, so the
+     tile scales it the same way. */
   .swatch__tile {
-    position: relative;
+    --blur-2xl: var(--blur-md);
     display: grid;
     place-items: center;
     align-content: center;
     gap: var(--space-1);
-    aspect-ratio: 1;
+    aspect-ratio: 3 / 2;
+    padding: 0;
+    border: var(--border-width) var(--border-style) var(--lp-line);
     border-radius: var(--radius-sm);
-    background: var(--lp-bg);
-    color: var(--lp-ink);
-    box-shadow: inset 0 0 0 var(--border-width) var(--lp-line);
   }
 
   .swatch[aria-pressed='true'] .swatch__tile {
@@ -176,7 +197,7 @@
   }
 
   .swatch__chip {
-    inline-size: 60%;
+    inline-size: 50%;
     block-size: var(--space-1);
     border-radius: var(--lp-radius-button);
     background: var(--lp-button-bg);
@@ -202,6 +223,13 @@
     min-block-size: 1lh;
     font-size: var(--text-xs);
     line-height: var(--leading-tight);
+    color: var(--color-text-secondary);
+  }
+
+  .swatches__note {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
     color: var(--color-text-secondary);
   }
 

@@ -40,6 +40,11 @@ export const curriculumDefinition: BlockDefinition<CurriculumProps> = {
       'Numbered stages that open to show their practices, so a long course stays easy to scan.'
     ),
     layout('cards', 'Cards', 'Each stage in its own card, side by side.'),
+    layout(
+      'map',
+      'Journey map',
+      'Your stages as stops along a drawn route, each opening to show its practices.'
+    ),
   ],
   fields: [
     eyebrowField,

@@ -211,7 +211,8 @@ export const createJourneyBodySchema = z.object({
 export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
 
 /**
- * One design AXIS: a CLOSED enum that DEGRADES instead of rejecting.
+ * One SECTION design axis (`scheme`/`spacing`): a CLOSED enum that DEGRADES
+ * instead of rejecting.
  *
  * `.optional().catch(undefined)` is the whole point. A future client sending an
  * axis value this deployment does not know must not fail the entire page save —
@@ -224,6 +225,14 @@ export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
  * arbitrary string reaching `resolveDesign` and being emitted as a `data-jp-*`
  * attribute value that matches no CSS rule, so the section silently renders with
  * defaults and the creator sees a control that appears to do nothing.
+ *
+ * The PAGE's `style` (in {@link sectionDesignSchema} below) does NOT use this
+ * helper — it is the one axis that REJECTS an unrecognised value instead of
+ * degrading (owner decision 2026-09-28, Codex-61zsk.29). Degrading `style`
+ * would silently turn the whole page's look into Bold, which is a far bigger,
+ * more visible change than one section losing an axis — worse than a failed
+ * save the creator can retry, because the editor keeps their edits and
+ * reports the failure rather than changing what they see.
  */
 const designAxis = <const T extends readonly [string, ...string[]]>(
   values: T
@@ -233,9 +242,10 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
  * A section's or page's v2 STYLE bag (`docs/design/landing-builder/
  * 01-contract.md` §2/§3 — BINDING) — the ONLY `design` shape a WRITE may
  * persist as of WP-9b. Mirrors `SectionDesign` in `@codex/shared-types`
- * (whose nine legacy fields now carry a `@deprecated` note); unknown KEYS are
- * stripped by `z.object`'s default behaviour and unknown VALUES by the
- * per-axis `.catch`.
+ * (whose nine legacy fields now carry a `@deprecated` note). Unknown KEYS are
+ * stripped by `z.object`'s default behaviour; unknown VALUES degrade via the
+ * per-axis `.catch` for `scheme`/`spacing`, and REJECT for `style` (owner
+ * decision 2026-09-28, Codex-61zsk.29 — see {@link designAxis} above).
  *
  * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
  * (this one object backs both `pageSectionSchema.design` and
@@ -261,7 +271,15 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
 export const sectionDesignSchema = z.object({
   scheme: designAxis(COLOUR_SCHEME_IDS),
   spacing: designAxis(SECTION_SPACING_IDS),
-  style: designAxis(PAGE_STYLE_IDS),
+  // The PAGE's v2 Style REJECTS an unrecognised value instead of degrading —
+  // the exception to `designAxis` above (owner decision 2026-09-28,
+  // Codex-61zsk.29). Absent still passes (`.optional()`); only a
+  // present-but-unknown value 400s.
+  style: z
+    .enum(PAGE_STYLE_IDS, {
+      error: 'Unknown page Style. Refresh and choose a Style again.',
+    })
+    .optional(),
 });
 export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
 

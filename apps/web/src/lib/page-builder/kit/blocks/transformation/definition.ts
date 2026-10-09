@@ -48,6 +48,11 @@ export const transformationDefinition: BlockDefinition<TransformationProps> = {
       'Big statement',
       'The before lines quiet, the after lines large, one beneath the other.'
     ),
+    layout(
+      'toggle',
+      'Switch',
+      'A switch that flips between where visitors are now and where they will be.'
+    ),
   ],
   fields: [
     eyebrowField,

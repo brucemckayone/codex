@@ -12,7 +12,16 @@
  */
 
 /** A page's Style — one complete, brand-driven design system. */
-export const PAGE_STYLE_IDS = ['bold', 'clean', 'soft', 'cinematic'] as const;
+export const PAGE_STYLE_IDS = [
+  'bold',
+  'clean',
+  'soft',
+  'cinematic',
+  'path',
+  'poster',
+  'studio',
+  'quiet',
+] as const;
 export type PageStyleId = (typeof PAGE_STYLE_IDS)[number];
 /** The Style a page renders in when it has none (owner decision 2026-09-26). */
 export const DEFAULT_PAGE_STYLE: PageStyleId = 'bold';
@@ -24,6 +33,8 @@ export const COLOUR_SCHEME_IDS = [
   'contrast',
   'brand',
   'accent',
+  // The org's own shader seen through the section (03-expressive-contract §5.1).
+  'atmosphere',
 ] as const;
 export type ColourSchemeId = (typeof COLOUR_SCHEME_IDS)[number];
 
@@ -37,20 +48,22 @@ export const DEFAULT_SECTION_SPACING: SectionSpacingId = 'regular';
  * type is its fallback when neither the section nor the Style names one.
  */
 export const SECTION_LAYOUTS = {
-  hero: ['statement', 'split', 'cover', 'centered'],
+  hero: ['statement', 'split', 'cover', 'centered', 'poster'],
   video: ['theatre', 'split'],
   problem: ['statement', 'list', 'split'],
-  transformation: ['columns', 'steps', 'statement'],
-  benefits: ['grid', 'checklist', 'split'],
-  curriculum: ['timeline', 'accordion', 'cards'],
+  transformation: ['columns', 'steps', 'statement', 'toggle'],
+  benefits: ['grid', 'checklist', 'split', 'bento'],
+  curriculum: ['timeline', 'accordion', 'cards', 'map'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
-  testimonials: ['grid', 'featured', 'quote'],
+  testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
   faq: ['accordion', 'columns'],
   pricing: ['cards', 'focus', 'band'],
   cta: ['band', 'split', 'compact'],
   stats: ['row', 'grid'],
   text: ['statement', 'columns', 'centered'],
+  story: ['scroll', 'chapters', 'strip'],
+  gallery: ['mosaic', 'strip', 'grid'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;

@@ -14495,15 +14495,23 @@ export const studio_page_editor_empty_title = () => `Start your page`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_empty_body = (params) => `Begin with a hero — the promise and button visitors meet first — or start from a complete page in the ${params.style} style and make it yours.`
+export const studio_page_editor_empty_body = (params) => `Choose how your page begins. Every section takes the ${params.style} style, and you can change, move or remove any of them afterwards.`
 
 
 /**
- * @param {{ style: NonNullable<unknown> }} params
+ * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const studio_page_editor_empty_template = (params) => `Start from the ${params.style} template`
+export const studio_page_editor_empty_sections = (params) => `${params.count} sections`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_empty_own = () => `Or build it yourself, one section at a time.`
 
 
 /**
@@ -14751,6 +14759,22 @@ export const studio_page_editor_scheme_accent = () => `Second`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere = () => `Moving`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_scheme_atmosphere_hint = () => `Your organisation’s moving background, set in Brand. Without one, a soft glow of your colours.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_spacing_title = () => `Spacing`
 
 
@@ -14768,6 +14792,22 @@ export const studio_page_editor_spacing_default = (params) => `${params.size} is
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_spacing_reset = () => `Use the default spacing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_background_title = () => `Background image`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_background_hint = () => `Fills the section behind your words, darkened so they stay easy to read. It takes the place of the section’s colour.`
 
 
 /**
@@ -14880,6 +14920,30 @@ export const studio_page_editor_gallery_add = (params) => `Add ${params.section}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_style_in_use = () => `In use`
+
+
+/**
+ * @param {{ heading: NonNullable<unknown>, body: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_style_fonts = (params) => `This Style suggests ${params.heading} and ${params.body}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_style_fonts_use = () => `Use these fonts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_style_fonts_keep = () => `Keep my fonts`
 
 
 /**

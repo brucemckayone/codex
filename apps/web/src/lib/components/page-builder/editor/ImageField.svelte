@@ -36,9 +36,18 @@
     mediaBaseUrl?: string | null;
     /** No words needed unless the creator chooses to add them. */
     decorative?: boolean;
+    /** The id of a heading that already names this field; it then draws no label of its own. */
+    labelledby?: string;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null, decorative = false }: Props = $props();
+  const {
+    field,
+    value,
+    onChange,
+    mediaBaseUrl = null,
+    decorative = false,
+    labelledby,
+  }: Props = $props();
 
   const id = $props.id();
   const upload = uploadPageImageForm.for(id);
@@ -99,8 +108,8 @@
   }
 </script>
 
-<div class="image" role="group" aria-labelledby="{id}-label">
-  <span class="image__label" id="{id}-label">{field.label}</span>
+<div class="image" role="group" aria-labelledby={labelledby ?? `${id}-label`}>
+  {#if !labelledby}<span class="image__label" id="{id}-label">{field.label}</span>{/if}
   {#if field.hint}<p class="image__hint">{field.hint}</p>{/if}
 
   <div class="image__row">

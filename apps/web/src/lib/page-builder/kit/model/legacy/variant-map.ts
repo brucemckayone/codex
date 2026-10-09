@@ -142,8 +142,11 @@ export const LEGACY_VARIANT_MAP: Readonly<
     grid: 'grid', // name match.
     stack: 'featured', // one column, full measure = a prominent single treatment.
     spotlight: 'featured', // "one quote at large scale" IS the definition of featured.
-    wall: 'grid', // dense masonry of many quotes = grid-like density.
-    marquee: 'featured', // a distinct prominent treatment; not a plain grid.
+    // v2 has had both compositions since 03 (E4), under the same names: the
+    // masonry wall and the moving strip (03 §13 X14). Before that these went
+    // to the nearest stand-in (grid, featured).
+    wall: 'wall',
+    marquee: 'marquee',
     pull: 'quote', // pull-quote, no card = name match.
   },
   faq: {

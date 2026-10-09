@@ -252,5 +252,86 @@ describe('BenefitsBlock', () => {
         { title: 'C' },
       ]);
     });
+
+    it('bento: every tile shows its own picture, the lead on the large file, drifting on a wrapper of its own', async () => {
+      const both = {
+        ...SAMPLE,
+        items: [
+          { ...first, image },
+          { ...second, image: { key: 'landing-pages/p1/images/b2' } },
+          ...rest,
+        ],
+      };
+      await render(both, { layout: 'bento', mediaBaseUrl: CDN });
+      const tiles = [
+        ...document.body.querySelectorAll('.benefits-bento__tile'),
+      ];
+      expect(tiles[0].querySelector('img')?.getAttribute('src')).toBe(
+        `${CDN}/${image.key}/lg.webp`
+      );
+      expect(tiles[0].querySelector('img')?.getAttribute('alt')).toBe(
+        image.alt
+      );
+      expect(tiles[1].querySelector('img')?.getAttribute('src')).toBe(
+        `${CDN}/landing-pages/p1/images/b2/md.webp`
+      );
+      // A tile without a picture keeps to its words: no empty frame.
+      for (const tile of tiles.slice(2)) {
+        expect(tile.querySelector('.lp-media')).toBeNull();
+        expect(tile.hasAttribute('data-pictured')).toBe(false);
+      }
+      const drifting = [
+        ...document.body.querySelectorAll('[data-lp-parallax]'),
+      ];
+      expect(drifting).toHaveLength(1);
+      expect(drifting[0].closest('li')).toBe(tiles[0]);
+      expect(drifting[0].matches('.lp-media, li')).toBe(false);
+    });
+
+    it('offers the tile image in the grid and the bento only', () => {
+      const field = benefitsDefinition.fields
+        .find((f) => f.key === 'items')
+        ?.itemFields?.find((f) => f.key === 'image');
+      expect(field?.layouts).toEqual(['grid', 'bento']);
+    });
+  });
+
+  describe('bento', () => {
+    it('gives the first item the largest tile and the section’s one filled card', async () => {
+      await render(SAMPLE, { layout: 'bento' });
+      const tiles = [
+        ...document.body.querySelectorAll('.benefits-bento__tile'),
+      ];
+      expect(tiles.map((t) => t.getAttribute('data-tile'))).toEqual([
+        'lead',
+        'side',
+        'half',
+        'half',
+      ]);
+      // Bold (the default Style) features a base section's card in `contrast`.
+      expect(tiles[0].getAttribute('data-lp-scheme')).toBe('contrast');
+      expect(tiles[0].hasAttribute('data-lead')).toBe(true);
+      for (const tile of tiles.slice(1)) {
+        expect(tile.hasAttribute('data-lp-scheme')).toBe(false);
+      }
+    });
+
+    it('nests each tile’s name under the section heading', async () => {
+      await render(SAMPLE, { layout: 'bento' });
+      expect(one('h2')?.textContent).toBe(SAMPLE.heading);
+      expect(all('h3').map((h) => h.textContent)).toEqual(
+        SAMPLE.items?.map((item) => item.title)
+      );
+    });
+
+    it('draws one item as a whole tile', async () => {
+      await render(
+        { items: [{ title: 'Lifetime access' }] },
+        { layout: 'bento' }
+      );
+      expect(one('.benefits-bento__tile')?.getAttribute('data-tile')).toBe(
+        'whole'
+      );
+    });
   });
 });
