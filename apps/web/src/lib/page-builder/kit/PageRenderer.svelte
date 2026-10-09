@@ -142,9 +142,10 @@
     return featured ? priceWithCadence(featured) : undefined;
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
-  // The floating bar sits on the org's own ground, in the org's own button,
-  // unless a Style names a band for it (phase 3a): a dark bar is a band the
-  // org's site never shows, and its button would have to move to stay legible.
+  // The floating bar is the org's own raised card (its card colour, D9),
+  // holding the org's own button, unless a Style names a band for it (phase
+  // 3a): a dark bar is a band the org's site never shows, and its button
+  // would have to move to stay legible.
   const stickyScheme = $derived(STYLES[style].sticky ?? 'base');
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
   // The org's shader draws in the ORG's colours, so a page with its own

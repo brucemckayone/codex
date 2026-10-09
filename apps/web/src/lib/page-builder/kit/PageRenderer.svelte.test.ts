@@ -365,7 +365,7 @@ describe('PageRenderer', () => {
     ).toBe(STYLES[style].sticky ?? 'base');
   });
 
-  it('floats the bar on the org’s ground unless a Style names a band: Cinematic’s on its tint', async () => {
+  it('floats the bar on the org’s own surface (base, its raised card) unless a Style names a band: Cinematic’s on its tint', async () => {
     const bars: Record<string, string | null | undefined> = {};
     for (const style of ['quiet', 'cinematic', 'bold'] as const) {
       const root = await render({ page: samplePage(style) });

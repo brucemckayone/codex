@@ -96,10 +96,10 @@ const MAPPING = [
 
 /**
  * The floating bar, where the page has one: a raised card in the org's card
- * colour, holding the org's button (owner, D9).
+ * colour (checked in its test, against the band), holding the org's button
+ * (owner, D9).
  */
 const STICKY_MAPPING = [
-  ['bar card', '--color-surface-card'],
   ['bar button', '--color-interactive'],
   ['bar button label', '--color-on-interactive'],
 ] as const;
@@ -371,6 +371,26 @@ for (const item of SELLING) {
         'the page has a floating bar'
       ).toBeTruthy();
       expect(mismatches(reading, reading.org, STICKY_MAPPING), why).toEqual([]);
+      // The org's card exactly, when it lies in the ground's band; a card
+      // outside it (the platform's dark #404040, L 0.37) is held on the
+      // band's edge, as the ground would be (Task 1), and the floors are the
+      // band's.
+      const own = reading.org['--color-surface-card'] ?? '';
+      const drawn = reading.kit['bar card'] ?? '';
+      const light = oklab(reading.kit.ground ?? '')[0] >= 0.5;
+      const ownL = oklab(own)[0];
+      if (light ? ownL >= 0.9 : ownL <= 0.24)
+        expect(
+          mismatches(reading, reading.org, [
+            ['bar card', '--color-surface-card'],
+          ]),
+          why
+        ).toEqual([]);
+      else
+        expect(
+          Math.abs(oklab(drawn)[0] - (light ? 0.9 : 0.24)),
+          why
+        ).toBeLessThan(0.005);
       expect(shadow.org, why).not.toBe('none');
       expect(shadow.bar, why).toContain(shadow.org);
       const { kit } = reading;
@@ -441,10 +461,14 @@ test('every call to action is the org’s button height and weight', async ({
   expect(found.org.md).toBe('44px');
   for (const button of found.kit) {
     const want = button.size === 'lg' ? found.org.lg : found.org.md;
+    const why = `${button.size} “${button.text}”: ${button.height}, want ${want}`;
+    // Numbers, not strings: at a brand density other than 1 the computed
+    // height prints rounded (46.0781px) and the drawn box does not (46.078125px).
     expect(
-      { height: button.height, weight: button.weight },
-      `${button.size} “${button.text}”`
-    ).toEqual({ height: want, weight: found.org.weight });
+      Math.abs(Number.parseFloat(button.height) - Number.parseFloat(want)),
+      why
+    ).toBeLessThan(0.01);
+    expect(button.weight, why).toBe(found.org.weight);
   }
 });
 

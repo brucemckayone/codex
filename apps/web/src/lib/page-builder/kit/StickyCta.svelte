@@ -33,7 +33,7 @@
     signature?: string;
   }
 
-  const { context, label, priceLine, scheme = 'contrast', signature = '' }: Props = $props();
+  const { context, label, priceLine, scheme = 'base', signature = '' }: Props = $props();
 
   const cta = $derived(resolvePrimaryCta(context, label));
   /** Set by the first observation, so the bar is never shown on a guess. */

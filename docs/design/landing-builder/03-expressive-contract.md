@@ -144,6 +144,9 @@ them in §13.
 
 ### 4.2 Corners: the brand radius, bent
 
+> **Amended by X44 (phase 3a):** the source of a card's, a picture's and a button's corner is now
+> the org's `--radius-card`, `--radius-lg` and `--radius-button`. The bends below stand.
+
 `--lp-brand-radius: var(--brand-radius, var(--radius-md))` (kit base). A Style sets each radius token
 as `clamp(<floor>, calc(var(--lp-brand-radius) * <k>), <ceiling>)`:
 
@@ -1027,3 +1030,234 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       new, at 120 characters (Codex-61zsk.36);
     - not measured: 1024 wide, containers of 50–56rem, the public page's header, and the editor
       canvas.
+- **X35 · 2026-10-09 · orchestrator + p3a · Phase 3a: the org's derived tokens are the source
+  (Codex-61zsk.41, Task 1).** The owner's decision (2026-09-30), verbatim: "Follow the org
+  (Recommended)". The kit had re-derived a second palette from the raw brand inputs; it now
+  draws the org's own `--color-*` tokens and keeps its move formulas only as the safety net.
+  - **The source.** `.lp` reads the org's nine tokens as `--_org-*` (`schemes.css`):
+    `--color-background`, `-surface-secondary`, `-surface-card`, `-text`, `-text-secondary`,
+    `-border`, `-heading`, `-focus` and `-interactive`. A page's own brand makes the root a
+    nested `[data-org-brand]` carrier, which re-derives them there.
+  - **Where.** Base and soft sections that are not over a picture, in every Style but
+    Cinematic. **Cinematic's dark room stays, deliberately**: its sections keep the kit's
+    inks.
+  - **The floors.** An org colour is drawn exactly, and moved only as far as a floor needs:
+    text 4.5:1, large text, marks, buttons and the focus ring 3:1. The grades are the band's
+    worst surface times a 2% margin. Plain: text `--_ot` (light Y ≤ .114, dark ≥ .25), large
+    `--_ol` (≤ .196 / ≥ .15). Decorated (Studio's paper, Soft's shapes): `--_odt`
+    (.086 / .33) and `--_odl` (.155 / .203). The hairline is decoration and is the org's
+    exactly.
+  - **The bands.** The ground, the soft band and the card move only when outside their band:
+    light L ≥ 0.9 (chroma capped at 0.046 only when moved), dark L ≤ 0.24 (0.039). The dark
+    surfaces share the ground's band, so there is one worst surface for every ink on it.
+  - **Polarity follows the org's ground.** An org background with no dark twin keeps the light
+    pole in dark mode, as the org's own pages do (`data-org-bg`).
+  - **Tests:** `e2e/page-kit/brand-fidelity.spec.ts` "a base section is drawn in the org's own
+    tokens" (4 pages × 2 themes), "a … preview on a … viewer draws the org's … tokens", "a dark
+    preview on a light viewer resolves a page carrier's DARK brand tokens";
+    `kit/styles/schemes.test.ts` "the org is the source — its tokens, drawn exactly unless a
+    floor fails (phase 3a)": it models `org-brand.css`, draws the seeded orgs exactly, holds
+    every floor for ANY org colour on the worst surface its band can hold, and moves no further
+    than 3% past what that surface needs.
+  - **Measured** against explore: 27 of 32 base-section readings differed before; 0 after.
+- **X36 · 2026-10-09 · p3a · The button is the org's, at the org's height and weight; the
+  floating bar defaults to `base` (Task 2).**
+  - **Fill and label.** A primary button is the org's `--color-interactive` through `--_ol`,
+    with the org's label rule (the platform's lightness pivot, `--color-on-interactive`'s
+    own). Accent text is the same colour at the text grade. The kit's own bands (contrast,
+    brand, accent) keep their own button grade (.248 / .175).
+  - **Shape.** In every Style a call to action is the org's large button,
+    `--tap-target-min` (44px), and a leading one (`size="lg"`: the hero's, the closing
+    band's, a featured offer's) its extra large, `max(--tap-target-min, --space-12)` (48px).
+    Both are scaled by the brand's density, at `--font-medium`. A Style keeps the label's
+    size, tracking and padding.
+  - **The bar's scheme.** `PageRenderer` passes `STYLES[style].sticky ?? 'base'`, and
+    `StickyCta`'s own default is `base` too. Quiet names `base`; Cinematic names `soft`, its
+    tint. A dark bar is a band the org's site never shows, and its button would have to move
+    to stay legible.
+  - **Tests:** spec "every call to action is the org's button height and weight" (compared as
+    numbers since 3a Task 3: at a density other than 1 the computed height prints rounded);
+    the button rows of the spec's mapping; schemes.test "draws the org's button, accent text
+    and marks on base and soft — on both paths"; `PageRenderer.svelte.test.ts` "floats the
+    bar on the org's own surface (base, its raised card) unless a Style names a band:
+    Cinematic's on its tint"; `StickyCta.svelte.test.ts` "defaults to the base scheme, as
+    PageRenderer does".
+- **X37 · 2026-10-09 · p3a · `--lp-accent-source` is the marks' source only.** It is the brand
+  colour a Style's marks are moved from (Path draws its route in the second colour). Accent
+  text and buttons are the org's interactive colour in every Style, never the source, so a
+  page's words and its asks are one colour. A mark is graphic grade (3:1) and is never the
+  colour of text or of a button. **Tests:** schemes.test "moves the accent and the buttons from
+  the brand, the marks from their source — on both paths"; "the mark is graphic grade only" ("is
+  never the colour of text or of a button anywhere in the kit", with its calibration).
+- **X38 · 2026-10-09 · p3a · A mid-tone button darkens a little and keeps white (D8).** The
+  owner's decision, verbatim: "Darken a little, keep white (Recommended)".
+  - **The rule.** Where white falls just short of 4.5:1 on the org's fill, the fill darkens
+    only as far as white needs (`--_wl-*`, `--_wl-f`). A bright fill keeps the org's black
+    label (`--_wk`, the switch at Y .182). On Tending the Grief, #ef3d0b is drawn #dd3809 with
+    a white label, in both themes.
+  - **Where it differs from the org.** The org's own label rule would put black on such a fill
+    (for example `#FF0000`, which the kit draws `#ed0000` with white). That difference is the
+    decision.
+  - **Tests:** schemes.test "keep white — a mid-tone button darkens a little rather than take a
+    black label (owner, D8)", with its teeth; spec "Tending the Grief's mid-tone brand darkens a
+    little and keeps a white label" (light and dark).
+- **X39 · 2026-10-09 · p3a · A page background with no twin follows the org in the other theme
+  (D7, `data-page-bg`).** The owner's decision, verbatim: "Follow the org's dark mode
+  (Recommended)".
+  - **The rule.** A page that sets only `--brand-bg` draws it in light mode only, and a page
+    that sets only `--brand-bg-dark` draws it in dark mode only. In the other theme the page
+    takes the org's own ground and inks.
+  - **The attributes.** `PageRenderer` marks the carrier `data-org-bg` and names the theme(s)
+    the background is for in `data-page-bg` (`light` | `dark` | `both`). Both are derived
+    from the properties declared, never from the style text.
+  - **Tests:** spec "a light-only page background gives way to the org's dark mode", its
+    preview case, and "studio-alpha light: a dark-only page background gives way to the org's
+    light mode"; `PageRenderer.svelte.test.ts` "names which theme the page's own background is
+    for, so the other takes the org's (owner, D7)"; schemes.test "gives a page background with
+    no twin back to the org in the other theme (owner, D7)".
+- **X40 · 2026-10-09 · p3a · Path's missing second colour is a tone of the org's own (D11).** The
+  owner's decision, verbatim: "A tone of the org's colour (Recommended)". It replaces the
+  invented 45° hue (of-blood-and-bones' ochre #765821).
+  - **The rule.** With no second colour of the org's own, `--lp-brand-2` is the org's colour
+    at the same hue, moved in OKLCH lightness toward the ground (+0.2 on the light pole, −0.2
+    on the dark), turning back at the band edge (L 0.78 / 0.25). An org's own second colour
+    is untouched.
+  - **Tests:** schemes.test "the second colour's tone — the org's own hue, apart from it (owner,
+    D11)", with its teeth; spec "Path's route is a tone of the org's colour" (light and dark).
+- **X41 · 2026-10-09 · p3a · The hero's main button over a photo is the org's own button (D10).**
+  The owner first chose "The org's colour (Recommended)". After seeing a lightened build turn
+  Tending the Grief's orange into coral (#ff7863), the owner chose "Org's own button
+  (Recommended)" (D10b).
+  - **The rule.** The hero's primary button over media is exactly the button the kit draws on
+    the org's surfaces. One rule carries both selectors and the two declarations, so they
+    cannot drift apart.
+  - **Why WCAG allows it.** WCAG 1.4.11 asks a control with visible text for no contrasting
+    edge, only a legible label and a visible focus ring
+    (https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html#boundaries). The focus
+    ring stays the on-media ink, at least 6.96:1 against the lightest surface any brand's scrim
+    allows.
+  - **Scope.** The secondary, quiet and watch controls, and the words, keep the on-media ink.
+  - **Known gap:** a Cinematic cover hero over a photo gets the org's button at the dark-pole
+    grade, while Cinematic's sections keep their own button. No live page has one.
+  - **Tests:** schemes.test "the hero's main button over a photo is the org's own button
+    (owner, D10)" (shared definition; focus ring for every brand); spec "the hero's main button
+    over its photo is the button its own sections draw" (light and dark).
+- **X42 · 2026-10-09 · p3a · The floating bar is a raised card (D9, Task 3).** The owner's
+  decision, verbatim: "Raised card (Recommended)". Since Task 2 the bar sat on the org's ground,
+  flat against the page it floats over.
+  - **The rule.** On the org's surfaces (scheme `base`), the bar draws its scheme's card colour,
+    `--lp-panel`, which there is the org's `--color-surface-card`. It sits on
+    `--lp-shadow-raised` (= `--shadow-xl`): the shadow the org floats its own bar
+    (`SubscribeStickyBar`) and its raised panels on. It holds the org's button. Quiet adds its
+    hairline rim over the same shadow. Cinematic's `soft` bar keeps its tint, because there
+    the card is the ground.
+  - **The floors.** The card is held in the ground's band exactly as the ground is (the same
+    `clamp`, per pole), so every ink and button proven on that band holds on it.
+  - **Card against ground.** No seeded org's card equals its ground:
+    - of-blood-and-bones: #fffffd on #f3f0e7 (1.14:1), both themes;
+    - studio-alpha and studio-beta, light: #ffffff on #fafafa (1.04:1). That is near-equal,
+      so the shadow carries the bar;
+    - studio-alpha and studio-beta, dark: the platform's card #404040 (L 0.37) lies above the
+      dark band, so it is held at L 0.24 (#1f1f1f) on #171717 (1.09:1), and the org's dark
+      shadow carries it.
+    - Neither studio has a bar on a live page, because nothing is on sale.
+  - **Measured on of-blood-and-bones, light:** text 20.97:1, price 9.43:1 (12.61:1 dark), the
+    button against the card 7.06:1, and its label 7.07:1. On Tending the Grief's own #dd3809
+    the button is 4.52:1 against the card and its label 4.52:1 on it.
+  - **Tests:** spec "the floating bar is a raised card in the org's card colour, with the org's
+    button" (2 pages × 2 themes): the card, the shadow and all four floors. The card is the
+    org's exactly when it lies in the band, and on the band's edge when it does not.
+    schemes.test "the floating bar is a raised card in the org's card colour (owner, D9)": the
+    drawn rule, the card in the ground's band, the floors for any brand and org ground, and the
+    seeded orgs. `StickyCta.svelte.test.ts` holds the default scheme.
+- **X43 · 2026-10-09 · p3a · Labels in the org's case and tracking (Task 3).** A label, the
+  eyebrow (the kit's kicker), is in the org's `--text-transform-label`:
+  `--lp-case-label: var(--text-transform-label, none)`.
+  - **The tracking.** The org has no label-tracking token. Its own uppercase labels pair the
+    case with `--tracking-wider` (0.05em) in 15 of the 20 places that read the case token, and
+    in 11 of the 13 on its public pages: the floating bar, the catalogue tile, the content
+    page's two, and 7 on the pricing page. The other 5 use `--tracking-wide`. So an uppercase
+    label takes
+    `--tracking-wider`, through `@container lp-page style(--lp-case-label: uppercase)` on each
+    section. A label in any other case keeps its Style's tracking.
+  - **Explore's kicker.** It is a literal 0.2em at 13px (`JourneyEntryCard`), not a token, so
+    the kit does not copy it.
+  - **Before → after,** on all 7 live pages, both themes: sentence case at 0–0.04em became
+    uppercase at 0.05em. 0 of 14 rows matched explore's case before; 14 of 14 after.
+  - **The fold (X34, X29, X27, X31).** 2,828 rows were re-measured and are identical to before:
+    0 past the fold, 0 split words, min gap 55.3px. An uppercase tracked eyebrow is 18–23%
+    wider, but every live one stays on one line; the longest is 324 of 355px at 390.
+  - **Known gaps:**
+    - SideLabel, the offer badge and the testimonial marquee's labels (blocks) do not read
+      `--lp-case-label`, so they stay in their own case;
+    - a browser without style queries keeps the Style's tracking.
+  - **Tests:** spec "every eyebrow is in the org's label case and tracking" (4 pages); "the
+    hero's eyebrow reads as its explore card's kicker" ("FOR THE WEIGHT YOU CARRY", equal to
+    explore's); "a page that sets its labels in sentence case keeps them, at its Style's
+    tracking".
+- **X44 · 2026-10-09 · p3a · Corners: the org's radius tokens, bent (Task 3; amends §4.2).** A
+  card's corner is the org's `--radius-card`, a picture's its `--radius-lg` and a button's its
+  `--radius-button`, each times the Style's bend from §4.2, with §4.2's floors and ceilings.
+  Chips and pill-if-rounded stay on the brand radius. The org's tokens are re-derived on a
+  page's own carrier.
+  - **Before,** the raw brand radius times the bend drew every card and picture at two thirds
+    of the org's card corner. Buttons are unchanged, because `--radius-button` is the brand
+    radius.
+  - **Drawn** (card and picture / button, px), verified on all 24 combinations:
+
+    | Style (k) | of-blood-and-bones (radius 0.33rem) | studio-alpha (0.375rem) | studio-beta (0.5rem) |
+    |---|---|---|---|
+    | Bold, Poster (.25) | 1.98 / 1.32 | 2.25 / 1.5 | 3 / 2 |
+    | Studio, Quiet (.5) | 3.96 / 2.64 | 4.5 / 3 | 6 / 4 |
+    | Clean, Path (1) | 7.92 / 5.28 | 9 / 6 | 12 / 8 |
+    | Soft (2) | 15.84 / pill | 18 / pill | 24 / pill |
+    | Cinematic (1) | 7.92 / pill | 9 / pill | 12 / pill |
+
+    Clean and Path draw the org's own card corner. Explore's content cards are rounder, at
+    `--radius-xl` (10.56 / 12 / 16).
+  - **Harness note.** Hydration sets the root's attributes back to the page's own about 0.66s
+    after the server's HTML renders. So the spec's `openAs` waits for a quiet network before
+    it draws anything on the root, and the corners test checks that the Style it set is still
+    the one drawn.
+  - **Tests:** spec "every Style's corners are the org's radius tokens, bent" (3 orgs × 8
+    Styles × card, picture and button).
+- **X45 · 2026-10-09 · p3a · Shadows: the org's own, where a Style lifts a card (Task 3).**
+  - **What the org draws.** Explore's cards rest on `--shadow-md` (on the picture, since the
+    card itself is transparent) and lift to `--shadow-lg` under the pointer. The home page's
+    carousel slides sit on `--shadow-lg`. Its floating bar and raised panels (Spotlight, the
+    subscribe panel, the pricing tier cards) sit on `--shadow-xl`.
+  - **The kit's two tokens.** `--lp-shadow-card` (`--shadow-md`) for a card at rest, and
+    `--lp-shadow-raised` (`--shadow-xl`) for one that floats over the page (X42). The org's
+    dark mode deepens both.
+  - **Per Style:**
+    - Soft's one filled card in a band rests on `--lp-shadow-card`. It was the card's own
+      ground deepened.
+    - Cinematic's plates keep the room's own shade: the room is the Style's deliberate dark,
+      where a grey shadow cannot show.
+    - Studio's prints are a photograph's edge, the Style's texture, and keep theirs.
+    - Clean, Bold and Poster draw no card shadow by design; Path and Quiet draw flat cards.
+  - **Known gap:** the org's shadow fine-tune (`--brand-shadow-scale`, `--brand-shadow-color`)
+    never reaches `--shadow-*`. The tokens are composed at `:root`
+    (`styles/tokens/shadows.css:12`), and `org-brand.css:190-191` re-declares only their
+    inputs. The org's own site has the same gap, and the kit matches it.
+  - **Tests:** spec "Soft's filled card rests on the org's card shadow" (light and dark; red on
+    the old Soft stylesheet); the bar's shadow in X42's spec case.
+- **X46 · 2026-10-09 · p3a · Phase 3a measured, before → after (c9ffbea2^ → Task 3).** The
+  owner's question for every page: does it read as the org's own site?
+  - **Before** was measured on the pre-3a sources swapped back in. The swap was calibrated:
+    1,064 of Task 1's readings were re-measured and the only 2 that differed were on explore's
+    own heading pick. **After** is the final tree.
+  - **Results:**
+    - colour: X35's 27 of 32 → 0, unchanged since Task 2 (studio-alpha and studio-beta: 255
+      of 256 readings identical between Task 2 and Task 3, the other on explore);
+    - labels: 0 of 14 sales-page rows in explore's label case → 14 of 14 (X43);
+    - corners: X44;
+    - the bar: 0 of 6 bars in the org's card → 6 of 6, light and dark. On of-blood-and-bones it
+      went from a dark contrast band (#23100c with #f74518 and a black label) to the org's card
+      #fffffd holding its #a62b0c button (X42).
+  - **Captures:** before | after | explore at 1440 light, one per org, shown to the owner on
+    2026-10-09.
+  - **Measured on the seeded brands.** During the first after run the owner was trying other
+    brands on of-blood-and-bones in the brand editor (#8B5CF6, then #FF0000 on #FDF3ED). Those
+    6 rows were re-measured once the seed was restored. The other 14 were identical between
+    the two runs.
