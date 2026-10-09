@@ -12,10 +12,15 @@
                 the band's edge (HeroPoster)
 
   The one sanctioned fallback in the kit: an empty headline renders the course
-  title. Media arrives on the streamed `sellPreview`; each layout holds its
-  space while it loads. Structure is identical in every Style — the Style
-  changes it through tokens and a few `[data-lp-style]` rules — so switching
-  Style never re-mounts the block.
+  title. Media arrives on the streamed `sellPreview`. Structure is identical in
+  every Style — the Style changes it through tokens and a few
+  `[data-lp-style]` rules — so switching Style never re-mounts the block.
+
+  NO PICTURE (Codex-61zsk.37): the public page draws only what it has, so a
+  split, centered or poster hero with no picture is its words alone — split
+  set as the statement sets them. The plate that holds a picture's place
+  appears only where the page is looked at (the canvas, a still thumbnail:
+  `page.still`), and there each layout keeps its shape while media loads.
 
   A medium or a long headline is marked `data-medium` / `data-long` (the
   kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
@@ -32,6 +37,7 @@
   import { COPY } from '../../model/copy';
   import { headingLength } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
+  import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
@@ -44,6 +50,7 @@
 
   const { props, section, context, edit }: BlockProps = $props();
 
+  const page = getKitPage();
   const content = $derived(heroDefinition.coerce(props));
   const heading = $derived(content.heading ?? context.course.title);
   const length = $derived(headingLength(heading));
@@ -84,15 +91,21 @@
     if (!edit) watching = clip;
   }
 
-  // The streamed preview once it settles, for the two layouts whose shape
-  // depends on whether there is media at all (cover, poster) — read in place,
-  // never through `{#await}` (`settled.svelte.ts`). Until it settles, and on
-  // the server, the media is the synchronous still.
+  // The streamed preview once it settles, for the layouts whose shape depends
+  // on whether there is media at all (cover, poster; split and centered on
+  // the public page) — read in place, never through `{#await}`
+  // (`settled.svelte.ts`). Until it settles, and on the server, the media is
+  // the synchronous still.
   const preview = $derived(settledValue(context.sellPreview));
   const settled = $derived<HeroMedia>(
     preview === undefined ? { still: syncStill, clip: null } : pick(preview)
   );
+  const pending = $derived(preview === undefined && !syncStill);
   const hasMedia = $derived(Boolean(settled.still || settled.clip));
+  // Where the page is looked at rather than read, a picture's place is kept
+  // with the plate in it; the public page draws only the picture it has.
+  const previewing = $derived(page.still || !!edit);
+  const framed = $derived(mode !== 'none' && (hasMedia || previewing));
   // A cover with nothing to show on a Moving background leaves the band to
   // the section: the org's shader (or the glow standing in for it) under the
   // scheme's own veil and ink. Otherwise it draws its own band — the image,
@@ -181,8 +194,9 @@
     {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
   </div>
 {:else if layout === 'poster'}
-  <!-- With no still known as it draws, the picture's place is held (the clip
-       or the plate fills it), so nothing moves when the stream settles. The
+  <!-- Where the page is looked at, the picture's place is held (the clip or
+       the plate fills it), so nothing moves when the stream settles; the
+       public page sets the words round a picture only once it has one. The
        poster's own box is the headline's parent, where a Style scales it;
        this plain box only hands it the headline's length, and the section's
        grid places it as it placed the poster. -->
@@ -190,34 +204,29 @@
     <HeroPoster
       still={settled.still}
       clip={settled.clip}
-      reserve={!syncStill && mode !== 'none'}
+      reserve={previewing && mode !== 'none'}
       {alt}
       {copy}
       watch={posterWatch}
     />
   </div>
 {:else if layout === 'split'}
-  <div class="hero-split" style:--lp-heading-chars={chars}>
-    <div class="hero-split__copy">{@render copy('start')}</div>
-    {#if mode !== 'none'}
+  {#if framed}
+    <div class="hero-split" style:--lp-heading-chars={chars}>
+      <div class="hero-split__copy">{@render copy('start')}</div>
       <div class="hero-split__media hero__enter-m">
-        {#await context.sellPreview}
-          {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
-        {:then preview}
-          {@render frame(pick(preview), false, 'var(--_ratio)')}
-        {/await}
+        {@render frame(settled, pending, 'var(--_ratio)')}
       </div>
-    {/if}
-  </div>
+    </div>
+  {:else}
+    <!-- No picture to share the band with: the words across it. -->
+    <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
+  {/if}
 {:else if layout === 'centered'}
   <div class="hero-centered" style:--lp-heading-chars={chars}>{@render copy('center')}</div>
-  {#if mode !== 'none'}
+  {#if framed}
     <div class="hero-centered__media hero__enter-m">
-      {#await context.sellPreview}
-        {@render frame({ still: syncStill, clip: null }, !syncStill, 'var(--_ratio)')}
-      {:then preview}
-        {@render frame(pick(preview), false, 'var(--_ratio)')}
-      {/await}
+      {@render frame(settled, pending, 'var(--_ratio)')}
     </div>
   {/if}
 {:else}

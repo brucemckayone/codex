@@ -5,7 +5,11 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import type { JourneySalesContext, PreviewMedia } from '../../../render/types';
+import type {
+  JourneySalesContext,
+  PreviewMedia,
+  SellPreview,
+} from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
@@ -136,38 +140,62 @@ describe('VideoBlock', () => {
     expect(played).toEqual([INTRO.playlistUrl]);
   });
 
-  it('holds the screen while the clip is still on its way', async () => {
+  it('holds the screen while the film is on its way, as the server sends it, and folds away once there is none', async () => {
+    let settle: (value: SellPreview | null) => void = () => {};
     const context = {
       ...sampleContext(),
-      sellPreview: new Promise<never>(() => {}),
+      sellPreview: new Promise<SellPreview | null>((resolve) => {
+        settle = resolve;
+      }),
     };
     await render(SAMPLE, { context });
+    expect(document.body.querySelector('h2')?.textContent).toBe(SAMPLE.heading);
     expect(
       document.body.querySelector('.lp-media[data-pending]')
     ).not.toBeNull();
     expect(document.body.querySelector('figcaption')?.textContent).toBe(
       SAMPLE.caption
     );
+    expect(document.body.querySelector('.video-none')).toBeNull();
+    settle({ intro: null, reel: null });
+    await tick();
+    await Promise.resolve();
+    flushSync();
+    expect(document.body.querySelector('h2')).toBeNull();
+    expect(document.body.querySelector('.video-none')).not.toBeNull();
+  });
+
+  // Codex-61zsk.37 (C1): the public page kept the words and dropped the
+  // screen, so a visitor read "Two minutes, from me to you" above nothing.
+  it.each(
+    SECTION_LAYOUTS.video
+  )('%s: with no film the public page draws no section at all', async (layout) => {
+    await render(SAMPLE, { layout, intro: null });
+    expect(document.body.querySelector('h2')).toBeNull();
+    expect(text().trim()).toBe('');
+    expect(document.body.querySelector('.lp-media')).toBeNull();
+    expect(watch()).toBeUndefined();
+    // The band is told to fold away (by the rule the parity test checks).
+    expect(document.body.querySelector('.video-none')).not.toBeNull();
   });
 
   it.each(
     SECTION_LAYOUTS.video
-  )('%s: with no film the public page shows only the words', async (layout) => {
-    await render(SAMPLE, { layout, intro: null });
+  )('%s: the canvas keeps the words and the plate, asks for the film, and keeps the caption editable', async (layout) => {
+    await render(SAMPLE, { layout, intro: null, edit: { commit: () => {} } });
     expect(document.body.querySelector('h2')?.textContent).toBe(SAMPLE.heading);
-    expect(document.body.querySelector('figure')).toBeNull();
-    expect(document.body.querySelector('.lp-media')).toBeNull();
-    expect(text()).not.toContain(SAMPLE.caption);
-    expect(watch()).toBeUndefined();
-  });
-
-  it('asks for the film on the canvas, keeping the caption editable', async () => {
-    await render(SAMPLE, { intro: null, edit: { commit: () => {} } });
+    expect(document.body.querySelector('.lp-media__plate')).not.toBeNull();
     expect(text()).toContain(VIDEO_PROMPT);
     expect(
       document.body.querySelector('figcaption')?.getAttribute('contenteditable')
     ).toBe('true');
     expect(watch()).toBeUndefined();
+  });
+
+  it('draws the section once the film is there, with nothing to fold it away', async () => {
+    await render(SAMPLE);
+    expect(document.body.querySelector('.video-none')).toBeNull();
+    expect(document.body.querySelector('[data-lp-edit-only]')).toBeNull();
   });
 
   it('draws the play button on the canvas but never plays there', async () => {

@@ -7,6 +7,15 @@
   Cinematic) — so an image-led layout still looks composed before its image
   exists, or without one. A blank box reads as broken.
 
+  The plate says "a picture goes here", which is a word for the creator: it
+  is painted only where the page is looked at (the canvas, a still thumbnail,
+  `.lp[data-lp-still]`), never on the live page. Blocks re-compose there
+  instead, so an empty frame is rarely drawn at all.
+
+  A MARK stands in for the picture where the page shows one anyway (the
+  guide's initials): designed content on the scheme the block gives it, never
+  treated as an empty frame.
+
   The clip is decoration (`HeroLoopVideo` is silent, `aria-hidden`, and shows
   its still under reduced motion); anything meant to be watched is a separate
   player the block opens.
@@ -15,6 +24,7 @@
   import type { Snippet } from 'svelte';
   import { HeroLoopVideo } from '$lib/components/ui/HeroLoopVideo';
   import type { PreviewMedia } from '../../render/types';
+  import type { ColourSchemeId } from '../model/ids';
 
   interface Props {
     image?: string | null;
@@ -28,6 +38,10 @@
     /** Waiting for the streamed media — the plate holds the space. */
     pending?: boolean;
     scrim?: boolean;
+    /** A few letters drawn in the picture's place when there is none. */
+    mark?: string;
+    /** The scheme the mark's ground takes: the section's filled one. */
+    scheme?: ColourSchemeId;
     /** Controls laid over the media (a play button). */
     children?: Snippet;
     class?: string;
@@ -41,6 +55,8 @@
     priority = false,
     pending = false,
     scrim = false,
+    mark,
+    scheme,
     children,
     class: className,
   }: Props = $props();
@@ -54,11 +70,14 @@
     return url && url !== failed ? url : null;
   });
   const empty = $derived(!clip && !still);
+  const marked = $derived(empty && Boolean(mark));
 </script>
 
 <div
   class="lp-media {className ?? ''}"
-  data-empty={empty ? '' : undefined}
+  data-empty={empty && !marked ? '' : undefined}
+  data-mark={marked ? '' : undefined}
+  data-lp-scheme={marked ? scheme : undefined}
   data-pending={pending ? '' : undefined}
   style:aspect-ratio={ratio}
 >
@@ -73,6 +92,8 @@
       decoding="async"
       onerror={() => (failed = still)}
     />
+  {:else if marked}
+    <span class="lp-media__mark" aria-hidden="true">{mark}</span>
   {:else}
     <span class="lp-media__plate" aria-hidden="true"></span>
   {/if}
@@ -137,6 +158,32 @@
       ),
       var(--lp-panel);
     opacity: 0.85;
+  }
+
+  /* A visitor never sees the plate: on a live page an empty frame is its
+     panel alone (a picture that failed, or one still loading). */
+  :global(.lp:not([data-lp-still])) .lp-media__plate {
+    display: none;
+  }
+
+  /* The mark: the letters in the display face on the scheme's own ground,
+     sized to the frame, so it fills a small portrait and a full-height one
+     alike. */
+  .lp-media[data-mark] {
+    container-type: inline-size;
+    display: grid;
+    place-items: center;
+    background: var(--lp-bg);
+    color: var(--lp-ink);
+  }
+
+  .lp-media__mark {
+    font-family: var(--lp-font-display);
+    font-size: 34cqi;
+    font-weight: var(--lp-weight-display);
+    font-synthesis: none;
+    line-height: 1;
+    letter-spacing: var(--lp-tracking-display);
   }
 
   .lp-media__overlay {

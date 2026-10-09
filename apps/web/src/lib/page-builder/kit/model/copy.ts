@@ -33,6 +33,10 @@ export const COPY = {
   hero: {
     watch: 'Watch the film',
   },
+  faq: {
+    /** Opens the list's closing row, before the creator's own contact link. */
+    stillWondering: 'Still wondering?',
+  },
   media: {
     play: 'Play video',
   },

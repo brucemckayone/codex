@@ -10,12 +10,20 @@
     centered — portrait, story and credentials down the middle
 
   Portrait, clip and signature stream on `sellPreview`; the portrait holds
-  its space while they load, and a clip adds a play button. No portrait: the
-  public page drops it, the canvas asks for one. Every field the creator
-  filled shows in every layout.
+  its space while they load, and a clip adds a play button. Every field the
+  creator filled shows in every layout.
+
+  NO PORTRAIT (Codex-61zsk.37): split and centered hold its place with a
+  medallion, public and canvas alike — the guide's initials in the display
+  face, on the section's filled scheme, in the frame every Style already
+  shapes as the portrait — and the canvas asks for the photo over it. The
+  quote's small sign-off portrait simply goes. With no name to draw either,
+  the public page drops the portrait; where the page is looked at, its plate
+  stays.
 -->
 <script lang="ts">
   import type { SellPreview } from '../../../render/types';
+  import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -28,6 +36,7 @@
   import Credentials from './Credentials.svelte';
   import { INSTRUCTOR_PROMPT, instructorDefinition } from './definition';
   import GuideQuote from './GuideQuote.svelte';
+  import { initials } from './initials';
   import Signoff from './Signoff.svelte';
 
   const { props, section, context, edit }: BlockProps = $props();
@@ -41,6 +50,9 @@
   const watchLabel = $derived(INSTRUCTOR_COPY.watch(content.name));
   const title = $derived(content.name ?? content.heading ?? context.course.title);
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
+  // What holds a missing portrait's place in split and centred.
+  const monogram = $derived(layout === 'quote' ? '' : initials(content.name));
+  const filled = $derived(featuredScheme(page.style, section.scheme));
 
   const still = (preview: SellPreview | null) =>
     preview?.guidePortraitUrl ?? preview?.guideClip?.posterUrl ?? null;
@@ -98,9 +110,19 @@
           <ClipFrame still={still(preview)} ratio="var(--_ratio)" {alt} />
         {/if}
       </div>
-    {:else if edit}
+    {:else if monogram}
+      <div class="guide__portrait" data-layout={layout}>
+        <span class="lp-atmos guide__glow" aria-hidden="true"></span>
+        <ClipFrame
+          ratio="var(--_ratio)"
+          mark={monogram}
+          scheme={filled}
+          prompt={edit && play ? INSTRUCTOR_PROMPT : undefined}
+        />
+      </div>
+    {:else if page.still || edit}
       <div class="guide__portrait" data-layout={layout} data-lp-edit-only>
-        <ClipFrame ratio="var(--_ratio)" prompt={play ? INSTRUCTOR_PROMPT : undefined} />
+        <ClipFrame ratio="var(--_ratio)" prompt={edit && play ? INSTRUCTOR_PROMPT : undefined} />
       </div>
     {/if}
   {/await}
