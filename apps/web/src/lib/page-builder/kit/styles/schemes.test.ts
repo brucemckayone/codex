@@ -3178,3 +3178,119 @@ describe('the hero’s main button over a photo is the org’s own button (owner
     expect(lowest).toBeGreaterThanOrEqual(3);
   });
 });
+
+// ── 14. the floating bar is a raised card (owner, D9) ───────────────────────
+describe('the floating bar is a raised card in the org’s card colour (owner, D9)', () => {
+  const KIT = join(LIB, 'page-builder', 'kit');
+  const read = (path: string) =>
+    squash(
+      readFileSync(join(KIT, path), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+    );
+  const STICKY = read('StickyCta.svelte');
+  const KIT_CSS = read('styles/kit.css');
+  const QUIET = read('styles/style-quiet.css');
+
+  it('draws the bar on the org’s surfaces in its scheme’s card colour, on the org’s floating shadow', () => {
+    expect(STICKY).toContain(
+      ".lp-sticky[data-lp-scheme='base'] { background: var(--lp-panel); }"
+    );
+    expect(STICKY).toMatch(
+      /\.lp-sticky \{[^}]*box-shadow: var\(--lp-shadow-raised\);/
+    );
+    expect(KIT_CSS).toContain('--lp-shadow-raised: var(--shadow-xl);');
+    // Quiet keeps its rim, over the same shadow.
+    expect(QUIET).toMatch(
+      /\.lp-sticky\[data-lp-scheme\] \{ box-shadow: 0 0 0 var\(--border-width\) var\(--lp-line\), var\(--lp-shadow-raised\); \}/
+    );
+    // On base, the card colour is the org's card.
+    expect(CODE).toContain(
+      ".lp [data-lp-scheme='base'] { --lp-bg: var(--lp-ground); --lp-panel: var(--_base-panel);"
+    );
+    expect(POLE.light).toContain('--_base-panel: var(--_org-panel);');
+  });
+
+  it('holds the org’s card in the ground’s own band in each pole, so the floors proven on that band are the bar’s', () => {
+    for (const pole of ['light', 'dark'] as const) {
+      const band = (name: string, from: string) =>
+        POLE[pole].match(
+          new RegExp(`${name}: oklch\\( from var\\(${from}\\) ([^;]*);`)
+        )?.[1];
+      const ground = band('--lp-ground', '--_ground-in');
+      expect(ground, pole).toBeTruthy();
+      expect(band('--_org-panel', '--_org-card'), pole).toBe(ground);
+    }
+  });
+
+  it(
+    'holds the bar’s words and button on its card for any brand and org ground, in both poles',
+    { timeout: 60_000 },
+    () => {
+      const brands: Rgb[] = Object.values(BRANDS).map(hex);
+      for (let r = 0; r < 256; r += 51)
+        for (let g = 0; g < 256; g += 51)
+          for (let b = 0; b < 256; b += 51)
+            brands.push([r / 255, g / 255, b / 255]);
+      const grounds = [null, '#F3F0E7', '#FFFFFF', '#E9F1EA', '#F7D9B9'];
+      const lowest = { ink: 9, soft: 9, button: 9, label: 9 };
+      let cases = 0;
+      for (const brand of brands)
+        for (const bg of grounds)
+          for (const theme of ['light', 'dark'] as const) {
+            const org = bg
+              ? orgFromBg(theme, hex(bg), brand, brand)
+              : platformOrg(theme, undefined, brand, brand);
+            const pole: Mode = bg ? 'light' : theme;
+            const t = schemeTokens(
+              pole,
+              'base',
+              orgGround(pole, org),
+              brand,
+              DEFAULT_TINT,
+              brand,
+              { org, decorated: false }
+            );
+            lowest.ink = Math.min(lowest.ink, ratio(t.ink, t.panel));
+            lowest.soft = Math.min(lowest.soft, ratio(t.soft, t.panel));
+            lowest.button = Math.min(lowest.button, ratio(t.button, t.panel));
+            lowest.label = Math.min(lowest.label, ratio(t.buttonInk, t.button));
+            cases++;
+          }
+      expect(cases).toBe(brands.length * grounds.length * 2);
+      expect(lowest.ink).toBeGreaterThanOrEqual(FLOORS.ink);
+      expect(lowest.soft).toBeGreaterThanOrEqual(FLOORS.soft);
+      expect(lowest.button).toBeGreaterThanOrEqual(FLOORS.button);
+      expect(lowest.label).toBeGreaterThanOrEqual(FLOORS.buttonInk);
+    }
+  );
+
+  it('names the seeded orgs whose card is their ground, where the shadow alone carries the bar', () => {
+    const byte = (rgb: Rgb) => clip(rgb).map((c) => Math.round(c * 255));
+    const same: string[] = [];
+    const lift: Record<string, string> = {};
+    for (const [name, seed] of Object.entries(SEEDED))
+      for (const theme of ['light', 'dark'] as const) {
+        const brand = hex(seed.brand);
+        const org = seed.bg
+          ? orgFromBg(theme, hex(seed.bg), brand, brand)
+          : platformOrg(theme, undefined, brand, brand);
+        const pole: Mode = seed.bg ? 'light' : theme;
+        const t = schemeTokens(
+          pole,
+          'base',
+          orgGround(pole, org),
+          brand,
+          DEFAULT_TINT,
+          brand,
+          { org, decorated: false }
+        );
+        const [a, b] = [byte(t.panel), byte(t.bg)];
+        if (a.every((v, i) => Math.abs(v - (b[i] ?? -9)) <= 1))
+          same.push(`${name} ${theme}`);
+        lift[`${name} ${theme}`] = ratio(t.panel, t.bg).toFixed(2);
+      }
+    // Every seeded org's card stands off its ground in both themes.
+    expect(same, JSON.stringify(lift)).toEqual([]);
+  });
+});

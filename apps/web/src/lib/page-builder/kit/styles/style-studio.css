@@ -21,8 +21,8 @@
 
    LAYOUT. Words beside photographs, and every photograph a print: square
    corners, a plain border of lighter paper, a soft shadow, set at a slight
-   tilt (alternating on a wall of them). Cards stay open paper in the brand
-   radius bent by 0.5 (never past `--radius-md`); quotes and cards never
+   tilt (alternating on a wall of them). Cards stay open paper in the org's
+   corners bent by 0.5 (never past `--radius-md`); quotes and cards never
    tilt — only prints do.
 
    SURFACES. A fine paper grain over every sheet (`--lp-texture: paper`,
@@ -55,10 +55,10 @@
   --lp-tracking-heading: -0.012em;
   --lp-tracking-title: -0.005em;
 
-  /* ── shape: the brand radius bent by 0.5, never past `--radius-md` ────── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  /* ── shape: the org's corners bent by 0.5, never past `--radius-md` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.5), var(--radius-md));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.5), var(--radius-md));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.5), var(--radius-md));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   --lp-button-pad: var(--space-6);
@@ -83,7 +83,9 @@
 
 /* ── prints: every photograph square, framed in lighter paper, tilted ───── */
 /* The frame is the sheet's own paper lifted toward white (a light sheet) or
-   a step lighter (a dark one), so it reads as a print on any ground. */
+   a step lighter (a dark one), so it reads as a print on any ground. A
+   print is a photograph's edge, the Style's texture, not a card: its shadow
+   is the print's own, never the org's card shadow. */
 :is(.lp, #lp-style)[data-lp-style='studio']
   :is(
     .hero-split__media,

@@ -63,20 +63,30 @@
   --lp-eyebrow-radius: 0;
 
   /* ── shape ────────────────────────────────────────────────────────────── */
-  /* The brand's own corner radius (03 §4.2). A Style BENDS it, never replaces
-     it: each radius token is `clamp(<floor>, calc(var(--lp-brand-radius) *
-     <k>), <ceiling>)`. A zero floor must be a length (`0rem`) — the
-     `--radius-none` token is a unitless 0, which voids any math function it
-     enters. `--brand-radius` is always rem (org layout, page overrides). */
+  /* The org's own corners (03 §4.2): a card is its `--radius-card`, a
+     picture its `--radius-lg` and a button its `--radius-button`, the tokens
+     its own pages draw them in (all derived from the brand radius, and
+     re-derived on a page's own carrier). A Style BENDS them, never replaces
+     them: each radius token is `clamp(<floor>, calc(var(<org token>) * <k>),
+     <ceiling>)`. A zero floor must be a length (`0rem`) — the `--radius-none`
+     token is a unitless 0, which voids any math function it enters. */
   --lp-brand-radius: var(--brand-radius, var(--radius-md));
   /* A pill when the brand is rounded at all, square when the brand is square. */
   --lp-radius-pill-if-rounded: min(calc(var(--lp-brand-radius) * 1000), var(--radius-full));
-  --lp-radius-card: var(--radius-lg);
+  --lp-radius-card: var(--radius-card);
   --lp-radius-media: var(--radius-lg);
-  --lp-radius-button: var(--radius-md);
+  --lp-radius-button: var(--radius-button);
   --lp-radius-chip: var(--radius-full);
   --lp-border: var(--border-width);
   --lp-rule: var(--border-width);
+
+  /* ── depth ────────────────────────────────────────────────────────────── */
+  /* The org's own shadows, where a Style lifts a card at all. A card at rest
+     sits on the shadow the org's cards rest on (explore's, `--shadow-md`); a
+     card that floats over the page, on the one the org floats its own bar
+     and raised panels on (`--shadow-xl`). The org's dark mode deepens both. */
+  --lp-shadow-card: var(--shadow-md);
+  --lp-shadow-raised: var(--shadow-xl);
 
   /* ── buttons ──────────────────────────────────────────────────────────── */
   /* The org's own buttons (`ui/Button`), in every Style: a call to action is

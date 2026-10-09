@@ -36,7 +36,7 @@
 
    SIGNATURE. Image reveals, and the gallery grid.
 
-   Corners: the brand radius exactly (k 1, 03 §4.2). Fonts: suggests Plus
+   Corners: the org's exactly (k 1, 03 §4.2). Fonts: suggests Plus
    Jakarta Sans over Inter; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -65,10 +65,10 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: the brand's corners exactly ───────────────────────────────── */
-  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  /* ── shape: the org's corners exactly ─────────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--radius-card) * 1));
+  --lp-radius-media: max(0rem, calc(var(--radius-lg) * 1));
+  --lp-radius-button: max(0rem, calc(var(--radius-button) * 1));
   --lp-radius-chip: max(0rem, calc(var(--lp-brand-radius) * 1));
 
   /* ── colour: a whisper of the brand on the tinted bands ───────────────── */

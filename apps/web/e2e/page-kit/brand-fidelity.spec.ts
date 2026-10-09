@@ -94,9 +94,12 @@ const MAPPING = [
   ['button label', '--color-on-interactive'],
 ] as const;
 
-/** The floating bar, where the page has one: the org's ground and button. */
+/**
+ * The floating bar, where the page has one: a raised card in the org's card
+ * colour, holding the org's button (owner, D9).
+ */
 const STICKY_MAPPING = [
-  ['bar ground', '--color-background'],
+  ['bar card', '--color-surface-card'],
   ['bar button', '--color-interactive'],
   ['bar button label', '--color-on-interactive'],
 ] as const;
@@ -198,6 +201,7 @@ function readColours(orgHost: 'main' | 'root'): Reading {
     '--color-focus',
     '--color-interactive',
     '--color-on-interactive',
+    '--color-surface-card',
   ])
     org[name] = token(host, name);
 
@@ -229,7 +233,9 @@ function readColours(orgHost: 'main' | 'root'): Reading {
   // The bar is rendered, styled and measurable before it is shown.
   const bar = root.querySelector<HTMLElement>('.lp-sticky');
   if (bar) {
-    kit['bar ground'] = hexOf(getComputedStyle(bar).backgroundColor);
+    kit['bar card'] = hexOf(getComputedStyle(bar).backgroundColor);
+    kit['bar ink'] = hexOf(getComputedStyle(bar).color);
+    kit['bar soft ink'] = token(bar, '--lp-ink-soft');
     kit['bar button'] = token(bar, '--lp-button-bg');
     kit['bar button label'] = token(bar, '--lp-button-ink');
   }
@@ -279,6 +285,12 @@ async function openAs(
   const page = await context.newPage();
   await page.goto(url);
   await expectSellPageRendered(page, fixture);
+  // The server's HTML is on screen at `load`, but hydration runs later, once
+  // the client's modules arrive, and sets the root's attributes back to the
+  // page's own: measured, a Style drawn on the root 0.5s after it rendered
+  // was put back at 0.66s. So nothing is drawn on the page before the
+  // network is quiet.
+  await page.waitForLoadState('networkidle');
   await page.evaluate(() => document.fonts.ready);
   expect(
     await page.evaluate(() => document.documentElement.dataset.theme),
@@ -317,25 +329,67 @@ for (const item of CASES) {
 // ── the floating bar, and the button's shape ──────────────────────────────────
 // of-blood-and-bones' pages sell, so they carry the bar (the seeded Quiet and
 // Cinematic pages have no offer on sale, and so no bar). It used to be a dark
-// band, where the rust brand had to turn #ff481b with a black label.
+// band, where the rust brand had to turn #ff481b with a black label, and then
+// the org's ground, where it was flat against the page it floats over. The
+// owner chose "Raised card (Recommended)" (D9): the org's card colour, lifted
+// by the shadow the org floats its own bar on, holding the org's button. Its
+// words and button still hold their floors on that card.
 const SELLING = CASES.filter((item) => item.org === 'of-blood-and-bones');
+
+/** WCAG's contrast ratio of two `#rrggbb` colours. */
+const ratio = (x: string, y: string) => {
+  const [hi = 0, lo = 0] = [luminance(x), luminance(y)].sort((p, q) => q - p);
+  return (hi + 0.05) / (lo + 0.05);
+};
 
 for (const item of SELLING) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`${item.org}/${item.slug} ${theme}: the floating bar is the org’s ground and button`, async ({
+    test(`${item.org}/${item.slug} ${theme}: the floating bar is a raised card in the org’s card colour, with the org’s button`, async ({
       browser,
       baseURL,
     }) => {
       const page = await openAs(browser, baseURL as string, item, theme);
-      const reading = await measure(page, {}, 'main');
+      await apply(page, {});
+      const reading = await page.evaluate(readColours, 'main');
+      // The org's own floating bar's shadow (`SubscribeStickyBar`), resolved
+      // where its pages read it, and the kit bar's.
+      const shadow = await page.evaluate(() => {
+        const main = document.querySelector('main#main-content, .org-main');
+        const bar = document.querySelector('.lp .lp-sticky');
+        if (!main || !bar) throw new Error('no org main or bar');
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;box-shadow:var(--shadow-xl)';
+        main.appendChild(probe);
+        const org = getComputedStyle(probe).boxShadow;
+        probe.remove();
+        return { org, bar: getComputedStyle(bar).boxShadow };
+      });
+      await page.context().close();
+      const why = JSON.stringify({ reading, shadow });
       expect(
         reading.kit['bar button'],
         'the page has a floating bar'
       ).toBeTruthy();
+      expect(mismatches(reading, reading.org, STICKY_MAPPING), why).toEqual([]);
+      expect(shadow.org, why).not.toBe('none');
+      expect(shadow.bar, why).toContain(shadow.org);
+      const { kit } = reading;
+      const card = kit['bar card'] ?? '';
+      expect(ratio(kit['bar ink'] ?? card, card), why).toBeGreaterThanOrEqual(
+        4.5
+      );
       expect(
-        mismatches(reading, reading.org, STICKY_MAPPING),
-        JSON.stringify(reading)
-      ).toEqual([]);
+        ratio(kit['bar soft ink'] ?? card, card),
+        why
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        ratio(kit['bar button'] ?? card, card),
+        why
+      ).toBeGreaterThanOrEqual(3);
+      expect(
+        ratio(kit['bar button label'] ?? '', kit['bar button'] ?? ''),
+        why
+      ).toBeGreaterThanOrEqual(4.5);
     });
   }
 }
@@ -913,3 +967,126 @@ test('studio-alpha/tending-the-grief: a page that sets its labels in sentence ca
       tracking: eyebrow.styleOwn,
     });
 });
+
+// ── corners: the org's radius tokens, bent by the Style ──────────────────────
+// A card's corner is the org's `--radius-card`, a picture's its `--radius-lg`
+// and a button's its `--radius-button`, each times the Style's bend (03
+// §4.2). They used to be the raw brand radius times the bend, which drew
+// every card and picture at two thirds of the org's own card corner. The
+// floors and ceilings bind on none of the seeded brands.
+
+/** Each Style's bend: its cards' and pictures', then its buttons' ('pill': round). */
+const BENDS: Record<string, readonly [number, number | 'pill']> = {
+  bold: [0.25, 0.25],
+  poster: [0.25, 0.25],
+  studio: [0.5, 0.5],
+  quiet: [0.5, 0.5],
+  clean: [1, 1],
+  path: [1, 1],
+  soft: [2, 'pill'],
+  cinematic: [1, 'pill'],
+};
+
+/** The org's three corners and the kit's, in px, resolved where each is read. */
+function readCorners() {
+  const main = document.querySelector('main#main-content, .org-main');
+  const section = document.querySelector('.lp-page > .lp-section');
+  if (!main || !section) throw new Error('no org main or section');
+  const px = (host: Element, name: string) => {
+    const probe = document.createElement('div');
+    probe.style.cssText = `position:absolute;border-top-left-radius:var(${name})`;
+    host.appendChild(probe);
+    const value = Number.parseFloat(
+      getComputedStyle(probe).borderTopLeftRadius
+    );
+    probe.remove();
+    return value;
+  };
+  return {
+    style: document.querySelector<HTMLElement>('.lp')?.dataset.lpStyle,
+    org: {
+      card: px(main, '--radius-card'),
+      media: px(main, '--radius-lg'),
+      button: px(main, '--radius-button'),
+    },
+    kit: {
+      card: px(section, '--lp-radius-card'),
+      media: px(section, '--lp-radius-media'),
+      button: px(section, '--lp-radius-button'),
+    },
+  };
+}
+
+for (const item of [CASES[0], CASES[2], CASES[3]].filter(
+  (c): c is Case => !!c
+)) {
+  test(`${item.org}: every Style's corners are the org's radius tokens, bent`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openAs(browser, baseURL as string, item, 'light');
+    const off: string[] = [];
+    for (const [style, [bend, button]] of Object.entries(BENDS)) {
+      await apply(page, { drawAs: style });
+      const { org, kit, style: drawn } = await page.evaluate(readCorners);
+      expect(drawn, 'the root is still drawn as the Style set').toBe(style);
+      const want = {
+        card: org.card * bend,
+        media: org.media * bend,
+        button: button === 'pill' ? null : org.button * button,
+      };
+      for (const role of ['card', 'media', 'button'] as const) {
+        const target = want[role];
+        const ok =
+          target === null
+            ? kit[role] >= 1000
+            : Math.abs(kit[role] - target) < 0.02;
+        if (!ok)
+          off.push(
+            `${style} ${role}: ${kit[role]}px, want ${target ?? 'pill'}`
+          );
+      }
+    }
+    await page.context().close();
+    expect(off).toEqual([]);
+  });
+}
+
+// ── a card that a Style lifts rests on the org's card shadow ─────────────────
+// Soft lifts the one filled card in a band (the featured offer, the lead
+// voice, a panel). The org's cards rest on `--shadow-md` (explore's, measured
+// on all three orgs), so Soft's does too: it used to be a shadow of its own,
+// the card's ground deepened. Drawn as Soft on a page whose offer is a
+// filled card.
+for (const theme of ['light', 'dark'] as const) {
+  test(`of-blood-and-bones/return-to-the-shoreline ${theme}: Soft's filled card rests on the org's card shadow`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const item = CASES[0];
+    if (!item) throw new Error('no case');
+    const page = await openAs(browser, baseURL as string, item, theme);
+    await apply(page, { drawAs: 'soft' });
+    const read = await page.evaluate(() => {
+      const main = document.querySelector('main#main-content, .org-main');
+      if (!main) throw new Error('no org main');
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;box-shadow:var(--shadow-md)';
+      main.appendChild(probe);
+      const org = getComputedStyle(probe).boxShadow;
+      probe.remove();
+      return {
+        org,
+        cards: [
+          ...document.querySelectorAll<HTMLElement>(
+            '.lp-page .lp-section[data-lp-type] [data-lp-scheme]'
+          ),
+        ].map((el) => getComputedStyle(el).boxShadow),
+      };
+    });
+    await page.context().close();
+    expect(read.org, JSON.stringify(read)).not.toBe('none');
+    expect(read.cards.length, 'the page has a filled card').toBeGreaterThan(0);
+    for (const shadow of read.cards) expect(shadow).toBe(read.org);
+  });
+}

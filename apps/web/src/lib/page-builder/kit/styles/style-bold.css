@@ -30,7 +30,7 @@
    heavier one tops each section on the ground, so a run of them reads as
    separate claims. Pictures bleed: the hero's photograph runs edge to edge
    into the next slab, and the guide and the clips meet the page edge.
-   Corners bend a little: a quarter of the brand radius, never past
+   Corners bend a little: a quarter of the org's corners, never past
    `--radius-sm`, never a pill (03 §4.2).
 
    MOTION. Headlines BUILD. The hero's headline lifts out of its own baseline
@@ -66,10 +66,10 @@
   --lp-tracking-title: -0.015em;
   --lp-weight-label: var(--font-bold);
 
-  /* ── shape: a quarter of the brand radius, never past `--radius-sm` ───── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* ── shape: a quarter of the org's corners, never past `--radius-sm` ──── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.25), var(--radius-sm));
   --lp-radius-chip: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
   /* Item rules, and the heavier one over a section on the ground. */
   --lp-rule: calc(var(--border-width-thick) * 1.5);

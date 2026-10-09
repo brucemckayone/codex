@@ -38,7 +38,7 @@
 
    SIGNATURE. The route, and the journey map it opens into.
 
-   Corners: the brand radius exactly (k 1, 03 §4.2); the stops are circles
+   Corners: the org's exactly (k 1, 03 §4.2); the stops are circles
    (decoration, not brand shape). Fonts: suggests Lato over Source Sans 3;
    designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -60,10 +60,10 @@
   --lp-tracking-title: -0.006em;
   --lp-tracking-label: 0.01em;
 
-  /* ── shape: the brand radius exactly ──────────────────────────────────── */
-  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  /* ── shape: the org's corners exactly ─────────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--radius-card) * 1));
+  --lp-radius-media: max(0rem, calc(var(--radius-lg) * 1));
+  --lp-radius-button: max(0rem, calc(var(--radius-button) * 1));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   /* ── rhythm: a column with a lane for the route beside it ─────────────── */

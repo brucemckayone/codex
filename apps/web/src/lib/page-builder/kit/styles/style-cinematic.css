@@ -26,7 +26,7 @@
    it. A cover WITH a picture keeps the picture edge to edge. Between them,
    scenes: pictures that bleed and fade into the dark (the in-block rules),
    the story as a scroll whose sticky picture changes as its numbered
-   moments pass. Corners are the brand's own radius; buttons are pills when
+   moments pass. Corners are the org's own; buttons are pills when
    the brand is rounded at all.
 
    MOTION. The opening: the light is already moving, the words arrive over
@@ -66,9 +66,9 @@
   --lp-tracking-label: 0.04em;
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: the brand radius exactly (03 §4.2, k 1) ───────────────────── */
-  --lp-radius-card: max(0rem, var(--lp-brand-radius));
-  --lp-radius-media: max(0rem, var(--lp-brand-radius));
+  /* ── shape: the org's corners exactly (03 §4.2, k 1) ──────────────────── */
+  --lp-radius-card: max(0rem, var(--radius-card));
+  --lp-radius-media: max(0rem, var(--radius-lg));
   --lp-radius-button: var(--lp-radius-pill-if-rounded);
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
@@ -213,7 +213,9 @@
    laid on the ground wherever the glow thins, and its edge goes. A hairline
    of the ink rims it, and a shade under it lifts it off the light — the
    same on both, so the canvas shows the page it makes. Paint only: the
-   card's box, and every line in it, stay the panel's own (03 X10). */
+   card's box, and every line in it, stay the panel's own (03 X10). The
+   shade is the room's own ground deepened, not the org's card shadow: the
+   room is the Style's deliberate dark, where a grey shadow cannot show. */
 :is(.lp, #lp-style)[data-lp-style='cinematic']
   .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media], :has(> .lp-inner > .lp-bleed))
   > .lp-surface::after {

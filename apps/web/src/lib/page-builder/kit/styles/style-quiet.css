@@ -33,7 +33,7 @@
 
    SIGNATURE. Read-along: the page brightens as it is read.
 
-   Corners: the brand radius bent by 0.5, never past `--radius-md` (03 §4.2).
+   Corners: the org's bent by 0.5, never past `--radius-md` (03 §4.2).
    Fonts: suggests Spectral over DM Sans; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -63,10 +63,10 @@
   --lp-weight-title: var(--heading-weight, var(--font-medium));
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: the brand radius bent by 0.5, never past `--radius-md` ────── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  /* ── shape: the org's corners bent by 0.5, never past `--radius-md` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.5), var(--radius-md));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.5), var(--radius-md));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.5), var(--radius-md));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   /* ── buttons: unhurried ───────────────────────────────────────────────── */
@@ -204,13 +204,14 @@
   }
 }
 
-/* ── the floating bar: the page's own ground, rimmed in its hairline ──────── */
-/* Its colours are base's (`quiet.ts` names the scheme): the org's ground and
-   the org's own button. Only the rim is Quiet's. */
+/* ── the floating bar: the org's raised card, rimmed in its hairline ──────── */
+/* Its colours are base's (`quiet.ts` names the scheme): the org's card and
+   the org's own button, on the org's floating shadow. Only the rim is
+   Quiet's. */
 :is(.lp, #lp-style)[data-lp-style='quiet'] .lp-sticky[data-lp-scheme] {
   box-shadow:
     0 0 0 var(--border-width) var(--lp-line),
-    var(--shadow-lg);
+    var(--lp-shadow-raised);
 }
 
 /* ── the closing ask, centred like the promise it answers ────────────────── */
