@@ -250,15 +250,15 @@
   .lp:not(
     [data-lp-theme='light'],
     [data-editing-theme='light'] .lp,
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
   ),
 [data-editing-theme='dark']
   .lp:not(
     [data-lp-theme='light'],
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
   ),
 .lp[data-lp-theme='dark']:not(
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])
+    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
   ),
 .lp[data-lp-style='cinematic'] {
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
@@ -340,20 +340,14 @@
    BOTH themes (its dark rule falls back to the light value), so in the
    other theme the carrier takes back the org's, exactly as if the page had
    set no background: every token `org-brand.css`'s `[data-org-bg]` rules
-   set (`schemes.test.ts` holds the list to them). A scoped preview of that
-   theme is re-stated below, for the kit. */
+   set (`schemes.test.ts` holds the list to them). Which theme the page's
+   background is for is PageRenderer's `data-page-bg` (light, dark or both),
+   never the style text. A scoped preview of that theme is re-stated below,
+   for the kit. */
 :is(.dark, [data-theme='dark'])
-  .lp[data-org-bg][style*='--brand-bg:']:not(
-    [style*='--brand-bg-dark:'],
-    [data-lp-theme='light'],
-    [data-editing-theme='light'] .lp
-  ),
+  .lp[data-page-bg='light']:not([data-lp-theme='light'], [data-editing-theme='light'] .lp),
 :root:not(.dark, [data-theme='dark'])
-  .lp[data-org-bg][style*='--brand-bg-dark:']:not(
-    [style*='--brand-bg:'],
-    [data-lp-theme='dark'],
-    [data-editing-theme='dark'] .lp
-  ) {
+  .lp[data-page-bg='dark']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp) {
   --color-background: inherit;
   --color-surface: inherit;
   --color-surface-secondary: inherit;
@@ -434,7 +428,7 @@
 :is(
   :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
-):is(.lp[data-org-bg][style*='--brand-bg-dark:']) {
+):is(.lp[data-org-bg]:is([data-page-bg='dark'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)));
   --_org-soft: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
   --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
@@ -487,7 +481,7 @@
   :is(.dark, [data-theme='dark']) .lp[data-lp-theme='light'],
   :is(.dark, [data-theme='dark']) [data-editing-theme='light'] .lp:not([data-lp-theme='dark']),
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
-):is(.lp[data-org-bg][style*='--brand-bg:']) {
+):is(.lp[data-org-bg]:is([data-page-bg='light'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg, var(--color-neutral-0));
   --_org-soft: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
   --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);

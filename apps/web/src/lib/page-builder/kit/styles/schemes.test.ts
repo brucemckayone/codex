@@ -2531,9 +2531,10 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
             .replace(/var\(--brand-bg,/g, 'var(--_org-bg-in,')
         );
       // …and the page's own, where it sets one for this theme.
-      const twin = theme === 'dark' ? '--brand-bg-dark:' : '--brand-bg:';
       const own = decls(
-        body(`${LAST[theme]}:is(.lp[data-org-bg][style*='${twin}']) {`)
+        body(
+          `${LAST[theme]}:is(.lp[data-org-bg]:is([data-page-bg='${theme}'], [data-page-bg='both'])) {`
+        )
       );
       for (const [name, value] of Object.entries(orgBgRecipes(theme)))
         expect(own[ORG_NAMES[name]], `${theme} ${name}`).toBe(asPreview(value));
@@ -2552,11 +2553,14 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
     // no dark twin takes the org's dark mode (owner, D7), so the page
     // override is no longer an exclusion of its own.
     const org =
-      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([style*='--brand-bg-dark:'])";
+      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])";
     expect(CODE.split(org).length - 1).toBe(3);
     expect(CODE).not.toContain(
       ".lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)"
     );
+    // The page's background is read from PageRenderer's `data-page-bg`,
+    // never from its style text: only the org's own root is matched so.
+    expect(CODE.match(/\.lp[^\s,{]*\[style\*=/g)).toBeNull();
     expect(POLE.dark).toContain('--lp-ground:');
   });
 
@@ -2570,8 +2574,8 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
     ];
     expect(union.length).toBeGreaterThan(15);
     const head =
-      ":is(.dark, [data-theme='dark']) .lp[data-org-bg][style*='--brand-bg:']:not( [style*='--brand-bg-dark:'], [data-lp-theme='light'], [data-editing-theme='light'] .lp ), " +
-      ":root:not(.dark, [data-theme='dark']) .lp[data-org-bg][style*='--brand-bg-dark:']:not( [style*='--brand-bg:'], [data-lp-theme='dark'], [data-editing-theme='dark'] .lp ) {";
+      ":is(.dark, [data-theme='dark']) .lp[data-page-bg='light']:not([data-lp-theme='light'], [data-editing-theme='light'] .lp), " +
+      ":root:not(.dark, [data-theme='dark']) .lp[data-page-bg='dark']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp) {";
     expect(CODE.split(head).length - 1).toBe(1);
     const rule =
       CODE.slice(CODE.indexOf(head) + head.length).match(/^([^}]*)\}/)?.[1] ??

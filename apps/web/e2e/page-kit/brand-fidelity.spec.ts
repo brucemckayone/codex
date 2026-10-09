@@ -125,9 +125,18 @@ async function apply(page: Page, setup: Setup): Promise<void> {
     if (s.carrier) {
       root.setAttribute('data-org-brand', '');
       root.setAttribute('style', s.carrier);
-      // A page that sets a background of its own also carries data-org-bg.
-      if (/--brand-bg(-dark)?:/.test(s.carrier))
+      // A page that sets a background of its own also carries data-org-bg,
+      // and names the theme(s) it is for — as PageRenderer derives both
+      // from the properties declared, never from the style text.
+      const declared = new Set(
+        s.carrier.split(';').map((d) => d.split(':')[0]?.trim())
+      );
+      const light = declared.has('--brand-bg');
+      const dark = declared.has('--brand-bg-dark');
+      if (light || dark) {
         root.setAttribute('data-org-bg', '');
+        root.dataset.pageBg = light && dark ? 'both' : light ? 'light' : 'dark';
+      }
     }
   }, setup);
   await page.evaluate(
@@ -471,15 +480,22 @@ const luminance = (hex: string) => {
   const [r = 0, g = 0, b = 0] = linear(hex);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
-/** OKLab hue, in degrees. */
-const hueOf = (hex: string) => {
+/** OKLab of a `#rrggbb`. */
+const oklab = (hex: string): [number, number, number] => {
   const [r = 0, g = 0, b = 0] = linear(hex);
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
-  return (Math.atan2(bb, a) * 180) / Math.PI;
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+};
+/** OKLab hue, in degrees. */
+const hueOf = (hex: string) => {
+  const [, a, b] = oklab(hex);
+  return (Math.atan2(b, a) * 180) / Math.PI;
 };
 
 for (const theme of ['light', 'dark'] as const) {

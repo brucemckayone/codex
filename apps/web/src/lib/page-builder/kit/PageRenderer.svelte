@@ -10,7 +10,8 @@
   that sets its own background also carries `data-org-bg`, so the org's
   surfaces, text and border are derived from it in that background's theme
   — the kit draws those tokens (`styles/schemes.css`), and gives the other
-  theme back to the org's when the page sets no twin for it. The page's
+  theme back to the org's when the page sets no twin for it
+  (`data-page-bg`: light, dark or both). The page's
   own fonts are loaded here, because the org layout loads only the org's.
 
   EDITING changes attributes, never structure: with `edit` the text fields
@@ -106,9 +107,13 @@
   // only under `[data-org-bg]`, which has no page-override twin: a page that
   // sets its own background carries the attribute, so they follow it — in
   // that background's own theme only (`schemes.css`, owner D7).
-  const ownBackground = $derived.by(() => {
+  // Which theme(s) that background is for: the kit selects on this, never on
+  // the style text, to give the other theme back to the org.
+  const pageBg = $derived.by(() => {
     const vars = brandOverridesToCssVars(brandOverrides);
-    return '--brand-bg' in vars || '--brand-bg-dark' in vars;
+    const light = '--brand-bg' in vars;
+    const dark = '--brand-bg-dark' in vars;
+    return light && dark ? 'both' : light ? 'light' : dark ? 'dark' : undefined;
   });
   const fontsHref = $derived(brandFontsHref(brandOverrides));
 
@@ -166,7 +171,8 @@
   data-lp-editing={edit ? '' : undefined}
   data-lp-atmosphere={atmosphere}
   data-org-brand={brandStyle ? '' : undefined}
-  data-org-bg={ownBackground ? '' : undefined}
+  data-org-bg={pageBg ? '' : undefined}
+  data-page-bg={pageBg}
   style={brandStyle}
   {@attach entrances(still || !!edit)}
 >

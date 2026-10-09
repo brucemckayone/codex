@@ -173,6 +173,32 @@ describe('PageRenderer', () => {
     expect(root.getAttribute('style')).toContain('--brand-bg-dark: #101018');
   });
 
+  it('names which theme the page’s own background is for, so the other takes the org’s (owner, D7)', async () => {
+    const cases = [
+      [{ backgroundColor: '#F6EFE6' }, 'light'],
+      [{ darkOverrides: { backgroundColor: '#101018' } }, 'dark'],
+      [
+        {
+          backgroundColor: '#F6EFE6',
+          darkOverrides: { backgroundColor: '#101018' },
+        },
+        'both',
+      ],
+      [{ primaryColor: '#0D9488' }, null],
+      // A blank background is no background (the override drops it).
+      [{ backgroundColor: '  ' }, null],
+    ] as const;
+    for (const [brandOverrides, expected] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      expect(
+        root.getAttribute('data-page-bg'),
+        JSON.stringify(brandOverrides)
+      ).toBe(expected);
+    }
+  });
+
   it('previews a theme on its own root, never on <html>', async () => {
     const root = await render({ theme: 'dark' });
     expect(root.dataset.lpTheme).toBe('dark');
