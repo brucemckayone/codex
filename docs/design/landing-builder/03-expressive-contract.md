@@ -1402,3 +1402,40 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     every floor. `resolve.test.ts` covers `groundBand`, `resolveGroundBands` and
     `atmosphereProven`; `PageRenderer.svelte.test.ts` covers the root's band attributes and an
     atmosphere section drawn as base on l85.
+- **X49 · 2026-10-10 · p3a · D12 on the org's side: its borders step away from its ground
+  (Codex-j4ioe).** The owner's decision, verbatim: "Fix it on the org's site (Recommended)".
+  `org-brand.css`'s `[data-org-bg]` rules stepped the four border levels (subtle .06, border
+  .12, hover .15, strong .18) by THEME: darker in light mode, lighter in dark. A ground on the
+  other side lost them. of-blood-and-bones' parchment (L 0.955) stays light in dark mode, so
+  every level clamped to L 1.000 (#fffffc, about 1.1:1). The mirror case is night (L 0.235) in
+  light mode, where every level went darker into black (0.175 to 0.055). Sand in dark mode
+  clamped the same way as the parchment.
+  - **The rule.** Each level is `oklch(from <background> calc(l + <step> * var(--_bg-away))
+    …)`. `--_bg-away` is −1 on a light ground and +1 on a dark one, in both rules. The side is
+    the ground's luminance at Y 0.1791, the kit's pole crossover (X48). **The mapping:**
+    relative colour gives l, c and h, not luminance, so `org-brand.css` rebuilds it exactly:
+    a = c·cos h and b = c·sin h; OKLab's three LMS′ rows, each cubed, give linear LMS; and Y
+    is one row of LMS → linear sRGB → Y (−0.040774541, 1.112492185, −0.071717644). No single
+    lightness would serve, because a grey crosses at L 0.5637 and a saturated colour does not.
+    The helpers are functions of the channel keywords, so they hold for whichever background
+    a border is derived from. The kit's four scoped previews of `--_org-line` take the same
+    expression.
+  - **Measured on explore** (OKLCH L of the background → subtle, border, hover, strong):
+    - seed dark: 0.955 → 1.000 ×4, now 0.895, 0.835, 0.805, 0.775;
+    - night light: 0.235 → 0.175, 0.115, 0.085, 0.055, now 0.295, 0.355, 0.385, 0.415;
+    - sand dark: 0.887 → 0.947, 1.000 ×3, now 0.827, 0.767, 0.737, 0.707;
+    - unchanged: seed light, night dark, sand light, lilac in both themes, and red and plain
+      (no background).
+    Of the seeded pages (5 sales pages and 3 explore pages × 2 themes, full length), only
+    of-blood-and-bones in dark mode changes: 4 pages, 7,472 to 31,024 pixels each. The rest are
+    pixel-identical, except studio-alpha's explore page (its animated hero) and Tending the
+    Grief in light mode, which differ by up to 3 levels between any two runs. That org has no
+    `[data-org-bg]`.
+  - **Tests.** In spec `brand-fidelity.spec.ts`, "D12 {of-blood-and-bones dark, night light}"
+    (red first: 2 failed and their 2 controls passed). It reads the org's background and all
+    four levels on the page, and checks each level steps away by its whole step, to within
+    0.005. In schemes.test §17, three tests: the helpers' text, evaluated as the browser does,
+    equal the luminance and the kit's pole over a 5,832-colour sample; every level in both
+    rules carries the side, and no fixed step remains; and every level stands its whole step
+    from any ground in either theme. §10's model of `org-brand.css` takes the same rule
+    (`ORG_BORDERS`, `awayFrom`).

@@ -531,7 +531,7 @@
   --_org-card: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
-  --_org-line: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.12) calc(c * 0.3) h);
+  --_org-line: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.12 * var(--_bg-away)) calc(c * 0.3) h);
 }
 
 /* …unless the page sets its own dark background. */
@@ -544,7 +544,7 @@
   --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
-  --_org-line: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.12) calc(c * 0.3) h);
+  --_org-line: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.12 * var(--_bg-away)) calc(c * 0.3) h);
 }
 
 :is(
@@ -583,7 +583,7 @@
   --_org-card: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-in, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
-  --_org-line: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l - 0.12) calc(c * 0.3) h);
+  --_org-line: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l + 0.12 * var(--_bg-away)) calc(c * 0.3) h);
 }
 
 /* …unless the page sets its own light background. */
@@ -597,7 +597,7 @@
   --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
-  --_org-line: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.12) calc(c * 0.3) h);
+  --_org-line: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.12 * var(--_bg-away)) calc(c * 0.3) h);
 }
 
 /* ── Scheme tokens (fallback path) ───────────────────────────────────────── */

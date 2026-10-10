@@ -745,10 +745,27 @@ function platformOrg(
  * step and chroma share from the background, and the text's share in the
  * secondary text. §10 rebuilds the rule's text from these. */
 const ORG_BG = {
-  light: { soft: -0.03, card: 0.05, line: -0.12, textShare: 0.62 },
-  dark: { soft: 0.04, card: 0.07, line: 0.12, textShare: 0.7 },
+  light: { soft: -0.03, card: 0.05, textShare: 0.62 },
+  dark: { soft: 0.04, card: 0.07, textShare: 0.7 },
 } as const;
 const ORG_CHROMA = { soft: 0.5, card: 0.2, line: 0.3 } as const;
+
+/**
+ * The org's borders (owner, D12, "Fix it on the org's site (Recommended)"):
+ * each steps AWAY from the background by its whole step, on the side the
+ * background's luminance puts it — darker on a light ground, lighter on a
+ * dark one, in either theme — at the kit's pole crossover (Y 0.1791). They
+ * used to step by THEME, so a light ground in dark mode clamped every level
+ * to white. `org-brand.css` computes the side in relative colour (§17).
+ */
+const ORG_BORDERS = {
+  '--color-border-subtle': { step: 0.06, chroma: 0.2 },
+  '--color-border': { step: 0.12, chroma: ORG_CHROMA.line },
+  '--color-border-hover': { step: 0.15, chroma: 0.3 },
+  '--color-border-strong': { step: 0.18, chroma: 0.3 },
+} as const;
+/** -1 on a light ground (the border darkens), +1 on a dark one. */
+const awayFrom = (bg: Rgb) => (lum(bg) > INK_CROSSOVER ? -1 : 1);
 
 /** `org-brand.css`'s `[data-org-bg]` rule for `theme`, from the background it
  * reads (the dark rule reads `--brand-bg-dark`, else the light one). A
@@ -781,7 +798,12 @@ function orgFromBg(
     ink,
     // `color-mix(in oklab, var(--color-text) <share>, var(--color-background))`.
     inkSoft: mix(ink, bg, 1 - p.textShare),
-    line: at('line'),
+    line: oklchFrom(
+      bg,
+      (l) =>
+        clampTo(0, l + ORG_BORDERS['--color-border'].step * awayFrom(bg), 1),
+      (_, c) => c * ORG_CHROMA.line
+    ),
     heading,
     focus,
     button,
@@ -2542,15 +2564,20 @@ function orgBgRecipes(theme: Mode): Record<string, string> {
       : 'var(--brand-bg-dark, var(--brand-bg, #1a1a2e))';
   const p = ORG_BG[theme];
   const step = (d: number) => `calc(l ${d < 0 ? '-' : '+'} ${Math.abs(d)})`;
-  const at = (key: keyof typeof ORG_CHROMA) =>
+  const at = (key: 'soft' | 'card') =>
     `oklch(from ${bg} ${step(p[key])} calc(c * ${ORG_CHROMA[key]}) h)`;
+  const border = (name: keyof typeof ORG_BORDERS) =>
+    `oklch(from ${bg} calc(l + ${ORG_BORDERS[name].step} * var(--_bg-away)) calc(c * ${ORG_BORDERS[name].chroma}) h)`;
   return {
     '--color-background': bg,
     '--color-surface-secondary': at('soft'),
     '--color-surface-card': at('card'),
     '--color-text': `oklch(from ${bg} clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0)`,
     '--color-text-secondary': `color-mix(in oklab, var(--color-text) ${Math.round(p.textShare * 100)}%, var(--color-background))`,
-    '--color-border': at('line'),
+    '--color-border': border('--color-border'),
+    '--color-border-subtle': border('--color-border-subtle'),
+    '--color-border-hover': border('--color-border-hover'),
+    '--color-border-strong': border('--color-border-strong'),
   };
 }
 
@@ -2736,7 +2763,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       // the previewed ground as its band draws it, by the pole's step (the
       // other way at the band's edge, §16), with its chroma.
       const recipes = Object.entries(orgBgRecipes(theme)).filter(
-        ([name]) => name !== '--color-surface-secondary'
+        ([name]) => name !== '--color-surface-secondary' && name in ORG_NAMES
       );
       const SOFT = SOFT_STEP_EXPR;
       const fromOrg = decls(body(`${LAST[theme]}:is([data-org-bg] .lp) {`));
@@ -4025,4 +4052,143 @@ describe('the org’s real ground — its pole, its band, and a soft band that s
       );
     }
   );
+});
+
+// ── 17. the org's borders step away from its ground (owner, D12) ────────────
+/*
+ * `org-brand.css` stepped its borders by THEME: darker in light mode, lighter
+ * in dark. of-blood-and-bones' parchment stays light in dark mode, so every
+ * border level clamped to #fffffc (1.1:1); night's forest ground in light
+ * mode drew them darker still, toward black. The owner chose "Fix it on the
+ * org's site (Recommended)" (D12, Codex-j4ioe): each border steps away from
+ * the ground on the side its luminance puts it, at the kit's crossover.
+ *
+ * Relative colour gives the ground's OKLCH l, c, h, not its luminance, so the
+ * stylesheet rebuilds it: a = c·cos h, b = c·sin h; OKLab's LMS' rows of
+ * (l, a, b), each cubed, are linear LMS; and the luminance is one row of
+ * LMS → linear sRGB → Y. That is exact, not a lightness proxy: Y 0.1791 has
+ * no single OKLab L (a grey crosses at L 0.5637, a saturated blue lower).
+ */
+describe('the org’s borders step away from its ground, on either side (owner, D12)', () => {
+  /** OKLab → linear LMS' rows, and Y's row of LMS → linear sRGB → Y. */
+  const LMS = {
+    l: [0.3963377774, 0.2158037573],
+    m: [-0.1055613458, -0.0638541728],
+    s: [-0.0894841775, -1.291485548],
+  } as const;
+  const Y_ROW = { l: -0.040774541, m: 1.112492185, s: -0.071717644 } as const;
+  const term = (k: number) =>
+    `${k < 0 ? '-' : '+'} ${Math.abs(k)} * var(--_bg-b)`;
+  const row = (name: 'l' | 'm' | 's') => {
+    const [ka, kb] = LMS[name];
+    return `--_bg-${name}: (l ${ka < 0 ? '-' : '+'} ${Math.abs(ka)} * var(--_bg-a) ${term(kb)});`;
+  };
+  const cube = (name: 'l' | 'm' | 's') =>
+    `var(--_bg-${name}) * var(--_bg-${name}) * var(--_bg-${name})`;
+  const HELPERS = [
+    '--_bg-a: (c * cos(h * 1deg));',
+    '--_bg-b: (c * sin(h * 1deg));',
+    row('l'),
+    row('m'),
+    row('s'),
+    `--_bg-y: (${Y_ROW.l} * ${cube('l')} + ${Y_ROW.m} * ${cube('m')} - ${Math.abs(Y_ROW.s)} * ${cube('s')});`,
+    `--_bg-away: (1 - 2 * clamp(0, (var(--_bg-y) - ${INK_CROSSOVER}) * 1e6, 1));`,
+  ].join(' ');
+
+  /** The helpers as the browser evaluates them, from the ground's l, c, h. */
+  const cssAway = (g: Rgb) => {
+    const [l, A, B] = toLab(g);
+    const c = Math.hypot(A, B);
+    const h = Math.atan2(B, A);
+    const [a, b] = [c * Math.cos(h), c * Math.sin(h)];
+    const lms = (name: 'l' | 'm' | 's') =>
+      (l + LMS[name][0] * a + LMS[name][1] * b) ** 3;
+    const y = Y_ROW.l * lms('l') + Y_ROW.m * lms('m') + Y_ROW.s * lms('s');
+    return { y, away: 1 - 2 * clampTo(0, (y - INK_CROSSOVER) * 1e6, 1) };
+  };
+  const sample: Rgb[] = [];
+  for (let r = 0; r < 256; r += 15)
+    for (let g = 0; g < 256; g += 15)
+      for (let b = 0; b < 256; b += 15)
+        sample.push([r / 255, g / 255, b / 255]);
+  const L = (rgb: Rgb) => toLab(rgb)[0];
+  const draw = (g: Rgb, name: keyof typeof ORG_BORDERS) =>
+    oklchFrom(
+      g,
+      (l) => clampTo(0, l + ORG_BORDERS[name].step * cssAway(g).away, 1),
+      (_, c) => c * ORG_BORDERS[name].chroma
+    );
+
+  it('finds the ground’s side from its luminance, in relative colour — the kit’s pole exactly', () => {
+    expect(ORG_BRAND).toContain(`[data-org-bg] { ${HELPERS} }`);
+    for (const g of sample) {
+      const { y, away } = cssAway(g);
+      // To the coefficients' 10 digits.
+      expect(y, toHex(g)).toBeCloseTo(lum(g), 7);
+      expect(away, toHex(g)).toBe(awayFrom(g));
+      // …which is the kit's pole for that ground.
+      const pole = BAND[groundBand(toHex(g)) as GroundBandId].pole;
+      expect(away, toHex(g)).toBe(pole === 'light' ? -1 : 1);
+    }
+    // No single lightness is the crossover: a grey crosses at 0.5637, and
+    // a ground of lower L can still be light.
+    expect(INK_CROSSOVER ** (1 / 3)).toBeCloseTo(0.5637, 4);
+    expect(
+      sample.some((g) => awayFrom(g) === -1 && L(g) < 0.5637) &&
+        sample.some((g) => awayFrom(g) === 1 && L(g) > 0.5637)
+    ).toBe(true);
+  });
+
+  it('spells every border level with that side, in both themes, and no fixed step remains', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const rule =
+        theme === 'light'
+          ? (ORG_BRAND.match(/\} \[data-org-bg\] \{([^}]*)\}/)?.[1] ?? '')
+          : (ORG_BRAND.match(
+              /\[data-editing-theme='dark'\]\[data-org-bg\] \{([^}]*)\}/
+            )?.[1] ?? '');
+      for (const name of Object.keys(
+        ORG_BORDERS
+      ) as (keyof typeof ORG_BORDERS)[])
+        expect(rule, `${theme} ${name}`).toContain(
+          `${name}: ${orgBgRecipes(theme)[name]};`
+        );
+      expect(rule, theme).not.toMatch(
+        /--color-border[\w-]*: oklch\(from [^;]* calc\(l [+-] [\d.]+\) /
+      );
+    }
+  });
+
+  it('never loses a border: every level stands its whole step from any ground, in either theme', () => {
+    let lighter = 0;
+    let darker = 0;
+    for (const g of sample)
+      for (const name of Object.keys(
+        ORG_BORDERS
+      ) as (keyof typeof ORG_BORDERS)[]) {
+        const delta = L(draw(g, name)) - L(g);
+        expect(Math.abs(delta), `${toHex(g)} ${name}`).toBeCloseTo(
+          ORG_BORDERS[name].step,
+          6
+        );
+        if (delta > 0) lighter++;
+        else darker++;
+      }
+    expect(lighter).toBeGreaterThan(1000);
+    expect(darker).toBeGreaterThan(1000);
+    // The two that lost them: the parchment in dark mode now darkens…
+    const parchment = hex('#F3F0E7');
+    expect(L(draw(parchment, '--color-border'))).toBeCloseTo(
+      L(parchment) - 0.12,
+      6
+    );
+    // …where the theme's step clamped it to white.
+    expect(clampTo(0, L(parchment) + 0.12, 1)).toBe(1);
+    // Night in light mode now lightens, where the theme's step went darker.
+    const night = hex('#15211C');
+    expect(L(draw(night, '--color-border-strong'))).toBeCloseTo(
+      L(night) + 0.18,
+      6
+    );
+  });
 });

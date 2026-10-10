@@ -1423,3 +1423,92 @@ for (const [name, at, carrier] of REVIEW_BRANDS) {
     });
   }
 }
+
+// ── D12: the org's borders step away from its ground (Codex-j4ioe) ────────
+// org-brand.css derived its borders by a fixed step per THEME: darker in
+// light mode, lighter in dark. An org whose ground is on the other side lost
+// them: of-blood-and-bones' parchment, which stays light in dark mode, drew
+// every border level as #fffffc (clamped at L 1), and night's forest ground
+// in light mode drew them darker still. The owner chose "Fix it on the org's
+// site (Recommended)": each border steps away from the ground, on the side
+// the ground's luminance puts it (Y 0.1791, as the kit's pole), by its whole
+// step. Measured on the org's own tokens: the org layout's for the seeded
+// org, the page carrier's for a review brand (derived by the same rules).
+const BORDER_STEPS = {
+  '--color-border-subtle': 0.06,
+  '--color-border': 0.12,
+  '--color-border-hover': 0.15,
+  '--color-border-strong': 0.18,
+} as const;
+
+/** Runs in the page: the org's background and border tokens on `host`. */
+function readBorders(args: {
+  orgHost: 'main' | 'root';
+  names: readonly string[];
+}): Record<string, string> {
+  const host =
+    args.orgHost === 'root'
+      ? document.querySelector('.lp')
+      : document.querySelector('main#main-content, .org-main');
+  if (!host) throw new Error(`no ${args.orgHost} host`);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d context');
+  const out: Record<string, string> = {};
+  for (const name of ['--color-background', ...args.names]) {
+    const probe = document.createElement('span');
+    probe.style.cssText = `position:absolute;inline-size:0;block-size:0;color:var(${name})`;
+    host.appendChild(probe);
+    ctx.globalCompositeOperation = 'copy';
+    ctx.fillStyle = '#000000';
+    ctx.fillStyle = getComputedStyle(probe).color;
+    probe.remove();
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    out[name] =
+      `#${[r, g, b].map((n) => (n ?? 0).toString(16).padStart(2, '0')).join('')}`;
+  }
+  return out;
+}
+
+const BORDER_CASES = [
+  // The bug: a light ground in dark mode (the seed, on the org's own path).
+  ['of-blood-and-bones dark', 'dark', null, 'darker'],
+  // Its mirror: a dark ground in light mode (night, on a carrier).
+  ['night light', 'light', REVIEW_BRANDS[0][2], 'lighter'],
+  // Controls: each ground on its own theme's side, unchanged.
+  ['of-blood-and-bones light', 'light', null, 'darker'],
+  ['night dark', 'dark', REVIEW_BRANDS[0][2], 'lighter'],
+] as const;
+
+for (const [name, theme, carrier, side] of BORDER_CASES) {
+  test(`D12 ${name}: every border level steps ${side} than the ground, by its whole step`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const item = CASES[1];
+    if (!item) throw new Error('no case');
+    const page = await openAs(browser, baseURL as string, item, theme);
+    if (carrier) await apply(page, { carrier });
+    const read = await page.evaluate(readBorders, {
+      orgHost: carrier ? 'root' : 'main',
+      names: Object.keys(BORDER_STEPS),
+    } as const);
+    await page.context().close();
+    const detail = JSON.stringify(read);
+    const ground = oklab(read['--color-background'] ?? '')[0];
+    for (const [token, step] of Object.entries(BORDER_STEPS)) {
+      const delta = oklab(read[token] ?? '')[0] - ground;
+      expect(Math.sign(delta), `${token} ${detail}`).toBe(
+        side === 'darker' ? -1 : 1
+      );
+      // 8-bit paint moves L by up to about 0.003.
+      expect(
+        Math.abs(Math.abs(delta) - step),
+        `${token} ${detail}`
+      ).toBeLessThan(0.005);
+    }
+  });
+}
