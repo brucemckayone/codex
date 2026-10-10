@@ -187,8 +187,12 @@
   --text-display: calc(clamp(2.75rem, 1rem + 4.5vw, 5rem) * var(--text-scale));
 
   /* ─── SHADOW OVERRIDES (from brand editor fine-tune) ───────────────── */
-  --shadow-strength: calc(1% * var(--brand-shadow-scale, 1));
-  --shadow-color: var(--brand-shadow-color, 220 3% 15%);
+  /* The brand scales each shadow's whole opacity (owner, D19) and replaces
+     its colour; the scale is re-composed from these under this scope
+     (`shadows.css`). With no override an org's shadows are the platform's,
+     in either theme. */
+  --shadow-scale: var(--brand-shadow-scale, 1);
+  --shadow-color: var(--brand-shadow-color, var(--shadow-color-default));
 
   /* ─── BLIND SPOT FIXES ─────────────────────────────────────────── */
   /* These tokens were NOT re-derived from brand inputs. They stayed
@@ -532,7 +536,7 @@
   --color-player-gradient-bottom: var(--brand-player-gradient-bottom-dark, var(--brand-player-gradient-bottom, hsl(0 0% 0% / var(--media-overlay-bottom-opacity, 0.7))));
 
   /* Shadow color — consumer reads --shadow-color. */
-  --shadow-color: var(--brand-shadow-color-dark, var(--brand-shadow-color, 220 3% 15%));
+  --shadow-color: var(--brand-shadow-color-dark, var(--brand-shadow-color, var(--shadow-color-default)));
 
   /* Fonts — consumer reads --font-body / --font-heading. Light lives on
      --brand-font-body/-heading (inline, from the fontBody/fontHeading fields);
