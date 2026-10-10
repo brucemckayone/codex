@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { PageRenderer } from '$lib/page-builder/kit';
@@ -18,6 +19,7 @@
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
+  import { orgGrounds } from '$lib/page-builder/org-grounds';
   import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
@@ -234,6 +236,10 @@
 
   /** The selling organisation, from the org layout's awaited data. */
   const orgName = $derived(data.org?.name ?? null);
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
 
   // Course JSON-LD for rich results.
   //
@@ -347,4 +353,5 @@
   page={data.kitPage}
   {context}
   brandOverrides={data.coursePage.page.brandOverrides}
+  orgGrounds={grounds}
 />

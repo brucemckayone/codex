@@ -19,6 +19,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import {
+  GROUND_BANDS,
+  type GroundBandId,
+  groundBand,
+  INK_CROSSOVER,
+  resolveGroundBands,
+} from '../model/resolve';
 
 const CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), 'schemes.css'),
@@ -110,6 +117,50 @@ const TARGET = {
   orgWhiteLabelInk: 0.182,
 };
 
+/**
+ * THE GROUND'S BANDS (Codex-61zsk.42, 03 X48): the org's grades on each, as
+ * `schemes.css` names them per band (`.lp[data-ground-*='<id>']`). The first
+ * band of each pole is the one the kit always had (the TARGETs above); a
+ * wider band holds a darker (lighter) worst surface, so its inks move
+ * further. Each is 2% past what its worst surface needs, rounded toward the
+ * ink. Keep white (D8) is off where the large grade lifts a button past
+ * white's 4.5:1 (`kw`). §16 proves every one.
+ */
+const BAND_GRADES: Record<
+  GroundBandId,
+  { ot: number; ol: number; odt: number; odl: number; kw: 0 | 1 }
+> = {
+  l90: {
+    ot: TARGET.orgTextLight,
+    ol: TARGET.orgLargeLight,
+    odt: TARGET.orgDecTextLight,
+    odl: TARGET.orgDecLargeLight,
+    kw: 1,
+  },
+  l85: { ot: 0.086, ol: 0.155, odt: 0.064, odl: 0.121, kw: 1 },
+  l80: { ot: 0.062, ol: 0.118, odt: 0.044, odl: 0.091, kw: 1 },
+  l75: { ot: 0.041, ol: 0.086, odt: 0.026, odl: 0.065, kw: 1 },
+  l70: { ot: 0.022, ol: 0.058, odt: 0.011, odl: 0.042, kw: 1 },
+  l65: { ot: 0.009, ol: 0.039, odt: 0.0009, odl: 0.026, kw: 1 },
+  d24: {
+    ot: TARGET.orgTextDark,
+    ol: TARGET.orgLargeDark,
+    odt: TARGET.orgDecTextDark,
+    odl: TARGET.orgDecLargeDark,
+    kw: 1,
+  },
+  d30: { ot: 0.316, ol: 0.194, odt: 0.417, odl: 0.261, kw: 0 },
+  d36: { ot: 0.414, ol: 0.26, odt: 0.535, odl: 0.34, kw: 0 },
+  d42: { ot: 0.552, ol: 0.352, odt: 0.69, odl: 0.443, kw: 0 },
+  d48: { ot: 0.737, ol: 0.475, odt: 0.885, odl: 0.574, kw: 0 },
+};
+type Band = (typeof GROUND_BANDS)[number] & (typeof BAND_GRADES)[GroundBandId];
+const BAND = Object.fromEntries(
+  GROUND_BANDS.map((b) => [b.id, { ...b, ...BAND_GRADES[b.id] }])
+) as Record<GroundBandId, Band>;
+/** The band each pole draws when no ground names one: its first. */
+const FIRST = { light: BAND.l90, dark: BAND.d24 } as const;
+
 // ── 1. parity ────────────────────────────────────────────────────────────────
 function fragments(): string[] {
   const channels = ['r', 'g', 'b'] as const;
@@ -132,12 +183,12 @@ function fragments(): string[] {
       );
     }
   }
-  const darken = (name: string, y: number) =>
+  const darken = (name: string, y: number | string) =>
     channels.map(
       (c) =>
         `--_${name}-${c}: max(0, 255 * (1.055 * pow(var(--_l${c}) * min(1, ${y} / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));`
     );
-  const lighten = (name: string, y: number) => [
+  const lighten = (name: string, y: number | string) => [
     `--_${name}-s: max(1, ${y} / max(var(--_y), 1e-6));`,
     ...channels.map(
       (c) => `--_${name}-1${c}: min(1, var(--_l${c}) * var(--_${name}-s));`
@@ -163,15 +214,16 @@ function fragments(): string[] {
     ...lighten('atm-btn-lt', TARGET.atmosButtonDark),
     ...darken('atm-mark-dk', TARGET.atmosMarkLight),
     ...lighten('atm-mark-lt', TARGET.atmosMarkDark),
-    ...darken('ot-dk', TARGET.orgTextLight),
-    ...lighten('ot-lt', TARGET.orgTextDark),
-    ...darken('ol-dk', TARGET.orgLargeLight),
-    ...lighten('ol-lt', TARGET.orgLargeDark),
-    ...darken('odt-dk', TARGET.orgDecTextLight),
-    ...lighten('odt-lt', TARGET.orgDecTextDark),
-    ...darken('odl-dk', TARGET.orgDecLargeLight),
-    ...lighten('odl-lt', TARGET.orgDecLargeDark),
-    `--_wl-f: max(min(1, ${TARGET.orgWhiteLabel} / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - ${TARGET.orgWhiteLabelCut}) * 1e6, 1));`,
+    // The org's grades are the ground's band's (§16): one band at a time.
+    ...darken('ot-dk', 'var(--_g-ot)'),
+    ...lighten('ot-lt', 'var(--_g-ot)'),
+    ...darken('ol-dk', 'var(--_g-ol)'),
+    ...lighten('ol-lt', 'var(--_g-ol)'),
+    ...darken('odt-dk', 'var(--_g-odt)'),
+    ...lighten('odt-lt', 'var(--_g-odt)'),
+    ...darken('odl-dk', 'var(--_g-odl)'),
+    ...lighten('odl-lt', 'var(--_g-odl)'),
+    `--_wl-f: max(min(1, ${TARGET.orgWhiteLabel} / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - ${TARGET.orgWhiteLabelCut}) * 1e6, 1), 1 - var(--_band-kw));`,
     ...channels.map(
       (c) =>
         `--_wlm-${c}: max(0, 255 * (1.055 * pow(var(--_l${c}) * var(--_wl-f), 1 / 2.4) - 0.055));`
@@ -184,18 +236,18 @@ function fragments(): string[] {
 const RECIPES = [
   // light pole
   '--_ground-in: var(--_org-ground);',
-  '--lp-ground: oklch( from var(--_ground-in) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
-  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
-  '--_org-panel: oklch( from var(--_org-card) clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h );',
+  '--lp-ground: oklch( from var(--_ground-in) clamp(var(--_band-edge), l, 1) calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h );',
+  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) clamp(var(--_band-edge), l, 1) calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h );',
+  '--_org-panel: oklch( from var(--_org-card) clamp(var(--_band-edge), l, 1) calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h );',
   '--_contrast-bg: oklch(from var(--lp-brand) 0.2 min(c * 0.3, 0.033) h);',
   '--_panel-g: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) var(--lp-tint-panel)) clamp(0.9, l, 0.965) min(c, (1 - clamp(0.9, l, 0.965)) * 0.46) h );',
   '--_panel-i: oklch(from var(--lp-brand) 0.265 min(c * 0.35, 0.043) h);',
   '--_scrim: oklch(from var(--lp-brand) 0.16 min(c * 0.25, 0.027) h);',
   // dark pole
   '--_ground-in: var(--lp-dark-ground-in, var(--_org-ground));',
-  '--lp-ground: oklch( from var(--_ground-in) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
-  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
-  '--_org-panel: oklch( from var(--_org-card) min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h );',
+  '--lp-ground: oklch( from var(--_ground-in) min(l, var(--_band-edge)) calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h );',
+  '--_org-soft-bg: oklch( from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft)) min(l, var(--_band-edge)) calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h );',
+  '--_org-panel: oklch( from var(--_org-card) min(l, var(--_band-edge)) calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h );',
   // Cinematic's room (the only dark-pole soft band and panel a base / soft
   // section draws that is not the org's)
   '--_soft-bg: oklch( from color-mix(in oklab, var(--lp-ground), var(--lp-brand) calc(var(--lp-tint-soft) + 2%)) clamp(0.12, l + 0.035, 0.27) min(c, clamp(0.12, l + 0.035, 0.27) * 0.165) h );',
@@ -368,7 +420,7 @@ describe('schemes.css ↔ model parity', () => {
       '--lp-brand: var(--brand-color-dark, var(--brand-color, var(--color-brand-primary)));'
     );
     expect(DARK_THEME).not.toContain('--lp-ground');
-    expect(POLE.dark).toContain('min(l, 0.24)');
+    expect(POLE.dark).toContain('min(l, var(--_band-edge))');
     expect(POLE.dark).not.toContain('--lp-brand:');
   });
 
@@ -587,17 +639,19 @@ const DEFAULT_TINT: Tint = { soft: 0, panel: 0.14 };
 const clampTo = (lo: number, v: number, hi: number) =>
   Math.min(hi, Math.max(lo, v));
 
-function ground(mode: Mode, input: Rgb): Rgb {
+/** A colour held inside the band (`--_band-edge`): moved to its edge,
+ * chroma capped, only when outside it. */
+function ground(mode: Mode, input: Rgb, edge: number = FIRST[mode].edge): Rgb {
   return mode === 'light'
     ? oklchFrom(
         input,
-        (l) => clampTo(0.9, l, 1),
-        (l, c) => c - (l < 0.9 ? 1 : 0) * Math.max(0, c - 0.046)
+        (l) => clampTo(edge, l, 1),
+        (l, c) => c - (l < edge ? 1 : 0) * Math.max(0, c - 0.046)
       )
     : oklchFrom(
         input,
-        (l) => Math.min(l, 0.24),
-        (l, c) => c - (l > 0.24 ? 1 : 0) * Math.max(0, c - 0.039)
+        (l) => Math.min(l, edge),
+        (l, c) => c - (l > edge ? 1 : 0) * Math.max(0, c - 0.039)
       );
 }
 
@@ -736,15 +790,21 @@ function orgFromBg(
 }
 
 /** The surface the kit's soft band is drawn from, before a Style's tint and
- * the band (`--_org-soft`; owner, D14). On an org's background, that ground
- * a step toward its ink with its chroma kept: the step `org-brand.css` takes
- * for its secondary surface, by POLE (`--_soft-step`), not by theme. On the
+ * the band (`--_org-soft`; owner, D14). On an org's background, the ground
+ * as the band draws it, a step toward its ink with its chroma kept: the step
+ * `org-brand.css` takes for its secondary surface, by POLE (`--_soft-step`),
+ * not by theme. Where that step would leave the band it is taken the other
+ * way (Codex-61zsk.42), so the band never collapses onto the ground. On the
  * platform's neutral ground, the platform's own secondary surface. */
-function kitSoft(mode: Mode, org: Org): Rgb {
+function kitSoft(mode: Mode, org: Org, edge: number = FIRST[mode].edge): Rgb {
   if (!org.background) return org.soft;
+  const step = ORG_BG[mode].soft;
   return oklchFrom(
-    org.ground,
-    (l) => clampTo(0, l + ORG_BG[mode].soft, 1),
+    ground(mode, org.ground, edge),
+    (l) => {
+      const leaves = mode === 'light' ? l + step < edge : l + step > edge;
+      return clampTo(0, l + (leaves ? -step : step), 1);
+    },
     (_, c) => c
   );
 }
@@ -754,6 +814,8 @@ function kitSoft(mode: Mode, org: Org): Rgb {
 interface Page {
   org: Org;
   decorated: boolean;
+  /** The ground's band (§16); its pole's first when the page names none. */
+  band?: Band;
 }
 
 /** The safety net: an org colour moved toward its pole's side only as far as
@@ -762,16 +824,17 @@ function orgMove(
   mode: Mode,
   colour: Rgb,
   grade: 'text' | 'large',
-  decorated: boolean
+  decorated: boolean,
+  band: Band = FIRST[mode]
 ): Rgb {
-  const [yLight, yDark] = decorated
+  const y = decorated
     ? grade === 'text'
-      ? [TARGET.orgDecTextLight, TARGET.orgDecTextDark]
-      : [TARGET.orgDecLargeLight, TARGET.orgDecLargeDark]
+      ? band.odt
+      : band.odl
     : grade === 'text'
-      ? [TARGET.orgTextLight, TARGET.orgTextDark]
-      : [TARGET.orgLargeLight, TARGET.orgLargeDark];
-  return mode === 'light' ? darken(colour, yLight) : lighten(colour, yDark);
+      ? band.ot
+      : band.ol;
+  return mode === 'light' ? darken(colour, y) : lighten(colour, y);
 }
 
 /** Keep white (owner, D8), after the grade's move: a fill the org's label
@@ -782,14 +845,16 @@ function orgMove(
 function keepWhite(
   mode: Mode,
   fill: Rgb,
-  decorated: boolean
+  decorated: boolean,
+  kw: 0 | 1 = 1
 ): { fill: Rgb; label: Rgb } {
   const kneeY = (rgb: Rgb) => {
     const [r, g, b] = clip(rgb).map(kneeLin);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
   let out = fill;
-  if (mode === 'light' || !decorated) {
+  // Off on a band whose large grade white cannot hold (`--_band-kw`).
+  if ((mode === 'light' || !decorated) && kw) {
     const L = clip(fill).map(kneeLin);
     const y = kneeY(fill);
     const f = Math.max(
@@ -896,11 +961,16 @@ function schemeTokens(
     if (page) {
       // The org's surfaces, banded as the ground is (`--_org-soft-bg`,
       // `--_org-panel`): `ground()` is that recipe.
+      const edge = (page.band ?? FIRST[mode]).edge;
       bg =
         scheme === 'base'
           ? g
-          : ground(mode, mix(kitSoft(mode, page.org), brand, tint.soft));
-      panel = scheme === 'base' ? ground(mode, page.org.card) : g;
+          : ground(
+              mode,
+              mix(kitSoft(mode, page.org, edge), brand, tint.soft),
+              edge
+            );
+      panel = scheme === 'base' ? ground(mode, page.org.card, edge) : g;
     } else {
       if (light && scheme === 'soft')
         throw new Error('the light pole has no kit soft band: it is the org’s');
@@ -943,27 +1013,31 @@ function schemeTokens(
     // A heading is the section's ink (`currentColor`), as is the focus ring.
     return { ...kit, heading: kit.ink, title: kit.ink, focus: kit.ink };
   const { org, decorated } = page;
-  const orgInk = orgMove(mode, org.ink, 'text', decorated);
+  const band = page.band ?? FIRST[mode];
+  const move = (colour: Rgb, grade: 'text' | 'large') =>
+    orgMove(mode, colour, grade, decorated, band);
+  const orgInk = move(org.ink, 'text');
   const orgButton = keepWhite(
     mode,
-    orgMove(mode, org.button, 'large', decorated),
-    decorated
+    move(org.button, 'large'),
+    decorated,
+    band.kw
   );
   return {
     ...kit,
     ink: orgInk,
-    soft: orgMove(mode, org.inkSoft, 'text', decorated),
+    soft: move(org.inkSoft, 'text'),
     panelInk: orgInk,
-    heading: orgMove(mode, org.heading, 'large', decorated),
-    title: orgMove(mode, org.heading, 'text', decorated),
-    focus: orgMove(mode, org.focus, 'large', decorated),
+    heading: move(org.heading, 'large'),
+    title: move(org.heading, 'text'),
+    focus: move(org.focus, 'large'),
     // The org's button and label rule (white kept on a mid-tone), its
     // accent text, and the marks in the colour the Style draws them in,
     // each at its grade.
     button: orgButton.fill,
     buttonInk: orgButton.label,
-    accent: orgMove(mode, org.button, 'text', decorated),
-    mark: orgMove(mode, source, 'large', decorated),
+    accent: move(org.button, 'text'),
+    mark: move(source, 'large'),
   };
 }
 
@@ -2346,6 +2420,89 @@ function worstSurface(band: Mode, decorated: boolean): Rgb {
   return worst;
 }
 
+/** The next edge past each pole's last band: §16 shows it holds no
+ * decorated text, whatever the ink. */
+const PAST = { light: 0.64, dark: 0.54 } as const;
+const edgesOf = (pole: Mode) => [
+  ...GROUND_BANDS.filter((b) => b.pole === pole).map((b) => b.edge),
+  PAST[pole],
+];
+
+/**
+ * The luminance of the worst surface of EVERY band (§16), plain and under
+ * the decorations that ship, in one pass over the sRGB cube and each edge's
+ * ring: a pole's bands nest, so a colour counts toward each band that holds
+ * it. `worstSurface` above is the first bands' (§16 holds the two equal).
+ */
+let bandWorstCache: Record<
+  string,
+  { plain: number; decorated: number }
+> | null = null;
+function bandWorsts(): Record<string, { plain: number; decorated: number }> {
+  if (bandWorstCache) return bandWorstCache;
+  const edges = { light: edgesOf('light'), dark: edgesOf('dark') };
+  const out: Record<string, { plain: number; decorated: number }> = {};
+  for (const pole of ['light', 'dark'] as const)
+    for (const e of edges[pole]) {
+      const far = pole === 'light' ? 2 : -1;
+      out[`${pole}/${e}`] = { plain: far, decorated: far };
+    }
+  const over = (paint: Rgb, alpha: number, under: Rgb): Rgb =>
+    triple((i) => alpha * paint[i] + (1 - alpha) * under[i]);
+  const hold = (pole: Mode, L: number, s: Rgb, y: number) => {
+    const shape: Rgb = pole === 'light' ? [0, 0, 0] : [1, 1, 1];
+    const line = clip(ink(s, INK.line));
+    let dy = pole === 'light' ? 2 : -1;
+    for (const style of SHIPPED) {
+      let seen = s;
+      if (style.texture) seen = over(line, style.texture, seen);
+      if (style.shapes) seen = over(shape, style.shapes, seen);
+      const v = lum(seen);
+      if (towardInk(pole, v, dy)) dy = v;
+    }
+    for (const e of edges[pole]) {
+      if (pole === 'light' ? L < e : L > e) continue;
+      const w = out[`${pole}/${e}`];
+      if (towardInk(pole, y, w.plain)) w.plain = y;
+      if (towardInk(pole, dy, w.decorated)) w.decorated = dy;
+    }
+  };
+  const lin = Float64Array.from({ length: 256 }, (_, i) => srgbToLin(i / 255));
+  const lightFrom = Math.min(...edges.light);
+  const darkTo = Math.max(...edges.dark);
+  for (let r = 0; r < 256; r++)
+    for (let g = 0; g < 256; g++)
+      for (let b = 0; b < 256; b++) {
+        const [R, G, B] = [lin[r], lin[g], lin[b]];
+        const L =
+          0.2104542553 *
+            Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B) +
+          0.793617785 *
+            Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B) -
+          0.0040720468 *
+            Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+        const pole = L >= lightFrom ? 'light' : L <= darkTo ? 'dark' : null;
+        if (!pole) continue;
+        const y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+        hold(pole, L, [r / 255, g / 255, b / 255], y);
+      }
+  // A colour moved into a band lands on its edge, chroma capped (`ground()`).
+  for (const [pole, cap] of [
+    ['light', 0.046],
+    ['dark', 0.039],
+  ] as const)
+    for (const e of edges[pole])
+      for (let h = 0; h < 360; h += 2)
+        for (let k = 0; k <= 8; k++) {
+          const c = (cap * k) / 8;
+          const a = (h * Math.PI) / 180;
+          const s = clip(toRgb([e, c * Math.cos(a), c * Math.sin(a)]));
+          hold(pole, e, s, lum(s));
+        }
+  bandWorstCache = out;
+  return out;
+}
+
 const GRADES = [
   { name: 'text', grade: 'text', floor: 4.5, decorated: false },
   { name: 'large', grade: 'large', floor: 3, decorated: false },
@@ -2370,6 +2527,12 @@ const target = (band: Mode, g: (typeof GRADES)[number]) => {
       ? TARGET.orgLargeLight
       : TARGET.orgLargeDark;
 };
+
+/** The kit's soft surface on an org's background (owner, D14): the ground
+ * as its band draws it, a step toward its ink (`--_soft-step`), or the other
+ * way where that step would leave the band (`--_band-side`; §16). */
+const SOFT_STEP_EXPR =
+  'oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h)';
 
 /** The `[data-org-bg]` rule as `org-brand.css` spells it, from ORG_BG. */
 function orgBgRecipes(theme: Mode): Record<string, string> {
@@ -2570,12 +2733,12 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       // the org's own inputs, so a page background with no twin for this
       // theme does not shadow them (owner, D7)…
       // The soft surface on a background is the kit's own (owner, D14):
-      // the previewed ground, by the pole's step, with its chroma.
+      // the previewed ground as its band draws it, by the pole's step (the
+      // other way at the band's edge, §16), with its chroma.
       const recipes = Object.entries(orgBgRecipes(theme)).filter(
         ([name]) => name !== '--color-surface-secondary'
       );
-      const SOFT =
-        'oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h)';
+      const SOFT = SOFT_STEP_EXPR;
       const fromOrg = decls(body(`${LAST[theme]}:is([data-org-bg] .lp) {`));
       for (const [name, value] of recipes)
         expect(fromOrg[ORG_NAMES[name]], `${theme} ${name}`).toBe(
@@ -2597,26 +2760,34 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
     expect(paletteHex('var(--color-neutral-0)')).toBe('#ffffff');
   });
 
-  it('keeps the light pole where the org’s dark ground is its light one, as org-brand.css paints it', () => {
-    // No dark background: the dark rule paints the light one.
+  it('puts the ground on the pole of its own lightness, as PageRenderer names its band (Codex-61zsk.42)', () => {
+    // No dark background: the dark rule paints the light one, so the dark
+    // theme's band is the light background's (`resolveGroundBands`).
     expect(orgBgRecipes('dark')['--color-background']).toContain(
       'var(--brand-bg-dark, var(--brand-bg,'
     );
-    // So the dark pole excludes it on each of the dark theme's three
-    // selectors, and nowhere else; Cinematic's room is dark in every theme.
-    // It is the ORG's background that decides: a page's own light one with
-    // no dark twin takes the org's dark mode (owner, D7), so the page
-    // override is no longer an exclusion of its own.
-    const org =
-      "[data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])";
-    expect(CODE.split(org).length - 1).toBe(3);
-    expect(CODE).not.toContain(
-      ".lp[data-org-bg]:not([style*='--brand-bg-dark:'], [style*='--brand-bg-dark:'] .lp)"
+    // The dark pole is each theme's selectors, less a dark theme whose
+    // ground is on a light band, plus a light theme whose ground is on a
+    // dark band. Cinematic's room is dark in every theme.
+    const head = [
+      ":is(.dark, [data-theme='dark']) .lp:not([data-lp-theme='light'], [data-editing-theme='light'] .lp, [data-ground-dark^='l'])",
+      "[data-editing-theme='dark'] .lp:not([data-lp-theme='light'], [data-ground-dark^='l'])",
+      ":root:not(.dark, [data-theme='dark']) .lp[data-ground-light^='d']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp)",
+      "[data-editing-theme='light'] .lp[data-ground-light^='d']:not([data-lp-theme='dark'])",
+      ".lp[data-lp-theme='light'][data-ground-light^='d']",
+      ".lp[data-lp-theme='dark']:not([data-ground-dark^='l'])",
+      ".lp[data-lp-style='cinematic'] {",
+    ].join(', ');
+    expect(CODE.split(head).length - 1).toBe(1);
+    expect(CODE.slice(CODE.indexOf(head) + head.length)).toMatch(
+      /^ [^}]*--lp-ground:/
     );
-    // The page's background is read from PageRenderer's `data-page-bg`,
-    // never from its style text: only the org's own root is matched so.
-    expect(CODE.match(/\.lp[^\s,{]*\[style\*=/g)).toBeNull();
-    expect(POLE.dark).toContain('--lp-ground:');
+    // The org's background is no longer read from its style text, nor the
+    // page's: the band attributes are the only thing the pole selects on.
+    expect(CODE).not.toContain('[style*=');
+    // Every band id starts with its pole's letter, which the selectors read.
+    for (const band of GROUND_BANDS)
+      expect(band.id[0], band.id).toBe(band.pole === 'light' ? 'l' : 'd');
   });
 
   it('gives a page background with no twin back to the org in the other theme (owner, D7)', () => {
@@ -3349,8 +3520,7 @@ describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
     const [l, a, b] = toLab(rgb);
     return { l, c: Math.hypot(a, b) };
   };
-  const D14 =
-    ':is([data-org-bg] .lp, .lp[data-org-bg]) { --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h); }';
+  const D14 = `:is([data-org-bg] .lp, .lp[data-org-bg]) { --_org-soft: ${SOFT_STEP_EXPR}; }`;
   /** The D7 hand-back to an org with no background (§10's selectors). */
   const PLATFORM_HAND_BACK =
     ":is(.dark, [data-theme='dark']) .lp[data-page-bg='light']:not([data-lp-theme='light'], [data-editing-theme='light'] .lp, [data-org-bg] .lp), " +
@@ -3382,7 +3552,7 @@ describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
   };
 
   it(
-    'is the org’s ground a step toward its ink with the ground’s chroma, in both poles, for any org ground, and inside the band',
+    'is the org’s ground, as its band draws it, a step toward its ink with its chroma, in both poles, for any org ground, and inside the band',
     { timeout: 60_000 },
     () => {
       const brand = hex('#A62B0C');
@@ -3395,9 +3565,14 @@ describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
           for (const theme of ['light', 'dark'] as const) {
             const org = orgFromBg(theme, bg, brand, brand);
             const soft = kitSoft(mode, org);
-            const from = lch(org.ground);
+            const from = lch(ground(mode, org.ground));
             const to = lch(soft);
-            const step = clampTo(0, from.l + ORG_BG[mode].soft, 1);
+            // Toward the ink, or away where that would leave the band (§16).
+            const s = ORG_BG[mode].soft;
+            const edge = FIRST[mode].edge;
+            const leaves =
+              mode === 'light' ? from.l + s < edge : from.l + s > edge;
+            const step = clampTo(0, from.l + (leaves ? -s : s), 1);
             expect(to.l, `${mode} ${bg}`).toBeCloseTo(step, 6);
             expect(to.c, `${mode} ${bg}: the ground's chroma`).toBeCloseTo(
               from.c,
@@ -3419,9 +3594,12 @@ describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
                 outside.push(`${mode} ${bg} ${JSON.stringify(tint)}`);
               cases++;
             }
-            // Where the step is already in the band, the kit's own band
-            // draws it exactly: the ground's chroma, within 0.002.
-            const inBand = mode === 'light' ? step >= 0.9 : step <= 0.24;
+            // Where the org's ground is in the band, the kit's own band
+            // draws the step exactly: the ground's chroma, within 0.002.
+            const inBand =
+              mode === 'light'
+                ? lch(org.ground).l >= edge
+                : lch(org.ground).l <= edge;
             if (inBand) {
               const drawn = lch(
                 schemeTokens(
@@ -3467,4 +3645,384 @@ describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
     );
     expect(lch(light).l).toBeLessThan(lch(bg).l);
   });
+});
+
+// ── 16. the org's real ground (Codex-61zsk.42, 03 X48) ──────────────────────
+/*
+ * The kit drew every org ground in one band per pole (L >= 0.9, L <= 0.24),
+ * by the viewer's theme: a dark org ground was lifted to pale mint, and a
+ * sand at L 0.887 drawn at 0.9, its soft band equal to the ground. The owner
+ * chose "Fix it next (Recommended)" under D1, "Follow the org (Recommended)".
+ * The POLE is now the ground's own (white and black ink cross at its
+ * luminance), and the ground is drawn in the narrowest band of its pole that
+ * holds it, so it moves only past the pole's last band. Every band's grades
+ * are proven here on the worst surface it can hold.
+ */
+
+/** The owner's review brands ("Sample brands for reviews (Recommended)",
+ * D15), as `docs/handover/phase3-sources/review-brands/brands.json` sets
+ * them (outside the repo, so its colours are copied here), and the seeded
+ * orgs. `bg` is the background, `dark` its dark twin; none is the platform. */
+const GROUND_ORGS = {
+  'review seed (of-blood-and-bones)': {
+    brand: '#A62B0C',
+    bg: '#F3F0E7',
+    dark: null,
+  },
+  'review night': { brand: '#C9A54C', bg: '#15211C', dark: null },
+  'review sand': { brand: '#1F3A5F', bg: '#E9D8B4', dark: null },
+  'review lilac': { brand: '#8B5CF6', bg: '#F3EEFD', dark: '#17112A' },
+  'review red': { brand: '#E0402A', bg: null, dark: null },
+  'review plain': { brand: '#0F766E', bg: null, dark: null },
+  'seed studio-alpha': { brand: '#E11D48', bg: null, dark: null },
+  'seed studio-beta': { brand: '#2563EB', bg: null, dark: null },
+} as const;
+
+/** The least the soft band stands apart from the ground, in OKLCH
+ * lightness: the org's step on a background (the dark pole's is 0.04), and
+ * the platform's own secondary surface on its neutral ground (0.0150 on
+ * #fafafa). The e2e (`brand-fidelity.spec.ts`) checks the same numbers on
+ * the painted page. */
+const SOFT_MIN = { background: 0.03, platform: 0.014 } as const;
+
+const toHex = (rgb: Rgb) =>
+  `#${clip(rgb)
+    .map((c) =>
+      Math.round(c * 255)
+        .toString(16)
+        .padStart(2, '0')
+    )
+    .join('')}`;
+const lightnessOf = (rgb: Rgb) => toLab(rgb)[0];
+const poleOf = (id: GroundBandId): Mode => BAND[id].pole;
+const gradeOf = (band: Band, g: (typeof GRADES)[number]) =>
+  g.decorated
+    ? g.grade === 'text'
+      ? band.odt
+      : band.odl
+    : g.grade === 'text'
+      ? band.ot
+      : band.ol;
+/** Contrast against a surface known by its luminance alone. */
+const ratioY = (a: number, b: number) =>
+  (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
+describe('the org’s real ground — its pole, its band, and a soft band that stands apart (Codex-61zsk.42)', () => {
+  const cube: Rgb[] = [];
+  for (let r = 0; r < 256; r += 15)
+    for (let g = 0; g < 256; g += 15)
+      for (let b = 0; b < 256; b += 15) cube.push([r / 255, g / 255, b / 255]);
+
+  it('puts the pole where black and white ink cross, by the ground’s luminance', () => {
+    // White on Y and black on Y are equal at sqrt(1.05 * 0.05) - 0.05.
+    expect(INK_CROSSOVER).toBeCloseTo(Math.sqrt(1.05 * 0.05) - 0.05, 4);
+    // The kit's inks switch at the same point.
+    expect(CODE).toContain(
+      `--_w: clamp(0, (${INK_CROSSOVER} - var(--_y)) * 1e6, 1);`
+    );
+    let light = 0;
+    let dark = 0;
+    for (const g of cube) {
+      const id = groundBand(toHex(g));
+      expect(id).toBeDefined();
+      const pole = poleOf(id as GroundBandId);
+      // A mid-tone ground is either pole: the ink that holds more contrast
+      // on it decides, black on the light pole and white on the dark.
+      const black = ratio([0, 0, 0], g);
+      const white = ratio([1, 1, 1], g);
+      expect(pole, toHex(g)).toBe(lum(g) > INK_CROSSOVER ? 'light' : 'dark');
+      if (pole === 'light') {
+        expect(black, toHex(g)).toBeGreaterThanOrEqual(white);
+        light++;
+      } else {
+        expect(white, toHex(g)).toBeGreaterThanOrEqual(black);
+        dark++;
+      }
+    }
+    expect(light).toBeGreaterThan(1000);
+    expect(dark).toBeGreaterThan(1000);
+    // A 3-digit hex is read; anything else names no band.
+    expect(groundBand('#15211c')).toBe(groundBand('#15211C'));
+    expect(groundBand('#fff')).toBe('l90');
+    for (const bad of [null, undefined, '', 'red', '#12345', 'rgb(0 0 0)'])
+      expect(groundBand(bad)).toBeUndefined();
+  });
+
+  it('draws a ground in the narrowest band of its pole that holds it, and moves it only past the last', () => {
+    let held = 0;
+    let moved = 0;
+    for (const g of cube) {
+      const band = BAND[groundBand(toHex(g)) as GroundBandId];
+      const L = lightnessOf(g);
+      const ownPole = GROUND_BANDS.filter((b) => b.pole === band.pole);
+      const inBand = band.pole === 'light' ? L >= band.edge : L <= band.edge;
+      const drawn = ground(band.pole, g, band.edge);
+      if (inBand) {
+        // No narrower band of the pole holds it…
+        const narrower = ownPole.slice(
+          0,
+          ownPole.findIndex((b) => b.id === band.id)
+        );
+        for (const b of narrower)
+          expect(
+            band.pole === 'light' ? L < b.edge : L > b.edge,
+            `${toHex(g)} ${b.id}`
+          ).toBe(true);
+        // …and it is drawn as itself.
+        for (const i of [0, 1, 2] as const)
+          expect(Math.abs(drawn[i] - g[i]), toHex(g)).toBeLessThan(0.5 / 255);
+        held++;
+      } else {
+        // Past the last band: it moves to that band's edge.
+        expect(band.id, toHex(g)).toBe(ownPole[ownPole.length - 1].id);
+        expect(lightnessOf(drawn)).toBeCloseTo(band.edge, 6);
+        moved++;
+      }
+    }
+    // Of the 5,832 sampled, 3,991 are drawn as themselves; the rest are the
+    // saturated mid-tones between the poles' last bands (L 0.48 to 0.65).
+    expect(held).toBeGreaterThan(3900);
+    expect(moved).toBeGreaterThan(1000);
+  });
+
+  it(
+    'holds every floor on the worst surface of every band, for ANY org colour, and moves 2% past it, rounded toward the ink',
+    { timeout: 120_000 },
+    () => {
+      const worsts = bandWorsts();
+      // The first bands' worst surfaces are the ones §10 proves on.
+      for (const pole of ['light', 'dark'] as const)
+        for (const decorated of [false, true])
+          expect(
+            worsts[`${pole}/${FIRST[pole].edge}`][
+              decorated ? 'decorated' : 'plain'
+            ]
+          ).toBeCloseTo(lum(worstSurface(pole, decorated)), 12);
+      const sources: Rgb[] = Object.values(BRANDS).map(hex);
+      for (let r = 0; r < 256; r += 51)
+        for (let g = 0; g < 256; g += 51)
+          for (let b = 0; b < 256; b += 51)
+            sources.push([r / 255, g / 255, b / 255]);
+      let checked = 0;
+      for (const band of Object.values(BAND))
+        for (const grade of GRADES) {
+          const label = `${band.id} ${grade.name}`;
+          const w =
+            worsts[`${band.pole}/${band.edge}`][
+              grade.decorated ? 'decorated' : 'plain'
+            ];
+          const t = gradeOf(band, grade);
+          expect(ratioY(t, w) / grade.floor, label).toBeGreaterThanOrEqual(
+            1.02 - 1e-9
+          );
+          // The grade 2% past what the worst surface needs, rounded toward
+          // the ink — and by less than 0.001.
+          const exact =
+            band.pole === 'light'
+              ? (w + 0.05) / (grade.floor * 1.02) - 0.05
+              : (w + 0.05) * grade.floor * 1.02 - 0.05;
+          const past = band.pole === 'light' ? exact - t : t - exact;
+          expect(past, label).toBeGreaterThanOrEqual(0);
+          expect(past, label).toBeLessThan(0.001);
+          for (const s of sources)
+            expect(
+              ratioY(
+                lum(orgMove(band.pole, s, grade.grade, grade.decorated, band)),
+                w
+              ),
+              `${label} ${toHex(s)}`
+            ).toBeGreaterThanOrEqual(grade.floor);
+          checked++;
+        }
+      expect(checked).toBe(GROUND_BANDS.length * GRADES.length);
+      // A wider band holds a darker (lighter) worst surface: its inks move
+      // further, never less far.
+      for (const pole of ['light', 'dark'] as const) {
+        const bands = Object.values(BAND).filter((b) => b.pole === pole);
+        for (let i = 1; i < bands.length; i++)
+          for (const key of ['ot', 'ol', 'odt', 'odl'] as const)
+            expect(
+              towardInk(pole, bands[i][key], bands[i - 1][key]),
+              `${bands[i].id} ${key}`
+            ).toBe(true);
+      }
+    }
+  );
+
+  it(
+    'reaches no further: past the last band of each pole, no ink holds decorated text',
+    { timeout: 120_000 },
+    () => {
+      const worsts = bandWorsts();
+      const at = (pole: Mode, edge: number) =>
+        worsts[`${pole}/${edge}`].decorated;
+      // The last bands hold it with pure black / pure white ink…
+      expect(ratioY(0, at('light', BAND.l65.edge))).toBeGreaterThanOrEqual(
+        4.5 * 1.02
+      );
+      expect(ratioY(1, at('dark', BAND.d48.edge))).toBeGreaterThanOrEqual(
+        4.5 * 1.02
+      );
+      // …and one step past them, not even those can.
+      expect(ratioY(0, at('light', PAST.light))).toBeLessThan(4.5 * 1.02);
+      expect(ratioY(1, at('dark', PAST.dark))).toBeLessThan(4.5 * 1.02);
+    }
+  );
+
+  it('keeps white (D8) only on a band whose large grade white can hold', () => {
+    for (const band of Object.values(BAND))
+      expect(band.kw, band.id).toBe(
+        band.pole === 'light' || band.ol <= TARGET.orgWhiteLabel ? 1 : 0
+      );
+    // Where it is off, the large grade lifts the button past white's 4.5:1,
+    // so its label is black, and holds.
+    for (const band of Object.values(BAND).filter((b) => !b.kw)) {
+      expect(ratioY(1, band.ol), band.id).toBeLessThan(4.5);
+      expect(ratioY(0, band.ol), band.id).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('names every band in schemes.css, for each theme’s ground, and falls back to the first bands', () => {
+    for (const [theme, key] of [
+      ['light', 'gl'],
+      ['dark', 'gd'],
+    ] as const) {
+      for (const band of Object.values(BAND))
+        expect(CODE, `${theme} ${band.id}`).toContain(
+          `.lp[data-ground-${theme}='${band.id}'] { --_${key}-edge: ${band.edge}; --_${key}-ot: ${band.ot}; --_${key}-ol: ${band.ol}; --_${key}-odt: ${band.odt}; --_${key}-odl: ${band.odl}; --_${key}-kw: ${band.kw}; }`
+        );
+      expect(
+        CODE.match(
+          new RegExp(`\\.lp\\[data-ground-${theme}='[a-z0-9]+'\\] \\{`, 'g')
+        )
+      ).toHaveLength(GROUND_BANDS.length);
+      const first = FIRST[theme];
+      const fallback = `--_band-edge: var(--_${key}-edge, ${first.edge}); --_g-ot: var(--_${key}-ot, ${first.ot}); --_g-ol: var(--_${key}-ol, ${first.ol}); --_g-odt: var(--_${key}-odt, ${first.odt}); --_g-odl: var(--_${key}-odl, ${first.odl}); --_band-kw: var(--_${key}-kw, ${first.kw});`;
+      expect(CODE, theme).toContain(fallback);
+    }
+    // Cinematic's room is the first dark band in every theme.
+    const d24 = BAND.d24;
+    expect(CODE).toContain(
+      `--_band-edge: ${d24.edge}; --_g-ot: ${d24.ot}; --_g-ol: ${d24.ol}; --_g-odt: ${d24.odt}; --_g-odl: ${d24.odl}; --_band-kw: ${d24.kw};`
+    );
+  });
+
+  it('steps the soft band the other way where its step would leave the band, so it always stands apart', () => {
+    const brand = hex('#A62B0C');
+    const flipped: Record<Mode, number> = { light: 0, dark: 0 };
+    let cases = 0;
+    for (const g of cube)
+      for (const theme of ['light', 'dark'] as const) {
+        const band = BAND[groundBand(toHex(g)) as GroundBandId];
+        const pole = band.pole;
+        const org = orgFromBg(theme, g, brand, brand);
+        const drawn = ground(pole, org.ground, band.edge);
+        const soft = kitSoft(pole, org, band.edge);
+        const [l0, l1] = [lightnessOf(drawn), lightnessOf(soft)];
+        const step = ORG_BG[pole].soft;
+        // Exactly the pole's step, one way or the other…
+        expect(Math.abs(l1 - l0), toHex(g)).toBeCloseTo(Math.abs(step), 6);
+        // …inside the band…
+        expect(
+          pole === 'light' ? l1 >= band.edge - 1e-9 : l1 <= band.edge + 1e-9,
+          `${toHex(g)} ${band.id}`
+        ).toBe(true);
+        // …turned only where the step toward the ink would leave it.
+        if (Math.sign(l1 - l0) !== Math.sign(step)) flipped[pole]++;
+        cases++;
+      }
+    expect(cases).toBe(cube.length * 2);
+    expect(flipped.light).toBeGreaterThan(50);
+    expect(flipped.dark).toBeGreaterThan(50);
+    expect(Math.abs(ORG_BG.light.soft)).toBeGreaterThanOrEqual(
+      SOFT_MIN.background
+    );
+    expect(Math.abs(ORG_BG.dark.soft)).toBeGreaterThanOrEqual(
+      SOFT_MIN.background
+    );
+    // The CSS turns it at the same point: `--_band-side` is the pole's
+    // direction into its band.
+    expect(POLE.light).toContain('--_soft-step: -0.03; --_band-side: 1;');
+    expect(POLE.dark).toContain('--_soft-step: 0.04; --_band-side: -1;');
+    expect(CODE.split(`--_org-soft: ${SOFT_STEP_EXPR};`).length - 1).toBe(5);
+  });
+
+  it(
+    'draws every review brand and seed on its own ground, in both themes: the pole follows it, every floor holds, and the soft band stands apart',
+    { timeout: 60_000 },
+    () => {
+      const report: string[] = [];
+      for (const [name, o] of Object.entries(GROUND_ORGS)) {
+        const brand = hex(o.brand);
+        const bands = resolveGroundBands({ light: o.bg, dark: o.dark });
+        for (const theme of ['light', 'dark'] as const) {
+          const own = theme === 'light' ? o.bg : (o.dark ?? o.bg);
+          const org = own
+            ? orgFromBg(theme, hex(own), brand, brand)
+            : platformOrg(theme, brand, brand, brand);
+          const id = bands[theme];
+          // A platform ground names no band: its theme's first.
+          const band = id ? BAND[id] : FIRST[theme];
+          const pole = band.pole;
+          const label = `${name} ${theme} ${band.id}`;
+          expect(id === undefined, label).toBe(!own);
+          // The pole follows the ground, and the ground is the org's own.
+          expect(pole, label).toBe(
+            lum(org.ground) > INK_CROSSOVER ? 'light' : 'dark'
+          );
+          const g = ground(pole, org.ground, band.edge);
+          for (const i of [0, 1, 2] as const)
+            expect(Math.abs(g[i] - org.ground[i]), label).toBeLessThan(
+              0.5 / 255
+            );
+          for (const decorated of [false, true]) {
+            const page: Page = { org, decorated, band };
+            for (const [tintName, tint] of Object.entries(STYLE_TINTS))
+              for (const scheme of SCHEMES) {
+                const t = schemeTokens(
+                  pole,
+                  scheme,
+                  g,
+                  brand,
+                  tint,
+                  brand,
+                  page
+                );
+                for (const [token, value] of Object.entries(ratios(t)))
+                  if (value < FLOORS[token as keyof typeof FLOORS])
+                    report.push(
+                      `${label} ${decorated ? 'decorated ' : ''}${tintName} ${scheme} ${token} ${value.toFixed(2)}`
+                    );
+              }
+            // The soft band, as the default Style draws it.
+            const soft = schemeTokens(
+              pole,
+              'soft',
+              g,
+              brand,
+              DEFAULT_TINT,
+              brand,
+              page
+            ).bg;
+            const apart = Math.abs(lightnessOf(soft) - lightnessOf(g));
+            expect(apart, `${label} soft`).toBeGreaterThanOrEqual(
+              (org.background ? SOFT_MIN.background : SOFT_MIN.platform) - 1e-6
+            );
+          }
+        }
+      }
+      expect(report).toEqual([]);
+      // The review brands that motivated this: night on the dark pole in
+      // both themes, sand on the light pole's second band.
+      const night = resolveGroundBands({ light: '#15211C' });
+      expect(night).toEqual({ light: 'd24', dark: 'd24' });
+      expect(resolveGroundBands({ light: '#E9D8B4' })).toEqual({
+        light: 'l85',
+        dark: 'l85',
+      });
+      expect(resolveGroundBands({ light: '#F3EEFD', dark: '#17112A' })).toEqual(
+        { light: 'l90', dark: 'd24' }
+      );
+    }
+  );
 });

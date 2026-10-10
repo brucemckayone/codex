@@ -19,7 +19,9 @@
   import { dev } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import type { BrandTokenOverrides } from '$lib/page-builder';
+  import { orgGrounds } from '$lib/page-builder/org-grounds';
   import {
     COLOUR_SCHEME_IDS,
     isColourSchemeId,
@@ -102,6 +104,10 @@
   ];
 
   const params = $derived(page.url.searchParams);
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
   const param = (key: string) => params.get(key) ?? '';
 
   const style = $derived.by(() => {
@@ -259,6 +265,7 @@
     brandOverrides={brand.overrides}
     {theme}
     {edit}
+    orgGrounds={grounds}
   />
 </div>
 

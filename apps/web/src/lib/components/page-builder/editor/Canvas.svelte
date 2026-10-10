@@ -27,6 +27,9 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { page as appPage } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
+  import { orgGrounds } from '$lib/page-builder/org-grounds';
   import { AlertTriangleIcon, PlusIcon, XIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -96,6 +99,10 @@
   });
 
   const rendered = $derived(inline.render(page));
+  // The org's own backgrounds, so the kit keeps its real ground (03 X48).
+  const grounds = $derived(
+    orgGrounds(appPage.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
   const visible = $derived(renderableSections(page));
   const frameWidth = $derived(FRAME_WIDTH[device]);
 
@@ -285,6 +292,7 @@
             {theme}
             still
             sticky={false}
+            orgGrounds={grounds}
           />
         </div>
 

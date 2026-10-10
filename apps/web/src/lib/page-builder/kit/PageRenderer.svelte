@@ -14,6 +14,15 @@
   (`data-page-bg`: light, dark or both). The page's
   own fonts are loaded here, because the org layout loads only the org's.
 
+  THE GROUND'S POLE AND BAND (03 X48) follow the org's ground, not the
+  viewer's theme, and CSS cannot read a colour's lightness: so each theme's
+  ground is resolved here (`model/resolve.ts`) from the org's backgrounds
+  (the `orgGrounds` prop: the caller passes the layout's data, or the brand
+  editor's while it is open) and the page's own, and named on the root as
+  `data-ground-light` /
+  `data-ground-dark`. A moving background is drawn only on the bands it is
+  proven on, and as `base` elsewhere.
+
   EDITING changes attributes, never structure: with `edit` the text fields
   carry the inline-edit seam, the root is still (no entrance), sections carry
   their id for selection, and there is no floating bar over the canvas.
@@ -46,7 +55,13 @@
   import { brandFontsHref } from './model/fonts';
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
-  import { resolveSections, resolveStyle } from './model/resolve';
+  import {
+    atmosphereProven,
+    resolveGroundBands,
+    resolveSections,
+    resolveStyle,
+    type ThemeGrounds,
+  } from './model/resolve';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
@@ -78,6 +93,13 @@
     still?: boolean;
     /** Show the floating call to action. Never shown while editing. */
     sticky?: boolean;
+    /**
+     * The org's own backgrounds per theme, as its layout paints them
+     * (`$lib/page-builder/org-grounds.ts`; 03 X48). Passed in as plain data,
+     * never read from a store here. Absent: no org background, so each
+     * theme takes its own pole.
+     */
+    orgGrounds?: ThemeGrounds;
   }
 
   const {
@@ -89,10 +111,25 @@
     theme,
     still = false,
     sticky = true,
+    orgGrounds = {},
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
-  const sections = $derived(resolveSections(page));
+  const grounds = $derived.by(() => {
+    const vars = brandOverridesToCssVars(brandOverrides);
+    return resolveGroundBands(orgGrounds, {
+      light: vars['--brand-bg'],
+      dark: vars['--brand-bg-dark'],
+    });
+  });
+  const sections = $derived.by(() => {
+    const resolved = resolveSections(page);
+    return atmosphereProven(grounds)
+      ? resolved
+      : resolved.map((s) =>
+          s.scheme === 'atmosphere' ? { ...s, scheme: 'base' as const } : s
+        );
+  });
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
   const edits = $derived(
     new Map<string, BlockEdit | null>(
@@ -174,6 +211,8 @@
   data-org-brand={brandStyle ? '' : undefined}
   data-org-bg={pageBg ? '' : undefined}
   data-page-bg={pageBg}
+  data-ground-light={grounds.light}
+  data-ground-dark={grounds.dark}
   style={brandStyle}
   {@attach entrances(still || !!edit)}
 >

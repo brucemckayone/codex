@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { PAGE_STYLE_IDS, SECTION_LAYOUTS, SECTION_TYPE_IDS } from './ids';
 import {
+  atmosphereProven,
   featuredScheme,
+  GROUND_BANDS,
+  groundBand,
+  resolveGroundBands,
   resolveLayout,
   resolveScheme,
   resolveSections,
@@ -290,5 +294,98 @@ describe('featuredScheme', () => {
         expect(featuredScheme(style, scheme)).not.toBe(scheme);
       }
     }
+  });
+});
+
+// Codex-61zsk.42: the ground's pole and band, named on the root for
+// `styles/schemes.css` (which proves each band's floors).
+describe('groundBand — the pole by luminance, then the narrowest band that holds it', () => {
+  it('draws the review brands and the seeds in their own bands', () => {
+    expect(groundBand('#F3F0E7')).toBe('l90'); // of-blood-and-bones
+    expect(groundBand('#E9D8B4')).toBe('l85'); // sand, L 0.887
+    expect(groundBand('#F3EEFD')).toBe('l90'); // lilac
+    expect(groundBand('#15211C')).toBe('d24'); // night
+    expect(groundBand('#17112A')).toBe('d24'); // lilac's dark twin
+    expect(groundBand('#fafafa')).toBe('l90'); // the platform's grounds
+    expect(groundBand('#171717')).toBe('d24');
+  });
+
+  it('switches pole where black and white ink cross (Y 0.1791), not at mid lightness', () => {
+    // Greys either side of Y 0.1791: #767676 (Y 0.181) and #757575 (0.178).
+    expect(groundBand('#767676')?.[0]).toBe('l');
+    expect(groundBand('#757575')?.[0]).toBe('d');
+    // A mid-tone past the last band of its pole is drawn on that band.
+    expect(groundBand('#767676')).toBe('l65');
+    expect(groundBand('#757575')).toBe('d48');
+  });
+
+  it('reads #rgb and #rrggbb in any case, and names no band for anything else', () => {
+    expect(groundBand('#fff')).toBe('l90');
+    expect(groundBand('#000')).toBe('d24');
+    expect(groundBand('#15211c')).toBe(groundBand('#15211C'));
+    expect(groundBand(' #15211C ')).toBe('d24');
+    for (const bad of [null, undefined, '', 'white', '#1234', 'rgb(0 0 0)'])
+      expect(groundBand(bad)).toBeUndefined();
+  });
+
+  it('lists each pole’s bands narrowest first, every id led by its pole', () => {
+    for (const pole of ['light', 'dark'] as const) {
+      const edges = GROUND_BANDS.filter((b) => b.pole === pole).map(
+        (b) => b.edge
+      );
+      const sorted = [...edges].sort((a, b) =>
+        pole === 'light' ? b - a : a - b
+      );
+      expect(edges).toEqual(sorted);
+    }
+    for (const band of GROUND_BANDS)
+      expect(band.id[0]).toBe(band.pole === 'light' ? 'l' : 'd');
+  });
+});
+
+describe('resolveGroundBands — each theme’s ground', () => {
+  it('takes the dark twin in dark mode, else the light background (as org-brand.css paints it)', () => {
+    expect(resolveGroundBands({ light: '#F3EEFD', dark: '#17112A' })).toEqual({
+      light: 'l90',
+      dark: 'd24',
+    });
+    expect(resolveGroundBands({ light: '#15211C' })).toEqual({
+      light: 'd24',
+      dark: 'd24',
+    });
+    expect(resolveGroundBands({ light: '#F3F0E7', dark: null })).toEqual({
+      light: 'l90',
+      dark: 'l90',
+    });
+  });
+
+  it('lets a page’s own background decide its own theme only (owner, D7)', () => {
+    expect(
+      resolveGroundBands({ light: '#F3F0E7' }, { light: '#15211C' })
+    ).toEqual({ light: 'd24', dark: 'l90' });
+    expect(
+      resolveGroundBands({ light: '#F3F0E7' }, { dark: '#15211C' })
+    ).toEqual({ light: 'l90', dark: 'd24' });
+  });
+
+  it('names no band for the platform’s ground', () => {
+    expect(resolveGroundBands({})).toEqual({
+      light: undefined,
+      dark: undefined,
+    });
+    expect(resolveGroundBands({ light: null, dark: null })).toEqual({
+      light: undefined,
+      dark: undefined,
+    });
+  });
+});
+
+describe('atmosphereProven — the moving background only on the bands its veil is sized for', () => {
+  it('holds on the platform and the first bands, and nowhere wider', () => {
+    expect(atmosphereProven({})).toBe(true);
+    expect(atmosphereProven({ light: 'l90', dark: 'd24' })).toBe(true);
+    expect(atmosphereProven({ light: 'l90', dark: 'l90' })).toBe(true);
+    expect(atmosphereProven({ light: 'l85', dark: 'l85' })).toBe(false);
+    expect(atmosphereProven({ light: 'l90', dark: 'd30' })).toBe(false);
   });
 });

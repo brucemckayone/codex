@@ -199,6 +199,50 @@ describe('PageRenderer', () => {
     }
   });
 
+  it('names each theme’s ground band on the root, so the pole follows the ground (Codex-61zsk.42)', async () => {
+    const cases = [
+      // Night: a dark ground for the light theme; the dark theme's is the
+      // org's (none here: the platform's, so no band).
+      [{ backgroundColor: '#15211C' }, 'd24', null],
+      [
+        {
+          backgroundColor: '#E9D8B4',
+          darkOverrides: { backgroundColor: '#15211C' },
+        },
+        'l85',
+        'd24',
+      ],
+      [{ primaryColor: '#0D9488' }, null, null],
+    ] as const;
+    for (const [brandOverrides, light, dark] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      const label = JSON.stringify(brandOverrides);
+      expect(root.getAttribute('data-ground-light'), label).toBe(light);
+      expect(root.getAttribute('data-ground-dark'), label).toBe(dark);
+    }
+  });
+
+  it('draws a moving background as base off the bands its veil is proven on', async () => {
+    const page = samplePage('bold');
+    const hero = page.sections.find((s) => s.type === 'hero');
+    if (!hero) throw new Error('no hero');
+    hero.design = { ...hero.design, scheme: 'atmosphere' };
+    const scheme = (root: HTMLElement) =>
+      root
+        .querySelector(`.lp-section[data-lp-type='hero']`)
+        ?.getAttribute('data-lp-scheme');
+    expect(scheme(await render({ page }))).toBe('atmosphere');
+    if (app) unmount(app);
+    document.body.innerHTML = '';
+    expect(
+      scheme(
+        await render({ page, brandOverrides: { backgroundColor: '#E9D8B4' } })
+      )
+    ).toBe('base');
+  });
+
   it('previews a theme on its own root, never on <html>', async () => {
     const root = await render({ theme: 'dark' });
     expect(root.dataset.lpTheme).toBe('dark');

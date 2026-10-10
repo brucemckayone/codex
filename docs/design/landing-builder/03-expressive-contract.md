@@ -1047,11 +1047,17 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     `--_ol` (≤ .196 / ≥ .15). Decorated (Studio's paper, Soft's shapes): `--_odt`
     (.086 / .33) and `--_odl` (.155 / .203). The hairline is decoration and is the org's
     exactly.
-  - **The bands.** The ground, the soft band and the card move only when outside their band:
-    light L ≥ 0.9 (chroma capped at 0.046 only when moved), dark L ≤ 0.24 (0.039). The dark
-    surfaces share the ground's band, so there is one worst surface for every ink on it.
-  - **Polarity follows the org's ground.** An org background with no dark twin keeps the light
-    pole in dark mode, as the org's own pages do (`data-org-bg`).
+  - **The bands (amended by X48).** The ground, the soft band and the card move only when
+    outside their band: light L ≥ its edge (chroma capped at 0.046 only when moved), dark
+    L ≤ its edge (0.039). The edge is no longer fixed at 0.9 / 0.24: it is the narrowest band
+    of the pole that holds the org's ground (X48), so the ground is drawn as itself unless it
+    lies past the pole's last band. The surfaces share the ground's band, so there is one
+    worst surface for every ink on it, and each band has its own grades.
+  - **Polarity follows the org's ground (amended by X48).** The pole is the ground's own, by its
+    luminance, in either theme: an org background with no dark twin keeps the light pole in
+    dark mode, as the org's own pages do, and a dark one is the dark pole in light mode too.
+    PageRenderer names each theme's band on the root (`data-ground-light`,
+    `data-ground-dark`); the selectors no longer read the carrier's style text.
   - **The one departure: the soft band (X47, D14).** On an org's background the soft band is
     not `--color-surface-secondary`. It is the org's ground a step toward its ink, with the
     ground's chroma kept. This is the one place the kit departs from the org's derived token.
@@ -1310,3 +1316,89 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     checks that the ground's chroma is kept and that, at every Style's tint, the drawn band is
     no nearer its ink than the band's worst surface. It also covers the platform's own surface
     and the same band in either theme.
+- **X48 · 2026-10-10 · p3a · The org's real ground: the pole from its lightness, the bands
+  widened, and a soft band that always stands apart (Codex-61zsk.42; amends X35 and X47).**
+  The owner's decisions, verbatim: "Fix it next (Recommended)", under D1's "Follow the org
+  (Recommended)", and for the brands to judge it on, "Sample brands for reviews
+  (Recommended)" (D15: `docs/handover/phase3-sources/review-brands/`). On the review brands
+  the kit drew night's forest ground (#15211C, L 0.235) at L 0.900, pale mint, in both themes,
+  and sand (#E9D8B4, L 0.887) at 0.900, where D14's soft band equalled the ground.
+  - **The pole.** A ground with luminance Y > 0.1791 is the light pole; at or below it, the
+    dark pole. 0.1791 is where black and white ink cross: white on Y and black on Y are equal at
+    √(1.05 × 0.05) − 0.05 (4.58:1 each), and the kit's inks already switch there (`--_w`). A
+    mid-tone ground could be either; the ink that holds more contrast on it decides. CSS cannot
+    read a colour's lightness, so `model/resolve.ts` (`groundBand`, `resolveGroundBands`)
+    resolves each theme's ground, PageRenderer names it on the root, and `schemes.css` selects
+    on `data-ground-light^='d'` (a dark pole in the light theme) and `data-ground-dark^='l'` (a
+    light pole in the dark theme). The dark theme's ground is the org's dark twin, else its
+    light background (as `org-brand.css` paints it); a page's own background decides its own
+    theme only (D7). No background is the platform's: no band, and the theme's pole.
+  - **The bands.** A ground is drawn in the narrowest band of its pole that holds its OKLCH
+    lightness, else on the pole's last band, where it moves to the edge:
+
+    | band | edge | text | large | decorated text | decorated large | keep white |
+    |---|---|---|---|---|---|---|
+    | l90 | L ≥ 0.90 | Y ≤ .114 | .196 | .086 | .155 | on |
+    | l85 | 0.85 | .086 | .155 | .064 | .121 | on |
+    | l80 | 0.80 | .062 | .118 | .044 | .091 | on |
+    | l75 | 0.75 | .041 | .086 | .026 | .065 | on |
+    | l70 | 0.70 | .022 | .058 | .011 | .042 | on |
+    | l65 | 0.65 | .009 | .039 | .0009 | .026 | on |
+    | d24 | L ≤ 0.24 | Y ≥ .25 | .15 | .33 | .203 | on |
+    | d30 | 0.30 | .316 | .194 | .417 | .261 | off |
+    | d36 | 0.36 | .414 | .26 | .535 | .34 | off |
+    | d42 | 0.42 | .552 | .352 | .69 | .443 | off |
+    | d48 | 0.48 | .737 | .475 | .885 | .574 | off |
+
+    l90 and d24 are the bands the kit always had. Each grade is the org's move (X35) at 2% past
+    what the band's worst surface needs, over the whole sRGB cube and the band's edge ring,
+    plain and under the decorations that ship, rounded toward the ink by less than 0.001.
+    **The limits:** l65 is the last light step at which decorated text still reaches 4.5:1
+    with that margin (an edge of 0.64 cannot, even with black ink), and d48 the last dark step
+    (0.54 cannot, even with white). A light-pole ground with L < 0.65 or a dark-pole ground with
+    L > 0.48 moves to that edge. In a 5,832-colour sample of the cube that is 1,841 colours,
+    the saturated mid-tones between L 0.48 and 0.65; none of the review brands or seeds is one.
+    **Keep white (D8)** is on only where white holds the band's large grade (Y ≤ .181): off from
+    d30, where the grade lifts a button to Y ≥ .194 and its label is black (≥ 4.88:1).
+  - **The soft band (amends X47).** It is the ground as its band draws it (`--lp-ground`), a
+    step toward its ink with its chroma (−0.03 light pole, +0.04 dark). Where that step would
+    leave the band, the kit takes it the other way (`--_band-side`), rather than holding a
+    clamp that would collapse it onto the ground: the step keeps its whole size either way.
+    **The minimum:** 0.03 OKLCH lightness on an org's background (0.04 on the dark pole), and
+    0.014 on the platform's own ground, whose secondary surface is the platform theme's (0.0150
+    on #fafafa). schemes.test and the e2e both check these numbers; the e2e allows 0.001 for 8-bit
+    paint. A Style's tint still mixes into the band and the band still holds it.
+  - **The moving background (§5.1)** is sized for the worst backdrops of l90 and d24 only, so
+    on a page whose ground is in any other band PageRenderer draws an `atmosphere` section as
+    `base` (`atmosphereProven`).
+  - **Measured, before → after** (OKLCH L of the org's `--color-background` | the kit's ground |
+    its soft band, of-blood-and-bones' sales page carrying each review brand through the brand
+    API, 1440, `scratchpad/3a/t42-brands-{before,after}.log`):
+    - night, both themes: 0.235 | 0.900 | 0.900 → 0.235 | 0.235 | 0.195 (d24 in both);
+    - sand, both themes: 0.887 | 0.900 | 0.900 → 0.887 | 0.887 | 0.857 (l85 in both);
+    - lilac: light 0.957 | 0.957 | 0.927 and dark 0.200 | 0.200 | 0.160 (l90, d24), unchanged
+      apart from the dark soft band, which now steps darker (0.2001 + 0.04 would leave d24);
+    - red (the platform's ground): unchanged, 0.985 | 0.985 | 0.970 light and 0.205 | 0.205 |
+      0.240 dark.
+    No review brand's ground moved. The seeds (of-blood-and-bones on l90 in both themes;
+    studio-alpha and studio-beta with no band) are pixel-identical before and after: 5 seeded
+    pages × 2 themes, full page.
+  - **Tests.** Spec `brand-fidelity.spec.ts` "review brand {night, sand, lilac, red, plain}
+    {light, dark}": the kit's ground equals the org's `--color-background` and its ink the
+    org's `--color-text` on the same page (measured both, within 1/255), its ink holds 4.5:1,
+    and every soft surface stands the minimum apart. The ink is what proves the pole: on the
+    wrong pole night's ground still lands within 1/255 and its moved ink still holds 4.5:1
+    (calibrated: with the light theme's dark-pole selectors broken, the spec first passed all
+    10, so the ink check was added; now exactly night light fails, and schemes.test's routing
+    test, 1 of 94). It puts each brand on a page carrier (no DB write) and names the carrier's
+    bands with `resolveGroundBands`, as PageRenderer does; the org-ground path is the one the
+    seeds and the API-applied captures exercise. Six failed before (night's ground light and
+    its soft band dark, sand's ground in both themes, and red and plain light at the platform's
+    0.015 step against a 0.03 minimum, which set the platform's own figure). schemes.test §16
+    "the org's real ground": the pole at the ink crossover over a 5,832-colour sample; the
+    narrowest band; every band's grades on its worst surface for any org colour, at 2% and no
+    further; the limits; keep white; every band rule in the CSS; the flip and its minimum; and
+    the review brands and seeds in both themes, at every Style's tint, plain and decorated, with
+    every floor. `resolve.test.ts` covers `groundBand`, `resolveGroundBands` and
+    `atmosphereProven`; `PageRenderer.svelte.test.ts` covers the root's band attributes and an
+    atmosphere section drawn as base on l85.

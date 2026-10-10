@@ -15,11 +15,12 @@
       4.58:1 on any fill. Ink is then pulled toward the ground's own colour in
       LINEAR light by exactly as much as a target ratio allows — a deep shade of
       cream on cream, a pink-white on rust — so it is tonal, not flat black.
-   2. Every derived surface is clamped into a LIGHT band (OKLCH L >= 0.9) or a
-      DARK band (L <= 0.28), with chroma capped to the sRGB envelope at that
-      lightness, so its polarity is known by construction and it never leaves
-      the gamut (an out-of-gamut origin would hand `rgb(from …)` channels
-      outside 0–255).
+   2. Every derived surface is clamped into a LIGHT band (OKLCH L >= its
+      edge, 0.9 unless the org's ground is in a wider band) or a DARK band
+      (L <= its edge, 0.24 likewise; THE GROUND'S BAND below), with chroma
+      capped to the sRGB envelope at that lightness, so its polarity is known
+      by construction and it never leaves the gamut (an out-of-gamut origin
+      would hand `rgb(from …)` channels outside 0–255).
    3. Knowing the polarity, the brand is moved in linear light only as far as
       it must: accent text to Y <= 0.105 on light / >= 0.30 on dark; a button
       needs 3:1 against its band (WCAG 1.4.11), so it moves only to
@@ -117,6 +118,7 @@
   --_org-ground: var(--color-background);
   --_org-soft: var(--color-surface-secondary);
   --_soft-step: -0.03;
+  --_band-side: 1;
   --_org-card: var(--color-surface-card);
   --_org-ink: var(--color-text);
   --_org-ink-soft: var(--color-text-secondary);
@@ -126,19 +128,20 @@
   --_org-button: var(--color-interactive);
 
   /* The ground and the org's surfaces, each moved into the light band
-     (L >= 0.9, chroma capped only when moved) ONLY when outside it. */
+     (L >= `--_band-edge`, chroma capped only when moved) ONLY when outside
+     it. */
   --_ground-in: var(--_org-ground);
   --lp-ground: oklch(
-    from var(--_ground-in) clamp(0.9, l, 1)
-      calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
+    from var(--_ground-in) clamp(var(--_band-edge), l, 1)
+      calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h
   );
   --_org-soft-bg: oklch(
     from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft))
-      clamp(0.9, l, 1) calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
+      clamp(var(--_band-edge), l, 1) calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h
   );
   --_org-panel: oklch(
-    from var(--_org-card) clamp(0.9, l, 1)
-      calc(c - clamp(0, (0.9 - l) * 1e6, 1) * max(0, c - 0.046)) h
+    from var(--_org-card) clamp(var(--_band-edge), l, 1)
+      calc(c - clamp(0, (var(--_band-edge) - l) * 1e6, 1) * max(0, c - 0.046)) h
   );
   /* The soft band and base's panel: the org's, except in Cinematic's room. */
   --_soft-ground: var(--_org-soft-bg);
@@ -250,29 +253,83 @@
   --_second-in: var(--brand-secondary-dark, var(--brand-secondary, var(--_accent-in)));
 }
 
-/* THE DARK POLE: the dark theme, EXCEPT where the org's ground stays light.
-   DARK MODE FOLLOWS THE ORG (phase 3a, D1): `org-brand.css` paints an org
-   that sets a background and no dark background in that same light ground
-   in dark mode (of-blood-and-bones stays parchment), and its sales page does
-   too, on the light pole. That is `data-org-bg` on the org with
-   `--brand-bg-dark` neither on it nor on the page. A page's own background
-   applies only to its own theme (owner, D7): one with no dark twin takes the
-   ORG's dark mode, so it is on this pole exactly when the org is. Cinematic's
-   room is dark in every theme. */
+/* ── THE GROUND'S BAND (Codex-61zsk.42, 03 X48) ───────────────────────────
+   A ground is drawn in the band its lightness lies in (`GROUND_BANDS` in
+   `model/resolve.ts`): a light band is [edge, 1], a dark one [0, edge], and
+   the ground, its soft band and its card are held inside it. Each band's
+   grades are the org's moves proven on the worst surface it can hold
+   (`schemes.test.ts`): text `--_g-ot`, large `--_g-ol`, and under a Style's
+   decorations `--_g-odt` / `--_g-odl`, each 2% past what that surface needs.
+   Keep white (owner, D8) stays on only where white can hold the band's
+   large grade (`--_band-kw`). The light theme draws the band its own ground
+   is in, the dark theme its own; a theme with no background is the
+   platform's, on its pole's first band (the bands the kit always had).
+   Cinematic's room is on the first dark band in every theme (below). */
+.lp[data-ground-light='l90'] { --_gl-edge: 0.9; --_gl-ot: 0.114; --_gl-ol: 0.196; --_gl-odt: 0.086; --_gl-odl: 0.155; --_gl-kw: 1; }
+.lp[data-ground-light='l85'] { --_gl-edge: 0.85; --_gl-ot: 0.086; --_gl-ol: 0.155; --_gl-odt: 0.064; --_gl-odl: 0.121; --_gl-kw: 1; }
+.lp[data-ground-light='l80'] { --_gl-edge: 0.8; --_gl-ot: 0.062; --_gl-ol: 0.118; --_gl-odt: 0.044; --_gl-odl: 0.091; --_gl-kw: 1; }
+.lp[data-ground-light='l75'] { --_gl-edge: 0.75; --_gl-ot: 0.041; --_gl-ol: 0.086; --_gl-odt: 0.026; --_gl-odl: 0.065; --_gl-kw: 1; }
+.lp[data-ground-light='l70'] { --_gl-edge: 0.7; --_gl-ot: 0.022; --_gl-ol: 0.058; --_gl-odt: 0.011; --_gl-odl: 0.042; --_gl-kw: 1; }
+.lp[data-ground-light='l65'] { --_gl-edge: 0.65; --_gl-ot: 0.009; --_gl-ol: 0.039; --_gl-odt: 0.0009; --_gl-odl: 0.026; --_gl-kw: 1; }
+.lp[data-ground-light='d24'] { --_gl-edge: 0.24; --_gl-ot: 0.25; --_gl-ol: 0.15; --_gl-odt: 0.33; --_gl-odl: 0.203; --_gl-kw: 1; }
+.lp[data-ground-light='d30'] { --_gl-edge: 0.3; --_gl-ot: 0.316; --_gl-ol: 0.194; --_gl-odt: 0.417; --_gl-odl: 0.261; --_gl-kw: 0; }
+.lp[data-ground-light='d36'] { --_gl-edge: 0.36; --_gl-ot: 0.414; --_gl-ol: 0.26; --_gl-odt: 0.535; --_gl-odl: 0.34; --_gl-kw: 0; }
+.lp[data-ground-light='d42'] { --_gl-edge: 0.42; --_gl-ot: 0.552; --_gl-ol: 0.352; --_gl-odt: 0.69; --_gl-odl: 0.443; --_gl-kw: 0; }
+.lp[data-ground-light='d48'] { --_gl-edge: 0.48; --_gl-ot: 0.737; --_gl-ol: 0.475; --_gl-odt: 0.885; --_gl-odl: 0.574; --_gl-kw: 0; }
+.lp[data-ground-dark='l90'] { --_gd-edge: 0.9; --_gd-ot: 0.114; --_gd-ol: 0.196; --_gd-odt: 0.086; --_gd-odl: 0.155; --_gd-kw: 1; }
+.lp[data-ground-dark='l85'] { --_gd-edge: 0.85; --_gd-ot: 0.086; --_gd-ol: 0.155; --_gd-odt: 0.064; --_gd-odl: 0.121; --_gd-kw: 1; }
+.lp[data-ground-dark='l80'] { --_gd-edge: 0.8; --_gd-ot: 0.062; --_gd-ol: 0.118; --_gd-odt: 0.044; --_gd-odl: 0.091; --_gd-kw: 1; }
+.lp[data-ground-dark='l75'] { --_gd-edge: 0.75; --_gd-ot: 0.041; --_gd-ol: 0.086; --_gd-odt: 0.026; --_gd-odl: 0.065; --_gd-kw: 1; }
+.lp[data-ground-dark='l70'] { --_gd-edge: 0.7; --_gd-ot: 0.022; --_gd-ol: 0.058; --_gd-odt: 0.011; --_gd-odl: 0.042; --_gd-kw: 1; }
+.lp[data-ground-dark='l65'] { --_gd-edge: 0.65; --_gd-ot: 0.009; --_gd-ol: 0.039; --_gd-odt: 0.0009; --_gd-odl: 0.026; --_gd-kw: 1; }
+.lp[data-ground-dark='d24'] { --_gd-edge: 0.24; --_gd-ot: 0.25; --_gd-ol: 0.15; --_gd-odt: 0.33; --_gd-odl: 0.203; --_gd-kw: 1; }
+.lp[data-ground-dark='d30'] { --_gd-edge: 0.3; --_gd-ot: 0.316; --_gd-ol: 0.194; --_gd-odt: 0.417; --_gd-odl: 0.261; --_gd-kw: 0; }
+.lp[data-ground-dark='d36'] { --_gd-edge: 0.36; --_gd-ot: 0.414; --_gd-ol: 0.26; --_gd-odt: 0.535; --_gd-odl: 0.34; --_gd-kw: 0; }
+.lp[data-ground-dark='d42'] { --_gd-edge: 0.42; --_gd-ot: 0.552; --_gd-ol: 0.352; --_gd-odt: 0.69; --_gd-odl: 0.443; --_gd-kw: 0; }
+.lp[data-ground-dark='d48'] { --_gd-edge: 0.48; --_gd-ot: 0.737; --_gd-ol: 0.475; --_gd-odt: 0.885; --_gd-odl: 0.574; --_gd-kw: 0; }
+
+:where(.lp) {
+  --_band-edge: var(--_gl-edge, 0.9);
+  --_g-ot: var(--_gl-ot, 0.114);
+  --_g-ol: var(--_gl-ol, 0.196);
+  --_g-odt: var(--_gl-odt, 0.086);
+  --_g-odl: var(--_gl-odl, 0.155);
+  --_band-kw: var(--_gl-kw, 1);
+}
+
+:where(
+  :is(.dark, [data-theme='dark']) .lp:not([data-lp-theme='light'], [data-editing-theme='light'] .lp),
+  [data-editing-theme='dark'] .lp:not([data-lp-theme='light']),
+  .lp[data-lp-theme='dark']
+) {
+  --_band-edge: var(--_gd-edge, 0.24);
+  --_g-ot: var(--_gd-ot, 0.25);
+  --_g-ol: var(--_gd-ol, 0.15);
+  --_g-odt: var(--_gd-odt, 0.33);
+  --_g-odl: var(--_gd-odl, 0.203);
+  --_band-kw: var(--_gd-kw, 1);
+}
+
+/* THE DARK POLE: wherever the ground is dark. The pole follows the org's
+   GROUND, not the viewer's theme (phase 3a, D1, and Codex-61zsk.42): an org
+   that sets a light background and no dark one keeps it in dark mode
+   (of-blood-and-bones stays parchment), and one that sets a dark background
+   has light ink in light mode too, as its own pages do. CSS cannot read a
+   colour's lightness, so PageRenderer resolves each theme's ground to a band
+   (`model/resolve.ts`, `groundBand`) and names it on the root:
+   `data-ground-light` for the light theme's, `data-ground-dark` for the dark
+   theme's, an `l…` or `d…` band. A page's own background applies to its own
+   theme only (owner, D7), which that resolution already does. With no
+   background the ground is the platform's, and the pole is the theme's.
+   Cinematic's room is dark in every theme. */
 :is(.dark, [data-theme='dark'])
-  .lp:not(
-    [data-lp-theme='light'],
-    [data-editing-theme='light'] .lp,
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
-  ),
-[data-editing-theme='dark']
-  .lp:not(
-    [data-lp-theme='light'],
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
-  ),
-.lp[data-lp-theme='dark']:not(
-    [data-org-bg]:not([style*='--brand-bg-dark:']) .lp:not([data-page-bg='dark'], [data-page-bg='both'])
-  ),
+  .lp:not([data-lp-theme='light'], [data-editing-theme='light'] .lp, [data-ground-dark^='l']),
+[data-editing-theme='dark'] .lp:not([data-lp-theme='light'], [data-ground-dark^='l']),
+:root:not(.dark, [data-theme='dark'])
+  .lp[data-ground-light^='d']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp),
+[data-editing-theme='light'] .lp[data-ground-light^='d']:not([data-lp-theme='dark']),
+.lp[data-lp-theme='light'][data-ground-light^='d'],
+.lp[data-lp-theme='dark']:not([data-ground-dark^='l']),
 .lp[data-lp-style='cinematic'] {
   /* `--lp-dark-ground-in` is a Style's hook (Cinematic sets it) — a separate
      property, so a Style never has to out-specify this selector list. */
@@ -280,20 +337,21 @@
   /* The second colour's tone, darker here (owner, D11). */
   --_tone-l: (l - 0.2 + 0.4 * clamp(0, (0.25 - l) * 1e6, 1));
   --lp-ground: oklch(
-    from var(--_ground-in) min(l, 0.24)
-      calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
+    from var(--_ground-in) min(l, var(--_band-edge))
+      calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h
   );
-  /* The org's surfaces in the dark band, which is the ground's (L <= 0.24):
-     one band, so one worst surface for every ink on it. On an org's
-     background the soft band steps lighter here (owner, D14). */
+  /* The org's surfaces in the dark band, which is the ground's (L <=
+     `--_band-edge`): one band, so one worst surface for every ink on it. On
+     an org's background the soft band steps lighter here (owner, D14). */
   --_soft-step: 0.04;
+  --_band-side: -1;
   --_org-soft-bg: oklch(
     from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft))
-      min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
+      min(l, var(--_band-edge)) calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h
   );
   --_org-panel: oklch(
-    from var(--_org-card) min(l, 0.24)
-      calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
+    from var(--_org-card) min(l, var(--_band-edge))
+      calc(c - clamp(0, (l - var(--_band-edge)) * 1e6, 1) * max(0, c - 0.039)) h
   );
   --_soft-bg: oklch(
     from
@@ -349,6 +407,12 @@
 .lp[data-lp-style='cinematic'] {
   --_soft-ground: var(--_soft-bg);
   --_base-panel: var(--_panel-g);
+  --_band-edge: 0.24;
+  --_g-ot: 0.25;
+  --_g-ol: 0.15;
+  --_g-odt: 0.33;
+  --_g-odl: 0.203;
+  --_band-kw: 1;
 }
 
 /* ── A page background with no twin (owner, D7) ────────────────────────────
@@ -400,16 +464,21 @@
    `org-brand.css` makes `--color-surface-secondary` for small controls (its
    search box) at half the ground's chroma, and as a full-width band on a
    warm ground it reads grey. On an org's background, the soft band is that
-   ground a step toward its ink with its chroma kept, by the step the org
-   takes for its secondary surface, chosen by the POLE (`--_soft-step`): an
-   org whose ground stays light in dark mode steps darker in both themes.
-   The band (`--_org-soft-bg`) still holds it inside the ground's band. On
+   ground (as its band draws it, `--lp-ground`) a step toward its ink with
+   its chroma kept, by the step the org takes for its secondary surface,
+   chosen by the POLE (`--_soft-step`): an org whose ground stays light in
+   dark mode steps darker in both themes. Where that step would leave the
+   band (a ground near its edge) it is taken the other way instead
+   (`--_band-side` is the pole's direction into its band; Codex-61zsk.42,
+   03 X48), so the soft band never collapses onto the ground: it always
+   stands the whole step apart. The band (`--_org-soft-bg`) still holds a
+   Style's tint of it inside the ground's band. On
    the platform's neutral ground there is no chroma to keep, so the root's
    `--color-surface-secondary` stands, including where a page's background
    is handed back (D7) to an org with none. A scoped preview re-states it
    below. */
 :is([data-org-bg] .lp, .lp[data-org-bg]) {
-  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+  --_org-soft: oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h);
 }
 
 :is(.dark, [data-theme='dark'])
@@ -458,7 +527,7 @@
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
 ):is([data-org-bg] .lp) {
   --_org-ground: var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900)));
-  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+  --_org-soft: oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h);
   --_org-card: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
@@ -471,7 +540,7 @@
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
 ):is(.lp[data-org-bg]:is([data-page-bg='dark'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)));
-  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+  --_org-soft: oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h);
   --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
@@ -510,7 +579,7 @@
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
 ):is([data-org-bg] .lp) {
   --_org-ground: var(--_org-bg-in, var(--color-neutral-0));
-  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+  --_org-soft: oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h);
   --_org-card: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-in, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
@@ -524,7 +593,7 @@
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
 ):is(.lp[data-org-bg]:is([data-page-bg='light'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg, var(--color-neutral-0));
-  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+  --_org-soft: oklch(from var(--lp-ground) calc(l + var(--_soft-step) * (1 - 2 * clamp(0, (var(--_band-edge) - l - var(--_soft-step)) * var(--_band-side) * 1e6, 1))) c h);
   --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
@@ -678,55 +747,55 @@
     --_atm-mark-lt-r: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1r) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1r)), 1 / 2.4) - 0.055));
     --_atm-mark-lt-g: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1g) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1g)), 1 / 2.4) - 0.055));
     --_atm-mark-lt-b: max(0, 255 * (1.055 * pow(var(--_atm-mark-lt-1b) + var(--_atm-mark-lt-k) * (1 - var(--_atm-mark-lt-1b)), 1 / 2.4) - 0.055));
-    --_ot-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ot-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ot-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.114 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ot-lt-s: max(1, 0.25 / max(var(--_y), 1e-6));
+    --_ot-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-ot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-ot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-ot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ot-lt-s: max(1, var(--_g-ot) / max(var(--_y), 1e-6));
     --_ot-lt-1r: min(1, var(--_lr) * var(--_ot-lt-s));
     --_ot-lt-1g: min(1, var(--_lg) * var(--_ot-lt-s));
     --_ot-lt-1b: min(1, var(--_lb) * var(--_ot-lt-s));
     --_ot-lt-y1: (0.2126 * var(--_ot-lt-1r) + 0.7152 * var(--_ot-lt-1g) + 0.0722 * var(--_ot-lt-1b));
-    --_ot-lt-k: max(0, (0.25 - var(--_ot-lt-y1)) / max(1 - var(--_ot-lt-y1), 1e-6));
+    --_ot-lt-k: max(0, (var(--_g-ot) - var(--_ot-lt-y1)) / max(1 - var(--_ot-lt-y1), 1e-6));
     --_ot-lt-r: max(0, 255 * (1.055 * pow(var(--_ot-lt-1r) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1r)), 1 / 2.4) - 0.055));
     --_ot-lt-g: max(0, 255 * (1.055 * pow(var(--_ot-lt-1g) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1g)), 1 / 2.4) - 0.055));
     --_ot-lt-b: max(0, 255 * (1.055 * pow(var(--_ot-lt-1b) + var(--_ot-lt-k) * (1 - var(--_ot-lt-1b)), 1 / 2.4) - 0.055));
-    --_ol-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ol-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ol-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.196 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_ol-lt-s: max(1, 0.15 / max(var(--_y), 1e-6));
+    --_ol-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-ol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-ol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-ol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_ol-lt-s: max(1, var(--_g-ol) / max(var(--_y), 1e-6));
     --_ol-lt-1r: min(1, var(--_lr) * var(--_ol-lt-s));
     --_ol-lt-1g: min(1, var(--_lg) * var(--_ol-lt-s));
     --_ol-lt-1b: min(1, var(--_lb) * var(--_ol-lt-s));
     --_ol-lt-y1: (0.2126 * var(--_ol-lt-1r) + 0.7152 * var(--_ol-lt-1g) + 0.0722 * var(--_ol-lt-1b));
-    --_ol-lt-k: max(0, (0.15 - var(--_ol-lt-y1)) / max(1 - var(--_ol-lt-y1), 1e-6));
+    --_ol-lt-k: max(0, (var(--_g-ol) - var(--_ol-lt-y1)) / max(1 - var(--_ol-lt-y1), 1e-6));
     --_ol-lt-r: max(0, 255 * (1.055 * pow(var(--_ol-lt-1r) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1r)), 1 / 2.4) - 0.055));
     --_ol-lt-g: max(0, 255 * (1.055 * pow(var(--_ol-lt-1g) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1g)), 1 / 2.4) - 0.055));
     --_ol-lt-b: max(0, 255 * (1.055 * pow(var(--_ol-lt-1b) + var(--_ol-lt-k) * (1 - var(--_ol-lt-1b)), 1 / 2.4) - 0.055));
-    --_odt-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odt-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odt-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.086 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odt-lt-s: max(1, 0.33 / max(var(--_y), 1e-6));
+    --_odt-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-odt) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-odt) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-odt) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odt-lt-s: max(1, var(--_g-odt) / max(var(--_y), 1e-6));
     --_odt-lt-1r: min(1, var(--_lr) * var(--_odt-lt-s));
     --_odt-lt-1g: min(1, var(--_lg) * var(--_odt-lt-s));
     --_odt-lt-1b: min(1, var(--_lb) * var(--_odt-lt-s));
     --_odt-lt-y1: (0.2126 * var(--_odt-lt-1r) + 0.7152 * var(--_odt-lt-1g) + 0.0722 * var(--_odt-lt-1b));
-    --_odt-lt-k: max(0, (0.33 - var(--_odt-lt-y1)) / max(1 - var(--_odt-lt-y1), 1e-6));
+    --_odt-lt-k: max(0, (var(--_g-odt) - var(--_odt-lt-y1)) / max(1 - var(--_odt-lt-y1), 1e-6));
     --_odt-lt-r: max(0, 255 * (1.055 * pow(var(--_odt-lt-1r) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1r)), 1 / 2.4) - 0.055));
     --_odt-lt-g: max(0, 255 * (1.055 * pow(var(--_odt-lt-1g) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1g)), 1 / 2.4) - 0.055));
     --_odt-lt-b: max(0, 255 * (1.055 * pow(var(--_odt-lt-1b) + var(--_odt-lt-k) * (1 - var(--_odt-lt-1b)), 1 / 2.4) - 0.055));
-    --_odl-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odl-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odl-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, 0.155 / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
-    --_odl-lt-s: max(1, 0.203 / max(var(--_y), 1e-6));
+    --_odl-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-odl) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-odl) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-odl) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_odl-lt-s: max(1, var(--_g-odl) / max(var(--_y), 1e-6));
     --_odl-lt-1r: min(1, var(--_lr) * var(--_odl-lt-s));
     --_odl-lt-1g: min(1, var(--_lg) * var(--_odl-lt-s));
     --_odl-lt-1b: min(1, var(--_lb) * var(--_odl-lt-s));
     --_odl-lt-y1: (0.2126 * var(--_odl-lt-1r) + 0.7152 * var(--_odl-lt-1g) + 0.0722 * var(--_odl-lt-1b));
-    --_odl-lt-k: max(0, (0.203 - var(--_odl-lt-y1)) / max(1 - var(--_odl-lt-y1), 1e-6));
+    --_odl-lt-k: max(0, (var(--_g-odl) - var(--_odl-lt-y1)) / max(1 - var(--_odl-lt-y1), 1e-6));
     --_odl-lt-r: max(0, 255 * (1.055 * pow(var(--_odl-lt-1r) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1r)), 1 / 2.4) - 0.055));
     --_odl-lt-g: max(0, 255 * (1.055 * pow(var(--_odl-lt-1g) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1g)), 1 / 2.4) - 0.055));
     --_odl-lt-b: max(0, 255 * (1.055 * pow(var(--_odl-lt-1b) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1b)), 1 / 2.4) - 0.055));
-    --_wl-f: max(min(1, 0.181 / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - 0.3) * 1e6, 1));
+    --_wl-f: max(min(1, 0.181 / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - 0.3) * 1e6, 1), 1 - var(--_band-kw));
     --_wlm-r: max(0, 255 * (1.055 * pow(var(--_lr) * var(--_wl-f), 1 / 2.4) - 0.055));
     --_wlm-g: max(0, 255 * (1.055 * pow(var(--_lg) * var(--_wl-f), 1 / 2.4) - 0.055));
     --_wlm-b: max(0, 255 * (1.055 * pow(var(--_lb) * var(--_wl-f), 1 / 2.4) - 0.055));

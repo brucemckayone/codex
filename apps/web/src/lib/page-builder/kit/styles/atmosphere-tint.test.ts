@@ -67,15 +67,18 @@ const CAP_L = Number(recipe?.[1]);
 const CAP_C = Number(recipe?.[3]);
 const STEP = Number(recipe?.[2]);
 
-/** The dark ground's own clamp: the band §5.1's proof sweeps. */
+/** The dark ground's own clamp: the band §5.1's proof sweeps. The ground's
+ * band is the org's (03 X48), and atmosphere is drawn only on the first one
+ * (`atmosphereProven`; PageRenderer draws it as base on any other), so the
+ * edge is the dark theme's first-band fallback. */
 const DARK_BAND_L = num(
   SCHEMES,
-  /--lp-ground: oklch\(from var\(--_ground-in\) min\(l, ([\d.]+)\)/,
+  /--_band-edge: var\(--_gd-edge, ([\d.]+)\);/,
   'dark ground L'
 );
 const DARK_BAND_C = num(
   SCHEMES,
-  /\(l - [\d.]+\) \* 1e6, 1\) \* max\(0, c - ([\d.]+)\)\) h\);/,
+  /\(l - var\(--_band-edge\)\) \* 1e6, 1\) \* max\(0, c - ([\d.]+)\)\) h\);/,
   'dark ground chroma'
 );
 

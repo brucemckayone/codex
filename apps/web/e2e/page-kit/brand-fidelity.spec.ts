@@ -36,6 +36,7 @@
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
+import { resolveGroundBands } from '../../src/lib/page-builder/kit/model/resolve';
 import {
   expectSellPageRendered,
   journeyFixture,
@@ -120,28 +121,67 @@ interface Setup {
  * dark room in that frame and its new ground two frames later.
  */
 async function apply(page: Page, setup: Setup): Promise<void> {
-  await page.evaluate((s: Setup) => {
-    const root = document.querySelector<HTMLElement>('.lp');
-    if (!root) throw new Error('no .lp root on the page');
-    if (s.drawAs) root.dataset.lpStyle = s.drawAs;
-    if (s.preview) root.dataset.lpTheme = s.preview;
-    if (s.carrier) {
-      root.setAttribute('data-org-brand', '');
-      root.setAttribute('style', s.carrier);
-      // A page that sets a background of its own also carries data-org-bg,
-      // and names the theme(s) it is for — as PageRenderer derives both
-      // from the properties declared, never from the style text.
-      const declared = new Set(
-        s.carrier.split(';').map((d) => d.split(':')[0]?.trim())
-      );
-      const light = declared.has('--brand-bg');
-      const dark = declared.has('--brand-bg-dark');
-      if (light || dark) {
-        root.setAttribute('data-org-bg', '');
-        root.dataset.pageBg = light && dark ? 'both' : light ? 'light' : 'dark';
+  // The band each theme's ground is drawn in, resolved exactly as
+  // PageRenderer resolves it: from the org's backgrounds (on the org
+  // layout) and the page's own (the carrier's).
+  const grounds = setup.carrier
+    ? resolveGroundBands(
+        await page.evaluate(() => {
+          const layout = document.querySelector('.org-layout');
+          const read = (name: string) =>
+            layout
+              ? getComputedStyle(layout).getPropertyValue(name).trim()
+              : '';
+          return { light: read('--brand-bg'), dark: read('--brand-bg-dark') };
+        }),
+        Object.fromEntries(
+          setup.carrier
+            .split(';')
+            .map((d) => d.split(':').map((part) => part.trim()))
+            .filter(
+              ([name]) => name === '--brand-bg' || name === '--brand-bg-dark'
+            )
+            .map(([name, value]) => [
+              name === '--brand-bg' ? 'light' : 'dark',
+              value,
+            ])
+        )
+      )
+    : null;
+  await page.evaluate(
+    ([s, g]) => {
+      const root = document.querySelector<HTMLElement>('.lp');
+      if (!root) throw new Error('no .lp root on the page');
+      if (s.drawAs) root.dataset.lpStyle = s.drawAs;
+      if (s.preview) root.dataset.lpTheme = s.preview;
+      if (s.carrier) {
+        root.setAttribute('data-org-brand', '');
+        root.setAttribute('style', s.carrier);
+        // A page that sets a background of its own also carries data-org-bg,
+        // and names the theme(s) it is for — as PageRenderer derives both
+        // from the properties declared, never from the style text.
+        const declared = new Set(
+          s.carrier.split(';').map((d) => d.split(':')[0]?.trim())
+        );
+        const light = declared.has('--brand-bg');
+        const dark = declared.has('--brand-bg-dark');
+        if (light || dark) {
+          root.setAttribute('data-org-bg', '');
+          root.dataset.pageBg =
+            light && dark ? 'both' : light ? 'light' : 'dark';
+        }
       }
-    }
-  }, setup);
+      if (g) {
+        for (const [attribute, band] of [
+          ['data-ground-light', g.light],
+          ['data-ground-dark', g.dark],
+        ] as const)
+          if (band) root.setAttribute(attribute, band);
+          else root.removeAttribute(attribute);
+      }
+    },
+    [setup, grounds] as const
+  );
   await page.evaluate(
     () =>
       new Promise<void>((done) =>
@@ -1288,3 +1328,98 @@ test('studio-alpha/tending-the-grief light: on the platform’s neutral ground t
     ).toBeLessThanOrEqual(0.002);
   }
 });
+
+// ── the org's real ground: light, mid-tone or dark (Codex-61zsk.42, 03 X48) ──
+// The owner's review brands (D15, "Sample brands for reviews (Recommended)";
+// `docs/handover/phase3-sources/review-brands/brands.json`), each put on a
+// page as its own brand: a page carrier is derived by the same
+// `org-brand.css` rules as the org's, and writes nothing to the org's row,
+// so the seeded cases above can run beside these. A brand with no
+// background is drawn on a platform org's page. The owner chose "Fix it next
+// (Recommended)": on every one, in both themes, the kit's ground is the
+// ground the carrier derives, measured beside it, and the soft band is a
+// visible step from it.
+const REVIEW_BRANDS = [
+  // Dark in both themes: the dark pole, in light mode too.
+  [
+    'night',
+    1,
+    '--brand-color: #C9A54C; --brand-bg: #15211C; --brand-bg-dark: #15211C',
+  ],
+  // A mid-tone light ground (L 0.887), under the band the kit used to have.
+  [
+    'sand',
+    1,
+    '--brand-color: #1F3A5F; --brand-bg: #E9D8B4; --brand-bg-dark: #E9D8B4',
+  ],
+  [
+    'lilac',
+    1,
+    '--brand-color: #8B5CF6; --brand-bg: #F3EEFD; --brand-bg-dark: #17112A',
+  ],
+  ['red', 2, '--brand-color: #E0402A'],
+  ['plain', 2, '--brand-color: #0F766E'],
+] as const;
+
+/**
+ * The least the soft band stands apart from the ground, in OKLCH lightness
+ * (X48), as `schemes.test.ts` proves it: on a background, the pole's whole
+ * step (0.03 light, 0.04 dark), the other way at a band's edge. On the
+ * platform's ground it is the platform's own secondary surface (D14), the
+ * smallest step the kit draws: 0.0150 on #fafafa, so 0.014. Measured on
+ * painted 8-bit colours, so to within 0.001.
+ */
+const SOFT_MIN = { background: 0.03, platform: 0.014 } as const;
+
+for (const [name, at, carrier] of REVIEW_BRANDS) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`review brand ${name} ${theme}: the kit's ground is the org's own, and its soft band a visible step from it`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const item = CASES[at];
+      if (!item) throw new Error('no case');
+      const page = await openAs(browser, baseURL as string, item, theme);
+      // A page with no soft section draws one (the attribute alone).
+      await page.evaluate(() => {
+        if (
+          document.querySelector(
+            ".lp-page > .lp-section[data-lp-scheme='soft']"
+          )
+        )
+          return;
+        document
+          .querySelector(".lp-page > .lp-section[data-lp-type='benefits']")
+          ?.setAttribute('data-lp-scheme', 'soft');
+      });
+      await apply(page, { carrier });
+      const reading = await page.evaluate(readColours, 'root' as const);
+      const soft = await page.evaluate(readSoft, 0);
+      await page.context().close();
+      const detail = JSON.stringify({ reading, soft });
+      // The ground is the org's, and so is its ink, exactly: the pole
+      // follows the ground. On the wrong pole a grade moves the ink (night's
+      // grey text darkened to Y .25), and that still holds 4.5:1 on its own
+      // ground, so the ratio alone cannot tell the poles apart.
+      expect(
+        mismatches(reading, reading.org, [
+          ['ground', '--color-background'],
+          ['ink', '--color-text'],
+        ]),
+        detail
+      ).toEqual([]);
+      const { ground, ink } = reading.kit;
+      if (!ground || !ink) throw new Error(detail);
+      expect(ratio(ink, ground), detail).toBeGreaterThanOrEqual(4.5);
+      expect(soft.surfaces.length, detail).toBeGreaterThan(0);
+      for (const surface of soft.surfaces)
+        expect(
+          Math.abs(surface.lch[0] - soft.ground.lch[0]),
+          `${surface.at} ${detail}`
+        ).toBeGreaterThanOrEqual(
+          SOFT_MIN[carrier.includes('--brand-bg') ? 'background' : 'platform'] -
+            0.001
+        );
+    });
+  }
+}
