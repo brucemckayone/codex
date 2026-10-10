@@ -419,6 +419,27 @@ describe('an org shader — the hero defaults to atmosphere, the closing ask kee
           ).toBe(scheme);
   });
 
+  it('draws it, or any scheme the page set to it, as base off the bands it is proven on', () => {
+    const off = { light: 'l80', dark: 'd24' } as const;
+    const on = { light: 'l85', dark: 'd30' } as const;
+    for (const style of PAGE_STYLE_IDS) {
+      for (const design of [undefined, { scheme: 'atmosphere' as const }]) {
+        expect(
+          resolveScheme('hero', design, style, { orgShader: true, grounds: on })
+        ).toBe('atmosphere');
+        expect(
+          resolveScheme('hero', design, style, {
+            orgShader: true,
+            grounds: off,
+          })
+        ).toBe('base');
+      }
+      expect(
+        resolveScheme('faq', { scheme: 'brand' }, style, { grounds: off })
+      ).toBe('brand');
+    }
+  });
+
   it('resolves a whole page with it, and Cinematic as it always was', () => {
     const page = (style: 'quiet' | 'cinematic'): KitPage => ({
       design: { style },

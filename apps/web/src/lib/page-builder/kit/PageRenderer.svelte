@@ -49,6 +49,7 @@
   import {
     brandOverridesToCssVars,
     brandOverridesToStyleAttr,
+    pageGrounds,
   } from '../render/brand-overrides';
   import type { JourneySalesContext } from '../render/types';
   import { priceWithCadence } from './model/copy';
@@ -56,7 +57,6 @@
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import {
-    atmosphereProven,
     resolveGroundBands,
     resolveSections,
     resolveStyle,
@@ -122,21 +122,8 @@
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
-  const grounds = $derived.by(() => {
-    const vars = brandOverridesToCssVars(brandOverrides);
-    return resolveGroundBands(orgGrounds, {
-      light: vars['--brand-bg'],
-      dark: vars['--brand-bg-dark'],
-    });
-  });
-  const sections = $derived.by(() => {
-    const resolved = resolveSections(page, { orgShader });
-    return atmosphereProven(grounds)
-      ? resolved
-      : resolved.map((s) =>
-          s.scheme === 'atmosphere' ? { ...s, scheme: 'base' as const } : s
-        );
-  });
+  const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
+  const sections = $derived(resolveSections(page, { orgShader, grounds }));
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
   const edits = $derived(
     new Map<string, BlockEdit | null>(

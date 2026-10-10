@@ -16,6 +16,7 @@ import {
   SECTION_TYPE_IDS,
   sampleContext,
 } from '$lib/page-builder/kit';
+import { STYLES } from '$lib/page-builder/kit/model/styles';
 import { upgradePage } from '$lib/page-builder/kit/model/upgrade';
 import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 import {
@@ -78,6 +79,16 @@ vi.mock('$lib/remote/page-images.remote', () => {
   return { uploadPageImageForm: { for: () => instance } };
 });
 
+/** The org the layout loaded: its shader preset and its backgrounds. */
+const layout = vi.hoisted(() => ({ org: null as unknown }));
+vi.mock('$app/state', () => ({
+  page: {
+    get data() {
+      return { org: layout.org };
+    },
+  },
+}));
+
 class OnScreen {
   constructor(private readonly callback: IntersectionObserverCallback) {}
   observe(target: Element): void {
@@ -96,6 +107,7 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', OnScreen);
   remote.result = undefined;
   remote.finish = null;
+  layout.org = null;
 });
 
 afterEach(() => {
@@ -260,5 +272,52 @@ describe('the background image, a control every section shares', () => {
     control?.querySelector<HTMLButtonElement>('.image__btn--quiet')?.click();
     flushSync();
     expect(stored('f')?.props).not.toHaveProperty('background');
+  });
+});
+
+// B2 (03 X50, X51): the canvas draws an org's hero on its moving background
+// when the org has a shader, and as base on a band a moving background is
+// not proven on. The colour swatches show what the canvas draws: the
+// section's colour, and which one is its default.
+describe('the colour the canvas draws for the hero', () => {
+  const org = (tokenOverrides: object, background?: string) => ({
+    brandColors: { background },
+    brandFineTune: { tokenOverrides: JSON.stringify(tokenOverrides) },
+  });
+  const swatches = () => {
+    const pressed = document.body.querySelectorAll<HTMLElement>(
+      ".swatch[aria-pressed='true']"
+    );
+    const defaults = [
+      ...document.body.querySelectorAll<HTMLElement>('.swatch'),
+    ].filter((b) => b.querySelector('.swatch__default')?.textContent?.trim());
+    return {
+      value: [...pressed].map((b) => b.dataset.scheme),
+      default: defaults.map((b) => b.dataset.scheme),
+    };
+  };
+
+  it('is the moving background, by default, in an org with a shader', () => {
+    layout.org = org({ 'shader-preset': 'glow' });
+    render([hero('h')], 'h');
+    expect(swatches()).toEqual({
+      value: ['atmosphere'],
+      default: ['atmosphere'],
+    });
+  });
+
+  it('is the Style’s own without one', () => {
+    layout.org = org({ 'shader-preset': 'none' });
+    render([hero('h')], 'h');
+    const own = STYLES.bold.schemes.hero ?? 'base';
+    expect(own).not.toBe('atmosphere');
+    expect(swatches()).toEqual({ value: [own], default: [own] });
+  });
+
+  it('is base where the org’s ground is on a band a moving background is not drawn on', () => {
+    // #D2C3A8 is L 0.82: band l80, where PageRenderer draws base.
+    layout.org = org({ 'shader-preset': 'glow' }, '#D2C3A8');
+    render([hero('h')], 'h');
+    expect(swatches()).toEqual({ value: ['base'], default: ['base'] });
   });
 });

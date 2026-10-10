@@ -52,6 +52,10 @@ export function resolveLayout(
 export interface ResolveOptions {
   /** The org has a moving background: a shader preset other than 'none'. */
   readonly orgShader?: boolean;
+  /** The bands the page's grounds are drawn in (`resolveGroundBands`): a
+   * moving background off the bands it is proven on is drawn as `base`
+   * (03 X48, X50). Absent: not judged. */
+  readonly grounds?: { light?: GroundBandId; dark?: GroundBandId };
 }
 
 /** The sections an org's moving background takes by default (owner, D4: "On
@@ -67,9 +71,16 @@ export function resolveScheme(
   style: PageStyleId,
   options: ResolveOptions = {}
 ): ColourSchemeId {
-  if (isColourSchemeId(design?.scheme)) return design.scheme;
-  if (options.orgShader && SHADER_SECTIONS.has(type)) return 'atmosphere';
-  return STYLES[style].schemes[type] ?? 'base';
+  const scheme = isColourSchemeId(design?.scheme)
+    ? design.scheme
+    : options.orgShader && SHADER_SECTIONS.has(type)
+      ? 'atmosphere'
+      : (STYLES[style].schemes[type] ?? 'base');
+  return scheme === 'atmosphere' &&
+    options.grounds &&
+    !atmosphereProven(options.grounds)
+    ? 'base'
+    : scheme;
 }
 
 /** A chosen spacing wins; otherwise a `compact` layout sits in compact bands. */

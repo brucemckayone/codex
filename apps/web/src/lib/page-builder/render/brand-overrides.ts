@@ -145,6 +145,18 @@ export function brandOverridesToCssVars(
   return Object.fromEntries(Object.entries(out).filter(isSafeDeclaration));
 }
 
+/** A page's own background per theme, where it sets one (owner, D7): what
+ * its grounds' bands are read from (`resolveGroundBands`, 03 X48). */
+export function pageGrounds(
+  overrides: BrandTokenOverrides | null | undefined
+): {
+  light?: string;
+  dark?: string;
+} {
+  const vars = brandOverridesToCssVars(overrides);
+  return { light: vars['--brand-bg'], dark: vars['--brand-bg-dark'] };
+}
+
 /**
  * Serialise a page's brand overrides to a `style`-attribute declaration string,
  * or `undefined` when nothing is overridden (so the caller renders a plain
