@@ -224,6 +224,12 @@ function fragments(): string[] {
     ...lighten('odt-lt', 'var(--_g-odt)'),
     ...darken('odl-dk', 'var(--_g-odl)'),
     ...lighten('odl-lt', 'var(--_g-odl)'),
+    // The org's heading on a moving background (owner, D17; §19): the drawn
+    // band's grades over its worst veiled backdrop.
+    ...darken('aot-dk', 'var(--_g-aot)'),
+    ...lighten('aot-lt', 'var(--_g-aot)'),
+    ...darken('aol-dk', 'var(--_g-aol)'),
+    ...lighten('aol-lt', 'var(--_g-aol)'),
     `--_wl-f: max(min(1, ${TARGET.orgWhiteLabel} / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - ${TARGET.orgWhiteLabelCut}) * 1e6, 1), 1 - var(--_band-kw));`,
     ...channels.map(
       (c) =>
@@ -3929,7 +3935,7 @@ describe('the org’s real ground — its pole, its band, and a soft band that s
     ] as const) {
       for (const band of Object.values(BAND))
         expect(CODE, `${theme} ${band.id}`).toContain(
-          `.lp[data-ground-${theme}='${band.id}'] { --_${key}-edge: ${band.edge}; --_${key}-ot: ${band.ot}; --_${key}-ol: ${band.ol}; --_${key}-odt: ${band.odt}; --_${key}-odl: ${band.odl}; --_${key}-kw: ${band.kw}; --_${key}-veil: ${BAND_VEIL[band.id]}; }`
+          `.lp[data-ground-${theme}='${band.id}'] { --_${key}-edge: ${band.edge}; --_${key}-ot: ${band.ot}; --_${key}-ol: ${band.ol}; --_${key}-odt: ${band.odt}; --_${key}-odl: ${band.odl}; --_${key}-kw: ${band.kw}; --_${key}-veil: ${BAND_VEIL[band.id]};${ATMOS_GRADES[band.id] ? ` --_${key}-aot: ${ATMOS_GRADES[band.id]?.aot}; --_${key}-aol: ${ATMOS_GRADES[band.id]?.aol};` : ''} }`
         );
       expect(
         CODE.match(
@@ -4329,5 +4335,202 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
     expect(CODE).toMatch(
       /\.lp\[data-lp-style='cinematic'\] \{[^}]*--_band-veil: 0;/
     );
+  });
+});
+
+// ── 19. the org's heading colour on atmosphere (owner, D17; 03 X51) ─────────
+/*
+ * On a moving background the headings draw the org's heading colour (owner,
+ * D17: "Keep the org's colour (Recommended)"), moved toward the ink only as
+ * far as its floor needs over the section's worst backdrops: the veil at the
+ * band's strength over pure black and over pure white. The rule is the org's
+ * surfaces' (§10, §16): a title at the text grade (4.5:1), a display or
+ * section heading at the large grade (3:1), each 2% past what the worst
+ * backdrop of the band needs and rounded toward the ink. A colour that
+ * already holds is drawn exactly. Only the bands atmosphere is drawn on carry
+ * a grade (§18). The veil is the band's own ground: a Style's tinted ground
+ * (X33) is clamped into the first band, so it is never further toward the
+ * ink than the band's own.
+ */
+const ATMOS_GRADES: Partial<
+  Record<GroundBandId, { aot: number; aol: number }>
+> = {
+  l90: { aot: 0.059, aol: 0.113 },
+  l85: { aot: 0.057, aol: 0.111 },
+  d24: { aot: 0.408, aol: 0.255 },
+  d30: { aot: 0.41, aol: 0.257 },
+};
+const ATMOS_GRADE = [
+  { key: 'aot', floor: 4.5, token: '--lp-title-ink' },
+  { key: 'aol', floor: 3, token: '--lp-heading-ink' },
+] as const;
+
+/** The veil over each backdrop, as the band's veil paints its ground. */
+const veiledOver = (band: Band, g: Rgb): Rgb[] => {
+  const s = BAND_VEIL[band.id];
+  return [
+    triple((i) => s * clip(g)[i]),
+    triple((i) => s * clip(g)[i] + (1 - s)),
+  ];
+};
+/** The luminance of the worst backdrop a band's veil can show. */
+function atmosWorst(band: Band): number {
+  let w = band.pole === 'light' ? 2 : -1;
+  for (const [g] of atmosphereBandCases(band))
+    for (const seen of veiledOver(band, g)) {
+      const y = lum(seen);
+      if (towardInk(band.pole, y, w)) w = y;
+    }
+  return w;
+}
+const atmosMove = (band: Band, colour: Rgb, y: number) =>
+  band.pole === 'light' ? darken(colour, y) : lighten(colour, y);
+
+describe('atmosphere headings — the org’s heading colour, floored over the veil (owner, D17)', () => {
+  const sources: Rgb[] = Object.values(BRANDS).map(hex);
+  for (let r = 0; r < 256; r += 51)
+    for (let g = 0; g < 256; g += 51)
+      for (let b = 0; b < 256; b += 51)
+        sources.push([r / 255, g / 255, b / 255]);
+
+  it(
+    'grades each drawn band 2% past what its worst veiled backdrop needs, and no further',
+    { timeout: 120_000 },
+    () => {
+      const drawn = Object.values(BAND).filter(shows);
+      expect(drawn.map((b) => b.id)).toEqual(Object.keys(ATMOS_GRADES));
+      const measured = Object.fromEntries(
+        drawn.map((band) => {
+          const w = atmosWorst(band);
+          const grade = (floor: number) => {
+            const exact =
+              band.pole === 'light'
+                ? (w + 0.05) / (floor * 1.02) - 0.05
+                : (w + 0.05) * floor * 1.02 - 0.05;
+            return band.pole === 'light'
+              ? Math.floor(exact * 1000) / 1000
+              : Math.ceil(exact * 1000) / 1000;
+          };
+          return [band.id, { aot: grade(4.5), aol: grade(3) }];
+        })
+      );
+      expect(measured).toEqual(ATMOS_GRADES);
+    }
+  );
+
+  it(
+    'holds the grade over pure black and pure white, at every drawn band’s veil, for any heading colour',
+    { timeout: 120_000 },
+    () => {
+      const out: string[] = [];
+      for (const band of Object.values(BAND).filter(shows)) {
+        const grades = ATMOS_GRADES[band.id];
+        if (!grades) throw new Error(band.id);
+        const cases = atmosphereBandCases(band);
+        // Every ground the band can draw, over both backdrops, and the
+        // glow where no shader runs.
+        const backdrops: Rgb[] = cases.flatMap(([g]) => veiledOver(band, g));
+        for (const [g, brand, tint] of cases.slice(0, 64)) {
+          const t = atmosphereTokens(band.pole, g, brand, tint);
+          const glow = oklchFrom(
+            brand,
+            () => GLOW[band.pole].l,
+            (_, c) => Math.min(c, GLOW[band.pole].c)
+          );
+          backdrops.push(
+            triple(
+              (i) =>
+                GLOW.strength * clip(glow)[i] +
+                (1 - GLOW.strength) * clip(t.bg)[i]
+            )
+          );
+        }
+        const worst = backdrops.reduce((a, b) =>
+          towardInk(band.pole, lum(b), lum(a)) ? b : a
+        );
+        for (const { key, floor } of ATMOS_GRADE)
+          for (const s of sources) {
+            const moved = atmosMove(band, s, grades[key]);
+            if (ratio(moved, worst) < floor)
+              out.push(
+                `${band.id} ${key} ${toHex(s)} ${ratio(moved, worst).toFixed(2)}`
+              );
+          }
+      }
+      expect(out).toEqual([]);
+    }
+  );
+
+  it('draws a colour that already holds exactly, and moves a failing one along its own hue', () => {
+    let kept = 0;
+    let moved = 0;
+    for (const band of Object.values(BAND).filter(shows)) {
+      const grades = ATMOS_GRADES[band.id];
+      if (!grades) throw new Error(band.id);
+      for (const { key } of ATMOS_GRADE)
+        for (const s of sources) {
+          const y = grades[key];
+          const after = atmosMove(band, s, y);
+          const holds = band.pole === 'light' ? lum(s) <= y : lum(s) >= y;
+          if (holds) {
+            expect(toHex(after), `${band.id} ${key} ${toHex(s)}`).toBe(
+              toHex(s)
+            );
+            kept++;
+          } else moved++;
+        }
+    }
+    expect(kept).toBeGreaterThan(0);
+    expect(moved).toBeGreaterThan(0);
+    // studio-alpha's crimson (light) deepens, never to black, keeping its hue.
+    const crimson = hex('#e11d48');
+    const deep = atmosMove(BAND.l90, crimson, ATMOS_GRADES.l90?.aol ?? 0);
+    expect(toHex(deep)).not.toBe('#000000');
+    const hue = (c: Rgb) => {
+      const [, a, b] = toLab(c);
+      return (Math.atan2(b, a) * 180) / Math.PI;
+    };
+    expect(Math.abs(hue(deep) - hue(crimson))).toBeLessThan(4);
+  });
+
+  it('ships it: the grades per drawn band, their fragments, and the headings of every atmosphere section but Cinematic’s, on the exact path only', () => {
+    for (const [theme, key] of [
+      ['light', 'gl'],
+      ['dark', 'gd'],
+    ] as const) {
+      for (const [id, g] of Object.entries(ATMOS_GRADES))
+        expect(CODE, `${theme} ${id}`).toMatch(
+          new RegExp(
+            `\\.lp\\[data-ground-${theme}='${id}'\\] \\{[^}]*--_${key}-aot: ${g?.aot}; --_${key}-aol: ${g?.aol}; \\}`
+          )
+        );
+      const first = ATMOS_GRADES[FIRST[theme].id];
+      expect(CODE, theme).toContain(
+        `--_g-aot: var(--_${key}-aot, ${first?.aot}); --_g-aol: var(--_${key}-aol, ${first?.aol});`
+      );
+    }
+    for (const [pole, side] of [
+      ['light', 'dk'],
+      ['dark', 'lt'],
+    ] as const)
+      for (const k of ['aot', 'aol'])
+        for (const c of ['r', 'g', 'b'])
+          expect(POLE[pole], `${pole} ${k}`).toContain(
+            `--_${k}-${c}: var(--_${k}-${side}-${c});`
+          );
+    const rule =
+      ".lp:not([data-lp-style='cinematic']) [data-lp-scheme='atmosphere']:not([data-lp-on-media]) { --lp-title-ink: rgb(from var(--_org-heading) var(--_aot-r) var(--_aot-g) var(--_aot-b)); --lp-heading-ink: rgb(from var(--_org-heading) var(--_aol-r) var(--_aol-g) var(--_aol-b)); }";
+    // Inside the exact path, once: without it the heading stays the kit's
+    // ink (`currentColor`), which every floor already holds.
+    const supports = CODE.indexOf(
+      '@supports (color: rgb(from red calc(255 * pow(r / 255, 2)) 0 0))'
+    );
+    const at = CODE.indexOf(rule);
+    expect(CODE.split(rule).length - 1).toBe(1);
+    expect(at).toBeGreaterThan(supports);
+    const between = CODE.slice(supports, at);
+    expect(
+      between.split('{').length - between.split('}').length
+    ).toBeGreaterThan(0);
   });
 });

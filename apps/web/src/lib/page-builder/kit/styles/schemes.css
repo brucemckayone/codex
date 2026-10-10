@@ -180,9 +180,10 @@
   --_button-i: var(--_btn-dark);
 
   /* The org's inks' moves (the exact path's `--_ot-*` text grade, `--_ol-*`
-     large grade, and the decorated `--_odt-*` / `--_odl-*`), routed to the
-     side the ground is on. A decorated page re-routes text and large grade
-     to its own (below). */
+     large grade, the decorated `--_odt-*` / `--_odl-*`, and a heading's on a
+     moving background, `--_aot-*` / `--_aol-*`), routed to the side the
+     ground is on. A decorated page re-routes text and large grade to its own
+     (below); a moving background is never decorated. */
   --_ot-r: var(--_ot-dk-r);
   --_ot-g: var(--_ot-dk-g);
   --_ot-b: var(--_ot-dk-b);
@@ -195,6 +196,12 @@
   --_odl-r: var(--_odl-dk-r);
   --_odl-g: var(--_odl-dk-g);
   --_odl-b: var(--_odl-dk-b);
+  --_aot-r: var(--_aot-dk-r);
+  --_aot-g: var(--_aot-dk-g);
+  --_aot-b: var(--_aot-dk-b);
+  --_aol-r: var(--_aol-dk-r);
+  --_aol-g: var(--_aol-dk-g);
+  --_aol-b: var(--_aol-dk-b);
 
   /* KEEP WHITE (owner, D8): the org's button moves on to `--_wl-*`, which
      darkens a mid-tone just far enough for a white label. A decorated page
@@ -260,32 +267,34 @@
    grades are the org's moves proven on the worst surface it can hold
    (`schemes.test.ts`): text `--_g-ot`, large `--_g-ol`, and under a Style's
    decorations `--_g-odt` / `--_g-odl`, each 2% past what that surface needs.
-   Keep white (owner, D8) stays on only where white can hold the band's
-   large grade (`--_band-kw`). A Moving background's veil is at least the
-   band's thinnest that holds (`--_band-veil`, 03 X50); PageRenderer draws
-   one only where that still shows the shader (l90, l85, d24, d30). The light theme draws the band its own ground
-   is in, the dark theme its own; a theme with no background is the
-   platform's, on its pole's first band (the bands the kit always had).
-   Cinematic's room is on the first dark band in every theme (below). */
-.lp[data-ground-light='l90'] { --_gl-edge: 0.9; --_gl-ot: 0.114; --_gl-ol: 0.196; --_gl-odt: 0.086; --_gl-odl: 0.155; --_gl-kw: 1; --_gl-veil: 0.82; }
-.lp[data-ground-light='l85'] { --_gl-edge: 0.85; --_gl-ot: 0.086; --_gl-ol: 0.155; --_gl-odt: 0.064; --_gl-odl: 0.121; --_gl-kw: 1; --_gl-veil: 0.89; }
+   Keep white (owner, D8) stays on only where white can hold the band's large
+   grade (`--_band-kw`). A Moving background's veil is at least the band's
+   thinnest that holds (`--_band-veil`, 03 X50), and its headings take the
+   band's grades over that veil (`--_g-aot` / `--_g-aol`, owner D17, 03 X51);
+   PageRenderer draws one only where that still shows the shader (l90, l85,
+   d24, d30). The light theme draws the band its own ground is in, the dark
+   theme its own; a theme with no background is the platform's, on its pole's
+   first band (the bands the kit always had). Cinematic's room is on the first
+   dark band in every theme (below). */
+.lp[data-ground-light='l90'] { --_gl-edge: 0.9; --_gl-ot: 0.114; --_gl-ol: 0.196; --_gl-odt: 0.086; --_gl-odl: 0.155; --_gl-kw: 1; --_gl-veil: 0.82; --_gl-aot: 0.059; --_gl-aol: 0.113; }
+.lp[data-ground-light='l85'] { --_gl-edge: 0.85; --_gl-ot: 0.086; --_gl-ol: 0.155; --_gl-odt: 0.064; --_gl-odl: 0.121; --_gl-kw: 1; --_gl-veil: 0.89; --_gl-aot: 0.057; --_gl-aol: 0.111; }
 .lp[data-ground-light='l80'] { --_gl-edge: 0.8; --_gl-ot: 0.062; --_gl-ol: 0.118; --_gl-odt: 0.044; --_gl-odl: 0.091; --_gl-kw: 1; --_gl-veil: 0.98; }
 .lp[data-ground-light='l75'] { --_gl-edge: 0.75; --_gl-ot: 0.041; --_gl-ol: 0.086; --_gl-odt: 0.026; --_gl-odl: 0.065; --_gl-kw: 1; --_gl-veil: 1; }
 .lp[data-ground-light='l70'] { --_gl-edge: 0.7; --_gl-ot: 0.022; --_gl-ol: 0.058; --_gl-odt: 0.011; --_gl-odl: 0.042; --_gl-kw: 1; --_gl-veil: 1; }
 .lp[data-ground-light='l65'] { --_gl-edge: 0.65; --_gl-ot: 0.009; --_gl-ol: 0.039; --_gl-odt: 0.0009; --_gl-odl: 0.026; --_gl-kw: 1; --_gl-veil: 1; }
-.lp[data-ground-light='d24'] { --_gl-edge: 0.24; --_gl-ot: 0.25; --_gl-ol: 0.15; --_gl-odt: 0.33; --_gl-odl: 0.203; --_gl-kw: 1; --_gl-veil: 0.86; }
-.lp[data-ground-light='d30'] { --_gl-edge: 0.3; --_gl-ot: 0.316; --_gl-ol: 0.194; --_gl-odt: 0.417; --_gl-odl: 0.261; --_gl-kw: 0; --_gl-veil: 0.92; }
+.lp[data-ground-light='d24'] { --_gl-edge: 0.24; --_gl-ot: 0.25; --_gl-ol: 0.15; --_gl-odt: 0.33; --_gl-odl: 0.203; --_gl-kw: 1; --_gl-veil: 0.86; --_gl-aot: 0.408; --_gl-aol: 0.255; }
+.lp[data-ground-light='d30'] { --_gl-edge: 0.3; --_gl-ot: 0.316; --_gl-ol: 0.194; --_gl-odt: 0.417; --_gl-odl: 0.261; --_gl-kw: 0; --_gl-veil: 0.92; --_gl-aot: 0.41; --_gl-aol: 0.257; }
 .lp[data-ground-light='d36'] { --_gl-edge: 0.36; --_gl-ot: 0.414; --_gl-ol: 0.26; --_gl-odt: 0.535; --_gl-odl: 0.34; --_gl-kw: 0; --_gl-veil: 1; }
 .lp[data-ground-light='d42'] { --_gl-edge: 0.42; --_gl-ot: 0.552; --_gl-ol: 0.352; --_gl-odt: 0.69; --_gl-odl: 0.443; --_gl-kw: 0; --_gl-veil: 1; }
 .lp[data-ground-light='d48'] { --_gl-edge: 0.48; --_gl-ot: 0.737; --_gl-ol: 0.475; --_gl-odt: 0.885; --_gl-odl: 0.574; --_gl-kw: 0; --_gl-veil: 1; }
-.lp[data-ground-dark='l90'] { --_gd-edge: 0.9; --_gd-ot: 0.114; --_gd-ol: 0.196; --_gd-odt: 0.086; --_gd-odl: 0.155; --_gd-kw: 1; --_gd-veil: 0.82; }
-.lp[data-ground-dark='l85'] { --_gd-edge: 0.85; --_gd-ot: 0.086; --_gd-ol: 0.155; --_gd-odt: 0.064; --_gd-odl: 0.121; --_gd-kw: 1; --_gd-veil: 0.89; }
+.lp[data-ground-dark='l90'] { --_gd-edge: 0.9; --_gd-ot: 0.114; --_gd-ol: 0.196; --_gd-odt: 0.086; --_gd-odl: 0.155; --_gd-kw: 1; --_gd-veil: 0.82; --_gd-aot: 0.059; --_gd-aol: 0.113; }
+.lp[data-ground-dark='l85'] { --_gd-edge: 0.85; --_gd-ot: 0.086; --_gd-ol: 0.155; --_gd-odt: 0.064; --_gd-odl: 0.121; --_gd-kw: 1; --_gd-veil: 0.89; --_gd-aot: 0.057; --_gd-aol: 0.111; }
 .lp[data-ground-dark='l80'] { --_gd-edge: 0.8; --_gd-ot: 0.062; --_gd-ol: 0.118; --_gd-odt: 0.044; --_gd-odl: 0.091; --_gd-kw: 1; --_gd-veil: 0.98; }
 .lp[data-ground-dark='l75'] { --_gd-edge: 0.75; --_gd-ot: 0.041; --_gd-ol: 0.086; --_gd-odt: 0.026; --_gd-odl: 0.065; --_gd-kw: 1; --_gd-veil: 1; }
 .lp[data-ground-dark='l70'] { --_gd-edge: 0.7; --_gd-ot: 0.022; --_gd-ol: 0.058; --_gd-odt: 0.011; --_gd-odl: 0.042; --_gd-kw: 1; --_gd-veil: 1; }
 .lp[data-ground-dark='l65'] { --_gd-edge: 0.65; --_gd-ot: 0.009; --_gd-ol: 0.039; --_gd-odt: 0.0009; --_gd-odl: 0.026; --_gd-kw: 1; --_gd-veil: 1; }
-.lp[data-ground-dark='d24'] { --_gd-edge: 0.24; --_gd-ot: 0.25; --_gd-ol: 0.15; --_gd-odt: 0.33; --_gd-odl: 0.203; --_gd-kw: 1; --_gd-veil: 0.86; }
-.lp[data-ground-dark='d30'] { --_gd-edge: 0.3; --_gd-ot: 0.316; --_gd-ol: 0.194; --_gd-odt: 0.417; --_gd-odl: 0.261; --_gd-kw: 0; --_gd-veil: 0.92; }
+.lp[data-ground-dark='d24'] { --_gd-edge: 0.24; --_gd-ot: 0.25; --_gd-ol: 0.15; --_gd-odt: 0.33; --_gd-odl: 0.203; --_gd-kw: 1; --_gd-veil: 0.86; --_gd-aot: 0.408; --_gd-aol: 0.255; }
+.lp[data-ground-dark='d30'] { --_gd-edge: 0.3; --_gd-ot: 0.316; --_gd-ol: 0.194; --_gd-odt: 0.417; --_gd-odl: 0.261; --_gd-kw: 0; --_gd-veil: 0.92; --_gd-aot: 0.41; --_gd-aol: 0.257; }
 .lp[data-ground-dark='d36'] { --_gd-edge: 0.36; --_gd-ot: 0.414; --_gd-ol: 0.26; --_gd-odt: 0.535; --_gd-odl: 0.34; --_gd-kw: 0; --_gd-veil: 1; }
 .lp[data-ground-dark='d42'] { --_gd-edge: 0.42; --_gd-ot: 0.552; --_gd-ol: 0.352; --_gd-odt: 0.69; --_gd-odl: 0.443; --_gd-kw: 0; --_gd-veil: 1; }
 .lp[data-ground-dark='d48'] { --_gd-edge: 0.48; --_gd-ot: 0.737; --_gd-ol: 0.475; --_gd-odt: 0.885; --_gd-odl: 0.574; --_gd-kw: 0; --_gd-veil: 1; }
@@ -298,6 +307,8 @@
   --_g-odl: var(--_gl-odl, 0.155);
   --_band-kw: var(--_gl-kw, 1);
   --_band-veil: var(--_gl-veil, 0);
+  --_g-aot: var(--_gl-aot, 0.059);
+  --_g-aol: var(--_gl-aol, 0.113);
 }
 
 :where(
@@ -312,6 +323,8 @@
   --_g-odl: var(--_gd-odl, 0.203);
   --_band-kw: var(--_gd-kw, 1);
   --_band-veil: var(--_gd-veil, 0);
+  --_g-aot: var(--_gd-aot, 0.408);
+  --_g-aol: var(--_gd-aol, 0.255);
 }
 
 /* THE DARK POLE: wherever the ground is dark. The pole follows the org's
@@ -389,6 +402,12 @@
   --_odl-r: var(--_odl-lt-r);
   --_odl-g: var(--_odl-lt-g);
   --_odl-b: var(--_odl-lt-b);
+  --_aot-r: var(--_aot-lt-r);
+  --_aot-g: var(--_aot-lt-g);
+  --_aot-b: var(--_aot-lt-b);
+  --_aol-r: var(--_aol-lt-r);
+  --_aol-g: var(--_aol-lt-g);
+  --_aol-b: var(--_aol-lt-b);
   --_wld-r: r;
   --_wld-g: g;
   --_wld-b: b;
@@ -800,6 +819,30 @@
     --_odl-lt-r: max(0, 255 * (1.055 * pow(var(--_odl-lt-1r) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1r)), 1 / 2.4) - 0.055));
     --_odl-lt-g: max(0, 255 * (1.055 * pow(var(--_odl-lt-1g) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1g)), 1 / 2.4) - 0.055));
     --_odl-lt-b: max(0, 255 * (1.055 * pow(var(--_odl-lt-1b) + var(--_odl-lt-k) * (1 - var(--_odl-lt-1b)), 1 / 2.4) - 0.055));
+    --_aot-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-aot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aot-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-aot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aot-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-aot) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aot-lt-s: max(1, var(--_g-aot) / max(var(--_y), 1e-6));
+    --_aot-lt-1r: min(1, var(--_lr) * var(--_aot-lt-s));
+    --_aot-lt-1g: min(1, var(--_lg) * var(--_aot-lt-s));
+    --_aot-lt-1b: min(1, var(--_lb) * var(--_aot-lt-s));
+    --_aot-lt-y1: (0.2126 * var(--_aot-lt-1r) + 0.7152 * var(--_aot-lt-1g) + 0.0722 * var(--_aot-lt-1b));
+    --_aot-lt-k: max(0, (var(--_g-aot) - var(--_aot-lt-y1)) / max(1 - var(--_aot-lt-y1), 1e-6));
+    --_aot-lt-r: max(0, 255 * (1.055 * pow(var(--_aot-lt-1r) + var(--_aot-lt-k) * (1 - var(--_aot-lt-1r)), 1 / 2.4) - 0.055));
+    --_aot-lt-g: max(0, 255 * (1.055 * pow(var(--_aot-lt-1g) + var(--_aot-lt-k) * (1 - var(--_aot-lt-1g)), 1 / 2.4) - 0.055));
+    --_aot-lt-b: max(0, 255 * (1.055 * pow(var(--_aot-lt-1b) + var(--_aot-lt-k) * (1 - var(--_aot-lt-1b)), 1 / 2.4) - 0.055));
+    --_aol-dk-r: max(0, 255 * (1.055 * pow(var(--_lr) * min(1, var(--_g-aol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aol-dk-g: max(0, 255 * (1.055 * pow(var(--_lg) * min(1, var(--_g-aol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aol-dk-b: max(0, 255 * (1.055 * pow(var(--_lb) * min(1, var(--_g-aol) / max(var(--_y), 1e-6)), 1 / 2.4) - 0.055));
+    --_aol-lt-s: max(1, var(--_g-aol) / max(var(--_y), 1e-6));
+    --_aol-lt-1r: min(1, var(--_lr) * var(--_aol-lt-s));
+    --_aol-lt-1g: min(1, var(--_lg) * var(--_aol-lt-s));
+    --_aol-lt-1b: min(1, var(--_lb) * var(--_aol-lt-s));
+    --_aol-lt-y1: (0.2126 * var(--_aol-lt-1r) + 0.7152 * var(--_aol-lt-1g) + 0.0722 * var(--_aol-lt-1b));
+    --_aol-lt-k: max(0, (var(--_g-aol) - var(--_aol-lt-y1)) / max(1 - var(--_aol-lt-y1), 1e-6));
+    --_aol-lt-r: max(0, 255 * (1.055 * pow(var(--_aol-lt-1r) + var(--_aol-lt-k) * (1 - var(--_aol-lt-1r)), 1 / 2.4) - 0.055));
+    --_aol-lt-g: max(0, 255 * (1.055 * pow(var(--_aol-lt-1g) + var(--_aol-lt-k) * (1 - var(--_aol-lt-1g)), 1 / 2.4) - 0.055));
+    --_aol-lt-b: max(0, 255 * (1.055 * pow(var(--_aol-lt-1b) + var(--_aol-lt-k) * (1 - var(--_aol-lt-1b)), 1 / 2.4) - 0.055));
     --_wl-f: max(min(1, 0.181 / max(var(--_y), 1e-6)), clamp(0, (var(--_y) - 0.3) * 1e6, 1), 1 - var(--_band-kw));
     --_wlm-r: max(0, 255 * (1.055 * pow(var(--_lr) * var(--_wl-f), 1 / 2.4) - 0.055));
     --_wlm-g: max(0, 255 * (1.055 * pow(var(--_lg) * var(--_wl-f), 1 / 2.4) - 0.055));
@@ -860,6 +903,22 @@
     --lp-accent: rgb(from var(--_org-button) var(--_ot-r) var(--_ot-g) var(--_ot-b));
     --lp-mark-ink: rgb(from var(--lp-accent-source) var(--_ol-r) var(--_ol-g) var(--_ol-b));
     --_tex-ink: rgb(from var(--lp-bg) var(--_line-r) var(--_line-g) var(--_line-b));
+  }
+
+  /* THE ORG'S HEADING ON A MOVING BACKGROUND (owner, D17: "Keep the org's
+     colour (Recommended)"; 03 X51). A heading on the veil draws the org's
+     heading colour, moved along its own path only as far as the floor needs
+     over the worst backdrop the band's veil can show, pure black or pure
+     white under it: a title at the text grade, a display or section heading
+     at the large grade, as on the org's surfaces (the band's `--_g-aot` /
+     `--_g-aol`, 2% past what that backdrop needs; `schemes.test.ts` §19). A
+     colour that holds is drawn exactly; a crimson deepens, never to black.
+     Only the headings: the ink, accent, mark and button keep atmosphere's own
+     moves (above). Not Cinematic's room, which keeps the kit's inks. Without
+     the exact path the heading stays the kit's ink. */
+  .lp:not([data-lp-style='cinematic']) [data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
+    --lp-title-ink: rgb(from var(--_org-heading) var(--_aot-r) var(--_aot-g) var(--_aot-b));
+    --lp-heading-ink: rgb(from var(--_org-heading) var(--_aol-r) var(--_aol-g) var(--_aol-b));
   }
 
   /* THE ORG'S BUTTON — written once, for both places it is drawn: the org's

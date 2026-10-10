@@ -102,8 +102,8 @@
     orgGrounds?: ThemeGrounds;
     /**
      * The org has a moving background, a shader preset other than 'none'
-     * (`orgShader` in `$lib/page-builder/org-grounds.ts`; 03 X50): the hero
-     * and the closing ask then default to `atmosphere`. Plain data, as above.
+     * (`orgShader` in `$lib/page-builder/org-grounds.ts`; 03 X50, X51): the
+     * hero then defaults to `atmosphere`. Plain data, as above.
      */
     orgShader?: boolean;
   }

@@ -37,8 +37,8 @@ export function orgGrounds(
  * Whether the org has a moving background: a shader preset other than
  * 'none' (03 X50). The brand editor's pending preset while it is open, else
  * the org's saved one: the rule the org layout gates its `ShaderHero` on
- * (`data-hero-shader-active`), so the page kit defaults its hero and closing
- * ask to `atmosphere` exactly where a shader runs behind them. PURE, as
+ * (`data-hero-shader-active`), so the page kit defaults its hero to
+ * `atmosphere` exactly where a shader runs behind it (03 X51). PURE, as
  * `orgGrounds` above.
  */
 export function orgShader(

@@ -108,7 +108,7 @@
   const grounds = $derived(
     orgGrounds(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
-  // The org's moving background, so the hero and closing ask take it (03 X50).
+  // The org's moving background, so the hero takes it (03 X50, X51).
   const shader = $derived(
     orgShader(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );

@@ -4,7 +4,7 @@
  * anything the creator picked stays put.
  *
  *   layout  = section.variant (if valid for the type) → Style default → first layout
- *   scheme  = section.design.scheme → the org's shader (hero, cta) → Style
+ *   scheme  = section.design.scheme → the org's shader (hero) → Style
  *             default → 'base'
  *   spacing = section.design.spacing → 'regular'
  *   style   = page.design.style → 'bold'
@@ -55,9 +55,11 @@ export interface ResolveOptions {
 }
 
 /** The sections an org's moving background takes by default (owner, D4: "On
- * by default (Recommended)", 03 X50): the page's opening and its closing ask.
- * Only the Style's default moves; a scheme the page set stays. */
-const SHADER_SECTIONS: ReadonlySet<SectionTypeId> = new Set(['hero', 'cta']);
+ * by default (Recommended)", 03 X50): the page's opening only (D16: "Opening
+ * only (Recommended)", 03 X51). The closing ask keeps its Style's own band in
+ * the org's colour. Only the Style's default moves; a scheme the page set
+ * stays, so a closing ask can still take it. */
+const SHADER_SECTIONS: ReadonlySet<SectionTypeId> = new Set(['hero']);
 
 export function resolveScheme(
   type: SectionTypeId,

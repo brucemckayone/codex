@@ -1,8 +1,11 @@
 /**
- * B2 (owner, D4: "On by default (Recommended)"; 03 X50): an org with a shader
- * preset other than 'none' has its sales pages open and close on its moving
- * background. Every Style's hero and closing ask default to `atmosphere`; a
- * scheme the page set stays.
+ * B2 (owner, D4: "On by default (Recommended)"; 03 X50), narrowed by D16
+ * ("Opening only (Recommended)"; 03 X51): an org with a shader preset other
+ * than 'none' has its sales pages open on its moving background. Every
+ * Style's hero defaults to `atmosphere`; the closing ask keeps its Style's own
+ * band; a scheme the page set stays. On the veil the headings draw the org's
+ * heading colour, moved only as far as their floor needs (D17, "Keep the
+ * org's colour (Recommended)").
  *
  * Measured on the org's own path (no carrier, no DB write): studio-alpha
  * carries the seeded 'glow' preset, of-blood-and-bones none. The words are
@@ -13,6 +16,8 @@
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
+import type { PageStyleId } from '../../src/lib/page-builder/kit/model/ids';
+import { STYLES } from '../../src/lib/page-builder/kit/model/styles';
 import {
   expectSellPageRendered,
   journeyFixture,
@@ -93,6 +98,15 @@ function readAtmosphere() {
       soft: token('--lp-ink-soft'),
       accent: token('--lp-accent'),
       button: token('--lp-button-bg'),
+      orgHeading: token('--_org-heading'),
+      // Each heading as painted: display and heading sizes take the large
+      // grade, a title the text grade (`Heading.svelte`).
+      headings: [...s.querySelectorAll<HTMLElement>('.lp-heading')].map(
+        (h) => ({
+          size: h.dataset.size ?? '',
+          color: hex(getComputedStyle(h).color),
+        })
+      ),
     };
   });
   return {
@@ -116,6 +130,23 @@ const luminance = (hex: string) => {
   const [r = 0, g = 0, b = 0] = linear(hex);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
+/** OKLCH hue in degrees and chroma, from sRGB hex. */
+const hueOf = (hex: string) => {
+  const [r = 0, g = 0, b = 0] = linear(hex);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return {
+    h: ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360,
+    c: Math.hypot(A, B),
+  };
+};
+const hueApart = (x: string, y: string) => {
+  const d = Math.abs(hueOf(x).h - hueOf(y).h) % 360;
+  return Math.min(d, 360 - d);
+};
 const ratio = (x: string, y: string) => {
   const [hi, lo] = [luminance(x), luminance(y)].sort((a, b) => b - a);
   return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
@@ -133,7 +164,7 @@ const over = (ground: string, s: number, backdrop: 0 | 255) =>
     .join('')}`;
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`studio-alpha (a 'glow' shader) ${theme}: the hero and the closing ask are its moving background, and every word holds on the veil`, async ({
+  test(`studio-alpha (a 'glow' shader) ${theme}: the hero is its moving background, the closing ask keeps its Style's band, and every word holds on the veil in the org's heading colour`, async ({
     browser,
     baseURL,
   }) => {
@@ -148,18 +179,24 @@ for (const theme of ['light', 'dark'] as const) {
     await page.context().close();
     const detail = JSON.stringify(read);
     expect(read.shaderActive, detail).toBe(true);
-    // The opening and the closing ask, and nothing else by default.
+    // The opening, and nothing else by default: the closing ask is its
+    // Style's own band (D16).
     const schemeOf = (type: string) =>
       read.sections.filter((s) => s.type === type).map((s) => s.scheme);
     expect(schemeOf('hero'), detail).toEqual(['atmosphere']);
+    const askDefault = STYLES[read.style as PageStyleId].schemes.cta ?? 'base';
+    expect(schemeOf('cta').length, detail).toBeGreaterThan(0);
     expect(
-      schemeOf('cta').every((s) => s === 'atmosphere'),
+      schemeOf('cta').every((s) => s === askDefault),
       detail
     ).toBe(true);
     expect(read.atmosphereAttr, detail).not.toBeNull();
     // One shader canvas: the org layout's.
     expect(read.canvases, detail).toBe(1);
-    expect(read.atmosphere.length, detail).toBeGreaterThanOrEqual(2);
+    expect(
+      read.atmosphere.map((a) => a.type),
+      detail
+    ).toEqual(['hero']);
     for (const a of read.atmosphere) {
       expect(a.veil, `${a.type} ${detail}`).toBeGreaterThan(0.5);
       expect(a.veil, `${a.type} ${detail}`).toBeLessThan(1);
@@ -170,6 +207,21 @@ for (const theme of ['light', 'dark'] as const) {
         expect(ratio(a.soft, seen), at).toBeGreaterThanOrEqual(4.5);
         expect(ratio(a.accent, seen), at).toBeGreaterThanOrEqual(4.5);
         expect(ratio(a.button, seen), at).toBeGreaterThanOrEqual(3);
+      }
+      // The headings are the org's heading colour, not the kit's ink: its
+      // hue, moved along its own path only as far as each floor needs over
+      // both backdrops (D17).
+      expect(a.headings.length, `${a.type} ${detail}`).toBeGreaterThan(0);
+      for (const h of a.headings) {
+        const at = `${a.type} ${h.size} heading ${h.color} (org ${a.orgHeading}, ink ${a.ink})`;
+        expect(h.color, at).not.toBe(a.ink);
+        expect(hueApart(h.color, a.orgHeading), at).toBeLessThanOrEqual(4);
+        const floor = h.size === 'title' ? 4.5 : 3;
+        for (const backdrop of [0, 255] as const)
+          expect(
+            ratio(h.color, over(a.ground, a.veil, backdrop)),
+            `${at} over ${backdrop ? 'white' : 'black'}`
+          ).toBeGreaterThanOrEqual(floor);
       }
     }
   });

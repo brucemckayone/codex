@@ -1446,7 +1446,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   - **The rule.** `resolveScheme(type, design, style, { orgShader })`: a scheme the page set
     wins; otherwise, with the org's shader on, `hero` and `cta` are `atmosphere`
     (`SHADER_SECTIONS`); otherwise the Style's default. Cinematic already drew both as
-    atmosphere and is unchanged. With no shader, nothing moves.
+    atmosphere and is unchanged. With no shader, nothing moves. **Amended by X51:** the
+    closing ask is no longer defaulted (D16); only the hero is.
   - **Plain data.** `orgShader(org, pending)` sits in `$lib/page-builder/org-grounds.ts` beside
     `orgGrounds`. It reads the brand editor's pending overrides while the editor is open, and
     otherwise the saved `brandFineTune.tokenOverrides` (unreadable JSON counts as no shader).
@@ -1514,3 +1515,70 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - Atmosphere draws the kit's inks; the org's inks are drawn on base and soft only. So
       studio-alpha's red headings are ink on its hero and closing ask.
     - In a still frame, sand's hero reads greyer than its ground: silk shows through at 11%.
+- **X51 · 2026-10-10 · p3a · B2 narrowed: the opening only, and the org's heading colour on
+  the veil (D16, D17; amends X50).** The owner's decisions, verbatim: D16 "Opening only
+  (Recommended)", and D17 "Keep the org's colour (Recommended)". The owner saw the B2 stills
+  and gave two reasons:
+  - on night, sand and lilac the closing ask had lost its band in the org's colour;
+  - on the veil the org's heading colour gave way to the kit's ink.
+  - **D16, the rule.** With an org shader, only the hero defaults to `atmosphere`:
+    `SHADER_SECTIONS` is `hero` alone. The closing ask keeps its Style's own default
+    (brand, accent, or whatever the Style designs). A scheme the page set still wins, so a
+    creator can still put the closing ask on the moving background. Cinematic is unchanged:
+    its Style draws both.
+  - **D17, the rule.** On an atmosphere section, a heading draws the org's heading colour
+    (`--_org-heading`), moved along its own path only as far as its floor needs. The floor is
+    measured over the section's worst backdrop: the veil at the band's strength over pure
+    black or over pure white.
+    - The grades match the org's surfaces: a title at the text grade (4.5:1, `--_g-aot`), and
+      a display or section heading at the large grade (3:1, `--_g-aol`). Each is 2% past what
+      the worst veiled backdrop of the band needs, rounded toward the ink.
+    - Per drawn band (luminance; light caps it, dark floors it):
+      - l90: text .059, large .113;
+      - l85: .057 / .111;
+      - d24: .408 / .255;
+      - d30: .41 / .257.
+    - The grades sit in each drawn band's rule, with the first band's as the fallback. They
+      are routed to the ground's pole as `--_aot-*` / `--_aol-*`, generated like the other
+      moves. A colour that holds is drawn exactly. A failing one deepens or lightens along its
+      own hue, never to black.
+    - Scope: headings and titles only. The ink, accent, mark and button keep atmosphere's own
+      moves.
+    - Not Cinematic, whose room keeps the kit's inks.
+    - It is on the exact path only. Without it, the heading stays the kit's ink.
+    - A moving background is never decorated, so the decorated re-routing (`--_odt-*` /
+      `--_odl-*`) never reaches it.
+    - A Style's tinted ground (X33) is clamped into the first band, so it is never nearer the
+      ink than the band's own ground.
+  - **Measured on studio-alpha** ('glow', Quiet), 1440, still frame (reduced motion):
+    - Light hero heading: the org's #e11d48 (OKLCH L .586, C .222, h 17.6) is now drawn as
+      #ba163a (L .508, C .193, h 17.6). Over the .82 veil on its ground #fce0e0 it holds
+      3.43–5.40:1 over black and white. Raw, it was 2.51–3.95:1; under B2 it was the kit's
+      #000000.
+    - Dark hero heading: #ff4c64 holds as it is: 3.36–5.35:1 on the .86 veil over #2e1819.
+      Under B2 it was #ffffff.
+    - Both closing asks are back to their pre-B2 band (Quiet's `base`, the org's crimson
+      heading). They are pixel-identical to the pre-B2 captures in light and dark.
+    - The owner's B2 figures for the closing ask, from the band's left edge (OKLCH C): night
+      gold #caa750 C .113 went to olive #292d1b C .031; sand ink blue #1d375b C .072 went to
+      #d0c9b5 C .028; lilac purple #8e61f7 C .214 went to #c9c2dc C .037. D16 gives those
+      bands back. Re-shot on of-blood-and-bones' Studio page (Ancestral Threads), all six
+      closing asks (night, sand and lilac in both themes) are Studio's `brand` again, and
+      pixel-identical to their pre-B2 captures.
+  - **Tests.**
+    - `resolve.test.ts`: only the hero's default moves, in every Style; an explicit scheme
+      wins, `atmosphere` on a closing ask included; a whole page resolves with the closing
+      ask at Quiet's own. Red: 2 failed of 40.
+    - `schemes.test.ts` §19, red at 4 of 4:
+      - each drawn band's grades are 2% past its worst veiled backdrop (over that band's
+        `atmosphereBandCases` grounds), and no further;
+      - the 14 brands plus a 216-colour sweep, floored, hold 4.5:1 and 3:1 over the worst of
+        both veiled backdrops and the glow where no shader runs;
+      - a colour that already holds is unchanged, and the crimson deepens on its own hue;
+      - the shipped text: band rules, fallbacks, pole routing, and the rule's place inside the
+        exact path.
+    - The parity generator and §16's band-rule text carry the new fragments and grades.
+    - Spec `org-shader.spec.ts`, red at 2 of 4 (studio-alpha in both themes):
+      - the hero is atmosphere and every closing ask is its Style's default;
+      - each hero heading is not the kit's ink, is within 4° of the org's heading hue, and
+        holds its grade over both veiled backdrops.

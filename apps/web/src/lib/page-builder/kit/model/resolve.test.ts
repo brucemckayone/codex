@@ -392,10 +392,11 @@ describe('atmosphereProven — the moving background only on the bands its veil 
   });
 });
 
-// B2 (owner, D4: "On by default (Recommended)"): with an org shader, the
-// page's opening and its closing ask take the org's moving background.
-describe('an org shader — the hero and the closing ask default to atmosphere', () => {
-  it('changes only the Style default of those two, in every Style', () => {
+// B2 (owner, D4: "On by default (Recommended)"), narrowed by D16 ("Opening
+// only (Recommended)"): with an org shader the page's opening takes the org's
+// moving background, and the closing ask keeps its Style's own band.
+describe('an org shader — the hero defaults to atmosphere, the closing ask keeps its Style’s (D16)', () => {
+  it('changes only the hero’s Style default, in every Style', () => {
     for (const style of PAGE_STYLE_IDS)
       for (const type of SECTION_TYPE_IDS) {
         const plain = STYLES[style].schemes[type] ?? 'base';
@@ -405,13 +406,13 @@ describe('an org shader — the hero and the closing ask default to atmosphere',
         expect(
           resolveScheme(type, undefined, style, { orgShader: true }),
           `${style} ${type}`
-        ).toBe(type === 'hero' || type === 'cta' ? 'atmosphere' : plain);
+        ).toBe(type === 'hero' ? 'atmosphere' : plain);
       }
   });
 
-  it('never overrides a scheme the page set', () => {
+  it('never overrides a scheme the page set, so a closing ask can still take it', () => {
     for (const style of PAGE_STYLE_IDS)
-      for (const scheme of ['base', 'brand', 'contrast'] as const)
+      for (const scheme of ['base', 'brand', 'contrast', 'atmosphere'] as const)
         for (const type of ['hero', 'cta'] as const)
           expect(
             resolveScheme(type, { scheme }, style, { orgShader: true })
@@ -431,11 +432,12 @@ describe('an org shader — the hero and the closing ask default to atmosphere',
     const schemes = (p: KitPage, orgShader?: boolean) =>
       resolveSections(p, { orgShader }).map((s) => s.scheme);
     const faq = STYLES.quiet.schemes.faq;
-    expect(schemes(page('quiet'))).toEqual(['base', faq, 'base', 'brand']);
+    const cta = STYLES.quiet.schemes.cta ?? 'base';
+    expect(schemes(page('quiet'))).toEqual(['base', faq, cta, 'brand']);
     expect(schemes(page('quiet'), true)).toEqual([
       'atmosphere',
       faq,
-      'atmosphere',
+      cta,
       'brand',
     ]);
     expect(schemes(page('cinematic'), true)).toEqual(
