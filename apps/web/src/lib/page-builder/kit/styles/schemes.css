@@ -261,32 +261,34 @@
    (`schemes.test.ts`): text `--_g-ot`, large `--_g-ol`, and under a Style's
    decorations `--_g-odt` / `--_g-odl`, each 2% past what that surface needs.
    Keep white (owner, D8) stays on only where white can hold the band's
-   large grade (`--_band-kw`). The light theme draws the band its own ground
+   large grade (`--_band-kw`). A Moving background's veil is at least the
+   band's thinnest that holds (`--_band-veil`, 03 X50); PageRenderer draws
+   one only where that still shows the shader (l90, l85, d24, d30). The light theme draws the band its own ground
    is in, the dark theme its own; a theme with no background is the
    platform's, on its pole's first band (the bands the kit always had).
    Cinematic's room is on the first dark band in every theme (below). */
-.lp[data-ground-light='l90'] { --_gl-edge: 0.9; --_gl-ot: 0.114; --_gl-ol: 0.196; --_gl-odt: 0.086; --_gl-odl: 0.155; --_gl-kw: 1; }
-.lp[data-ground-light='l85'] { --_gl-edge: 0.85; --_gl-ot: 0.086; --_gl-ol: 0.155; --_gl-odt: 0.064; --_gl-odl: 0.121; --_gl-kw: 1; }
-.lp[data-ground-light='l80'] { --_gl-edge: 0.8; --_gl-ot: 0.062; --_gl-ol: 0.118; --_gl-odt: 0.044; --_gl-odl: 0.091; --_gl-kw: 1; }
-.lp[data-ground-light='l75'] { --_gl-edge: 0.75; --_gl-ot: 0.041; --_gl-ol: 0.086; --_gl-odt: 0.026; --_gl-odl: 0.065; --_gl-kw: 1; }
-.lp[data-ground-light='l70'] { --_gl-edge: 0.7; --_gl-ot: 0.022; --_gl-ol: 0.058; --_gl-odt: 0.011; --_gl-odl: 0.042; --_gl-kw: 1; }
-.lp[data-ground-light='l65'] { --_gl-edge: 0.65; --_gl-ot: 0.009; --_gl-ol: 0.039; --_gl-odt: 0.0009; --_gl-odl: 0.026; --_gl-kw: 1; }
-.lp[data-ground-light='d24'] { --_gl-edge: 0.24; --_gl-ot: 0.25; --_gl-ol: 0.15; --_gl-odt: 0.33; --_gl-odl: 0.203; --_gl-kw: 1; }
-.lp[data-ground-light='d30'] { --_gl-edge: 0.3; --_gl-ot: 0.316; --_gl-ol: 0.194; --_gl-odt: 0.417; --_gl-odl: 0.261; --_gl-kw: 0; }
-.lp[data-ground-light='d36'] { --_gl-edge: 0.36; --_gl-ot: 0.414; --_gl-ol: 0.26; --_gl-odt: 0.535; --_gl-odl: 0.34; --_gl-kw: 0; }
-.lp[data-ground-light='d42'] { --_gl-edge: 0.42; --_gl-ot: 0.552; --_gl-ol: 0.352; --_gl-odt: 0.69; --_gl-odl: 0.443; --_gl-kw: 0; }
-.lp[data-ground-light='d48'] { --_gl-edge: 0.48; --_gl-ot: 0.737; --_gl-ol: 0.475; --_gl-odt: 0.885; --_gl-odl: 0.574; --_gl-kw: 0; }
-.lp[data-ground-dark='l90'] { --_gd-edge: 0.9; --_gd-ot: 0.114; --_gd-ol: 0.196; --_gd-odt: 0.086; --_gd-odl: 0.155; --_gd-kw: 1; }
-.lp[data-ground-dark='l85'] { --_gd-edge: 0.85; --_gd-ot: 0.086; --_gd-ol: 0.155; --_gd-odt: 0.064; --_gd-odl: 0.121; --_gd-kw: 1; }
-.lp[data-ground-dark='l80'] { --_gd-edge: 0.8; --_gd-ot: 0.062; --_gd-ol: 0.118; --_gd-odt: 0.044; --_gd-odl: 0.091; --_gd-kw: 1; }
-.lp[data-ground-dark='l75'] { --_gd-edge: 0.75; --_gd-ot: 0.041; --_gd-ol: 0.086; --_gd-odt: 0.026; --_gd-odl: 0.065; --_gd-kw: 1; }
-.lp[data-ground-dark='l70'] { --_gd-edge: 0.7; --_gd-ot: 0.022; --_gd-ol: 0.058; --_gd-odt: 0.011; --_gd-odl: 0.042; --_gd-kw: 1; }
-.lp[data-ground-dark='l65'] { --_gd-edge: 0.65; --_gd-ot: 0.009; --_gd-ol: 0.039; --_gd-odt: 0.0009; --_gd-odl: 0.026; --_gd-kw: 1; }
-.lp[data-ground-dark='d24'] { --_gd-edge: 0.24; --_gd-ot: 0.25; --_gd-ol: 0.15; --_gd-odt: 0.33; --_gd-odl: 0.203; --_gd-kw: 1; }
-.lp[data-ground-dark='d30'] { --_gd-edge: 0.3; --_gd-ot: 0.316; --_gd-ol: 0.194; --_gd-odt: 0.417; --_gd-odl: 0.261; --_gd-kw: 0; }
-.lp[data-ground-dark='d36'] { --_gd-edge: 0.36; --_gd-ot: 0.414; --_gd-ol: 0.26; --_gd-odt: 0.535; --_gd-odl: 0.34; --_gd-kw: 0; }
-.lp[data-ground-dark='d42'] { --_gd-edge: 0.42; --_gd-ot: 0.552; --_gd-ol: 0.352; --_gd-odt: 0.69; --_gd-odl: 0.443; --_gd-kw: 0; }
-.lp[data-ground-dark='d48'] { --_gd-edge: 0.48; --_gd-ot: 0.737; --_gd-ol: 0.475; --_gd-odt: 0.885; --_gd-odl: 0.574; --_gd-kw: 0; }
+.lp[data-ground-light='l90'] { --_gl-edge: 0.9; --_gl-ot: 0.114; --_gl-ol: 0.196; --_gl-odt: 0.086; --_gl-odl: 0.155; --_gl-kw: 1; --_gl-veil: 0.82; }
+.lp[data-ground-light='l85'] { --_gl-edge: 0.85; --_gl-ot: 0.086; --_gl-ol: 0.155; --_gl-odt: 0.064; --_gl-odl: 0.121; --_gl-kw: 1; --_gl-veil: 0.89; }
+.lp[data-ground-light='l80'] { --_gl-edge: 0.8; --_gl-ot: 0.062; --_gl-ol: 0.118; --_gl-odt: 0.044; --_gl-odl: 0.091; --_gl-kw: 1; --_gl-veil: 0.98; }
+.lp[data-ground-light='l75'] { --_gl-edge: 0.75; --_gl-ot: 0.041; --_gl-ol: 0.086; --_gl-odt: 0.026; --_gl-odl: 0.065; --_gl-kw: 1; --_gl-veil: 1; }
+.lp[data-ground-light='l70'] { --_gl-edge: 0.7; --_gl-ot: 0.022; --_gl-ol: 0.058; --_gl-odt: 0.011; --_gl-odl: 0.042; --_gl-kw: 1; --_gl-veil: 1; }
+.lp[data-ground-light='l65'] { --_gl-edge: 0.65; --_gl-ot: 0.009; --_gl-ol: 0.039; --_gl-odt: 0.0009; --_gl-odl: 0.026; --_gl-kw: 1; --_gl-veil: 1; }
+.lp[data-ground-light='d24'] { --_gl-edge: 0.24; --_gl-ot: 0.25; --_gl-ol: 0.15; --_gl-odt: 0.33; --_gl-odl: 0.203; --_gl-kw: 1; --_gl-veil: 0.86; }
+.lp[data-ground-light='d30'] { --_gl-edge: 0.3; --_gl-ot: 0.316; --_gl-ol: 0.194; --_gl-odt: 0.417; --_gl-odl: 0.261; --_gl-kw: 0; --_gl-veil: 0.92; }
+.lp[data-ground-light='d36'] { --_gl-edge: 0.36; --_gl-ot: 0.414; --_gl-ol: 0.26; --_gl-odt: 0.535; --_gl-odl: 0.34; --_gl-kw: 0; --_gl-veil: 1; }
+.lp[data-ground-light='d42'] { --_gl-edge: 0.42; --_gl-ot: 0.552; --_gl-ol: 0.352; --_gl-odt: 0.69; --_gl-odl: 0.443; --_gl-kw: 0; --_gl-veil: 1; }
+.lp[data-ground-light='d48'] { --_gl-edge: 0.48; --_gl-ot: 0.737; --_gl-ol: 0.475; --_gl-odt: 0.885; --_gl-odl: 0.574; --_gl-kw: 0; --_gl-veil: 1; }
+.lp[data-ground-dark='l90'] { --_gd-edge: 0.9; --_gd-ot: 0.114; --_gd-ol: 0.196; --_gd-odt: 0.086; --_gd-odl: 0.155; --_gd-kw: 1; --_gd-veil: 0.82; }
+.lp[data-ground-dark='l85'] { --_gd-edge: 0.85; --_gd-ot: 0.086; --_gd-ol: 0.155; --_gd-odt: 0.064; --_gd-odl: 0.121; --_gd-kw: 1; --_gd-veil: 0.89; }
+.lp[data-ground-dark='l80'] { --_gd-edge: 0.8; --_gd-ot: 0.062; --_gd-ol: 0.118; --_gd-odt: 0.044; --_gd-odl: 0.091; --_gd-kw: 1; --_gd-veil: 0.98; }
+.lp[data-ground-dark='l75'] { --_gd-edge: 0.75; --_gd-ot: 0.041; --_gd-ol: 0.086; --_gd-odt: 0.026; --_gd-odl: 0.065; --_gd-kw: 1; --_gd-veil: 1; }
+.lp[data-ground-dark='l70'] { --_gd-edge: 0.7; --_gd-ot: 0.022; --_gd-ol: 0.058; --_gd-odt: 0.011; --_gd-odl: 0.042; --_gd-kw: 1; --_gd-veil: 1; }
+.lp[data-ground-dark='l65'] { --_gd-edge: 0.65; --_gd-ot: 0.009; --_gd-ol: 0.039; --_gd-odt: 0.0009; --_gd-odl: 0.026; --_gd-kw: 1; --_gd-veil: 1; }
+.lp[data-ground-dark='d24'] { --_gd-edge: 0.24; --_gd-ot: 0.25; --_gd-ol: 0.15; --_gd-odt: 0.33; --_gd-odl: 0.203; --_gd-kw: 1; --_gd-veil: 0.86; }
+.lp[data-ground-dark='d30'] { --_gd-edge: 0.3; --_gd-ot: 0.316; --_gd-ol: 0.194; --_gd-odt: 0.417; --_gd-odl: 0.261; --_gd-kw: 0; --_gd-veil: 0.92; }
+.lp[data-ground-dark='d36'] { --_gd-edge: 0.36; --_gd-ot: 0.414; --_gd-ol: 0.26; --_gd-odt: 0.535; --_gd-odl: 0.34; --_gd-kw: 0; --_gd-veil: 1; }
+.lp[data-ground-dark='d42'] { --_gd-edge: 0.42; --_gd-ot: 0.552; --_gd-ol: 0.352; --_gd-odt: 0.69; --_gd-odl: 0.443; --_gd-kw: 0; --_gd-veil: 1; }
+.lp[data-ground-dark='d48'] { --_gd-edge: 0.48; --_gd-ot: 0.737; --_gd-ol: 0.475; --_gd-odt: 0.885; --_gd-odl: 0.574; --_gd-kw: 0; --_gd-veil: 1; }
 
 :where(.lp) {
   --_band-edge: var(--_gl-edge, 0.9);
@@ -295,6 +297,7 @@
   --_g-odt: var(--_gl-odt, 0.086);
   --_g-odl: var(--_gl-odl, 0.155);
   --_band-kw: var(--_gl-kw, 1);
+  --_band-veil: var(--_gl-veil, 0);
 }
 
 :where(
@@ -308,6 +311,7 @@
   --_g-odt: var(--_gd-odt, 0.33);
   --_g-odl: var(--_gd-odl, 0.203);
   --_band-kw: var(--_gd-kw, 1);
+  --_band-veil: var(--_gd-veil, 0);
 }
 
 /* THE DARK POLE: wherever the ground is dark. The pole follows the org's
@@ -413,6 +417,7 @@
   --_g-odt: 0.33;
   --_g-odl: 0.203;
   --_band-kw: 1;
+  --_band-veil: 0;
 }
 
 /* ── A page background with no twin (owner, D7) ────────────────────────────
@@ -915,7 +920,7 @@
   --lp-mark-ink: var(--_atmos-mark);
   --lp-button-bg: var(--_atmos-button);
   --lp-button-line: var(--lp-ink-soft);
-  --_atmos-s: max(var(--_atmos-min), var(--lp-atmosphere-scrim, 0));
+  --_atmos-s: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));
   --_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));
 }
 

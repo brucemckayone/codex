@@ -1439,3 +1439,78 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     rules carries the side, and no fixed step remains; and every level stands its whole step
     from any ground in either theme. §10's model of `org-brand.css` takes the same rule
     (`ORG_BORDERS`, `awayFrom`).
+- **X50 · 2026-10-10 · p3a · B2: the org's moving background is on by default (D4,
+  Codex-61zsk.35).** The owner's decision, verbatim: "On by default (Recommended)". When an org
+  has a shader preset other than 'none', every Style's hero and closing ask (`cta`) open and
+  close on it.
+  - **The rule.** `resolveScheme(type, design, style, { orgShader })`: a scheme the page set
+    wins; otherwise, with the org's shader on, `hero` and `cta` are `atmosphere`
+    (`SHADER_SECTIONS`); otherwise the Style's default. Cinematic already drew both as
+    atmosphere and is unchanged. With no shader, nothing moves.
+  - **Plain data.** `orgShader(org, pending)` sits in `$lib/page-builder/org-grounds.ts` beside
+    `orgGrounds`. It reads the brand editor's pending overrides while the editor is open, and
+    otherwise the saved `brandFineTune.tokenOverrides` (unreadable JSON counts as no shader).
+    This is the org layout's own `hasShaderPreset` rule, the one that sets
+    `data-hero-shader-active`. PageRenderer takes it as the `orgShader` prop. The journey page,
+    the studio page-kit, Canvas and MiniPreview pass it. The kit reads no store.
+  - **Every band.** A band's veil is the thinnest that holds every floor over pure black and
+    pure white (§5.1) for that band's grounds. The cases are the band's worst surface, 216
+    cube grounds drawn in the band × 14 brands, and 4,096 brands on the worst surface.
+    - Measured light: l90 .82, l85 .89, l80 .98, l75, l70 and l65 1.
+    - Measured dark: d24 .86, d30 .92, d36, d42 and d48 1.
+    - Each band rule carries `--_g{l,d}-veil`, and the veil is
+      `max(--_atmos-min, --_band-veil, --lp-atmosphere-scrim)`. Cinematic's room sets
+      `--_band-veil: 0`, because its room is the first dark band in every theme.
+    - A veil of 1 shows no shader. Atmosphere is drawn only where a band lets through at least
+      half of what its pole's first band does: l90 18% and l85 11%; d24 14% and d30 8%
+      (`ATMOSPHERE_BANDS`). l80 lets through 2%, and every other band is opaque, so those draw
+      `base` (PageRenderer).
+  - **The tint (X33) for Bold, Path and Studio.** Over a dark shader, their plain veil reads
+    as a grey band. They take the tint, as Clean, Quiet and Soft do, but only under
+    `.org-layout[data-hero-shader-active]`.
+    - Why only there: a page that set a Moving background itself, with no shader, must not
+      change. Of Blood & Bones' Tending the Grief is a Path page with an atmosphere instructor
+      section.
+    - The org layout carries the flag in the studio too, so the canvas shows what the page
+      will.
+    - Why the first band's proof covers the second: the panel ground clamps itself into the
+      first band from any ground (light [0.9, 0.965]; dark capped at 0.24). The tint's proof
+      therefore covers l85 and d30 grounds at the first band's veil, the thinnest any band
+      draws.
+  - **One canvas.** The shader is the org layout's. The kit adds none: every page measured has
+    exactly 1 `canvas`.
+  - **Measured, before → after** (1440, reduced motion, so the shader is one still frame):
+    - studio-alpha ('glow', Quiet, no band): hero and closing ask go from base to atmosphere,
+      at 0.82 light and 0.86 dark.
+    - night ('nebula', d24 in both themes) on Of Blood & Bones' Studio page: base and brand
+      become atmosphere at 0.86.
+    - sand ('silk', l85): atmosphere at 0.89.
+    - lilac ('aurora', l90 light, d24 dark): 0.82 and 0.86.
+    - Pixel-identical, full length: Of Blood & Bones' 4 sales pages and studio-beta's, in both
+      themes (10 captures), and red and plain applied to Of Blood & Bones (Ancestral Threads
+      and Tending the Grief × 2 themes, 8 captures). One first capture caught the pricing
+      before its offers loaded. Re-shot twice in each state, all were identical.
+  - **Tests.**
+    - `resolve.test.ts`: the default with and without an org shader, for every Style; an
+      explicit scheme wins; `ATMOSPHERE_BANDS` (l85 and d30 in, l80 and d36 out). Red: 2
+      failed.
+    - `org-grounds.test.ts`: the saved preset, and the editor's pending one.
+    - schemes.test §18: the measured veils equal the CSS and the first bands equal §5.1's;
+      exactly l90, l85, d24 and d30 are drawn, in both themes; 0.01 thinner fails; the glow
+      holds; and the CSS text.
+    - `atmosphere-tint.test.ts`:
+      - the opt-in set, with Bold, Path and Studio gated on the shader (red against the
+        ungated form: 1 failed);
+      - the tint's floors on the l85 and d30 grounds;
+      - teeth: there the plain veil fails at the first band's strength.
+    - `PageRenderer.svelte.test.ts`: atmosphere drawn as base on l80.
+    - Spec `org-shader.spec.ts`: studio-alpha in light and dark has its hero and every closing
+      ask in atmosphere, one canvas, a veil inside (0.5, 1), and ink, soft ink and accent at
+      4.5:1 and the button at 3:1 over black and white. Of Blood & Bones has no atmosphere and
+      no flag. Red: studio-alpha's hero was base, 2 of 4 failed.
+  - **Not done.**
+    - SectionInspector still resolves a section's scheme without `orgShader`, so its picker
+      shows the Style's default for the hero and closing ask. It is outside this change.
+    - Atmosphere draws the kit's inks; the org's inks are drawn on base and soft only. So
+      studio-alpha's red headings are ink on its hero and closing ask.
+    - In a still frame, sand's hero reads greyer than its ground: silk shows through at 11%.

@@ -381,11 +381,65 @@ describe('resolveGroundBands — each theme’s ground', () => {
 });
 
 describe('atmosphereProven — the moving background only on the bands its veil is sized for', () => {
-  it('holds on the platform and the first bands, and nowhere wider', () => {
+  it('holds on the platform and the bands whose veil still shows the shader (03 X50)', () => {
     expect(atmosphereProven({})).toBe(true);
     expect(atmosphereProven({ light: 'l90', dark: 'd24' })).toBe(true);
     expect(atmosphereProven({ light: 'l90', dark: 'l90' })).toBe(true);
-    expect(atmosphereProven({ light: 'l85', dark: 'l85' })).toBe(false);
-    expect(atmosphereProven({ light: 'l90', dark: 'd30' })).toBe(false);
+    expect(atmosphereProven({ light: 'l85', dark: 'l85' })).toBe(true);
+    expect(atmosphereProven({ light: 'l90', dark: 'd30' })).toBe(true);
+    expect(atmosphereProven({ light: 'l80', dark: 'l80' })).toBe(false);
+    expect(atmosphereProven({ light: 'l90', dark: 'd36' })).toBe(false);
+  });
+});
+
+// B2 (owner, D4: "On by default (Recommended)"): with an org shader, the
+// page's opening and its closing ask take the org's moving background.
+describe('an org shader — the hero and the closing ask default to atmosphere', () => {
+  it('changes only the Style default of those two, in every Style', () => {
+    for (const style of PAGE_STYLE_IDS)
+      for (const type of SECTION_TYPE_IDS) {
+        const plain = STYLES[style].schemes[type] ?? 'base';
+        expect(resolveScheme(type, undefined, style), `${style} ${type}`).toBe(
+          plain
+        );
+        expect(
+          resolveScheme(type, undefined, style, { orgShader: true }),
+          `${style} ${type}`
+        ).toBe(type === 'hero' || type === 'cta' ? 'atmosphere' : plain);
+      }
+  });
+
+  it('never overrides a scheme the page set', () => {
+    for (const style of PAGE_STYLE_IDS)
+      for (const scheme of ['base', 'brand', 'contrast'] as const)
+        for (const type of ['hero', 'cta'] as const)
+          expect(
+            resolveScheme(type, { scheme }, style, { orgShader: true })
+          ).toBe(scheme);
+  });
+
+  it('resolves a whole page with it, and Cinematic as it always was', () => {
+    const page = (style: 'quiet' | 'cinematic'): KitPage => ({
+      design: { style },
+      sections: [
+        section({ id: 'h', type: 'hero' }),
+        section({ id: 'f', type: 'faq' }),
+        section({ id: 'k', type: 'cta' }),
+        section({ id: 'k2', type: 'cta', design: { scheme: 'brand' } }),
+      ],
+    });
+    const schemes = (p: KitPage, orgShader?: boolean) =>
+      resolveSections(p, { orgShader }).map((s) => s.scheme);
+    const faq = STYLES.quiet.schemes.faq;
+    expect(schemes(page('quiet'))).toEqual(['base', faq, 'base', 'brand']);
+    expect(schemes(page('quiet'), true)).toEqual([
+      'atmosphere',
+      faq,
+      'atmosphere',
+      'brand',
+    ]);
+    expect(schemes(page('cinematic'), true)).toEqual(
+      schemes(page('cinematic'))
+    );
   });
 });

@@ -32,3 +32,32 @@ export function orgGrounds(
       ?.backgroundColor,
   };
 }
+
+/**
+ * Whether the org has a moving background: a shader preset other than
+ * 'none' (03 X50). The brand editor's pending preset while it is open, else
+ * the org's saved one: the rule the org layout gates its `ShaderHero` on
+ * (`data-hero-shader-active`), so the page kit defaults its hero and closing
+ * ask to `atmosphere` exactly where a shader runs behind them. PURE, as
+ * `orgGrounds` above.
+ */
+export function orgShader(
+  org: Pick<OrganizationData, 'brandFineTune'> | null | undefined,
+  pending: Pick<BrandEditorState, 'tokenOverrides'> | null
+): boolean {
+  let overrides: Record<string, unknown> = {};
+  if (pending) overrides = pending.tokenOverrides ?? {};
+  else {
+    const raw = org?.brandFineTune?.tokenOverrides;
+    if (raw) {
+      try {
+        overrides = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // A malformed row carries no preset, as the org layout reads it.
+        overrides = {};
+      }
+    }
+  }
+  const preset = overrides['shader-preset'];
+  return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
+}

@@ -100,6 +100,12 @@
      * theme takes its own pole.
      */
     orgGrounds?: ThemeGrounds;
+    /**
+     * The org has a moving background, a shader preset other than 'none'
+     * (`orgShader` in `$lib/page-builder/org-grounds.ts`; 03 X50): the hero
+     * and the closing ask then default to `atmosphere`. Plain data, as above.
+     */
+    orgShader?: boolean;
   }
 
   const {
@@ -112,6 +118,7 @@
     still = false,
     sticky = true,
     orgGrounds = {},
+    orgShader = false,
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
@@ -123,7 +130,7 @@
     });
   });
   const sections = $derived.by(() => {
-    const resolved = resolveSections(page);
+    const resolved = resolveSections(page, { orgShader });
     return atmosphereProven(grounds)
       ? resolved
       : resolved.map((s) =>

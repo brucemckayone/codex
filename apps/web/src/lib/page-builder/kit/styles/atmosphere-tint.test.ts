@@ -82,6 +82,28 @@ const DARK_BAND_C = num(
   'dark ground chroma'
 );
 
+/** The bands a Moving background is drawn on, per pole (`ATMOSPHERE_BANDS`
+ * in `model/resolve.ts`, 03 X50): the first and the next, each band's edge
+ * read from its rule. The panel ground clamps itself into the first band
+ * whatever ground it starts from, so a tinted section on the second band is
+ * proven at the first band's veil, the thinnest any band draws. */
+const edgeOf = (band: string) =>
+  num(
+    SCHEMES,
+    new RegExp(
+      `\\.lp\\[data-ground-light='${band}'\\] \\{ --_gl-edge: ([\\d.]+);`
+    ),
+    `${band} edge`
+  );
+const FIRST_EDGE: Record<'light' | 'dark', number> = {
+  light: edgeOf('l90'),
+  dark: edgeOf('d24'),
+};
+const DRAWN_EDGES: Record<'light' | 'dark', number[]> = {
+  light: [FIRST_EDGE.light, edgeOf('l85')],
+  dark: [FIRST_EDGE.dark, edgeOf('d30')],
+};
+
 const VEIL = {
   light: num(EXACT, /--_atmos-min-light: ([\d.]+);/, 'light veil'),
   dark: num(EXACT, /--_atmos-min-dark: ([\d.]+);/, 'dark veil'),
@@ -250,17 +272,18 @@ function lighten(rgb: Rgb, yMin: number): Rgb {
   const k = Math.max(0, (yMin - y1) / Math.max(1 - y1, 1e-6));
   return triple((i) => unit(kneeInv(L1[i] + k * (1 - L1[i]))));
 }
-function ground(mode: Mode, input: Rgb): Rgb {
+/** The ground held in its band: [edge, 1] light, [0, edge] dark. */
+function ground(mode: Mode, input: Rgb, edge = FIRST_EDGE[mode]): Rgb {
   return mode === 'light'
     ? oklchFrom(
         input,
-        (l) => clampTo(0.9, l, 1),
-        (l, c) => c - (l < 0.9 ? 1 : 0) * Math.max(0, c - 0.046)
+        (l) => clampTo(edge, l, 1),
+        (l, c) => c - (l < edge ? 1 : 0) * Math.max(0, c - 0.046)
       )
     : oklchFrom(
         input,
-        (l) => Math.min(l, 0.24),
-        (l, c) => c - (l > 0.24 ? 1 : 0) * Math.max(0, c - 0.039)
+        (l) => Math.min(l, edge),
+        (l, c) => c - (l > edge ? 1 : 0) * Math.max(0, c - 0.039)
       );
 }
 /** `--_panel-g`, per pole (pinned to schemes.css below). */
@@ -378,11 +401,15 @@ const GROUNDS: Record<Mode, string[]> = {
   light: ['#fafafa', '#F6EFE6', '#D9CBB8', '#1a1a2e'],
   dark: ['#171717', '#200000', '#101018', '#F6EFE6'],
 };
-function cases(mode: Mode): [Rgb, Rgb][] {
+function cases(mode: Mode, edge = FIRST_EDGE[mode]): [Rgb, Rgb][] {
   const out: [Rgb, Rgb][] = [];
   for (const g of GROUNDS[mode])
-    for (const b of BRANDS) out.push([ground(mode, hex(g)), hex(b)]);
-  const platform = ground(mode, hex(mode === 'light' ? '#fafafa' : '#171717'));
+    for (const b of BRANDS) out.push([ground(mode, hex(g), edge), hex(b)]);
+  const platform = ground(
+    mode,
+    hex(mode === 'light' ? '#fafafa' : '#171717'),
+    edge
+  );
   for (let r = 0; r < 256; r += 17)
     for (let gr = 0; gr < 256; gr += 17)
       for (let b = 0; b < 256; b += 17)
@@ -391,19 +418,28 @@ function cases(mode: Mode): [Rgb, Rgb][] {
     for (let gr = 0; gr < 256; gr += 51)
       for (let b = 0; b < 256; b += 51)
         for (const brand of BRANDS)
-          out.push([ground(mode, [r / 255, gr / 255, b / 255]), hex(brand)]);
+          out.push([
+            ground(mode, [r / 255, gr / 255, b / 255], edge),
+            hex(brand),
+          ]);
   return out;
 }
 const MODES: Mode[] = ['light', 'dark'];
-const plainFailures = (mode: Mode, s: number) =>
-  cases(mode).flatMap(([g, brand]) =>
+const plainFailures = (mode: Mode, s: number, edge = FIRST_EDGE[mode]) =>
+  cases(mode, edge).flatMap(([g, brand]) =>
     veiled(
       tokens(mode, g, brand, panelGround(mode, g, brand, KIT_PANEL_TINT)),
       s
     )
   );
-const tintFailures = (mode: Mode, s: number, tint: number, cap = true) =>
-  cases(mode).flatMap(([g, brand]) => {
+const tintFailures = (
+  mode: Mode,
+  s: number,
+  tint: number,
+  cap = true,
+  edge = FIRST_EDGE[mode]
+) =>
+  cases(mode, edge).flatMap(([g, brand]) => {
     const panel = panelGround(mode, g, brand, tint);
     return veiled(tokens(mode, tinted(panel, cap), brand, panel), s);
   });
@@ -441,21 +477,69 @@ describe('the tinted atmosphere veil — what ships', () => {
     );
   });
 
-  it('is chosen by Clean, Soft and Quiet only', () => {
-    expect([...OPTED].sort()).toEqual(['clean', 'quiet', 'soft']);
+  it('is chosen by every Style with a plain veil: Bold, Clean, Path, Quiet, Soft and Studio (Codex-61zsk.35)', () => {
+    expect([...OPTED].sort()).toEqual([
+      'bold',
+      'clean',
+      'path',
+      'quiet',
+      'soft',
+      'studio',
+    ]);
     const declared = readdirSync(DIR)
       .filter((f) => f.endsWith('.css'))
       .filter((f) => read(f).includes('--lp-atmosphere-ground:'));
     expect(declared.sort()).toEqual([
+      'style-bold.css',
       'style-clean.css',
+      'style-path.css',
       'style-quiet.css',
       'style-soft.css',
+      'style-studio.css',
       'surfaces.css',
     ]);
   });
 });
 
+describe('the tinted atmosphere veil — only where it changes nothing it should not', () => {
+  // Bold, Path and Studio took the tint with B2 (03 X50). Their plain veil
+  // was already on any page that set a Moving background itself (of Blood &
+  // Bones' Tending the Grief, a Path page, sets one and has no shader), so
+  // they take it only where the org's shader runs: an org without one keeps
+  // every pixel. The org layout carries the flag in the studio too, so the
+  // canvas shows what the page will.
+  const LATE = ['bold', 'path', 'studio'];
+  const DECL = '--lp-atmosphere-ground: tint;';
+  const blockAt = (sheet: string, at: number) =>
+    sheet.slice(sheet.lastIndexOf('}', at) + 1, sheet.indexOf('}', at));
+
+  it('Bold, Path and Studio declare it only under a running shader', () => {
+    for (const id of LATE) {
+      const sheet = read(`style-${id}.css`);
+      expect(sheet.split(DECL).length - 1, id).toBe(1);
+      expect(blockAt(sheet, sheet.indexOf(DECL)).trim(), id).toBe(
+        `.org-layout[data-hero-shader-active] .lp[data-lp-style='${id}'] { ${DECL}`
+      );
+    }
+  });
+
+  it('Clean, Quiet and Soft keep it wherever they draw a Moving background', () => {
+    for (const id of OPTED.filter((s) => !LATE.includes(s))) {
+      const sheet = read(`style-${id}.css`);
+      expect(blockAt(sheet, sheet.indexOf(DECL)), id).not.toContain(
+        'hero-shader-active'
+      );
+    }
+  });
+});
+
 describe('the tinted atmosphere veil — the §5.1 floors', () => {
+  // The glow sweep runs every case on both drawn bands for six Styles: ~11s
+  // alone, past the 15s default beside the rest of the kit's suites. The work
+  // is fixed and deterministic, so the limit is sized to it (as schemes.test's
+  // sweeps are); a pathological slowdown still fails.
+  const SWEEP_TIMEOUT = 60_000;
+
   for (const mode of MODES) {
     it(`${mode}: the model is the kit's — the plain veil passes at the proven strength and loses the soft ink 0.01 below`, () => {
       expect(plainFailures(mode, VEIL[mode])).toEqual([]);
@@ -463,31 +547,48 @@ describe('the tinted atmosphere veil — the §5.1 floors', () => {
       expect(thinner.some((f) => f.startsWith('soft over'))).toBe(true);
     });
 
-    it(`${mode}: holds every floor over pure black and pure white, for each Style that opts in`, () => {
-      for (const id of OPTED)
-        expect(tintFailures(mode, VEIL[mode], panelTintOf(id)), id).toEqual([]);
-    });
+    it(
+      `${mode}: holds every floor over pure black and pure white, for each Style that opts in, on every band it is drawn on`,
+      { timeout: SWEEP_TIMEOUT },
+      () => {
+        expect(DRAWN_EDGES[mode]).toEqual(
+          mode === 'light' ? [0.9, 0.85] : [0.24, 0.3]
+        );
+        for (const edge of DRAWN_EDGES[mode])
+          for (const id of OPTED)
+            expect(
+              tintFailures(mode, VEIL[mode], panelTintOf(id), true, edge),
+              `${id} ${edge}`
+            ).toEqual([]);
+      }
+    );
 
-    it(`${mode}: holds under the glow where no shader runs`, () => {
-      const out = cases(mode).flatMap(([g, brand]) =>
-        OPTED.flatMap((id) => {
-          const panel = panelGround(mode, g, brand, panelTintOf(id));
-          const t = tokens(mode, tinted(panel), brand, panel);
-          const glow = oklchFrom(
-            brand,
-            () => GLOW[mode],
-            (_, c) => Math.min(c, GLOW.c)
-          );
-          const seen = triple(
-            (i) =>
-              GLOW.strength * clip(glow)[i] +
-              (1 - GLOW.strength) * clip(t.bg)[i]
-          );
-          return failures(t, [['the glow', seen]]);
-        })
-      );
-      expect(out).toEqual([]);
-    });
+    it(
+      `${mode}: holds under the glow where no shader runs, on every band it is drawn on`,
+      { timeout: SWEEP_TIMEOUT },
+      () => {
+        const out = DRAWN_EDGES[mode].flatMap((edge) =>
+          cases(mode, edge).flatMap(([g, brand]) =>
+            OPTED.flatMap((id) => {
+              const panel = panelGround(mode, g, brand, panelTintOf(id));
+              const t = tokens(mode, tinted(panel), brand, panel);
+              const glow = oklchFrom(
+                brand,
+                () => GLOW[mode],
+                (_, c) => Math.min(c, GLOW.c)
+              );
+              const seen = triple(
+                (i) =>
+                  GLOW.strength * clip(glow)[i] +
+                  (1 - GLOW.strength) * clip(t.bg)[i]
+              );
+              return failures(t, [['the glow', seen]]);
+            })
+          )
+        );
+        expect(out).toEqual([]);
+      }
+    );
   }
 
   it('has teeth: the dark panel ground without the cap fails at the proven veil', () => {
@@ -495,5 +596,13 @@ describe('the tinted atmosphere veil — the §5.1 floors', () => {
       tintFailures('dark', VEIL.dark, panelTintOf(id), false)
     );
     expect(uncapped.length).toBeGreaterThan(0);
+  });
+
+  it('has teeth: on the second band the plain veil fails at the first band’s strength, where the tint holds', () => {
+    for (const mode of MODES)
+      expect(
+        plainFailures(mode, VEIL[mode], DRAWN_EDGES[mode][1]).length,
+        mode
+      ).toBeGreaterThan(0);
   });
 });

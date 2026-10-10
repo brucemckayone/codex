@@ -21,7 +21,7 @@
   import { page } from '$app/state';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandTokenOverrides } from '$lib/page-builder';
-  import { orgGrounds } from '$lib/page-builder/org-grounds';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import {
     COLOUR_SCHEME_IDS,
     isColourSchemeId,
@@ -107,6 +107,10 @@
   // The org's own backgrounds, so the kit keeps its real ground (03 X48).
   const grounds = $derived(
     orgGrounds(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
+  // The org's moving background, so the hero and closing ask take it (03 X50).
+  const shader = $derived(
+    orgShader(page.data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
   const param = (key: string) => params.get(key) ?? '';
 
@@ -266,6 +270,7 @@
     {theme}
     {edit}
     orgGrounds={grounds}
+    orgShader={shader}
   />
 </div>
 

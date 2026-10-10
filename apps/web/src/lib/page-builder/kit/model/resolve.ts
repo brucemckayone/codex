@@ -4,7 +4,8 @@
  * anything the creator picked stays put.
  *
  *   layout  = section.variant (if valid for the type) → Style default → first layout
- *   scheme  = section.design.scheme → Style default → 'base'
+ *   scheme  = section.design.scheme → the org's shader (hero, cta) → Style
+ *             default → 'base'
  *   spacing = section.design.spacing → 'regular'
  *   style   = page.design.style → 'bold'
  */
@@ -47,12 +48,25 @@ export function resolveLayout(
   return isLayoutOf(type, styled) ? styled : SECTION_LAYOUTS[type][0];
 }
 
+/** What the org brings to a page's defaults, as plain data from its caller. */
+export interface ResolveOptions {
+  /** The org has a moving background: a shader preset other than 'none'. */
+  readonly orgShader?: boolean;
+}
+
+/** The sections an org's moving background takes by default (owner, D4: "On
+ * by default (Recommended)", 03 X50): the page's opening and its closing ask.
+ * Only the Style's default moves; a scheme the page set stays. */
+const SHADER_SECTIONS: ReadonlySet<SectionTypeId> = new Set(['hero', 'cta']);
+
 export function resolveScheme(
   type: SectionTypeId,
   design: SectionStyle | null | undefined,
-  style: PageStyleId
+  style: PageStyleId,
+  options: ResolveOptions = {}
 ): ColourSchemeId {
   if (isColourSchemeId(design?.scheme)) return design.scheme;
+  if (options.orgShader && SHADER_SECTIONS.has(type)) return 'atmosphere';
   return STYLES[style].schemes[type] ?? 'base';
 }
 
@@ -78,7 +92,10 @@ export function renderableSections(page: KitPage): KitSection[] {
  * the page's one `<h1>` — a duplicate hero is demoted rather than dropped, so
  * its author can still see and delete it.
  */
-export function resolveSections(page: KitPage): ResolvedSection[] {
+export function resolveSections(
+  page: KitPage,
+  options: ResolveOptions = {}
+): ResolvedSection[] {
   const style = resolveStyle(page.design);
   const seen = new Map<SectionTypeId, number>();
   let heroTaken = false;
@@ -92,7 +109,7 @@ export function resolveSections(page: KitPage): ResolvedSection[] {
 
     const layout = resolveLayout(section.type, section.variant, style);
     const scheme = keepBandsApart(
-      resolveScheme(section.type, section.design, style),
+      resolveScheme(section.type, section.design, style, options),
       previousScheme,
       isColourSchemeId(section.design?.scheme)
     );
@@ -181,13 +198,18 @@ export const GROUND_BANDS = [
 
 export type GroundBandId = (typeof GROUND_BANDS)[number]['id'];
 
-/** The bands the moving background (`atmosphere`, 03 §5.1) is proven on:
- * its veil and glow are sized for the worst backdrop of these two only.
- * Elsewhere such a section is drawn as `base`. */
+/** The bands the moving background (`atmosphere`, 03 §5.1, X50) is drawn
+ * on: each band's veil is the thinnest that holds every floor over pure black
+ * and pure white (`styles/schemes.test.ts`), and these are the bands where
+ * it still lets at least half as much shader through as the pole's first
+ * band (l85 0.89, d30 0.92; l80 needs 0.98, the rest are opaque). Elsewhere
+ * such a section is drawn as `base`. */
 const ATMOSPHERE_BANDS: ReadonlySet<GroundBandId | undefined> = new Set([
   undefined,
   'l90',
+  'l85',
   'd24',
+  'd30',
 ]);
 
 /** Whether a page whose grounds are in these bands can draw `atmosphere`. */

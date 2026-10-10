@@ -238,7 +238,8 @@ describe('PageRenderer', () => {
     document.body.innerHTML = '';
     expect(
       scheme(
-        await render({ page, brandOverrides: { backgroundColor: '#E9D8B4' } })
+        // L 0.82: the l80 band, whose veil would hide the shader (03 X50).
+        await render({ page, brandOverrides: { backgroundColor: '#D2C3A8' } })
       )
     ).toBe('base');
   });

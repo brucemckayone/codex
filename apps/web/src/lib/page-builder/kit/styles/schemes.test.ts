@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  atmosphereProven,
   GROUND_BANDS,
   type GroundBandId,
   groundBand,
@@ -299,7 +300,7 @@ const RECIPES = [
   '--_atm-mark-dark: rgb(from var(--lp-accent-source) var(--_atm-mark-lt-r) var(--_atm-mark-lt-g) var(--_atm-mark-lt-b));',
   '--_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));',
   '--_atm-btn-dark: rgb(from var(--lp-brand) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b));',
-  '--_atmos-s: max(var(--_atmos-min), var(--lp-atmosphere-scrim, 0));',
+  '--_atmos-s: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));',
   '--_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));',
 ];
 
@@ -1648,8 +1649,13 @@ function atmosphereCases(mode: Mode): [Rgb, Rgb, Tint][] {
   return cases;
 }
 
-function failuresAt(mode: Mode, s: number, moved = true): string[] {
-  return atmosphereCases(mode).flatMap(([g, brand, tint]) =>
+function failuresAt(
+  mode: Mode,
+  s: number,
+  moved = true,
+  cases: [Rgb, Rgb, Tint][] = atmosphereCases(mode)
+): string[] {
+  return cases.flatMap(([g, brand, tint]) =>
     veilFailures(s, atmosphereTokens(mode, g, brand, tint, moved))
   );
 }
@@ -1701,9 +1707,10 @@ const GLOW = {
 function glowFailures(
   mode: Mode,
   strength: number,
-  l = GLOW[mode].l
+  l = GLOW[mode].l,
+  cases: [Rgb, Rgb, Tint][] = atmosphereCases(mode)
 ): string[] {
-  return atmosphereCases(mode).flatMap(([g, brand, tint]) => {
+  return cases.flatMap(([g, brand, tint]) => {
     const t = atmosphereTokens(mode, g, brand, tint);
     const glow = oklchFrom(
       brand,
@@ -2456,18 +2463,21 @@ const edgesOf = (pole: Mode) => [
  * ring: a pole's bands nest, so a colour counts toward each band that holds
  * it. `worstSurface` above is the first bands' (§16 holds the two equal).
  */
-let bandWorstCache: Record<
-  string,
-  { plain: number; decorated: number }
-> | null = null;
-function bandWorsts(): Record<string, { plain: number; decorated: number }> {
+interface BandWorst {
+  plain: number;
+  decorated: number;
+  /** The plain worst surface itself. */
+  plainAt: Rgb;
+}
+let bandWorstCache: Record<string, BandWorst> | null = null;
+function bandWorsts(): Record<string, BandWorst> {
   if (bandWorstCache) return bandWorstCache;
   const edges = { light: edgesOf('light'), dark: edgesOf('dark') };
-  const out: Record<string, { plain: number; decorated: number }> = {};
+  const out: Record<string, BandWorst> = {};
   for (const pole of ['light', 'dark'] as const)
     for (const e of edges[pole]) {
       const far = pole === 'light' ? 2 : -1;
-      out[`${pole}/${e}`] = { plain: far, decorated: far };
+      out[`${pole}/${e}`] = { plain: far, decorated: far, plainAt: [0, 0, 0] };
     }
   const over = (paint: Rgb, alpha: number, under: Rgb): Rgb =>
     triple((i) => alpha * paint[i] + (1 - alpha) * under[i]);
@@ -2485,7 +2495,10 @@ function bandWorsts(): Record<string, { plain: number; decorated: number }> {
     for (const e of edges[pole]) {
       if (pole === 'light' ? L < e : L > e) continue;
       const w = out[`${pole}/${e}`];
-      if (towardInk(pole, y, w.plain)) w.plain = y;
+      if (towardInk(pole, y, w.plain)) {
+        w.plain = y;
+        w.plainAt = s;
+      }
       if (towardInk(pole, dy, w.decorated)) w.decorated = dy;
     }
   };
@@ -3916,7 +3929,7 @@ describe('the org’s real ground — its pole, its band, and a soft band that s
     ] as const) {
       for (const band of Object.values(BAND))
         expect(CODE, `${theme} ${band.id}`).toContain(
-          `.lp[data-ground-${theme}='${band.id}'] { --_${key}-edge: ${band.edge}; --_${key}-ot: ${band.ot}; --_${key}-ol: ${band.ol}; --_${key}-odt: ${band.odt}; --_${key}-odl: ${band.odl}; --_${key}-kw: ${band.kw}; }`
+          `.lp[data-ground-${theme}='${band.id}'] { --_${key}-edge: ${band.edge}; --_${key}-ot: ${band.ot}; --_${key}-ol: ${band.ol}; --_${key}-odt: ${band.odt}; --_${key}-odl: ${band.odl}; --_${key}-kw: ${band.kw}; --_${key}-veil: ${BAND_VEIL[band.id]}; }`
         );
       expect(
         CODE.match(
@@ -4189,6 +4202,132 @@ describe('the org’s borders step away from its ground, on either side (owner, 
     expect(L(draw(night, '--color-border-strong'))).toBeCloseTo(
       L(night) + 0.18,
       6
+    );
+  });
+});
+
+// ── 18. atmosphere on every band (owner, D4; 03 X50) ────────────────────────
+/*
+ * With an org shader the hero and the closing ask default to `atmosphere`
+ * (owner, D4: "On by default (Recommended)"), so a page on a wider band (X48)
+ * draws one too. The veil (§5) is proven over pure black and pure white for
+ * the first bands only, so each band gets the thinnest veil that holds every
+ * floor over both backdrops for every ground the band can draw, and the glow
+ * (where no shader runs) is measured on the same grounds. A band whose
+ * thinnest veil is opaque cannot show a shader: PageRenderer draws its
+ * atmosphere as base (`atmosphereProven`).
+ */
+function atmosphereBandCases(band: Band): [Rgb, Rgb, Tint][] {
+  const pole = band.pole;
+  const worst = bandWorsts()[`${pole}/${band.edge}`].plainAt;
+  const cases: [Rgb, Rgb, Tint][] = [];
+  for (const brandHex of Object.values(BRANDS)) {
+    for (const tint of Object.values(STYLE_TINTS))
+      cases.push([worst, hex(brandHex), tint]);
+    for (let r = 0; r < 256; r += 51)
+      for (let g = 0; g < 256; g += 51)
+        for (let b = 0; b < 256; b += 51)
+          cases.push([
+            ground(pole, [r / 255, g / 255, b / 255], band.edge),
+            hex(brandHex),
+            DEFAULT_TINT,
+          ]);
+  }
+  for (let r = 0; r < 256; r += 17)
+    for (let g = 0; g < 256; g += 17)
+      for (let b = 0; b < 256; b += 17)
+        cases.push([worst, [r / 255, g / 255, b / 255], DEFAULT_TINT]);
+  return cases;
+}
+
+/** The thinnest veil, in hundredths, that holds on `band`; 1 is opaque. */
+function thinnestVeil(band: Band): number {
+  const cases = atmosphereBandCases(band);
+  let lo = Math.round(VEIL[band.pole] * 100) - 1;
+  let hi = 100;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (failuresAt(band.pole, mid / 100, true, cases).length === 0) hi = mid;
+    else lo = mid;
+  }
+  return hi / 100;
+}
+
+/** Each band's thinnest veil (§18 measures it), and so the bands an
+ * atmosphere section is drawn on: where the shader still shows at least half
+ * as much as on the pole's first band (light 18%, dark 14%). */
+const BAND_VEIL: Record<GroundBandId, number> = {
+  l90: 0.82,
+  l85: 0.89,
+  l80: 0.98,
+  l75: 1,
+  l70: 1,
+  l65: 1,
+  d24: 0.86,
+  d30: 0.92,
+  d36: 1,
+  d42: 1,
+  d48: 1,
+};
+const shows = (band: Band) =>
+  1 - BAND_VEIL[band.id] >= (1 - BAND_VEIL[FIRST[band.pole].id]) / 2;
+
+describe('atmosphere on every band — the thinnest veil that holds, or none (03 X50)', () => {
+  it(
+    'measures each band’s thinnest veil, and the first bands’ is the poles’ own',
+    { timeout: 120_000 },
+    () => {
+      const veils = Object.fromEntries(
+        Object.values(BAND).map((band) => [band.id, thinnestVeil(band)])
+      );
+      expect(veils).toEqual(BAND_VEIL);
+      expect(BAND_VEIL.l90).toBe(VEIL.light);
+      expect(BAND_VEIL.d24).toBe(VEIL.dark);
+    }
+  );
+
+  it(
+    'draws it only where the shader shows: l90, l85, d24 and d30',
+    { timeout: 120_000 },
+    () => {
+      const drawn = Object.values(BAND)
+        .filter(shows)
+        .map((b) => b.id);
+      expect(drawn).toEqual(['l90', 'l85', 'd24', 'd30']);
+      // atmosphereProven agrees, in both themes.
+      for (const band of Object.values(BAND))
+        for (const other of ['l90', 'd24'] as const) {
+          expect(atmosphereProven({ light: band.id, dark: other })).toBe(
+            shows(band)
+          );
+          expect(atmosphereProven({ light: other, dark: band.id })).toBe(
+            shows(band)
+          );
+        }
+      // On each, 0.01 thinner fails, and the glow (no shader) holds.
+      for (const band of Object.values(BAND).filter(shows)) {
+        const cases = atmosphereBandCases(band);
+        expect(
+          failuresAt(band.pole, BAND_VEIL[band.id] - 0.01, true, cases).length,
+          band.id
+        ).toBeGreaterThan(0);
+        expect(
+          glowFailures(band.pole, GLOW.strength, GLOW[band.pole].l, cases),
+          band.id
+        ).toEqual([]);
+      }
+    }
+  );
+
+  it('names each band’s veil in schemes.css, and the section draws the stronger of it and the pole’s', () => {
+    expect(CODE).toContain(
+      '--_atmos-s: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));'
+    );
+    expect(CODE).toContain('--_band-veil: var(--_gl-veil, 0);');
+    expect(CODE).toContain('--_band-veil: var(--_gd-veil, 0);');
+    // Cinematic's room is the first dark band's, at the pole's own veil.
+    expect(CODE).toMatch(
+      /\.lp\[data-lp-style='cinematic'\] \{[^}]*--_band-veil: 0;/
     );
   });
 });

@@ -19,7 +19,7 @@
     type OfferBillingInterval,
     type OfferPath,
   } from '$lib/page-builder/offer-paths';
-  import { orgGrounds } from '$lib/page-builder/org-grounds';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { buildPublicContext, offerAsVisitor } from '$lib/page-builder/public-context';
   import { buildJourneyUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
@@ -240,6 +240,10 @@
   const grounds = $derived(
     orgGrounds(data.org, brandEditor.isOpen ? brandEditor.pending : null)
   );
+  // The org's moving background, so the hero and closing ask take it (03 X50).
+  const shader = $derived(
+    orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null)
+  );
 
   // Course JSON-LD for rich results.
   //
@@ -354,4 +358,5 @@
   {context}
   brandOverrides={data.coursePage.page.brandOverrides}
   orgGrounds={grounds}
+  orgShader={shader}
 />

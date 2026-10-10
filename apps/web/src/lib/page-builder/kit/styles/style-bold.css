@@ -394,3 +394,13 @@
   font-weight: var(--lp-weight-label);
   color: var(--lp-ink);
 }
+
+/* A Moving background in the tint of Bold's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='bold'] {
+  --lp-atmosphere-ground: tint;
+}
