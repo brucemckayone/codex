@@ -619,6 +619,9 @@ interface Org {
   focus: Rgb;
   /** `--color-interactive`: the org's button fill and accent text. */
   button: Rgb;
+  /** `data-org-bg`: the org set a background (`org-brand.css` derives its
+   * surfaces from it), rather than drawing the platform theme. */
+  background: boolean;
 }
 
 const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -680,6 +683,7 @@ function platformOrg(
     heading: heading ?? ink,
     focus: focus ?? t('focus'),
     button: button ?? t('button'),
+    background: false,
   };
 }
 
@@ -727,7 +731,22 @@ function orgFromBg(
     heading,
     focus,
     button,
+    background: true,
   };
+}
+
+/** The surface the kit's soft band is drawn from, before a Style's tint and
+ * the band (`--_org-soft`; owner, D14). On an org's background, that ground
+ * a step toward its ink with its chroma kept: the step `org-brand.css` takes
+ * for its secondary surface, by POLE (`--_soft-step`), not by theme. On the
+ * platform's neutral ground, the platform's own secondary surface. */
+function kitSoft(mode: Mode, org: Org): Rgb {
+  if (!org.background) return org.soft;
+  return oklchFrom(
+    org.ground,
+    (l) => clampTo(0, l + ORG_BG[mode].soft, 1),
+    (_, c) => c
+  );
 }
 
 /** A base / soft section on an org's page; `null` is the kit's own inks
@@ -880,7 +899,7 @@ function schemeTokens(
       bg =
         scheme === 'base'
           ? g
-          : ground(mode, mix(page.org.soft, brand, tint.soft));
+          : ground(mode, mix(kitSoft(mode, page.org), brand, tint.soft));
       panel = scheme === 'base' ? ground(mode, page.org.card) : g;
     } else {
       if (light && scheme === 'soft')
@@ -1234,7 +1253,7 @@ describe('the §5 floors — named brand matrix', () => {
           for (const from of [
             org.ground,
             org.card,
-            mix(org.soft, brand, STYLE_TINTS.soft.soft),
+            mix(kitSoft(mode, org), brand, STYLE_TINTS.soft.soft),
           ]) {
             const banded = ground(mode, from);
             const moved = banded.some((c, i) => Math.abs(c - from[i]) > 1e-6);
@@ -2439,18 +2458,25 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
   });
 
   it('models the platform theme for an org with no background (calibrated against the dev stack)', () => {
+    // The colours; `background` is checked on its own below.
     const asHex = (org: Org) =>
       Object.fromEntries(
-        Object.entries(org).map(([k, v]) => [
-          k,
-          `#${v
-            .map((c: number) =>
-              Math.round(c * 255)
-                .toString(16)
-                .padStart(2, '0')
-            )
-            .join('')}`,
-        ])
+        Object.entries(org).flatMap(([k, v]) =>
+          Array.isArray(v)
+            ? [
+                [
+                  k,
+                  `#${v
+                    .map((c: number) =>
+                      Math.round(c * 255)
+                        .toString(16)
+                        .padStart(2, '0')
+                    )
+                    .join('')}`,
+                ],
+              ]
+            : []
+        )
       );
     expect(asHex(platformOrg('light'))).toEqual({
       ground: '#fafafa',
@@ -2475,6 +2501,7 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       button: '#f47d67',
     });
     for (const theme of ['light', 'dark'] as const) {
+      expect(platformOrg(theme).background).toBe(false);
       // No platform heading colour: a heading is the text, as `--color-text-primary`.
       expect(THEMES[theme]).not.toContain('--color-heading:');
       expect(paletteHex(themeValue(theme, '--color-text-primary'))).toBe(
@@ -2542,21 +2569,30 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
       // The org's background: `org-brand.css`'s rule for the theme, from
       // the org's own inputs, so a page background with no twin for this
       // theme does not shadow them (owner, D7)…
+      // The soft surface on a background is the kit's own (owner, D14):
+      // the previewed ground, by the pole's step, with its chroma.
+      const recipes = Object.entries(orgBgRecipes(theme)).filter(
+        ([name]) => name !== '--color-surface-secondary'
+      );
+      const SOFT =
+        'oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h)';
       const fromOrg = decls(body(`${LAST[theme]}:is([data-org-bg] .lp) {`));
-      for (const [name, value] of Object.entries(orgBgRecipes(theme)))
+      for (const [name, value] of recipes)
         expect(fromOrg[ORG_NAMES[name]], `${theme} ${name}`).toBe(
           asPreview(value)
             .replace(/var\(--brand-bg-dark,/g, 'var(--_org-bg-dark-in,')
             .replace(/var\(--brand-bg,/g, 'var(--_org-bg-in,')
         );
+      expect(fromOrg['--_org-soft'], theme).toBe(SOFT);
       // …and the page's own, where it sets one for this theme.
       const own = decls(
         body(
           `${LAST[theme]}:is(.lp[data-org-bg]:is([data-page-bg='${theme}'], [data-page-bg='both'])) {`
         )
       );
-      for (const [name, value] of Object.entries(orgBgRecipes(theme)))
+      for (const [name, value] of recipes)
         expect(own[ORG_NAMES[name]], `${theme} ${name}`).toBe(asPreview(value));
+      expect(own['--_org-soft'], theme).toBe(SOFT);
     }
     expect(paletteHex('var(--color-neutral-0)')).toBe('#ffffff');
   });
@@ -2659,7 +2695,8 @@ describe('the org is the source — its tokens, drawn exactly unless a floor fai
             );
             const drawn: [string, Rgb, Rgb][] = [
               ['ground', base.bg, org.ground],
-              ['soft band', soft.bg, org.soft],
+              // The surface the kit draws its soft band from (owner, D14).
+              ['soft band', soft.bg, kitSoft(pole, org)],
               ['panel', base.panel, org.card],
               ['ink', base.ink, org.ink],
               ['soft ink', base.soft, org.inkSoft],
@@ -3292,5 +3329,142 @@ describe('the floating bar is a raised card in the org’s card colour (owner, D
       }
     // Every seeded org's card stands off its ground in both themes.
     expect(same, JSON.stringify(lift)).toEqual([]);
+  });
+});
+
+// ── 15. the soft band keeps the ground's warmth (owner, D14) ────────────────
+/*
+ * The soft band was the org's secondary surface, which `org-brand.css` makes
+ * for small controls at half the ground's chroma: on parchment, a full-width
+ * band of it read grey. The owner chose "Warm step of the parchment
+ * (Recommended)": on an org's background the band is that ground a step
+ * toward its ink, by the step `org-brand.css` takes for its secondary
+ * surface, with the ground's chroma kept. The step follows the POLE, not the
+ * theme: an org whose ground stays light in dark mode steps darker there
+ * too. On the platform's neutral ground there is no chroma to keep, and the
+ * band stays the platform's own secondary surface.
+ */
+describe('the soft band keeps the ground’s warmth (owner, D14)', () => {
+  const lch = (rgb: Rgb) => {
+    const [l, a, b] = toLab(rgb);
+    return { l, c: Math.hypot(a, b) };
+  };
+  const D14 =
+    ':is([data-org-bg] .lp, .lp[data-org-bg]) { --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h); }';
+  /** The D7 hand-back to an org with no background (§10's selectors). */
+  const PLATFORM_HAND_BACK =
+    ":is(.dark, [data-theme='dark']) .lp[data-page-bg='light']:not([data-lp-theme='light'], [data-editing-theme='light'] .lp, [data-org-bg] .lp), " +
+    ":root:not(.dark, [data-theme='dark']) .lp[data-page-bg='dark']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp, [data-org-bg] .lp) { --_org-soft: var(--color-surface-secondary); }";
+
+  it('spells it in schemes.css: the step by pole, the org’s ground with its chroma, and the platform’s own where a page hands back', () => {
+    expect(POLE.light).toContain(`--_soft-step: ${ORG_BG.light.soft};`);
+    expect(POLE.dark).toContain(`--_soft-step: ${ORG_BG.dark.soft};`);
+    expect(CODE.split(D14).length - 1).toBe(1);
+    expect(CODE.split(PLATFORM_HAND_BACK).length - 1).toBe(1);
+    // The org's secondary surface is still the root's, for the platform.
+    expect(POLE.light).toContain(
+      '--_org-soft: var(--color-surface-secondary);'
+    );
+  });
+
+  // Grounds on each pole: the matrix's, the seeded, the bar's, and the cube.
+  const groundsOn = (mode: Mode): Rgb[] => {
+    const out: Rgb[] = [
+      ...Object.entries(GROUNDS[mode])
+        .filter(([name]) => name !== 'platform')
+        .map(([, value]) => hex(value)),
+      ...['#F3F0E7', '#FFFFFF', '#E9F1EA', '#F7D9B9', '#10202a'].map(hex),
+    ];
+    for (let r = 0; r < 256; r += 51)
+      for (let g = 0; g < 256; g += 51)
+        for (let b = 0; b < 256; b += 51) out.push([r / 255, g / 255, b / 255]);
+    return out;
+  };
+
+  it(
+    'is the org’s ground a step toward its ink with the ground’s chroma, in both poles, for any org ground, and inside the band',
+    { timeout: 60_000 },
+    () => {
+      const brand = hex('#A62B0C');
+      let cases = 0;
+      let unmoved = 0;
+      const outside: string[] = [];
+      for (const mode of ['light', 'dark'] as const) {
+        const worst = lum(worstSurface(mode, false));
+        for (const bg of groundsOn(mode))
+          for (const theme of ['light', 'dark'] as const) {
+            const org = orgFromBg(theme, bg, brand, brand);
+            const soft = kitSoft(mode, org);
+            const from = lch(org.ground);
+            const to = lch(soft);
+            const step = clampTo(0, from.l + ORG_BG[mode].soft, 1);
+            expect(to.l, `${mode} ${bg}`).toBeCloseTo(step, 6);
+            expect(to.c, `${mode} ${bg}: the ground's chroma`).toBeCloseTo(
+              from.c,
+              6
+            );
+            // Drawn, at every tint a Style ships, it is a surface of the
+            // band, so every ink and button proven on the band holds on it.
+            for (const tint of Object.values(STYLE_TINTS)) {
+              const band = schemeTokens(
+                mode,
+                'soft',
+                ground(mode, org.ground),
+                brand,
+                tint,
+                brand,
+                { org, decorated: false }
+              ).bg;
+              if (towardInk(mode, lum(band), worst))
+                outside.push(`${mode} ${bg} ${JSON.stringify(tint)}`);
+              cases++;
+            }
+            // Where the step is already in the band, the kit's own band
+            // draws it exactly: the ground's chroma, within 0.002.
+            const inBand = mode === 'light' ? step >= 0.9 : step <= 0.24;
+            if (inBand) {
+              const drawn = lch(
+                schemeTokens(
+                  mode,
+                  'soft',
+                  ground(mode, org.ground),
+                  brand,
+                  DEFAULT_TINT,
+                  brand,
+                  { org, decorated: false }
+                ).bg
+              );
+              expect(Math.abs(drawn.c - from.c), `${mode} ${bg}`).toBeLessThan(
+                0.002
+              );
+              unmoved++;
+            }
+          }
+      }
+      expect(outside).toEqual([]);
+      expect(cases).toBeGreaterThan(1500);
+      expect(unmoved).toBeGreaterThan(20);
+    }
+  );
+
+  it('keeps the platform’s own secondary surface on its neutral ground, in both themes', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const org = platformOrg(theme);
+      expect(kitSoft(theme, org)).toEqual(org.soft);
+    }
+  });
+
+  it('draws the same soft band for an org that keeps its light ground, in either theme (its pole’s step)', () => {
+    const bg = hex(SEEDED['of-blood-and-bones'].bg);
+    const brand = hex(SEEDED['of-blood-and-bones'].brand);
+    const [light, dark] = (['light', 'dark'] as const).map((theme) =>
+      kitSoft('light', orgFromBg(theme, bg, brand, brand))
+    );
+    expect(dark).toEqual(light);
+    // The org's own secondary surface is not: a step LIGHTER in dark mode.
+    expect(lch(orgFromBg('dark', bg, brand, brand).soft).l).toBeGreaterThan(
+      lch(bg).l
+    );
+    expect(lch(light).l).toBeLessThan(lch(bg).l);
   });
 });

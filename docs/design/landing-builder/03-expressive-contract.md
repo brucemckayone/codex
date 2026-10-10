@@ -1052,6 +1052,12 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     surfaces share the ground's band, so there is one worst surface for every ink on it.
   - **Polarity follows the org's ground.** An org background with no dark twin keeps the light
     pole in dark mode, as the org's own pages do (`data-org-bg`).
+  - **The one departure: the soft band (X47, D14).** On an org's background the soft band is
+    not `--color-surface-secondary`. It is the org's ground a step toward its ink, with the
+    ground's chroma kept. This is the one place the kit departs from the org's derived token.
+    The reason: the org makes its secondary surface for small controls (its search box), at
+    half the ground's chroma, and as a full-width band on a warm ground it reads grey. On the
+    platform's neutral ground the token stands.
   - **Tests:** `e2e/page-kit/brand-fidelity.spec.ts` "a base section is drawn in the org's own
     tokens" (4 pages × 2 themes), "a … preview on a … viewer draws the org's … tokens", "a dark
     preview on a light viewer resolves a page carrier's DARK brand tokens";
@@ -1261,3 +1267,46 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     brands on of-blood-and-bones in the brand editor (#8B5CF6, then #FF0000 on #FDF3ED). Those
     6 rows were re-measured once the seed was restored. The other 14 were identical between
     the two runs.
+- **X47 · 2026-10-10 · p3a · The soft band keeps the ground's warmth (D14; amends X35).** The
+  owner's decision, verbatim: "Warm step of the parchment (Recommended)". Shown the band as
+  built (the org's secondary surface), the parchment a step darker keeping its warmth, the
+  peach tint from before phase 3a, and no band (`scratchpad/3a/t3-options/`). D13, label
+  tracking, was "Narrow, 0.05em (Recommended)", as built (X43).
+  - **The rule.** On an org's background (`[data-org-bg]` above the page, or on it), the soft
+    surface is `oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h)`: the ground,
+    a step toward its ink, with its chroma and hue. The step is the one `org-brand.css` takes
+    for its secondary surface, chosen by the POLE, not the theme: −0.03 on the light pole,
+    +0.04 on the dark. So an org whose ground stays light in dark mode steps darker in both
+    themes. Before, in dark mode it drew the dark theme's secondary surface, a step LIGHTER
+    than its parchment.
+  - **The platform.** On the platform's neutral ground there is no chroma to keep, so the soft
+    band stays `--color-surface-secondary` (#f5f5f5 on #fafafa; #404040 held in the dark
+    band). That includes a page whose own background is handed back (X39) to an org with
+    none. The scoped previews' platform copies are unchanged; their four background copies
+    take the rule.
+  - **Everything that reads the soft surface follows.** That means soft sections, and any
+    element a block gives the `soft` scheme. On the live pages those are Studio's tabs card,
+    the featured offer, a bento tile and a before/after column. By code they can also be the
+    lead testimonial, a CTA panel and a marked picture. A Style's tint mixes into the new
+    surface, and Cinematic's room keeps its own band.
+  - **The floors.** `--_org-soft-bg` still holds the surface inside the ground's band in each
+    pole, so every ink and button proven there holds. Where the step lands outside the band,
+    the band's edge takes it and its chroma cap applies, as before.
+  - **Measured on of-blood-and-bones** (#f3f0e7, oklch 0.955 0.0124 91.3), on its 16 soft
+    surfaces across 3 live pages:
+    - light: #e7e6e2 (oklch 0.925 0.0062) → #e9e6dd (oklch 0.925 0.0124);
+    - dark: #fffdf9 (oklch 0.995 0.0062) → #e9e6dd, the same as light;
+    - drawn as Clean (5% tint): #e6ddd7 → #e7ddd3; as Soft (16%): #f0d8cf → #f1d8cb.
+  - **The studios** are unchanged. studio-alpha's Tending the Grief captures are pixel-identical
+    before and after, as is, and with its benefits section drawn soft. studio-beta's Cinematic
+    band is #151f33 before and after.
+  - **Tests:** spec "of-blood-and-bones/ancestral-threads {light, dark}: the soft band is the
+    org's ground a step darker, its warmth kept". It computes the expected colour from the
+    measured ground, and holds every soft surface to it within 1/255 and to the ground's
+    chroma within 0.002. Spec "studio-alpha/tending-the-grief light: on the platform's neutral
+    ground the soft band is the platform's own, unchanged". schemes.test "the soft band keeps
+    the ground's warmth (owner, D14)" covers the CSS text and both poles. For every org ground
+    in the matrix, the seeded grounds, the bar's grounds and a 216-colour sweep of the cube, it
+    checks that the ground's chroma is kept and that, at every Style's tint, the drawn band is
+    no nearer its ink than the band's worst surface. It also covers the platform's own surface
+    and the same band in either theme.

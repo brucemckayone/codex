@@ -110,9 +110,13 @@
      derived. They are the VIEWER's theme's, so a scoped preview of the other
      theme re-states them (the preview blocks below). An org with no heading
      colour of its own heads in its text colour. `--_org-button` is what the
-     org fills its buttons with (`ui/Button` primary). */
+     org fills its buttons with (`ui/Button` primary). `--_org-soft`, the
+     soft band's surface, is the org's secondary surface on the platform's
+     ground only: on an org's background it is that ground a step toward its
+     ink (owner, D14, below), by this pole's step. */
   --_org-ground: var(--color-background);
   --_org-soft: var(--color-surface-secondary);
+  --_soft-step: -0.03;
   --_org-card: var(--color-surface-card);
   --_org-ink: var(--color-text);
   --_org-ink-soft: var(--color-text-secondary);
@@ -280,7 +284,9 @@
       calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
   );
   /* The org's surfaces in the dark band, which is the ground's (L <= 0.24):
-     one band, so one worst surface for every ink on it. */
+     one band, so one worst surface for every ink on it. On an org's
+     background the soft band steps lighter here (owner, D14). */
+  --_soft-step: 0.04;
   --_org-soft-bg: oklch(
     from color-mix(in oklab, var(--_org-soft), var(--lp-brand) var(--lp-tint-soft))
       min(l, 0.24) calc(c - clamp(0, (l - 0.24) * 1e6, 1) * max(0, c - 0.039)) h
@@ -389,6 +395,30 @@
   --_org-bg-dark-in: var(--brand-bg-dark);
 }
 
+/* ── The soft band keeps the ground's warmth (owner, D14) ─────────────────
+   The one place the kit departs from the org's derived token (03 X35, X47).
+   `org-brand.css` makes `--color-surface-secondary` for small controls (its
+   search box) at half the ground's chroma, and as a full-width band on a
+   warm ground it reads grey. On an org's background, the soft band is that
+   ground a step toward its ink with its chroma kept, by the step the org
+   takes for its secondary surface, chosen by the POLE (`--_soft-step`): an
+   org whose ground stays light in dark mode steps darker in both themes.
+   The band (`--_org-soft-bg`) still holds it inside the ground's band. On
+   the platform's neutral ground there is no chroma to keep, so the root's
+   `--color-surface-secondary` stands, including where a page's background
+   is handed back (D7) to an org with none. A scoped preview re-states it
+   below. */
+:is([data-org-bg] .lp, .lp[data-org-bg]) {
+  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
+}
+
+:is(.dark, [data-theme='dark'])
+  .lp[data-page-bg='light']:not([data-lp-theme='light'], [data-editing-theme='light'] .lp, [data-org-bg] .lp),
+:root:not(.dark, [data-theme='dark'])
+  .lp[data-page-bg='dark']:not([data-lp-theme='dark'], [data-editing-theme='dark'] .lp, [data-org-bg] .lp) {
+  --_org-soft: var(--color-surface-secondary);
+}
+
 /* ── Scoped previews: the org's tokens for the theme previewed ────────────
    The org's `--color-*` are derived for the VIEWER's theme, so a preview of
    the other one — the kit's `data-lp-theme`, or the brand editor's
@@ -397,8 +427,8 @@
    which falls back to LIGHT). These re-state them as the previewed theme
    derives them: the platform theme (`themes/light.css`, `themes/dark.css`)
    for an org with no background, `org-brand.css`'s rules for a branded org
-   and for one that sets a background. `schemes.test.ts` holds each line to
-   the text it mirrors. */
+   and for one that sets a background, whose soft surface is D14's (above).
+   `schemes.test.ts` holds each line to the text it mirrors. */
 :is(
   :root:not(.dark, [data-theme='dark']) .lp[data-lp-theme='dark'],
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
@@ -428,7 +458,7 @@
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
 ):is([data-org-bg] .lp) {
   --_org-ground: var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900)));
-  --_org-soft: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
+  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
   --_org-card: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-dark-in, var(--_org-bg-in, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
@@ -441,7 +471,7 @@
   :root:not(.dark, [data-theme='dark']) [data-editing-theme='dark'] .lp:not([data-lp-theme='light'])
 ):is(.lp[data-org-bg]:is([data-page-bg='dark'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900)));
-  --_org-soft: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.04) calc(c * 0.5) h);
+  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
   --_org-card: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) calc(l + 0.07) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg-dark, var(--brand-bg, var(--color-neutral-900))) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 70%, var(--_org-ground));
@@ -480,7 +510,7 @@
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
 ):is([data-org-bg] .lp) {
   --_org-ground: var(--_org-bg-in, var(--color-neutral-0));
-  --_org-soft: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
+  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
   --_org-card: oklch(from var(--_org-bg-in, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--_org-bg-in, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));
@@ -494,7 +524,7 @@
   [data-editing-theme='dark'] .lp[data-lp-theme='light']
 ):is(.lp[data-org-bg]:is([data-page-bg='light'], [data-page-bg='both'])) {
   --_org-ground: var(--brand-bg, var(--color-neutral-0));
-  --_org-soft: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l - 0.03) calc(c * 0.5) h);
+  --_org-soft: oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h);
   --_org-card: oklch(from var(--brand-bg, var(--color-neutral-0)) calc(l + 0.05) calc(c * 0.2) h);
   --_org-ink: oklch(from var(--brand-bg, var(--color-neutral-0)) clamp(0.05, (0.6 - l) * 1000, 0.9) 0 0);
   --_org-ink-soft: color-mix(in oklab, var(--_org-ink) 62%, var(--_org-ground));

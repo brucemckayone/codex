@@ -1114,3 +1114,177 @@ for (const theme of ['light', 'dark'] as const) {
     for (const shadow of read.cards) expect(shadow).toBe(read.org);
   });
 }
+
+// ── the soft band keeps the ground's warmth (owner, D14) ──────────────────────
+// The kit's alternate band (`soft`: its sections, and the panels a base
+// section fills with it, such as Studio's tabs card and the featured offer)
+// was the org's secondary surface. `org-brand.css` makes that for small
+// controls (its search box), at half the ground's chroma, and as a
+// full-width band on parchment it read grey: #e7e6e2 against #f3f0e7. In dark
+// mode, where this org keeps its light ground, it was the dark theme's
+// secondary surface, a step LIGHTER than the parchment (#fffdf9). The owner
+// chose "Warm step of the parchment (Recommended)": the org's ground a step
+// darker, its chroma kept. The expectation is computed in the browser from
+// the ground it measures.
+
+/**
+ * Runs in the page: the ground (a base section's), every soft surface, the
+ * org's secondary surface, and the ground stepped by `step` in OKLCH
+ * lightness. Each colour is read twice: as sRGB (a canvas readback) and as
+ * the browser's own OKLCH, forced through `oklch(from X l c h)` so only that
+ * one serialisation comes back, and calibrated before it is trusted.
+ */
+function readSoft(step: number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d context');
+  const hexOf = (css: string): string => {
+    ctx.globalCompositeOperation = 'copy';
+    ctx.fillStyle = '#000000';
+    ctx.fillStyle = css;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+    const h = (n: number) => n.toString(16).padStart(2, '0');
+    return `#${h(r)}${h(g)}${h(b)}`;
+  };
+  // A fresh probe per colour, styled before it is inserted: the page
+  // transitions colours, and a probe whose colour changes reads the
+  // transition's start.
+  const resolve = (css: string): string => {
+    const probe = document.createElement('span');
+    probe.style.cssText = `position:absolute;inline-size:0;block-size:0;color:${css}`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  };
+  const lchOf = (css: string): [number, number, number] => {
+    const value = resolve(`oklch(from ${css} l c h)`);
+    const m = value.match(
+      /^oklch\(([\d.e+-]+) ([\d.e+-]+) ([\d.e+-]+|none)\)$/
+    );
+    if (!m) throw new Error(`not an oklch() serialisation: ${value} (${css})`);
+    return [Number(m[1]), Number(m[2]), m[3] === 'none' ? 0 : Number(m[3])];
+  };
+  const read = (css: string) => ({ hex: hexOf(css), lch: lchOf(css) });
+
+  const main = document.querySelector('main#main-content, .org-main');
+  if (!main) throw new Error('no org main');
+  const base = document.querySelector<HTMLElement>(
+    ".lp-page > .lp-section[data-lp-scheme='base']:not([data-lp-on-media])"
+  );
+  if (!base) throw new Error('no base section');
+  const ground = getComputedStyle(base).backgroundColor;
+  const secondary = document.createElement('span');
+  secondary.style.cssText =
+    'position:absolute;color:var(--color-surface-secondary)';
+  main.appendChild(secondary);
+  const orgSecondary = getComputedStyle(secondary).color;
+  secondary.remove();
+  return {
+    calibration: {
+      white: lchOf('#ffffff'),
+      known: lchOf('oklch(0.5 0.1 30)'),
+    },
+    ground: read(ground),
+    orgSecondary: read(orgSecondary),
+    expected: read(`oklch(from ${ground} calc(l + ${step}) c h)`),
+    surfaces: [
+      ...document.querySelectorAll<HTMLElement>(
+        ".lp-page [data-lp-scheme='soft']:not([data-lp-on-media])"
+      ),
+    ].map((el) => ({
+      at: `${el.closest<HTMLElement>('[data-lp-type]')?.dataset.lpType}: ${el.className.split(' ')[0]}`,
+      ...read(getComputedStyle(el).backgroundColor),
+    })),
+  };
+}
+
+/** The largest channel difference of two `#rrggbb`, in 1/255 steps. */
+const apart = (x: string, y: string) =>
+  Math.max(
+    ...[1, 3, 5].map((i) =>
+      Math.abs(
+        Number.parseInt(x.slice(i, i + 2), 16) -
+          Number.parseInt(y.slice(i, i + 2), 16)
+      )
+    )
+  );
+
+/** The readback is trusted only once it reads two known colours exactly. */
+function expectCalibrated(read: ReturnType<typeof readSoft>) {
+  const [l, c] = read.calibration.white;
+  expect(Math.abs(l - 1), 'white reads L 1').toBeLessThan(0.001);
+  expect(c, 'white reads no chroma').toBeLessThan(0.001);
+  expect(read.calibration.known).toEqual([0.5, 0.1, 30]);
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`of-blood-and-bones/ancestral-threads ${theme}: the soft band is the org's ground a step darker, its warmth kept`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const item = CASES[1];
+    if (!item) throw new Error('no case');
+    const page = await openAs(browser, baseURL as string, item, theme);
+    const read = await page.evaluate(readSoft, -0.03);
+    await page.context().close();
+    const detail = JSON.stringify(read);
+    expectCalibrated(read);
+    // This org keeps its light ground in dark mode, so both themes are on
+    // the light pole, where the step is darker.
+    expect(read.ground.lch[0], detail).toBeGreaterThan(0.9);
+    expect(read.ground.lch[1], 'a warm ground').toBeGreaterThan(0.01);
+    // Its bands, its tabs card and its featured offer.
+    expect(read.surfaces.length, detail).toBeGreaterThanOrEqual(5);
+    for (const surface of read.surfaces) {
+      expect(
+        apart(surface.hex, read.expected.hex),
+        `${surface.at} ${detail}`
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(surface.lch[1] - read.ground.lch[1]),
+        `${surface.at}: the ground's chroma ${detail}`
+      ).toBeLessThanOrEqual(0.002);
+    }
+  });
+}
+
+// On the platform's neutral ground, nothing changes: the soft band is still
+// the platform's own secondary surface (#f5f5f5 on #fafafa), with no chroma
+// to keep. Tending the Grief has no soft section, so its benefits section is
+// drawn as one (the attribute alone: the mapping is CSS).
+test('studio-alpha/tending-the-grief light: on the platform’s neutral ground the soft band is the platform’s own, unchanged', async ({
+  browser,
+  baseURL,
+}) => {
+  const item = CASES[2];
+  if (!item) throw new Error('no case');
+  const page = await openAs(browser, baseURL as string, item, 'light');
+  await page.evaluate(() => {
+    const section = document.querySelector(
+      ".lp-page > .lp-section[data-lp-type='benefits']"
+    );
+    if (!section) throw new Error('no benefits section');
+    section.setAttribute('data-lp-scheme', 'soft');
+  });
+  await apply(page, {});
+  const read = await page.evaluate(readSoft, -0.03);
+  await page.context().close();
+  const detail = JSON.stringify(read);
+  expectCalibrated(read);
+  expect(read.ground.lch[1], 'a neutral ground').toBeLessThan(0.002);
+  expect(read.surfaces.length, detail).toBe(1);
+  for (const surface of read.surfaces) {
+    expect(
+      apart(surface.hex, read.orgSecondary.hex),
+      detail
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(surface.lch[1] - read.ground.lch[1]),
+      detail
+    ).toBeLessThanOrEqual(0.002);
+  }
+});
