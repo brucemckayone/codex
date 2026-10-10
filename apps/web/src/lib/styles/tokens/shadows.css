@@ -1,34 +1,49 @@
 /* shadows.css */
+/* The platform's shadow inputs, per theme. `--shadow-color` and
+   `--shadow-strength` are what the scale below reads. An org's brand
+   recolours them and sets `--shadow-scale`, which multiplies each layer's
+   WHOLE opacity, so 0.5 is half the shadow in either theme (owner, D19:
+   "Scale the whole shadow (Recommended)"). Unset, it is 1, and the
+   platform's shadows are exactly as before (`org-brand.css`, Codex-hz5du). */
 :root {
-  --shadow-color: 220 3% 15%;
-  --shadow-strength: 1%;
+  --shadow-color-default: 220 3% 15%;
+  --shadow-strength-default: 1%;
+  --shadow-color: var(--shadow-color-default);
+  --shadow-strength: var(--shadow-strength-default);
+}
 
-  --shadow-xs: 0 1px 2px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%));
+[data-theme='dark'] {
+  --shadow-color-default: 220 40% 2%;
+  --shadow-strength-default: 25%;
+}
+
+/* THE SCALE, composed wherever its inputs are set: the platform's root, and
+   each org's scope. A custom property substitutes its `var()`s on the element
+   that declares it, so a scale declared on `:root` alone kept the platform's
+   strength and colour inside every org, whatever the brand editor set. */
+:root,
+[data-org-brand] {
+  --shadow-xs: 0 1px 2px -1px hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1)));
 
   --shadow-sm:
-    0 1px 2px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
-    0 1px 3px 1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+    0 1px 2px 0 hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1))),
+    0 1px 3px 1px hsl(var(--shadow-color) / calc((var(--shadow-strength) + 4%) * var(--shadow-scale, 1)));
 
   --shadow-md:
-    0 1px 3px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
-    0 4px 6px -1px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+    0 1px 3px 0 hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1))),
+    0 4px 6px -1px hsl(var(--shadow-color) / calc((var(--shadow-strength) + 4%) * var(--shadow-scale, 1)));
 
   --shadow-lg:
-    0 1px 3px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
-    0 8px 14px -2px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+    0 1px 3px 0 hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1))),
+    0 8px 14px -2px hsl(var(--shadow-color) / calc((var(--shadow-strength) + 4%) * var(--shadow-scale, 1)));
 
   --shadow-xl:
-    0 1px 4px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%)),
-    0 16px 30px -4px hsl(var(--shadow-color) / calc(var(--shadow-strength) + 4%));
+    0 1px 4px 0 hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1))),
+    0 16px 30px -4px hsl(var(--shadow-color) / calc((var(--shadow-strength) + 4%) * var(--shadow-scale, 1)));
 
-  --shadow-inner: inset 0 2px 4px 0 hsl(var(--shadow-color) / calc(var(--shadow-strength) + 9%));
+  --shadow-inner: inset 0 2px 4px 0 hsl(var(--shadow-color) / calc((var(--shadow-strength) + 9%) * var(--shadow-scale, 1)));
 
   /* Focus Ring — for input/select focus states */
   --shadow-focus-ring: 0 0 0 2px var(--color-focus-ring);
   --shadow-focus-ring-error: 0 0 0 2px var(--color-error-50);
-}
-
-[data-theme='dark'] {
-  --shadow-color: 220 40% 2%;
-  --shadow-strength: 25%;
 }

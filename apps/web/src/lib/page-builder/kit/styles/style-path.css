@@ -6,16 +6,18 @@
    at every section, and it draws itself as they scroll.
 
    PALETTE. The route, its stops and every marker are the SECOND brand
-   colour: this Style makes it the kit's accent source (below), so they are
+   colour: this Style makes it the kit's mark source (below), so they are
    drawn in the kit's mark (`--lp-mark-ink`), moved only as far as a graphic
-   needs (3:1, so an amber stays amber), and the words it colours in the
-   accent, moved to the text floor. The calls to action stay in the PRIMARY.
+   needs (3:1, so an amber stays amber). The words it colours take the
+   org's own accent, its interactive colour, as the calls to action do: the
+   PRIMARY, so a page's words and its asks are one colour (phase 3a).
    The ground and a tint of it take turns, one stretch per stop; two dark
    stretches and the arrival in the brand's own colour.
 
-   TYPE. Signpost type: sentence case, clear steps between display, heading
-   and title, leading just over 1, and a body with room to read (1.62).
-   Emphasis is size and leading, never weight, so a one-weight face holds.
+   TYPE. Signpost type: sentence case (labels in the org's, `kit.css`), clear
+   steps between display, heading and title, leading just over 1, and a body
+   with room to read (1.62). Emphasis is size and leading, never weight, so a
+   one-weight face holds.
 
    LAYOUT. A narrower column (70rem) with the route in a lane of its own in
    the gutter, so the words never share their space with it. The course is
@@ -36,7 +38,7 @@
 
    SIGNATURE. The route, and the journey map it opens into.
 
-   Corners: the brand radius exactly (k 1, 03 §4.2); the stops are circles
+   Corners: the org's exactly (k 1, 03 §4.2); the stops are circles
    (decoration, not brand shape). Fonts: suggests Lato over Source Sans 3;
    designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -58,10 +60,10 @@
   --lp-tracking-title: -0.006em;
   --lp-tracking-label: 0.01em;
 
-  /* ── shape: the brand radius exactly ──────────────────────────────────── */
-  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  /* ── shape: the org's corners exactly ─────────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--radius-card) * 1));
+  --lp-radius-media: max(0rem, calc(var(--radius-lg) * 1));
+  --lp-radius-button: max(0rem, calc(var(--radius-button) * 1));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   /* ── rhythm: a column with a lane for the route beside it ─────────────── */
@@ -85,8 +87,8 @@
     calc(var(--lp-stagger) * 3) both;
 
   /* ── the second colour ────────────────────────────────────────────────── */
-  /* The kit moves its accent and its marks from this, in every scheme and
-     both poles (`schemes.css`); the buttons stay the brand's. */
+  /* The kit moves its marks from this, in every scheme and both poles
+     (`schemes.css`); its accent text and buttons stay the org's primary. */
   --lp-accent-source: var(--lp-brand-2);
 }
 
@@ -544,4 +546,14 @@
       --lp-display-scale: min(1, pow(22 / var(--lp-heading-chars, 120), 0.2));
     }
   }
+}
+
+/* A Moving background in the tint of Path's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='path'] {
+  --lp-atmosphere-ground: tint;
 }

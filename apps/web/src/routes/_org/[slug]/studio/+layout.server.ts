@@ -174,6 +174,10 @@ export const load: LayoutServerLoad = async ({
       description: org.description,
       logoUrl: org.logoUrl,
       brandColors: org.brandColors,
+      // Carried through for the same reason: the page kit's previews draw the
+      // org's dark-mode background, which lives in the fine-tune's
+      // `darkModeOverrides` (page-builder/org-grounds.ts, 03 X48).
+      brandFineTune: org.brandFineTune,
     },
     userRole: role,
     userJoinedAt: joinedAt,

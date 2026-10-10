@@ -14,17 +14,18 @@
    neutral (studio-alpha's is grey), and a grey pebble on a warm tint reads
    as switched off. A creator can still give any band the second colour.
 
-   TYPE. Sentence case everywhere, never tight: easy leading (1.08 display,
-   1.12 heading, 1.65 body), tracking near zero, a moderate display size.
-   Heads gather to the centre where a section gathers (grids, the course,
-   the numbers, the offer); reading columns stay left. Emphasis is size and
-   leading only — the brand's own heavy face is never pushed further.
+   TYPE. Sentence case (labels in the org's, `kit.css`), never tight: easy
+   leading (1.08 display, 1.12 heading, 1.65 body), tracking near zero, a
+   moderate display size. Heads gather to the centre where a section gathers
+   (grids, the course, the numbers, the offer); reading columns stay left.
+   Emphasis is size and leading only — the brand's own heavy face is never
+   pushed further.
 
    LAYOUT. Every corner rounded within the bend (03 §4.2): cards and
-   pictures twice the brand radius, from a gentle floor to 2rem; buttons,
+   pictures twice the org's corners, from a gentle floor to 2rem; buttons,
    labels and chips pills whenever the brand is rounded at all. Cards are
    open pebbles — a soft line, no fill; the one filled card of a section
-   rests a hair above the page on a shadow of its own colour. Even a story's
+   rests a hair above the page on the org's card shadow. Even a story's
    full-width scenes are rounded, inset pebbles, never slabs.
 
    SURFACES. Three soft shapes behind every band (`--lp-shapes: blobs`) and
@@ -65,12 +66,12 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: twice the brand radius, from a gentle floor to 2rem ─────────
+  /* ── shape: twice the org's corners, from a gentle floor to 2rem ────────
      The floor is the design system's md step AS A LENGTH: inside an org
      `--radius-md` is the brand's own radius, which is 0 for a square brand —
      and Soft is the one Style that rounds a square brand up (03 §4.2). */
-  --lp-radius-card: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
-  --lp-radius-media: clamp(var(--space-2), calc(var(--lp-brand-radius) * 2), var(--space-8));
+  --lp-radius-card: clamp(var(--space-2), calc(var(--radius-card) * 2), var(--space-8));
+  --lp-radius-media: clamp(var(--space-2), calc(var(--radius-lg) * 2), var(--space-8));
   --lp-radius-button: var(--lp-radius-pill-if-rounded);
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
@@ -172,15 +173,10 @@
 
 /* ── the pebbles: the one filled card rests a hair above the page ────────── */
 /* A scheme nested in a band is that band's one filled card — the featured
-   offer, the lead voice, the "after", a panel. Its shadow is its own ground
-   deepened, so it reads as the card's colour on any band, never a grey
-   smudge; on a dark page it simply disappears. */
+   offer, the lead voice, the "after", a panel. It rests on the org's own
+   card shadow, the one the org's cards rest on (`--lp-shadow-card`). */
 :is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type] [data-lp-scheme] {
-  box-shadow:
-    0 var(--space-5) var(--space-12) calc(-1 * var(--space-6))
-      oklch(from var(--lp-bg) calc(l * 0.5) c h / 0.5),
-    0 var(--space-1) var(--space-3) calc(-1 * var(--space-1))
-      oklch(from var(--lp-bg) calc(l * 0.6) c h / 0.22);
+  box-shadow: var(--lp-shadow-card);
 }
 
 /* ── story chapters: scenes as pebbles, not slabs ────────────────────────── */

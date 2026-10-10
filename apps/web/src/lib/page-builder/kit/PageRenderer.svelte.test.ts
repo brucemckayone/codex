@@ -157,6 +157,91 @@ describe('PageRenderer', () => {
         'link[href*="fonts.googleapis.com"][href*="Syne"]'
       )
     ).not.toBeNull();
+    // No background of its own: the org's surfaces are inherited, not re-derived.
+    expect(root.hasAttribute('data-org-bg')).toBe(false);
+  });
+
+  it('re-derives the org’s surfaces on the carrier when the page sets its own background, light or dark', async () => {
+    let root = await render({ brandOverrides: { backgroundColor: '#F6EFE6' } });
+    expect(root.hasAttribute('data-org-brand')).toBe(true);
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    unmount(app);
+    root = await render({
+      brandOverrides: { darkOverrides: { backgroundColor: '#101018' } },
+    });
+    expect(root.hasAttribute('data-org-bg')).toBe(true);
+    expect(root.getAttribute('style')).toContain('--brand-bg-dark: #101018');
+  });
+
+  it('names which theme the page’s own background is for, so the other takes the org’s (owner, D7)', async () => {
+    const cases = [
+      [{ backgroundColor: '#F6EFE6' }, 'light'],
+      [{ darkOverrides: { backgroundColor: '#101018' } }, 'dark'],
+      [
+        {
+          backgroundColor: '#F6EFE6',
+          darkOverrides: { backgroundColor: '#101018' },
+        },
+        'both',
+      ],
+      [{ primaryColor: '#0D9488' }, null],
+      // A blank background is no background (the override drops it).
+      [{ backgroundColor: '  ' }, null],
+    ] as const;
+    for (const [brandOverrides, expected] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      expect(
+        root.getAttribute('data-page-bg'),
+        JSON.stringify(brandOverrides)
+      ).toBe(expected);
+    }
+  });
+
+  it('names each theme’s ground band on the root, so the pole follows the ground (Codex-61zsk.42)', async () => {
+    const cases = [
+      // Night: a dark ground for the light theme; the dark theme's is the
+      // org's (none here: the platform's, so no band).
+      [{ backgroundColor: '#15211C' }, 'd24', null],
+      [
+        {
+          backgroundColor: '#E9D8B4',
+          darkOverrides: { backgroundColor: '#15211C' },
+        },
+        'l85',
+        'd24',
+      ],
+      [{ primaryColor: '#0D9488' }, null, null],
+    ] as const;
+    for (const [brandOverrides, light, dark] of cases) {
+      if (app) unmount(app);
+      document.body.innerHTML = '';
+      const root = await render({ brandOverrides });
+      const label = JSON.stringify(brandOverrides);
+      expect(root.getAttribute('data-ground-light'), label).toBe(light);
+      expect(root.getAttribute('data-ground-dark'), label).toBe(dark);
+    }
+  });
+
+  it('draws a moving background as base off the bands its veil is proven on', async () => {
+    const page = samplePage('bold');
+    const hero = page.sections.find((s) => s.type === 'hero');
+    if (!hero) throw new Error('no hero');
+    hero.design = { ...hero.design, scheme: 'atmosphere' };
+    const scheme = (root: HTMLElement) =>
+      root
+        .querySelector(`.lp-section[data-lp-type='hero']`)
+        ?.getAttribute('data-lp-scheme');
+    expect(scheme(await render({ page }))).toBe('atmosphere');
+    if (app) unmount(app);
+    document.body.innerHTML = '';
+    expect(
+      scheme(
+        // L 0.82: the l80 band, whose veil would hide the shader (03 X50).
+        await render({ page, brandOverrides: { backgroundColor: '#D2C3A8' } })
+      )
+    ).toBe('base');
   });
 
   it('previews a theme on its own root, never on <html>', async () => {
@@ -322,10 +407,10 @@ describe('PageRenderer', () => {
     const root = await render({ page: samplePage(style) });
     expect(
       root.querySelector('.lp-sticky')?.getAttribute('data-lp-scheme')
-    ).toBe(STYLES[style].sticky ?? 'contrast');
+    ).toBe(STYLES[style].sticky ?? 'base');
   });
 
-  it('floats Quiet’s bar on its own ground and Cinematic’s on its tint; the rest on contrast', async () => {
+  it('floats the bar on the org’s own surface (base, its raised card) unless a Style names a band: Cinematic’s on its tint', async () => {
     const bars: Record<string, string | null | undefined> = {};
     for (const style of ['quiet', 'cinematic', 'bold'] as const) {
       const root = await render({ page: samplePage(style) });
@@ -338,7 +423,7 @@ describe('PageRenderer', () => {
     expect(bars).toEqual({
       quiet: 'base',
       cinematic: 'soft',
-      bold: 'contrast',
+      bold: 'base',
     });
   });
 });

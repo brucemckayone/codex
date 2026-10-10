@@ -30,7 +30,7 @@
    heavier one tops each section on the ground, so a run of them reads as
    separate claims. Pictures bleed: the hero's photograph runs edge to edge
    into the next slab, and the guide and the clips meet the page edge.
-   Corners bend a little: a quarter of the brand radius, never past
+   Corners bend a little: a quarter of the org's corners, never past
    `--radius-sm`, never a pill (03 §4.2).
 
    MOTION. Headlines BUILD. The hero's headline lifts out of its own baseline
@@ -66,20 +66,21 @@
   --lp-tracking-title: -0.015em;
   --lp-weight-label: var(--font-bold);
 
-  /* ── shape: a quarter of the brand radius, never past `--radius-sm` ───── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* ── shape: a quarter of the org's corners, never past `--radius-sm` ──── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.25), var(--radius-sm));
   --lp-radius-chip: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
   /* Item rules, and the heavier one over a section on the ground. */
   --lp-rule: calc(var(--border-width-thick) * 1.5);
   --_bold-slab: calc(var(--border-width-thick) * 3);
 
-  /* ── buttons: large, square-shouldered, solid ─────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: square-shouldered, solid ────────────────────────────────── */
+  /* The org's button height (kit.css), at the weight the org gives its
+     loudest call, its home hero's (semibold); wide, with a larger label. */
   --lp-button-pad: var(--space-8);
   --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-bold);
+  --lp-button-weight: var(--font-semibold);
   --lp-button-tracking: -0.01em;
 
   /* ── rhythm: the widest column, room for the type to be big ───────────── */
@@ -392,4 +393,14 @@
   font-size: var(--lp-size-body);
   font-weight: var(--lp-weight-label);
   color: var(--lp-ink);
+}
+
+/* A Moving background in the tint of Bold's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='bold'] {
+  --lp-atmosphere-ground: tint;
 }

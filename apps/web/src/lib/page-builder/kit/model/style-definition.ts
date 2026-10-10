@@ -44,7 +44,9 @@ export interface StyleDefinition {
   /**
    * The scheme the floating call to action is drawn in — its own small band
    * over whatever section it passes, so never `atmosphere` (there is no veil
-   * to see through). Absent = `contrast`.
+   * to see through). Absent = `base` (`PageRenderer`): the org's own
+   * surface, where the bar is a raised card in the org's card colour holding
+   * the org's button (owner, D9).
    */
   sticky?: Exclude<ColourSchemeId, 'atmosphere'>;
 }

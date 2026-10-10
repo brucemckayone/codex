@@ -17,9 +17,10 @@
    a dark room are the whole palette.
 
    TYPE. A neutral grotesk, set semibold and tight: display to 5.5rem at
-   leading 1, section headings to 3.25rem, titles to 1.5rem, the reading
-   body at 1.62. Sentence case; labels tracked a hair open. Emphasis is size
-   and tracking only — never weight on a one-weight face.
+   leading 1, section headings to 3.25rem, titles to 1.5rem, the reading body
+   at 1.62. Sentence case; labels in the org's case (`kit.css`), tracked a
+   hair open when not uppercase. Emphasis is size and tracking only — never
+   weight on a one-weight face.
 
    LAYOUT. Heads read across one row: the heading on the left, its lead
    level with the heading's last line on the right. A split gives the
@@ -35,7 +36,7 @@
 
    SIGNATURE. Image reveals, and the gallery grid.
 
-   Corners: the brand radius exactly (k 1, 03 §4.2). Fonts: suggests Plus
+   Corners: the org's exactly (k 1, 03 §4.2). Fonts: suggests Plus
    Jakarta Sans over Inter; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -64,10 +65,10 @@
   --lp-weight-heading: var(--heading-weight, var(--font-semibold));
   --lp-weight-label: var(--font-medium);
 
-  /* ── shape: the brand's corners exactly ───────────────────────────────── */
-  --lp-radius-card: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-media: max(0rem, calc(var(--lp-brand-radius) * 1));
-  --lp-radius-button: max(0rem, calc(var(--lp-brand-radius) * 1));
+  /* ── shape: the org's corners exactly ─────────────────────────────────── */
+  --lp-radius-card: max(0rem, calc(var(--radius-card) * 1));
+  --lp-radius-media: max(0rem, calc(var(--radius-lg) * 1));
+  --lp-radius-button: max(0rem, calc(var(--radius-button) * 1));
   --lp-radius-chip: max(0rem, calc(var(--lp-brand-radius) * 1));
 
   /* ── colour: a whisper of the brand on the tinted bands ───────────────── */
@@ -75,9 +76,6 @@
   /* A Moving background in the tint of Clean's own cards: the org's shader
      through the plain ground reads as a grey band. */
   --lp-atmosphere-ground: tint;
-
-  /* ── buttons ──────────────────────────────────────────────────────────── */
-  --lp-button-weight: var(--font-semibold);
 
   /* ── rhythm: generous air, a wide column for the pictures ─────────────── */
   --lp-pad-compact: clamp(var(--space-12), var(--space-8) + 3cqi, var(--space-20));

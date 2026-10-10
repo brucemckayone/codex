@@ -13,6 +13,8 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { page as appPage } from '$app/state';
+  import { brandEditor } from '$lib/brand-editor';
   import { CopyIcon, EyeIcon, EyeOffIcon, TrashIcon } from '$lib/components/ui/Icon';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
@@ -20,6 +22,7 @@
     DEFINITIONS,
     type KitPage,
     type KitSection,
+    resolveGroundBands,
     resolveLayout,
     resolveScheme,
     resolveSections,
@@ -27,7 +30,9 @@
     resolveStyle,
     type SectionTypeId,
   } from '$lib/page-builder/kit';
+  import { orgGrounds, orgShader } from '$lib/page-builder/org-grounds';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { pageGrounds } from '$lib/page-builder/render/brand-overrides';
   import type { JourneySalesContext } from '$lib/page-builder/render/types';
   import * as m from '$paraglide/messages';
   import FieldControl from './FieldControl.svelte';
@@ -94,14 +99,29 @@
   const style = $derived(resolveStyle(page.design));
   const hidden = $derived(section.enabled === false);
 
+  // The colour the canvas draws (03 X48, X50): the org's moving background,
+  // and the band its ground is in, as Canvas hands them to the page.
+  const drawn = $derived.by(() => {
+    const pending = brandEditor.isOpen ? brandEditor.pending : null;
+    return {
+      orgShader: orgShader(appPage.data.org, pending),
+      grounds: resolveGroundBands(
+        orgGrounds(appPage.data.org, pending),
+        pageGrounds(brandOverrides)
+      ),
+    };
+  });
+
   /** A hidden section is not on the page, so it has no neighbour to step back from. */
   function resolvedIn(target: KitPage) {
-    return resolveSections(target).find((s) => s.id === section.id);
+    return resolveSections(target, drawn).find((s) => s.id === section.id);
   }
 
   const current = $derived(resolvedIn(page));
   const layout = $derived(current?.layout ?? resolveLayout(section.type, section.variant, style));
-  const scheme = $derived(current?.scheme ?? resolveScheme(section.type, section.design, style));
+  const scheme = $derived(
+    current?.scheme ?? resolveScheme(section.type, section.design, style, drawn)
+  );
   const spacing = $derived(current?.spacing ?? resolveSpacing(section.design, layout));
   const styleLayout = $derived(resolveLayout(section.type, undefined, style));
   const styleScheme = $derived.by(() => {
@@ -111,7 +131,7 @@
         s.id === section.id ? { ...s, design: { ...s.design, scheme: undefined } } : s
       ),
     };
-    return resolvedIn(unset)?.scheme ?? resolveScheme(section.type, undefined, style);
+    return resolvedIn(unset)?.scheme ?? resolveScheme(section.type, undefined, style, drawn);
   });
   // Item fields follow the layout too: a benefits tile's image only shows in `grid`.
   const fields = $derived(
