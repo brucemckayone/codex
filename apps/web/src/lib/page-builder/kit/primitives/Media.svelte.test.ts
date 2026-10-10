@@ -84,11 +84,7 @@ describe('Media', () => {
   // is the band's ink, and the plate sits on the panel — white on near-white
   // there, 1.04:1. The marks must come from the surface they are drawn on.
   it('marks the plate in its panel’s own ink, quieter than any word, never the section’s accent', () => {
-    const source = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), 'Media.svelte'),
-      'utf8'
-    );
-    const plate = declarations(source).get('.lp-media__plate');
+    const plate = declarations(source()).get('.lp-media__plate');
     expect(plate).toBeDefined();
     const mark =
       /^color-mix\(in oklab, var\(--lp-panel-ink\) (\d+)%, var\(--lp-panel\)\)$/;
@@ -103,4 +99,49 @@ describe('Media', () => {
     expect(plate!.background).toContain('var(--_ring)');
     expect(Object.values(plate!).join(' ')).not.toContain('--lp-accent');
   });
+
+  // Codex-61zsk.37 (C1): the plate says "a picture goes here", which is a word
+  // for the creator. On a live page it is never painted; each block also
+  // re-composes, so an empty frame is rarely drawn there at all.
+  it('paints the plate only where the page is looked at: the canvas and still thumbnails', () => {
+    const rules = declarations(source());
+    expect(
+      rules.get(':global(.lp:not([data-lp-still])) .lp-media__plate')
+    ).toEqual({ display: 'none' });
+    expect(rules.get('.lp-media__plate')?.display).toBeUndefined();
+  });
+
+  it('stands a mark in for the picture: letters on the scheme it is given, never the plate', () => {
+    app = mount(Media, {
+      target: document.body,
+      props: { mark: 'ML', scheme: 'contrast' },
+    });
+    flushSync();
+    const box = document.body.querySelector('.lp-media');
+    expect(box?.querySelector('.lp-media__plate')).toBeNull();
+    expect(box?.querySelector('[aria-hidden="true"]')?.textContent).toBe('ML');
+    expect(box?.getAttribute('data-lp-scheme')).toBe('contrast');
+    // Designed content, not an empty frame: nothing may treat it as one.
+    expect(box?.hasAttribute('data-empty')).toBe(false);
+  });
+
+  it('draws a picture over any mark', () => {
+    app = mount(Media, {
+      target: document.body,
+      props: { image: '/a.jpg', mark: 'ML', scheme: 'contrast' },
+    });
+    flushSync();
+    expect(document.body.querySelector('img')).not.toBeNull();
+    expect(document.body.textContent?.trim()).toBe('');
+    expect(
+      document.body.querySelector('.lp-media')?.hasAttribute('data-lp-scheme')
+    ).toBe(false);
+  });
 });
+
+function source(): string {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), 'Media.svelte'),
+    'utf8'
+  );
+}

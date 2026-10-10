@@ -13,7 +13,19 @@ import {
   readText,
   readTextList,
 } from '../../model/read';
-import type { BlockDefinition } from '../../model/types';
+import type { BlockDefinition, BlockField } from '../../model/types';
+
+/**
+ * The creator's note on a section that sells (pricing, call to action): their
+ * own words, set under the text. Never the small print beside a price — that
+ * is always the offer's own billing line (`derivedNote`), so it cannot
+ * describe a different offer when the recommended one changes.
+ */
+export const offerNoteField: BlockField = {
+  ...noteField,
+  label: 'A short reassurance',
+  hint: 'Optional. Shown under your text, like "Start whenever you like". Each price already says how it is paid.',
+};
 
 /**
  * Authored copy that DECORATES one real offer path. `id` names a canonical
@@ -67,7 +79,7 @@ export const pricingDefinition: BlockDefinition<PricingProps> = {
     headingField(100),
     { ...bodyField, maxLength: 400 },
     ctaLabelField,
-    noteField,
+    offerNoteField,
     {
       key: 'offers',
       label: 'Describe your options',

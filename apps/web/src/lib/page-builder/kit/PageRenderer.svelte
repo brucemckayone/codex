@@ -13,6 +13,11 @@
   carry the inline-edit seam, the root is still (no entrance), sections carry
   their id for selection, and there is no floating bar over the canvas.
 
+  STILL (a thumbnail, or editing) is also on the page context, so a block may
+  draw what stands in for missing media there — a plate, a frame waiting for
+  a picture — and never on the public page. What the canvas alone draws is
+  marked `data-lp-edit-only`.
+
   `theme` is a SCOPED preview (`data-lp-theme`) for thumbnails and the dev
   route; it never touches `<html data-theme>` (ref 11-theming §4).
 
@@ -95,6 +100,10 @@
   setKitPage({
     get style() {
       return style;
+    },
+    // As `data-lp-still` below: editing is always still.
+    get still() {
+      return still || !!edit;
     },
   });
 

@@ -67,35 +67,49 @@ describe('CtaBlock', () => {
       'Begin this week'
     );
     expect(text()).toContain('The first practice is waiting.');
+    // The one offer it prices, pre-selected at the checkout.
+    expect(link(COPY.cta.buy)?.getAttribute('href')).toBe(
+      '/journeys/steady-ground/checkout?offer=purchase'
+    );
+  });
+
+  it.each(
+    SECTION_LAYOUTS.cta
+  )('%s: prices itself from the live offer only', async (layout) => {
+    await render({ heading: 'Join' }, layout, 'tiers');
+    expect(text()).toContain('£15 per month');
+    unmount(app);
+    await render({ heading: 'Join' }, layout, 'unknown');
+    expect(text()).not.toMatch(/£/);
     expect(link(COPY.cta.buy)?.getAttribute('href')).toBe(
       '/journeys/steady-ground/checkout'
     );
   });
 
-  it('prices the split panel from the live offer only', async () => {
-    await render({ heading: 'Join' }, 'split', 'tiers');
-    expect(text()).toContain('£15 per month');
-    unmount(app);
-    await render({ heading: 'Join' }, 'split', 'unknown');
-    expect(text()).not.toMatch(/£/);
-    expect(link(COPY.cta.buy)).toBeDefined();
-  });
-
   it.each(
     SECTION_LAYOUTS.cta
   )('%s: "Continue" for a member, a notice when closed', async (layout) => {
-    await render({ heading: 'Join', ctaLabel: 'Buy it' }, layout, 'enrolled');
+    const note = 'Start whenever you like.';
+    await render(
+      { heading: 'Join', ctaLabel: 'Buy it', note },
+      layout,
+      'enrolled'
+    );
     expect(link(COPY.cta.continue)?.getAttribute('href')).toBe(
       '/journeys/steady-ground/dashboard'
     );
+    // Sales words have no place when there is nothing to buy.
+    expect(text()).not.toContain(note);
+    expect(text()).not.toMatch(/£/);
     unmount(app);
     await render(
-      { heading: 'Join', ctaLabel: 'Buy it' },
+      { heading: 'Join', ctaLabel: 'Buy it', note },
       layout,
       'unavailable'
     );
     expect(text()).toContain(COPY.cta.unavailableTitle);
     expect(link('Buy it')).toBeUndefined();
+    expect(text()).not.toContain(note);
   });
 
   it('renders only its own words', async () => {
@@ -141,5 +155,104 @@ describe('CtaBlock', () => {
       expect(root()?.hasAttribute('data-lp-on-media')).toBe(false);
       expect(document.body.querySelector('.cta__atmos')).not.toBeNull();
     });
+  });
+});
+
+/**
+ * The smallest box that holds this price and a way to buy it: the offer as a
+ * visitor reads it. No class names, so it finds the same box in any markup.
+ */
+function offerUnit(price: string): Element | null {
+  const leaf = [...document.body.querySelectorAll('*')].find(
+    (el) => el.children.length === 0 && el.textContent?.includes(price)
+  );
+  for (
+    let el = leaf?.parentElement;
+    el && el !== document.body;
+    el = el.parentElement
+  ) {
+    if (el.querySelector('a[href*="/checkout"]')) return el;
+  }
+  return null;
+}
+
+// Codex-61zsk.38: split printed "£15 per month" over the creator's "One payment,
+// no deadline to finish."; band and compact never showed a price at all.
+describe('CtaBlock — the button travels with the offer it sells', () => {
+  const NOTE = 'One payment, no deadline to finish.';
+  // The featured offer moves from the one-off to the membership.
+  const FEATURED = {
+    buy: {
+      price: '£49',
+      cadence: 'one-off',
+      print: 'Pay once and keep it for good.',
+      href: '/journeys/steady-ground/checkout?offer=purchase',
+    },
+    tiers: {
+      price: '£15',
+      cadence: 'per month',
+      print: 'Billed monthly as part of Studio membership.',
+      href: '/journeys/steady-ground/checkout?offer=tier%3Astudio',
+    },
+  } as const;
+
+  it.each(
+    SECTION_LAYOUTS.cta
+  )('%s: the featured price, its period and its own billing line sit with the button', async (layout) => {
+    for (const offer of ['buy', 'tiers'] as const) {
+      await render(
+        { heading: 'Join', body: 'The first practice is waiting.', note: NOTE },
+        layout,
+        offer
+      );
+      const { price, cadence, print, href } = FEATURED[offer];
+      const other = FEATURED[offer === 'buy' ? 'tiers' : 'buy'].print;
+      const unit = offerUnit(price);
+      expect(
+        unit,
+        `${layout} · ${offer}: ${price} beside its button`
+      ).not.toBeNull();
+      expect(unit?.textContent).toMatch(new RegExp(`${price}\\s*${cadence}`));
+      expect(unit?.textContent).toContain(print);
+      expect(unit?.textContent).not.toContain(other);
+      expect(unit?.textContent).not.toContain(NOTE);
+      expect(
+        unit?.querySelector('a[href*="/checkout"]')?.getAttribute('href')
+      ).toBe(href);
+      // The creator's words: in the heading's own box, and only once.
+      expect(
+        document.body.querySelector('h2')?.parentElement?.textContent
+      ).toContain(NOTE);
+      expect(text().split(NOTE)).toHaveLength(2);
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it('names the offer the button buys, for a listener', async () => {
+    await render({ heading: 'Join' }, 'band', 'tiers');
+    expect(link(COPY.cta.buy)?.getAttribute('aria-label')).toBe(
+      `${COPY.cta.buy}, Studio membership`
+    );
+  });
+
+  it('keeps the note in the words when the offer could not be read', async () => {
+    await render({ heading: 'Join', note: NOTE }, 'split', 'unknown');
+    expect(
+      document.body.querySelector('h2')?.parentElement?.textContent
+    ).toContain(NOTE);
+    expect(text().split(NOTE)).toHaveLength(2);
+  });
+
+  it('lets the canvas edit the note in the words, never the kit’s billing line', async () => {
+    await render({ heading: 'Join', note: NOTE }, 'split', 'tiers', {
+      commit: () => {},
+    });
+    const notes = [...document.body.querySelectorAll('[data-field="note"]')];
+    expect(notes.map((el) => el.textContent?.trim())).toEqual([NOTE]);
+    expect(offerUnit('£15')?.querySelector('[data-field="note"]')).toBeNull();
+    expect(
+      document.body.querySelectorAll('[data-field="ctaLabel"]')
+    ).toHaveLength(1);
   });
 });

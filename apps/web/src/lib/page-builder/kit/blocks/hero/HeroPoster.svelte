@@ -11,12 +11,13 @@
   lede and the buttons follow round it. Narrow, the words stack and the
   picture closes the band edge to edge.
 
-  The picture's place is kept whenever one is allowed (`reserve`): a clip or
-  a still that arrives on the stream drops into it, and with none the plate
-  fills it — so nothing moves as the stream settles, and the canvas, the
-  thumbnails and the public page draw the same arrangement. Only "No image"
-  makes it a type-only poster: the headline at the top, the lede and the
-  buttons at the foot.
+  Where the page is looked at (the canvas, a still thumbnail) the picture's
+  place is kept (`reserve`): a clip or a still that arrives on the stream
+  drops into it, and with none the plate fills it, so nothing moves as the
+  stream settles. The public page sets the words round a picture only once it
+  has one (Codex-61zsk.37); with none — or "No image" — it is a type-only
+  poster: the headline at the top, the lede and the buttons at the foot. The
+  words are never re-set either way: only the picture's box comes and goes.
 
   Only the picture reaches the edges (03 X10): the words keep the content
   column, so this is never `.lp-bleed`. The picture paints in the first HTML
@@ -37,10 +38,10 @@
     /** The play button laid over a clip. */
     watch: Snippet;
     /**
-     * Keep the picture's place though there is no still yet: one may arrive
-     * on the streamed preview, and the plate stands in for it until then —
-     * or for good, the designed empty picture — so the words are set round
-     * it from the first paint.
+     * Keep the picture's place though there is no still yet — only where the
+     * page is looked at: one may arrive on the streamed preview, and the
+     * plate stands in for it until then (or for good), so the words are set
+     * round it from the first paint.
      */
     reserve?: boolean;
   }

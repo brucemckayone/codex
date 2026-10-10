@@ -5,11 +5,15 @@
   copy that describes it, and a button that deep-links the checkout to exactly
   this path. The recommended card renders in its own nested colour scheme, so
   its button is contrasted against the CARD, not the section around it.
+
+  The small print under the button is always this path's own billing line,
+  derived here rather than passed in: nothing a creator writes can end up
+  describing an offer it was not written for.
 -->
 <script lang="ts">
   import type { OfferPath } from '../../../offer-paths';
   import type { JourneySalesContext } from '../../../render/types';
-  import { COPY, pathActionName } from '../../model/copy';
+  import { COPY, derivedNote, pathActionName } from '../../model/copy';
   import { pathHref } from '../../model/cta';
   import type { ColourSchemeId } from '../../model/ids';
   import type { BlockEdit } from '../../model/types';
@@ -21,7 +25,6 @@
     path: OfferPath;
     context: JourneySalesContext;
     label: string;
-    note: string;
     /** The nested scheme of the recommended card; absent = transparent card. */
     scheme?: ColourSchemeId;
     /** "Recommended" means something only when there is a choice. */
@@ -36,7 +39,6 @@
     path,
     context,
     label,
-    note,
     scheme,
     badge = false,
     size = 'card',
@@ -73,7 +75,7 @@
       field={editable ? 'ctaLabel' : undefined}
       {edit}
     />
-    <p class="offer__note">{note}</p>
+    <p class="offer__note">{derivedNote(path)}</p>
   </div>
 </article>
 

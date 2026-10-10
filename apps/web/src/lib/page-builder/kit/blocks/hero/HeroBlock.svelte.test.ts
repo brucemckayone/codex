@@ -14,7 +14,8 @@ import { COPY } from '../../model/copy';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
 import { isLongHeading } from '../../model/long-heading';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
-import type { BlockEdit, ResolvedSection } from '../../model/types';
+import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
+import PageRenderer from '../../PageRenderer.svelte';
 import HeroBlock from './HeroBlock.svelte';
 
 let app: ReturnType<typeof mount> | null = null;
@@ -612,7 +613,46 @@ describe('HeroBlock', () => {
       expect(poster?.querySelector('h1')?.textContent).toBe('H');
     });
 
-    it('with no still known as it draws, holds the picture’s place, and the streamed clip lands in it', async () => {
+    const clipOnly: SellPreview = {
+      intro: null,
+      reel: null,
+      heroImageUrl: null,
+      heroClip: { playlistUrl: '/clip.m3u8' },
+      guidePortraitUrl: null,
+    };
+
+    it('on the canvas, with no still known as it draws, holds the picture’s place, and the streamed clip lands in it', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'poster',
+          context: {
+            ...sampleContext({ course: { heroImageUrl: null } }),
+            sellPreview: promise,
+          },
+          edit: { commit: () => {} },
+        }
+      );
+      const poster = document.body.querySelector('.hero-poster');
+      // Before the stream settles: already set round the picture, the plate
+      // in its place, so the caret never loses its words.
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      const box = poster?.querySelector('.hero-poster__media');
+      const headline = poster?.querySelector('h1');
+      expect(box?.querySelector('.lp-media__plate')).not.toBeNull();
+      settle(clipOnly);
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      // The clip lands in that same box; the words were never re-set.
+      expect(poster?.querySelector('.hero-poster__media')).toBe(box);
+      expect(poster?.querySelector('h1')).toBe(headline);
+      expect(box?.querySelector('.lp-media__plate')).toBeNull();
+      expect(box?.textContent).toContain(COPY.hero.watch);
+    });
+
+    it('on the public page, is its words alone until a picture arrives, then sets them round it without re-setting them', async () => {
       const { promise, settle } = deferred();
       await render(
         { heading: 'H' },
@@ -625,37 +665,35 @@ describe('HeroBlock', () => {
         }
       );
       const poster = document.body.querySelector('.hero-poster');
-      // Before the stream settles: already set round the picture, the plate
-      // in its place (the server's HTML is this).
-      expect(poster?.hasAttribute('data-pictured')).toBe(true);
-      const box = poster?.querySelector('.hero-poster__media');
+      // The server's HTML is this: no picture known, so no plate for it.
+      expect(poster?.hasAttribute('data-pictured')).toBe(false);
+      expect(poster?.querySelector('.hero-poster__media')).toBeNull();
       const headline = poster?.querySelector('h1');
-      expect(box?.querySelector('.lp-media__plate')).not.toBeNull();
-      settle({
-        intro: null,
-        reel: null,
-        heroImageUrl: null,
-        heroClip: { playlistUrl: '/clip.m3u8' },
-        guidePortraitUrl: null,
-      });
+      settle(clipOnly);
       await tick();
       await Promise.resolve();
       flushSync();
-      // The clip lands in that same box; the words were never re-set.
-      expect(poster?.querySelector('.hero-poster__media')).toBe(box);
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
       expect(poster?.querySelector('h1')).toBe(headline);
-      expect(box?.querySelector('.lp-media__plate')).toBeNull();
-      expect(box?.textContent).toContain(COPY.hero.watch);
+      expect(poster?.querySelector('.lp-media__plate')).toBeNull();
+      expect(poster?.textContent).toContain(COPY.hero.watch);
     });
 
-    it('settled with no media at all, keeps that arrangement with the plate as its picture', async () => {
+    it('settled with no media at all, is a type-only poster in public and keeps the plate on the canvas', async () => {
       await render({ heading: 'H' }, { layout: 'poster', context: noMedia() });
-      const poster = document.body.querySelector('.hero-poster');
-      expect(poster?.hasAttribute('data-pictured')).toBe(true);
-      const media = poster?.querySelector('.hero-poster__media .lp-media');
+      const poster = () => document.body.querySelector('.hero-poster');
+      expect(poster()?.hasAttribute('data-pictured')).toBe(false);
+      expect(poster()?.querySelector('.lp-media')).toBeNull();
+      unmount(app);
+      await render(
+        { heading: 'H' },
+        { layout: 'poster', context: noMedia(), edit: { commit: () => {} } }
+      );
+      expect(poster()?.hasAttribute('data-pictured')).toBe(true);
+      const media = poster()?.querySelector('.hero-poster__media .lp-media');
       expect(media?.hasAttribute('data-empty')).toBe(true);
       expect(media?.querySelector('.lp-media__plate')).not.toBeNull();
-      expect(poster?.querySelector('img, video')).toBeNull();
+      expect(poster()?.querySelector('img, video')).toBeNull();
     });
 
     it('gives that plate a sheet of its own — the panel tinted with the brand and lifted toward its ink — computed a step up (no cycle)', () => {
@@ -720,6 +758,77 @@ describe('HeroBlock', () => {
       expect(
         document.body.querySelector('.hero-poster__media')?.textContent
       ).toContain(COPY.hero.watch);
+    });
+  });
+
+  // Codex-61zsk.37 (C1): Tending the Grief's live first screen was a 1024×448
+  // plate. With no picture, the public page draws the hero's words alone; the
+  // plate stands in only where the page is looked at.
+  describe('with no picture', () => {
+    const FRAMED = ['split', 'centered', 'poster'] as const;
+
+    it.each(
+      FRAMED
+    )('%s: the public page draws the words alone — no frame, no plate', async (layout) => {
+      await render(
+        { heading: 'H', body: 'Six calm weeks.' },
+        { layout, context: noMedia() }
+      );
+      expect(document.body.querySelector('h1')?.textContent).toBe('H');
+      expect(document.body.textContent).toContain('Six calm weeks.');
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+    });
+
+    it('split re-composes as the statement does, the words across the band', async () => {
+      await render({ heading: 'H' }, { layout: 'split', context: noMedia() });
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(
+        document.body.querySelector('.hero-statement h1')?.textContent
+      ).toBe('H');
+    });
+
+    it.each(
+      FRAMED
+    )('%s: the canvas keeps the plate in the picture’s place', async (layout) => {
+      await render(
+        { heading: 'H' },
+        { layout, context: noMedia(), edit: { commit: () => {} } }
+      );
+      expect(document.body.querySelector('.lp-media__plate')).not.toBeNull();
+    });
+
+    it.each(
+      FRAMED
+    )('%s: a still thumbnail keeps the plate too; the public page beside it has none', async (layout) => {
+      const page: KitPage = {
+        design: { style: 'bold' },
+        sections: [
+          {
+            id: 'hero-1',
+            type: 'hero',
+            enabled: true,
+            variant: layout,
+            props: { heading: 'H' },
+          },
+        ],
+      };
+      const draw = async (still: boolean) => {
+        app = mount(PageRenderer, {
+          target: document.body,
+          props: { page, context: noMedia(), still, sticky: false },
+        });
+        flushSync();
+        await tick();
+        await Promise.resolve();
+        flushSync();
+        const plates =
+          document.body.querySelectorAll('.lp-media__plate').length;
+        unmount(app);
+        app = null;
+        return plates;
+      };
+      expect(await draw(true)).toBe(1);
+      expect(await draw(false)).toBe(0);
     });
   });
 });

@@ -3,13 +3,15 @@
 
   A frame for a still that may have a film behind it: the poster — or the
   kit's designed plate, which also holds the frame's space while the streamed
-  media is pending — any control the block lays over it, and, on the canvas
-  only, the block's prompt when there is nothing to show yet.
+  media is pending, or a `mark` standing in for the picture (`Media`) — any
+  control the block lays over it, and, on the canvas only, the block's prompt
+  when there is nothing to show yet (marked `data-lp-edit-only`).
 
   Shared by the video, sneak peek and about-you blocks.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { ColourSchemeId } from '../../model/ids';
   import Media from '../../primitives/Media.svelte';
 
   interface Props {
@@ -18,6 +20,10 @@
     ratio?: string;
     alt?: string;
     pending?: boolean;
+    /** Letters drawn in the picture's place when there is none (`Media`). */
+    mark?: string;
+    /** The scheme the mark's ground takes. */
+    scheme?: ColourSchemeId;
     /**
      * Where the control sits: centred, in the lower corner, or centred on the
      * frame's foot, half over its edge (for a round or narrow frame).
@@ -34,6 +40,8 @@
     ratio,
     alt = '',
     pending = false,
+    mark,
+    scheme,
     place = 'corner',
     prompt,
     children,
@@ -42,10 +50,10 @@
 </script>
 
 <div class="clip {className ?? ''}" data-place={place}>
-  <Media image={still} {ratio} {pending} {alt} />
+  <Media image={still} {ratio} {pending} {alt} {mark} {scheme} />
   {#if children}<div class="clip__control">{@render children()}</div>{/if}
   {#if prompt && !still && !pending}
-    <p class="clip__prompt"><span>{prompt}</span></p>
+    <p class="clip__prompt" data-lp-edit-only><span>{prompt}</span></p>
   {/if}
 </div>
 

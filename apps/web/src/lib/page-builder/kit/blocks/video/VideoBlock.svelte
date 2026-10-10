@@ -8,20 +8,24 @@
     split   — the film as the larger half beside the words (running off the
               band's leading edge in Bold)
 
-  The film streams on `sellPreview`: the screen holds its ratio while it
-  loads, then shows the clip's poster — or the kit's plate — under the play
-  button. No film: the public page drops the screen and its caption; the
-  canvas keeps the screen and asks for the film. The button row appears only
-  when the creator writes one.
+  The film streams on `sellPreview`, so the server cannot know it: it sends
+  the section whole, the screen holding its ratio (its HTML is the final
+  state, 03 §10). Once the stream settles with no film, the public page
+  never leaves its words above nothing (Codex-61zsk.37): the section draws
+  nothing and its band folds away. Where the page is looked at (the canvas, a
+  still thumbnail) the section keeps its screen, the kit's plate in it, and
+  on the canvas a prompt for the film. The button row appears only when the
+  creator writes one.
 -->
 <script lang="ts">
-  import type { PreviewMedia } from '../../../render/types';
   import type { BlockProps } from '../../model/types';
+  import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import { editAttrs } from '../../primitives/edit';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
+  import { settled } from '../hero/settled.svelte';
   import ClipFrame from './ClipFrame.svelte';
   import { VIDEO_COPY } from './copy';
   import { VIDEO_PROMPT, videoDefinition } from './definition';
@@ -29,12 +33,24 @@
 
   const { props, section, context, edit }: BlockProps = $props();
 
+  const page = getKitPage();
   const content = $derived(videoDefinition.coerce(props));
   const split = $derived(section.layout === 'split');
   const title = $derived(content.heading ?? context.course.title);
   const hasWords = $derived(Boolean(content.eyebrow || content.heading || content.body));
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
   const captionAttrs = $derived(editAttrs('video', 'caption', edit));
+
+  // The film once the stream settles, read in place (`settled.svelte.ts`):
+  // `undefined` until then and on the server, `null` if the read failed.
+  const preview = $derived(settled(context.sellPreview));
+  const pending = $derived(preview === undefined);
+  const clip = $derived(preview?.intro ?? null);
+  // Settled with no film: the public page has nothing to show for it.
+  const filmless = $derived(!pending && !clip);
+  const shown = $derived(!filmless || page.still || !!edit);
+  // A section with no film is the creator's alone: the canvas's own.
+  const creatorOnly = $derived(filmless ? '' : undefined);
 </script>
 
 {#snippet words()}
@@ -59,7 +75,7 @@
 
 {#snippet actions()}
   {#if hasCta}
-    <div class="video__actions">
+    <div class="video__actions" data-lp-edit-only={creatorOnly}>
       <ButtonRow
         {context}
         section="video"
@@ -72,12 +88,8 @@
   {/if}
 {/snippet}
 
-{#snippet screen(clip: PreviewMedia | null, pending: boolean)}
-  <figure
-    class="video__screen"
-    data-layout={section.layout}
-    data-lp-edit-only={!clip && !pending ? '' : undefined}
-  >
+{#snippet screen()}
+  <figure class="video__screen" data-layout={section.layout} data-lp-edit-only={creatorOnly}>
     <span class="lp-atmos video__glow" aria-hidden="true"></span>
     {#if clip}
       <ClipFrame still={clip.posterUrl} ratio="var(--_ratio)" place={split ? 'corner' : 'center'}>
@@ -96,30 +108,31 @@
   </figure>
 {/snippet}
 
-{#snippet stage()}
-  {#await context.sellPreview}
-    {@render screen(null, true)}
-  {:then preview}
-    {#if preview?.intro || edit}
-      {@render screen(preview?.intro ?? null, false)}
-    {/if}
-  {/await}
-{/snippet}
-
-{#if split}
-  <div class="video-split">
-    {#if hasWords || hasCta}
-      <div class="video-split__words">{@render words()}{@render actions()}</div>
-    {/if}
-    {@render stage()}
-  </div>
-{:else}
-  {#if hasWords}<div class="video-head">{@render words()}</div>{/if}
-  {@render stage()}
-  {@render actions()}
+{#if filmless}
+  <!-- No film: the live page folds this band away. -->
+  <span class="video-none" hidden></span>
+{/if}
+{#if shown}
+  {#if split}
+    <div class="video-split" data-lp-edit-only={creatorOnly}>
+      {#if hasWords || hasCta}
+        <div class="video-split__words">{@render words()}{@render actions()}</div>
+      {/if}
+      {@render screen()}
+    </div>
+  {:else}
+    <!-- Side by side, no space between: nothing is left behind when the
+         canvas's own parts are set aside. -->
+    {#if hasWords}<div class="video-head" data-lp-edit-only={creatorOnly}>{@render words()}</div>{/if}{@render screen()}{@render actions()}
+  {/if}
 {/if}
 
 <style>
+  /* ── no film on the live page: no band either ──────────────────────────── */
+  :global(.lp:not([data-lp-still]) .lp-section:has(> .lp-inner > .video-none)) {
+    display: none;
+  }
+
   /* ── shared ────────────────────────────────────────────────────────────── */
   .video__top,
   .video-head,
