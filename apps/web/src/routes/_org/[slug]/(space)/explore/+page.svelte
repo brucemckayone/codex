@@ -806,9 +806,8 @@
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-medium);
-    /* Match the page h1 (.explore__title) — consistent heading colour in the
-       org's theme, whatever it is. */
-    color: var(--color-text-primary);
+    /* Match the page h1 (.explore__title): the org's heading colour. */
+    color: var(--color-heading, var(--color-text));
     line-height: var(--leading-tight);
   }
 
@@ -842,7 +841,7 @@
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-medium);
-    color: var(--color-text-primary);
+    color: var(--color-heading, var(--color-text));
     line-height: var(--leading-tight);
   }
 
@@ -859,7 +858,10 @@
     margin: 0;
     font-size: var(--text-3xl);
     font-weight: var(--font-bold);
-    color: var(--color-text-primary);
+    /* The org's heading colour, as PageHeader and CardTitle read it
+       (Codex-gxbu9): `--color-heading` is declared only under
+       `[data-org-brand]`, so the text colour stands in elsewhere. */
+    color: var(--color-heading, var(--color-text));
     line-height: var(--leading-tight);
   }
 
