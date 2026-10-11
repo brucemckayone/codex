@@ -72,6 +72,9 @@
   --lp-texture: paper;
   /* A fine grain, felt more than seen. */
   --lp-texture-strength: 0.22;
+  /* A Moving background seen in full, its veil a patch of paper under the
+     words only (03 X52). */
+  --lp-atmosphere-veil: words;
 
   /* ── the hero's one entrance: the words, then the print settles ─────── */
   --lp-enter-headline: lp-rise-soft var(--duration-slowest) var(--ease-smooth) both;

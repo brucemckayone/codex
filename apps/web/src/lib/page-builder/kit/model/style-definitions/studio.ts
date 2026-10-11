@@ -75,4 +75,8 @@ export const STUDIO: StyleDefinition = {
     'cta',
   ],
   fonts: { heading: 'Bitter', body: 'Figtree' },
+  // Sharp: the org's moving background as designed, its veil only under the
+  // words (`--lp-atmosphere-veil: words`, 03 X52). Blurred, the 0.82 veil
+  // left about a fifth of it, and nothing moved.
+  atmosphere: 'sharp',
 };

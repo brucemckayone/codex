@@ -1582,3 +1582,31 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       - the hero is atmosphere and every closing ask is its Style's default;
       - each hero heading is not the kit's ink, is within 4° of the org's heading hue, and
         holds its grade over both veiled backdrops.
+- **X52 · 2026-10-11 · 3b round 1 · The veil under the words only (`--lp-atmosphere-veil:
+  words`), and Studio's moving background drawn sharp.** BUILT on `feat/landing-builder-phase3b`;
+  not yet seen by the owner. The owner's note on the live page: *"cant really see it moving or
+  anything alittle too much blur"*. Two causes, both on the page: the inner pages' 60px
+  `--blur-2xl` (only `data-lp-atmosphere='sharp'` lifts it), and the 0.82 / 0.86 veil over the
+  whole opening, which left about a fifth of the shader.
+  - **The rule.** A third value of X9's axis. A block marks the box that holds its words
+    (`data-lp-words`): the hero's copy in the statement, split, centred and cover layouts, and
+    the closing ask's words. On an atmosphere section, that box paints the section's own veil
+    (`rgb(from var(--lp-bg) r g b / var(--_atmos-s))`: the plain ground, or X33's tint), and a
+    `box-shadow` in the same colour carries it past the box: spread 3σ, blur 2σ, with
+    σ = `clamp(--space-3, 1.4cqi, --space-6)`. Where the shader runs, the section itself is
+    cleared, by the same `:has()` that finds the box.
+  - **Why the proof is unchanged.** An outer shadow is never drawn inside its box, so every
+    word sits on the veil at exactly `--_atmos-s`, the strength §5.1 proves over pure black and
+    pure white. The spread puts the shadow at Φ(3) = 0.9987 of the veil at the box's edge
+    (inside one 8-bit step), so no seam shows.
+  - **Limits.** The poster's words share its grid with the picture and have no box of their
+    own, so a poster hero keeps the section veil; any section with no marked box does. Without
+    a shader the box is drawn over the glow too, as X10's panel is, so the canvas shows the
+    composition.
+  - **Studio** takes it: `--lp-atmosphere-veil: words` and `atmosphere: 'sharp'`. The other
+    six Styles that blur are unchanged until round 5 spreads what works.
+  - **Seen** (1440, still): of-blood-and-bones' Ancestral Threads (statement hero, its 'flow'
+    shader) in light and dark, and studio-alpha's 'glow' drawn as Studio. Pictures:
+    `docs/handover/phase3-sources/round1/`.
+  - **Open:** on a centred or statement hero the box is the content column's width, so the
+    patch is nearly a panel; a patch hugging the lines is the alternative.
