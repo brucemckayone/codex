@@ -150,8 +150,9 @@ test.describe('before and after · Ancestral Threads, wider than a phone', () =>
       'transformation',
       'toggle'
     );
-    // At 1440×900 the section starts below the fold, where the page's script
-    // places it; wide, it stays the columns (03 X55).
+    // Both sides, as the server draws them at every width. On its own this
+    // could pass before the page's script has run; the round trip below is
+    // what proves the script keeps a wide section as the columns (03 X55).
     await expect(section.getByRole('tablist')).toHaveCount(0);
     for (const side of ['before', 'after']) {
       const column = section.locator(`.tf-col[data-side="${side}"]`);

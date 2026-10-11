@@ -233,7 +233,7 @@ describe('TransformationBlock', () => {
 });
 
 /**
- * An observer the test drives: `report()` tells every observed element where
+ * An observer the test drives: `reportPlace()` tells every observed element where
  * it is. (The shared jsdom stub never reports, so a toggle mounted without
  * this stays the columns it starts as — the no-JS markup.)
  */
@@ -256,7 +256,7 @@ class FakeObserver {
   }
 }
 
-function report(isIntersecting: boolean, top: number) {
+function reportPlace(isIntersecting: boolean, top: number) {
   for (const observer of observers) {
     const entries = observer.targets.map(
       (target) =>
@@ -295,7 +295,18 @@ class FakeSizeObserver {
   }
 }
 
-function resize(phone: boolean) {
+/** Frames the page has asked for, run by `frames()`. */
+let queued: FrameRequestCallback[] = [];
+
+function frames() {
+  const due = queued;
+  queued = [];
+  for (const callback of due) callback(0);
+  flushSync();
+}
+
+/** The section crosses the breakpoint: the observers report, then a frame. */
+function reportSize(phone: boolean) {
   phoneWidth = phone;
   for (const observer of sizeObservers) {
     if (observer.targets.length > 0)
@@ -304,13 +315,25 @@ function resize(phone: boolean) {
   flushSync();
 }
 
+function resize(phone: boolean) {
+  reportSize(phone);
+  frames();
+}
+
 describe('TransformationBlock — toggle', () => {
   beforeEach(() => {
     observers.length = 0;
     sizeObservers.length = 0;
     phoneWidth = true;
+    queued = [];
     vi.stubGlobal('IntersectionObserver', FakeObserver);
     vi.stubGlobal('ResizeObserver', FakeSizeObserver);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+      queued.push(callback)
+    );
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      queued.splice(id - 1, 1, () => {});
+    });
     const computed = window.getComputedStyle.bind(window);
     vi.spyOn(window, 'getComputedStyle').mockImplementation(
       (element, pseudo) => {
@@ -363,7 +386,7 @@ describe('TransformationBlock — toggle', () => {
 
   it('on a phone, becomes two tabs while the section is still ahead, opening on the payoff', async () => {
     await render(SAMPLE, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     const list = one('[role="tablist"]');
     expect(list?.getAttribute('aria-label')).toBe(TRANSFORMATION_COPY.switch);
     const [before, after] = tabs();
@@ -396,7 +419,7 @@ describe('TransformationBlock — toggle', () => {
   it('wider than a phone, it stays the columns: both sides in view', async () => {
     phoneWidth = false;
     await render(SAMPLE, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     expect(one('[role="tablist"]')).toBeNull();
     expect(one('.tf-toggle')?.hasAttribute('data-tabs')).toBe(false);
     for (const side of ['before', 'after'])
@@ -406,13 +429,38 @@ describe('TransformationBlock — toggle', () => {
   it('follows the section across the phone-width breakpoint as it resizes', async () => {
     phoneWidth = false;
     await render(SAMPLE, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     expect(one('[role="tablist"]')).toBeNull();
     resize(true);
     expect(tabs()).toHaveLength(2);
     resize(false);
     expect(one('[role="tablist"]')).toBeNull();
     expect(one('.tf-toggle .tf-cols')).not.toBeNull();
+  });
+
+  it('swaps a frame after the size is reported, never inside the observer’s own delivery', async () => {
+    phoneWidth = false;
+    await render(SAMPLE, { layout: 'toggle' });
+    reportPlace(false, 2000);
+    reportSize(true);
+    // Swapping here would resize the section mid-delivery: a reported loop.
+    expect(one('[role="tablist"]')).toBeNull();
+    frames();
+    expect(tabs()).toHaveLength(2);
+  });
+
+  it('keeps a visitor’s place when the tabs give way under their focus', async () => {
+    await render(SAMPLE, { layout: 'toggle' });
+    reportPlace(false, 2000);
+    const [, after] = tabs();
+    after.focus();
+    resize(false);
+    await tick();
+    const side = one('.tf-col[data-side="after"]') as HTMLElement;
+    expect(document.activeElement).toBe(side);
+    // Focusable only while it holds the focus: the markup stays the columns'.
+    side.blur();
+    expect(side.hasAttribute('tabindex')).toBe(false);
   });
 
   it('measures the width on the section, the container its breakpoint is read against', async () => {
@@ -426,13 +474,13 @@ describe('TransformationBlock — toggle', () => {
 
   it('never re-lays out a section the visitor is looking at', async () => {
     await render(SAMPLE, { layout: 'toggle' });
-    report(true, 100);
+    reportPlace(true, 100);
     expect(one('[role="tablist"]')).toBeNull();
     // Scrolled past: still columns, it is above the visitor now.
-    report(false, -900);
+    reportPlace(false, -900);
     expect(one('[role="tablist"]')).toBeNull();
     // Back ahead of them: now it can change.
-    report(false, 1200);
+    reportPlace(false, 1200);
     expect(one('[role="tablist"]')).not.toBeNull();
   });
 
@@ -442,13 +490,13 @@ describe('TransformationBlock — toggle', () => {
     still.setAttribute('data-lp-still', '');
     document.body.appendChild(still);
     await render(SAMPLE, { layout: 'toggle', target: still });
-    report(true, 0);
+    reportPlace(true, 0);
     expect(tabs()).toHaveLength(2);
   });
 
   it('flips with a click, and only one panel is shown at a time', async () => {
     await render(SAMPLE, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     const [before, after] = tabs();
     before.click();
     flushSync();
@@ -460,7 +508,7 @@ describe('TransformationBlock — toggle', () => {
 
   it('arrow keys, Home and End move the selection with the focus (roving tabindex)', async () => {
     await render(SAMPLE, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     const [before, after] = tabs();
     expect([before.tabIndex, after.tabIndex]).toEqual([-1, 0]);
     after.focus();
@@ -488,7 +536,7 @@ describe('TransformationBlock — toggle', () => {
       { before: ['Rushed mornings'], after: ['A quiet start'] },
       { layout: 'toggle' }
     );
-    report(false, 2000);
+    reportPlace(false, 2000);
     expect(tabs().map((t) => t.textContent?.trim())).toEqual([
       TRANSFORMATION_COPY.before,
       TRANSFORMATION_COPY.after,
@@ -497,7 +545,7 @@ describe('TransformationBlock — toggle', () => {
 
   it('with one side written there is nothing to flip: it stays columns', async () => {
     await render({ after: ['A quiet start'] }, { layout: 'toggle' });
-    report(false, 2000);
+    reportPlace(false, 2000);
     expect(one('[role="tablist"]')).toBeNull();
     expect(text()).toContain('A quiet start');
   });
@@ -507,7 +555,7 @@ describe('TransformationBlock — toggle', () => {
       { before: ['One', 'Two', 'Three'], after: ['Uno'] },
       { layout: 'toggle' }
     );
-    report(false, 2000);
+    reportPlace(false, 2000);
     expect(all('.tf-toggle__panel[data-side="before"] li')).toHaveLength(3);
     expect(all('.tf-toggle__panel[data-side="after"] li')).toHaveLength(1);
     expect(all('.tf-toggle__panel[data-side="after"] svg')).toHaveLength(1);

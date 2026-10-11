@@ -8,60 +8,23 @@
  *      the columns side by side, so the two can never drift apart.
  *   2. Side by side, the after lines are the loudest thing in the section:
  *      the display face at title size, over the before side's body lines.
+ *   3. A toggle drawn as the columns is the columns in every Style's own
+ *      treatment too: Soft centres its head over either.
  *
  * A SOURCE test, the weaker instrument: it proves the rules, not the paint.
  * The paint is measured in a browser by `e2e/page-kit/type-rank.spec.ts`.
  * Read with svelte's own parser, which drops the style block's comments.
  */
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
+import { componentRules } from '../testing';
 
-type CssNode = {
-  type: string;
-  name?: string;
-  prelude?: { start: number; end: number } | string;
-  property?: string;
-  value?: string;
-  block?: { children: CssNode[] } | null;
-};
-
-type Rule = { selector: string; decls: Map<string, string>; within: string[] };
-
-const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
-
-/** Every rule in a component's style block, with the at-rules it sits in. */
-function rulesOf(file: string): Rule[] {
-  const source = readFileSync(join(import.meta.dirname, file), 'utf8');
-  const css = parse(source, { modern: true }).css;
-  const rules: Rule[] = [];
-  const visit = (children: CssNode[], within: string[]) => {
-    for (const node of children) {
-      if (node.type === 'Atrule') {
-        visit(node.block?.children ?? [], [
-          ...within,
-          `@${node.name} ${squash(String(node.prelude))}`,
-        ]);
-      } else if (node.type === 'Rule' && typeof node.prelude === 'object') {
-        const decls = new Map<string, string>();
-        for (const d of node.block?.children ?? [])
-          if (d.type === 'Declaration')
-            decls.set(d.property ?? '', squash(d.value ?? ''));
-        rules.push({
-          selector: squash(source.slice(node.prelude.start, node.prelude.end)),
-          decls,
-          within,
-        });
-      }
-    }
-  };
-  visit((css?.children ?? []) as unknown as CssNode[], []);
-  return rules;
-}
+const rulesOf = (file: string) =>
+  componentRules(join(import.meta.dirname, file));
 
 const columns = rulesOf('ChangeColumns.svelte');
 const toggle = rulesOf('ChangeToggle.svelte');
+const block = rulesOf('TransformationBlock.svelte');
 
 describe('the transformation layouts', () => {
   it('flags phone width under exactly the complement of the columns’ side-by-side query', () => {
@@ -103,5 +66,22 @@ describe('the transformation layouts', () => {
           r.decls.has('font-size')
       )
     ).toEqual([]);
+  });
+
+  it('centres a Soft head over a toggle drawn as the columns, as over the columns', () => {
+    const centred = block.filter(
+      (r) =>
+        r.selector.includes("data-lp-style='soft'") &&
+        (r.decls.get('justify-items') === 'center' ||
+          r.decls.get('--lp-actions-align') === 'center' ||
+          r.decls.get('justify-self') === 'center') &&
+        r.selector.includes("[data-layout='columns']")
+    );
+    // The actions, the head and the eyebrow.
+    expect(centred).toHaveLength(3);
+    for (const rule of centred)
+      expect(rule.selector).toContain(
+        "[data-layout='toggle']:has(:global(.tf-cols))"
+      );
   });
 });

@@ -20,6 +20,7 @@
   With only one side written there is nothing to flip, so it stays columns.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { CheckIcon } from '$lib/components/ui/Icon';
   import type { ColourSchemeId } from '../../model/ids';
@@ -61,18 +62,45 @@
     return () => observer.disconnect();
   };
 
-  /** Follows the section across its phone-width breakpoint, as it resizes. */
+  /**
+   * Follows the section across its phone-width breakpoint, as it resizes. The
+   * swap waits a frame: made inside the observer's own delivery, it would
+   * resize the section being observed, which the browser reports as a loop.
+   */
   const atPhoneWidth: Attachment<HTMLElement> = (root) => {
-    const read = () => {
-      phone = getComputedStyle(root).getPropertyValue('--_phone').trim() === '1';
-    };
-    read();
+    const flag = () => getComputedStyle(root).getPropertyValue('--_phone').trim() === '1';
+    phone = flag();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(read);
+    let frame = 0;
+    const follow = () => {
+      const next = flag();
+      if (next === phone) return;
+      const focused = tabs && !next && root.contains(document.activeElement);
+      phone = next;
+      if (focused) void tick().then(() => keepPlace(root));
+    };
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(follow);
+    });
     // The section is the query container the breakpoint is measured on.
     observer.observe(root.closest('.lp-section') ?? root);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   };
+
+  /** The tabs gave way under a visitor's focus: the side they were on takes it. */
+  function keepPlace(root: HTMLElement) {
+    const side =
+      root.querySelector<HTMLElement>(`.tf-col[data-side='${selected}']`) ??
+      root.querySelector<HTMLElement>('.tf-col');
+    if (!side) return;
+    side.tabIndex = -1;
+    side.addEventListener('blur', () => side.removeAttribute('tabindex'), { once: true });
+    side.focus({ preventScroll: true });
+  }
 
   const KEYS: Record<string, (index: number) => number> = {
     ArrowRight: (index) => (index + 1) % SIDES.length,
