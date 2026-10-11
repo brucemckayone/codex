@@ -4128,8 +4128,11 @@ export class CourseJourneyService extends BaseService {
    * Load the ordered curriculum for the PUBLIC sales page (SPEC §5): non-deleted
    * stages (by `sortOrder`), each with its PUBLISHED, non-deleted practices (by
    * `stage_practices.sortOrder`). Distinct from {@link loadStages} (the member
-   * dashboard shape): the public view carries NO completion flag and NO media
-   * (duration / thumbnail / stream) — the sell map lists titles + types only.
+   * dashboard shape): the public view carries NO completion flag and no
+   * thumbnail or stream. It does carry each practice's LENGTH, from the
+   * already-public media item (null for a written practice, or media never
+   * probed), so the curriculum can say what a visitor is signing up to
+   * (Codex-61zsk.46).
    */
   private async loadPublicStages(
     courseId: string
@@ -4159,9 +4162,19 @@ export class CourseJourneyService extends BaseService {
         slug: content.slug,
         title: content.title,
         contentType: content.contentType,
+        mediaDurationSeconds: mediaItems.durationSeconds,
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
+      // In the ON clause, so a deleted media item lends no length but never
+      // drops its practice from the page.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -4178,6 +4191,7 @@ export class CourseJourneyService extends BaseService {
         slug: row.slug,
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
+        durationSeconds: row.mediaDurationSeconds ?? null,
         sortOrder: row.sortOrder,
       };
       const list = practicesByStage.get(row.stageId);
