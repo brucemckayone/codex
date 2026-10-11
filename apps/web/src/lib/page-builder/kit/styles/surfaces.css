@@ -141,6 +141,13 @@
     background: var(--_atmos-veil);
   }
 
+  /* The live veil (03 X54) eases in as it thins, so the shader comes up
+     through the band once it has been watched; it thickens at once, so no
+     word is ever shown on less veil than it needs. */
+  .lp-section[data-lp-veil-easing] {
+    transition: background-color var(--duration-slowest) var(--ease-smooth);
+  }
+
   .org-layout[data-hero-shader-active]
     .lp[data-lp-atmosphere]:not([data-lp-still])
     .lp-section[data-lp-scheme='atmosphere']

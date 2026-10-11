@@ -5,7 +5,10 @@
  * go through the real channel, and the frames are run by hand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
+import {
+  shaderTone,
+  TONE_SETTLE_SAMPLES,
+} from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   accumulateTone,
   emptyToneGrid,
@@ -124,30 +127,82 @@ describe('sectionNeed', () => {
     );
     expect(sectionNeed(s, g, viewport, memo)).toBeGreaterThan(0.71);
   });
+
+  it("reaches as far as the shader's blur: a dark cell beside the line counts", () => {
+    // The line is over paper; the cell beside it is dark, 20px off its edge.
+    const shader = grid((cell) => (cell === 1 ? DUSK : PAPER));
+    const s = section([line({ left: 10, top: 10, right: 80, bottom: 40 })]);
+    expect(sectionNeed(s, shader, viewport)).toBe(0.71);
+    expect(
+      sectionNeed(s, shader, viewport, new Map(), { reach: 40 })
+    ).toBeGreaterThan(0.71);
+  });
+
+  it('judges nothing until the shader has been watched for long enough', () => {
+    const s = section([line(left)]);
+    expect(
+      sectionNeed(
+        s,
+        grid(() => PAPER),
+        viewport,
+        new Map(),
+        { settled: false }
+      )
+    ).toBeNull();
+  });
 });
 
 describe('atmosphereVeil', () => {
   let frames: FrameRequestCallback[] = [];
+  let observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] =
+    [];
+  /** What a change of size in `el` reports, to whoever observes it. */
+  const resize = (el: Element) => {
+    for (const o of observers)
+      if (o.targets.has(el)) o.callback([], {} as ResizeObserver);
+  };
   const flush = () => {
     const due = frames;
     frames = [];
     for (const callback of due) callback(0);
   };
-  const report = (rgb: Rgb) => {
+  /** One frame of the shader, all `rgb`; still (exact at once) or moving. */
+  const report = (rgb: Rgb, still = true) => {
     const rgba = new Uint8ClampedArray(TONE_COLS * TONE_ROWS * 4);
     for (let cell = 0; cell < TONE_COLS * TONE_ROWS; cell++)
       rgba.set([...rgb, 255], cell * 4);
-    shaderTone.record(rgba);
+    shaderTone.record(rgba, { still, blur: 0 });
   };
   const need = (el: HTMLElement) => el.style.getPropertyValue('--_atmos-need');
+  const across = () => line({ left: 10, top: 10, right: 390, bottom: 40 });
 
   beforeEach(() => {
     frames = [];
+    observers = [];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback);
       return frames.length;
     });
     vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        readonly targets = new Set<Element>();
+        constructor(callback: ResizeObserverCallback) {
+          observers.push({ callback, targets: this.targets });
+        }
+        observe(el: Element) {
+          this.targets.add(el);
+        }
+        unobserve(el: Element) {
+          this.targets.delete(el);
+        }
+        disconnect() {
+          this.targets.clear();
+        }
+      }
+    );
     for (const [side, size] of [
       ['clientWidth', viewport.width],
       ['clientHeight', viewport.height],
@@ -160,8 +215,10 @@ describe('atmosphereVeil', () => {
 
   afterEach(() => {
     shaderTone.clear();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     document.documentElement.removeAttribute('data-theme');
+    document.body.replaceChildren();
   });
 
   it('asks the shader for nothing on a page that is not live, or with no veil to thin', () => {
@@ -179,7 +236,7 @@ describe('atmosphereVeil', () => {
   });
 
   it('asks while a section may thin, sets its veil from each report, and lets go when the page leaves', () => {
-    const s = section([line({ left: 10, top: 10, right: 390, bottom: 40 })]);
+    const s = section([across()]);
     const detach = atmosphereVeil(true, () => [s])(
       document.createElement('div')
     );
@@ -199,8 +256,39 @@ describe('atmosphereVeil', () => {
     expect(need(s.el)).toBe('');
   });
 
-  it('keeps its veil while none of its inks is on the window, and drops it when the shader starts over', () => {
-    const words = line({ left: 10, top: 10, right: 390, bottom: 40 });
+  it('watches a moving shader for a few seconds before it thins anything', () => {
+    const s = section([across()]);
+    const detach = atmosphereVeil(true, () => [s])(
+      document.createElement('div')
+    );
+    for (let i = 1; i < TONE_SETTLE_SAMPLES; i++) {
+      report(PAPER, false);
+      flush();
+    }
+    expect(need(s.el)).toBe('');
+    report(PAPER, false);
+    flush();
+    expect(need(s.el)).toBe('0.71');
+    detach?.();
+  });
+
+  it('eases in as it thins, and thickens at once', () => {
+    const s = section([across()]);
+    const detach = atmosphereVeil(true, () => [s])(
+      document.createElement('div')
+    );
+    report(PAPER);
+    flush();
+    expect(s.el.hasAttribute('data-lp-veil-easing')).toBe(true);
+    report(DUSK);
+    flush();
+    expect(Number(need(s.el))).toBeGreaterThan(0.71);
+    expect(s.el.hasAttribute('data-lp-veil-easing')).toBe(false);
+    detach?.();
+  });
+
+  it('keeps its veil while none of its inks is on the window', () => {
+    const words = across();
     const s = section([words]);
     const detach = atmosphereVeil(true, () => [s])(
       document.createElement('div')
@@ -210,16 +298,144 @@ describe('atmosphereVeil', () => {
     const held = need(s.el);
     expect(Number(held)).toBeGreaterThan(0.71);
 
-    // Scrolled past: the band's last part on the window keeps its veil.
     words.at = { left: 10, top: -90, right: 390, bottom: -60 };
     window.dispatchEvent(new Event('scroll'));
     flush();
     expect(need(s.el)).toBe(held);
+    detach?.();
+  });
 
-    // A new shader (or size) has drawn nothing yet: the proven veil.
-    shaderTone.clear();
+  it('drops every veil the moment the shader starts over, before its next frame', () => {
+    const s = section([across()]);
+    const detach = atmosphereVeil(true, () => [s])(
+      document.createElement('div')
+    );
+    report(PAPER);
     flush();
+    expect(need(s.el)).toBe('0.71');
+    shaderTone.clear();
+    // No frame run: the new picture is never painted under the old veil.
     expect(need(s.el)).toBe('');
+    detach?.();
+  });
+
+  it('measures again when a scroller inside the page moves, or a section changes size', () => {
+    // The shader dark over the window's top half, paper over its bottom.
+    const rgba = new Uint8ClampedArray(TONE_COLS * TONE_ROWS * 4);
+    for (let cell = 0; cell < TONE_COLS * TONE_ROWS; cell++) {
+      const top = Math.floor(cell / TONE_COLS) < TONE_ROWS / 2;
+      rgba.set([...(top ? DUSK : PAPER), 255], cell * 4);
+    }
+    const words = line({ left: 10, top: 10, right: 390, bottom: 40 });
+    const s = section([words]);
+    const root = document.createElement('div');
+    const strip = document.createElement('div');
+    root.append(strip);
+    document.body.append(root);
+    const detach = atmosphereVeil(true, () => [s])(root);
+    shaderTone.record(rgba, { still: true, blur: 0 });
+    flush();
+    expect(Number(need(s.el))).toBeGreaterThan(0.71);
+
+    // A scroller inside the page carries the words down over the paper.
+    words.at = { left: 10, top: 150, right: 390, bottom: 180 };
+    strip.dispatchEvent(new Event('scroll'));
+    flush();
+    expect(need(s.el)).toBe('0.71');
+
+    // Content above them grows (a <details> opening) and pushes them back up.
+    words.at = { left: 10, top: 10, right: 390, bottom: 40 };
+    resize(s.el);
+    flush();
+    expect(Number(need(s.el))).toBeGreaterThan(0.71);
+    detach?.();
+  });
+
+  it('reaches as far as the shader says its blur does', () => {
+    // Dark over the window's top half; the words just below it, on paper.
+    const rgba = new Uint8ClampedArray(TONE_COLS * TONE_ROWS * 4);
+    for (let cell = 0; cell < TONE_COLS * TONE_ROWS; cell++) {
+      const top = Math.floor(cell / TONE_COLS) < TONE_ROWS / 2;
+      rgba.set([...(top ? DUSK : PAPER), 255], cell * 4);
+    }
+    const s = section([line({ left: 10, top: 112, right: 390, bottom: 140 })]);
+    const detach = atmosphereVeil(true, () => [s])(
+      document.createElement('div')
+    );
+    shaderTone.record(rgba, { still: true, blur: 0 });
+    flush();
+    expect(need(s.el)).toBe('0.71');
+    shaderTone.clear();
+    shaderTone.record(rgba, { still: true, blur: 20 });
+    flush();
+    expect(Number(need(s.el))).toBeGreaterThan(0.71);
+    detach?.();
+  });
+
+  it('measures a count as it rolls, and reads the page again only once it stops', async () => {
+    const read = vi.fn(() => [section([across()])]);
+    const root = document.createElement('div');
+    const figure = document.createElement('span');
+    figure.textContent = '0';
+    root.append(figure);
+    const detach = atmosphereVeil(true, read)(root);
+    expect(read).toHaveBeenCalledTimes(1);
+    for (const n of ['1', '2', '3']) {
+      figure.textContent = n;
+      await Promise.resolve();
+      flush();
+    }
+    expect(read).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(300);
+    flush();
+    expect(read).toHaveBeenCalledTimes(2);
+
+    // A new element is a new ink: read at once.
+    root.append(document.createElement('p'));
+    await Promise.resolve();
+    flush();
+    expect(read).toHaveBeenCalledTimes(3);
+    detach?.();
+  });
+
+  it("reading the page again keeps a section's veil rather than starting it over", async () => {
+    const s = section([across()]);
+    const root = document.createElement('div');
+    root.append(s.el);
+    const detach = atmosphereVeil(true, () => [s])(root);
+    report(PAPER);
+    flush();
+    expect(need(s.el)).toBe('0.71');
+    const writes: MutationRecord[] = [];
+    new MutationObserver((r) => writes.push(...r)).observe(s.el, {
+      attributes: true,
+    });
+    document.documentElement.setAttribute('data-theme', 'dark');
+    await Promise.resolve();
+    flush();
+    await Promise.resolve();
+    expect(need(s.el)).toBe('0.71');
+    expect(writes).toEqual([]);
+    detach?.();
+  });
+
+  it("does not read the page again when a veil's own easing ends, only when a colour's does", () => {
+    const read = vi.fn();
+    const s = section([across()]);
+    read.mockReturnValue([s]);
+    const root = document.createElement('div');
+    const link = document.createElement('a');
+    root.append(s.el, link);
+    const detach = atmosphereVeil(true, read)(root);
+    expect(read).toHaveBeenCalledTimes(1);
+    s.el.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+    flush();
+    expect(read).toHaveBeenCalledTimes(1);
+    link.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+    flush();
+    expect(read).toHaveBeenCalledTimes(2);
     detach?.();
   });
 

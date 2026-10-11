@@ -171,7 +171,7 @@
         canvasEl.width = w;
         canvasEl.height = h;
         renderer?.resize(gl!, w, h);
-        if (tone) shaderTone.clear();
+        clearTone();
         // Resizing clears the canvas, and a frozen one has no next frame to
         // repaint it, so it draws its static frame again.
         if (isFrozen && hasRenderedStaticFrame) {
@@ -198,7 +198,7 @@
         cachedConfig = getShaderConfig(undefined, presetOverride);
         const key = JSON.stringify(cachedConfig);
         // New colours or settings draw a different picture under each cell.
-        if (key !== cachedConfigKey && tone) shaderTone.clear();
+        if (key !== cachedConfigKey) clearTone();
         cachedConfigKey = key;
       }
       return cachedConfig;
@@ -213,6 +213,22 @@
     const TONE_SCALE = 4;
     let toneCtx: CanvasRenderingContext2D | null = null;
     let nextToneAt = 0;
+
+    /** What was sampled no longer lies under the same cells: start again,
+     *  with the next frame drawn (a still shader may draw no other). */
+    function clearTone() {
+      if (!tone) return;
+      shaderTone.clear();
+      nextToneAt = 0;
+    }
+
+    /** The CSS blur over the shader (the org layout's filter), in px. */
+    function blurRadius(): number {
+      const radius = /blur\(([\d.]+)px\)/.exec(
+        containerEl ? getComputedStyle(containerEl).filter : ''
+      );
+      return radius ? Number(radius[1]) : 0;
+    }
 
     function sampleTone() {
       if (!tone || !shaderTone.wanted || !canvasEl) return;
@@ -238,7 +254,8 @@
       if (sw <= 0 || sh <= 0) return;
       toneCtx.drawImage(canvasEl, sx, sy, sw, sh, 0, 0, width, height);
       shaderTone.record(
-        averageCells(toneCtx.getImageData(0, 0, width, height).data, cols, rows, TONE_SCALE)
+        averageCells(toneCtx.getImageData(0, 0, width, height).data, cols, rows, TONE_SCALE),
+        { still: isFrozen, blur: blurRadius() }
       );
     }
 
@@ -264,7 +281,7 @@
       }
 
       currentPreset = preset;
-      if (tone) shaderTone.clear();
+      clearTone();
 
       if (preset === 'none') {
         // Hide canvas so CSS gradient fallback shows through.

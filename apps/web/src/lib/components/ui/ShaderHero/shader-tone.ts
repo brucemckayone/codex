@@ -7,14 +7,31 @@
  */
 import { accumulateTone, emptyToneGrid, type ToneGrid } from './tone-grid';
 
+/**
+ * Frames a moving shader is watched for before its grid is trusted: about
+ * four seconds at two a second. One frame of 'flow' let a veil thin to 0.712
+ * that the frames after it needed at 0.727. A still shader draws one frame,
+ * so one is all of it.
+ */
+export const TONE_SETTLE_SAMPLES = 8;
+
 class ShaderToneChannel {
   grid: ToneGrid = emptyToneGrid();
+  /** The last frame folded in was a still one (reduced motion, `still`). */
+  still = false;
+  /** The CSS blur over the shader, in px: what reaches past a cell's edge. */
+  blur = 0;
   #demand = 0;
   #wake: (() => void) | null = null;
   readonly #listeners = new Set<() => void>();
 
   get wanted(): boolean {
     return this.#demand > 0;
+  }
+
+  /** Enough of the shader has been seen to judge a veil by it. */
+  get settled(): boolean {
+    return this.grid.samples >= (this.still ? 1 : TONE_SETTLE_SAMPLES);
   }
 
   /** Asks for samples, and for a frame now; returns the release. */
@@ -41,8 +58,13 @@ class ShaderToneChannel {
   }
 
   /** ShaderHero: folds a sampled frame (RGBA, one pixel per cell) in. */
-  record(rgba: ArrayLike<number>): void {
+  record(
+    rgba: ArrayLike<number>,
+    frame: { still: boolean; blur: number } = { still: false, blur: 0 }
+  ): void {
     accumulateTone(this.grid, rgba);
+    this.still = frame.still;
+    this.blur = frame.blur;
     this.#notify();
   }
 

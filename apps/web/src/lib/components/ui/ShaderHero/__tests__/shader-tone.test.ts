@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shaderTone } from '../shader-tone';
+import { shaderTone, TONE_SETTLE_SAMPLES } from '../shader-tone';
 import { TONE_COLS, TONE_ROWS } from '../tone-grid';
 
 const frame = (v: number) =>
@@ -43,5 +43,17 @@ describe('shaderTone', () => {
     stop();
     shaderTone.record(frame(10));
     expect(heard).toHaveBeenCalledTimes(3);
+  });
+
+  it('is settled after one still frame, or after watching a moving shader for a while', () => {
+    shaderTone.record(frame(90), { still: true, blur: 0 });
+    expect(shaderTone.settled).toBe(true);
+    shaderTone.clear();
+    for (let i = 1; i < TONE_SETTLE_SAMPLES; i++)
+      shaderTone.record(frame(90), { still: false, blur: 20 });
+    expect(shaderTone.settled).toBe(false);
+    shaderTone.record(frame(90), { still: false, blur: 20 });
+    expect(shaderTone.settled).toBe(true);
+    expect(shaderTone.blur).toBe(20);
   });
 });

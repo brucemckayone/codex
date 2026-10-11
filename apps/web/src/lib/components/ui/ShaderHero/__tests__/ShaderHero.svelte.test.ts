@@ -247,4 +247,31 @@ describe('ShaderHero tone', () => {
     for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
     expect(shaderTone.grid.samples).toBe(0);
   });
+
+  it('says whether its frame is still, and how far the blur over it reaches', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    (document.querySelector('.shader-hero') as HTMLElement).style.filter =
+      'blur(20px)';
+    ask();
+    step(3);
+    expect(shaderTone.grid.samples).toBe(1);
+    expect(shaderTone.still).toBe(true);
+    expect(shaderTone.blur).toBe(20);
+  });
+
+  it('samples a still frame again after a resize, however soon after the last', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ still: true, tone: true });
+    ask();
+    step(3);
+    expect(shaderTone.grid.samples).toBe(1);
+
+    clock += 50; // well inside the half second
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(shaderTone.grid.samples).toBe(1);
+  });
 });
