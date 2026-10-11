@@ -790,6 +790,12 @@ export interface JourneyPracticeView {
   title: string;
   contentType: PracticeContentType;
   sortOrder: number;
+  /**
+   * The practice's length in seconds, from its media item: null for a written
+   * practice or media whose duration was never probed. OPTIONAL-additive: an
+   * older worker deployment omits it and the curriculum names the kind alone.
+   */
+  durationSeconds?: number | null;
   /** Completion — dashboard / in-course only; omitted on the public sales page. */
   completed?: boolean;
 }
