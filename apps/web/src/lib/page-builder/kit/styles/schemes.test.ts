@@ -306,7 +306,9 @@ const RECIPES = [
   '--_atm-mark-dark: rgb(from var(--lp-accent-source) var(--_atm-mark-lt-r) var(--_atm-mark-lt-g) var(--_atm-mark-lt-b));',
   '--_atm-btn-light: rgb(from var(--lp-brand) var(--_atm-btn-dk-r) var(--_atm-btn-dk-g) var(--_atm-btn-dk-b));',
   '--_atm-btn-dark: rgb(from var(--lp-brand) var(--_atm-btn-lt-r) var(--_atm-btn-lt-g) var(--_atm-btn-lt-b));',
-  '--_atmos-s: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));',
+  '--_atmos-floor: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));',
+  '--_atmos-thin: calc(1 - var(--lp-atmosphere-show, 1) * (1 - var(--_atmos-floor)));',
+  '--_atmos-s: max(var(--_atmos-thin), var(--_atmos-need, var(--_atmos-floor)));',
   '--_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));',
 ];
 
@@ -4327,7 +4329,7 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
 
   it('names each band’s veil in schemes.css, and the section draws the stronger of it and the pole’s', () => {
     expect(CODE).toContain(
-      '--_atmos-s: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));'
+      '--_atmos-floor: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));'
     );
     expect(CODE).toContain('--_band-veil: var(--_gl-veil, 0);');
     expect(CODE).toContain('--_band-veil: var(--_gd-veil, 0);');
@@ -4335,6 +4337,47 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
     expect(CODE).toMatch(
       /\.lp\[data-lp-style='cinematic'\] \{[^}]*--_band-veil: 0;/
     );
+  });
+
+  // 03 X54: a Style may let more of the shader through than the proven veil
+  // does (`--lp-atmosphere-show`). That veil is not proven over black and
+  // white, and no one multiple holds over every shader (X53's 1.6, measured
+  // on 'flow', left 'glow' at 3.4:1 for 4.5:1 text), so the section is only
+  // ever as thin as the page has measured, behind its own inks: the live
+  // veil's `--_atmos-need` (`atmosphere-veil.ts`), which no stylesheet sets.
+  it('lets more of the shader through only where the page has measured it, on Studio alone', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const stylesheets = readdirSync(dir)
+      .filter((file) => file.endsWith('.css'))
+      .map((file) => ({
+        file,
+        code: readFileSync(join(dir, file), 'utf8').replace(
+          /\/\*[\s\S]*?\*\//g,
+          ''
+        ),
+      }));
+    const shows = stylesheets.flatMap(({ file, code }) =>
+      [...code.matchAll(/--lp-atmosphere-show:\s*([\d.]+)/g)].map((m) => ({
+        file,
+        show: Number(m[1]),
+      }))
+    );
+    expect(shows.map((s) => s.file)).toEqual(['style-studio.css']);
+    expect(shows[0]?.show).toBeGreaterThanOrEqual(1);
+    // Unmeasured, the veil is the proven one: the need falls back to the floor.
+    const rule =
+      CODE.match(/\.lp \[data-lp-scheme='atmosphere'\] \{([^}]*)\}/)?.[1] ?? '';
+    expect(rule).toContain(
+      '--_atmos-s: max(var(--_atmos-thin), var(--_atmos-need, var(--_atmos-floor)));'
+    );
+    // Only the page's measurement sets the need.
+    for (const { file, code } of stylesheets)
+      expect(code, file).not.toMatch(/--_atmos-need\s*:/);
+    // The ends are numbers the page can read; an unreadable one is solid.
+    for (const end of ['floor', 'thin'])
+      expect(CODE).toContain(
+        `@property --_atmos-${end} { syntax: '<number>'; inherits: true; initial-value: 1; }`
+      );
   });
 });
 

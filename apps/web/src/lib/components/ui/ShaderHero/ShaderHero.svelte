@@ -20,6 +20,8 @@
   import { getShaderConfig, type ShaderPresetId } from './shader-config';
   import { loadRenderer } from './load-renderer';
   import type { ShaderRenderer, MouseState } from './renderer-types';
+  import { shaderTone, toneViewport } from './shader-tone';
+  import { averageCells, visibleBufferRegion } from './tone-grid';
 
   interface Props {
     class?: string;
@@ -38,9 +40,21 @@
      * click). Turning it off resumes the motion.
      */
     still?: boolean;
+    /**
+     * Report what it draws, cell by cell, to `shaderTone`, while a page asks
+     * (the page kit's live veil, landing-builder 03 X54). For the one shader
+     * the window shows behind a page: the org layout's fullpage one. Read
+     * once, at mount.
+     */
+    tone?: boolean;
   }
 
-  const { class: className, preset: presetOverride, still = false }: Props = $props();
+  const {
+    class: className,
+    preset: presetOverride,
+    still = false,
+    tone = false,
+  }: Props = $props();
 
   // Set by onMount; the effect below hands it each new `still`. Read `still`
   // first: `applyStill?.(still)` skips its argument while applyStill is unset,
@@ -91,6 +105,9 @@
     // One static frame, then stop: reduced motion, or `still`.
     let isFrozen = false;
     let hasRenderedStaticFrame = false;
+    // The moment a frozen shader shows, kept so that drawing it again (after
+    // a resize, or for a sample) draws the same frame rather than a later one.
+    let frozenElapsed: number | null = null;
     let pointerListenersAttached = false;
 
     const mouse: MouseState = { x: 0.5, y: 0.5, active: false, burstStrength: 0 };
@@ -116,6 +133,7 @@
     function setFrozen(next: boolean) {
       if (next === isFrozen) return;
       isFrozen = next;
+      frozenElapsed = null;
       if (isFrozen) {
         hasRenderedStaticFrame = false;
         detachPointerListeners();
@@ -153,6 +171,7 @@
         canvasEl.width = w;
         canvasEl.height = h;
         renderer?.resize(gl!, w, h);
+        clearTone();
         // Resizing clears the canvas, and a frozen one has no next frame to
         // repaint it, so it draws its static frame again.
         if (isFrozen && hasRenderedStaticFrame) {
@@ -169,6 +188,7 @@
     // an override so callers can force a preset regardless of org config.
     let configPollCounter = 0;
     let cachedConfig = getShaderConfig(undefined, presetOverride);
+    let cachedConfigKey = JSON.stringify(cachedConfig);
 
     function pollConfig() {
       // Poll every 30 frames (~0.5s at 60fps) to avoid getComputedStyle overhead
@@ -176,9 +196,79 @@
       if (configPollCounter >= 30) {
         configPollCounter = 0;
         cachedConfig = getShaderConfig(undefined, presetOverride);
+        const key = JSON.stringify(cachedConfig);
+        // New colours or settings draw a different picture under each cell.
+        if (key !== cachedConfigKey) clearTone();
+        cachedConfigKey = key;
       }
       return cachedConfig;
     }
+
+    // ── Tone (03 X54) ──────────────────────────────────────────
+    // While a page asks, about twice a second, the part of the frame the
+    // window shows, drawn small and averaged per cell, goes to `shaderTone`.
+    // Read straight after render, in the same task: the drawing buffer is not
+    // preserved, so once the frame is composited it reads back blank.
+    const TONE_EVERY_MS = 500;
+    const TONE_SCALE = 4;
+    let toneCtx: CanvasRenderingContext2D | null = null;
+    let nextToneAt = 0;
+
+    /** What was sampled no longer lies under the same cells: start again,
+     *  with the next frame drawn (a still shader may draw no other). */
+    function clearTone() {
+      if (!tone) return;
+      shaderTone.clear();
+      nextToneAt = 0;
+    }
+
+    /** The CSS blur over the shader (the org layout's filter), in px. */
+    function blurRadius(): number {
+      const radius = /blur\(([\d.]+)px\)/.exec(
+        containerEl ? getComputedStyle(containerEl).filter : ''
+      );
+      return radius ? Number(radius[1]) : 0;
+    }
+
+    function sampleTone() {
+      if (!tone || !shaderTone.wanted || !canvasEl) return;
+      const now = performance.now();
+      if (now < nextToneAt) return;
+      nextToneAt = now + TONE_EVERY_MS;
+      const { cols, rows } = shaderTone.grid;
+      const width = cols * TONE_SCALE;
+      const height = rows * TONE_SCALE;
+      if (!toneCtx) {
+        const small = document.createElement('canvas');
+        small.width = width;
+        small.height = height;
+        toneCtx = small.getContext('2d');
+        if (!toneCtx) return;
+      }
+      const { sx, sy, sw, sh } = visibleBufferRegion({
+        rect: canvasEl.getBoundingClientRect(),
+        buffer: canvasEl,
+        fit: getComputedStyle(canvasEl).objectFit,
+        viewport: toneViewport(),
+      });
+      if (sw <= 0 || sh <= 0) return;
+      toneCtx.drawImage(canvasEl, sx, sy, sw, sh, 0, 0, width, height);
+      shaderTone.record(
+        averageCells(toneCtx.getImageData(0, 0, width, height).data, cols, rows, TONE_SCALE),
+        { still: isFrozen, blur: blurRadius() }
+      );
+    }
+
+    // A page that starts asking gets a sample at the next frame; a frozen
+    // shader has none coming, so it draws its frame again.
+    if (tone)
+      shaderTone.onDemand(() => {
+        nextToneAt = 0;
+        if (isFrozen && hasRenderedStaticFrame) {
+          hasRenderedStaticFrame = false;
+          scheduleFrame();
+        }
+      });
 
     // ── Preset switching ───────────────────────────────────────
     async function ensureRenderer(preset: ShaderPresetId): Promise<boolean> {
@@ -191,6 +281,7 @@
       }
 
       currentPreset = preset;
+      clearTone();
 
       if (preset === 'none') {
         // Hide canvas so CSS gradient fallback shows through.
@@ -265,8 +356,9 @@
       if (isFrozen) {
         if (hasRenderedStaticFrame) return;
         hasRenderedStaticFrame = true;
-        const elapsed = (performance.now() - startTime) / 1000;
-        renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+        frozenElapsed ??= (performance.now() - startTime) / 1000;
+        renderer.render(gl!, frozenElapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+        sampleTone();
         return; // no re-prime — static frame is final
       }
 
@@ -284,6 +376,7 @@
 
       const elapsed = (now - startTime) / 1000;
       renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+      sampleTone();
 
       // Re-prime ONLY from the render branch — hidden tabs and reduced-motion
       // users no longer pay for 1Hz / 60Hz wake-ups that render nothing.
@@ -372,6 +465,10 @@
     // ── Cleanup ────────────────────────────────────────────────
     return () => {
       applyStill = undefined;
+      if (tone) {
+        shaderTone.onDemand(null);
+        shaderTone.clear();
+      }
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);
       // JFA program cache is module-scoped and stays warm across preset

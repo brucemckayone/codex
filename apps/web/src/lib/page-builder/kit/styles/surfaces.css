@@ -21,8 +21,14 @@
                                              Unset: straight.
      --lp-edge-depth: <length>               how deep the cut runs, never more
                                              than the smallest section padding.
-     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil (never
-                                             thinner, `schemes.css`).
+     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil
+                                             (`schemes.css`).
+     --lp-atmosphere-show: <number >= 1>     a thinner one: this many times as
+                                             much of the shader through as the
+                                             proven veil lets through (03 X53).
+                                             No longer proven over black and
+                                             white, so it is measured over a
+                                             real shader first. Studio only.
      --lp-atmosphere-veil: section | panel   where that veil is drawn (03 X9).
                                              `section` (default): the whole
                                              band. `panel`: one card behind the
@@ -133,6 +139,13 @@
     .lp[data-lp-atmosphere]:not([data-lp-still])
     .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]) {
     background: var(--_atmos-veil);
+  }
+
+  /* The live veil (03 X54) eases in as it thins, so the shader comes up
+     through the band once it has been watched; it thickens at once, so no
+     word is ever shown on less veil than it needs. */
+  .lp-section[data-lp-veil-easing] {
+    transition: background-color var(--duration-slowest) var(--ease-smooth);
   }
 
   .org-layout[data-hero-shader-active]

@@ -1582,3 +1582,115 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       - the hero is atmosphere and every closing ask is its Style's default;
       - each hero heading is not the kit's ink, is within 4° of the org's heading hue, and
         holds its grade over both veiled backdrops.
+- **X52 · 2026-10-11 · 3b round 1 · The veil under the words only (`--lp-atmosphere-veil:
+  words`), and Studio's moving background drawn sharp.** REJECTED by the owner the same day, on
+  the before/after pictures: *"your way of showing the shader is terrrrrrrible it should be more
+  like a blur or popacity over the full thing just less"*. Reverted before it left the branch;
+  X53 replaces it. Kept for the record. The owner's note on the live page: *"cant really see it moving or
+  anything alittle too much blur"*. Two causes, both on the page: the inner pages' 60px
+  `--blur-2xl` (only `data-lp-atmosphere='sharp'` lifts it), and the 0.82 / 0.86 veil over the
+  whole opening, which left about a fifth of the shader.
+  - **The rule.** A third value of X9's axis. A block marks the box that holds its words
+    (`data-lp-words`): the hero's copy in the statement, split, centred and cover layouts, and
+    the closing ask's words. On an atmosphere section, that box paints the section's own veil
+    (`rgb(from var(--lp-bg) r g b / var(--_atmos-s))`: the plain ground, or X33's tint), and a
+    `box-shadow` in the same colour carries it past the box: spread 3σ, blur 2σ, with
+    σ = `clamp(--space-3, 1.4cqi, --space-6)`. Where the shader runs, the section itself is
+    cleared, by the same `:has()` that finds the box.
+  - **Why the proof is unchanged.** An outer shadow is never drawn inside its box, so every
+    word sits on the veil at exactly `--_atmos-s`, the strength §5.1 proves over pure black and
+    pure white. The spread puts the shadow at Φ(3) = 0.9987 of the veil at the box's edge
+    (inside one 8-bit step), so no seam shows.
+  - **Limits.** The poster's words share its grid with the picture and have no box of their
+    own, so a poster hero keeps the section veil; any section with no marked box does. Without
+    a shader the box is drawn over the glow too, as X10's panel is, so the canvas shows the
+    composition.
+  - **Studio** takes it: `--lp-atmosphere-veil: words` and `atmosphere: 'sharp'`. The other
+    six Styles that blur are unchanged until round 5 spreads what works.
+  - **Seen** (1440, still): of-blood-and-bones' Ancestral Threads (statement hero, its 'flow'
+    shader) in light and dark, and studio-alpha's 'glow' drawn as Studio. Pictures:
+    `docs/handover/phase3-sources/round1/`.
+  - **Open:** on a centred or statement hero the box is the content column's width, so the
+    patch is nearly a panel; a patch hugging the lines is the alternative.
+- **X53 · 2026-10-11 · 3b round 1 · Studio's moving background: the veil over every band
+  again, a third of the blur, and 1.6 times as much of the shader through (replaces X52).**
+  BUILT on `feat/landing-builder-phase3b`; the owner chose it from before / A / B pictures.
+  - **The blur.** `atmosphere: 'hazy'`, a third value beside `soft` and `sharp`. The org
+    layout blurs the shader by `--blur-xl` (20px) instead of `--blur-2xl` (60px), and the
+    canvas runs twice that radius past each edge, as `soft` does. Cutting the blur alone (A)
+    sharpened the shapes and showed them moving, but let no more of the shader through.
+  - **The veil.** `--lp-atmosphere-show` (>= 1, default 1) lets that many times as much of the
+    shader through as the proven veil: `s = 1 − show · (1 − max(floor, band veil, scrim))`.
+    Studio sets 1.6: 0.71 (light) / 0.78 (dark) where the floors are 0.82 / 0.86. It scales
+    with each band's own floor, so a band that needs a solid veil (1) keeps it. Studio only,
+    and only where the org's shader runs; without one the section is the glow on its ground,
+    unchanged.
+  - **Why it holds: measured, not proven.** §5.1's veil is proven over pure black and pure
+    white, so any shader. This one is not. It is measured over of-blood-and-bones' 'flow'
+    shader (1440 @2x, 20px blur, words hidden, three frames six seconds apart, composited in
+    sRGB as the browser does, and checked against a veiled frame to within 1.2/255 in dark).
+    Every line of the opening held its floor (4.5:1 for text under 24px, 3:1 for the title
+    and the button against its surround) down to 0.65 in light (bound by the note under the
+    button) and 0.75 in dark (bound by the lede). `schemes.test.ts` holds the multiple there:
+    only Studio sets it, and never past those two measured veils. **Wrong, and replaced by
+    X54:** that was measured with the words AT REST. The shader is fixed while they scroll, so
+    each line passes over the darker top of the window, where 'flow' light needs 0.76; two of
+    the opening's 4.5:1 lines fell to 4.38 and 4.24 at 300px. And on a second shader,
+    studio-alpha's 'glow', the fixed 0.71 left the title at 2.61:1 and the facts at 3.65:1.
+  - **The risk** that a darker (light) or brighter (dark) shader than 'flow' falls under a
+    floor was real (above). X54 closes it: no fixed multiple holds, so the page measures.
+  - **Seen** (1440, still and live): Ancestral Threads, light and dark. Pictures:
+    `docs/handover/phase3-sources/round1/` (section 0).
+- **X54 · 2026-10-11 · 3b round 1 · The live veil: as thin as Studio asks wherever the shader
+  behind each ink allows (replaces X53's fixed multiple; BUILT, decided without the owner).**
+  The owner chose X53's look (B: the whole band, a 20px blur, 1.6 times the shader) and asked
+  for no further input; the goal said to lower `--lp-atmosphere-show` until both shaders hold.
+  None does at the look the owner chose ('glow' light needs 0.817 where B gives 0.712), so
+  instead of a lower multiple everywhere, the veil is measured where it is drawn and the
+  approved look stays wherever it holds.
+  - **The rule.** `--lp-atmosphere-show` now names the thinnest the veil may go
+    (`--_atmos-thin`); the proven veil (`--_atmos-floor`, §5.1, with the band's and the
+    scrim) is the thickest. The section draws `max(thin, --_atmos-need)`, and with no
+    `--_atmos-need` the floor. Both ends are registered numbers (`@property`, initial 1), so
+    the page reads what CSS computed, and a browser that cannot read them never thins.
+  - **The measurement.** The org layout's fullpage shader (`ShaderHero tone`) samples, about
+    twice a second and only while a page asks, the part of its frame the window shows: drawn
+    at 4 × 4 per cell and averaged to a 48 × 30 grid, keeping each cell's darkest and lightest
+    colour per channel since the shader, its colours or its size last changed
+    (`shaderTone`). It reports its CSS blur, and whether its frame is still. A moving shader
+    is watched for eight frames (about four seconds) before anything thins: one frame of
+    'flow' had thinned the veil to 0.712 where the frames after it needed 0.727. A still
+    shader (reduced motion, the studio) draws one frame, so one is all of it, and it draws its
+    same moment again for a page that starts asking.
+  - **The veil.** The kit's root (`atmosphere-veil.ts`) finds every ink drawn straight on an
+    atmosphere section's veil (nothing filled between): each element's words, at 4.5:1 or
+    3:1 for large text, hidden ones too, as they may be shown, but not words on their own
+    fill; a control's fill, borders and drawn lines (an opaque box-shadow), an SVG's strokes
+    and fills, and a Style's marks (pseudo-elements, X24) over their host and half an em round
+    it, all at 3:1. Colours are read by drawing them, never parsed. Each ink is held over the
+    cells under its own box grown by twice the shader's blur, which mixes in what lies that
+    far off (`liveVeil`: the composite in sRGB, its darkest and lightest ends, an ink inside
+    that run counted as failing), and the section takes the thinnest veil at which all of
+    them hold, 2% past. Again on each report, scroll (the window's or any scroller's), change
+    of a section's size and `<details>` toggling. A section with no ink on the window keeps
+    its veil. Whatever it cannot measure keeps the proven veil: an ink it cannot read or that
+    is not opaque, one on a translucent fill, a mark drawn with an image. It eases in as it
+    thins (`data-lp-veil-easing`, `--duration-slowest`) and thickens at once.
+  - **Measured** over the composite actually drawn (words hidden, p0.1, each ink against its
+    own pixels), before the review's changes made it thicker still: 'glow' light 12 of 12 hold
+    at 0.817 (9 fail at X53's 0.712); 'glow' dark 12 of 12 at 0.776, Studio's own; 'flow' light
+    at rest 11 of 11 at 0.712, scrolled 300px 8 of 8 at 0.767 (2 fail at 0.712); 'flow' light at
+    phone width 11 of 11 at 0.712. As built: 'flow' light holds the proven veil for four
+    seconds, eases to 0.737 and holds it (0.025 over the owner's look); 0.762 at 150px and
+    0.792 at 300px; 'flow' dark 0.776 at 300px; 'glow' light 0.817 and dark 0.776.
+    `e2e/page-kit/live-veil.spec.ts` measures it on CI ('glow', both themes), and fails a
+    runtime that measures but writes Studio's veil.
+  - **Cost.** Nothing on a page whose Styles do not thin (the other seven): no section asks,
+    so the shader samples nothing. On Studio, a 192 × 120 readback twice a second, and on
+    each scroll frame the boxes of the inks on the window (a line on the same cells reuses its
+    last answer); a count rolling up is measured as it rolls and the page read again once it
+    stops.
+  - **Open:** a moving shader starts again on a resize and on a theme change (its colours
+    change), so it holds the proven veil for four seconds after either, which includes a
+    phone whose window grows as its address bar hides. The veil changes as the opening
+    scrolls, in steps of 0.005, thickening at once. Only Chromium has been measured.

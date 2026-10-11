@@ -35,6 +35,7 @@
   import { resolvePageImageUrl } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
+  import { heroFacts } from '../../model/facts';
   import { headingLength } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -57,6 +58,8 @@
   const chars = $derived(heading.length);
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
+  // The course's shape and its way in, under the lede (`model/facts.ts`).
+  const facts = $derived(heroFacts(context));
   let watching = $state<PreviewMedia | null>(null);
 
   interface HeroMedia {
@@ -133,9 +136,17 @@
       {edit}
     />
   </div>
-  {#if content.body}
+  {#if content.body || facts.length > 0}
     <div class="hero__lede hero__enter-c">
-      <Text text={content.body} size="lead" type="hero" field="body" {edit} />
+      {#if content.body}
+        <Text text={content.body} size="lead" type="hero" field="body" {edit} />
+      {/if}
+      {#if facts.length > 0}
+        <p class="hero__facts">
+          {#each facts as fact, i (fact)}{#if i > 0}<span aria-hidden="true">{' · '}</span
+              >{/if}<span>{fact}</span>{/each}
+        </p>
+      {/if}
     </div>
   {/if}
   <div class="hero__actions hero__enter-c">
@@ -257,6 +268,21 @@
 {/if}
 
 <style>
+  /* ── the facts line: small, in the soft ink, its figures lined up ──────── */
+  .hero__facts {
+    margin: 0;
+    font-family: var(--lp-font-body);
+    font-size: var(--lp-size-small);
+    line-height: var(--lp-leading-body);
+    font-variant-numeric: tabular-nums;
+    color: var(--lp-ink-soft);
+    text-wrap: balance;
+  }
+
+  .hero__lede:has(> :global(.lp-text)) > .hero__facts {
+    margin-block-start: var(--lp-stack);
+  }
+
   /* ── statement ─────────────────────────────────────────────────────────── */
   .hero-statement {
     display: grid;

@@ -75,4 +75,7 @@ export const STUDIO: StyleDefinition = {
     'cta',
   ],
   fonts: { heading: 'Bitter', body: 'Figtree' },
+  // Hazy: the org's moving background through a third of the inner pages'
+  // blur, under the same veil, so it is seen moving (03 X53).
+  atmosphere: 'hazy',
 };

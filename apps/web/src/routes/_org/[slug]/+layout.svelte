@@ -473,8 +473,9 @@
   style={serverTokenOverrideStyle}
 >
   <!-- Still in the studio: there it sits behind an 80% cover and a 60px blur,
-       where its motion buys nothing and every frame is a full-viewport render. -->
-  <ShaderHero class="shader-hero--fullpage" still={isStudio} />
+       where its motion buys nothing and every frame is a full-viewport render.
+       `tone`: it reports what it draws to a page kit's live veil (03 X54). -->
+  <ShaderHero class="shader-hero--fullpage" still={isStudio} tone />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
     <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />
@@ -529,7 +530,7 @@
      backdrop-filter doesn't reliably composite against WebGL canvases
      when view-transition-name creates a stacking context on org-main. */
   .org-layout:not(.org-layout--landing) :global(.shader-hero--fullpage) {
-    filter: blur(var(--blur-2xl));
+    filter: blur(var(--_shader-blur, var(--blur-2xl)));
   }
 
   /* Landing page: backdrop-filter overlay with gradient mask.
@@ -588,9 +589,14 @@
      §5.1): for the life of that page, clear the stack above the org's shader
      so the section's own veil sits on the shader itself. The kit clears its
      root and keeps every other section opaque (`kit/styles/surfaces.css`). A
-     Style that asks for a sharp background lifts the blur as well. */
+     Style that asks for a hazy background takes a third of the blur, and one
+     that asks for a sharp background lifts it. */
   .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere])) .org-main {
     background: transparent;
+  }
+
+  .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='hazy'])) {
+    --_shader-blur: var(--blur-xl);
   }
 
   .org-layout[data-hero-shader-active]:has(:global(.lp[data-lp-atmosphere='sharp']))
@@ -618,10 +624,10 @@
       :global(.lp[data-lp-atmosphere]:not([data-lp-atmosphere='sharp']))
     )
     :global(.shader-hero--fullpage canvas) {
-    width: calc(100% + 4 * var(--blur-2xl));
+    width: calc(100% + 4 * var(--_shader-blur, var(--blur-2xl)));
     max-width: none;
-    height: calc(100% + 4 * var(--blur-2xl));
-    margin: calc(-2 * var(--blur-2xl));
+    height: calc(100% + 4 * var(--_shader-blur, var(--blur-2xl)));
+    margin: calc(-2 * var(--_shader-blur, var(--blur-2xl)));
     object-fit: cover;
   }
 
