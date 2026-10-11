@@ -112,7 +112,10 @@ describe('getStreamingUrl checks access before media readiness (Codex-h3ipg)', (
   });
 
   it('denies a viewer who has not bought it, never reporting the media state', async () => {
-    const call = svc.getStreamingUrl(strangerId, { contentId });
+    const call = svc.getStreamingUrl(strangerId, {
+      contentId,
+      expirySeconds: 600,
+    });
     await expect(call).rejects.toBeInstanceOf(AccessDeniedError);
     await expect(call).rejects.not.toBeInstanceOf(
       MediaNotReadyForStreamingError
@@ -121,7 +124,7 @@ describe('getStreamingUrl checks access before media readiness (Codex-h3ipg)', (
 
   it('tells a buyer the media is not ready', async () => {
     await expect(
-      svc.getStreamingUrl(buyerId, { contentId })
+      svc.getStreamingUrl(buyerId, { contentId, expirySeconds: 600 })
     ).rejects.toBeInstanceOf(MediaNotReadyForStreamingError);
   });
 });
