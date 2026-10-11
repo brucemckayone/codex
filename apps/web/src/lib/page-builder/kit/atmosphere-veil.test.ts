@@ -330,8 +330,8 @@ describe('atmosphereVeil', () => {
     const s = section([words]);
     const root = document.createElement('div');
     const strip = document.createElement('div');
-    root.append(strip);
-    document.body.append(root);
+    root.appendChild(strip);
+    document.body.appendChild(root);
     const detach = atmosphereVeil(true, () => [s])(root);
     shaderTone.record(rgba, { still: true, blur: 0 });
     flush();
@@ -377,7 +377,7 @@ describe('atmosphereVeil', () => {
     const root = document.createElement('div');
     const figure = document.createElement('span');
     figure.textContent = '0';
-    root.append(figure);
+    root.appendChild(figure);
     const detach = atmosphereVeil(true, read)(root);
     expect(read).toHaveBeenCalledTimes(1);
     for (const n of ['1', '2', '3']) {
@@ -391,7 +391,7 @@ describe('atmosphereVeil', () => {
     expect(read).toHaveBeenCalledTimes(2);
 
     // A new element is a new ink: read at once.
-    root.append(document.createElement('p'));
+    root.appendChild(document.createElement('p'));
     await Promise.resolve();
     flush();
     expect(read).toHaveBeenCalledTimes(3);
@@ -401,7 +401,7 @@ describe('atmosphereVeil', () => {
   it("reading the page again keeps a section's veil rather than starting it over", async () => {
     const s = section([across()]);
     const root = document.createElement('div');
-    root.append(s.el);
+    root.appendChild(s.el);
     const detach = atmosphereVeil(true, () => [s])(root);
     report(PAPER);
     flush();
@@ -425,7 +425,8 @@ describe('atmosphereVeil', () => {
     read.mockReturnValue([s]);
     const root = document.createElement('div');
     const link = document.createElement('a');
-    root.append(s.el, link);
+    root.appendChild(s.el);
+    root.appendChild(link);
     const detach = atmosphereVeil(true, read)(root);
     expect(read).toHaveBeenCalledTimes(1);
     s.el.dispatchEvent(new Event('transitionend', { bubbles: true }));
