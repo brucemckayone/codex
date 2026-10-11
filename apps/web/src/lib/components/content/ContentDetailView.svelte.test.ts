@@ -34,6 +34,15 @@ vi.mock('$lib/collections/progress', () => ({ updateLocalProgress: vi.fn() }));
 vi.mock('$lib/components/ui/Toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
+// The view lazy-loads its player in an effect as soon as the content is video
+// or audio. No test here plays anything, and the real modules pull in
+// media-chrome and hls, a load slow enough on CI that the file ended with it
+// still in flight and vitest failed the run on "Closing rpc while 'fetch' was
+// pending". Stub them, and settle every dynamic import before teardown.
+vi.mock('$lib/components/VideoPlayer/VideoPlayer.svelte', () => ({
+  default: () => {},
+}));
+vi.mock('$lib/components/AudioPlayer', () => ({ AudioPlayer: () => {} }));
 
 import ContentDetailView from './ContentDetailView.svelte';
 
@@ -90,7 +99,8 @@ function player(): HTMLElement {
 
 const bodyText = () => document.body.textContent ?? '';
 
-afterEach(() => {
+afterEach(async () => {
+  await vi.dynamicImportSettled();
   if (component) unmount(component);
   component = null;
   document.body.innerHTML = '';
