@@ -1655,31 +1655,42 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     the page reads what CSS computed, and a browser that cannot read them never thins.
   - **The measurement.** The org layout's fullpage shader (`ShaderHero tone`) samples, about
     twice a second and only while a page asks, the part of its frame the window shows: drawn
-    at 4 × 4 per cell and averaged to a 48 × 30 grid (the 20px blur averages more), keeping
-    each cell's darkest and lightest colour per channel since the shader, its colours or its
-    size last changed (`shaderTone`). A frozen shader (reduced motion, the studio) draws its
+    at 4 × 4 per cell and averaged to a 48 × 30 grid, keeping each cell's darkest and lightest
+    colour per channel since the shader, its colours or its size last changed
+    (`shaderTone`). It reports its CSS blur, and whether its frame is still. A moving shader
+    is watched for eight frames (about four seconds) before anything thins: one frame of
+    'flow' had thinned the veil to 0.712 where the frames after it needed 0.727. A still
+    shader (reduced motion, the studio) draws one frame, so one is all of it, and it draws its
     same moment again for a page that starts asking.
   - **The veil.** The kit's root (`atmosphere-veil.ts`) finds every ink drawn straight on an
-    atmosphere section's veil (nothing opaque between): each element's words, at 4.5:1 or
-    3:1 for large text; a filled button's fill and a ghost button's line, at 3:1; a Style's
-    marks (pseudo-elements, X24), at 3:1, over their host and half an em round it. Colours are
-    read by drawing them, never parsed. On each report and each scroll, each ink is held over
-    the cells under its own box (`liveVeil`: the composite in sRGB, its darkest and lightest
-    ends, an ink inside that run counted as failing) and the section takes the thinnest veil
-    at which all of them hold, 2% past. A section with no ink on the window keeps its veil.
+    atmosphere section's veil (nothing filled between): each element's words, at 4.5:1 or
+    3:1 for large text, hidden ones too, as they may be shown, but not words on their own
+    fill; a control's fill, borders and drawn lines (an opaque box-shadow), an SVG's strokes
+    and fills, and a Style's marks (pseudo-elements, X24) over their host and half an em round
+    it, all at 3:1. Colours are read by drawing them, never parsed. Each ink is held over the
+    cells under its own box grown by twice the shader's blur, which mixes in what lies that
+    far off (`liveVeil`: the composite in sRGB, its darkest and lightest ends, an ink inside
+    that run counted as failing), and the section takes the thinnest veil at which all of
+    them hold, 2% past. Again on each report, scroll (the window's or any scroller's), change
+    of a section's size and `<details>` toggling. A section with no ink on the window keeps
+    its veil. Whatever it cannot measure keeps the proven veil: an ink it cannot read or that
+    is not opaque, one on a translucent fill, a mark drawn with an image. It eases in as it
+    thins (`data-lp-veil-easing`, `--duration-slowest`) and thickens at once.
   - **Measured** over the composite actually drawn (words hidden, p0.1, each ink against its
-    own pixels): 'glow' light 12 of 12 hold at 0.817 (9 fail at X53's 0.712); 'glow' dark 12
-    of 12 at 0.776, Studio's own; 'flow' light at rest 11 of 11 at 0.712 (the owner's look),
-    scrolled 300px 8 of 8 at 0.767 (2 fail at 0.712); 'flow' dark 0.776; 'flow' light at
-    phone width 11 of 11 at 0.712. Those were each a few seconds in. The extremes only widen
-    as the shader moves, so the veil settles once its range under the words has been seen:
-    'flow' light at rest settled at 0.727 (and held it for the next minute), 0.015 over the
-    owner's look, and 0.782 at 300px. `e2e/page-kit/live-veil.spec.ts` measures it on
-    CI ('glow', both themes), and fails a runtime that measures but writes Studio's veil.
+    own pixels), before the review's changes made it thicker still: 'glow' light 12 of 12 hold
+    at 0.817 (9 fail at X53's 0.712); 'glow' dark 12 of 12 at 0.776, Studio's own; 'flow' light
+    at rest 11 of 11 at 0.712, scrolled 300px 8 of 8 at 0.767 (2 fail at 0.712); 'flow' light at
+    phone width 11 of 11 at 0.712. As built: 'flow' light holds the proven veil for four
+    seconds, eases to 0.737 and holds it (0.025 over the owner's look); 0.762 at 150px and
+    0.792 at 300px; 'flow' dark 0.776 at 300px; 'glow' light 0.817 and dark 0.776.
+    `e2e/page-kit/live-veil.spec.ts` measures it on CI ('glow', both themes), and fails a
+    runtime that measures but writes Studio's veil.
   - **Cost.** Nothing on a page whose Styles do not thin (the other seven): no section asks,
     so the shader samples nothing. On Studio, a 192 × 120 readback twice a second, and on
     each scroll frame the boxes of the inks on the window (a line on the same cells reuses its
-    last answer).
-  - **Open:** the grid is cleared on a resize, so a phone whose window grows as its address
-    bar hides holds the proven veil until the next sample (half a second). The veil changes
-    as the opening scrolls (0.712 → 0.767 on 'flow' light over 300px), in steps of 0.005.
+    last answer); a count rolling up is measured as it rolls and the page read again once it
+    stops.
+  - **Open:** a moving shader starts again on a resize and on a theme change (its colours
+    change), so it holds the proven veil for four seconds after either, which includes a
+    phone whose window grows as its address bar hides. The veil changes as the opening
+    scrolls, in steps of 0.005, thickening at once. Only Chromium has been measured.
