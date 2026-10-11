@@ -144,6 +144,9 @@ them in §13.
 
 ### 4.2 Corners: the brand radius, bent
 
+> **Amended by X44 (phase 3a):** the source of a card's, a picture's and a button's corner is now
+> the org's `--radius-card`, `--radius-lg` and `--radius-button`. The bends below stand.
+
 `--lp-brand-radius: var(--brand-radius, var(--radius-md))` (kit base). A Style sets each radius token
 as `clamp(<floor>, calc(var(--lp-brand-radius) * <k>), <ceiling>)`:
 
@@ -1027,3 +1030,555 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       new, at 120 characters (Codex-61zsk.36);
     - not measured: 1024 wide, containers of 50–56rem, the public page's header, and the editor
       canvas.
+- **X35 · 2026-10-09 · orchestrator + p3a · Phase 3a: the org's derived tokens are the source
+  (Codex-61zsk.41, Task 1).** The owner's decision (2026-09-30), verbatim: "Follow the org
+  (Recommended)". The kit had re-derived a second palette from the raw brand inputs; it now
+  draws the org's own `--color-*` tokens and keeps its move formulas only as the safety net.
+  - **The source.** `.lp` reads the org's nine tokens as `--_org-*` (`schemes.css`):
+    `--color-background`, `-surface-secondary`, `-surface-card`, `-text`, `-text-secondary`,
+    `-border`, `-heading`, `-focus` and `-interactive`. A page's own brand makes the root a
+    nested `[data-org-brand]` carrier, which re-derives them there.
+  - **Where.** Base and soft sections that are not over a picture, in every Style but
+    Cinematic. **Cinematic's dark room stays, deliberately**: its sections keep the kit's
+    inks.
+  - **The floors.** An org colour is drawn exactly, and moved only as far as a floor needs:
+    text 4.5:1, large text, marks, buttons and the focus ring 3:1. The grades are the band's
+    worst surface times a 2% margin. Plain: text `--_ot` (light Y ≤ .114, dark ≥ .25), large
+    `--_ol` (≤ .196 / ≥ .15). Decorated (Studio's paper, Soft's shapes): `--_odt`
+    (.086 / .33) and `--_odl` (.155 / .203). The hairline is decoration and is the org's
+    exactly.
+  - **The bands (amended by X48).** The ground, the soft band and the card move only when
+    outside their band: light L ≥ its edge (chroma capped at 0.046 only when moved), dark
+    L ≤ its edge (0.039). The edge is no longer fixed at 0.9 / 0.24: it is the narrowest band
+    of the pole that holds the org's ground (X48), so the ground is drawn as itself unless it
+    lies past the pole's last band. The surfaces share the ground's band, so there is one
+    worst surface for every ink on it, and each band has its own grades.
+  - **Polarity follows the org's ground (amended by X48).** The pole is the ground's own, by its
+    luminance, in either theme: an org background with no dark twin keeps the light pole in
+    dark mode, as the org's own pages do, and a dark one is the dark pole in light mode too.
+    PageRenderer names each theme's band on the root (`data-ground-light`,
+    `data-ground-dark`); the selectors no longer read the carrier's style text.
+  - **The one departure: the soft band (X47, D14).** On an org's background the soft band is
+    not `--color-surface-secondary`. It is the org's ground a step toward its ink, with the
+    ground's chroma kept. This is the one place the kit departs from the org's derived token.
+    The reason: the org makes its secondary surface for small controls (its search box), at
+    half the ground's chroma, and as a full-width band on a warm ground it reads grey. On the
+    platform's neutral ground the token stands.
+  - **Tests:** `e2e/page-kit/brand-fidelity.spec.ts` "a base section is drawn in the org's own
+    tokens" (4 pages × 2 themes), "a … preview on a … viewer draws the org's … tokens", "a dark
+    preview on a light viewer resolves a page carrier's DARK brand tokens";
+    `kit/styles/schemes.test.ts` "the org is the source — its tokens, drawn exactly unless a
+    floor fails (phase 3a)": it models `org-brand.css`, draws the seeded orgs exactly, holds
+    every floor for ANY org colour on the worst surface its band can hold, and moves no further
+    than 3% past what that surface needs.
+  - **Measured** against explore: 27 of 32 base-section readings differed before; 0 after.
+- **X36 · 2026-10-09 · p3a · The button is the org's, at the org's height and weight; the
+  floating bar defaults to `base` (Task 2).**
+  - **Fill and label.** A primary button is the org's `--color-interactive` through `--_ol`,
+    with the org's label rule (the platform's lightness pivot, `--color-on-interactive`'s
+    own). Accent text is the same colour at the text grade. The kit's own bands (contrast,
+    brand, accent) keep their own button grade (.248 / .175).
+  - **Shape.** In every Style a call to action is the org's large button,
+    `--tap-target-min` (44px), and a leading one (`size="lg"`: the hero's, the closing
+    band's, a featured offer's) its extra large, `max(--tap-target-min, --space-12)` (48px).
+    Both are scaled by the brand's density, at `--font-medium`. A Style keeps the label's
+    size, tracking and padding.
+  - **The bar's scheme.** `PageRenderer` passes `STYLES[style].sticky ?? 'base'`, and
+    `StickyCta`'s own default is `base` too. Quiet names `base`; Cinematic names `soft`, its
+    tint. A dark bar is a band the org's site never shows, and its button would have to move
+    to stay legible.
+  - **Tests:** spec "every call to action is the org's button height and weight" (compared as
+    numbers since 3a Task 3: at a density other than 1 the computed height prints rounded);
+    the button rows of the spec's mapping; schemes.test "draws the org's button, accent text
+    and marks on base and soft — on both paths"; `PageRenderer.svelte.test.ts` "floats the
+    bar on the org's own surface (base, its raised card) unless a Style names a band:
+    Cinematic's on its tint"; `StickyCta.svelte.test.ts` "defaults to the base scheme, as
+    PageRenderer does".
+- **X37 · 2026-10-09 · p3a · `--lp-accent-source` is the marks' source only.** It is the brand
+  colour a Style's marks are moved from (Path draws its route in the second colour). Accent
+  text and buttons are the org's interactive colour in every Style, never the source, so a
+  page's words and its asks are one colour. A mark is graphic grade (3:1) and is never the
+  colour of text or of a button. **Tests:** schemes.test "moves the accent and the buttons from
+  the brand, the marks from their source — on both paths"; "the mark is graphic grade only" ("is
+  never the colour of text or of a button anywhere in the kit", with its calibration).
+- **X38 · 2026-10-09 · p3a · A mid-tone button darkens a little and keeps white (D8).** The
+  owner's decision, verbatim: "Darken a little, keep white (Recommended)".
+  - **The rule.** Where white falls just short of 4.5:1 on the org's fill, the fill darkens
+    only as far as white needs (`--_wl-*`, `--_wl-f`). A bright fill keeps the org's black
+    label (`--_wk`, the switch at Y .182). On Tending the Grief, #ef3d0b is drawn #dd3809 with
+    a white label, in both themes.
+  - **Where it differs from the org.** The org's own label rule would put black on such a fill
+    (for example `#FF0000`, which the kit draws `#ed0000` with white). That difference is the
+    decision.
+  - **Tests:** schemes.test "keep white — a mid-tone button darkens a little rather than take a
+    black label (owner, D8)", with its teeth; spec "Tending the Grief's mid-tone brand darkens a
+    little and keeps a white label" (light and dark).
+- **X39 · 2026-10-09 · p3a · A page background with no twin follows the org in the other theme
+  (D7, `data-page-bg`).** The owner's decision, verbatim: "Follow the org's dark mode
+  (Recommended)".
+  - **The rule.** A page that sets only `--brand-bg` draws it in light mode only, and a page
+    that sets only `--brand-bg-dark` draws it in dark mode only. In the other theme the page
+    takes the org's own ground and inks.
+  - **The attributes.** `PageRenderer` marks the carrier `data-org-bg` and names the theme(s)
+    the background is for in `data-page-bg` (`light` | `dark` | `both`). Both are derived
+    from the properties declared, never from the style text.
+  - **Tests:** spec "a light-only page background gives way to the org's dark mode", its
+    preview case, and "studio-alpha light: a dark-only page background gives way to the org's
+    light mode"; `PageRenderer.svelte.test.ts` "names which theme the page's own background is
+    for, so the other takes the org's (owner, D7)"; schemes.test "gives a page background with
+    no twin back to the org in the other theme (owner, D7)".
+- **X40 · 2026-10-09 · p3a · Path's missing second colour is a tone of the org's own (D11).** The
+  owner's decision, verbatim: "A tone of the org's colour (Recommended)". It replaces the
+  invented 45° hue (of-blood-and-bones' ochre #765821).
+  - **The rule.** With no second colour of the org's own, `--lp-brand-2` is the org's colour
+    at the same hue, moved in OKLCH lightness toward the ground (+0.2 on the light pole, −0.2
+    on the dark), turning back at the band edge (L 0.78 / 0.25). An org's own second colour
+    is untouched.
+  - **Tests:** schemes.test "the second colour's tone — the org's own hue, apart from it (owner,
+    D11)", with its teeth; spec "Path's route is a tone of the org's colour" (light and dark).
+- **X41 · 2026-10-09 · p3a · The hero's main button over a photo is the org's own button (D10).**
+  The owner first chose "The org's colour (Recommended)". After seeing a lightened build turn
+  Tending the Grief's orange into coral (#ff7863), the owner chose "Org's own button
+  (Recommended)" (D10b).
+  - **The rule.** The hero's primary button over media is exactly the button the kit draws on
+    the org's surfaces. One rule carries both selectors and the two declarations, so they
+    cannot drift apart.
+  - **Why WCAG allows it.** WCAG 1.4.11 asks a control with visible text for no contrasting
+    edge, only a legible label and a visible focus ring
+    (https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html#boundaries). The focus
+    ring stays the on-media ink, at least 6.96:1 against the lightest surface any brand's scrim
+    allows.
+  - **Scope.** The secondary, quiet and watch controls, and the words, keep the on-media ink.
+  - **Known gap:** a Cinematic cover hero over a photo gets the org's button at the dark-pole
+    grade, while Cinematic's sections keep their own button. No live page has one.
+  - **Tests:** schemes.test "the hero's main button over a photo is the org's own button
+    (owner, D10)" (shared definition; focus ring for every brand); spec "the hero's main button
+    over its photo is the button its own sections draw" (light and dark).
+- **X42 · 2026-10-09 · p3a · The floating bar is a raised card (D9, Task 3).** The owner's
+  decision, verbatim: "Raised card (Recommended)". Since Task 2 the bar sat on the org's ground,
+  flat against the page it floats over.
+  - **The rule.** On the org's surfaces (scheme `base`), the bar draws its scheme's card colour,
+    `--lp-panel`, which there is the org's `--color-surface-card`. It sits on
+    `--lp-shadow-raised` (= `--shadow-xl`): the shadow the org floats its own bar
+    (`SubscribeStickyBar`) and its raised panels on. It holds the org's button. Quiet adds its
+    hairline rim over the same shadow. Cinematic's `soft` bar keeps its tint, because there
+    the card is the ground.
+  - **The floors.** The card is held in the ground's band exactly as the ground is (the same
+    `clamp`, per pole), so every ink and button proven on that band holds on it.
+  - **Card against ground.** No seeded org's card equals its ground:
+    - of-blood-and-bones: #fffffd on #f3f0e7 (1.14:1), both themes;
+    - studio-alpha and studio-beta, light: #ffffff on #fafafa (1.04:1). That is near-equal,
+      so the shadow carries the bar;
+    - studio-alpha and studio-beta, dark: the platform's card #404040 (L 0.37) lies above the
+      dark band, so it is held at L 0.24 (#1f1f1f) on #171717 (1.09:1), and the org's dark
+      shadow carries it.
+    - Neither studio has a bar on a live page, because nothing is on sale.
+  - **Measured on of-blood-and-bones, light:** text 20.97:1, price 9.43:1 (12.61:1 dark), the
+    button against the card 7.06:1, and its label 7.07:1. On Tending the Grief's own #dd3809
+    the button is 4.52:1 against the card and its label 4.52:1 on it.
+  - **Tests:** spec "the floating bar is a raised card in the org's card colour, with the org's
+    button" (2 pages × 2 themes): the card, the shadow and all four floors. The card is the
+    org's exactly when it lies in the band, and on the band's edge when it does not.
+    schemes.test "the floating bar is a raised card in the org's card colour (owner, D9)": the
+    drawn rule, the card in the ground's band, the floors for any brand and org ground, and the
+    seeded orgs. `StickyCta.svelte.test.ts` holds the default scheme.
+- **X43 · 2026-10-09 · p3a · Labels in the org's case and tracking (Task 3).** A label, the
+  eyebrow (the kit's kicker), is in the org's `--text-transform-label`:
+  `--lp-case-label: var(--text-transform-label, none)`.
+  - **The tracking.** The org has no label-tracking token. Its own uppercase labels pair the
+    case with `--tracking-wider` (0.05em) in 15 of the 20 places that read the case token, and
+    in 11 of the 13 on its public pages: the floating bar, the catalogue tile, the content
+    page's two, and 7 on the pricing page. The other 5 use `--tracking-wide`. So an uppercase
+    label takes
+    `--tracking-wider`, through `@container lp-page style(--lp-case-label: uppercase)` on each
+    section. A label in any other case keeps its Style's tracking.
+  - **Explore's kicker.** It is a literal 0.2em at 13px (`JourneyEntryCard`), not a token, so
+    the kit does not copy it.
+  - **Before → after,** on all 7 live pages, both themes: sentence case at 0–0.04em became
+    uppercase at 0.05em. 0 of 14 rows matched explore's case before; 14 of 14 after.
+  - **The fold (X34, X29, X27, X31).** 2,828 rows were re-measured and are identical to before:
+    0 past the fold, 0 split words, min gap 55.3px. An uppercase tracked eyebrow is 18–23%
+    wider, but every live one stays on one line; the longest is 324 of 355px at 390.
+  - **Known gaps:**
+    - SideLabel, the offer badge and the testimonial marquee's labels (blocks) do not read
+      `--lp-case-label`, so they stay in their own case;
+    - a browser without style queries keeps the Style's tracking.
+  - **Tests:** spec "every eyebrow is in the org's label case and tracking" (4 pages); "the
+    hero's eyebrow reads as its explore card's kicker" ("FOR THE WEIGHT YOU CARRY", equal to
+    explore's); "a page that sets its labels in sentence case keeps them, at its Style's
+    tracking".
+- **X44 · 2026-10-09 · p3a · Corners: the org's radius tokens, bent (Task 3; amends §4.2).** A
+  card's corner is the org's `--radius-card`, a picture's its `--radius-lg` and a button's its
+  `--radius-button`, each times the Style's bend from §4.2, with §4.2's floors and ceilings.
+  Chips and pill-if-rounded stay on the brand radius. The org's tokens are re-derived on a
+  page's own carrier.
+  - **Before,** the raw brand radius times the bend drew every card and picture at two thirds
+    of the org's card corner. Buttons are unchanged, because `--radius-button` is the brand
+    radius.
+  - **Drawn** (card and picture / button, px), verified on all 24 combinations:
+
+    | Style (k) | of-blood-and-bones (radius 0.33rem) | studio-alpha (0.375rem) | studio-beta (0.5rem) |
+    |---|---|---|---|
+    | Bold, Poster (.25) | 1.98 / 1.32 | 2.25 / 1.5 | 3 / 2 |
+    | Studio, Quiet (.5) | 3.96 / 2.64 | 4.5 / 3 | 6 / 4 |
+    | Clean, Path (1) | 7.92 / 5.28 | 9 / 6 | 12 / 8 |
+    | Soft (2) | 15.84 / pill | 18 / pill | 24 / pill |
+    | Cinematic (1) | 7.92 / pill | 9 / pill | 12 / pill |
+
+    Clean and Path draw the org's own card corner. Explore's content cards are rounder, at
+    `--radius-xl` (10.56 / 12 / 16).
+  - **Harness note.** Hydration sets the root's attributes back to the page's own about 0.66s
+    after the server's HTML renders. So the spec's `openAs` waits for a quiet network before
+    it draws anything on the root, and the corners test checks that the Style it set is still
+    the one drawn.
+  - **Tests:** spec "every Style's corners are the org's radius tokens, bent" (3 orgs × 8
+    Styles × card, picture and button).
+- **X45 · 2026-10-09 · p3a · Shadows: the org's own, where a Style lifts a card (Task 3).**
+  - **What the org draws.** Explore's cards rest on `--shadow-md` (on the picture, since the
+    card itself is transparent) and lift to `--shadow-lg` under the pointer. The home page's
+    carousel slides sit on `--shadow-lg`. Its floating bar and raised panels (Spotlight, the
+    subscribe panel, the pricing tier cards) sit on `--shadow-xl`.
+  - **The kit's two tokens.** `--lp-shadow-card` (`--shadow-md`) for a card at rest, and
+    `--lp-shadow-raised` (`--shadow-xl`) for one that floats over the page (X42). The org's
+    dark mode deepens both.
+  - **Per Style:**
+    - Soft's one filled card in a band rests on `--lp-shadow-card`. It was the card's own
+      ground deepened.
+    - Cinematic's plates keep the room's own shade: the room is the Style's deliberate dark,
+      where a grey shadow cannot show.
+    - Studio's prints are a photograph's edge, the Style's texture, and keep theirs.
+    - Clean, Bold and Poster draw no card shadow by design; Path and Quiet draw flat cards.
+  - **Known gap:** the org's shadow fine-tune (`--brand-shadow-scale`, `--brand-shadow-color`)
+    never reaches `--shadow-*`. The tokens are composed at `:root`
+    (`styles/tokens/shadows.css:12`), and `org-brand.css:190-191` re-declares only their
+    inputs. The org's own site has the same gap, and the kit matches it.
+  - **Tests:** spec "Soft's filled card rests on the org's card shadow" (light and dark; red on
+    the old Soft stylesheet); the bar's shadow in X42's spec case.
+- **X46 · 2026-10-09 · p3a · Phase 3a measured, before → after (c9ffbea2^ → Task 3).** The
+  owner's question for every page: does it read as the org's own site?
+  - **Before** was measured on the pre-3a sources swapped back in. The swap was calibrated:
+    1,064 of Task 1's readings were re-measured and the only 2 that differed were on explore's
+    own heading pick. **After** is the final tree.
+  - **Results:**
+    - colour: X35's 27 of 32 → 0, unchanged since Task 2 (studio-alpha and studio-beta: 255
+      of 256 readings identical between Task 2 and Task 3, the other on explore);
+    - labels: 0 of 14 sales-page rows in explore's label case → 14 of 14 (X43);
+    - corners: X44;
+    - the bar: 0 of 6 bars in the org's card → 6 of 6, light and dark. On of-blood-and-bones it
+      went from a dark contrast band (#23100c with #f74518 and a black label) to the org's card
+      #fffffd holding its #a62b0c button (X42).
+  - **Captures:** before | after | explore at 1440 light, one per org, shown to the owner on
+    2026-10-09.
+  - **Measured on the seeded brands.** During the first after run the owner was trying other
+    brands on of-blood-and-bones in the brand editor (#8B5CF6, then #FF0000 on #FDF3ED). Those
+    6 rows were re-measured once the seed was restored. The other 14 were identical between
+    the two runs.
+- **X47 · 2026-10-10 · p3a · The soft band keeps the ground's warmth (D14; amends X35).** The
+  owner's decision, verbatim: "Warm step of the parchment (Recommended)". Shown the band as
+  built (the org's secondary surface), the parchment a step darker keeping its warmth, the
+  peach tint from before phase 3a, and no band (`scratchpad/3a/t3-options/`). D13, label
+  tracking, was "Narrow, 0.05em (Recommended)", as built (X43).
+  - **The rule.** On an org's background (`[data-org-bg]` above the page, or on it), the soft
+    surface is `oklch(from var(--_org-ground) calc(l + var(--_soft-step)) c h)`: the ground,
+    a step toward its ink, with its chroma and hue. The step is the one `org-brand.css` takes
+    for its secondary surface, chosen by the POLE, not the theme: −0.03 on the light pole,
+    +0.04 on the dark. So an org whose ground stays light in dark mode steps darker in both
+    themes. Before, in dark mode it drew the dark theme's secondary surface, a step LIGHTER
+    than its parchment.
+  - **The platform.** On the platform's neutral ground there is no chroma to keep, so the soft
+    band stays `--color-surface-secondary` (#f5f5f5 on #fafafa; #404040 held in the dark
+    band). That includes a page whose own background is handed back (X39) to an org with
+    none. The scoped previews' platform copies are unchanged; their four background copies
+    take the rule.
+  - **Everything that reads the soft surface follows.** That means soft sections, and any
+    element a block gives the `soft` scheme. On the live pages those are Studio's tabs card,
+    the featured offer, a bento tile and a before/after column. By code they can also be the
+    lead testimonial, a CTA panel and a marked picture. A Style's tint mixes into the new
+    surface, and Cinematic's room keeps its own band.
+  - **The floors.** `--_org-soft-bg` still holds the surface inside the ground's band in each
+    pole, so every ink and button proven there holds. Where the step lands outside the band,
+    the band's edge takes it and its chroma cap applies, as before.
+  - **Measured on of-blood-and-bones** (#f3f0e7, oklch 0.955 0.0124 91.3), on its 16 soft
+    surfaces across 3 live pages:
+    - light: #e7e6e2 (oklch 0.925 0.0062) → #e9e6dd (oklch 0.925 0.0124);
+    - dark: #fffdf9 (oklch 0.995 0.0062) → #e9e6dd, the same as light;
+    - drawn as Clean (5% tint): #e6ddd7 → #e7ddd3; as Soft (16%): #f0d8cf → #f1d8cb.
+  - **The studios** are unchanged. studio-alpha's Tending the Grief captures are pixel-identical
+    before and after, as is, and with its benefits section drawn soft. studio-beta's Cinematic
+    band is #151f33 before and after.
+  - **Tests:** spec "of-blood-and-bones/ancestral-threads {light, dark}: the soft band is the
+    org's ground a step darker, its warmth kept". It computes the expected colour from the
+    measured ground, and holds every soft surface to it within 1/255 and to the ground's
+    chroma within 0.002. Spec "studio-alpha/tending-the-grief light: on the platform's neutral
+    ground the soft band is the platform's own, unchanged". schemes.test "the soft band keeps
+    the ground's warmth (owner, D14)" covers the CSS text and both poles. For every org ground
+    in the matrix, the seeded grounds, the bar's grounds and a 216-colour sweep of the cube, it
+    checks that the ground's chroma is kept and that, at every Style's tint, the drawn band is
+    no nearer its ink than the band's worst surface. It also covers the platform's own surface
+    and the same band in either theme.
+- **X48 · 2026-10-10 · p3a · The org's real ground: the pole from its lightness, the bands
+  widened, and a soft band that always stands apart (Codex-61zsk.42; amends X35 and X47).**
+  The owner's decisions, verbatim: "Fix it next (Recommended)", under D1's "Follow the org
+  (Recommended)", and for the brands to judge it on, "Sample brands for reviews
+  (Recommended)" (D15: `docs/handover/phase3-sources/review-brands/`). On the review brands
+  the kit drew night's forest ground (#15211C, L 0.235) at L 0.900, pale mint, in both themes,
+  and sand (#E9D8B4, L 0.887) at 0.900, where D14's soft band equalled the ground.
+  - **The pole.** A ground with luminance Y > 0.1791 is the light pole; at or below it, the
+    dark pole. 0.1791 is where black and white ink cross: white on Y and black on Y are equal at
+    √(1.05 × 0.05) − 0.05 (4.58:1 each), and the kit's inks already switch there (`--_w`). A
+    mid-tone ground could be either; the ink that holds more contrast on it decides. CSS cannot
+    read a colour's lightness, so `model/resolve.ts` (`groundBand`, `resolveGroundBands`)
+    resolves each theme's ground, PageRenderer names it on the root, and `schemes.css` selects
+    on `data-ground-light^='d'` (a dark pole in the light theme) and `data-ground-dark^='l'` (a
+    light pole in the dark theme). The dark theme's ground is the org's dark twin, else its
+    light background (as `org-brand.css` paints it); a page's own background decides its own
+    theme only (D7). No background is the platform's: no band, and the theme's pole.
+  - **The bands.** A ground is drawn in the narrowest band of its pole that holds its OKLCH
+    lightness, else on the pole's last band, where it moves to the edge:
+
+    | band | edge | text | large | decorated text | decorated large | keep white |
+    |---|---|---|---|---|---|---|
+    | l90 | L ≥ 0.90 | Y ≤ .114 | .196 | .086 | .155 | on |
+    | l85 | 0.85 | .086 | .155 | .064 | .121 | on |
+    | l80 | 0.80 | .062 | .118 | .044 | .091 | on |
+    | l75 | 0.75 | .041 | .086 | .026 | .065 | on |
+    | l70 | 0.70 | .022 | .058 | .011 | .042 | on |
+    | l65 | 0.65 | .009 | .039 | .0009 | .026 | on |
+    | d24 | L ≤ 0.24 | Y ≥ .25 | .15 | .33 | .203 | on |
+    | d30 | 0.30 | .316 | .194 | .417 | .261 | off |
+    | d36 | 0.36 | .414 | .26 | .535 | .34 | off |
+    | d42 | 0.42 | .552 | .352 | .69 | .443 | off |
+    | d48 | 0.48 | .737 | .475 | .885 | .574 | off |
+
+    l90 and d24 are the bands the kit always had. Each grade is the org's move (X35) at 2% past
+    what the band's worst surface needs, over the whole sRGB cube and the band's edge ring,
+    plain and under the decorations that ship, rounded toward the ink by less than 0.001.
+    **The limits:** l65 is the last light step at which decorated text still reaches 4.5:1
+    with that margin (an edge of 0.64 cannot, even with black ink), and d48 the last dark step
+    (0.54 cannot, even with white). A light-pole ground with L < 0.65 or a dark-pole ground with
+    L > 0.48 moves to that edge. In a 5,832-colour sample of the cube that is 1,841 colours,
+    the saturated mid-tones between L 0.48 and 0.65; none of the review brands or seeds is one.
+    **Keep white (D8)** is on only where white holds the band's large grade (Y ≤ .181): off from
+    d30, where the grade lifts a button to Y ≥ .194 and its label is black (≥ 4.88:1).
+  - **The soft band (amends X47).** It is the ground as its band draws it (`--lp-ground`), a
+    step toward its ink with its chroma (−0.03 light pole, +0.04 dark). Where that step would
+    leave the band, the kit takes it the other way (`--_band-side`), rather than holding a
+    clamp that would collapse it onto the ground: the step keeps its whole size either way.
+    **The minimum:** 0.03 OKLCH lightness on an org's background (0.04 on the dark pole), and
+    0.014 on the platform's own ground, whose secondary surface is the platform theme's (0.0150
+    on #fafafa). schemes.test and the e2e both check these numbers; the e2e allows 0.001 for 8-bit
+    paint. A Style's tint still mixes into the band and the band still holds it.
+  - **The moving background (§5.1)** is sized for the worst backdrops of l90 and d24 only, so
+    on a page whose ground is in any other band PageRenderer draws an `atmosphere` section as
+    `base` (`atmosphereProven`).
+  - **Measured, before → after** (OKLCH L of the org's `--color-background` | the kit's ground |
+    its soft band, of-blood-and-bones' sales page carrying each review brand through the brand
+    API, 1440, `scratchpad/3a/t42-brands-{before,after}.log`):
+    - night, both themes: 0.235 | 0.900 | 0.900 → 0.235 | 0.235 | 0.195 (d24 in both);
+    - sand, both themes: 0.887 | 0.900 | 0.900 → 0.887 | 0.887 | 0.857 (l85 in both);
+    - lilac: light 0.957 | 0.957 | 0.927 and dark 0.200 | 0.200 | 0.160 (l90, d24), unchanged
+      apart from the dark soft band, which now steps darker (0.2001 + 0.04 would leave d24);
+    - red (the platform's ground): unchanged, 0.985 | 0.985 | 0.970 light and 0.205 | 0.205 |
+      0.240 dark.
+    No review brand's ground moved. The seeds (of-blood-and-bones on l90 in both themes;
+    studio-alpha and studio-beta with no band) are pixel-identical before and after: 5 seeded
+    pages × 2 themes, full page.
+  - **Tests.** Spec `brand-fidelity.spec.ts` "review brand {night, sand, lilac, red, plain}
+    {light, dark}": the kit's ground equals the org's `--color-background` and its ink the
+    org's `--color-text` on the same page (measured both, within 1/255), its ink holds 4.5:1,
+    and every soft surface stands the minimum apart. The ink is what proves the pole: on the
+    wrong pole night's ground still lands within 1/255 and its moved ink still holds 4.5:1
+    (calibrated: with the light theme's dark-pole selectors broken, the spec first passed all
+    10, so the ink check was added; now exactly night light fails, and schemes.test's routing
+    test, 1 of 94). It puts each brand on a page carrier (no DB write) and names the carrier's
+    bands with `resolveGroundBands`, as PageRenderer does; the org-ground path is the one the
+    seeds and the API-applied captures exercise. Six failed before (night's ground light and
+    its soft band dark, sand's ground in both themes, and red and plain light at the platform's
+    0.015 step against a 0.03 minimum, which set the platform's own figure). schemes.test §16
+    "the org's real ground": the pole at the ink crossover over a 5,832-colour sample; the
+    narrowest band; every band's grades on its worst surface for any org colour, at 2% and no
+    further; the limits; keep white; every band rule in the CSS; the flip and its minimum; and
+    the review brands and seeds in both themes, at every Style's tint, plain and decorated, with
+    every floor. `resolve.test.ts` covers `groundBand`, `resolveGroundBands` and
+    `atmosphereProven`; `PageRenderer.svelte.test.ts` covers the root's band attributes and an
+    atmosphere section drawn as base on l85.
+- **X49 · 2026-10-10 · p3a · D12 on the org's side: its borders step away from its ground
+  (Codex-j4ioe).** The owner's decision, verbatim: "Fix it on the org's site (Recommended)".
+  `org-brand.css`'s `[data-org-bg]` rules stepped the four border levels (subtle .06, border
+  .12, hover .15, strong .18) by THEME: darker in light mode, lighter in dark. A ground on the
+  other side lost them. of-blood-and-bones' parchment (L 0.955) stays light in dark mode, so
+  every level clamped to L 1.000 (#fffffc, about 1.1:1). The mirror case is night (L 0.235) in
+  light mode, where every level went darker into black (0.175 to 0.055). Sand in dark mode
+  clamped the same way as the parchment.
+  - **The rule.** Each level is `oklch(from <background> calc(l + <step> * var(--_bg-away))
+    …)`. `--_bg-away` is −1 on a light ground and +1 on a dark one, in both rules. The side is
+    the ground's luminance at Y 0.1791, the kit's pole crossover (X48). **The mapping:**
+    relative colour gives l, c and h, not luminance, so `org-brand.css` rebuilds it exactly:
+    a = c·cos h and b = c·sin h; OKLab's three LMS′ rows, each cubed, give linear LMS; and Y
+    is one row of LMS → linear sRGB → Y (−0.040774541, 1.112492185, −0.071717644). No single
+    lightness would serve, because a grey crosses at L 0.5637 and a saturated colour does not.
+    The helpers are functions of the channel keywords, so they hold for whichever background
+    a border is derived from. The kit's four scoped previews of `--_org-line` take the same
+    expression.
+  - **Measured on explore** (OKLCH L of the background → subtle, border, hover, strong):
+    - seed dark: 0.955 → 1.000 ×4, now 0.895, 0.835, 0.805, 0.775;
+    - night light: 0.235 → 0.175, 0.115, 0.085, 0.055, now 0.295, 0.355, 0.385, 0.415;
+    - sand dark: 0.887 → 0.947, 1.000 ×3, now 0.827, 0.767, 0.737, 0.707;
+    - unchanged: seed light, night dark, sand light, lilac in both themes, and red and plain
+      (no background).
+    Of the seeded pages (5 sales pages and 3 explore pages × 2 themes, full length), only
+    of-blood-and-bones in dark mode changes: 4 pages, 7,472 to 31,024 pixels each. The rest are
+    pixel-identical, except studio-alpha's explore page (its animated hero) and Tending the
+    Grief in light mode, which differ by up to 3 levels between any two runs. That org has no
+    `[data-org-bg]`.
+  - **Tests.** In spec `brand-fidelity.spec.ts`, "D12 {of-blood-and-bones dark, night light}"
+    (red first: 2 failed and their 2 controls passed). It reads the org's background and all
+    four levels on the page, and checks each level steps away by its whole step, to within
+    0.005. In schemes.test §17, three tests: the helpers' text, evaluated as the browser does,
+    equal the luminance and the kit's pole over a 5,832-colour sample; every level in both
+    rules carries the side, and no fixed step remains; and every level stands its whole step
+    from any ground in either theme. §10's model of `org-brand.css` takes the same rule
+    (`ORG_BORDERS`, `awayFrom`).
+- **X50 · 2026-10-10 · p3a · B2: the org's moving background is on by default (D4,
+  Codex-61zsk.35).** The owner's decision, verbatim: "On by default (Recommended)". When an org
+  has a shader preset other than 'none', every Style's hero and closing ask (`cta`) open and
+  close on it.
+  - **The rule.** `resolveScheme(type, design, style, { orgShader })`: a scheme the page set
+    wins; otherwise, with the org's shader on, `hero` and `cta` are `atmosphere`
+    (`SHADER_SECTIONS`); otherwise the Style's default. Cinematic already drew both as
+    atmosphere and is unchanged. With no shader, nothing moves. **Amended by X51:** the
+    closing ask is no longer defaulted (D16); only the hero is.
+  - **Plain data.** `orgShader(org, pending)` sits in `$lib/page-builder/org-grounds.ts` beside
+    `orgGrounds`. It reads the brand editor's pending overrides while the editor is open, and
+    otherwise the saved `brandFineTune.tokenOverrides` (unreadable JSON counts as no shader).
+    This is the org layout's own `hasShaderPreset` rule, the one that sets
+    `data-hero-shader-active`. PageRenderer takes it as the `orgShader` prop. The journey page,
+    the studio page-kit, Canvas and MiniPreview pass it. The kit reads no store.
+  - **Every band.** A band's veil is the thinnest that holds every floor over pure black and
+    pure white (§5.1) for that band's grounds. The cases are the band's worst surface, 216
+    cube grounds drawn in the band × 14 brands, and 4,096 brands on the worst surface.
+    - Measured light: l90 .82, l85 .89, l80 .98, l75, l70 and l65 1.
+    - Measured dark: d24 .86, d30 .92, d36, d42 and d48 1.
+    - Each band rule carries `--_g{l,d}-veil`, and the veil is
+      `max(--_atmos-min, --_band-veil, --lp-atmosphere-scrim)`. Cinematic's room sets
+      `--_band-veil: 0`, because its room is the first dark band in every theme.
+    - A veil of 1 shows no shader. Atmosphere is drawn only where a band lets through at least
+      half of what its pole's first band does: l90 18% and l85 11%; d24 14% and d30 8%
+      (`ATMOSPHERE_BANDS`). l80 lets through 2%, and every other band is opaque, so those draw
+      `base` (PageRenderer).
+  - **The tint (X33) for Bold, Path and Studio.** Over a dark shader, their plain veil reads
+    as a grey band. They take the tint, as Clean, Quiet and Soft do, but only under
+    `.org-layout[data-hero-shader-active]`.
+    - Why only there: a page that set a Moving background itself, with no shader, must not
+      change. Of Blood & Bones' Tending the Grief is a Path page with an atmosphere instructor
+      section.
+    - The org layout carries the flag in the studio too, so the canvas shows what the page
+      will.
+    - Why the first band's proof covers the second: the panel ground clamps itself into the
+      first band from any ground (light [0.9, 0.965]; dark capped at 0.24). The tint's proof
+      therefore covers l85 and d30 grounds at the first band's veil, the thinnest any band
+      draws.
+  - **One canvas.** The shader is the org layout's. The kit adds none: every page measured has
+    exactly 1 `canvas`.
+  - **Measured, before → after** (1440, reduced motion, so the shader is one still frame):
+    - studio-alpha ('glow', Quiet, no band): hero and closing ask go from base to atmosphere,
+      at 0.82 light and 0.86 dark.
+    - night ('nebula', d24 in both themes) on Of Blood & Bones' Studio page: base and brand
+      become atmosphere at 0.86.
+    - sand ('silk', l85): atmosphere at 0.89.
+    - lilac ('aurora', l90 light, d24 dark): 0.82 and 0.86.
+    - Pixel-identical, full length: Of Blood & Bones' 4 sales pages and studio-beta's, in both
+      themes (10 captures), and red and plain applied to Of Blood & Bones (Ancestral Threads
+      and Tending the Grief × 2 themes, 8 captures). One first capture caught the pricing
+      before its offers loaded. Re-shot twice in each state, all were identical.
+  - **Tests.**
+    - `resolve.test.ts`: the default with and without an org shader, for every Style; an
+      explicit scheme wins; `ATMOSPHERE_BANDS` (l85 and d30 in, l80 and d36 out). Red: 2
+      failed.
+    - `org-grounds.test.ts`: the saved preset, and the editor's pending one.
+    - schemes.test §18: the measured veils equal the CSS and the first bands equal §5.1's;
+      exactly l90, l85, d24 and d30 are drawn, in both themes; 0.01 thinner fails; the glow
+      holds; and the CSS text.
+    - `atmosphere-tint.test.ts`:
+      - the opt-in set, with Bold, Path and Studio gated on the shader (red against the
+        ungated form: 1 failed);
+      - the tint's floors on the l85 and d30 grounds;
+      - teeth: there the plain veil fails at the first band's strength.
+    - `PageRenderer.svelte.test.ts`: atmosphere drawn as base on l80.
+    - Spec `org-shader.spec.ts`: studio-alpha in light and dark has its hero and every closing
+      ask in atmosphere, one canvas, a veil inside (0.5, 1), and ink, soft ink and accent at
+      4.5:1 and the button at 3:1 over black and white. Of Blood & Bones has no atmosphere and
+      no flag. Red: studio-alpha's hero was base, 2 of 4 failed.
+  - **Not done.**
+    - SectionInspector still resolves a section's scheme without `orgShader`, so its picker
+      shows the Style's default for the hero and closing ask. It is outside this change.
+    - Atmosphere draws the kit's inks; the org's inks are drawn on base and soft only. So
+      studio-alpha's red headings are ink on its hero and closing ask.
+    - In a still frame, sand's hero reads greyer than its ground: silk shows through at 11%.
+- **X51 · 2026-10-10 · p3a · B2 narrowed: the opening only, and the org's heading colour on
+  the veil (D16, D17; amends X50).** The owner's decisions, verbatim: D16 "Opening only
+  (Recommended)", and D17 "Keep the org's colour (Recommended)". The owner saw the B2 stills
+  and gave two reasons:
+  - on night, sand and lilac the closing ask had lost its band in the org's colour;
+  - on the veil the org's heading colour gave way to the kit's ink.
+  - **D16, the rule.** With an org shader, only the hero defaults to `atmosphere`:
+    `SHADER_SECTIONS` is `hero` alone. The closing ask keeps its Style's own default
+    (brand, accent, or whatever the Style designs). A scheme the page set still wins, so a
+    creator can still put the closing ask on the moving background. Cinematic is unchanged:
+    its Style draws both.
+  - **D17, the rule.** On an atmosphere section, a heading draws the org's heading colour
+    (`--_org-heading`), moved along its own path only as far as its floor needs. The floor is
+    measured over the section's worst backdrop: the veil at the band's strength over pure
+    black or over pure white.
+    - The grades match the org's surfaces: a title at the text grade (4.5:1, `--_g-aot`), and
+      a display or section heading at the large grade (3:1, `--_g-aol`). Each is 2% past what
+      the worst veiled backdrop of the band needs, rounded toward the ink.
+    - Per drawn band (luminance; light caps it, dark floors it):
+      - l90: text .059, large .113;
+      - l85: .057 / .111;
+      - d24: .408 / .255;
+      - d30: .41 / .257.
+    - The grades sit in each drawn band's rule, with the first band's as the fallback. They
+      are routed to the ground's pole as `--_aot-*` / `--_aol-*`, generated like the other
+      moves. A colour that holds is drawn exactly. A failing one deepens or lightens along its
+      own hue, never to black.
+    - Scope: headings and titles only. The ink, accent, mark and button keep atmosphere's own
+      moves.
+    - Not Cinematic, whose room keeps the kit's inks.
+    - It is on the exact path only. Without it, the heading stays the kit's ink.
+    - A moving background is never decorated, so the decorated re-routing (`--_odt-*` /
+      `--_odl-*`) never reaches it.
+    - A Style's tinted ground (X33) is clamped into the first band, so it is never nearer the
+      ink than the band's own ground.
+  - **Measured on studio-alpha** ('glow', Quiet), 1440, still frame (reduced motion):
+    - Light hero heading: the org's #e11d48 (OKLCH L .586, C .222, h 17.6) is now drawn as
+      #ba163a (L .508, C .193, h 17.6). Over the .82 veil on its ground #fce0e0 it holds
+      3.43–5.40:1 over black and white. Raw, it was 2.51–3.95:1; under B2 it was the kit's
+      #000000.
+    - Dark hero heading: #ff4c64 holds as it is: 3.36–5.35:1 on the .86 veil over #2e1819.
+      Under B2 it was #ffffff.
+    - Both closing asks are back to their pre-B2 band (Quiet's `base`, the org's crimson
+      heading). They are pixel-identical to the pre-B2 captures in light and dark.
+    - The owner's B2 figures for the closing ask, from the band's left edge (OKLCH C): night
+      gold #caa750 C .113 went to olive #292d1b C .031; sand ink blue #1d375b C .072 went to
+      #d0c9b5 C .028; lilac purple #8e61f7 C .214 went to #c9c2dc C .037. D16 gives those
+      bands back. Re-shot on of-blood-and-bones' Studio page (Ancestral Threads), all six
+      closing asks (night, sand and lilac in both themes) are Studio's `brand` again, and
+      pixel-identical to their pre-B2 captures.
+  - **Tests.**
+    - `resolve.test.ts`: only the hero's default moves, in every Style; an explicit scheme
+      wins, `atmosphere` on a closing ask included; a whole page resolves with the closing
+      ask at Quiet's own. Red: 2 failed of 40.
+    - `schemes.test.ts` §19, red at 4 of 4:
+      - each drawn band's grades are 2% past its worst veiled backdrop (over that band's
+        `atmosphereBandCases` grounds), and no further;
+      - the 14 brands plus a 216-colour sweep, floored, hold 4.5:1 and 3:1 over the worst of
+        both veiled backdrops and the glow where no shader runs;
+      - a colour that already holds is unchanged, and the crimson deepens on its own hue;
+      - the shipped text: band rules, fallbacks, pole routing, and the rule's place inside the
+        exact path.
+    - The parity generator and §16's band-rule text carry the new fragments and grades.
+    - Spec `org-shader.spec.ts`, red at 2 of 4 (studio-alpha in both themes):
+      - the hero is atmosphere and every closing ask is its Style's default;
+      - each hero heading is not the kit's ink, is within 4° of the org's heading hue, and
+        holds its grade over both veiled backdrops.

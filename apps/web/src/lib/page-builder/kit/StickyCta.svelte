@@ -33,7 +33,7 @@
     signature?: string;
   }
 
-  const { context, label, priceLine, scheme = 'contrast', signature = '' }: Props = $props();
+  const { context, label, priceLine, scheme = 'base', signature = '' }: Props = $props();
 
   const cta = $derived(resolvePrimaryCta(context, label));
   /** Set by the first observation, so the bar is never shown on a guess. */
@@ -134,7 +134,7 @@
     border-radius: calc(var(--lp-radius-button) + var(--space-2));
     background: var(--lp-bg);
     color: var(--lp-ink);
-    box-shadow: var(--shadow-xl);
+    box-shadow: var(--lp-shadow-raised);
     opacity: 0;
     transform: translateY(calc(100% + var(--space-8)));
     transition:
@@ -146,6 +146,15 @@
     .lp-sticky {
       --_clear: 0px;
     }
+  }
+
+  /* On the org's surfaces it is a raised card (owner, D9): the scheme's card
+     colour, which there is the org's own, lifted on the org's floating
+     shadow. The card is held in the ground's band as the ground is, so the
+     inks and the button proven on that band hold on it. Another scheme
+     (Cinematic's soft band) keeps its band colour: its card is the ground. */
+  .lp-sticky[data-lp-scheme='base'] {
+    background: var(--lp-panel);
   }
 
   .lp-sticky[data-shown] {

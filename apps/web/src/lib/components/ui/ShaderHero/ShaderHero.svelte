@@ -9,7 +9,7 @@
   - 4 presets: suture (RDA), ether (raymarch), warp (FBM), ripple (wave eq)
   - Brand-colored — reads org palette from CSS vars
   - IntersectionObserver pauses when off-screen
-  - prefers-reduced-motion: render one static frame, then stop
+  - prefers-reduced-motion, or `still`: render one static frame, then stop
   - Mobile DPR capped at 1 for performance
   - Live-preview: brand editor changes take effect immediately
 -->
@@ -30,9 +30,26 @@
      * even when the org hasn't configured one on the main hero.
      */
     preset?: ShaderPresetId;
+    /**
+     * Draw one frame and stop, as for reduced motion, for a surface where the
+     * shader sits far behind the content and its motion buys nothing: the
+     * studio, behind an 80% cover and a 60px blur. There every frame costs a
+     * full-viewport render (on a CPU-rendered context, as in CI, ~8s per
+     * click). Turning it off resumes the motion.
+     */
+    still?: boolean;
   }
 
-  const { class: className, preset: presetOverride }: Props = $props();
+  const { class: className, preset: presetOverride, still = false }: Props = $props();
+
+  // Set by onMount; the effect below hands it each new `still`. Read `still`
+  // first: `applyStill?.(still)` skips its argument while applyStill is unset,
+  // so the effect would never track it.
+  let applyStill: ((still: boolean) => void) | undefined;
+  $effect(() => {
+    const next = still;
+    applyStill?.(next);
+  });
 
   // Frame-rate-independent burst decay (docs/04-motion.md §4).
   // Old per-frame multiplier `burstStrength *= 0.85` decayed 2× faster on 120Hz
@@ -70,6 +87,9 @@
     let lastFrameTime = performance.now();
     let isVisible = true;
     let isReducedMotion = false;
+    let isStill = still;
+    // One static frame, then stop: reduced motion, or `still`.
+    let isFrozen = false;
     let hasRenderedStaticFrame = false;
     let pointerListenersAttached = false;
 
@@ -92,20 +112,29 @@
     // ── Reduced motion check ───────────────────────────────────
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     isReducedMotion = motionQuery.matches;
-    const onMotionChange = (e: MediaQueryListEvent) => {
-      const wasReduced = isReducedMotion;
-      isReducedMotion = e.matches;
-      if (isReducedMotion) {
+    isFrozen = isReducedMotion || isStill;
+    function setFrozen(next: boolean) {
+      if (next === isFrozen) return;
+      isFrozen = next;
+      if (isFrozen) {
         hasRenderedStaticFrame = false;
         detachPointerListeners();
         // Schedule one frame to render the static snapshot, then loop self-exits.
         scheduleFrame();
-      } else if (wasReduced) {
+      } else {
         attachPointerListeners();
         scheduleFrame();
       }
+    }
+    const onMotionChange = (e: MediaQueryListEvent) => {
+      isReducedMotion = e.matches;
+      setFrozen(isReducedMotion || isStill);
     };
     motionQuery.addEventListener('change', onMotionChange);
+    applyStill = (next) => {
+      isStill = next;
+      setFrozen(isReducedMotion || isStill);
+    };
 
     // Renderer factory is imported from ./load-renderer — single source of
     // truth shared with ImmersiveShaderPlayer. Adding a new preset only
@@ -124,6 +153,12 @@
         canvasEl.width = w;
         canvasEl.height = h;
         renderer?.resize(gl!, w, h);
+        // Resizing clears the canvas, and a frozen one has no next frame to
+        // repaint it, so it draws its static frame again.
+        if (isFrozen && hasRenderedStaticFrame) {
+          hasRenderedStaticFrame = false;
+          scheduleFrame();
+        }
       }
     }
 
@@ -225,9 +260,9 @@
         return;
       }
 
-      // Reduced motion: render one static frame, then release the loop.
-      // onMotionChange re-primes if the user turns reduced-motion off.
-      if (isReducedMotion) {
+      // Reduced motion or `still`: render one static frame, then release the
+      // loop. setFrozen re-primes when both are off again.
+      if (isFrozen) {
         if (hasRenderedStaticFrame) return;
         hasRenderedStaticFrame = true;
         const elapsed = (performance.now() - startTime) / 1000;
@@ -307,7 +342,7 @@
       window.removeEventListener('touchend', onTouchEnd);
     }
 
-    if (!isReducedMotion) attachPointerListeners();
+    if (!isFrozen) attachPointerListeners();
 
     // ── Visibility — pause when tab is hidden ───────────────────
     // For full-page fixed backgrounds, IntersectionObserver doesn't work
@@ -336,6 +371,7 @@
 
     // ── Cleanup ────────────────────────────────────────────────
     return () => {
+      applyStill = undefined;
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);
       // JFA program cache is module-scoped and stays warm across preset

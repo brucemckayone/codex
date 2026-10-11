@@ -47,7 +47,10 @@
   --lp-weight-body: var(--body-weight, var(--font-normal));
   --lp-weight-label: var(--font-semibold);
   --lp-case-display: none;
-  --lp-case-label: none;
+  /* A label (the eyebrow, the kit's kicker) is in the org's own label case:
+     uppercase unless the org or the page chose otherwise. An uppercase label
+     takes the org's tracking for it (after `.lp-page`, below). */
+  --lp-case-label: var(--text-transform-label, none);
   /* In em, so a lead's paragraphs part further than body copy's. */
   --lp-paragraph-gap: 0.9em;
   --lp-underline-offset: 0.3em;
@@ -60,27 +63,44 @@
   --lp-eyebrow-radius: 0;
 
   /* ── shape ────────────────────────────────────────────────────────────── */
-  /* The brand's own corner radius (03 §4.2). A Style BENDS it, never replaces
-     it: each radius token is `clamp(<floor>, calc(var(--lp-brand-radius) *
-     <k>), <ceiling>)`. A zero floor must be a length (`0rem`) — the
-     `--radius-none` token is a unitless 0, which voids any math function it
-     enters. `--brand-radius` is always rem (org layout, page overrides). */
+  /* The org's own corners (03 §4.2): a card is its `--radius-card`, a
+     picture its `--radius-lg` and a button its `--radius-button`, the tokens
+     its own pages draw them in (all derived from the brand radius, and
+     re-derived on a page's own carrier). A Style BENDS them, never replaces
+     them: each radius token is `clamp(<floor>, calc(var(<org token>) * <k>),
+     <ceiling>)`. A zero floor must be a length (`0rem`) — the `--radius-none`
+     token is a unitless 0, which voids any math function it enters. */
   --lp-brand-radius: var(--brand-radius, var(--radius-md));
   /* A pill when the brand is rounded at all, square when the brand is square. */
   --lp-radius-pill-if-rounded: min(calc(var(--lp-brand-radius) * 1000), var(--radius-full));
-  --lp-radius-card: var(--radius-lg);
+  --lp-radius-card: var(--radius-card);
   --lp-radius-media: var(--radius-lg);
-  --lp-radius-button: var(--radius-md);
+  --lp-radius-button: var(--radius-button);
   --lp-radius-chip: var(--radius-full);
   --lp-border: var(--border-width);
   --lp-rule: var(--border-width);
 
+  /* ── depth ────────────────────────────────────────────────────────────── */
+  /* The org's own shadows, where a Style lifts a card at all. A card at rest
+     sits on the shadow the org's cards rest on (explore's, `--shadow-md`); a
+     card that floats over the page, on the one the org floats its own bar
+     and raised panels on (`--shadow-xl`). The org's dark mode deepens both. */
+  --lp-shadow-card: var(--shadow-md);
+  --lp-shadow-raised: var(--shadow-xl);
+
   /* ── buttons ──────────────────────────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-12));
+  /* The org's own buttons (`ui/Button`), in every Style: a call to action is
+     the org's large button (`--space-11`, 44px, never under the tap target)
+     and a leading one (`size="lg"`: the hero's, the closing band's, a
+     featured offer's) its extra large (`--space-12`, 48px), both scaled by
+     the brand's density, at the org's medium weight. A Style keeps the
+     label's size, tracking and padding. */
+  --lp-button-height: var(--tap-target-min);
+  --lp-button-height-lg: max(var(--tap-target-min), var(--space-12));
   --lp-button-pad: var(--space-6);
   /* Its own step: a button label follows the body only so far. */
   --lp-button-size: calc(clamp(1.0625rem, 1rem + 0.15cqi, 1.125rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-semibold);
+  --lp-button-weight: var(--font-medium);
   --lp-button-tracking: 0em;
 
   /* ── rhythm ───────────────────────────────────────────────────────────── */
@@ -120,6 +140,18 @@
    (`surfaces.css`); unnamed size queries still find the section. */
 .lp-page {
   container: lp-page / inline-size;
+}
+
+/* An uppercase label is tracked open the way the org tracks its own. The org
+   has no label-tracking token; its uppercase labels (the floating bar's, the
+   pricing page's, the catalogue tile's) pair the case with `--tracking-wider`.
+   A label in any other case keeps its Style's tracking. Declared on each
+   section, so it outranks the Style's root value; a browser without style
+   queries keeps the Style's. */
+@container lp-page style(--lp-case-label: uppercase) {
+  .lp-section {
+    --lp-tracking-label: var(--tracking-wider);
+  }
 }
 
 /* ── sections ────────────────────────────────────────────────────────────── */

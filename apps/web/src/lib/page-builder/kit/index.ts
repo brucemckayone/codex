@@ -23,6 +23,7 @@ export {
 export {
   featuredScheme,
   renderableSections,
+  resolveGroundBands,
   resolveLayout,
   resolveScheme,
   resolveSections,

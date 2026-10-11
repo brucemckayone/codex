@@ -33,7 +33,7 @@
    SIGNATURE. The poster hero: the headline in capitals at full scale, set
    round a photograph that runs off the sheet, a sticker on top.
 
-   Corners: the brand radius bent by 0.25 and capped at `--radius-sm`
+   Corners: the org's bent by 0.25 and capped at `--radius-sm`
    (03 §4.2); stickers are pills only if the brand is rounded at all.
    Fonts: suggests Anton over Roboto; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -59,18 +59,19 @@
   --lp-case-display: uppercase;
   --lp-weight-label: var(--font-bold);
 
-  /* ── shape: the brand radius bent by 0.25, never past `--radius-sm` ───── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.25), var(--radius-sm));
+  /* ── shape: the org's corners bent by 0.25, never past `--radius-sm` ──── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.25), var(--radius-sm));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
   --lp-border: var(--border-width-thick);
   --lp-rule: var(--border-width-thick);
 
-  /* ── buttons: heavy, in capitals ──────────────────────────────────────── */
-  --lp-button-height: max(var(--tap-target-min), var(--space-14));
+  /* ── buttons: in capitals, tracked open ───────────────────────────────── */
+  /* The org's button height (kit.css), at the weight the org gives its
+     loudest call, its home hero's (semibold). */
   --lp-button-pad: var(--space-8);
-  --lp-button-weight: var(--font-bold);
+  --lp-button-weight: var(--font-semibold);
   --lp-button-tracking: 0.05em;
 
   /* ── rhythm: dense sheets, a wide column the type can crowd ───────────── */

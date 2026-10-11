@@ -14,14 +14,15 @@
    brand and still reads as the brand. Never the text-grade accent, which
    darkens it as far as a line of text needs.
 
-   TYPE. Sentence case everywhere; a moderate display size with easy leading
-   (1.04 / 1.1) and a narrower, looser body (58ch, 1.68) — a notebook, not a
-   billboard. Emphasis is size and leading, never weight.
+   TYPE. Sentence case, labels in the org's case (`kit.css`); a moderate
+   display size with easy leading (1.04 / 1.1) and a narrower, looser body
+   (58ch, 1.68) — a notebook, not a billboard. Emphasis is size and leading,
+   never weight.
 
    LAYOUT. Words beside photographs, and every photograph a print: square
    corners, a plain border of lighter paper, a soft shadow, set at a slight
-   tilt (alternating on a wall of them). Cards stay open paper in the brand
-   radius bent by 0.5 (never past `--radius-md`); quotes and cards never
+   tilt (alternating on a wall of them). Cards stay open paper in the org's
+   corners bent by 0.5 (never past `--radius-md`); quotes and cards never
    tilt — only prints do.
 
    SURFACES. A fine paper grain over every sheet (`--lp-texture: paper`,
@@ -54,10 +55,10 @@
   --lp-tracking-heading: -0.012em;
   --lp-tracking-title: -0.005em;
 
-  /* ── shape: the brand radius bent by 0.5, never past `--radius-md` ────── */
-  --lp-radius-card: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-media: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
-  --lp-radius-button: clamp(0rem, calc(var(--lp-brand-radius) * 0.5), var(--radius-md));
+  /* ── shape: the org's corners bent by 0.5, never past `--radius-md` ───── */
+  --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.5), var(--radius-md));
+  --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.5), var(--radius-md));
+  --lp-radius-button: clamp(0rem, calc(var(--radius-button) * 0.5), var(--radius-md));
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 
   --lp-button-pad: var(--space-6);
@@ -82,7 +83,9 @@
 
 /* ── prints: every photograph square, framed in lighter paper, tilted ───── */
 /* The frame is the sheet's own paper lifted toward white (a light sheet) or
-   a step lighter (a dark one), so it reads as a print on any ground. */
+   a step lighter (a dark one), so it reads as a print on any ground. A
+   print is a photograph's edge, the Style's texture, not a card: its shadow
+   is the print's own, never the org's card shadow. */
 :is(.lp, #lp-style)[data-lp-style='studio']
   :is(
     .hero-split__media,
@@ -399,4 +402,14 @@
     animation: lp-wipe var(--duration-slowest) var(--ease-smooth)
       calc(var(--duration-slowest) + var(--lp-stagger) * 2) both;
   }
+}
+
+/* A Moving background in the tint of Studio's own cards (03 X33), where the
+   org's shader runs behind it: the shader through the plain ground reads as a
+   grey band. Now that an org's shader is on by default (03 X50,
+   Codex-61zsk.35), every Style but Poster's and Cinematic's panels takes it.
+   Without a shader the section draws its glow in the brand's hues, and the
+   plain ground stays exactly as it was. */
+.org-layout[data-hero-shader-active] .lp[data-lp-style='studio'] {
+  --lp-atmosphere-ground: tint;
 }

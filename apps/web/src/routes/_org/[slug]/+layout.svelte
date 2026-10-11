@@ -472,7 +472,9 @@
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >
-  <ShaderHero class="shader-hero--fullpage" />
+  <!-- Still in the studio: there it sits behind an 80% cover and a 60px blur,
+       where its motion buys nothing and every frame is a full-viewport render. -->
+  <ShaderHero class="shader-hero--fullpage" still={isStudio} />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
     <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />
