@@ -198,7 +198,6 @@
   {/if}
   <div
     class="hero-cover__copy"
-    data-lp-words
     data-lp-on-media={coverOwnsBand ? '' : undefined}
     style:--lp-heading-chars={chars}
   >
@@ -225,24 +224,24 @@
 {:else if layout === 'split'}
   {#if framed}
     <div class="hero-split" style:--lp-heading-chars={chars}>
-      <div class="hero-split__copy" data-lp-words>{@render copy('start')}</div>
+      <div class="hero-split__copy">{@render copy('start')}</div>
       <div class="hero-split__media hero__enter-m">
         {@render frame(settled, pending, 'var(--_ratio)')}
       </div>
     </div>
   {:else}
     <!-- No picture to share the band with: the words across it. -->
-    <div class="hero-statement" data-lp-words style:--lp-heading-chars={chars}>{@render copy('start')}</div>
+    <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
   {/if}
 {:else if layout === 'centered'}
-  <div class="hero-centered" data-lp-words style:--lp-heading-chars={chars}>{@render copy('center')}</div>
+  <div class="hero-centered" style:--lp-heading-chars={chars}>{@render copy('center')}</div>
   {#if framed}
     <div class="hero-centered__media hero__enter-m">
       {@render frame(settled, pending, 'var(--_ratio)')}
     </div>
   {/if}
 {:else}
-  <div class="hero-statement" data-lp-words style:--lp-heading-chars={chars}>{@render copy('start')}</div>
+  <div class="hero-statement" style:--lp-heading-chars={chars}>{@render copy('start')}</div>
   {#await context.sellPreview}
     {#if syncStill}
       <div class="hero-statement__media hero__enter-m">

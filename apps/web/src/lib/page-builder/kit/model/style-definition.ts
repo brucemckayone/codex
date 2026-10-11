@@ -38,9 +38,10 @@ export interface StyleDefinition {
   fonts?: { heading: string; body: string };
   /**
    * How the org's shader shows through an `atmosphere` section: blurred, as on
-   * the org's other pages, or sharp (03 §5.1). Absent = blurred.
+   * the org's other pages; hazy, a third of that blur, so it is seen moving;
+   * or sharp (03 §5.1, X53). Absent = blurred. The veil is the same in all three.
    */
-  atmosphere?: 'soft' | 'sharp';
+  atmosphere?: 'soft' | 'hazy' | 'sharp';
   /**
    * The scheme the floating call to action is drawn in — its own small band
    * over whatever section it passes, so never `atmosphere` (there is no veil

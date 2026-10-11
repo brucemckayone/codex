@@ -1583,8 +1583,10 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       - each hero heading is not the kit's ink, is within 4° of the org's heading hue, and
         holds its grade over both veiled backdrops.
 - **X52 · 2026-10-11 · 3b round 1 · The veil under the words only (`--lp-atmosphere-veil:
-  words`), and Studio's moving background drawn sharp.** BUILT on `feat/landing-builder-phase3b`;
-  not yet seen by the owner. The owner's note on the live page: *"cant really see it moving or
+  words`), and Studio's moving background drawn sharp.** REJECTED by the owner the same day, on
+  the before/after pictures: *"your way of showing the shader is terrrrrrrible it should be more
+  like a blur or popacity over the full thing just less"*. Reverted before it left the branch;
+  X53 replaces it. Kept for the record. The owner's note on the live page: *"cant really see it moving or
   anything alittle too much blur"*. Two causes, both on the page: the inner pages' 60px
   `--blur-2xl` (only `data-lp-atmosphere='sharp'` lifts it), and the 0.82 / 0.86 veil over the
   whole opening, which left about a fifth of the shader.
@@ -1610,3 +1612,29 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     `docs/handover/phase3-sources/round1/`.
   - **Open:** on a centred or statement hero the box is the content column's width, so the
     patch is nearly a panel; a patch hugging the lines is the alternative.
+- **X53 · 2026-10-11 · 3b round 1 · Studio's moving background: the veil over every band
+  again, a third of the blur, and 1.6 times as much of the shader through (replaces X52).**
+  BUILT on `feat/landing-builder-phase3b`; the owner chose it from before / A / B pictures.
+  - **The blur.** `atmosphere: 'hazy'`, a third value beside `soft` and `sharp`. The org
+    layout blurs the shader by `--blur-xl` (20px) instead of `--blur-2xl` (60px), and the
+    canvas runs twice that radius past each edge, as `soft` does. Cutting the blur alone (A)
+    sharpened the shapes and showed them moving, but let no more of the shader through.
+  - **The veil.** `--lp-atmosphere-show` (>= 1, default 1) lets that many times as much of the
+    shader through as the proven veil: `s = 1 − show · (1 − max(floor, band veil, scrim))`.
+    Studio sets 1.6: 0.71 (light) / 0.78 (dark) where the floors are 0.82 / 0.86. It scales
+    with each band's own floor, so a band that needs a solid veil (1) keeps it. Studio only,
+    and only where the org's shader runs; without one the section is the glow on its ground,
+    unchanged.
+  - **Why it holds: measured, not proven.** §5.1's veil is proven over pure black and pure
+    white, so any shader. This one is not. It is measured over of-blood-and-bones' 'flow'
+    shader (1440 @2x, 20px blur, words hidden, three frames six seconds apart, composited in
+    sRGB as the browser does, and checked against a veiled frame to within 1.2/255 in dark).
+    Every line of the opening held its floor (4.5:1 for text under 24px, 3:1 for the title
+    and the button against its surround) down to 0.65 in light (bound by the note under the
+    button) and 0.75 in dark (bound by the lede). `schemes.test.ts` holds the multiple there:
+    only Studio sets it, and never past those two measured veils.
+  - **The risk, accepted by the owner.** A brand on Studio whose shader is much darker (light)
+    or brighter (dark) than 'flow' could fall under a floor. Not yet measured on a second
+    shader: the local database has no Studio page on a shader org but of-blood-and-bones.
+  - **Seen** (1440, still and live): Ancestral Threads, light and dark. Pictures:
+    `docs/handover/phase3-sources/round1/` (section 0).

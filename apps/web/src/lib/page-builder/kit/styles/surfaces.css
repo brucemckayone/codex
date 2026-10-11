@@ -21,23 +21,24 @@
                                              Unset: straight.
      --lp-edge-depth: <length>               how deep the cut runs, never more
                                              than the smallest section padding.
-     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil (never
-                                             thinner, `schemes.css`).
-     --lp-atmosphere-veil: section | panel | words
-                                             where that veil is drawn (03 X9,
-                                             X52). `section` (default): the
-                                             whole band. `panel`: one card
-                                             behind the content column only, in
-                                             the Style's card radius, the shader
-                                             at full strength around it. The
-                                             same veil, so the same proof: every
-                                             word sits inside the panel. A
-                                             section whose content bleeds
-                                             (`.lp-bleed`) keeps the section
-                                             veil. `words`: only behind the box
-                                             a block marks `data-lp-words`,
-                                             feathered past it; a section with
-                                             no such box keeps the section veil.
+     --lp-atmosphere-scrim: <0–1>            a thicker atmosphere veil
+                                             (`schemes.css`).
+     --lp-atmosphere-show: <number >= 1>     a thinner one: this many times as
+                                             much of the shader through as the
+                                             proven veil lets through (03 X53).
+                                             No longer proven over black and
+                                             white, so it is measured over a
+                                             real shader first. Studio only.
+     --lp-atmosphere-veil: section | panel   where that veil is drawn (03 X9).
+                                             `section` (default): the whole
+                                             band. `panel`: one card behind the
+                                             content column only, in the Style's
+                                             card radius, the shader at full
+                                             strength around it. The same veil,
+                                             so the same proof: every word sits
+                                             inside the panel. A section whose
+                                             content bleeds (`.lp-bleed`) keeps
+                                             the section veil.
      --lp-atmosphere-ground: tint            the veil's colour: the Style's
                                              panel ground (the ground moved
                                              toward the brand by
@@ -212,42 +213,7 @@
   }
 }
 
-/* WORDS (03 X52): the veil only behind the words, the shader at full
-   strength everywhere else. A block marks the box that holds its words
-   (`data-lp-words`: the hero's copy in every layout but the poster's, the
-   closing ask's words). The box paints the section's own veil, and a shadow
-   in the same colour carries it past the box, softly. An outer shadow is
-   never drawn inside its box, so every word sits on the veil at exactly
-   `--_atmos-s` and the proof is the section veil's; the shadow's spread is
-   three of its blur's sigmas, so at the box's edge it holds 0.9987 of the
-   veil (inside one 8-bit step) and no seam shows. The colour is the
-   section's own (`--lp-bg`: the plain ground, or the tint a Style asks for).
-   A section with no marked box (the poster's words share its grid with the
-   picture) keeps the section veil: the section is cleared by the SAME
-   selector that finds the box, so a veil is never removed without being
-   redrawn. Where no shader runs the box is drawn over the glow too, so the
-   canvas and thumbnails show the composition the page will have. */
-@container lp-page style(--lp-atmosphere-veil: words) {
-  .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
-    [data-lp-words]:not([data-lp-on-media]) {
-    --_words-soft: clamp(var(--space-3), 1.4cqi, var(--space-6));
-    background: rgb(from var(--lp-bg) r g b / var(--_atmos-s));
-    box-shadow: 0 0 calc(var(--_words-soft) * 2) calc(var(--_words-soft) * 3)
-      rgb(from var(--lp-bg) r g b / var(--_atmos-s));
-  }
-
-  @supports (color: rgb(from red r g b / 0.5)) {
-    .org-layout[data-hero-shader-active]
-      .lp[data-lp-atmosphere]:not([data-lp-still])
-      .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media]):has(
-        [data-lp-words]:not([data-lp-on-media])
-      ) {
-      background: transparent;
-    }
-  }
-}
-
-/* ── textures (§5.2)─────────────────────────────────────────────────────── */
+/* ── textures (§5.2) ─────────────────────────────────────────────────────── */
 /* Static SVG masks over `--_tex-ink` (the line colour, or away from the ink
    on a brand band), at the texture's intrinsic tile size. */
 @container lp-page style(--lp-texture: grain) {

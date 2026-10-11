@@ -115,13 +115,13 @@
     <span class="lp-atmos cta__atmos" data-drift aria-hidden="true"></span>
   {/if}
   {#if layout === 'split'}
-    <div class="cta__words" data-lp-words>{@render words('heading')}</div>
+    <div class="cta__words">{@render words('heading')}</div>
     <div class="cta__panel" data-lp-scheme={panel}>{@render offer('lg')}</div>
   {:else if layout === 'compact'}
-    <div class="cta__words" data-lp-words>{@render words('title')}</div>
+    <div class="cta__words">{@render words('title')}</div>
     {@render offer('md')}
   {:else}
-    <div class="cta__words" data-lp-words>{@render words('heading')}</div>
+    <div class="cta__words">{@render words('heading')}</div>
     {@render offer('lg')}
   {/if}
 </div>
