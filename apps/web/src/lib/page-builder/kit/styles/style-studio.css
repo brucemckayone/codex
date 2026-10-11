@@ -29,9 +29,10 @@
    X5); straight edges, no shapes.
 
    MOTION. The pen: each mark draws in a beat after the words it marks
-   arrive (`--lp-mark-draw`, X12/X13) — an underline under a section's
-   heading, a circle round each number, a scribbled frame round the guide's
-   portrait. The hero's print settles into its tilt as the page opens. The
+   arrive (`--lp-mark-draw`, X12/X13) — an underline under the opening's
+   headline and the closing ask's heading only, a circle round each number,
+   a scribbled frame round the guide's portrait. The hero's print settles
+   into its tilt as the page opens. The
    stage numbers and prices are circled too, still.
 
    SIGNATURE. The marks — the page annotated by hand.
@@ -200,16 +201,17 @@
 }
 
 /* ── the pen: marks drawn in the mark ink ───────────────────────────────── */
-/* An underline under a section's heading, a length of its own. Not where the
-   section carries a mark of its own (the numbers, the guide's portrait). */
+/* An underline under the closing ask's heading, a length of its own. The pen
+   underlines the opening and the ask, and nothing between them (3b round 1):
+   under every section's heading it marked nothing. */
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+  .lp-section[data-lp-type='cta']
   .lp-heading:is([data-size='heading'], [data-size='display']) {
   position: relative;
 }
 
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+  .lp-section[data-lp-type='cta']
   .lp-heading:is([data-size='heading'], [data-size='display'])::after {
   content: '';
   position: absolute;
@@ -244,17 +246,8 @@
   pointer-events: none;
 }
 
-:is(.lp, #lp-style)[data-lp-style='studio']
-  :is(.hero-centered, .guide-centered, .text[data-layout='centered'])
-  .lp-heading::after {
-  inset-inline: 0;
-  margin-inline: auto;
-}
-
-/* Under a centred heading the stroke is centred too. */
-:is(.lp, #lp-style)[data-lp-style='studio']
-  :is(.guide-centered, .text[data-layout='centered'])
-  .lp-heading[data-size='heading']::after {
+/* Under a centred headline the stroke is centred too. */
+:is(.lp, #lp-style)[data-lp-style='studio'] .hero-centered .lp-heading::after {
   inset-inline: 0;
   margin-inline: auto;
 }
@@ -381,12 +374,40 @@
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
 }
 
+/* Wide, the list's signs stand beside its heading, large and in the
+   heading's face (3b round 1): the reader finds themselves in them before
+   the argument, and the band's right half is used. A join button stays
+   under the words. Narrow, the signs stay under the heading. */
+@container (min-width: 56rem) {
+  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: calc(var(--lp-gap) * 1.5);
+    align-items: start;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] > .problem__head {
+    grid-column: 1;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio']
+    .problem[data-layout='list']
+    > :is(.problem__lines, .problem__empty) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] .problem__lines li {
+    font-size: calc(var(--lp-size-heading) * 0.68);
+    line-height: var(--lp-leading-heading);
+  }
+}
+
 /* Each mark draws a beat after the words it marks (motion.css stages the
    host; `--lp-mark-draw` exists only on a host it armed). */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
     .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
-    .lp-section:not([data-lp-type='hero'], [data-lp-type='stats'], [data-lp-type='instructor'])
+    .lp-section[data-lp-type='cta']
     .lp-heading:is([data-size='heading'], [data-size='display'])::after,
   :root[data-theme] .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
   :root[data-theme]
