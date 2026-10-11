@@ -246,20 +246,22 @@ function readColours(orgHost: 'main' | 'root'): Reading {
     org[name] = token(host, name);
 
   // A base section on the page's own ground (not over a picture) with a
-  // large heading in it.
+  // large heading in it. A cover hero is a base section too, but its words
+  // are over its picture (`data-lp-on-media` on the copy, not the section),
+  // drawn in the media ink, so the heading must be on the ground itself.
+  const onGround = (s: Element) =>
+    [
+      ...s.querySelectorAll(
+        ".lp-heading:is([data-size='display'], [data-size='heading'])"
+      ),
+    ].find((h) => !h.closest('[data-lp-on-media]'));
   const section = [
     ...document.querySelectorAll<HTMLElement>(
       ".lp-page > .lp-section[data-lp-scheme='base']:not([data-lp-on-media])"
     ),
-  ].find((s) =>
-    s.querySelector(
-      ".lp-heading:is([data-size='display'], [data-size='heading'])"
-    )
-  );
+  ].find(onGround);
   if (!section) throw new Error('no base section with a large heading');
-  const heading = section.querySelector(
-    ".lp-heading:is([data-size='display'], [data-size='heading'])"
-  );
+  const heading = onGround(section);
   const kit: Record<string, string | null> = {
     ground: hexOf(getComputedStyle(section).backgroundColor),
     ink: token(section, '--lp-ink'),
@@ -795,22 +797,23 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 // ── the hero's main button over a photo is the org's own button (owner, D10) ──
-// Tending the Grief's cover hero sets its words over its photo, on 72% of the
-// scrim. Its main button used to be the on-media ink (#efefef). The owner
-// chose the org's own button there, exactly as the page draws it on its own
-// surfaces, with nothing added: WCAG 1.4.11 asks a control with visible text
-// for no contrasting edge, only a legible label and a focus ring that holds
-// 3:1 where it sits. The secondary controls and the words keep the ink. This
-// page's sections were edited past its seed, so it is opened without the
-// stored-order check; it is the one live cover hero over a photo.
+// A cover hero sets its words over its picture, on 72% of the scrim. Its main
+// button used to be the on-media ink (#efefef). The owner chose the org's own
+// button there, exactly as the page draws it on its own surfaces, with nothing
+// added: WCAG 1.4.11 asks a control with visible text for no contrasting edge,
+// only a legible label and a focus ring that holds 3:1 where it sits. The
+// secondary controls and the words keep the ink. The subject is the seeded
+// cover hero on a page that sells (`seed-portals.ts` pins Return to the
+// Shoreline's for this org), drawn in Tending the Grief's mid-tone brand, the
+// page D10 was decided on.
 for (const theme of ['light', 'dark'] as const) {
-  test(`of-blood-and-bones/tending-the-grief ${theme}: the hero's main button over its photo is the button its own sections draw`, async ({
+  test(`of-blood-and-bones/return-to-the-shoreline ${theme}: the cover hero's main button is the button its own sections draw`, async ({
     browser,
     baseURL,
   }) => {
     const url = journeyUrl(
       baseURL as string,
-      journeyFixture('of-blood-and-bones', 'tending-the-grief')
+      journeyFixture('of-blood-and-bones', 'return-to-the-shoreline')
     );
     const context = await browser.newContext({
       viewport: { width: 1440, height: 900 },
@@ -826,7 +829,7 @@ for (const theme of ['light', 'dark'] as const) {
       ".lp-section[data-lp-type='hero'] .hero-cover__copy[data-lp-on-media]";
     const hero = page.locator(`${copy} .lp-button[data-variant='primary']`);
     await expect(hero).toBeVisible();
-    await apply(page, {});
+    await apply(page, { carrier: MID_TONE_CARRIER });
     // The ring as a keyboard user sees it (script focus with no pointer
     // interaction matches :focus-visible).
     await hero.focus();
@@ -889,7 +892,7 @@ for (const theme of ['light', 'dark'] as const) {
       fill: read.ownFill,
       label: read.ownLabel,
     });
-    // …which is Tending the Grief's (D8: a little darker, keeping white).
+    // …which is the mid-tone brand's (D8: a little darker, keeping white).
     expect({ fill: read.fill, label: read.label }, why).toEqual({
       fill: '#dd3809',
       label: '#ffffff',

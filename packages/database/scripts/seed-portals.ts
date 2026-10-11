@@ -247,11 +247,6 @@ const PORTALS: PortalSpec[] = [
     // Room and quiet, no colour bands, and a short page: enough for a hard week.
     style: 'quiet',
     recipe: 'short',
-    // The cover hero over a photo the browser suite reads on this org
-    // (`e2e/page-kit/brand-fidelity.spec.ts`, D10). Not on studio-alpha,
-    // whose copy is the org-shader suite's subject: a cover with a picture
-    // draws its own band over the org's moving background.
-    orgPins: { 'of-blood-and-bones': { hero: 'cover' } },
     stages: [
       { name: 'Naming', gloss: 'Saying the thing plainly.' },
       { name: 'Holding', gloss: 'Company for what cannot be fixed.' },
@@ -292,6 +287,11 @@ const PORTALS: PortalSpec[] = [
     // The journey recipe's own pin too; set here so the test survives a
     // change of recipe.
     pins: { curriculum: 'map' },
+    // The cover hero on a page that sells, which the browser suite reads
+    // (`e2e/page-kit/brand-fidelity.spec.ts`, D10): its main button over the
+    // picture. Of Blood & Bones' alone: studio-alpha's 'glow' shader opens
+    // its pages on the moving background, which a cover would draw over.
+    orgPins: { 'of-blood-and-bones': { hero: 'cover' } },
     stages: [
       { name: 'Looking back', gloss: 'What the walking changed.' },
       { name: 'Marking it', gloss: 'A rite so the body knows it ended.' },
