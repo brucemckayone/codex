@@ -19,8 +19,12 @@
   NO PICTURE (Codex-61zsk.37): the public page draws only what it has, so a
   split, centered or poster hero with no picture is its words alone — split
   set as the statement sets them. The plate that holds a picture's place
-  appears only where the page is looked at (the canvas, a still thumbnail:
-  `page.still`), and there each layout keeps its shape while media loads.
+  appears where the page is looked at (the canvas, a still thumbnail:
+  `page.still`), and there each layout keeps its shape while media loads. On
+  the public page it appears only while a hero video the awaited view says is
+  attached (`course.filmsAttached.hero`, Codex-61zsk.40) is on its way, so a
+  video-only hero is framed from the first paint rather than re-framed above
+  the fold; one that then fails to resolve leaves the words alone.
 
   A medium or a long headline is marked `data-medium` / `data-long` (the
   kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
@@ -108,12 +112,23 @@
   // Where the page is looked at rather than read, a picture's place is kept
   // with the plate in it; the public page draws only the picture it has.
   const previewing = $derived(page.still || !!edit);
-  const framed = $derived(mode !== 'none' && (hasMedia || previewing));
+  // A hero video the awaited view says is attached, still on its way: the
+  // public page holds its place as the canvas does (Codex-61zsk.40).
+  const heroComing = $derived(
+    mode !== 'none' &&
+      preview === undefined &&
+      context.course.filmsAttached?.hero === true
+  );
+  const framed = $derived(
+    mode !== 'none' && (hasMedia || previewing || heroComing)
+  );
   // A cover with nothing to show on a Moving background leaves the band to
   // the section: the org's shader (or the glow standing in for it) under the
   // scheme's own veil and ink. Otherwise it draws its own band — the image,
   // or its glow — under the media colours.
-  const coverOwnsBand = $derived(section.scheme !== 'atmosphere' || hasMedia);
+  const coverOwnsBand = $derived(
+    section.scheme !== 'atmosphere' || hasMedia || heroComing
+  );
 </script>
 
 {#snippet copy(align: 'start' | 'center')}
@@ -215,7 +230,7 @@
     <HeroPoster
       still={settled.still}
       clip={settled.clip}
-      reserve={previewing && mode !== 'none'}
+      reserve={(previewing || heroComing) && mode !== 'none'}
       {alt}
       {copy}
       watch={posterWatch}
@@ -246,6 +261,10 @@
     {#if syncStill}
       <div class="hero-statement__media hero__enter-m">
         {@render frame({ still: syncStill, clip: null }, false, 'var(--_ratio)')}
+      </div>
+    {:else if heroComing}
+      <div class="hero-statement__media hero__enter-m">
+        {@render frame({ still: null, clip: null }, true, 'var(--_ratio)')}
       </div>
     {/if}
   {:then preview}

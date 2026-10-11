@@ -150,6 +150,21 @@ export interface JourneyCourseView {
    * the streamed field.
    */
   heroImageUrl?: string | null;
+  /**
+   * Which films the streamed `sellPreview` can carry, known at first paint
+   * (Codex-61zsk.40). ONE-SIDED: `false` means that film cannot arrive, so a
+   * block draws without it from the first paint; `true` means it probably
+   * will. See `@codex/shared-types` `JourneyFilmsAttached`. OPTIONAL-additive:
+   * an older worker omits it and the blocks wait for the stream as before.
+   */
+  filmsAttached?: {
+    /** The intro film, `sellPreview.intro`. */
+    intro: boolean;
+    /** The practice reel, `sellPreview.reel`. */
+    reel: boolean;
+    /** The hero's media item: `sellPreview.heroClip` and its poster still. */
+    hero: boolean;
+  };
 }
 
 export interface JourneyTestimonialView {

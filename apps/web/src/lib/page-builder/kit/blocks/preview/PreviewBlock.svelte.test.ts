@@ -181,6 +181,75 @@ describe('PreviewBlock', () => {
     expect(document.body.querySelector('.preview-none')).not.toBeNull();
   });
 
+  // Codex-61zsk.40: the awaited course view says whether a clip can come.
+  // With none, the band folds from the first paint instead of drawing whole
+  // and then vanishing once the stream settles.
+  describe('with the awaited view saying which clip can come', () => {
+    const awaiting = (
+      attached: boolean
+    ): {
+      context: JourneySalesContext;
+      settle: (value: SellPreview | null) => void;
+    } => {
+      let settle: (value: SellPreview | null) => void = () => {};
+      const context = {
+        ...sampleContext({
+          course: {
+            filmsAttached: { hero: false, intro: true, reel: attached },
+          },
+        }),
+        sellPreview: new Promise<SellPreview | null>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      return { context, settle };
+    };
+
+    it.each(
+      SECTION_LAYOUTS.preview
+    )('%s: with no clip attached the public page folds from the first paint', async (layout) => {
+      await render(SAMPLE, { layout, context: awaiting(false).context });
+      expect(document.body.querySelector('h2')).toBeNull();
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+      expect(document.body.querySelector('.preview-none')).not.toBeNull();
+    });
+
+    it('with one attached, holds its place while it is on its way', async () => {
+      await render(SAMPLE, { context: awaiting(true).context });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(
+        document.body.querySelector('.lp-media[data-pending]')
+      ).not.toBeNull();
+      expect(document.body.querySelector('.preview-none')).toBeNull();
+    });
+
+    it('a clip that arrives although none was attached still shows', async () => {
+      const { context, settle } = awaiting(false);
+      await render(SAMPLE, { context });
+      settle({ reel: REEL, intro: null });
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.preview-none')).toBeNull();
+    });
+
+    it('with none attached the canvas still keeps the words and the plate', async () => {
+      await render(SAMPLE, {
+        context: awaiting(false).context,
+        edit: { commit: () => {} },
+      });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.lp-media')).not.toBeNull();
+    });
+  });
+
   it.each(
     SECTION_LAYOUTS.preview
   )('%s: the canvas keeps the words and the plate, and asks for the clip', async (layout) => {

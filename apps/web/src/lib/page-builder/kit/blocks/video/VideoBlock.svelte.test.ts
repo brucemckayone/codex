@@ -165,6 +165,75 @@ describe('VideoBlock', () => {
     expect(document.body.querySelector('.video-none')).not.toBeNull();
   });
 
+  // Codex-61zsk.40: the awaited course view says whether a film can come.
+  // With none, the band folds from the first paint instead of drawing whole
+  // and then vanishing once the stream settles.
+  describe('with the awaited view saying which film can come', () => {
+    const awaiting = (
+      attached: boolean
+    ): {
+      context: JourneySalesContext;
+      settle: (value: SellPreview | null) => void;
+    } => {
+      let settle: (value: SellPreview | null) => void = () => {};
+      const context = {
+        ...sampleContext({
+          course: {
+            filmsAttached: { hero: false, reel: true, intro: attached },
+          },
+        }),
+        sellPreview: new Promise<SellPreview | null>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      return { context, settle };
+    };
+
+    it.each(
+      SECTION_LAYOUTS.video
+    )('%s: with no film attached the public page folds from the first paint', async (layout) => {
+      await render(SAMPLE, { layout, context: awaiting(false).context });
+      expect(document.body.querySelector('h2')).toBeNull();
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+      expect(document.body.querySelector('.video-none')).not.toBeNull();
+    });
+
+    it('with one attached, holds its place while it is on its way', async () => {
+      await render(SAMPLE, { context: awaiting(true).context });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(
+        document.body.querySelector('.lp-media[data-pending]')
+      ).not.toBeNull();
+      expect(document.body.querySelector('.video-none')).toBeNull();
+    });
+
+    it('a film that arrives although none was attached still shows', async () => {
+      const { context, settle } = awaiting(false);
+      await render(SAMPLE, { context });
+      settle({ intro: INTRO, reel: null });
+      await tick();
+      await Promise.resolve();
+      flushSync();
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.video-none')).toBeNull();
+    });
+
+    it('with none attached the canvas still keeps the words and the plate', async () => {
+      await render(SAMPLE, {
+        context: awaiting(false).context,
+        edit: { commit: () => {} },
+      });
+      expect(document.body.querySelector('h2')?.textContent).toBe(
+        SAMPLE.heading
+      );
+      expect(document.body.querySelector('.lp-media')).not.toBeNull();
+    });
+  });
+
   // Codex-61zsk.37 (C1): the public page kept the words and dropped the
   // screen, so a visitor read "Two minutes, from me to you" above nothing.
   it.each(

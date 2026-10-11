@@ -73,6 +73,7 @@ import type {
   JourneyCoursePage,
   JourneyCourseSummary,
   JourneyEnrollment,
+  JourneyFilmsAttached,
   JourneyListItem,
   JourneyPageRecord,
   JourneyPractice,
@@ -182,6 +183,33 @@ function resolveCourseSignatureUrl(
   return signatureImageKey && r2PublicUrlBase
     ? `${r2PublicUrlBase}/${signatureImageKey}/md.webp`
     : null;
+}
+
+/**
+ * Which films the streamed sell preview can carry, from the course's own
+ * columns (Codex-61zsk.40). ONE-SIDED: it applies the gates
+ * {@link CourseJourneyService.getCourseSellPreview} applies before resolving
+ * anything (the media ref set, the course PUBLISHED, a CDN base configured), and
+ * nothing it would need a `media_items` join for. So a `false` is certain and a
+ * `true` is a promise the stream can still break (a preview never transcoded).
+ * See `JourneyFilmsAttached`.
+ */
+function resolveFilmsAttached(
+  course: {
+    status: string;
+    introVideoMediaId: string | null;
+    previewVideoMediaId: string | null;
+    heroMediaId: string | null;
+  },
+  r2PublicUrlBase: string | undefined
+): JourneyFilmsAttached {
+  const servable =
+    course.status === CONTENT_STATUS.PUBLISHED && Boolean(r2PublicUrlBase);
+  return {
+    intro: servable && course.introVideoMediaId !== null,
+    reel: servable && course.previewVideoMediaId !== null,
+    hero: servable && course.heroMediaId !== null,
+  };
 }
 
 /**
@@ -482,6 +510,11 @@ export class CourseJourneyService extends BaseService {
           // AWAITED envelope for the same reason `coverImageKey` is — see
           // `course.heroImageUrl` below (Codex-61zsk.6 · WP-6).
           heroImageKey: courses.heroImageKey,
+          // Codex-61zsk.40: the three film refs, read as presence only, so
+          // the awaited envelope can say which films the stream can carry.
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          heroMediaId: courses.heroMediaId,
         })
         .from(courses)
         .where(
@@ -568,6 +601,10 @@ export class CourseJourneyService extends BaseService {
             courseRow.heroImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.40: which films the STREAMED preview can carry, so a
+          // block can draw without a film from the first paint rather than
+          // folding or re-framing once the stream settles.
+          filmsAttached: resolveFilmsAttached(courseRow, r2PublicUrlBase),
         },
         stages,
         testimonials,
@@ -646,6 +683,10 @@ export class CourseJourneyService extends BaseService {
           coverImageKey: courses.coverImageKey,
           // A32 (Codex-490z7) — see `getCoursePage`'s identical projection.
           heroImageKey: courses.heroImageKey,
+          // Codex-61zsk.40 — see `getCoursePage`'s identical projection.
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          heroMediaId: courses.heroMediaId,
         })
         .from(courses)
         .where(
@@ -725,6 +766,9 @@ export class CourseJourneyService extends BaseService {
             courseRow.heroImageKey,
             r2PublicUrlBase
           ),
+          // Codex-61zsk.40 — a DRAFT course reads all false: the stream serves
+          // published courses only, so a draft preview never waits on a film.
+          filmsAttached: resolveFilmsAttached(courseRow, r2PublicUrlBase),
         },
         stages,
         testimonials,

@@ -505,6 +505,135 @@ describe('HeroBlock', () => {
     sellPreview: Promise.resolve(null),
   });
 
+  // Codex-61zsk.40: the awaited course view says a hero video is attached, so
+  // the public page frames the hero from the first paint. When the video
+  // arrives it lands in that frame, and nothing above the fold moves.
+  describe('with a hero video attached and still on its way', () => {
+    const attached = (
+      sellPreview: Promise<SellPreview | null>,
+      hero = true
+    ): JourneySalesContext => ({
+      ...sampleContext({
+        course: {
+          heroImageUrl: null,
+          filmsAttached: { intro: false, reel: false, hero },
+        },
+      }),
+      sellPreview,
+    });
+    const arrived: SellPreview = {
+      intro: null,
+      reel: null,
+      heroImageUrl: '/hero-poster.jpg',
+      heroClip: {
+        playlistUrl: '/hero.m3u8',
+        posterUrl: '/hero-poster.jpg',
+        durationSeconds: 30,
+      },
+      guidePortraitUrl: null,
+    };
+    async function land(
+      settle: (v: SellPreview | null) => void,
+      v: SellPreview | null
+    ) {
+      settle(v);
+      await tick();
+      await Promise.resolve();
+      flushSync();
+    }
+
+    it('split is framed at first paint, and the video lands in that frame', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise) }
+      );
+      const media = document.body.querySelector('.hero-split__media');
+      const headline = document.body.querySelector('h1');
+      expect(
+        media?.querySelector('.lp-media')?.hasAttribute('data-pending')
+      ).toBe(true);
+      await land(settle, arrived);
+      expect(document.body.querySelector('.hero-split__media')).toBe(media);
+      expect(document.body.querySelector('h1')).toBe(headline);
+      expect(media?.textContent).toContain(COPY.hero.watch);
+    });
+
+    it('centered holds the picture’s slot at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'centered', context: attached(promise) }
+      );
+      expect(
+        document.body.querySelector('.hero-centered__media .lp-media')
+      ).not.toBeNull();
+    });
+
+    it('the statement holds the picture’s slot under its words at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'statement', context: attached(promise) }
+      );
+      expect(
+        document.body.querySelector('.hero-statement__media .lp-media')
+      ).not.toBeNull();
+    });
+
+    it('the poster sets its words round the picture’s place at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'poster', context: attached(promise) }
+      );
+      const poster = document.body.querySelector('.hero-poster');
+      expect(poster?.hasAttribute('data-pictured')).toBe(true);
+      expect(poster?.querySelector('.hero-poster__media')).not.toBeNull();
+    });
+
+    it('a cover on a Moving background takes its band at first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', scheme: 'atmosphere', context: attached(promise) }
+      );
+      expect(document.body.querySelector('.hero-cover__media')).not.toBeNull();
+    });
+
+    it('a video that fails to resolve leaves the words alone', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise) }
+      );
+      await land(settle, null);
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(
+        document.body.querySelector('.hero-statement h1')?.textContent
+      ).toBe('H');
+    });
+
+    it('with no hero video attached, split is its words alone from the first paint', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'split', context: attached(promise, false) }
+      );
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+      expect(document.body.querySelector('.lp-media')).toBeNull();
+    });
+
+    it('a hero set to show no media is never framed for it', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H', media: 'none' },
+        { layout: 'split', context: attached(promise) }
+      );
+      expect(document.body.querySelector('.hero-split')).toBeNull();
+    });
+  });
+
   describe('cover on a Moving background (03 §5.1, X10)', () => {
     it('with nothing to show, leaves the band to the section: no paint, no glow, no media colours', async () => {
       await render(
