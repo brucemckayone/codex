@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accumulateTone,
+  averageCells,
   cellsUnder,
   emptyToneGrid,
   visibleBufferRegion,
@@ -33,6 +34,27 @@ describe('accumulateTone', () => {
     expect([...grid.lo]).toEqual([10, 20, 30, 90, 100, 80]);
     expect([...grid.hi]).toEqual([50, 200, 30, 100, 120, 100]);
     expect(grid.samples).toBe(2);
+  });
+});
+
+describe('averageCells', () => {
+  it("takes each cell's mean, not one of its pixels", () => {
+    // Two cells of 2 × 2 pixels: the first black and white in a check, the
+    // second all one grey.
+    const px = (v: number) => [v, v, v, 255];
+    const rgba = new Uint8ClampedArray([
+      ...px(0),
+      ...px(255),
+      ...px(90),
+      ...px(90),
+      ...px(255),
+      ...px(0),
+      ...px(90),
+      ...px(90),
+    ]);
+    expect([...averageCells(rgba, 2, 1, 2)]).toEqual([
+      128, 128, 128, 255, 90, 90, 90, 255,
+    ]);
   });
 });
 

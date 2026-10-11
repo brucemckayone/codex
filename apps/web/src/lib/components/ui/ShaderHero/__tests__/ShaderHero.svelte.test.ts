@@ -4,6 +4,8 @@
  * behind an 80% cover and a 60px blur and every frame is a full-viewport
  * render (on CI's CPU-rendered context, ~8s per click on a studio page).
  *
+ * And its `tone`: what it draws, sampled for a page that asks (03 X54).
+ *
  * The render loop is driven by hand: requestAnimationFrame queues its
  * callbacks and `step()` runs one frame's worth. The WebGL context and the
  * renderer are stand-ins; what is counted is how often the renderer draws.
@@ -38,11 +40,15 @@ vi.mock('../shader-config', () => ({
 }));
 
 import ShaderHero from '../ShaderHero.svelte';
+import { shaderTone } from '../shader-tone';
 
 let frames: FrameRequestCallback[] = [];
 let resizeCallbacks: ResizeObserverCallback[] = [];
 let box = { width: 0, height: 0 };
 let app: ReturnType<typeof mount> | null = null;
+let clock = 0;
+let releases: (() => void)[] = [];
+const toneDraws = vi.fn();
 
 /** Run the frames queued so far (those they queue run on the next step). */
 function step(count = 1) {
@@ -54,7 +60,7 @@ function step(count = 1) {
 }
 
 /** Mount, then let the async renderer load and its first frame queue. */
-async function start(props: { still: boolean }) {
+async function start(props: { still?: boolean; tone?: boolean }) {
   app = mount(ShaderHero, { target: document.body, props });
   flushSync();
   await tick();
@@ -83,9 +89,30 @@ beforeEach(() => {
       disconnect() {}
     }
   );
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
-    {} as unknown as RenderingContext
-  );
+  // The WebGL context is a stand-in; the 2D one the samples are drawn on
+  // counts its draws and reads back a mid grey.
+  toneDraws.mockClear();
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
+    kind: string
+  ) =>
+    kind === '2d'
+      ? {
+          drawImage: toneDraws,
+          getImageData: (_x: number, _y: number, w: number, h: number) => ({
+            data: new Uint8ClampedArray(w * h * 4).fill(128),
+          }),
+        }
+      : {}) as unknown as HTMLCanvasElement['getContext']);
+  clock = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  for (const [side, size] of [
+    ['clientWidth', 1200],
+    ['clientHeight', 800],
+  ] as const)
+    Object.defineProperty(document.documentElement, side, {
+      configurable: true,
+      value: size,
+    });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
     () =>
       ({
@@ -101,6 +128,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const release of releases) release();
+  releases = [];
   if (app) unmount(app);
   app = null;
   vi.unstubAllGlobals();
@@ -152,5 +181,70 @@ describe('ShaderHero still', () => {
     step(3);
     expect(renderer.render).toHaveBeenCalledTimes(2);
     expect(frames).toHaveLength(0);
+  });
+});
+
+describe('ShaderHero tone', () => {
+  const ask = () => releases.push(shaderTone.demand());
+
+  it('samples nothing until a page asks, then about twice a second', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ tone: true });
+    step(3);
+    expect(shaderTone.grid.samples).toBe(0);
+
+    ask();
+    step(1);
+    expect(shaderTone.grid.samples).toBe(1);
+    // Frames within the half second draw, but are not sampled.
+    clock += 100;
+    step(3);
+    expect(shaderTone.grid.samples).toBe(1);
+    clock += 500;
+    step(1);
+    expect(shaderTone.grid.samples).toBe(2);
+    // One pixel per cell, averaged from the frame.
+    expect(shaderTone.grid.lo[0]).toBe(128);
+  });
+
+  it('never samples without `tone`, whatever a page asks', async () => {
+    box = { width: 1200, height: 800 };
+    await start({});
+    ask();
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+    expect(toneDraws).not.toHaveBeenCalled();
+    expect(shaderTone.grid.samples).toBe(0);
+  });
+
+  it('draws a frozen frame again, the same moment, for a page that starts asking', async () => {
+    box = { width: 1200, height: 800 };
+    clock = 1000;
+    await start({ still: true, tone: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    expect(shaderTone.grid.samples).toBe(0);
+
+    clock = 9000;
+    ask();
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    expect(shaderTone.grid.samples).toBe(1);
+    // The same moment: the picture behind the page does not jump.
+    const elapsed = renderer.render.mock.calls.map((call) => call[1]);
+    expect(elapsed[1]).toBe(elapsed[0]);
+    expect(frames).toHaveLength(0);
+  });
+
+  it('clears what it reported when the canvas changes size', async () => {
+    box = { width: 1200, height: 800 };
+    await start({ tone: true });
+    ask();
+    step(1);
+    expect(shaderTone.grid.samples).toBe(1);
+
+    box = { width: 900, height: 700 };
+    for (const callback of resizeCallbacks) callback([], {} as ResizeObserver);
+    expect(shaderTone.grid.samples).toBe(0);
   });
 });

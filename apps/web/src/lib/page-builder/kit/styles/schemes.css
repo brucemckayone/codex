@@ -974,10 +974,27 @@
    `--lp-atmosphere-scrim` (0–1).
    A Style may also let more of the shader through with
    `--lp-atmosphere-show` (>= 1, default 1), a multiple of what the proven veil
-   lets through: Studio's 1.6 draws 0.71 (light) / 0.78 (dark) where the floor
-   is 0.82 / 0.86. That veil is no longer proven over black and white. It is
-   measured over the shader a page shows (03 X53), and it scales with each
-   band's own floor, so a band that needs a solid veil (1) keeps it. */
+   lets through: Studio's 1.6 asks for 0.71 (light) / 0.78 (dark) where the
+   floor is 0.82 / 0.86, and scales with each band's own floor, so a band that
+   needs a solid veil (1) keeps it. That veil is not proven over black and
+   white, and no one multiple holds over every shader (03 X54), so it is only
+   ever as thin as the page has MEASURED: the kit's live veil
+   (`atmosphere-veil.ts`) reads what the org's shader draws behind each line
+   and sets `--_atmos-need`, the thinnest veil between the two at which every
+   ink on it holds. Until it has, and wherever it cannot, the veil is the
+   proven one. The two ends are registered numbers so it can read them. */
+@property --_atmos-floor {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --_atmos-thin {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
 .lp [data-lp-scheme='atmosphere'] {
   --lp-bg: var(--lp-ground);
   --lp-panel: var(--_panel-g);
@@ -985,10 +1002,9 @@
   --lp-mark-ink: var(--_atmos-mark);
   --lp-button-bg: var(--_atmos-button);
   --lp-button-line: var(--lp-ink-soft);
-  --_atmos-s: calc(
-    1 - var(--lp-atmosphere-show, 1) *
-      (1 - max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0)))
-  );
+  --_atmos-floor: max(var(--_atmos-min), var(--_band-veil), var(--lp-atmosphere-scrim, 0));
+  --_atmos-thin: calc(1 - var(--lp-atmosphere-show, 1) * (1 - var(--_atmos-floor)));
+  --_atmos-s: max(var(--_atmos-thin), var(--_atmos-need, var(--_atmos-floor)));
   --_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));
 }
 

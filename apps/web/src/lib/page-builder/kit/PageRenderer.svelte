@@ -39,6 +39,9 @@
   background" section, so the org layout clears the stack above its shader
   for this page only. Never set while editing or still — the canvas and
   thumbnails sit inside the studio, and there `atmosphere` draws its glow.
+  While it is set, the root also keeps each section's veil as thin as the
+  Style asks wherever the shader drawn behind it allows (`atmosphere-veil.ts`,
+  03 X54).
 
   ENTRANCES (03 X13): the root hosts the page's stage (`motion/entrances.ts`),
   which plays each reveal, build and mark once as the visitor reaches it.
@@ -62,6 +65,7 @@
     resolveStyle,
     type ThemeGrounds,
   } from './model/resolve';
+  import { atmosphereVeil } from './atmosphere-veil';
   import { STYLES } from './model/styles';
   import type { BlockEdit, KitPage } from './model/types';
   import { entrances } from './motion/entrances';
@@ -209,6 +213,7 @@
   data-ground-dark={grounds.dark}
   style={brandStyle}
   {@attach entrances(still || !!edit)}
+  {@attach atmosphereVeil(!!atmosphere)}
 >
   <div class="lp-page">
     {#each sections as section (section.id)}

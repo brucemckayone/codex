@@ -51,6 +51,36 @@ export function accumulateTone(grid: ToneGrid, rgba: ArrayLike<number>): void {
   grid.samples++;
 }
 
+/**
+ * A frame drawn at `scale` pixels per cell side (RGBA, row-major), averaged
+ * down to one pixel per cell. `drawImage` alone, scaling a buffer of
+ * thousands of pixels to tens, keeps a few pixels per cell rather than their
+ * mean, and so the detail the blur takes out.
+ */
+export function averageCells(
+  rgba: ArrayLike<number>,
+  cols: number,
+  rows: number,
+  scale: number
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(cols * rows * 4);
+  const width = cols * scale;
+  const n = scale * scale;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      for (let c = 0; c < 4; c++) {
+        let sum = 0;
+        for (let y = 0; y < scale; y++)
+          for (let x = 0; x < scale; x++)
+            sum +=
+              rgba[((row * scale + y) * width + col * scale + x) * 4 + c] ?? 0;
+        out[(row * cols + col) * 4 + c] = Math.round(sum / n);
+      }
+    }
+  }
+  return out;
+}
+
 interface Box {
   left: number;
   top: number;
