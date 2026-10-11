@@ -6,7 +6,8 @@
  * Web job, so every test here runs in CI:
  *
  *   the journey map     Return to the Shoreline · curriculum `map`
- *   before and after    Ancestral Threads · transformation `toggle`
+ *   before and after    Ancestral Threads · transformation `toggle` (the
+ *                       switch on a phone, the columns wider)
  *   a strip             Bone Deep · gallery `strip`
  *
  * Each subject is PINNED on its section in seed-portals.ts (`PortalSpec.pins`),
@@ -137,7 +138,38 @@ test.describe('journey map · Return to the Shoreline', () => {
   });
 });
 
-test.describe('before and after · Ancestral Threads', () => {
+test.describe('before and after · Ancestral Threads, wider than a phone', () => {
+  test('both sides in view, and the switch only once the window is phone-width', async ({
+    page,
+    baseURL,
+  }) => {
+    const section = await openSubject(
+      page,
+      baseURL,
+      ANCESTRAL,
+      'transformation',
+      'toggle'
+    );
+    // At 1440×900 the section starts below the fold, where the page's script
+    // places it; wide, it stays the columns (03 X55).
+    await expect(section.getByRole('tablist')).toHaveCount(0);
+    for (const side of ['before', 'after']) {
+      const column = section.locator(`.tf-col[data-side="${side}"]`);
+      await expect(column).toBeVisible();
+      await expect(column.locator('li')).toHaveCount(3);
+    }
+    // The section's own width decides: a phone-width window, the switch...
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(section.getByRole('tablist')).toHaveCount(1);
+    // ...and wide again, the columns.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(section.getByRole('tablist')).toHaveCount(0);
+    await expect(section.locator('.tf-col[data-side="after"]')).toBeVisible();
+  });
+});
+
+test.describe('before and after · Ancestral Threads, on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
   let toggle: Locator;
 
   test.beforeEach(async ({ page, baseURL }) => {
@@ -151,14 +183,14 @@ test.describe('before and after · Ancestral Threads', () => {
     toggle = section.locator('.tf-toggle');
     await expect(
       toggle,
-      'the toggle stayed two columns: at 1440×900 it starts below the fold, where the page’s script turns it into tabs (03 §13 X8)'
+      'the toggle stayed two columns: on a phone it starts below the fold, where the page’s script turns it into tabs (03 §13 X8, X55)'
     ).toHaveAttribute('data-tabs', '');
   });
 
   const panel = (side: 'before' | 'after') =>
     toggle.locator(`.tf-toggle__panel[data-side="${side}"]`);
 
-  test('tabs that switch between the two sides, and say which is shown', async () => {
+  test('tabs that open on the payoff, switch between the two sides, and say which is shown', async () => {
     const tabs = toggle.getByRole('tab');
     await expect(tabs).toHaveCount(2);
     const [before, after] = [tabs.nth(0), tabs.nth(1)];
@@ -180,18 +212,18 @@ test.describe('before and after · Ancestral Threads', () => {
       );
     }
 
-    await expect(before).toHaveAttribute('aria-selected', 'true');
-    await expect(before).toHaveAttribute('tabindex', '0');
-    await expect(after).toHaveAttribute('aria-selected', 'false');
-    await expect(after).toHaveAttribute('tabindex', '-1');
-    await expect(panel('before')).toBeVisible();
-    await expect(panel('after')).toBeHidden();
-
-    await after.click();
     await expect(after).toHaveAttribute('aria-selected', 'true');
+    await expect(after).toHaveAttribute('tabindex', '0');
     await expect(before).toHaveAttribute('aria-selected', 'false');
+    await expect(before).toHaveAttribute('tabindex', '-1');
     await expect(panel('after')).toBeVisible();
     await expect(panel('before')).toBeHidden();
+
+    await before.click();
+    await expect(before).toHaveAttribute('aria-selected', 'true');
+    await expect(after).toHaveAttribute('aria-selected', 'false');
+    await expect(panel('before')).toBeVisible();
+    await expect(panel('after')).toBeHidden();
   });
 
   test('keyboard: the arrow keys, Home and End move the selection with the focus', async ({
@@ -204,20 +236,20 @@ test.describe('before and after · Ancestral Threads', () => {
       await expect(tab).toHaveAttribute('aria-selected', 'true');
     };
 
-    await before.focus();
-    await page.keyboard.press('ArrowRight');
-    await selected(after);
-    await expectFocusRing(after);
-    await expect(panel('after')).toBeVisible();
+    await after.focus();
     await page.keyboard.press('ArrowRight');
     await selected(before);
-    await page.keyboard.press('ArrowLeft');
+    await expectFocusRing(before);
+    await expect(panel('before')).toBeVisible();
+    await page.keyboard.press('ArrowRight');
     await selected(after);
-    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowLeft');
     await selected(before);
     await page.keyboard.press('End');
     await selected(after);
-    await expect(panel('before')).toBeHidden();
+    await page.keyboard.press('Home');
+    await selected(before);
+    await expect(panel('after')).toBeHidden();
   });
 });
 

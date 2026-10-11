@@ -200,7 +200,11 @@
   }
 
   /* ── grid ──────────────────────────────────────────────────────────────── */
+  /* Each name reads as a promise, not a caption (03 X55): two fifths of the
+     way from the Style's title size to its heading's; four across, a fifth,
+     so a name of a few words still sits in its narrower column. */
   .benefits-grid {
+    --lp-title-lift: 0.4;
     display: grid;
     gap: var(--space-10) var(--lp-gap);
   }
@@ -236,6 +240,7 @@
     }
 
     .benefits-grid:is([data-count='4'], [data-count='7'], [data-count='8']) {
+      --lp-title-lift: 0.2;
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
@@ -357,10 +362,12 @@
      larger sets in threes, never four narrow cards to a row. */
   @container (min-width: 60rem) {
     :global(.lp[data-lp-style='soft']) .benefits-grid[data-count='4'] {
+      --lp-title-lift: 0.4;
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     :global(.lp[data-lp-style='soft']) .benefits-grid:is([data-count='7'], [data-count='8']) {
+      --lp-title-lift: 0.4;
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }

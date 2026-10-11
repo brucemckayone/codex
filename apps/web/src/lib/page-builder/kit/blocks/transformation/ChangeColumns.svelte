@@ -4,7 +4,9 @@
   The `columns` layout: before and after side by side. Wide, the two sides
   share row tracks (subgrid), so each before line sits level with its after
   line however either wraps. The after side is the section's one filled panel,
-  in its own nested scheme, so its ink and accent contrast with the PANEL.
+  in its own nested scheme, so its ink and accent contrast with the PANEL,
+  and its lines are the loudest thing in the section: the display face at
+  title size over the before side's quiet body lines (03 X55).
 -->
 <script lang="ts">
   import { CheckIcon } from '$lib/components/ui/Icon';
@@ -84,7 +86,7 @@
   /* base.css spaces every `li` but the last, which unevens a grid row. */
   li {
     display: grid;
-    grid-template-columns: var(--space-6) minmax(0, 1fr);
+    grid-template-columns: max(var(--space-6), 1em) minmax(0, 1fr);
     gap: var(--space-2);
     margin: 0;
     padding-block: var(--space-3);
@@ -92,6 +94,16 @@
     font-size: var(--lp-size-body);
     line-height: var(--lp-leading-body);
     text-wrap: pretty;
+  }
+
+  /* The payoff is told in type as well as colour, as in the toggle's panel. */
+  .tf-col[data-side='after'] li {
+    font-family: var(--lp-font-display);
+    font-size: var(--lp-size-title);
+    font-weight: var(--lp-weight-title);
+    font-synthesis: none;
+    line-height: var(--lp-leading-title);
+    letter-spacing: var(--lp-tracking-title);
   }
 
   /* Both marks sit on the FIRST line, however the line wraps. */

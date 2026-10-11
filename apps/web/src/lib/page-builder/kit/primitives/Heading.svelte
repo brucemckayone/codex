@@ -92,8 +92,15 @@
     letter-spacing: var(--lp-tracking-heading);
   }
 
+  /* `--lp-title-lift` is a layout's hook too: how far a title steps toward
+     the heading's size (0 the title, 1 the heading), so a name that is a
+     promise rather than a caption reads at a middle size in every Style's own
+     scale, and stays a title in all else: its ink grade, its build, its face. */
   .lp-heading[data-size='title'] {
-    font-size: var(--lp-size-title);
+    font-size: calc(
+      var(--lp-size-title) +
+        (var(--lp-size-heading) - var(--lp-size-title)) * var(--lp-title-lift, 0)
+    );
     color: var(--lp-title-ink, currentColor);
     font-weight: var(--lp-weight-title);
     line-height: var(--lp-leading-title);
