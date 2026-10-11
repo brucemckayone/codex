@@ -81,7 +81,7 @@ Consequences, each testable (§11):
 |---|---|---|
 | hero | `poster` | Display type at full Style scale, set around an image that overlaps the section edge |
 | benefits | `bento` | Tiles of mixed sizes; the first is large and may carry its image |
-| transformation | `toggle` | Before and after as two tabs |
+| transformation | `toggle` | Before and after: two tabs on a phone, opening on the after; side by side wider (X55) |
 | curriculum | `map` | The journey map: the course's stages as stops on a drawn route, each opening to its practices |
 | testimonials | `marquee` · `wall` | A slowly moving strip of quotes with a pause control · a masonry wall |
 
@@ -300,8 +300,9 @@ Style applies `reveal` to every section.
   inline. **Chapters** (`story` `chapters`): each step is a full-width scene, the image behind a uniform
   scrim. **Strip** (`story` `strip`, `gallery` `strip`): native horizontal scroll with
   `scroll-snap-type`, a labelled focusable region, and previous/next buttons.
-- **Before and after** (`transformation` `toggle`). The WAI-ARIA tabs pattern (arrow keys, `aria-selected`,
-  `tabpanel`). Without JS both lists render side by side, as `columns` does.
+- **Before and after** (`transformation` `toggle`). On a phone-width section, the WAI-ARIA tabs pattern
+  (arrow keys, `aria-selected`, `tabpanel`), opening on the after side; wider, and without JS, both
+  lists render side by side, as `columns` does (X55).
 - **Marquee** (`testimonials` `marquee`). A duplicated track moving slowly; the duplicate is
   `aria-hidden` and `inert`; a visible pause/play button (`aria-pressed`); pauses on hover and
   `:focus-within`. Under reduced motion it is a static grid with no duplicate.
@@ -454,7 +455,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
   toggle already in view at load stays columns until it next leaves the screen). A journey-map stage
   with nothing inside is a plain stop, not a `<details>` (a disclosure that opens to nothing), as the
   accordion already does. Visitor copy lives in block-local `copy.ts` files, the existing precedent
-  (curriculum, preview, instructor, stats, video).
+  (curriculum, preview, instructor, stats, video). *Amended by X55: the tabs only on a phone-width
+  section, opening on the after side; wider it stays the columns.*
 - **X9 · 2026-09-27 · orchestrator · Atmosphere panel mode.** E1 measured the live shader at ~14%
   under the 0.86 dark veil: quieter than the no-shader glow, so an org that adds a shader would see LESS
   atmosphere. The veil stays proven, but a Style may now choose WHERE it is drawn:
@@ -1694,3 +1696,35 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     change), so it holds the proven veil for four seconds after either, which includes a
     phone whose window grows as its address bar hides. The veil changes as the opening
     scrolls, in steps of 0.005, thickening at once. Only Chromium has been measured.
+
+- **X55 · 2026-10-11 · 3b round 2 · The payoff first: the change side by side with its after lines
+  loudest, the switch on phones only; a benefit's name at a middle size (BUILT, decided without the
+  owner; amends X8).** The reference plan (`phase3-sources/ref-plan`, sections 3 and 4): "the payoff
+  hides behind a toggle that opens on the before", and "the benefits [are] at body size, under
+  headings three to six times their size".
+  - **The toggle** is the columns wherever they sit side by side, and the switch only where they
+    would stack: phone width is the columns' own breakpoint, read from the stylesheet (`--_phone`, set
+    under the complement of the columns' `@container (min-width: 44rem)`) on a ResizeObserver over
+    the section, so a resize either way swaps it, and the number lives in one place. On a phone it
+    opens on the after side, the tabs still in reading order (where you are, where you will be). X8's
+    rule holds: the first swap waits until the section is ahead of the visitor. Not re-decided: the
+    canvas's editable side titles, which the tabs do not offer, now show on a wide canvas.
+  - **The after lines** in `columns` take the display face at title size, as the toggle's panel
+    already did, over the before side's body lines in the soft ink, so the payoff is the loudest
+    thing after the heading. Measured in all eight Styles (gallery, 1440): after 24–32px, before
+    19.6–20.8px, every row still level across the two sides.
+  - **A benefit's name** in the `grid` sits two fifths of the way from the Style's title size to its
+    heading's (a fifth when four sit to a row), through a Heading hook, `--lp-title-lift` (0 the
+    title, 1 the heading), like `--lp-display-scale`. A new size value was rejected: the builds
+    (`motion.css`) key on `[data-size='title']`, and a new value would have silently dropped every
+    Style's entrance from the names. The name keeps the title's ink, the text grade, since at a
+    0.9 text scale it falls under large-text size. Ancestral Threads: 26.3px to 39.5px under a
+    59.4px heading, at most two lines; a phone, 25.1px under 32.2px. The gallery's four 16–18
+    character names stay within two lines in every Style (Bold 43px, Quiet 27.5px).
+  - **Not built:** the plan's optional mark beside each benefit (it needs a field on the item, the
+    editor's work in 3c); the split and checklist layouts keep their sizes (split's rows are
+    already title size; the checklist is compact by design).
+  - **Tests:** the toggle's unit tests at phone width and wide and across a resize, a source pin
+    tying `--_phone` to the columns' breakpoint, and `e2e/page-kit/type-rank.spec.ts` measuring the
+    after lines against the before and each name against the Style's two sizes resolved where it
+    sits. The seed pins Ancestral Threads' benefits `grid`, a test subject now.
