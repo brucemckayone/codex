@@ -71,6 +71,9 @@
     readyVariants: null as string[] | null,
     streamingExpiresAt: null as string | null,
     revocationReason: null as AccessRevocationReason | null,
+    // The /stream call failed without a verdict (Codex-h3ipg): the view
+    // asks for a refresh instead of showing a paywall.
+    accessCheckFailed: false,
     progress: null as {
       positionSeconds: number;
       durationSeconds: number;
@@ -100,6 +103,7 @@
             accessState.revocationReason =
               (result as { revocationReason?: AccessRevocationReason | null })
                 .revocationReason ?? null;
+            accessState.accessCheckFailed = result.accessCheckFailed;
             accessState.progress = result.progress;
             accessState.loading = false;
           }
@@ -114,6 +118,7 @@
         accessState.readyVariants = null;
         accessState.streamingExpiresAt = null;
         accessState.revocationReason = null;
+        accessState.accessCheckFailed = false;
         accessState.progress = null;
         accessState.loading = false;
         resolvedPromise = null;
@@ -189,6 +194,7 @@
   readyVariants={accessState.readyVariants}
   streamingExpiresAt={accessState.streamingExpiresAt}
   revocationReason={accessState.revocationReason}
+  accessCheckFailed={accessState.accessCheckFailed}
   onaccessrestored={() => {
     // Clear the reason optimistically, then force a server-load re-run
     // so the next streaming URL request can succeed. `app:auth` is the
