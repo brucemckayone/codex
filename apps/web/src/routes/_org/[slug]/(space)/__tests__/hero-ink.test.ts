@@ -367,8 +367,13 @@ describe('the painting-shader selector reads what ShaderHero writes', () => {
     ).toBe('0');
     expect(shader.match(/\.style\.opacity = '1'/g)).toHaveLength(1);
     expect(shader).toMatch(/\.style\.opacity = '0'/);
-    expect(stripComments(readFileSync(LAYOUT, 'utf8'))).toMatch(
-      /<ShaderHero class="shader-hero--fullpage" \/>/
-    );
+    // One mount, as the fullpage shader. Its other props (`still`, held in
+    // the studio) do not change where the canvas sits, so they are not pinned.
+    const mounts =
+      stripComments(readFileSync(LAYOUT, 'utf8')).match(
+        /<ShaderHero\b[^>]*\/>/g
+      ) ?? [];
+    expect(mounts).toHaveLength(1);
+    expect(mounts[0]).toMatch(/\sclass="shader-hero--fullpage"[\s/]/);
   });
 });
