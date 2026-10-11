@@ -191,6 +191,13 @@ interface PortalSpec {
    * test's subject away.
    */
   pins?: Partial<Record<SeededType, string>>;
+  /**
+   * Pins for ONE org's copy of this page, over {@link pins}. Every org in
+   * {@link FIXTURE_ORGS} seeds the same portals, and one org's test subject
+   * can be another org's: a layout pinned for a test on one would move the
+   * page a test reads on another.
+   */
+  orgPins?: Record<string, Partial<Record<SeededType, string>>>;
   stages: [StageSpec, StageSpec, StageSpec];
   /** How many of this portal's practices are marked complete. */
   completions: number;
@@ -240,6 +247,11 @@ const PORTALS: PortalSpec[] = [
     // Room and quiet, no colour bands, and a short page: enough for a hard week.
     style: 'quiet',
     recipe: 'short',
+    // The cover hero over a photo the browser suite reads on this org
+    // (`e2e/page-kit/brand-fidelity.spec.ts`, D10). Not on studio-alpha,
+    // whose copy is the org-shader suite's subject: a cover with a picture
+    // draws its own band over the org's moving background.
+    orgPins: { 'of-blood-and-bones': { hero: 'cover' } },
     stages: [
       { name: 'Naming', gloss: 'Saying the thing plainly.' },
       { name: 'Holding', gloss: 'Company for what cannot be fixed.' },
@@ -479,7 +491,7 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
     // seeded is exactly the case that has to backfill one. Reconciling (rather
     // than inserting inside `createPortal`) is what makes the fix reach rows that
     // already exist.
-    await reconcilePage(org.id, userId, courseId, spec);
+    await reconcilePage(org.id, orgSlug, userId, courseId, spec);
     await reconcilePrice(courseId, spec);
     await retirePlans(courseId, spec);
     await reconcileCover(courseId, spec);
@@ -508,6 +520,7 @@ async function seedOrgPortals(orgSlug: string): Promise<void> {
  */
 async function reconcilePage(
   organizationId: string,
+  orgSlug: string,
   creatorId: string,
   courseId: string,
   spec: PortalSpec
@@ -529,7 +542,7 @@ async function reconcilePage(
     featured: spec.featured ?? false,
     subjectType: 'course' as const,
     subjectId: courseId,
-    sections: buildSections(spec),
+    sections: buildSections(spec, orgSlug),
     // The page-kit v2 STYLE (`docs/design/landing-builder/01-contract.md`
     // §2/§3, BINDING; WP-9b) — each portal's OWN choice (see `PortalSpec.style`),
     // not a single shared bundle. This used to be one legacy nine-axis bundle
@@ -1118,7 +1131,7 @@ const PAGE_COPY: Record<
  * `courses.priceCents` (or its absence) is what actually drives the CTA a
  * visitor sees, and the framing text here stays honest against either state.
  */
-function buildSections(spec: PortalSpec) {
+function buildSections(spec: PortalSpec, orgSlug: string) {
   const copy = PAGE_COPY[spec.slug];
   if (!copy) {
     throw new Error(
@@ -1231,8 +1244,17 @@ function buildSections(spec: PortalSpec) {
     readonly type: SeededType;
     readonly layout?: string;
   }[] = RECIPES[spec.recipe];
-  // A pin on a section the recipe does not have would quietly pin nothing.
-  for (const type of Object.keys(spec.pins ?? {})) {
+  // A pin for an org the seed never runs, or on a section the recipe does not
+  // have, would quietly pin nothing.
+  for (const pinned of Object.keys(spec.orgPins ?? {})) {
+    if (!FIXTURE_ORGS.includes(pinned)) {
+      throw new Error(
+        `buildSections: "${spec.slug}" pins layouts for "${pinned}", which is not one of ${FIXTURE_ORGS.join(', ')}`
+      );
+    }
+  }
+  const pins = { ...spec.pins, ...spec.orgPins?.[orgSlug] };
+  for (const type of Object.keys(pins)) {
     if (!recipe.some((section) => section.type === type)) {
       throw new Error(
         `buildSections: "${spec.slug}" pins a ${type} layout, but the ${spec.recipe} recipe has no ${type} section`
@@ -1241,7 +1263,7 @@ function buildSections(spec: PortalSpec) {
   }
   return recipe.map(({ type, layout: recipeLayout }) => {
     const { name, props } = sections[type]();
-    const layout = spec.pins?.[type] ?? recipeLayout;
+    const layout = pins[type] ?? recipeLayout;
     return {
       id: crypto.randomUUID(),
       type,

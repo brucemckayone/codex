@@ -213,6 +213,52 @@ export async function seedOrganizations(db: typeof DbClient) {
     {
       organizationId: ORGS.alpha.id,
       primaryColorHex: ORGS.alpha.primaryColor,
+      // The seeded org with a shader and its own heading colour: the browser
+      // suite reads both (`e2e/page-kit/org-shader.spec.ts`,
+      // `e2e/org/explore-heading.spec.ts`). This is the whole brand those
+      // suites were made green against, copied from the local row it was
+      // tuned in (2026-09-27), so a fresh seed tests the look that was tested.
+      secondaryColorHex: '#737373',
+      accentColorHex: '#F59E0B',
+      fontHeading: 'Inter',
+      fontBody: 'Inter',
+      radiusValue: '0.375',
+      densityValue: '0.96',
+      heroLayout: 'centered',
+      tokenOverrides: JSON.stringify({
+        'shader-preset': 'glow',
+        'shader-intensity': '0.9',
+        'shader-vignette': '0.45',
+        'shader-glow-drift': '0.16',
+        'shader-glow-count': '8',
+        'shader-glow-size': '0.8',
+        'text-scale': '1',
+        'heading-weight': '600',
+        'body-weight': '400',
+        'text-transform-label': 'uppercase',
+        'shadow-scale': '0.9',
+        'shadow-color': '220 6% 14%',
+        'card-hover-scale': '1.015',
+        'card-image-hover-scale': '1.03',
+        'heading-color': '#E11D48',
+        'glass-tint': '#FDE7CF',
+        'hero-text': '#FFFFFF',
+        'hero-text-muted': '#FFFFFF',
+        'hero-title-color': '#FFFFFF',
+        'hero-title-blend': 'normal',
+        'hero-glass-text': '#FFFFFF',
+        'hero-glass-tint': '#FFFFFF',
+        'hero-border-tint': '#FFFFFF',
+        'hero-logo-scale': '1.05',
+        'hero-cta-bg': '#F59E0B',
+        'hero-cta-text': '#000000',
+      }),
+      darkModeOverrides: JSON.stringify({ primaryColor: '#E11D48' }),
+      darkTokenOverrides: JSON.stringify({
+        'heading-color': '#FF4C64',
+        'glass-tint': '#261704',
+        'shadow-color': '220 10% 5%',
+      }),
       logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.alpha.id, 'md')}`,
       pricingFaq: JSON.stringify([
         {
