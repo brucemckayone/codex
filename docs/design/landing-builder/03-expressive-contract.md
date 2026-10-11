@@ -1728,3 +1728,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     tying `--_phone` to the columns' breakpoint, and `e2e/page-kit/type-rank.spec.ts` measuring the
     after lines against the before and each name against the Style's two sizes resolved where it
     sits. The seed pins Ancestral Threads' benefits `grid`, a test subject now.
+  - **From the review:** the swap waits a frame after the ResizeObserver reports (made inside its
+    delivery it resized the observed section, a reported loop on every rotation); a visitor focused
+    on a tab when the tabs give way keeps their place on that side's column; Soft centres its head
+    over a toggle drawn as the columns, as over the columns (source-pinned only: the local stack had
+    stopped, so it was not looked at); source pins for the four-across lift and Soft's resets.
