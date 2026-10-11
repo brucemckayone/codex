@@ -14,6 +14,11 @@ import {
   USERS,
 } from './constants';
 import {
+  cleanupStripeSeedObjects,
+  resolveSeedEnv,
+  SEED_ENV_METADATA_KEY,
+} from './stripe-cleanup';
+import {
   assertTestModeKey,
   createOrFindStripeSubscription,
   SYNTHETIC_STRIPE_CUSTOMER_ID,
@@ -25,90 +30,12 @@ const purchasedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 days ag
 const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
 
 // ── Stripe Cleanup ─────────────────────────────────────────────────────────
-// Remove stale seed objects from previous runs to keep the Stripe dashboard clean.
-
-/**
- * Grace period before a seed Product is considered abandoned.
- *
- * WHY THIS EXISTS. The Stripe TEST-MODE ACCOUNT IS SHARED — by every
- * developer machine, every worktree, `seed-dev-db.yml`, and every CI run of
- * `testing.yml`. This cleanup selects on `metadata['codex_seed']:'true'`
- * globally, with no notion of which environment owns what, so before this
- * bound it archived the products and prices that OTHER live databases were
- * pointing at. Those rows are not repaired by anything: the other environment
- * keeps its `stripe_price_monthly_id`, and the next subscription checkout dies
- * in `SubscriptionService.createCheckoutSession` with Stripe's
- * `The price specified is inactive. This field only accepts active prices.`
- * (`line_items[0][price]`) — a 500 on the pricing page's Subscribe button.
- *
- * That is a cross-environment write, and it was observed: the seeded
- * `studio-alpha` Standard/Pro and `of-blood-and-bones` Soul Path tiers all had
- * `active: false` products AND prices in Stripe while the local database still
- * referenced them, which is exactly what
- * `e2e/subscription/03-subscribe-flow.spec.ts` fails on. A seed run in one
- * checkout had archived the objects a different checkout's database owned.
- *
- * A 24h floor keeps the hygiene the cleanup was written for while making it
- * impossible to archive anything an in-flight environment just created (a CI
- * E2E job lives ~15 minutes). Products newer than this are left alone; they
- * are inert rows in a test account, which is a far cheaper problem than
- * breaking someone else's checkout.
- */
-const STRIPE_SEED_CLEANUP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
-
-async function cleanupStripeSeedObjects(stripe: Stripe): Promise<void> {
-  // 1. Archive stale seed Products and their Prices
-  // Stripe doesn't allow deleting products with prices, so we archive instead.
-  const seedProducts = await stripe.products.search({
-    query: "metadata['codex_seed']:'true' AND active:'true'",
-    limit: 100,
-  });
-
-  const archiveCutoff = Math.floor(
-    (Date.now() - STRIPE_SEED_CLEANUP_MIN_AGE_MS) / 1000
-  );
-  const stale = seedProducts.data.filter((p) => p.created < archiveCutoff);
-  const spared = seedProducts.data.length - stale.length;
-
-  for (const product of stale) {
-    // Archive all active prices first
-    const prices = await stripe.prices.list({
-      product: product.id,
-      active: true,
-      limit: 100,
-    });
-    for (const price of prices.data) {
-      await stripe.prices.update(price.id, { active: false });
-    }
-    // Archive the product
-    await stripe.products.update(product.id, { active: false });
-  }
-
-  if (stale.length > 0) {
-    console.log(
-      `  🧹 Archived ${stale.length} stale Stripe products + prices (older than 24h)`
-    );
-  }
-  if (spared > 0) {
-    console.log(
-      `  ⏭ Spared ${spared} recent seed product(s) — another environment may be using them`
-    );
-  }
-
-  // 2. Find existing seed Connect accounts (can't delete, but we track for reuse)
-  // Stripe accounts.list doesn't support metadata filtering, so we list recent and check
-  const accounts = await stripe.accounts.list({ limit: 100 });
-  const seedAccounts = accounts.data.filter(
-    (a) => a.metadata?.codex_seed === 'true'
-  );
-  if (seedAccounts.length > 0) {
-    console.log(
-      `  🔍 Found ${seedAccounts.length} existing seed Connect account(s)`
-    );
-  }
-
-  return;
-}
+// Ownership model + cleanup live in ./stripe-cleanup.ts (Codex-1ilxl). In
+// short: every seed Stripe object is tagged `codex_seed_env`, a run archives
+// only its OWN env's objects (plus `ci-*` namespaces older than 24h), and
+// untagged legacy objects are never touched. The Stripe test account is
+// shared by every environment, so an account-wide cleanup archives prices
+// other live databases still reference.
 
 // ── Stripe Connect Pre-fill ────────────────────────────────────────────────
 // Bypass onboarding requirements in test mode by providing all required fields.
@@ -265,9 +192,17 @@ interface SeededConnectAccountResult {
  * a new one. Idempotent — safe to re-run `pnpm db:seed`.
  *
  * Pre-existing accounts are matched by `metadata.codex_seed === 'true'` AND
- * `metadata.codex_organization_id === config.orgId`. Older Express seed accounts
- * (`requirement_collection: 'stripe'`) cannot be programmatically activated, so
- * we ignore them and create a fresh Custom one.
+ * `metadata.codex_organization_id === config.orgId`. Older Express seed
+ * accounts (`requirement_collection: 'stripe'`) cannot be programmatically
+ * activated, so we ignore them and create a fresh Custom one.
+ *
+ * Connect accounts are deliberately SHARED across environments and carry no
+ * `codex_seed_env` tag (Codex-1ilxl owner decision). Unlike products, an
+ * account is expensive to produce — activation is asynchronous and takes up
+ * to ~65s (see `activateConnectAccount`) — and nothing ever archives one, so
+ * sharing cannot cause the inactive-price failure that per-env products fix.
+ * Namespacing them would make every CI run create and activate two fresh
+ * accounts, growing the account list the `accounts.list` window must search.
  *
  * A matching account is only reused when it is ALREADY `charges_enabled`.
  * A Connect account that has once failed keyed identity verification is
@@ -369,7 +304,19 @@ async function ensureSeededConnectAccount(
   return { accountId, chargesEnabled, payoutsEnabled };
 }
 
-export async function seedCommerce(db: typeof DbClient) {
+interface SeedCommerceOptions {
+  /**
+   * `subscription_tiers.stripe_product_id` values read BEFORE the seed
+   * truncated the database. Own-env ones are archived precisely, with no age
+   * floor, because this run is about to re-point the tiers at new products.
+   */
+  previousStripeProductIds?: readonly string[];
+}
+
+export async function seedCommerce(
+  db: typeof DbClient,
+  { previousStripeProductIds = [] }: SeedCommerceOptions = {}
+) {
   // Platform fee config: 10% (1000 basis points)
   await db.insert(schema.platformFeeConfig).values({
     id: PLATFORM_FEE.id,
@@ -771,15 +718,23 @@ export async function seedCommerce(db: typeof DbClient) {
     string,
     { stripePriceMonthlyId: string; stripePriceAnnualId: string }
   > | null = null;
+  // Owning env id for every Stripe object created below. Set with the client.
+  let seedEnv: string | null = null;
 
   if (stripeKey) {
     // Refuse to seed against a live Stripe account — the seed creates
     // disposable customers and subscriptions that must never touch real data.
     assertTestModeKey(stripeKey);
     const stripe = new Stripe(stripeKey);
+    seedEnv = resolveSeedEnv();
+    console.log(`  Stripe seed env: ${seedEnv}`);
 
-    // Step 1: Clean up stale seed objects from previous runs
-    await cleanupStripeSeedObjects(stripe);
+    // Step 1: Archive this environment's previous seed objects (and stale CI
+    // namespaces). Never another live environment's — see stripe-cleanup.ts.
+    await cleanupStripeSeedObjects(stripe, {
+      seedEnv,
+      previousProductIds: previousStripeProductIds,
+    });
 
     // Step 2: Create Products + Prices for tiers
     const seedTiers = [
@@ -804,6 +759,7 @@ export async function seedCommerce(db: typeof DbClient) {
           codex_tier_id: tier.id,
           codex_org_id: tier.organizationId,
           codex_seed: 'true',
+          [SEED_ENV_METADATA_KEY]: seedEnv,
         },
       });
 
@@ -813,14 +769,24 @@ export async function seedCommerce(db: typeof DbClient) {
           unit_amount: tier.priceMonthly,
           currency: 'gbp',
           recurring: { interval: 'month' },
-          metadata: { codex_tier_id: tier.id, interval: 'month' },
+          metadata: {
+            codex_tier_id: tier.id,
+            interval: 'month',
+            codex_seed: 'true',
+            [SEED_ENV_METADATA_KEY]: seedEnv,
+          },
         }),
         stripe.prices.create({
           product: product.id,
           unit_amount: tier.priceAnnual,
           currency: 'gbp',
           recurring: { interval: 'year' },
-          metadata: { codex_tier_id: tier.id, interval: 'year' },
+          metadata: {
+            codex_tier_id: tier.id,
+            interval: 'year',
+            codex_seed: 'true',
+            [SEED_ENV_METADATA_KEY]: seedEnv,
+          },
         }),
       ]);
 
@@ -888,7 +854,7 @@ export async function seedCommerce(db: typeof DbClient) {
       Date.now() + 30 * 24 * 60 * 60 * 1000
     ); // +30 days
 
-    if (stripeKey && stripePriceIdsByTier) {
+    if (stripeKey && stripePriceIdsByTier && seedEnv) {
       const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
       if (tierPrices) {
         const stripe = new Stripe(stripeKey);
@@ -902,6 +868,7 @@ export async function seedCommerce(db: typeof DbClient) {
             },
             subscriptionSeedId,
             billingInterval: 'month',
+            seedEnv,
           });
           stripeSubscriptionId = result.stripeSubscriptionId;
           stripeCustomerId = result.stripeCustomerId;

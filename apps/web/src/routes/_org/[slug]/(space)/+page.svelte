@@ -465,7 +465,7 @@
         aria-label={m.org_hero_watch_intro()}
       >
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-          <path d="M14 8L34 20L14 32V8Z" fill="white" opacity="0.9" />
+          <path d="M14 8L34 20L14 32V8Z" fill="currentColor" opacity="0.9" />
         </svg>
       </button>
     {/if}
@@ -946,19 +946,76 @@
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
-    color: var(--brand-hero-text, white);
+
+    /* Hero ink (Codex-okfrf). Every `--brand-hero-*` colour, and the white
+       each falls back to, is authored for the dark ground a SHADER paints
+       (preset-axes.ts HERO_INK: "the hero sits over a shader, not over
+       --color-surface"). Until a shader is actually painting — no preset,
+       WebGL unavailable, a renderer that fails, or the moment before one
+       loads — the ground is the page itself, so the hero takes the org's
+       page ink, which the brand tokens keep legible on --color-background
+       in both themes. White on the parchment page measured 1.14:1.
+       `--color-heading` only exists inside a branded subtree. */
+    --_hero-ink: var(--color-text);
+    --_hero-ink-heading: var(--color-heading, var(--color-text));
+    --_hero-ink-muted: var(--color-text);
+    --_hero-tint: var(--color-text);
+    --_hero-glass-ink: var(--color-text);
+    --_hero-glass-tint: var(--color-text);
+    --_hero-title-blend: normal;
+    color: var(--_hero-ink);
   }
+
+  /* A shader is painting behind the hero. ShaderHero sets its canvas to
+     `opacity: 1` only once a renderer has initialised, and back to 0 for
+     preset 'none' or a failed renderer, so this matches exactly the frames
+     that have the dark ground. The org's explicit hero ink wins here, with
+     the white it was designed around as the fallback — unchanged for orgs
+     with a shader. `hero-ink.test.ts` pins both sides of this contract.
+
+     The canvas FADES in (ShaderHero's --transition-opacity), so an instant
+     swap put white on a still-unpainted page for the first half of the
+     fade. Transitioning the ink discretely with the fade's own duration
+     and easing flips it when the canvas crosses half opacity instead. It
+     lives on this rule only, so a theme switch without a shader stays
+     instant. */
+  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero {
+    --_hero-ink: var(--brand-hero-text, white);
+    --_hero-ink-heading: var(--brand-hero-title-color, white);
+    --_hero-ink-muted: var(--brand-hero-text-muted, white);
+    --_hero-tint: var(--brand-hero-border-tint, white);
+    --_hero-glass-ink: var(--brand-hero-glass-text, white);
+    --_hero-glass-tint: var(--brand-hero-glass-tint, white);
+    --_hero-title-blend: var(--brand-hero-title-blend, difference);
+    transition-property: --_hero-ink, --_hero-ink-heading, --_hero-ink-muted, --_hero-tint, --_hero-glass-ink,
+      --_hero-glass-tint, --_hero-title-blend;
+    transition-duration: var(--duration-normal);
+    transition-timing-function: var(--ease-default);
+    transition-behavior: allow-discrete;
+  }
+
+  /* Registered only so the swap above can run: Chromium will not transition
+     an unregistered custom property at all. `syntax: '*'` keeps each one
+     parsing and inheriting exactly like an unregistered property. */
+  @property --_hero-ink { syntax: '*'; inherits: true; }
+  @property --_hero-ink-heading { syntax: '*'; inherits: true; }
+  @property --_hero-ink-muted { syntax: '*'; inherits: true; }
+  @property --_hero-tint { syntax: '*'; inherits: true; }
+  @property --_hero-glass-ink { syntax: '*'; inherits: true; }
+  @property --_hero-glass-tint { syntax: '*'; inherits: true; }
+  @property --_hero-title-blend { syntax: '*'; inherits: true; }
 
   /* Bottom-weighted darken over the shader for stat/CTA legibility. Sits
      ABOVE the title (z-index 1 > title's implicit 0) so it adds contrast
      to the content block sitting at the bottom of the hero. Intentionally
      subtle — orgs WITH a shader want the shader to breathe.
-     Scoped to `[data-hero-shader-active]` so shader-less orgs show their
-     natural brand background instead of a dark overlay.
+     Keyed to the same painting-shader state as the hero ink, so a page
+     without one (or before it appears) shows its natural background
+     instead of a dark overlay under page-coloured text.
      Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
      surface tokens flip to light in dark-theme orgs, which would invert
      the intended darkening effect. */
-  :global(.org-layout[data-hero-shader-active]) .hero::after {
+  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -1011,8 +1068,8 @@
     font-weight: var(--font-bold);
     line-height: 0.95;
     letter-spacing: -0.03em;
-    color: var(--brand-hero-title-color, white);
-    mix-blend-mode: var(--brand-hero-title-blend, difference);
+    color: var(--_hero-ink-heading);
+    mix-blend-mode: var(--_hero-title-blend);
   }
 
   .hero__description {
@@ -1020,7 +1077,7 @@
     font-size: var(--text-xl);
     line-height: var(--leading-relaxed);
     max-width: 40ch;
-    color: color-mix(in srgb, var(--brand-hero-text, white) 80%, transparent);
+    color: color-mix(in srgb, var(--_hero-ink) 80%, transparent);
   }
 
   /* ── Content type pills ── */
@@ -1034,12 +1091,12 @@
 
   .hero__pill {
     padding: var(--space-1) var(--space-3);
-    background: color-mix(in srgb, var(--brand-hero-border-tint, white) 15%, transparent);
-    border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-border-tint, white) 20%, transparent);
+    background: color-mix(in srgb, var(--_hero-tint) 15%, transparent);
+    border: var(--border-width) solid color-mix(in srgb, var(--_hero-tint) 20%, transparent);
     border-radius: var(--radius-base);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--brand-hero-text, white);
+    color: var(--_hero-ink);
     letter-spacing: var(--tracking-wide);
     text-transform: uppercase;
   }
@@ -1049,14 +1106,14 @@
     text-transform: none;
     font-weight: var(--font-normal);
     letter-spacing: normal;
-    color: color-mix(in srgb, var(--brand-hero-text-muted, white) 75%, transparent);
-    border-color: color-mix(in srgb, var(--brand-hero-border-tint, white) 15%, transparent);
+    color: color-mix(in srgb, var(--_hero-ink-muted) 75%, transparent);
+    border-color: color-mix(in srgb, var(--_hero-tint) 15%, transparent);
     background: transparent;
     transition: color var(--duration-fast) var(--ease-default);
   }
 
   .hero__pill--category:hover {
-    color: var(--brand-hero-text, white);
+    color: var(--_hero-ink);
   }
 
   /* Separator dot between content pills and category pills */
@@ -1064,7 +1121,7 @@
     width: var(--space-1);
     height: var(--space-1);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--brand-hero-border-tint, white) 40%, transparent);
+    background: color-mix(in srgb, var(--_hero-tint) 40%, transparent);
   }
 
   /* ── CTAs ── */
@@ -1107,13 +1164,13 @@
   }
 
   .hero__cta--glass {
-    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 12%, transparent);
-    color: var(--brand-hero-glass-text, white);
-    border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
+    background: color-mix(in srgb, var(--_hero-glass-tint) 12%, transparent);
+    color: var(--_hero-glass-ink);
+    border: var(--border-width) solid color-mix(in srgb, var(--_hero-glass-tint) 25%, transparent);
   }
 
   .hero__cta--glass:hover {
-    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 20%, transparent);
+    background: color-mix(in srgb, var(--_hero-glass-tint) 20%, transparent);
     box-shadow: var(--shadow-md);
   }
 
@@ -1122,8 +1179,8 @@
   }
 
   .hero__follow--active {
-    background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
-    border-color: color-mix(in srgb, var(--brand-hero-glass-tint, white) 40%, transparent);
+    background: color-mix(in srgb, var(--_hero-glass-tint) 25%, transparent);
+    border-color: color-mix(in srgb, var(--_hero-glass-tint) 40%, transparent);
   }
 
   /* ── Centered play button (desktop only) ──
@@ -1146,11 +1203,11 @@
       width: var(--space-24);
       height: var(--space-24);
       border-radius: var(--radius-base);
-      background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 12%, transparent);
-      border: var(--border-width) solid color-mix(in srgb, var(--brand-hero-glass-tint, white) 25%, transparent);
+      background: color-mix(in srgb, var(--_hero-glass-tint) 12%, transparent);
+      border: var(--border-width) solid color-mix(in srgb, var(--_hero-glass-tint) 25%, transparent);
       backdrop-filter: blur(var(--blur-md));
       -webkit-backdrop-filter: blur(var(--blur-md));
-      color: var(--brand-hero-glass-text, white);
+      color: var(--_hero-glass-ink);
       cursor: pointer;
       transition: transform var(--duration-normal) var(--ease-out),
         background var(--duration-fast) var(--ease-default),
@@ -1160,8 +1217,8 @@
 
     .hero__play-center:hover {
       transform: translate(-50%, -50%) scale(1.1);
-      background: color-mix(in srgb, var(--brand-hero-glass-tint, white) 20%, transparent);
-      box-shadow: 0 0 0 var(--space-3) color-mix(in srgb, var(--brand-hero-glass-tint, white) 8%, transparent);
+      background: color-mix(in srgb, var(--_hero-glass-tint) 20%, transparent);
+      box-shadow: 0 0 0 var(--space-3) color-mix(in srgb, var(--_hero-glass-tint) 8%, transparent);
     }
 
     .hero__play-center:focus-visible {
@@ -1181,8 +1238,8 @@
   }
 
   @keyframes hero-play-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-hero-glass-tint, white) 15%, transparent); }
-    50% { box-shadow: 0 0 0 var(--space-4) color-mix(in srgb, var(--brand-hero-glass-tint, white) 0%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--_hero-glass-tint) 15%, transparent); }
+    50% { box-shadow: 0 0 0 var(--space-4) color-mix(in srgb, var(--_hero-glass-tint) 0%, transparent); }
   }
 
   /* ── Hero video-playing state ──
@@ -1224,7 +1281,7 @@
     display: flex;
     gap: var(--space-10);
     padding-top: var(--space-6);
-    border-top: var(--border-width) solid color-mix(in srgb, var(--brand-hero-border-tint, white) 25%, transparent);
+    border-top: var(--border-width) solid color-mix(in srgb, var(--_hero-tint) 25%, transparent);
     margin-top: var(--space-2);
   }
 
@@ -1240,7 +1297,7 @@
     font-weight: var(--font-bold);
     line-height: 1;
     letter-spacing: -0.02em;
-    color: var(--brand-hero-text, white);
+    color: var(--_hero-ink);
   }
 
   .hero__stat-label {
@@ -1248,7 +1305,7 @@
     font-weight: var(--font-medium);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: color-mix(in srgb, var(--brand-hero-text-muted, white) 62%, transparent);
+    color: color-mix(in srgb, var(--_hero-ink-muted) 62%, transparent);
   }
 
   /* ══════════════════════════════════════════
@@ -1631,7 +1688,7 @@
     gap: var(--space-5);
     border-top: none;
     border-right: var(--border-width) solid
-      color-mix(in srgb, var(--brand-hero-border-tint, white) 30%, transparent);
+      color-mix(in srgb, var(--_hero-tint) 30%, transparent);
     padding-top: 0;
     padding-right: var(--space-5);
     margin-top: 0;
@@ -1844,7 +1901,7 @@
       text-align: left;
       border-right: none;
       border-top: var(--border-width) solid
-        color-mix(in srgb, var(--brand-hero-border-tint, white) 25%, transparent);
+        color-mix(in srgb, var(--_hero-tint) 25%, transparent);
       padding-top: var(--space-6);
       padding-right: 0;
       margin-top: var(--space-2);

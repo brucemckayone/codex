@@ -83,6 +83,7 @@ const SEED_TIER = {
 };
 
 const SEED_SUBSCRIPTION_ID = 'sub_seed_test_viewer_alpha_standard';
+const SEED_ENV = 'local-abc123def456';
 
 function makeStripeCustomer(id: string): Stripe.Customer {
   return {
@@ -189,7 +190,11 @@ describe('createOrFindStripeCustomer', () => {
       },
     });
 
-    const result = await createOrFindStripeCustomer(asStripe(mock), SEED_USER);
+    const result = await createOrFindStripeCustomer(
+      asStripe(mock),
+      SEED_USER,
+      SEED_ENV
+    );
 
     expect(result.id).toBe('cus_test_existing');
     expect(mock.customers.search).toHaveBeenCalledTimes(1);
@@ -199,6 +204,8 @@ describe('createOrFindStripeCustomer', () => {
     expect(query).toContain(`codex_seed_user_id`);
     expect(query).toContain(SEED_USER.id);
     expect(query).toContain(`codex_seed`);
+    // ...and by the owning env, so another environment's customer is never reused
+    expect(query).toContain(`metadata['codex_seed_env']:'${SEED_ENV}'`);
   });
 
   it('creates a new customer with an idempotency key when none found', async () => {
@@ -211,7 +218,11 @@ describe('createOrFindStripeCustomer', () => {
       },
     });
 
-    const result = await createOrFindStripeCustomer(asStripe(mock), SEED_USER);
+    const result = await createOrFindStripeCustomer(
+      asStripe(mock),
+      SEED_USER,
+      SEED_ENV
+    );
 
     expect(result.id).toBe('cus_test_new');
     expect(mock.customers.create).toHaveBeenCalledTimes(1);
@@ -221,9 +232,10 @@ describe('createOrFindStripeCustomer', () => {
     expect(params.metadata).toMatchObject({
       codex_seed_user_id: SEED_USER.id,
       codex_seed: 'true',
+      codex_seed_env: SEED_ENV,
     });
     expect(options).toMatchObject({
-      idempotencyKey: `seed_customer_${SEED_USER.id}`,
+      idempotencyKey: `seed_customer_${SEED_ENV}_${SEED_USER.id}`,
     });
   });
 
@@ -237,7 +249,7 @@ describe('createOrFindStripeCustomer', () => {
     });
 
     await expect(
-      createOrFindStripeCustomer(asStripe(mock), SEED_USER)
+      createOrFindStripeCustomer(asStripe(mock), SEED_USER, SEED_ENV)
     ).rejects.toThrow(/Failed to create Stripe customer for seed user/);
   });
 });
@@ -264,6 +276,7 @@ describe('createOrFindStripeSubscription', () => {
       tier: SEED_TIER,
       subscriptionSeedId: SEED_SUBSCRIPTION_ID,
       billingInterval: 'month',
+      seedEnv: SEED_ENV,
     });
 
     expect(result.stripeSubscriptionId).toBe('sub_test_reused');
@@ -296,6 +309,7 @@ describe('createOrFindStripeSubscription', () => {
       tier: SEED_TIER,
       subscriptionSeedId: SEED_SUBSCRIPTION_ID,
       billingInterval: 'month',
+      seedEnv: SEED_ENV,
     });
 
     expect(result.stripeSubscriptionId).toBe('sub_test_created');
@@ -304,7 +318,7 @@ describe('createOrFindStripeSubscription', () => {
     expect(mock.subscriptions.create).toHaveBeenCalledTimes(1);
     const [subParams, subOptions] = mock.subscriptions.create.mock.calls[0];
     expect(subOptions).toMatchObject({
-      idempotencyKey: `seed_subscription_${SEED_SUBSCRIPTION_ID}`,
+      idempotencyKey: `seed_subscription_${SEED_ENV}_${SEED_SUBSCRIPTION_ID}`,
     });
 
     // Confirm metadata includes the codex_seed tag
@@ -313,6 +327,7 @@ describe('createOrFindStripeSubscription', () => {
       codex_seed_user_id: SEED_USER.id,
       codex_seed_tier_id: SEED_TIER.id,
       codex_seed: 'true',
+      codex_seed_env: SEED_ENV,
     });
 
     // Confirm it used the monthly price for billingInterval: 'month'
@@ -355,6 +370,7 @@ describe('createOrFindStripeSubscription', () => {
       tier: SEED_TIER,
       subscriptionSeedId: SEED_SUBSCRIPTION_ID,
       billingInterval: 'year',
+      seedEnv: SEED_ENV,
     });
 
     const [subParams] = mock.subscriptions.create.mock.calls[0];
@@ -389,6 +405,7 @@ describe('createOrFindStripeSubscription', () => {
         },
         subscriptionSeedId: SEED_SUBSCRIPTION_ID,
         billingInterval: 'month',
+        seedEnv: SEED_ENV,
       })
     ).rejects.toThrow(/missing stripePriceMonthlyId/);
 

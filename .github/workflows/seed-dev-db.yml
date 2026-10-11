@@ -107,6 +107,12 @@ jobs:
           # =false + secure WS. The connection_uri above is already pooled=false
           # (direct), so this matches the proven-good config in testing.yml.
           DB_METHOD: NEON_BRANCH
+          # Stable Stripe ownership namespace for the long-lived dev branch.
+          # Without it the seed derives `ci-<run id>-…` from GITHUB_RUN_ID,
+          # and `ci-*` namespaces older than 24h are swept as ephemeral —
+          # which would archive the prices this persistent DB still uses
+          # (Codex-1ilxl, packages/database/scripts/seed/stripe-cleanup.ts).
+          CODEX_SEED_ENV: dev-neon
           # The seed script also touches dev CDN / KV for cache-flushing.
           # In CI we don't have those bindings, so those operations
           # will be no-ops or warn — the DB seeding still completes.

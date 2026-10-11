@@ -103,6 +103,17 @@ const SNIFFABLE_IMAGE_MIME_TYPES: readonly AllowedMimeType[] = [
 ];
 
 /**
+ * True when `mimeType` is a raster format whose binary signature can be
+ * verified (see {@link SNIFFABLE_IMAGE_MIME_TYPES}). A declaration of one of
+ * these types is a claim the bytes can prove or disprove; SVG is not.
+ */
+export function isSniffableImageMimeType(
+  mimeType: string
+): mimeType is AllowedMimeType {
+  return (SNIFFABLE_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
+}
+
+/**
  * Detects an image's MIME type from its magic bytes (content sniffing).
  *
  * Where {@link validateImageSignature} verifies a *claimed* type, this *infers*
