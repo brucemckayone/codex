@@ -61,7 +61,7 @@ async function resolveStudioOrg(): Promise<{
  * The kit's block inspector is the one that decides which prop the returned
  * `key` ends up in (`props.image`, `props.background`, `items[].image`, ...)
  * — this function has no opinion on that, and does not validate it: it only
- * uploads and hands back `{ key, url }`.
+ * uploads and hands back `{ key, url, width?, height? }`.
  */
 export const uploadPageImageForm = form(
   z.object({
@@ -88,12 +88,14 @@ export const uploadPageImageForm = form(
       };
     }
     try {
-      const { key, url } = await ctx.api.access.uploadPageImage(
+      const { key, url, width, height } = await ctx.api.access.uploadPageImage(
         ctx.orgId,
         pageId,
         image
       );
-      return { outcome: 'uploaded' as const, key, url };
+      // The picture's own size (absent from an older worker), which the
+      // field stores on the reference as `w`/`h` (Codex-61zsk.53).
+      return { outcome: 'uploaded' as const, key, url, width, height };
     } catch (err) {
       if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
         return { outcome: 'failed' as const, message: err.message };

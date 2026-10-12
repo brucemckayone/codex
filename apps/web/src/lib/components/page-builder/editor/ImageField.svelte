@@ -80,11 +80,22 @@
   const thumb = $derived(broken ? null : thumbUrl);
   const isDecorative = $derived(decorative && !describing && !alt.trim());
 
+  /**
+   * The reference with its words changed and everything else kept: the
+   * focal point and the picture's size (`focus`, `w`, `h`) belong to the
+   * picture, so rebuilding it as `{ key, alt }` would drop them
+   * (Codex-61zsk.53).
+   */
+  function withAlt(current: ImageRef, next: string | undefined): ImageRef {
+    const { alt: _old, ...rest } = current;
+    return next === undefined ? rest : { ...rest, alt: next };
+  }
+
   function writeAlt(next: string): void {
     if (!ref) return;
     // Clearing the words to retype them must not flip the field to decorative.
     describing = true;
-    onChange(next.trim() ? { key: ref.key, alt: next } : { key: ref.key });
+    onChange(withAlt(ref, next.trim() ? next : undefined));
   }
 
   async function setDecorative(on: boolean): Promise<void> {
@@ -95,7 +106,7 @@
       await tick();
       altInput?.focus();
     } else if (ref && ref.alt !== undefined) {
-      onChange({ key: ref.key });
+      onChange(withAlt(ref, undefined));
     }
   }
 
@@ -151,7 +162,12 @@
           // `value` as it is NOW, not the `ref` derived when the upload
           // started: a slow upload can outlive the field on screen.
           const alt = isImageRef(value) ? value.alt : undefined;
-          onChange(alt ? { key: result.key, alt } : { key: result.key });
+          // A new picture: its words carry over, its focal point does not
+          // (it was the old picture's subject), and its size is the
+          // server's, which is also what says it has an `xl` to offer.
+          const size =
+            result.width && result.height ? { w: result.width, h: result.height } : {};
+          onChange(alt ? { key: result.key, alt, ...size } : { key: result.key, ...size });
           uploaded = true;
         } else {
           // The server's own words (a format it refuses, a size over the
