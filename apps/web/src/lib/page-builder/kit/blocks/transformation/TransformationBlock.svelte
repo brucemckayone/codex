@@ -113,12 +113,16 @@
   }
 
   /* Soft centres the head over its pair of cards, as its pricing does; the
-     cards themselves keep reading from the start. */
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] {
+     cards themselves keep reading from the start. A toggle drawn as the
+     columns (wider than a phone, X55) is the columns, so it centres too. */
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols))) {
     --lp-actions-align: center;
   }
 
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] .tf__head {
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols)))
+    .tf__head {
     justify-items: center;
     text-align: center;
   }
@@ -136,7 +140,9 @@
     justify-items: center;
   }
 
-  :global(.lp[data-lp-style='soft']) .tf[data-layout='columns'] :global(.lp-eyebrow),
+  :global(.lp[data-lp-style='soft'])
+    .tf:is([data-layout='columns'], [data-layout='toggle']:has(:global(.tf-cols)))
+    :global(.lp-eyebrow),
   :global(.lp:is([data-lp-style='soft'], [data-lp-style='cinematic']))
     .tf[data-layout='statement']
     :global(.lp-eyebrow) {

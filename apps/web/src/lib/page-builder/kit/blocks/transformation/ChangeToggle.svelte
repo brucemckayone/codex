@@ -1,10 +1,15 @@
 <!--
   @component ChangeToggle
 
-  The `toggle` layout: a switch over one panel that flips between where the
-  visitor is now and where they will be — the WAI-ARIA tabs pattern. Until
-  the page's script runs it IS the `columns` layout, so a visitor without
-  JavaScript reads both sides.
+  The `toggle` layout: on a phone-width section, a switch over one panel that
+  flips between where the visitor is now and where they will be — the
+  WAI-ARIA tabs pattern — opening on where they will be, so the payoff comes
+  first. Wider, it IS the `columns` layout: both sides in view, the after
+  lines the loudest (03 X55). Until the page's script runs it is the columns
+  at every width, so a visitor without JavaScript reads both sides.
+
+  Phone width is the width at which the columns stack, read from the
+  stylesheet's own container query (`--_phone`), never restated here.
 
   The tabs are shorter than the columns they replace, so the swap waits until
   the section is still ahead of the visitor (below the viewport): nothing they
@@ -15,6 +20,7 @@
   With only one side written there is nothing to flip, so it stays columns.
 -->
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
   import { CheckIcon } from '$lib/components/ui/Icon';
   import type { ColourSchemeId } from '../../model/ids';
@@ -34,8 +40,11 @@
   const { lines, labels, anchor, featured, edit }: Props = $props();
 
   let ready = $state(false);
-  let selected = $state<Side>('before');
-  const tabs = $derived(ready && lines.before.length > 0 && lines.after.length > 0);
+  let phone = $state(false);
+  let selected = $state<Side>('after');
+  const tabs = $derived(
+    ready && phone && lines.before.length > 0 && lines.after.length > 0
+  );
   const tabId = (side: Side) => `${anchor}-tab-${side}`;
   const panelId = (side: Side) => `${anchor}-panel-${side}`;
 
@@ -52,6 +61,46 @@
     observer.observe(root);
     return () => observer.disconnect();
   };
+
+  /**
+   * Follows the section across its phone-width breakpoint, as it resizes. The
+   * swap waits a frame: made inside the observer's own delivery, it would
+   * resize the section being observed, which the browser reports as a loop.
+   */
+  const atPhoneWidth: Attachment<HTMLElement> = (root) => {
+    const flag = () => getComputedStyle(root).getPropertyValue('--_phone').trim() === '1';
+    phone = flag();
+    if (typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const follow = () => {
+      const next = flag();
+      if (next === phone) return;
+      const focused = tabs && !next && root.contains(document.activeElement);
+      phone = next;
+      if (focused) void tick().then(() => keepPlace(root));
+    };
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(follow);
+    });
+    // The section is the query container the breakpoint is measured on.
+    observer.observe(root.closest('.lp-section') ?? root);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  };
+
+  /** The tabs gave way under a visitor's focus: the side they were on takes it. */
+  function keepPlace(root: HTMLElement) {
+    const side =
+      root.querySelector<HTMLElement>(`.tf-col[data-side='${selected}']`) ??
+      root.querySelector<HTMLElement>('.tf-col');
+    if (!side) return;
+    side.tabIndex = -1;
+    side.addEventListener('blur', () => side.removeAttribute('tabindex'), { once: true });
+    side.focus({ preventScroll: true });
+  }
 
   const KEYS: Record<string, (index: number) => number> = {
     ArrowRight: (index) => (index + 1) % SIDES.length,
@@ -70,7 +119,12 @@
   }
 </script>
 
-<div class="tf-toggle" data-tabs={tabs ? '' : undefined} {@attach whenAhead}>
+<div
+  class="tf-toggle"
+  data-tabs={tabs ? '' : undefined}
+  {@attach whenAhead}
+  {@attach atPhoneWidth}
+>
   {#if tabs}
     <div class="tf-toggle__switch" role="tablist" aria-label={TRANSFORMATION_COPY.switch}>
       {#each SIDES as side (side)}
@@ -120,6 +174,13 @@
 </div>
 
 <style>
+  /* Phone width: the columns' own breakpoint (ChangeColumns), its complement. */
+  @container not (min-width: 44rem) {
+    .tf-toggle {
+      --_phone: 1;
+    }
+  }
+
   .tf-toggle[data-tabs] {
     --_pad: clamp(var(--space-5), var(--space-3) + 2cqi, var(--space-10));
     display: grid;

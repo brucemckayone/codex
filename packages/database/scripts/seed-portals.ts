@@ -264,8 +264,10 @@ const PORTALS: PortalSpec[] = [
     // Family history kept by hand: prints, pen marks and paper.
     style: 'studio',
     recipe: 'full',
-    // What is handed down, and what is chosen: the before and after as a switch.
-    pins: { transformation: 'toggle' },
+    // What is handed down, and what is chosen: the before and after as a
+    // switch on a phone, side by side wider; what's included as named tiles
+    // (e2e/page-kit/type-rank.spec.ts measures both).
+    pins: { transformation: 'toggle', benefits: 'grid' },
     stages: [
       { name: 'The near ones', gloss: 'Parents, and their weather.' },
       { name: 'The far ones', gloss: 'Names you were never told.' },
