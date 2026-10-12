@@ -52,9 +52,14 @@ export interface StyleDefinition {
   sticky?: Exclude<ColourSchemeId, 'atmosphere'>;
 }
 
-/** The sales narrative: promise, pain, the journey, shift, proof, offer, objections, ask. */
+/**
+ * The sales narrative: promise, pain, the journey, shift, proof, offer,
+ * objections, ask. What the course holds comes straight after its promise
+ * (03 X63): a visitor sees what they would be buying before being sold it.
+ */
 export const STORY_ORDER = [
   'hero',
+  'inside',
   'video',
   'problem',
   'story',

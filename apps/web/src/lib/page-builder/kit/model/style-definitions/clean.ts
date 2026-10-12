@@ -17,6 +17,7 @@ export const CLEAN: StyleDefinition = {
     curriculum: 'accordion',
     preview: 'feature',
     gallery: 'grid',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'grid',
     faq: 'accordion',
@@ -39,6 +40,9 @@ export const CLEAN: StyleDefinition = {
     curriculum: 'base',
     preview: 'contrast',
     gallery: 'base',
+    // The whisper of tint between the hero's ground and the change's, so the
+    // opening still takes turns (03 X63).
+    inside: 'soft',
     instructor: 'base',
     testimonials: 'soft',
     stats: 'base',
@@ -57,6 +61,7 @@ export const CLEAN: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'transformation',
     'benefits',
     'curriculum',

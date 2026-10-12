@@ -23,6 +23,7 @@ export const QUIET: StyleDefinition = {
     curriculum: 'accordion',
     preview: 'feature',
     gallery: 'grid',
+    inside: 'carousel',
     instructor: 'quote',
     testimonials: 'quote',
     faq: 'accordion',
@@ -42,6 +43,7 @@ export const QUIET: StyleDefinition = {
     curriculum: 'base',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'base',
     stats: 'base',
@@ -59,9 +61,11 @@ export const QUIET: StyleDefinition = {
     accent: 'base',
     atmosphere: 'soft',
   },
-  // The statement straight after the promise, then the story in order.
+  // What the course holds straight after the promise (03 X63), then the
+  // statement, then the story in order.
   order: [
     'hero',
+    'inside',
     'text',
     'problem',
     'video',
@@ -80,6 +84,7 @@ export const QUIET: StyleDefinition = {
   ],
   starter: [
     'hero',
+    'inside',
     'text',
     'transformation',
     'curriculum',

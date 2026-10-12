@@ -14,6 +14,7 @@ import CurriculumBlock from './blocks/curriculum/CurriculumBlock.svelte';
 import FaqBlock from './blocks/faq/FaqBlock.svelte';
 import GalleryBlock from './blocks/gallery/GalleryBlock.svelte';
 import HeroBlock from './blocks/hero/HeroBlock.svelte';
+import InsideBlock from './blocks/inside/InsideBlock.svelte';
 import InstructorBlock from './blocks/instructor/InstructorBlock.svelte';
 import PreviewBlock from './blocks/preview/PreviewBlock.svelte';
 import PricingBlock from './blocks/pricing/PricingBlock.svelte';
@@ -47,6 +48,7 @@ export const BLOCKS: Readonly<Record<SectionTypeId, KitBlockComponent>> = {
   text: TextBlock,
   story: StoryBlock,
   gallery: GalleryBlock,
+  inside: InsideBlock,
 };
 
 export interface KitBlock {

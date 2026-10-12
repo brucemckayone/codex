@@ -85,7 +85,9 @@ type PracticeType = JourneyStageView['practices'][number]['contentType'];
 /**
  * Believable practices per stage (one film each) — thumbnails show them —
  * each with its length in seconds, null for a reading, as the course sends
- * them.
+ * them. None carries a picture (`thumbnailUrl`): a sample never points at a
+ * made-up URL, so "What's inside" previews its cards as their kinds' tiles,
+ * which is what a course with no thumbnails really shows (03 X63).
  */
 const STAGE_PRACTICES: readonly (readonly (readonly [
   string,

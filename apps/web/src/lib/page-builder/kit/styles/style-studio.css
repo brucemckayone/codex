@@ -96,7 +96,8 @@
     .guide__portrait:not([data-layout='quote']) .clip,
     .gallery-picture__frame,
     .benefits-grid .lp-media,
-    .story-strip__card > .lp-media
+    .story-strip__card > .lp-media,
+    .practice-card__picture
   ) {
   --_print-edge: clamp(var(--space-2), 0.8cqi, var(--space-3));
   --_print-paper: oklch(
@@ -117,7 +118,8 @@
     .hero-centered__media,
     .text__media,
     .guide__portrait .clip,
-    .gallery-picture__frame
+    .gallery-picture__frame,
+    .practice-card__picture
   )
   .lp-media {
   border-radius: 0;

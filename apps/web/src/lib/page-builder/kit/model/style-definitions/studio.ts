@@ -23,6 +23,7 @@ export const STUDIO: StyleDefinition = {
     curriculum: 'timeline',
     preview: 'split',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'wall',
     faq: 'columns',
@@ -44,6 +45,7 @@ export const STUDIO: StyleDefinition = {
     curriculum: 'base',
     preview: 'soft',
     gallery: 'base',
+    inside: 'base',
     instructor: 'soft',
     testimonials: 'base',
     stats: 'accent',
@@ -64,6 +66,7 @@ export const STUDIO: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'story',
     'benefits',

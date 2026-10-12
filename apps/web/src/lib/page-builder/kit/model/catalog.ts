@@ -13,6 +13,7 @@ import { curriculumDefinition } from '../blocks/curriculum/definition';
 import { faqDefinition } from '../blocks/faq/definition';
 import { galleryDefinition } from '../blocks/gallery/definition';
 import { heroDefinition } from '../blocks/hero/definition';
+import { insideDefinition } from '../blocks/inside/definition';
 import { instructorDefinition } from '../blocks/instructor/definition';
 import { previewDefinition } from '../blocks/preview/definition';
 import { pricingDefinition } from '../blocks/pricing/definition';
@@ -43,6 +44,7 @@ export const DEFINITIONS: Readonly<Record<SectionTypeId, BlockDefinition>> = {
   text: textDefinition,
   story: storyDefinition,
   gallery: galleryDefinition,
+  inside: insideDefinition,
 };
 
 /** Gallery groups, in the order the add-section gallery shows them. */

@@ -25,6 +25,7 @@ export const CINEMATIC: StyleDefinition = {
     curriculum: 'timeline',
     preview: 'feature',
     gallery: 'strip',
+    inside: 'carousel',
     instructor: 'quote',
     testimonials: 'quote',
     faq: 'accordion',
@@ -44,6 +45,7 @@ export const CINEMATIC: StyleDefinition = {
     curriculum: 'soft',
     preview: 'base',
     gallery: 'soft',
+    inside: 'base',
     instructor: 'soft',
     testimonials: 'base',
     stats: 'soft',
@@ -63,6 +65,7 @@ export const CINEMATIC: StyleDefinition = {
   },
   order: [
     'hero',
+    'inside',
     'video',
     'problem',
     'story',
@@ -81,6 +84,7 @@ export const CINEMATIC: StyleDefinition = {
   ],
   starter: [
     'hero',
+    'inside',
     'video',
     'problem',
     'transformation',
