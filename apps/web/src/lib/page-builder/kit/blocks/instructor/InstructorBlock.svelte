@@ -4,7 +4,8 @@
   The guide, with their portrait as the emotional centre. Three layouts:
     split    — portrait beside the story; Bold crops it hard to the band's
                full height, Soft arches it, Cinematic dissolves it into the
-               dark; signed off with the signature, name and role
+               dark; signed off with a round portrait (or the guide's
+               initials), name and role, as centred is (03 X57)
     quote    — the guide's own line, large, signed with a small portrait (in
                Cinematic the portrait becomes the room's backdrop instead)
     centered — portrait, story and credentials down the middle
@@ -171,7 +172,8 @@
       {#if content.credentials}
         <Credentials items={content.credentials} variant={centred ? 'chips' : 'ledger'} />
       {/if}
-      <Signoff {context} name={content.name} role={content.role} {edit} />
+      <!-- Signed with a round portrait, not the mark (03 X57). -->
+      <Signoff {context} name={content.name} role={content.role} {edit} face />
       {@render actions()}
     </div>
   </div>

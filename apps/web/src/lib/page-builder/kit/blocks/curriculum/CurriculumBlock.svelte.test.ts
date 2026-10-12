@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { JourneyStageView } from '$lib/page-builder';
 import {
   flushSync,
@@ -10,6 +10,13 @@ import type { JourneySalesContext } from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext, sampleStages } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import {
+  reportPlace,
+  resize,
+  startAt,
+  stubSwap,
+  unstubSwap,
+} from '../../primitives/swap.testing';
 import CurriculumBlock from './CurriculumBlock.svelte';
 import { CURRICULUM_COPY } from './copy';
 import { CURRICULUM_EMPTY, curriculumDefinition } from './definition';
@@ -93,21 +100,66 @@ describe('CurriculumBlock', () => {
     expect(titles[0]).toContain(STAGES[0].practices[0].title);
   });
 
-  it('reads a practice’s kind by its icon, and says it to a screen reader', async () => {
-    await render(SAMPLE);
+  it.each(
+    SECTION_LAYOUTS.curriculum
+  )('%s: says what each practice is and how long it takes', async (layout) => {
+    await render(SAMPLE, { layout });
     const rows = practiceRows();
     const practices = STAGES.flatMap((stage) => stage.practices);
-    // The sample must exercise every kind, or this proves nothing.
+    // The sample must exercise every kind, measured and not, or this proves
+    // nothing.
     expect(new Set(practices.map((p) => p.contentType))).toEqual(
       new Set(['video', 'audio', 'written'])
     );
+    expect(practices.some((p) => p.durationSeconds)).toBe(true);
+    expect(practices.some((p) => !p.durationSeconds)).toBe(true);
     rows.forEach((row, i) => {
+      const practice = practices[i];
+      const length = CURRICULUM_COPY.length(practice.durationSeconds);
       expect(row.querySelector('svg')).not.toBeNull();
-      expect(row.querySelector('.sr-only')?.textContent).toBe(
-        `, ${CURRICULUM_COPY.type(practices[i].contentType)}`
+      // What a screen reader hears, in order; the dot between is drawn.
+      expect(row.textContent).toBe(
+        `${practice.title}, ${CURRICULUM_COPY.kind(practice.contentType)}${
+          length ? `, ${length}` : ''
+        }`
       );
     });
-    expect(CURRICULUM_COPY.type('written')).toBe('reading');
+    expect(text()).toContain('Video');
+    expect(text()).toContain('6 min');
+    expect(text()).toContain('Reading');
+  });
+
+  it('names a practice’s kind alone when nobody measured its length', async () => {
+    const [stage] = STAGES;
+    const unmeasured = {
+      ...stage,
+      practices: stage.practices.map((p) => ({ ...p, durationSeconds: null })),
+    };
+    // An older worker omits the field altogether.
+    const omitted = {
+      ...STAGES[1],
+      practices: STAGES[1].practices.map(({ durationSeconds: _, ...p }) => p),
+    };
+    await render(SAMPLE, { context: withStages([unmeasured, omitted]) });
+    const practices = [...unmeasured.practices, ...omitted.practices];
+    practiceRows().forEach((row, i) => {
+      expect(row.querySelector('.practice__length')).toBeNull();
+      expect(row.querySelector('.practice__meta')?.textContent).toBe(
+        `, ${CURRICULUM_COPY.kind(practices[i].contentType)}`
+      );
+    });
+  });
+
+  it('says a length in whole minutes, then hours, rounded as a visitor plans by it', () => {
+    expect(CURRICULUM_COPY.length(580)).toBe('10 min');
+    expect(CURRICULUM_COPY.length(89)).toBe('1 min');
+    expect(CURRICULUM_COPY.length(25)).toBe('under 1 min');
+    expect(CURRICULUM_COPY.length(3570)).toBe('1 hr');
+    expect(CURRICULUM_COPY.length(4500)).toBe('1 hr 15 min');
+    for (const nothing of [null, undefined, 0, -5, Number.NaN]) {
+      expect(CURRICULUM_COPY.length(nothing)).toBeNull();
+    }
+    expect(CURRICULUM_COPY.kind('written')).toBe('Reading');
   });
 
   it('orders the stages and their practices as the course does', async () => {
@@ -281,6 +333,121 @@ describe('CurriculumBlock', () => {
     await render(SAMPLE, { edit: { commit: () => {} } });
     expect(document.body.querySelector('h2')?.getAttribute('aria-label')).toBe(
       'Curriculum — Heading'
+    );
+  });
+});
+
+describe('CurriculumBlock — the timeline folds on a phone', () => {
+  // The stylesheet sets the phone-width flag on the timeline itself.
+  beforeEach(() => stubSwap('timeline'));
+  afterEach(() => {
+    unstubSwap();
+    document.body.removeAttribute('data-lp-still');
+  });
+
+  const timelineToggles = () => [
+    ...document.body.querySelectorAll<HTMLButtonElement>('.timeline button'),
+  ];
+  const AHEAD = 900;
+
+  it('is served open: every stage’s words and practices, and no buttons', async () => {
+    await render(SAMPLE);
+    expect(timelineToggles()).toHaveLength(0);
+    expect(practiceRows()).toHaveLength(
+      STAGES.flatMap((s) => s.practices).length
+    );
+    expect(document.body.querySelector('.timeline [hidden]')).toBeNull();
+  });
+
+  it('on a phone, once ahead of the visitor, each stage folds under its name, the first open', async () => {
+    await render(SAMPLE);
+    reportPlace(false, AHEAD);
+    const toggles = timelineToggles();
+    expect(toggles).toHaveLength(STAGES.length);
+    toggles.forEach((toggle, index) => {
+      // A real heading for the outline, the button inside it.
+      expect(toggle.parentElement?.tagName).toBe('H3');
+      expect(toggle.textContent).toContain(STAGES[index].name);
+      expect(toggle.textContent).toContain(
+        CURRICULUM_COPY.practices(STAGES[index].practices.length)
+      );
+    });
+    const [first, second] = toggles;
+    expect(first.getAttribute('aria-expanded')).toBe('true');
+    expect(panel(first)?.hasAttribute('hidden')).toBe(false);
+    expect(second.getAttribute('aria-expanded')).toBe('false');
+    // Closed, but still in the page: find-in-page opens it.
+    expect(panel(second)?.getAttribute('hidden')).toBe('until-found');
+    expect(panel(second)?.textContent).toContain(STAGES[1].practices[0].title);
+    expect(panel(second)?.textContent).toContain(STAGES[1].gloss ?? '');
+
+    second.click();
+    flushSync();
+    expect(second.getAttribute('aria-expanded')).toBe('true');
+    expect(first.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('never folds where the visitor would see it move: in view, or scrolled past', async () => {
+    await render(SAMPLE);
+    reportPlace(true, 120);
+    expect(timelineToggles()).toHaveLength(0);
+    reportPlace(false, -2000);
+    expect(timelineToggles()).toHaveLength(0);
+  });
+
+  it('wider than a phone it stays one row a stage, and follows the width as it changes', async () => {
+    startAt(false);
+    await render(SAMPLE);
+    reportPlace(false, AHEAD);
+    expect(timelineToggles()).toHaveLength(0);
+    resize(true);
+    expect(timelineToggles()).toHaveLength(STAGES.length);
+    resize(false);
+    expect(timelineToggles()).toHaveLength(0);
+    expect(practiceRows()).toHaveLength(
+      STAGES.flatMap((s) => s.practices).length
+    );
+  });
+
+  it('folds at once in a still preview, which nobody is scrolling', async () => {
+    document.body.setAttribute('data-lp-still', '');
+    await render(SAMPLE);
+    reportPlace(true, 0);
+    expect(timelineToggles()).toHaveLength(STAGES.length);
+  });
+
+  it('keeps a stage with nothing inside a plain row', async () => {
+    const stages = [{ ...STAGES[0], gloss: null, practices: [] }, STAGES[1]];
+    await render(SAMPLE, { context: withStages(stages) });
+    reportPlace(false, AHEAD);
+    const toggles = timelineToggles();
+    expect(toggles).toHaveLength(1);
+    // The first stage that holds anything is the one open.
+    expect(toggles[0].getAttribute('aria-expanded')).toBe('true');
+    expect(text()).toContain(STAGES[0].name);
+    expect(text()).not.toContain('0 practices');
+  });
+
+  it('steps between the stages with the arrow keys', async () => {
+    await render(SAMPLE);
+    reportPlace(false, AHEAD);
+    const [first, second] = timelineToggles();
+    first.focus();
+    first.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+    );
+    expect(document.activeElement).toBe(second);
+  });
+
+  it('when the fold gives way under the visitor’s focus, their stage keeps it', async () => {
+    await render(SAMPLE);
+    reportPlace(false, AHEAD);
+    timelineToggles()[1].focus();
+    resize(false);
+    await tick();
+    const stage = document.body.querySelectorAll('.timeline__stage')[1];
+    expect(document.activeElement).toBe(
+      stage.querySelector('.timeline__words')
     );
   });
 });

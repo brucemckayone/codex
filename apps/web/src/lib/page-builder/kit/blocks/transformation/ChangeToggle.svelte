@@ -21,10 +21,10 @@
 -->
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { Attachment } from 'svelte/attachments';
   import { CheckIcon } from '$lib/components/ui/Icon';
   import type { ColourSchemeId } from '../../model/ids';
   import type { BlockEdit } from '../../model/types';
+  import { phoneWidth, whenAhead } from '../../primitives/swap';
   import { SIDES, type Side, type SideLabels, type SideLines } from './change';
   import ChangeColumns from './ChangeColumns.svelte';
   import { TRANSFORMATION_COPY } from './copy';
@@ -49,47 +49,14 @@
   const panelId = (side: Side) => `${anchor}-panel-${side}`;
 
   /** Hands the section to the tabs once re-laying it out moves nothing in view. */
-  const whenAhead: Attachment<HTMLElement> = (root) => {
-    if (typeof IntersectionObserver === 'undefined') return;
-    const still = root.closest('[data-lp-still]') !== null;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (still || (!entry.isIntersecting && entry.boundingClientRect.top > 0)) {
-        ready = true;
-        observer.disconnect();
-      }
-    });
-    observer.observe(root);
-    return () => observer.disconnect();
-  };
+  const ahead = whenAhead(() => (ready = true));
 
-  /**
-   * Follows the section across its phone-width breakpoint, as it resizes. The
-   * swap waits a frame: made inside the observer's own delivery, it would
-   * resize the section being observed, which the browser reports as a loop.
-   */
-  const atPhoneWidth: Attachment<HTMLElement> = (root) => {
-    const flag = () => getComputedStyle(root).getPropertyValue('--_phone').trim() === '1';
-    phone = flag();
-    if (typeof ResizeObserver === 'undefined') return;
-    let frame = 0;
-    const follow = () => {
-      const next = flag();
-      if (next === phone) return;
-      const focused = tabs && !next && root.contains(document.activeElement);
-      phone = next;
-      if (focused) void tick().then(() => keepPlace(root));
-    };
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(follow);
-    });
-    // The section is the query container the breakpoint is measured on.
-    observer.observe(root.closest('.lp-section') ?? root);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  };
+  /** Follows the section across its phone-width breakpoint, as it resizes. */
+  const atPhoneWidth = phoneWidth((next, root) => {
+    const focused = tabs && !next && root.contains(document.activeElement);
+    phone = next;
+    if (focused) void tick().then(() => keepPlace(root));
+  });
 
   /** The tabs gave way under a visitor's focus: the side they were on takes it. */
   function keepPlace(root: HTMLElement) {
@@ -122,7 +89,7 @@
 <div
   class="tf-toggle"
   data-tabs={tabs ? '' : undefined}
-  {@attach whenAhead}
+  {@attach ahead}
   {@attach atPhoneWidth}
 >
   {#if tabs}

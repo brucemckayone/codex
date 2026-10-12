@@ -72,7 +72,7 @@
   {:else if layout === 'map'}
     <StageMap {stages} {level} />
   {:else}
-    <StageTimeline {stages} {level} />
+    <StageTimeline {stages} {level} anchor={section.anchor} />
   {/if}
 
   {#if asks}

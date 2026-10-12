@@ -1765,6 +1765,57 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     section's link and the floating bar's price to name the same path (two plants: the call to
     action back on `{}`, and the context handing out nothing, each fail with `'£15'` for `'£49'`).
     Removing a seeded FAQ heading fails the seed's own type check.
+- **X57 · 2026-10-12 · 3b round 3 · Each stage one row with its practices' kind and length, the
+  stages folding on a phone; the guide signs off with a round portrait (BUILT, decided without the
+  owner; Codex-61zsk.46).** The reference plan (`phase3-sources/ref-plan`, sections 5 and 6): "each
+  stage and its practices read as one row, with each practice's kind and length. On phones, stages
+  open and close, so the section is half the height", and "the tiny landscape thumbnail above
+  Nell's name goes. A round portrait shows instead, or her initials when there's no photo."
+  - **Kind and length, on every practice.** Every curriculum layout gains them, because the list
+    is shared: "Video · 13 min", "Audio · 20 min", "Reading". The length is the practice's
+    `durationSeconds` (Codex-61zsk.46's data half, #559): whole minutes, rounded rather than
+    floored, then hours ("1 hr 15 min"), and "under 1 min" below a minute. With no length (a
+    reading, a film never probed, an older worker) the kind stands alone. The words are spoken
+    "title, kind, length", with the commas hidden and the dot drawn. The pair closes the title's
+    line where the list has room and drops under the title where it has not. The list is its own
+    inline-size container (`26rem`), because a card is narrow on a wide band; it is
+    `inline-size: 100%`, since a size container in a centring parent shrinks to nothing.
+  - **One row a stage.** The timeline draws a rule over each stage's words and practices, clear of
+    the spine. Its practices go unruled, and the first sits level with the stage name: both lines
+    centre on the marker. The expandable list keeps its ruled practices.
+  - **Folding on a phone.** Below the width at which the row stacks (`--_phone` under the
+    complement of `@container (min-width: 52rem)`), each stage's name becomes the button of an
+    ARIA accordion over its line and practices. It uses the FAQ's disclosure model with the first
+    stage open, `hidden="until-found"`, and the arrow keys between stages; a stage with nothing
+    inside stays a plain row. X8's rule holds: it is served open, so no-JS visitors read every
+    stage, and it folds only while the section is ahead of the visitor. A visitor focused on a stage
+    when the fold gives way keeps their place on that stage. Measured at 390: the sample's six
+    stages of four drop to 0.44 of the open height (2650 to 1155px), and Studio, Bold and Cinematic
+    to 0.42–0.44. Ancestral Threads' three short stages save less (list 685 to 462px, 0.67),
+    because the open first stage is most of it. `whenAhead` and the `--_phone` follower moved out
+    of the before and after's toggle into `kit/primitives/swap.ts`, shared by both. The toggle's 36
+    tests pass on them unchanged, and the fake observers moved to `swap.testing.ts`.
+  - **The guide's sign-off.** Split and centred sign off with a round portrait beside the name and
+    role (56px): the block's own portrait, or its clip's frame, else the guide's initials, as the
+    medallion. A circle holds the place while the stream is out, so the name never moves. The
+    "thumbnail" was the signature slot: without an uploaded mark, `signatureUrl` is a frame of the
+    Signature film, and `Signature.svelte` drew that photo through its ink filter. The quote layout
+    keeps the mark. Whether a film's frame should ever stand in as a signature changes a studio
+    slot, so it is the owner's call (Codex-61zsk.47: keep, make the signature upload-only, or retire
+    the slot; the recommendation is the last two).
+  - **Found on the way:** `org-brand.css` paints every `[class*='__title']` and `[class*='-title']`
+    with the org's heading colour. A practice named `practice__title` turned Of Blood & Bones'
+    practice names its heading green, which only a real org brand shows. Renamed, and
+    `blocks/heading-ink-class-names.test.ts` now fails on any kit class like it.
+  - **Not done:** Path's route stop beside the stacked instructor split (Codex-61zsk.26), which this
+    round did not touch.
+  - **Tests:** the curriculum's kind and length in every layout, and the length's rounding. The
+    timeline: served open; folding on a phone once ahead, the first stage open; never folding in
+    view or scrolled past; following the width both ways; folding at once in a still preview; the
+    arrow keys; and the focus handed back. The sign-off: portrait, clip frame, initials, the held
+    circle, no face without a name, and the mark kept in the quote. Every new test was calibrated
+    against a planted tree: the fold at any width, the fold in view, no stage opened, the focus
+    dropped, the face never asked for, no held circle, no initials, and the colliding class name.
 - **X58 · 2026-10-12 · 3b round 4, second part · A section with no words of its own continues the
   band above it (BUILT, decided without the owner; Codex-61zsk.48).** The reference plan
   (`phase3-sources/ref-plan`, sections 7 and 8): "The large gap under the cards goes", and "Today
