@@ -2439,8 +2439,16 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     such an edit and left for longer than the grace period (7 days) is deleted. The fix needs
     a server-side draft or a keep-alive for pending uploads: backend, schema and API work of
     its own.
+  - **With the page dials (X61), on rebasing onto them:** the colour dial reads the bands, not
+    the sections. Vivid's brand colour yields to the nearest band beside it, so it looks past a
+    simple section between the two, which takes one of their bands. A Picture under Soft's
+    questions therefore does not let them go brand against the brand ask. A simple section takes
+    no dial of its own: it joins a band that is already dialled. X61's tests now read the page's
+    bands the way the bands' own tests do. Calibrated: reading the raw neighbours failed, and so
+    did the first section reading the page's last band (`lastIndexOf` reads a negative start
+    from the end).
   - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading;
-    the dials' (X61, X62) reading of the ordinary sequence, which belongs to their branch;
+    louder's fit (X62) over the Heading section's heading, to be run once X62 is on dev;
     anything checked in a browser.
   - **Tests:**
     - The bands: every Style's ordinary sections unchanged with the four in place, and every

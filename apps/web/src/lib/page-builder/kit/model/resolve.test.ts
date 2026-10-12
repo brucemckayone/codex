@@ -638,6 +638,12 @@ describe("the page's dials (03 X61)", () => {
   });
   const schemes = (page: KitPage, orgShader?: boolean) =>
     resolveSections(page, { orgShader }).map((s) => s.scheme);
+  /** The page's bands: its ordinary sections. A simple one takes the band it
+   *  joins (03 X64), so it is that band, not a second one beside it. */
+  const bands = (page: KitPage) =>
+    resolveSections(page)
+      .filter((s) => !SIMPLE_SECTIONS.has(s.type))
+      .map((s) => s.scheme);
   const COLOURED: readonly ColourSchemeId[] = ['contrast', 'brand', 'accent'];
 
   it('leave a page that sets none exactly as its Style', () => {
@@ -661,8 +667,8 @@ describe("the page's dials (03 X61)", () => {
 
     it('vivid takes every soft tint up to the brand colour unless a band stands beside it', () => {
       for (const style of PAGE_STYLE_IDS) {
-        const before = schemes(whole(style));
-        const vivid = schemes(whole(style, { colour: 'vivid' }));
+        const before = bands(whole(style));
+        const vivid = bands(whole(style, { colour: 'vivid' }));
         before.forEach((scheme, i) => {
           if (scheme !== 'soft') return;
           const banded = [before[i - 1], before[i + 1]].some(
@@ -765,7 +771,7 @@ describe("the page's dials (03 X61)", () => {
     it('never puts a band beside its twin, or the brand colour beside contrast, in any Style', () => {
       for (const style of PAGE_STYLE_IDS)
         for (const colour of [undefined, 'muted', 'vivid'] as const) {
-          const drawn = schemes(whole(style, colour ? { colour } : undefined));
+          const drawn = bands(whole(style, colour ? { colour } : undefined));
           drawn.slice(1).forEach((scheme, i) => {
             const above = drawn[i];
             const label = `${style} ${colour ?? 'style'} ${i + 1}`;
