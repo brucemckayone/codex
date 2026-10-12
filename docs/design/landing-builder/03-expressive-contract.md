@@ -1860,3 +1860,52 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     a test, dropping a type from the list or hand-rolling one block's head fails the guard, and a
     page that never passes the mark fails the page test. In the browser, removing the mark brings
     Bold's slab and Quiet's hairline back.
+- **X59 · 2026-10-12 · 3b round 5 · Every Style that blurs takes the hazy look, and the live veil
+  reads Path's route (BUILT, decided without the owner; Codex-61zsk.49).** X52: "The other six
+  Styles that blur are unchanged until round 5 spreads what works." The owner chose X53's look for
+  Studio (B: the whole band, a 20px blur, 1.6 times the shader) as "a blur or opacity over the full
+  thing, just less", having called the heavy blur "terrible".
+  - **Who takes it.** Bold, Clean, Soft, Path and Quiet now ask for `atmosphere: 'hazy'`, as Studio
+    does. Poster and Cinematic keep the shader sharp behind their panel, where it already shows at
+    full strength around the words. A test holds every Style to one of the two (hazy, or sharp with
+    `--lp-atmosphere-veil: panel`), so none is left on the old blur.
+  - **One look, one rule.** The 1.6 moved from Studio's stylesheet to one rule on
+    `.lp[data-lp-atmosphere='hazy']`, where the shader runs. The thinner veil was measured under the
+    20px blur, and the blur alone (X53's A) let no more of the shader through, so a Style can take
+    neither without the other. `schemes.test.ts` now holds the multiple to exactly that rule.
+  - **Path could never thin.** X54's live veil gave up on any mark drawn with a gradient, and never
+    read a section's own pseudo-elements, so Path (its route is gradients, its walked line on the
+    section itself) kept the proven veil. The reader now holds a gradient mark by its opaque stops:
+    a translucent stop is shading, as a soft shadow already was, and a stop in the ground's own
+    colour (a ring's hole, within the two 8-bit steps a translucent veil loses to the canvas) is the
+    ground. An absolutely placed mark is measured over its own box, the offsets the browser reports
+    from its containing block, rather than its host's: Path's rail is a 41px strip, and measured over
+    the whole hero it would have forced the thickest veil. A mark drawn with a picture still keeps
+    the proven veil.
+  - **Measured** (the hero): of-blood-and-bones' Return to the Shoreline (Path, 'flow') thins to
+    0.737 in light at 1440 (floor 0.82), and to the thin end, 0.776, in dark at 390 (floor 0.86).
+    Over studio-alpha's 'glow' at 1440, near-black in light, every hazy Style measures 0.817 in
+    light and 0.806 to 0.816 in dark: there the shader allows almost nothing thinner, and the live
+    veil keeps it so.
+    These are moving shaders read at one moment, so they vary by a step.
+  - **The proof.** `live-veil.spec.ts` ran on Studio's multiple added by hand. It now runs on its
+    page's own look (Tending the Grief is Quiet) in every hazy Style, the root switched to each,
+    so each Style's own inks, marks and buttons are held to their floors over the shader drawn. It
+    reads gradient marks and the section's own marks as the runtime does, and holds each ink over
+    its own section's pixels: Path's rail ends at the hero's foot, and the next section draws its
+    route there in the same ink.
+  - **Path's guide, stacked (Codex-61zsk.26).** A stop's height is worked out, never measured: the
+    section's padding, its eyebrow, its heading's size (X24). Stacked on a phone, the guide's split
+    puts its portrait above the heading, a 4:5 picture the content column wide and then the
+    split's gap, so the stop sat 412px above "Meet your guide" at 390. The stop now adds that
+    picture's height while the split is stacked, and not side by side, where the heading heads its
+    column again. `path-route.spec.ts` holds every section's stop on Return to the Shoreline to the
+    middle of its heading's first line at 390 and 1440, read at rest (the hero's words rise into
+    place as the page opens, and read mid-rise sit up to 16px low). Calibrated: no lead fails at
+    390, the lead kept side by side fails at 1440.
+  - **Tests:** `imageColours` reads every stop of Path's route as the browser computes it, nothing
+    where nothing is drawn, and refuses a picture alone or among gradients. The Style test, and the
+    page test, which also no longer leaves Cinematic without its `'sharp'` for the tests after it.
+    Calibrated: a Style without the look, a second multiple, and the rule keyed back on Studio each
+    fail the scheme tests; a veil forced to the thin end fails the proof over 'glow' light; and
+    Path's route drawn faint fails it in both themes, which it could not have seen before.
