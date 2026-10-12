@@ -5,7 +5,9 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
+import { priceWithCadence } from './model/copy';
 import { PAGE_STYLE_IDS } from './model/ids';
+import { pricingView } from './model/offer';
 import { sampleContext, samplePage } from './model/sample';
 import { STYLES } from './model/styles';
 import type { KitPage } from './model/types';
@@ -388,6 +390,41 @@ describe('PageRenderer', () => {
       });
       expect(publicMarkup(editingRoot)).toBe(publicHtml);
     });
+  });
+
+  // Codex-61zsk.39: a creator who recommends a path other than the platform's
+  // must see that same path featured everywhere the page sells.
+  it('features the pricing section’s recommended path in the call to action and the floating bar too', async () => {
+    const page = samplePage('bold', ['hero', 'pricing', 'cta']);
+    const pricing = page.sections.find((s) => s.type === 'pricing');
+    expect(pricing).toBeDefined();
+    pricing!.props = {
+      ...pricing!.props,
+      offers: [{ id: 'purchase', best: true }],
+    };
+    const context = sampleContext({
+      offer: 'tiers',
+      media: { heroImageUrl: '/hero.jpg' },
+    });
+    const authored = pricingView(context, pricing!.props).featured;
+    // The premise: on its own the platform recommends a different path.
+    expect(authored?.id).toBe('purchase');
+    expect(pricingView(context, {}).featured?.id).not.toBe('purchase');
+
+    const root = await render({ page, context });
+    const cta = root.querySelector('.cta');
+    expect(cta?.querySelector('.cta__amount')?.textContent).toBe(
+      authored!.priceLabel
+    );
+    expect(
+      cta?.querySelector('a[href*="offer="]')?.getAttribute('href')
+    ).toContain('offer=purchase');
+    expect(
+      root.querySelector('.pricing a[href*="offer=purchase"]')
+    ).not.toBeNull();
+    expect(document.body.querySelector('.lp-sticky__price')?.textContent).toBe(
+      priceWithCadence(authored!)
+    );
   });
 
   it('keeps the floating call to action outside every query container', async () => {

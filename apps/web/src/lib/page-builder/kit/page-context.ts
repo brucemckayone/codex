@@ -20,6 +20,14 @@ export interface KitPageContext {
    * `data-lp-still` is the same fact for CSS.
    */
   readonly still: boolean;
+  /**
+   * The page's own offer choices: its pricing section's props, where a
+   * creator may name the path to recommend (`offers[].best`). A block that
+   * sells reads them, so the call to action features the same path as the
+   * pricing section and the floating bar (Codex-61zsk.39). Empty with no
+   * pricing section, and for a block mounted on its own.
+   */
+  readonly offerProps: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -41,6 +49,7 @@ export function getKitPage(): KitPageContext {
     getContext<KitPageContext | undefined>(KEY) ?? {
       style: DEFAULT_PAGE_STYLE,
       still: false,
+      offerProps: {},
     }
   );
 }

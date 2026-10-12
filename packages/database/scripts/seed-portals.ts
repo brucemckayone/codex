@@ -632,7 +632,9 @@ const PAGE_COPY: Record<
     curriculum: { heading: string; body: string };
     instructor: { bridge: string; quote: string };
     pricing: { heading: string; body: string; ctaLabel: string; note?: string };
+    /** A heading always: without one the questions start untitled. */
     faq: {
+      heading: string;
       items: [
         { question: string; answer: string },
         { question: string; answer: string },
@@ -726,6 +728,7 @@ const PAGE_COPY: Record<
       ctaLabel: 'Begin the descent',
     },
     faq: {
+      heading: 'Before the descent',
       items: [
         {
           question: 'Do I need any experience with somatic work?',
@@ -852,6 +855,7 @@ const PAGE_COPY: Record<
       ctaLabel: 'Begin tending',
     },
     faq: {
+      heading: 'What people ask before they begin',
       items: [
         {
           question: 'Is this therapy?',
@@ -941,11 +945,12 @@ const PAGE_COPY: Record<
     },
     pricing: {
       heading: 'Join Ancestral Threads',
-      body: 'A one-off payment opens the whole lineage practice, once and for good.',
+      body: 'Every way in opens the whole lineage practice: all three stages, at the pace the work asks.',
       ctaLabel: 'Take up the thread',
-      note: 'One payment. Yours to keep and return to.',
+      note: 'No deadline to finish. Come back to any stage when you need it.',
     },
     faq: {
+      heading: 'Before you take up the thread',
       items: [
         {
           question: 'What if I know very little about my family history?',
@@ -970,7 +975,7 @@ const PAGE_COPY: Record<
       heading: 'The thread is still in your hands',
       body: 'Begin tracing what you were handed — and decide, deliberately, what you hand on.',
       ctaLabel: 'Take up the thread',
-      note: 'One payment, no deadline to finish.',
+      note: 'No deadline to finish.',
     },
   },
   'return-to-the-shoreline': {
@@ -1036,9 +1041,10 @@ const PAGE_COPY: Record<
       heading: 'Join Return to the Shoreline',
       body: 'A short, complete rite — use it once, or at the end of every long chapter.',
       ctaLabel: 'Walk to the shoreline',
-      note: 'One payment, yours to repeat.',
+      note: 'Walk it again at the close of the next long thing.',
     },
     faq: {
+      heading: 'Before you walk it',
       items: [
         {
           question: 'What kind of ending is this for?',
@@ -1063,7 +1069,7 @@ const PAGE_COPY: Record<
       heading: 'Let this one actually end',
       body: 'Walk the three stages, and come back up into ordinary light on purpose.',
       ctaLabel: 'Walk to the shoreline',
-      note: 'One payment, yours to repeat.',
+      note: 'Short enough for one sitting, and made to be repeated.',
     },
     story: {
       heading: 'The last stretch of the walk',
@@ -1220,6 +1226,7 @@ function buildSections(spec: PortalSpec, orgSlug: string) {
     faq: () => ({
       name: 'Questions',
       props: {
+        heading: copy.faq.heading,
         items: copy.faq.items,
         contactLabel: copy.faq.contactLabel,
         contactHref: copy.faq.contactHref,

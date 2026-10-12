@@ -160,9 +160,15 @@
     get still() {
       return still || !!edit;
     },
+    get offerProps() {
+      return offerProps;
+    },
   });
 
-  /** The floating bar says what the page's own offer button says. */
+  /**
+   * The pricing section's props: the floating bar, and every block that
+   * sells (through `setKitPage`), feature the path they recommend.
+   */
   const offerProps = $derived(
     propsById.get(sections.find((s) => s.type === 'pricing')?.id ?? '') ?? {}
   );
