@@ -95,14 +95,30 @@ textarea:not([rows]) {
   scroll-margin-block: 5ex;
 }
 
-/* Remove all animations and transitions for people that prefer not to see them */
+/* Remove all animations and transitions for people that prefer not to see them.
+
+   The one place this is done: `tokens/motion.css` is imported after this
+   file, so a second copy there would win.
+
+   Transitions are forced to 0s, not 0.01ms (Codex-1vs02). `transition-property`
+   defaults to `all`, so a non-zero duration here made EVERY element
+   transition every property it changed, including elements that declare no
+   transition. A `getComputedStyle` or layout read straight after a change
+   returned the old value until a frame had passed. A transition starts only
+   when duration + delay is above 0s, so now a change lands at once. A
+   declared `transition-delay` still holds the old value for its delay and
+   then jumps, so nothing moves.
+
+   The cost: a transition with no delay fires no `transitionend`. Nothing in
+   the app waits for one. Animations keep 0.01ms, so `animationend` still
+   fires. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
     scroll-behavior: auto !important;
   }
 }
