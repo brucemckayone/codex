@@ -2447,9 +2447,21 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     bands the way the bands' own tests do. Calibrated: reading the raw neighbours failed, and so
     did the first section reading the page's last band (`lastIndexOf` reads a negative start
     from the end).
+  - **Checked in a browser** (every Style's full gallery page at 1440 and 390, real photographs
+    in local R2): each simple section on the ground of the neighbour it joins, and its joints'
+    padding as above. One fault was found and fixed. In Soft and Poster, whose sections rise into
+    the one above along an edge, the next section covered a marked Break's foot to the edge's
+    depth, and a mark centred in the whole step sat under the cut (up to 18px at 1440). A marked
+    Break now keeps `padding-block-end: var(--_edge-d, 0px)` inside its one step, so the mark
+    is centred in what the cut leaves. Clearance went from −15 and −18 to +15 and +13 at 1440,
+    and from −5 and +2 to +10 and +14 at 390. No section's height changed, nor did any other
+    Style. `edge-clearance.test.ts` holds the rule, the full Picture's foot, and the depth's
+    name in `surfaces.css`. Calibrated: removing the Break's padding failed its test, and
+    renaming the depth failed the name's.
   - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading;
     louder's fit (X62) over the Heading section's heading, to be run once X62 is on dev;
-    anything checked in a browser.
+    in a browser, a full Picture in Soft and Poster against the next edge, the Button's
+    actions, and the canvas's prompts.
   - **Tests:**
     - The bands: every Style's ordinary sections unchanged with the four in place, and every
       pair of every Style's ordinary types with each simple type between them (the premise

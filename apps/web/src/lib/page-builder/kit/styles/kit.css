@@ -262,6 +262,15 @@
   --lp-pad-end: 0px;
 }
 
+/* In a Style whose sections rise into the one above along an edge (a curve,
+   an angle: `surfaces.css`), the next section covers the Break's foot to the
+   edge's depth, and a mark centred in the whole step was cut by it (Soft's
+   pebbles, Poster's rule). A mark is centred in what the cut leaves; the
+   pause stays one step. */
+.lp-section[data-lp-type='break'] .lp-break[data-mark] {
+  padding-block-end: var(--_edge-d, 0px);
+}
+
 /* A full-width picture runs to its band's foot; with a caption under it the
    foot is the compact rung, so the words never touch the next section. In a
    Style whose sections rise into the one above along an edge (a curve, an
