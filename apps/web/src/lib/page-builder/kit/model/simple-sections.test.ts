@@ -66,6 +66,38 @@ describe('the simple sections join the band they serve', () => {
     }
   });
 
+  it('dropped between any two neighbours of any Style, none changes the band under it', () => {
+    // Every pair, not only the order's neighbours: a Style's own order is
+    // designed apart, so only a creator's reorder brings two tints or a brand
+    // and a contrast band together, and that is where the lower one steps
+    // back to the page. Without the rule, a Picture between them would stop
+    // it, and the two would smear (03 X64).
+    let steppedBack = 0;
+    for (const style of PAGE_STYLE_IDS) {
+      const ordinary = STYLES[style].order.filter(
+        (t) => !SIMPLE_SECTIONS.has(t)
+      );
+      for (const a of ordinary) {
+        for (const b of ordinary) {
+          const lower = (between: KitSection['type'][]) =>
+            resolveSections({
+              design: { style },
+              sections: [a, ...between, b].map((type, n) =>
+                section({ id: `${n}`, type })
+              ),
+            }).at(-1)?.scheme;
+          const alone = lower([]);
+          if (alone !== STYLES[style].schemes[b]) steppedBack++;
+          for (const type of SIMPLE_SECTIONS) {
+            expect(lower([type]), `${style}: ${a}, ${type}, ${b}`).toBe(alone);
+          }
+        }
+      }
+    }
+    // The premise: some pairs really do step back, or this proves nothing.
+    expect(steppedBack).toBeGreaterThan(0);
+  });
+
   it('in every Style’s full page, each takes the ground of the neighbour it joins', () => {
     for (const style of PAGE_STYLE_IDS) {
       const sections = resolveSections({
