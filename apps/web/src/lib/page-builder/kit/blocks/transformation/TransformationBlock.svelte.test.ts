@@ -1,5 +1,5 @@
 import { tick } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   flushSync,
   mount,
@@ -10,6 +10,16 @@ import { SECTION_LAYOUTS } from '../../model/ids';
 import { featuredScheme } from '../../model/resolve';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import {
+  frames,
+  reportPlace,
+  reportSize,
+  resize,
+  startAt,
+  stubSwap,
+  unstubSwap,
+  watchedForSize,
+} from '../../primitives/swap.testing';
 import { TRANSFORMATION_COPY } from './copy';
 import { TRANSFORMATION_EMPTY, transformationDefinition } from './definition';
 import TransformationBlock from './TransformationBlock.svelte';
@@ -232,134 +242,10 @@ describe('TransformationBlock', () => {
   });
 });
 
-/**
- * An observer the test drives: `reportPlace()` tells every observed element where
- * it is. (The shared jsdom stub never reports, so a toggle mounted without
- * this stays the columns it starts as — the no-JS markup.)
- */
-const observers: FakeObserver[] = [];
-
-class FakeObserver {
-  targets: Element[] = [];
-  constructor(readonly callback: IntersectionObserverCallback) {
-    observers.push(this);
-  }
-  observe(target: Element) {
-    this.targets.push(target);
-  }
-  unobserve() {}
-  disconnect() {
-    this.targets = [];
-  }
-  takeRecords() {
-    return [];
-  }
-}
-
-function reportPlace(isIntersecting: boolean, top: number) {
-  for (const observer of observers) {
-    const entries = observer.targets.map(
-      (target) =>
-        ({
-          target,
-          isIntersecting,
-          boundingClientRect: { top },
-        }) as unknown as IntersectionObserverEntry
-    );
-    if (entries.length > 0)
-      observer.callback(entries, observer as unknown as IntersectionObserver);
-  }
-  flushSync();
-}
-
-/**
- * The section's width, as the toggle reads it: jsdom runs no container
- * queries, so the stylesheet's phone-width flag (`--_phone`, set under the
- * columns' own breakpoint) is answered here, and `resize()` moves the section
- * across that breakpoint and tells every size observer, as a browser would.
- */
-let phoneWidth = true;
-const sizeObservers: FakeSizeObserver[] = [];
-
-class FakeSizeObserver {
-  targets: Element[] = [];
-  constructor(readonly callback: ResizeObserverCallback) {
-    sizeObservers.push(this);
-  }
-  observe(target: Element) {
-    this.targets.push(target);
-  }
-  unobserve() {}
-  disconnect() {
-    this.targets = [];
-  }
-}
-
-/** Frames the page has asked for, run by `frames()`. */
-let queued: FrameRequestCallback[] = [];
-
-function frames() {
-  const due = queued;
-  queued = [];
-  for (const callback of due) callback(0);
-  flushSync();
-}
-
-/** The section crosses the breakpoint: the observers report, then a frame. */
-function reportSize(phone: boolean) {
-  phoneWidth = phone;
-  for (const observer of sizeObservers) {
-    if (observer.targets.length > 0)
-      observer.callback([], observer as unknown as ResizeObserver);
-  }
-  flushSync();
-}
-
-function resize(phone: boolean) {
-  reportSize(phone);
-  frames();
-}
-
 describe('TransformationBlock — toggle', () => {
-  beforeEach(() => {
-    observers.length = 0;
-    sizeObservers.length = 0;
-    phoneWidth = true;
-    queued = [];
-    vi.stubGlobal('IntersectionObserver', FakeObserver);
-    vi.stubGlobal('ResizeObserver', FakeSizeObserver);
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
-      queued.push(callback)
-    );
-    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
-      queued.splice(id - 1, 1, () => {});
-    });
-    const computed = window.getComputedStyle.bind(window);
-    vi.spyOn(window, 'getComputedStyle').mockImplementation(
-      (element, pseudo) => {
-        const style = computed(element, pseudo);
-        if (!element.classList.contains('tf-toggle')) return style;
-        return new Proxy(style, {
-          get(target, property) {
-            if (property === 'getPropertyValue')
-              return (name: string) =>
-                name === '--_phone'
-                  ? phoneWidth
-                    ? '1'
-                    : ''
-                  : target.getPropertyValue(name);
-            const value = Reflect.get(target, property);
-            return typeof value === 'function' ? value.bind(target) : value;
-          },
-        });
-      }
-    );
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
+  // The stylesheet sets the phone-width flag on the toggle itself.
+  beforeEach(() => stubSwap('tf-toggle'));
+  afterEach(unstubSwap);
 
   const tabs = () => all('[role="tab"]') as HTMLButtonElement[];
   const panelOf = (tab: Element) =>
@@ -417,7 +303,7 @@ describe('TransformationBlock — toggle', () => {
   });
 
   it('wider than a phone, it stays the columns: both sides in view', async () => {
-    phoneWidth = false;
+    startAt(false);
     await render(SAMPLE, { layout: 'toggle' });
     reportPlace(false, 2000);
     expect(one('[role="tablist"]')).toBeNull();
@@ -427,7 +313,7 @@ describe('TransformationBlock — toggle', () => {
   });
 
   it('follows the section across the phone-width breakpoint as it resizes', async () => {
-    phoneWidth = false;
+    startAt(false);
     await render(SAMPLE, { layout: 'toggle' });
     reportPlace(false, 2000);
     expect(one('[role="tablist"]')).toBeNull();
@@ -439,7 +325,7 @@ describe('TransformationBlock — toggle', () => {
   });
 
   it('swaps a frame after the size is reported, never inside the observer’s own delivery', async () => {
-    phoneWidth = false;
+    startAt(false);
     await render(SAMPLE, { layout: 'toggle' });
     reportPlace(false, 2000);
     reportSize(true);
@@ -468,7 +354,7 @@ describe('TransformationBlock — toggle', () => {
     section.className = 'lp-section';
     document.body.appendChild(section);
     await render(SAMPLE, { layout: 'toggle', target: section });
-    const watched = sizeObservers.flatMap((observer) => observer.targets);
+    const watched = watchedForSize();
     expect(watched).toEqual([section]);
   });
 
