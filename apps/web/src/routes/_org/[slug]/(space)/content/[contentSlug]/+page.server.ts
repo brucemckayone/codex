@@ -13,7 +13,7 @@ import { getPublicContent } from '$lib/remote/content.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
-  DENIED_ACCESS_RESULT,
+  ACCESS_CHECK_FAILED_RESULT,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
   isPublicContent,
@@ -141,7 +141,7 @@ export const load: PageServerLoad = async ({
         platform,
         cookies,
         content
-      ).catch(() => ({ ...DENIED_ACCESS_RESULT, hasAccess: isPublic })),
+      ).catch(() => ({ ...ACCESS_CHECK_FAILED_RESULT, hasAccess: isPublic })),
       subscriptionContext,
       relatedContent: relatedPromise,
       parentCourses: parentCoursesPromise,
@@ -157,7 +157,7 @@ export const load: PageServerLoad = async ({
     platform,
     cookies,
     content
-  ).catch(() => DENIED_ACCESS_RESULT);
+  ).catch(() => ACCESS_CHECK_FAILED_RESULT);
 
   const gatedBodyHtml = accessResult.hasAccess
     ? await renderContentBody(content)

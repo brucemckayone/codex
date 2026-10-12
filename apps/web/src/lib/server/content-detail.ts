@@ -81,6 +81,14 @@ interface AccessAndProgress {
    * — see Codex-zdf2u.
    */
   revocationReason: AccessRevocationReason | null;
+  /**
+   * True when the `/stream` call failed in a way that carries no access
+   * verdict (network, timeout, a 5xx), so nothing is known about entitlement.
+   * `hasAccess` still fails CLOSED for gated content, but the view must not
+   * claim a paywall: it says the check failed and asks for a refresh
+   * (Codex-h3ipg). False on a grant, a 403 denial, and media not ready.
+   */
+  accessCheckFailed: boolean;
   progress: {
     positionSeconds: number;
     durationSeconds: number;
@@ -133,25 +141,26 @@ export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
 };
 
 /**
- * Denied-access fallback used by content detail loaders when the
- * gated `loadAccessAndProgress()` await rejects (network error, 5xx,
- * timeout). Returned shape matches the success-path `AccessAndProgress`
- * with everything absent/denied — six fields, all null/false.
+ * Fallback used by content detail loaders when the `loadAccessAndProgress()`
+ * await itself rejects. A rejected load says nothing about entitlement, so
+ * this is a FAILED check rather than a denial: `hasAccess` stays false (fail
+ * closed) and `accessCheckFailed` is true, so the view asks for a refresh
+ * instead of showing a paywall (Codex-h3ipg). Everything else is absent.
  *
- * The fast-path (free content + authenticated user) inlines a similar
- * literal but with `hasAccess: isPublic` rather than `false`, so it can't
- * share this constant directly without a wrapper.
+ * The fast path (public content + authenticated user) spreads it with
+ * `hasAccess: isPublic`, because public content stays readable either way.
  *
  * Shape pinned by `content-detail.test.ts` so the field set can only drift in
  * one place (originally the removed iter-027 F3 denoise proof).
  */
-export const DENIED_ACCESS_RESULT: AccessAndProgress = {
+export const ACCESS_CHECK_FAILED_RESULT: AccessAndProgress = {
   hasAccess: false,
   streamingUrl: null,
   waveformUrl: null,
   readyVariants: null,
   expiresAt: null,
   revocationReason: null,
+  accessCheckFailed: true,
   progress: null,
 };
 
@@ -216,11 +225,35 @@ type ServerApi = ReturnType<typeof createServerApi>;
 /**
  * Resolved payload of the access worker's `/stream` endpoint
  * (`api.access.getStreamingUrl`). Threaded through {@link resolveAccessGranted}
- * as `StreamResult | null`, where `null` means the call threw — a 403
- * `AccessDeniedError`, a network error, or a 5xx — i.e. the backend did not
- * grant access.
+ * as `StreamResult | null`, where `null` means the call threw. Why it threw is
+ * read by {@link classifyStreamFailure}.
  */
 type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
+
+/**
+ * What a thrown `/stream` call says about access (Codex-h3ipg):
+ * - `denied`: a 403 `AccessDeniedError`, the only real "no".
+ * - `not-ready`: a 422 `MEDIA_NOT_READY`. The worker throws it from
+ *   `resolveStreamableMedia`, which runs only AFTER `assertStreamingAccess`
+ *   passed, so it means "granted, nothing playable yet". The ordering is pinned
+ *   by `content-access-not-ready-after-decision.integration.test.ts` in
+ *   `@codex/access`; this reading fails OPEN if that order ever flips.
+ * - `unknown`: anything else (network, timeout, 5xx, an unrecognised 4xx). The
+ *   R2 signing and content-type failures that also follow the decision arrive
+ *   as a generic 500 and cannot be told apart from an outage, so they land here
+ *   and fail closed.
+ */
+export type StreamFailure = 'denied' | 'not-ready' | 'unknown';
+
+export function classifyStreamFailure(error: unknown): StreamFailure {
+  if (ApiError.isApiError(error)) {
+    if (error.status === 403) return 'denied';
+    if (error.status === 422 && error.code === 'MEDIA_NOT_READY') {
+      return 'not-ready';
+    }
+  }
+  return 'unknown';
+}
 
 /**
  * ── ACCESS-GRANT SEAM · single WP-2 swap point ───────────────────────────
@@ -229,12 +262,13 @@ type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
  * ONE place both content-detail routes resolve "granted?" — see the module
  * header for the two routes and the lockstep contract.
  *
- * BEHAVIOUR (preserved): access is inferred from the `/stream` response. A
- * resolved response — *even one whose `streamingUrl` is null* (written articles
- * have no media to sign) — means the backend access check passed. A thrown call
- * (captured by the caller as `streamResult === null`) means denied. This is the
- * historical "getStreamingUrl-throws" gate; the null-streamingUrl-but-granted
- * case must not regress.
+ * BEHAVIOUR: access is inferred from the `/stream` response. A resolved
+ * response — *even one whose `streamingUrl` is null* (written articles have no
+ * media to sign) — means the backend access check passed; the
+ * null-streamingUrl-but-granted case must not regress. A thrown call (captured
+ * by the caller as `streamResult === null`) is denied UNLESS
+ * {@link classifyStreamFailure} reads it as `not-ready`, which the worker only
+ * raises after access passed (Codex-h3ipg). Every other failure stays denied.
  *
  * WP-2 (Codex-2pryk · `@codex/access` rewire) LANDED: the content-api worker's
  * `getStreamingUrl` now gates on the collapsed `canView` entitlement resolver
@@ -250,16 +284,19 @@ type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
  * ─────────────────────────────────────────────────────────────────────────
  */
 export function resolveAccessGranted(
-  streamResult: StreamResult | null
+  streamResult: StreamResult | null,
+  streamError: unknown = null
 ): boolean {
-  return streamResult !== null;
+  if (streamResult !== null) return true;
+  return classifyStreamFailure(streamError) === 'not-ready';
 }
 
 /**
  * Fetch streaming URL and playback progress for an authenticated user.
  *
- * Returns `{ hasAccess, streamingUrl, progress }`.
- * Gracefully handles 403 / network errors by returning hasAccess=false.
+ * Returns `{ hasAccess, streamingUrl, progress, ... }`. A 403 or a failed call
+ * returns hasAccess=false; a failed call also sets `accessCheckFailed`, so the
+ * view never shows a paywall it has no verdict for (Codex-h3ipg).
  *
  * Shared verbatim by both content-detail routes (see module header). The
  * access-grant decision is isolated in {@link resolveAccessGranted} — the
@@ -303,10 +340,12 @@ export async function loadAccessAndProgress(
 
   // A successful response from /stream means the access check passed,
   // even when streamingUrl is null (written articles — no media to sign).
-  // Only a thrown error (403 denied, network failure) means no access.
-  // Single access-grant seam — WP-2 swaps `resolveAccessGranted` for an
-  // explicit `@codex/access` canView resolver (see its doc block).
-  const accessGranted = resolveAccessGranted(streamResult);
+  // A thrown error is read by `classifyStreamFailure`: media not ready is a
+  // grant with nothing to play; anything but a 403 is a check that FAILED.
+  // Single access-grant seam (see `resolveAccessGranted`'s doc block).
+  const accessGranted = resolveAccessGranted(streamResult, streamError);
+  const accessCheckFailed =
+    !accessGranted && classifyStreamFailure(streamError) === 'unknown';
   const hasAccess = isPublicContent(policy ?? {}) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
@@ -338,6 +377,7 @@ export async function loadAccessAndProgress(
     readyVariants,
     expiresAt,
     revocationReason,
+    accessCheckFailed,
     progress,
   };
 }

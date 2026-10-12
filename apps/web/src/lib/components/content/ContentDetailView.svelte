@@ -135,6 +135,12 @@
      */
     revocationReason?: AccessRevocationReason | null;
     /**
+     * The access check failed without a verdict (network, 5xx, timeout). The
+     * lock and the gate say so and ask for a refresh rather than naming a
+     * paywall nobody confirmed (Codex-h3ipg).
+     */
+    accessCheckFailed?: boolean;
+    /**
      * Called after the user successfully reactivates their subscription from
      * the overlay. Wire this to an `invalidate()` so the server load reruns
      * and either grants access or surfaces the next gate.
@@ -170,6 +176,7 @@
     subscriptionCoversContent,
     accessLoading = false,
     revocationReason = null,
+    accessCheckFailed = false,
     onaccessrestored,
     journeyLink = null,
     creatorAttribution,
@@ -308,11 +315,12 @@
     if (accessState.status === 'unlocked') return 'Content unlocked.';
     if (accessState.status === 'preview') return 'Preview playing.';
     if (accessState.status === 'locked') {
+      if (accessCheckFailed) return 'Could not check access.';
       if (isFollowersOnly) return 'Follow to unlock this content.';
       if (isTeamOnly) return 'Team-only content.';
       if (needsSubscription) return 'Subscription required.';
       if (!isAuthenticated) return 'Sign in required.';
-      return 'Purchase required.';
+      return needsPurchase ? 'Purchase required.' : 'Access required.';
     }
     return '';
   });
@@ -331,30 +339,83 @@
   // URL, which needs auth. Swap the "Purchase to watch" lock copy for a
   // sign-in prompt so we don't claim there's a paywall where there isn't.
   const isFreeSigninPrompt = $derived(isFree && !isAuthenticated);
+  const isAudio = $derived(content.contentType === 'audio');
 
+  /**
+   * Media-lock copy, branched by the real reason in the gate chain's order
+   * (team, followers, subscription, then purchase). "Purchase to watch" only
+   * when there is something to buy; a lock with no named reason says access
+   * is required. A failed check names no reason at all (Codex-h3ipg).
+   */
   const lockCtaText = $derived.by<string>(() => {
+    if (accessCheckFailed) return m.content_detail_access_check_failed_cta();
+    if (isTeamOnly) return m.team_only_cta_title();
+    if (isFollowersOnly) return m.followers_only_cta_title();
+    if (needsSubscription) {
+      return hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title();
+    }
     if (isFreeSigninPrompt) {
-      return content.contentType === 'audio'
+      return isAudio
         ? m.content_detail_signin_listen_cta()
         : m.content_detail_signin_watch_cta();
     }
-    return m.content_detail_purchase_cta();
+    if (needsPurchase) return m.content_detail_purchase_cta();
+    return m.content_detail_locked_cta();
   });
 
   const lockCtaSubtext = $derived.by<string>(() => {
+    if (accessCheckFailed) return m.content_detail_refresh_description();
+    if (isTeamOnly) return m.team_only_cta_description();
+    if (isFollowersOnly) {
+      return isAudio
+        ? m.content_detail_followers_listen_description()
+        : m.content_detail_followers_watch_description();
+    }
+    if (needsSubscription) {
+      return hasSubscription
+        ? m.upgrade_cta_description()
+        : m.subscribe_cta_description();
+    }
     if (isFreeSigninPrompt) {
-      return content.contentType === 'audio'
+      return isAudio
         ? m.content_detail_signin_listen_description()
         : m.content_detail_signin_watch_description();
     }
-    return m.content_detail_purchase_cta_description();
+    if (needsPurchase) return m.content_detail_purchase_cta_description();
+    return m.content_detail_locked_cta_description();
   });
+
+  /**
+   * Access passed but there is nothing to play: the media is still
+   * processing, a published item has no media, or (for public content) the
+   * stream call failed. An anonymous visitor reaches it only when there is no
+   * media at all; with media they get the sign-in lock, since a stream needs
+   * a session (Codex-h3ipg).
+   */
+  const unplayableText = $derived(
+    accessCheckFailed
+      ? isAudio
+        ? m.content_detail_load_failed_listen()
+        : m.content_detail_load_failed_watch()
+      : isAudio
+        ? m.content_detail_unplayable_listen()
+        : m.content_detail_unplayable_watch()
+  );
+  const unplayableSubtext = $derived(
+    accessCheckFailed
+      ? m.content_detail_refresh_description()
+      : m.content_detail_unplayable_description()
+  );
+  const showUnplayable = $derived(
+    hasAccess && (isAuthenticated || !content.mediaItem)
+  );
 
   /**
    * Body-lock copy, branched by the real reason the body is gated.
    * Codex-jdmp6 — previously generic purchase copy for every gate.
    */
   const bodyLockText = $derived.by<string>(() => {
+    if (accessCheckFailed) return m.content_detail_refresh_description();
     if (isFollowersOnly) return m.followers_only_cta_description();
     if (isTeamOnly) return m.team_only_cta_description();
     if (needsSubscription) {
@@ -716,6 +777,24 @@
       <div class="content-detail__player-skeleton">
         <div class="skeleton skeleton--player"></div>
       </div>
+    {:else if showUnplayable}
+      <!-- Access passed, nothing to play: a poster and a plain note, no lock
+           and no paywall copy (Codex-h3ipg). -->
+      <div class="content-detail__preview content-detail__preview--unplayable">
+        {#if thumbnailUrl}
+          <img
+            class="content-detail__preview-image"
+            src={thumbnailUrl}
+            alt={m.content_thumbnail_alt({ title: content.title })}
+          />
+        {/if}
+        <div class="content-detail__preview-overlay">
+          <div class="content-detail__preview-cta">
+            <p class="content-detail__cta-text">{unplayableText}</p>
+            <p class="content-detail__cta-subtext">{unplayableSubtext}</p>
+          </div>
+        </div>
+      </div>
     {:else}
       <div class="content-detail__preview">
         {#if thumbnailUrl}
@@ -818,6 +897,22 @@
           <div class="audio-player-skeleton">
             <div class="skeleton skeleton--audio"></div>
           </div>
+        {:else if showUnplayable}
+          <!-- Access passed, nothing to play (Codex-h3ipg): the locked card's
+               frame without the lock or the paywall copy. -->
+          <div class="content-detail__audio-locked content-detail__audio-locked--unplayable">
+            {#if thumbnailUrl}
+              <img
+                class="content-detail__audio-locked-image"
+                src={thumbnailUrl}
+                alt={m.content_thumbnail_alt({ title: content.title })}
+              />
+            {/if}
+            <div class="content-detail__audio-locked-overlay">
+              <p class="content-detail__cta-text">{unplayableText}</p>
+              <p class="content-detail__cta-subtext">{unplayableSubtext}</p>
+            </div>
+          </div>
         {:else}
           <!-- Locked audio preview card (Codex-066ye) -->
           <div class="content-detail__audio-locked">
@@ -846,7 +941,16 @@
       price amount span (Codex-jo819 O2).
     -->
     {#if !accessLoading}
-      {#if isTeamOnly}
+      {#if accessCheckFailed && !hasAccess}
+        <!-- No verdict, so no gate: a purchase CTA here would ask an
+             entitled viewer to pay again (Codex-h3ipg). -->
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-check">
+          <div class="content-detail__price">
+            <span id="purchase-label-check" class="content-detail__price-amount">{m.content_detail_access_check_failed_cta()}</span>
+            <span class="content-detail__price-label">{m.content_detail_refresh_description()}</span>
+          </div>
+        </section>
+      {:else if isTeamOnly}
         <section class="content-detail__purchase" aria-labelledby="purchase-label-team">
           <div class="content-detail__price">
             <span id="purchase-label-team" class="content-detail__price-amount">{m.team_only_cta_title()}</span>

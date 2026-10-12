@@ -2419,6 +2419,94 @@ export const content_detail_signin_free_cta = () => `Sign in to watch`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_watch = () => `This video isn't ready to play yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_listen = () => `This audio isn't ready to play yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_unplayable_description = () => `You have access. Check back soon.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_load_failed_watch = () => `We couldn't load this video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_load_failed_listen = () => `We couldn't load this audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_access_check_failed_cta = () => `We couldn't check your access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_refresh_description = () => `Refresh the page to try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_followers_watch_description = () => `It's free for followers. Follow to start watching.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_followers_listen_description = () => `It's free for followers. Follow to start listening.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_locked_cta = () => `Access required`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_locked_cta_description = () => `You don't have access to this yet.`
+
+
+/**
  * @param {{ creator: NonNullable<unknown> }} params
  * @returns {string}
  */
