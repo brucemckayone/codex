@@ -39,7 +39,9 @@
   const page = getKitPage();
   const content = $derived(ctaDefinition.coerce(props));
   const layout = $derived(section.layout);
-  const view = $derived(pricingView(context, {}));
+  // The page's own offer choices, so the path featured here is the one the
+  // pricing section and the floating bar recommend (Codex-61zsk.39).
+  const view = $derived(pricingView(context, page.offerProps));
   // The note reassures a buyer: it has no place once there is nothing to buy.
   const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
   const label = $derived(content.ctaLabel ?? COPY.cta.buy);

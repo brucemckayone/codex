@@ -15,13 +15,18 @@
   so neither takes one here. An image that fails to load leaves the section in
   its own scheme, as if none were set.
 
+  CONTINUES (03 X58): `data-lp-continues` marks a section with no words of
+  its own on the ground of the one above (`continuingSections`). It gives up
+  its top padding (`--lp-pad-start`), and the Styles that mark a new section
+  leave it unmarked.
+
   `editing` adds the canvas's hooks — the section id and the selection mark —
   and nothing else, so public markup is untouched by the editor.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { resolvePageImageUrl } from '../page-images';
-  import type { SectionTypeId } from './model/ids';
+  import { OWN_BACKDROP } from './model/resolve';
   import type { ResolvedSection } from './model/types';
 
   interface Props {
@@ -30,18 +35,18 @@
     background?: unknown;
     /** The page-image CDN base (`context.mediaBaseUrl`). */
     mediaBaseUrl?: string | null;
+    /** No words of its own, on the ground of the section above (03 X58). */
+    continues?: boolean;
     editing?: boolean;
     selected?: boolean;
     children: Snippet;
   }
 
-  /** Types that draw their own backdrop, so the shell never adds a second. */
-  const OWN_BACKDROP: readonly SectionTypeId[] = ['hero', 'cta'];
-
   const {
     section,
     background,
     mediaBaseUrl = null,
+    continues = false,
     editing = false,
     selected = false,
     children,
@@ -49,7 +54,7 @@
 
   let failed = $state<string | null>(null);
   const backdrop = $derived.by(() => {
-    if (OWN_BACKDROP.includes(section.type)) return null;
+    if (OWN_BACKDROP.has(section.type)) return null;
     const url = resolvePageImageUrl(background, 'lg', mediaBaseUrl);
     return url && url !== failed ? url : null;
   });
@@ -63,6 +68,7 @@
   data-lp-scheme={section.scheme}
   data-lp-spacing={section.spacing}
   data-lp-on-media={backdrop ? '' : undefined}
+  data-lp-continues={continues ? '' : undefined}
   data-lp-section={editing ? section.id : undefined}
   data-lp-selected={editing && selected ? '' : undefined}
 >

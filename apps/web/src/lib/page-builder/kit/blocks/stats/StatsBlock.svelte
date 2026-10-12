@@ -16,6 +16,7 @@
   (`motion/count-up.ts`); its HTML is always the final value.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import { countUp, parseFigure } from '../../motion/count-up';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -32,7 +33,7 @@
   const longest = $derived(Math.max(1, ...figures.map((figure) => figure.value.length)));
   const grid = $derived(section.layout === 'grid');
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
-  const hasHead = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
 </script>
 
 {#snippet actions()}
@@ -51,7 +52,7 @@
 {/snippet}
 
 <div class="stats" data-layout={grid ? 'grid' : 'row'}>
-  {#if hasHead || (grid && hasCta)}
+  {#if headed || (grid && hasCta)}
     <div class="stats__head">
       {#if content.eyebrow || content.heading}
         <div class="stats__top">

@@ -16,6 +16,7 @@
   the public page keeps only the words; the canvas asks for some.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { COPY } from '../../model/copy';
   import type { BlockProps } from '../../model/types';
   import Button from '../../primitives/Button.svelte';
@@ -34,7 +35,7 @@
   const layout = $derived(section.layout === 'columns' ? 'columns' : 'accordion');
   const items = $derived(content.items ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
   // Beside the list only when there are words to keep in view: a button alone
   // in that column would be as orphaned as the contact once was.
   const sided = $derived(layout === 'accordion' && headed);

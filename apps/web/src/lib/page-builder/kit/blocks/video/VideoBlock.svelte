@@ -20,6 +20,7 @@
   creator writes one.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -39,7 +40,7 @@
   const content = $derived(videoDefinition.coerce(props));
   const split = $derived(section.layout === 'split');
   const title = $derived(content.heading ?? context.course.title);
-  const hasWords = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const hasWords = $derived(hasHead(content));
   const hasCta = $derived(Boolean(content.ctaLabel || content.note));
   const captionAttrs = $derived(editAttrs('video', 'caption', edit));
 

@@ -17,6 +17,7 @@
   keeps only the words; the canvas asks for some.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -42,7 +43,7 @@
   );
   const featured = $derived(featuredScheme(page.style, section.scheme));
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
 </script>
 
 {#snippet list(entries: Testimonial[], size: 'grid' | 'quiet', centred: boolean)}

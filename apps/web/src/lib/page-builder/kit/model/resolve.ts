@@ -23,6 +23,7 @@ import {
   type SectionSpacingId,
   type SectionTypeId,
 } from './ids';
+import { hasHead } from './read';
 import { STYLES } from './styles';
 import type {
   KitPage,
@@ -162,6 +163,67 @@ function keepBandsApart(
     (scheme === 'brand' && previous === 'contrast') ||
     (scheme === 'contrast' && previous === 'brand');
   return scheme === previous || smears ? 'base' : scheme;
+}
+
+/**
+ * The blocks whose head is their eyebrow, heading and lead (`hasHead`). With
+ * none of the three, such a block has no words of its own: its content (the
+ * questions, the list, the pictures) starts at its top.
+ */
+export const HEADED_BY_WORDS: ReadonlySet<SectionTypeId> =
+  new Set<SectionTypeId>([
+    'benefits',
+    'curriculum',
+    'faq',
+    'gallery',
+    'stats',
+    'story',
+    'testimonials',
+    'transformation',
+    'video',
+  ]);
+
+/** Types that draw their own backdrop (01 A5), so the shell never adds one. */
+export const OWN_BACKDROP: ReadonlySet<SectionTypeId> = new Set<SectionTypeId>([
+  'hero',
+  'cta',
+]);
+
+/**
+ * The sections that CONTINUE the band above them (03 X58): no words of their
+ * own, on the same plain ground. Two sections on one ground are parted by
+ * space alone, each band's padding, and a heading is what makes that space
+ * read as a new section. Without one the space reads as a hole: questions
+ * set two paddings under the offer they answer for. A continuing section
+ * gives up its top padding, so the band above's foot is the whole joint.
+ *
+ * Never across a change of ground (the bands part it), on or under a picture
+ * (`props.background`, counted when set at all, so an unreadable one keeps
+ * the section apart), on the shader, or under a type with its own backdrop.
+ */
+export function continuingSections(
+  page: KitPage,
+  sections: readonly ResolvedSection[]
+): ReadonlySet<string> {
+  const props = new Map(page.sections.map((s) => [s.id, s.props ?? {}]));
+  const onMedia = (id: string) => props.get(id)?.background != null;
+  const continuing = new Set<string>();
+  sections.forEach((section, index) => {
+    const above = sections[index - 1];
+    if (
+      above &&
+      HEADED_BY_WORDS.has(section.type) &&
+      !hasHead(props.get(section.id) ?? {}) &&
+      section.scheme === above.scheme &&
+      section.scheme !== 'atmosphere' &&
+      !OWN_BACKDROP.has(above.type) &&
+      !onMedia(section.id) &&
+      !onMedia(above.id)
+    ) {
+      continuing.add(section.id);
+    }
+  });
+  return continuing;
 }
 
 /** The scheme a featured card renders in, inside a section of `scheme`. */

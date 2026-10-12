@@ -16,6 +16,7 @@
   arrange, they never censor); only its connector is left out.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
@@ -42,7 +43,7 @@
 </script>
 
 <div class="tf" data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="tf__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="transformation" {edit} />{/if}
       {#if content.heading}

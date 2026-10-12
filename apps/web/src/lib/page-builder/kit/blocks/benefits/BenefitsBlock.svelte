@@ -15,6 +15,7 @@
   still reads as a set.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { CheckIcon } from '$lib/components/ui/Icon';
   import { resolvePageImageUrl } from '../../../page-images';
   import { featuredScheme } from '../../model/resolve';
@@ -35,7 +36,7 @@
   const layout = $derived(section.layout);
   const items = $derived(content.items ?? []);
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
   // A tile's name sits one level under the section heading, or takes its
   // level when there is none, so the outline never skips a step.
   const itemLevel = $derived(

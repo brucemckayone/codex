@@ -21,6 +21,7 @@
   points at a made-up image. While editing, the prompt sits over them.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { resolvePageImageUrl } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -68,7 +69,7 @@
 {/snippet}
 
 <div class="gallery" class:lp-bleed={layout === 'strip'} data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="gallery__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="gallery" {edit} />{/if}
       {#if content.heading}

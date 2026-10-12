@@ -140,10 +140,15 @@
 /* ── one hairline between two plain sections ─────────────────────────────── */
 /* Across the content column, at the top of the lower one — room does the
    rest. Only real sections (the editor's colour tiles are `.lp-section`s
-   too), and never where a band, a picture or the shader already parts them. */
+   too), and never where a band, a picture or the shader already parts them,
+   or where the lower one continues the upper (03 X58): it is not a new
+   section, and the line would touch its words. */
 :is(.lp, #lp-style)[data-lp-style='quiet']
   .lp-section[data-lp-type][data-lp-scheme='base']:not([data-lp-on-media])
-  + .lp-section[data-lp-type][data-lp-scheme='base']:not([data-lp-on-media])::before {
+  + .lp-section[data-lp-type][data-lp-scheme='base']:not(
+    [data-lp-on-media],
+    [data-lp-continues]
+  )::before {
   content: '';
   position: absolute;
   inset-block-start: 0;

@@ -60,6 +60,7 @@
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import {
+    continuingSections,
     resolveGroundBands,
     resolveSections,
     resolveStyle,
@@ -129,6 +130,7 @@
   const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
   const sections = $derived(resolveSections(page, { orgShader, grounds }));
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
+  const continuing = $derived(continuingSections(page, sections));
   const edits = $derived(
     new Map<string, BlockEdit | null>(
       sections.map((s) => [
@@ -160,9 +162,15 @@
     get still() {
       return still || !!edit;
     },
+    get offerProps() {
+      return offerProps;
+    },
   });
 
-  /** The floating bar says what the page's own offer button says. */
+  /**
+   * The pricing section's props: the floating bar, and every block that
+   * sells (through `setKitPage`), feature the path they recommend.
+   */
   const offerProps = $derived(
     propsById.get(sections.find((s) => s.type === 'pricing')?.id ?? '') ?? {}
   );
@@ -222,6 +230,7 @@
         {section}
         background={propsById.get(section.id)?.background}
         mediaBaseUrl={context.mediaBaseUrl}
+        continues={continuing.has(section.id)}
         editing={!!edit}
         selected={selectedId === section.id}
       >

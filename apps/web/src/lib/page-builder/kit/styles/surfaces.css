@@ -317,7 +317,7 @@
 .lp-section + .lp-section {
   --lp-edge-offset: var(--_edge-d, 0px);
   margin-block-start: calc(-1 * var(--_edge-d, 0px));
-  padding-block-start: calc(var(--lp-pad) + var(--_edge-d, 0px));
+  padding-block-start: calc(var(--lp-pad-start) + var(--_edge-d, 0px));
   mask:
     var(--_edge-top) top / 100% calc(var(--_edge-d) + 1px) no-repeat,
     linear-gradient(currentColor 0 0) left 0 top var(--_edge-d) / 100% 100% no-repeat;

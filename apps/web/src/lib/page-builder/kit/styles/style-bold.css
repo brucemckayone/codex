@@ -246,10 +246,15 @@
 /* Drawn in the section's own background, at the head of its content column,
    so it moves nothing. Never on the first section (the hero), on a colour
    slab (the colour already parts it), or over an image or the shader. The
-   structural `+` also keeps it off the editor's one-section colour tiles. */
+   structural `+` also keeps it off the editor's one-section colour tiles.
+   Not on a section that continues the band above (03 X58): the slab says a
+   new section starts, and it would sit in that section's words. */
 :is(.lp, #lp-style)[data-lp-style='bold']
   .lp-section
-  + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not([data-lp-on-media]) {
+  + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not(
+    [data-lp-on-media],
+    [data-lp-continues]
+  ) {
   background:
     linear-gradient(var(--lp-ink) 0 0) 50%
       calc(var(--lp-pad) - clamp(var(--space-6), 2.4cqi, var(--space-10))) /

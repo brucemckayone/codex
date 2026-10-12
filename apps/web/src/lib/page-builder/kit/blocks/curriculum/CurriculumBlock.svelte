@@ -15,6 +15,7 @@
   the canvas points to the Curriculum tab.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import type { BlockProps } from '../../model/types';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -37,7 +38,7 @@
       : 'timeline'
   );
   const asks = $derived(Boolean(content.ctaLabel || content.note));
-  const headed = $derived(Boolean(content.eyebrow || content.heading || content.body));
+  const headed = $derived(hasHead(content));
   // A stage's name sits one level under the section heading, or at the
   // section's own level when there is none — never a second h1.
   const level = $derived<2 | 3>(content.heading && section.headingLevel === 2 ? 3 : 2);

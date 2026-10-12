@@ -134,8 +134,9 @@
     max-inline-size: 18ch;
   }
 
-  /* No heading above: the first scene starts at the section's top edge. */
+  /* No heading above: the first scene starts at the section's top edge (on
+     a section that continues the band above, already there: 03 X58). */
   :global(.story:not(:has(> .story__head))) > .story-chapters {
-    margin-block-start: calc(-1 * var(--lp-pad));
+    margin-block-start: calc(-1 * var(--lp-pad-start));
   }
 </style>
