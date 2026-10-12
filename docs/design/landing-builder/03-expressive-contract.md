@@ -2305,3 +2305,167 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - Every Style putting it second, in its order and on a new page.
     - Each was calibrated against a planted fault, from a raw key handed out to a link on the
       card.
+- **X64 · 2026-10-12 · 3b · Simple one-job sections: Picture, Heading, Break and Button, each
+  joining the band it serves (BUILT; the design decided BY the owner on 2026-10-12, the Button's
+  actions decided WITHOUT the owner; Codex-61zsk.53).** The owner reviewed the mock-up and design
+  note (`phase3-sources/simple-sections`) and approved every pick on it. Their added decisions:
+  pictures come from uploads only, through the page-image pipeline, with replace and remove
+  proven through the save diff and the sweep (replace, remove, undo, the same key twice on one
+  page); `xl` registered with the sweep (closes Codex-61zsk.13, full-bleed page images
+  upscaling); `ImageField` keeping the picture's own fields; and a check of Codex-a0e3a.
+  - **Four section types**, first in the gallery under a new group, "Basics". None stores a
+    colour by default, none takes a background picture, and no Style's starter or recipe
+    gains one (a new Picture would be empty, and a Heading has no starter words). Each Style's
+    order places them where a full page shows them at work: a Picture after the problem, a
+    Heading before the curriculum, a Button after it, and a Break before the testimonials.
+    - *Picture* (`contained`, `full`, `beside`): one upload and an optional caption, never laid
+      over the photograph. In the column it keeps its own shape, never cropped and never taller
+      than `--lp-picture-tall`. Full width it runs edge to edge at 2:1, 3:2 from 34rem and 4:5
+      on a phone, cropped around its focal point. Beside its caption it is a 7:5 row from 52rem,
+      the words at its foot like a gallery label.
+    - *Heading* (`start`, `center`; centred by default in Soft and Cinematic): an optional small
+      label and a chapter title at the section-heading size, an `<h2>`. Over 64 characters it
+      steps down to a lifted title size. A label alone counts as empty.
+    - *Break* (`space`): space, exactly one rhythm step high. A new one stores no spacing and
+      reads Medium; Small and Large are stored. It has no colour control. An optional mark
+      (off by default) in each Style's own drawing.
+    - *Button* (`stack`, `row`): the label is the creator's own words; the action is one of a
+      proven set. There is no small-print field: the billing line is derived.
+  - **The bands (`joinSimpleSections`).** Simple sections are transparent to `keepBandsApart`:
+    the ordinary sections resolve as if they were not there, so a Picture between Bold's brand
+    hero and its contrast problem cannot stop the problem stepping back. Then each run of simple
+    sections between ordinary sections A (above) and B (below) takes a neighbour's ground:
+    - everything before the run's first Heading joins A; from that Heading on joins B, because
+      a heading announces what follows; with no B, the Heading's part joins A (and the
+      inspector says "A heading reads best right above the section it introduces");
+    - X58's guards hold: nothing joins the hero or the closing ask (each draws its own
+      backdrop), a section on a picture, or a section on the shader. A section that can join
+      neither stands on its Style's own ground (`base`), padded on both sides, except a Break,
+      which takes B's ground when it cannot take A's, so it is never a stripe of its own;
+    - a colour the creator chose stands alone and is never overridden. A Break's stored scheme
+      is ignored.
+  - **The joints (`continuingSections`, `kit.css`).** A joined Picture, Break or Button gives up
+    its top padding. A joined Heading keeps its top (a new part starts) and the section it
+    announces gives up its own, head and all. A Break has no padding: its height is its rung.
+    The foot gained its own variable, `--lp-pad-end`. A full-width Picture's foot is the depth
+    of the Style's band edge (`--_edge-d`, 0 where a Style has none), so the next band's curve or
+    angle lands in padding and never on the photograph; with a caption it is the compact rung.
+    Nothing sits flush under a full-width Picture with no caption: the section below keeps its
+    top, X58's included.
+  - **The live page folds** an empty Picture, an empty Heading and a Button with nowhere to go
+    (`foldForVisitors`), before the bands resolve, so no band rule counts a section a visitor
+    cannot see. The canvas and still thumbnails keep them all, with their prompts. A Picture
+    whose image fails to load hides its figure on the live page.
+  - **The Styles.** The marks, all in an ink already proven on every ground a Break can stand
+    on: Studio a short stroke of its pen (`--lp-mark-underline`, drawn on as it enters), Bold
+    its slab in the ink, Quiet its hairline in the line, Poster a thick printed rule in its
+    line, Soft three small pebbles and Cinematic a hairline fading at both ends, both in
+    `--lp-mark-ink`. Clean ("parted by air") and Path (the route already runs through the pause)
+    have none, so the inspector hides the switch there. A marked Break replaces the Style's own
+    separator at its joint: Bold's slab and Quiet's hairline are never drawn on a Break or on
+    the section after a marked one. Studio frames a Picture in the column or beside its words
+    as one of its prints, sets its caption in the display face's italic, and underlines a
+    Heading section's heading (the pen's one exception: a chapter head). Bold sets a caption
+    under its printed rule, except at full width. Soft centres a Button.
+  - **Picture data.** An `ImageRef` is now `{ key, alt?, focus?, w?, h? }`. The upload writes a
+    fourth size, `xl`, at `min(1600, width)` and never upscales, and returns the picture's
+    width and height, which `ImageField` stores; replacing the picture drops the old focal point,
+    and writing the description keeps the rest of the reference (it used to rebuild it).
+    `pageImageSrcset` lists `xl` only with a size, each width capped at the picture's own. The
+    focal point is stored in whole percent; the centre is never stored. The inspector offers it
+    under the upload, live at full width and explained in the other layouts: tap or click to
+    place it, the arrow keys move it 2% (Shift 10%), "Use the centre" removes it, and three
+    crops (wide 2:1, tablet 3:2, phone 4:5) show what each screen keeps.
+  - **Replace and remove.** The save nominates and the sweep decides, as for every page image.
+    The save's diff moved beside the key rules (`droppedPageImageKeys`,
+    `@codex/image-processing`): replacing a Picture nominates the old picture; removing it, or
+    deleting the section, nominates it; putting it back (an undo) nominates nothing, and the
+    earlier nomination is refused by the sweep, which reads the pages first; and the same
+    picture on two Pictures stays until neither shows it. Every nomination names the four
+    objects, `xl` included, and the sweep deletes and keeps all four.
+  - **The Button's actions (decided WITHOUT the owner).**
+    - `join` (the default, stored as no action): the closing ask's path through `OfferAsk`, the
+      closing ask's own offer extracted with its markup and class names unchanged, so the two
+      can never disagree. Priced, it shows the recommended path's price above the button and
+      its derived billing line under it; otherwise "Continue" for a member, the closed notice,
+      or a price-less button. On the canvas with no price it adds "Your price shows here once
+      the journey has one (the Pricing tab)."
+    - `section`: a jump to a section on this page, by section id (`#anchor`); no price.
+    - `preview`: plays the page's preview film in the shared player; offered only once the
+      journey has one; no price.
+    - `link`: an https address with a host and no credentials, at most 2000 characters, opened
+      in a new tab with `rel="noopener"`, its accessible name ending "(opens in a new tab)"; no
+      price. The write boundary refuses anything else: `buttonActionSchema` in
+      `@codex/validation`, applied by `pageSectionSchema` to a Button's `props.action`, with a
+      twin reader in the kit held to it by a parity test. The inspector writes a link only once
+      it is a full https address, and shows "Use a full web address that starts with https://"
+      until then.
+    - Each action starts with its own label until the creator writes one: "Join now", "Read
+      on", "Watch the preview", "Find out more".
+    - **A dead target is hidden on the live page**, never sent to the checkout: a section that
+      is hidden, deleted or folded, a preview film the page does not have (known from the
+      awaited `filmsAttached`, or once the stream settles), or a stored action that cannot be
+      read. Its label was written for that destination. The canvas keeps it and says why
+      visitors will not see it.
+    - The floating bar steps aside while a Button is on screen, as for the offer and the
+      closing ask.
+  - **The editor.** Colour reads "Matches the section above" (or below) until the creator picks
+    one; a Break shows "A pause has no colour of its own" instead of swatches, and notes the
+    colour change that already makes a pause, and two pauses in a row. The canvas draws a Break
+    as a dashed outline with the chip "Pause · Medium. Visitors see only the space." and an
+    empty Heading's "Type the heading for what follows". The compact closing ask's gallery
+    line now reads "A band of its own: one line and a button".
+  - **Rejected, and why.**
+    - *A band of its own for each simple section.* That is the empty stripe, and a picture two
+      paddings below the words it shows.
+    - *A bare URL as the Button's only destination.* It puts the page's price beside a link
+      that leaves the page, the contradiction X56 removed, and it was the only way to reach a
+      section or the film.
+    - *Script actions* (or `javascript:`, `data:` and the like). They run code on a visitor's
+      page under the creator's words. The set is closed and checked at the write boundary.
+    - *A dead target falling back to "Join".* The label was written for somewhere else, so
+      the visitor would land at the checkout under the wrong words.
+    - *The price inside the button* ("£15/mo"). It hides the billing line and makes the label
+      too long for a phone.
+    - *A Break split across a change of colour.* It looks balanced but has no centre for a mark.
+    - *Pictures from the media library.* `media_items` hold no images yet. "Use a picture
+      already on this page" is small and later.
+    - *`xl` at 2400.* About twice the bytes and Wasm memory, for a full bleed on a 2x wide
+      screen; 1600 covers a 1440 window at 1x and the column at 2x.
+  - **Codex-a0e3a (unused-image cleanup can delete pictures an unpublished edit still shows):
+    the gap is real, and not fixed here.** A published page's unpublished edit lives only in
+    the tab's session storage (`page-builder-store.svelte.ts`), and autosave never writes a
+    published page, so the sweep reads only the published sections. A picture uploaded into
+    such an edit and left for longer than the grace period (7 days) is deleted. The fix needs
+    a server-side draft or a keep-alive for pending uploads: backend, schema and API work of
+    its own.
+  - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading;
+    the dials' (X61, X62) reading of the ordinary sequence, which belongs to their branch;
+    anything checked in a browser.
+  - **Tests:**
+    - The bands: every Style's ordinary sections unchanged with the four in place, and every
+      pair of every Style's ordinary types with each simple type between them (the premise
+      asserted: some pairs really do step back); each one in every Style's full page on the
+      ground of the neighbour it joins; the run split at its Heading; the fallbacks; every
+      guard; a chosen colour; a Break's ignored colour.
+    - The joints and the fold, each condition alone.
+    - The page: every section drawn in order under one h1, simple ones on a neighbour's
+      ground; identical with and without the editor in every Style; an empty Picture and
+      Heading folded for a visitor and kept on the canvas.
+    - The Button through the page: the joining ask's markup identical to the closing ask's in
+      every offer state; its labels; the canvas's price hint; each action's link, button or
+      film and no price beside it; every dead target hidden live and explained on the canvas;
+      untrusted links never drawn; the floating bar stepping aside.
+    - The marks: drawn exactly in the Styles that offer one, in their proven ink, and the
+      separators matched against real elements under a plain and a marked Break.
+    - The editor: no action written that the save would refuse; the preview offered only with
+      a film; the notes; the mark only where a Style draws it; the focal point placed, moved,
+      centred and explained; a half-typed link kept out of the page.
+    - The save diff for a Picture: replace, remove, undo, the same key twice, a move, and the
+      four objects.
+    - The upload: `xl` at 1600, no upscale, the memory freed; the sweep deleting and keeping
+      `xl`; an old three-size key still valid.
+    - `OfferAsk`'s extraction was proven once against the closing ask as it was before it
+      (every layout, every offer state, page and canvas, 36 renders identical, the CSS moved
+      rule for rule), then that comparison was removed with the old file.
+    - Every new test was calibrated against a planted fault: 30 plants, each red.
