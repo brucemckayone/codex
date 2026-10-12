@@ -972,9 +972,9 @@
    line is the soft ink — which is what lets the veil stop at 0.82 (light) /
    0.86 (dark) instead of 0.97. A Style may thicken the veil with
    `--lp-atmosphere-scrim` (0–1).
-   A Style may also let more of the shader through with
+   The hazy look lets more of the shader through with
    `--lp-atmosphere-show` (>= 1, default 1), a multiple of what the proven veil
-   lets through: Studio's 1.6 asks for 0.71 (light) / 0.78 (dark) where the
+   lets through: its 1.6 asks for 0.71 (light) / 0.78 (dark) where the
    floor is 0.82 / 0.86, and scales with each band's own floor, so a band that
    needs a solid veil (1) keeps it. That veil is not proven over black and
    white, and no one multiple holds over every shader (03 X54), so it is only
@@ -1006,6 +1006,18 @@
   --_atmos-thin: calc(1 - var(--lp-atmosphere-show, 1) * (1 - var(--_atmos-floor)));
   --_atmos-s: max(var(--_atmos-thin), var(--_atmos-need, var(--_atmos-floor)));
   --_atmos-veil: rgb(from var(--lp-ground) r g b / var(--_atmos-s));
+}
+
+/* The hazy look (03 X53, X59): a Style that asks for it (`atmosphere: 'hazy'`)
+   sees the org's shader through a third of the inner pages' blur AND 1.6
+   times as much of it through the veil, the owner's "a blur or opacity over
+   the full thing, just less". One rule, so the look is one choice: a Style
+   cannot take the thinner veil without the blur it was measured under, or the
+   blur without it. Only where the shader runs and the page is live (the
+   root's `data-lp-atmosphere`): a still preview keeps the proven veil, as an
+   unmeasured page does anyway. */
+.org-layout[data-hero-shader-active] .lp[data-lp-atmosphere='hazy'] {
+  --lp-atmosphere-show: 1.6;
 }
 
 .lp [data-lp-scheme='soft'] {

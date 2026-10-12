@@ -313,22 +313,29 @@ describe('PageRenderer', () => {
 
     const context = () => sampleContext({ offer: 'tiers', mediaBaseUrl: CDN });
 
-    it('flags a live page that has a Moving background section, blurred unless the Style asks otherwise', async () => {
+    it('flags a live page that has a Moving background section, in the look its Style asks for, blurred when it names none', async () => {
+      // Bold asks for the hazy look (03 X59).
       const root = await render({ page: surfacedPage(), context: context() });
-      expect(root.dataset.lpAtmosphere).toBe('soft');
+      expect(root.dataset.lpAtmosphere).toBe('hazy');
       unmount(app);
-      const cinematic = STYLES.cinematic as { atmosphere?: 'soft' | 'sharp' };
-      cinematic.atmosphere = 'sharp';
+      // Cinematic asks for it sharp.
+      const page = samplePage('cinematic');
+      page.sections[0] = {
+        ...page.sections[0],
+        design: { scheme: 'atmosphere' },
+      };
+      const sharp = await render({ page, context: context() });
+      expect(sharp.dataset.lpAtmosphere).toBe('sharp');
+      unmount(app);
+      // A Style that names no look is blurred, as the org's other pages.
+      const bold = STYLES.bold as { atmosphere?: 'soft' | 'hazy' | 'sharp' };
+      const asked = bold.atmosphere;
+      delete bold.atmosphere;
       try {
-        const page = samplePage('cinematic');
-        page.sections[0] = {
-          ...page.sections[0],
-          design: { scheme: 'atmosphere' },
-        };
-        const sharp = await render({ page, context: context() });
-        expect(sharp.dataset.lpAtmosphere).toBe('sharp');
+        const soft = await render({ page: surfacedPage(), context: context() });
+        expect(soft.dataset.lpAtmosphere).toBe('soft');
       } finally {
-        delete cinematic.atmosphere;
+        bold.atmosphere = asked;
       }
     });
 
@@ -368,7 +375,7 @@ describe('PageRenderer', () => {
         context: context(),
         brandOverrides: { fontHeading: 'Syne' },
       });
-      expect(fontsOnly.dataset.lpAtmosphere).toBe('soft');
+      expect(fontsOnly.dataset.lpAtmosphere).toBe('hazy');
     });
 
     it('draws a background image behind a section, decoratively, on the media colours', async () => {

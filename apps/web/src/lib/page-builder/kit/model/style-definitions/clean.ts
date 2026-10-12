@@ -74,4 +74,7 @@ export const CLEAN: StyleDefinition = {
   // defaults the suggestion changes the heading face, which is the part of
   // the page Clean's crispness rests on.
   fonts: { heading: 'Plus Jakarta Sans', body: 'Inter' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

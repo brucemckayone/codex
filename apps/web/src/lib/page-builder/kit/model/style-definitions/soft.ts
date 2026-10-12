@@ -77,4 +77,7 @@ export const SOFT: StyleDefinition = {
     'cta',
   ],
   fonts: { heading: 'Nunito', body: 'Outfit' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

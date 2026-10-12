@@ -311,6 +311,19 @@ function colourReader(): (css: string) => Paint {
 
 const opaque = (p: Paint): p is Rgba => typeof p !== 'string' && p[3] >= OPAQUE;
 const rgbOf = (c: Rgba): Rgb => [c[0], c[1], c[2]];
+/** The same colour as `rgb`, within the two 8-bit steps a translucent
+ *  veil's colour loses when the canvas un-premultiplies it. */
+const sameRgb = (c: Rgba, rgb: Rgb) =>
+  Math.abs(c[0] - rgb[0]) <= 2 &&
+  Math.abs(c[1] - rgb[1]) <= 2 &&
+  Math.abs(c[2] - rgb[2]) <= 2;
+
+/** `el`'s ancestors, nearest first. */
+function ancestors(el: Element): Element[] {
+  const out: Element[] = [];
+  for (let p = el.parentElement; p; p = p.parentElement) out.push(p);
+  return out;
+}
 
 /** Each atmosphere section painting a veil it may thin, and its inks. */
 export function readVeil(root: HTMLElement): VeilSection[] {
@@ -325,7 +338,7 @@ export function readVeil(root: HTMLElement): VeilSection[] {
     if (!(thin < floor)) continue;
     const ground = paint(cs.backgroundColor);
     if (typeof ground === 'string') continue;
-    const lines = inksOn(el, paint);
+    const lines = inksOn(el, paint, rgbOf(ground));
     if (lines) out.push({ el, ground: rgbOf(ground), thin, floor, lines });
   }
   return out;
@@ -361,13 +374,30 @@ function placement(
   return at;
 }
 
-/** The colours of every opaque, unblurred line in a computed box-shadow. */
-function shadowColours(shadow: string): string[] {
-  if (shadow === 'none') return [];
+/** Every colour function in a computed value: a shadow list, a gradient. */
+function colourFunctions(value: string): string[] {
   return (
-    shadow.match(/(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)/g) ??
+    value.match(/(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^()]*\)/g) ??
     []
   );
+}
+
+/** The colours of every opaque, unblurred line in a computed box-shadow. */
+function shadowColours(shadow: string): string[] {
+  return shadow === 'none' ? [] : colourFunctions(shadow);
+}
+
+/**
+ * The colour stops of a computed `background-image` drawn only with
+ * gradients (Path's route, 03 X59), or null when any layer is a picture
+ * (`url()`, `image-set()`, a cross-fade…), whose colours cannot be read.
+ */
+export function imageColours(image: string): string[] | null {
+  if (image === 'none') return [];
+  if (/\b(?:url|image|image-set|cross-fade|element|paint)\(/.test(image))
+    return null;
+  if (!/gradient\(/.test(image)) return null;
+  return colourFunctions(image);
 }
 
 const SIDES = ['Top', 'Right', 'Bottom', 'Left'] as const;
@@ -375,7 +405,8 @@ const SIDES = ['Top', 'Right', 'Bottom', 'Left'] as const;
 /** Every ink on the section's veil, or null if one cannot be measured. */
 function inksOn(
   section: HTMLElement,
-  paint: (css: string) => Paint
+  paint: (css: string) => Paint,
+  ground: Rgb
 ): VeilLine[] | null {
   const lines: VeilLine[] = [];
   const known = new Map<Element, Placement>();
@@ -391,12 +422,81 @@ function inksOn(
         bottom: r.bottom + grow,
       };
     };
+  /**
+   * Where a pseudo-element mark is drawn, reaching `grow` further. Placed
+   * absolutely, its own box: the offsets the browser reports from its
+   * containing block (the host if positioned, else the host's nearest
+   * positioned ancestor), read again on every measure. Otherwise its host's.
+   */
+  const markBox = (host: Element, ps: CSSStyleDeclaration, grow: number) => {
+    const block =
+      ps.position === 'absolute'
+        ? [host, ...ancestors(host)].find(
+            (el) => getComputedStyle(el).position !== 'static'
+          )
+        : undefined;
+    if (!block) return rectOf(host, grow);
+    return () => {
+      const at = ['left', 'top', 'width', 'height'].map((key) =>
+        ps.getPropertyValue(key)
+      );
+      if (!at.every((value) => value.endsWith('px')))
+        return rectOf(host, grow)();
+      const [x = 0, y = 0, w = 0, h = 0] = at.map(Number.parseFloat);
+      const r = block.getBoundingClientRect();
+      const left = r.left + block.clientLeft + x;
+      const top = r.top + block.clientTop + y;
+      return {
+        left: left - grow,
+        top: top - grow,
+        right: left + w + grow,
+        bottom: top + h + grow,
+      };
+    };
+  };
   /** An ink at `floor`: transparent is nothing; anything else not opaque
    *  or not readable keeps the section at the proven veil. */
   const add = (p: Paint, floor: number, box: () => Box) => {
     if (p === 'none') return;
     if (!opaque(p)) unmeasurable = true;
     else lines.push({ rgb: rgbOf(p), floor, box });
+  };
+
+  /**
+   * A Style's marks on `el` (pseudo-elements, X24), which reach a little
+   * past their host: their fill and borders, or, drawn with gradients
+   * (Path's route), each opaque stop. A translucent stop is shading, as a
+   * soft shadow is, and one in the ground's own colour is the ground (a
+   * ring's hole). False when one is a picture, which cannot be read.
+   */
+  const marksOf = (el: Element): boolean => {
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(el, pseudo);
+      if (ps.content === 'none' || ps.content === 'normal') continue;
+      const em = Number.parseFloat(ps.fontSize) || 16;
+      const box = markBox(el, ps, em / 2);
+      const mark = paint(ps.backgroundColor);
+      if (mark === 'none' && ps.backgroundImage !== 'none') {
+        const stops = imageColours(ps.backgroundImage);
+        if (!stops) return false;
+        for (const stop of stops) {
+          const p = paint(stop);
+          if (opaque(p) && !sameRgb(p, ground)) add(p, 3, box);
+        }
+      } else add(mark, 3, box);
+      for (const side of SIDES)
+        if (
+          Number.parseFloat(
+            ps.getPropertyValue(`border-${side.toLowerCase()}-width`)
+          ) > 0
+        )
+          add(
+            paint(ps.getPropertyValue(`border-${side.toLowerCase()}-color`)),
+            3,
+            box
+          );
+    }
+    return true;
   };
 
   // Words: each element that holds text itself, in its colour, on the veil
@@ -466,27 +566,10 @@ function inksOn(
         );
       }
     }
-    for (const pseudo of ['::before', '::after']) {
-      const ps = getComputedStyle(el, pseudo);
-      if (ps.content === 'none' || ps.content === 'normal') continue;
-      const em = Number.parseFloat(ps.fontSize) || 16;
-      const mark = paint(ps.backgroundColor);
-      // A mark drawn with an image (a gradient) is not read.
-      if (mark === 'none' && ps.backgroundImage !== 'none') return null;
-      add(mark, 3, rectOf(el, em / 2));
-      for (const side of SIDES)
-        if (
-          Number.parseFloat(
-            ps.getPropertyValue(`border-${side.toLowerCase()}-width`)
-          ) > 0
-        )
-          add(
-            paint(ps.getPropertyValue(`border-${side.toLowerCase()}-color`)),
-            3,
-            rectOf(el, em / 2)
-          );
-    }
+    if (!marksOf(el)) return null;
     if (unmeasurable) return null;
   }
+  // The section's own marks too (Path's walked line is drawn on it).
+  if (!marksOf(section)) return null;
   return unmeasurable ? null : lines;
 }

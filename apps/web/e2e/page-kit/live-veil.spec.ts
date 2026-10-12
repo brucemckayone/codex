@@ -8,14 +8,19 @@
  * held to its floor over the pixels under it (a filled button, a ghost
  * button's line and a mark over a ring round them), at the 0.1 percentile.
  *
- * CI's seed has no Studio page on an org with a shader, so the page is
- * studio-alpha's own (its 'glow' shader, near-black in the light theme,
- * which a fixed 1.6 left at 3.4:1 for 4.5:1 text) with Studio's multiple set
- * on its root, as Studio's stylesheet sets it. Reduced motion holds the
- * shader on one frame, so one capture is all it draws.
+ * The page is studio-alpha's Tending the Grief, in Quiet, over its 'glow'
+ * shader (near-black in the light theme, which a fixed 1.6 left at 3.4:1 for
+ * 4.5:1 text). Since 03 X59 every Style but Poster's and Cinematic's takes
+ * the hazy look, the multiple included, and each Style's own inks are what is
+ * drawn on the veil, so the page is held to it in each of them: its root
+ * switched to the Style, which is how a Style restyles a page (its layouts
+ * and schemes are the page's own here; its inks, marks and buttons are the
+ * Style's). Reduced motion holds the shader on one frame, so one capture is
+ * all it draws.
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
+import { STYLES } from '../../src/lib/page-builder/kit/model/styles';
 import {
   expectSellPageRendered,
   journeyFixture,
@@ -85,6 +90,57 @@ function readHero(selector: string) {
     const r = el.getBoundingClientRect();
     return [r.left, r.top, r.right, r.bottom];
   };
+  // The veil is translucent, so its colour comes back a step or two off
+  // the ground's (the canvas un-premultiplies it).
+  const ground = paint(cs.backgroundColor)?.rgb ?? [-9, -9, -9];
+  const isGround = (rgb: number[]) =>
+    rgb.every((c, i) => Math.abs(c - (ground[i] ?? -9)) <= 2);
+  /** A pseudo-element's own box when it is placed absolutely, else its host's. */
+  const markBox = (el: Element, ps: CSSStyleDeclaration) => {
+    const at = ['left', 'top', 'width', 'height'].map((k) =>
+      ps.getPropertyValue(k)
+    );
+    if (ps.position !== 'absolute' || !at.every((v) => v.endsWith('px')))
+      return boxOf(el);
+    let block: Element | null = el;
+    while (block && getComputedStyle(block).position === 'static')
+      block = block.parentElement;
+    if (!block) return boxOf(el);
+    const r = block.getBoundingClientRect();
+    const [x = 0, y = 0, w = 0, h = 0] = at.map(Number.parseFloat);
+    const left = r.left + block.clientLeft + x;
+    const top = r.top + block.clientTop + y;
+    return [left, top, left + w, top + h];
+  };
+  /** A Style's marks: their fill, or every opaque stop of the gradients they
+   *  are drawn with (Path's route), the ground's own colour aside. */
+  const marks = (el: Element) => {
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(el, pseudo);
+      if (ps.content === 'none' || ps.content === 'normal') continue;
+      const fill = paint(ps.backgroundColor);
+      const stops = fill
+        ? [fill]
+        : (
+            ps.backgroundImage.match(
+              /(?:rgba?|oklch|oklab|lab|lch|hsla?|hwb|color)\([^()]*\)/g
+            ) ?? []
+          )
+            .map(paint)
+            .filter(
+              (p): p is NonNullable<typeof p> =>
+                !!p && p.a >= 250 && !isGround(p.rgb)
+            );
+      for (const mark of stops)
+        lines.push({
+          name: `mark ${el.className.split(' ')[0]}${pseudo}`,
+          ink: mark.rgb,
+          floor: 3,
+          ring: true,
+          box: markBox(el, ps),
+        });
+    }
+  };
   const holders = new Set<HTMLElement>();
   const walker = document.createTreeWalker(section, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode())
@@ -124,32 +180,35 @@ function readHero(selector: string) {
           box: boxOf(el),
         });
     }
-    for (const pseudo of ['::before', '::after']) {
-      const ps = getComputedStyle(el, pseudo);
-      if (ps.content === 'none' || ps.content === 'normal') continue;
-      const mark = paint(ps.backgroundColor);
-      if (mark)
-        lines.push({
-          name: `mark ${el.className.split(' ')[0]}${pseudo}`,
-          ink: mark.rgb,
-          floor: 3,
-          ring: true,
-          box: boxOf(el),
-        });
-    }
+    marks(el);
   }
+  // The section's own marks too: Path draws its walked line on it.
+  marks(section);
   return {
     thin: Number.parseFloat(cs.getPropertyValue('--_atmos-thin')),
     floor: Number.parseFloat(cs.getPropertyValue('--_atmos-floor')),
     need: section.style.getPropertyValue('--_atmos-need'),
+    bounds: boxOf(section),
     lines,
   };
 }
 
 type Lines = NonNullable<ReturnType<typeof readHero>>['lines'];
 
-/** Runs in the page: decodes the capture and holds each line to its floor. */
-async function measure({ png, lines }: { png: string; lines: Lines }) {
+/**
+ * Runs in the page: decodes the capture and holds each line to its floor,
+ * over the pixels of its own section (`bounds`): a mark at its foot, as
+ * Path's route is, would otherwise be read against the next section.
+ */
+async function measure({
+  png,
+  lines,
+  bounds,
+}: {
+  png: string;
+  lines: Lines;
+  bounds: number[];
+}) {
   // From its bytes: the page's own fetch (and its CSP) never sees it.
   const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
   const bitmap = await createImageBitmap(
@@ -185,11 +244,14 @@ async function measure({ png, lines }: { png: string; lines: Lines }) {
       : [[x0, y0, x1, y1]];
     const ink = lum(line.ink);
     const ratios: number[] = [];
+    const [bl = 0, bt = 0, br = 0, bb = 0] = bounds.map((v) =>
+      Math.round(v * k)
+    );
     for (const [a = 0, b = 0, c = 0, d = 0] of regions) {
-      const [l, t] = [Math.max(a, 0), Math.max(b, 0)];
+      const [l, t] = [Math.max(a, bl, 0), Math.max(b, bt, 0)];
       const [w, h] = [
-        Math.min(c, canvas.width) - l,
-        Math.min(d, canvas.height) - t,
+        Math.min(c, br, canvas.width) - l,
+        Math.min(d, bb, canvas.height) - t,
       ];
       if (w <= 0 || h <= 0) continue;
       const data = ctx.getImageData(l, t, w, h).data;
@@ -210,52 +272,73 @@ async function measure({ png, lines }: { png: string; lines: Lines }) {
   });
 }
 
-for (const theme of ['light', 'dark'] as const) {
-  test(`studio-alpha ('glow') ${theme}: a veil thinner than the proven one holds every ink on it over the shader drawn`, async ({
-    browser,
-    baseURL,
-  }) => {
-    const page = await open(browser, baseURL as string, theme);
-    await expect(
-      page.locator('.org-layout[data-hero-shader-active]')
-    ).toHaveCount(1);
-    // Studio's multiple, on a page whose own Style does not set one; the
-    // live veil reads the page again on a resize.
-    await page.addStyleTag({ content: '.lp { --lp-atmosphere-show: 1.6; }' });
-    await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+/** Every Style that asks for the hazy look, and so for the thinner veil. */
+const HAZY = (Object.keys(STYLES) as (keyof typeof STYLES)[]).filter(
+  (style) => STYLES[style].atmosphere === 'hazy'
+);
 
-    // It has measured: a veil between the Style's and the proven one.
-    await expect
-      .poll(async () => (await page.evaluate(readHero, HERO))?.need, {
-        timeout: 15_000,
-      })
-      .not.toBe('');
-    const hero = await page.evaluate(readHero, HERO);
-    const detail = JSON.stringify(hero);
-    expect(hero, detail).not.toBeNull();
-    if (!hero) return;
-    expect(hero.thin, detail).toBeLessThan(hero.floor);
-    expect(Number(hero.need), detail).toBeGreaterThanOrEqual(hero.thin);
-    expect(Number(hero.need), detail).toBeLessThanOrEqual(hero.floor);
-    expect(hero.lines.length, detail).toBeGreaterThan(3);
+test('the page is drawn in a Style that asks for the hazy look', () => {
+  expect(HAZY).toContain('quiet');
+  expect(HAZY.length).toBeGreaterThan(1);
+});
 
-    // The words (and marks, and buttons) hidden, the veil and the shader
-    // left: what each ink is seen against.
-    await page.addStyleTag({
-      content: `${HERO} * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }
-        ${HERO} *::before, ${HERO} *::after, ${HERO} .lp-button { visibility: hidden !important; }`,
+for (const style of HAZY)
+  for (const theme of ['light', 'dark'] as const) {
+    test(`studio-alpha ('glow') as ${style}, ${theme}: a veil thinner than the proven one holds every ink on it over the shader drawn`, async ({
+      browser,
+      baseURL,
+    }) => {
+      const page = await open(browser, baseURL as string, theme);
+      await expect(
+        page.locator('.org-layout[data-hero-shader-active]')
+      ).toHaveCount(1);
+      // Its own look, multiple and all, with no stylesheet added.
+      await expect(page.locator(".lp[data-lp-atmosphere='hazy']")).toHaveCount(
+        1
+      );
+      // The Style's inks; the live veil reads the page again on a resize.
+      await page.evaluate((id) => {
+        const root = document.querySelector<HTMLElement>('.lp');
+        if (root) root.dataset.lpStyle = id;
+        window.dispatchEvent(new Event('resize'));
+      }, style);
+
+      // It has measured: a veil between the Style's and the proven one.
+      await expect
+        .poll(async () => (await page.evaluate(readHero, HERO))?.need, {
+          timeout: 15_000,
+        })
+        .not.toBe('');
+      const hero = await page.evaluate(readHero, HERO);
+      const detail = JSON.stringify(hero);
+      expect(hero, detail).not.toBeNull();
+      if (!hero) return;
+      expect(hero.thin, detail).toBeLessThan(hero.floor);
+      expect(Number(hero.need), detail).toBeGreaterThanOrEqual(hero.thin);
+      expect(Number(hero.need), detail).toBeLessThanOrEqual(hero.floor);
+      expect(hero.lines.length, detail).toBeGreaterThan(3);
+
+      // The words (and marks, and buttons) hidden, the veil and the shader
+      // left: what each ink is seen against.
+      await page.addStyleTag({
+        content: `${HERO} * { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; }
+        ${HERO}::before, ${HERO}::after, ${HERO} *::before, ${HERO} *::after, ${HERO} .lp-button { visibility: hidden !important; }`,
+      });
+      await page.evaluate(
+        () =>
+          new Promise((done) =>
+            requestAnimationFrame(() => requestAnimationFrame(done))
+          )
+      );
+      const png = (await page.screenshot()).toString('base64');
+      const held = await page.evaluate(measure, {
+        png,
+        lines: hero.lines,
+        bounds: hero.bounds,
+      });
+      await page.context().close();
+
+      const short = held.filter((l) => l.worst < l.floor);
+      expect(short, `veil ${hero.need}: ${JSON.stringify(held)}`).toEqual([]);
     });
-    await page.evaluate(
-      () =>
-        new Promise((done) =>
-          requestAnimationFrame(() => requestAnimationFrame(done))
-        )
-    );
-    const png = (await page.screenshot()).toString('base64');
-    const held = await page.evaluate(measure, { png, lines: hero.lines });
-    await page.context().close();
-
-    const short = held.filter((l) => l.worst < l.floor);
-    expect(short, `veil ${hero.need}: ${JSON.stringify(held)}`).toEqual([]);
-  });
-}
+  }
