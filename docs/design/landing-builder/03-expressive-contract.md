@@ -2059,3 +2059,105 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     renamed, an unknown step written, the attribute never written) fails its test; and the e2e passes on the branch and fails with the `brand` rule
     cut to a Style's own specificity (`.lp[data-lp-corners='brand']`), where load order, not the
     dial, decides: the Style's corners won on all four tokens.
+
+- **X63 · 2026-10-12 · 3b · "What's inside": every practice in the course as a picture-led card
+  to swipe through, straight after the hero (BUILT, decided BY the owner on 2026-10-12;
+  Codex-61zsk.52).** The owner reviewed a working mock-up (`phase3-sources/whats-inside`) and took
+  every recommendation on it. On the stage line: "I like the stages idea here, showing what's in
+  each stage."
+  - **Its own section type.** `inside`, labelled "What's inside", with one layout, `carousel`. It
+    can go anywhere, like any type, and is the second section in every Style's order and starter,
+    straight after the hero (`STORY_ORDER`, and Cinematic's and Quiet's own orders). A visitor
+    sees what they would be buying before they are sold it. The full-story recipe, and the
+    portal seeded from it (Ancestral Threads), start with it too. The four shorter recipes keep
+    their own point: the essentials, the journey's story, the video, the pictures.
+  - **The card.** It shows the picture at 16:9. Below that come the kind and length, in X57's own
+    words through `CURRICULUM_COPY` ("Video · 12 min", or "Reading" alone). Then comes the title,
+    in full however long it is, and last "Stage 2 · Breath" in small type on every card. It is
+    spoken "title, kind, length, stage": the title leads the markup and the kind leads the eye.
+    The card is a pure showcase. Nothing on it is a link or takes a press, and the row's own
+    arrows are the section's only buttons.
+  - **No picture.** The frame shows the kind's icon in a ring, on the brand colour. The brand
+    ground is a nested `brand` scheme, so the icon's ink is the kit's proven ink on any brand. On
+    a brand, accent or contrast band, the brand would vanish into the band or smear against it,
+    so the tile takes the band's own panel instead. A picture that fails to load gets the same
+    tile, never a broken image (`Media` gained a `fallback` snippet).
+  - **The row.** It uses `ScrollStrip`: the browser's own scrolling, snapping card by card, as an
+    ordered list in a labelled region. The heading names it, or "What's inside" when there is no
+    heading. The visitor drives it; it never moves by itself, and the section adds no motion of
+    its own. Cards are about four-fifths of a phone's width (`clamp(17rem, 80cqi, 22.5rem)`), so
+    the next one shows at the edge. A wide screen shows three whole cards and part of a fourth.
+    Up to three practices sit from the column's start, as any row does (the coordinator's
+    default; centring or growing them was not taken). The arrows sit under the row on the right,
+    where the gallery's and the story's strips put them. Beside them is the position: the cards
+    wholly in view, "1–3 of 18" (`ScrollStrip`'s new `position`). It is hidden from a screen
+    reader, which already hears the list's length.
+  - **The words.** A new section starts with the heading "What's inside" and one line: "Every
+    practice in {course}, in the order you'll meet them." There is no eyebrow, as with the
+    kit's other starters.
+  - **Its band keeps each Style's alternation.** It takes base after the Studio, Path, Bold,
+    Poster, Cinematic and Quiet heroes, and the tint between Clean's hero and its change. Under
+    Soft's tinted hero it sits on the page. That is the one place the build departs from the
+    mock-up, which continued Soft's tint into the carousel: a Style's own order never runs one
+    coloured band into the same one (`PageRenderer.svelte.test.ts`; `keepBandsApart` steps it
+    back to base anyway), because the two read as one oversized slab. The bands that were already
+    there are unchanged in every Style.
+  - **The Styles' own looks.** Studio draws each picture as one of its prints, untilted, since a
+    tilt inside a scroller is clipped. Bold tops each card's words with its ink rule. Bold and
+    Clean lay the head across a row, as they do the gallery's and the curriculum's. Soft centres
+    the head over its row of cards, as it does the curriculum's cards.
+  - **No practices yet.** A heading over nothing is an empty promise, so the public page folds
+    the band away from the first paint, as the video's does. Where the page is only looked at
+    (the canvas, a still thumbnail), it keeps a row of tiles. While editing, a prompt points to
+    the Curriculum tab.
+  - **The data.** The public sales read (`loadPublicStages`) now carries each practice's
+    picture as a full CDN URL: the creator's own thumbnail, else its film's frame, else null.
+    That is an optional `thumbnailUrl` on `JourneyPracticeView`. It arrives in the awaited page
+    read, so the cards and their words are in the first HTML. Only the image bytes load later:
+    the first four (as many as a wide screen shows) load straight away at
+    `fetchpriority="low"`, behind the hero's, and the rest lazily, through `srcset` (`Media`
+    gained `srcset`, `sizes` and `early`). The other curriculum reads used to hand out the
+    frame's raw R2 key as the URL (Codex-e140e). Now one resolver, `resolvePracticeThumbnail`,
+    serves all of them. The canvas mapping now carries `durationSeconds` too, which it had
+    dropped since X57.
+  - **Shared with the curriculum.** `PracticeCard`, `PracticeTile` and `practiceCard()` live in
+    `blocks/inside/`. A curriculum layout that groups practices by stage (Codex-61zsk.55) lays
+    out the same cards with the stage line left off, so the kind, length and picture are never
+    worked out twice.
+  - **Rejected, and why.**
+    - *4:5 or 1:1 pictures.* They keep only 45% or 56% of a 16:9 frame's width, so a film's
+      frame (every transcode's thumbnail) is cropped hard. 16:9 also keeps a phone's card short
+      enough to show its words.
+    - *The kit's default strip card*, with half the next card showing. A 16:9 picture that small
+      is a stamp, and half a card reads as a grid that was cut off.
+    - *Smaller cards, more at once.* They are stamps for the same reason.
+    - *Arrows in the heading row.* On a phone they sit far from the cards they move.
+    - *Arrows over the strip's edges.* They cover the pictures and are easy to miss on touch.
+    - *Dots.* They stop working past about eight items.
+    - *A plain count* ("18 practices"). It was a fair second choice, but the hero's facts line
+      already carries the totals.
+    - *No position.* It leaves the peek alone to say there is more.
+    - *A stage marker over each stage's first card.* It leaves most cards without a stage.
+    - *A stage chip on the picture.* It competes with the photograph.
+    - *"Inside the journey".* The gallery already starts "Inside {course}".
+    - *Always the hero's other ground.* In Studio, Soft and Path that lands on the same ground
+      as the section after it.
+    - *Cutting long titles at three lines.* It hides a creator's words.
+  - **Not done:** a finishing transcode still invalidates no cached content list (Codex-1szw2,
+    its own bead). It is latent here, since the sell page's read is not cached. Also not done:
+    making a changed picture appear at once. A visitor who already holds the old one sees it for
+    up to an hour, the platform's window for every image (accepted). Both are left to their own
+    work.
+  - **Tests:**
+    - The resolver alone. A real-database read of every curriculum surface, written while the
+      raw-key bug still reproduced, covering the custom picture, the frame, a written practice,
+      a deleted media item and a draft.
+    - The routes passing the CDN base, and the canvas mapping.
+    - `Media`'s sizes, early load and stand-in, and `ScrollStrip`'s position.
+    - The block: every practice in order with its kind, length, title and stage; the row's
+      label, order and buttons; pictures at their sizes; the tile, on a failed picture and on
+      each filled band; the first four early; no link and nothing to press; the empty fold,
+      canvas and thumbnail; and the starter's words.
+    - Every Style putting it second, in its order and on a new page.
+    - Each was calibrated against a planted fault, from a raw key handed out to a link on the
+      card.
