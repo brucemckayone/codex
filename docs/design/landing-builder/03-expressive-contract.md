@@ -2090,7 +2090,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
         is `--lp-column`, declared on each section because a Style may re-set the gutter or the
         container there. A head with less room names it as `--lp-heading-column`, beside the rule
         that makes the room:
-        - the measure: the story, gallery and pricing heads, and the story's chapters;
+        - the measure: the story, gallery, pricing and "What's inside" heads (the last added on
+          rebasing onto X63), and the story's chapters;
         - a split's share (5/12 or 7/12 of the column, or half, less its gap): the FAQ and
           pricing-focus heads, the stats grid, the text and benefits columns, the problem split and
           Studio's problem list, the guide's split (across the band on Bold and Cinematic),
@@ -2181,7 +2182,10 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       four. Type and still CSS: six, and an unheld price. e2e: louder doing nothing, the colour
       transitions left on `:root`'s durations, the route following the scroll at gentle, and in
       `louder-fit` the fit turned off (118 faults) and the FAQ's split forgetting its room (7,
-      all in the FAQ).
+      all in the FAQ). After the rebase onto X63, the "What's inside" head forgetting its room
+      gave 22 faults, all on that heading in Poster at 1024 and 1440 ("Transformation",
+      "Photography" drawn wider than the line); with its room, none. The full run passed again
+      on that base: 60 runs in 15 minutes.
     - **`louder-fit`'s first runs measured nothing.** On the branch's old base, reduced motion
       still gave every property a 0.01ms transition, so a size read straight after a heading's text
       was swapped returned the size before the swap. The fit looked switched off: almost a
