@@ -1,5 +1,28 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { navigating } from '$app/state';
+  import { brandBars } from './navigation-progress-scope.svelte';
+
+  interface Props {
+    /**
+     * Where this instance is mounted. Required, so neither call site can
+     * silently take the other's role (see `navigation-progress-scope`).
+     *  - `root`: the root layout's fallback bar. Draws only while no brand
+     *    scope has a bar of its own mounted.
+     *  - `brand`: mounted INSIDE a brand scope (`.org-layout`), so the bar
+     *    inherits that scope's `--color-interactive` and `--color-focus`.
+     */
+    placement: 'root' | 'brand';
+  }
+
+  const { placement }: Props = $props();
+
+  onMount(() => (placement === 'brand' ? brandBars.register() : undefined));
+
+  // The root bar keeps tracking navigation while it stands down, so a hand-off
+  // mid-navigation (leaving the org tree for an `(auth)` page on the same host
+  // unmounts the org layout's bar) finishes the bar instead of cutting it.
+  const standsDown = $derived(placement === 'root' && brandBars.mounted);
 
   let visible = $state(false);
   let completing = $state(false);
@@ -21,7 +44,7 @@
   });
 </script>
 
-{#if visible}
+{#if visible && !standsDown}
   <div class="navigation-progress" role="progressbar" aria-label="Page loading">
     <div class="bar" class:completing></div>
   </div>

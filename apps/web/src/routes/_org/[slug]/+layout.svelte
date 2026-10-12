@@ -22,6 +22,7 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
+  import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
@@ -472,6 +473,13 @@
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >
+  <!-- The page-load bar, mounted HERE so it inherits this element's brand remap
+       of `--color-interactive` (dark: `--brand-color-dark` first). The root
+       layout's bar stands down while this one is mounted (Codex-451j0). A
+       direct child, outside `.org-main`, so the `page-content` view transition
+       never snapshots it; this element sets no transform, filter or z-index, so
+       `position: fixed` still pins it to the viewport above all chrome. -->
+  <NavigationProgress placement="brand" />
   <!-- Still in the studio: there it sits behind an 80% cover and a 60px blur,
        where its motion buys nothing and every frame is a full-viewport render.
        `tone`: it reports what it draws to a page kit's live veil (03 X54). -->
