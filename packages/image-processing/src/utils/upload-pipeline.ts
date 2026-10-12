@@ -78,13 +78,15 @@ export function stillVariantKeys(baseKey: string): VariantKeys {
   };
 }
 
-/** WebP buffers for the three size variants. Internal helper — service.ts
- * passes a structurally-matching object literal to `uploadImageVariants`
- * and never imports the named type, so this stays unexported. */
+/** WebP buffers for the three size variants, and a page image's `xl`
+ * (Codex-61zsk.13). Internal helper — service.ts passes a structurally-
+ * matching object literal to `uploadImageVariants` and never imports the
+ * named type, so this stays unexported. */
 interface VariantBuffers {
   sm: Uint8Array;
   md: Uint8Array;
   lg: Uint8Array;
+  xl?: Uint8Array;
 }
 
 /**
@@ -128,7 +130,8 @@ const IMAGE_VARIANT_PUT_OPTIONS = {
  * never appears in 5xx-rate monitoring.
  */
 export async function uploadImageVariants(params: {
-  keys: VariantKeys;
+  /** `xl` is a page image's alone, and is put only when both sides carry it. */
+  keys: VariantKeys & { xl?: string };
   variants: VariantBuffers;
   r2: R2Service;
   failureLabel: string;
@@ -143,7 +146,10 @@ export async function uploadImageVariants(params: {
     { size: 'sm', key: keys.sm, body: variants.sm },
     { size: 'md', key: keys.md, body: variants.md },
     { size: 'lg', key: keys.lg, body: variants.lg },
-  ] as const;
+    ...(keys.xl && variants.xl
+      ? [{ size: 'xl', key: keys.xl, body: variants.xl } as const]
+      : []),
+  ];
 
   const uploadResults = await Promise.allSettled(
     targets.map((target) =>

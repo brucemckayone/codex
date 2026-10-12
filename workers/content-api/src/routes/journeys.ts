@@ -1502,7 +1502,7 @@ app.delete(
  * a fresh uuid rather than a slot-deterministic key, so two uploads for the
  * same page never collide and neither ever overwrites the other (see
  * `ImageProcessingService.processPageImage`).
- * @returns {{ key: string; url: string }}
+ * @returns {{ key: string; url: string; width: number; height: number }}
  */
 app.post(
   '/studio/journeys/:pageId/images',
@@ -1523,7 +1523,14 @@ app.post(
         allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
       },
     },
-    handler: async (ctx): Promise<{ key: string; url: string }> => {
+    handler: async (
+      ctx
+    ): Promise<{
+      key: string;
+      url: string;
+      width: number;
+      height: number;
+    }> => {
       // Resolve (and org-scope) the page FIRST — a foreign or missing page
       // must 404 before any R2 object exists (Codex-29fs0's ordering rule).
       await ctx.services.courseJourney.assertJourneyPageInOrg(
@@ -1539,7 +1546,14 @@ app.post(
         })
       );
 
-      return { key: processed.key, url: processed.url };
+      // The picture's own size rides back so the page can store it on the
+      // `ImageRef` (`w`/`h`): its shape, and the sign that it has an `xl`.
+      return {
+        key: processed.key,
+        url: processed.url,
+        width: processed.width,
+        height: processed.height,
+      };
     },
   })
 );

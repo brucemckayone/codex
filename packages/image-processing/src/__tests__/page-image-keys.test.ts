@@ -4,6 +4,7 @@ import {
   pageImageKey,
   pageImageKeyOfObject,
   pageImageObjectKeys,
+  pageImageVariantKeys,
 } from '../page-image-keys';
 
 const PAGE = '4b0c8a52-9d1e-4f3a-8a6b-2c5d7e9f0a1b';
@@ -15,12 +16,27 @@ describe('page-image keys', () => {
     expect(pageImageKey(PAGE, IMAGE)).toBe(BASE);
   });
 
-  it('names the three objects that actually hold the bytes', () => {
+  it('names the four objects that actually hold the bytes, xl included (Codex-61zsk.13)', () => {
+    // The upload records this list and the save nominates it, so an object
+    // missing here is written and never swept.
     expect(pageImageObjectKeys(BASE)).toEqual([
       `${BASE}/sm.webp`,
       `${BASE}/md.webp`,
       `${BASE}/lg.webp`,
+      `${BASE}/xl.webp`,
     ]);
+    expect(pageImageVariantKeys(BASE)).toEqual({
+      sm: `${BASE}/sm.webp`,
+      md: `${BASE}/md.webp`,
+      lg: `${BASE}/lg.webp`,
+      xl: `${BASE}/xl.webp`,
+    });
+  });
+
+  it('still reads an image uploaded before xl existed: its three objects are page-image objects', () => {
+    for (const size of ['sm', 'md', 'lg']) {
+      expect(pageImageKeyOfObject(`${BASE}/${size}.webp`)).toBe(BASE);
+    }
   });
 
   it('maps every object back to its base key', () => {
@@ -46,7 +62,8 @@ describe('page-image keys', () => {
 
   it.each([
     ['the base key itself', BASE],
-    ['another size', `${BASE}/xl.webp`],
+    ['a size no upload writes', `${BASE}/xxl.webp`],
+    ['a size in another format', `${BASE}/xl.png`],
     ['a course still variant', `courses/${PAGE}/hero/lg.webp`],
   ])('refuses %s as an object key', (_label, value) => {
     expect(pageImageKeyOfObject(value)).toBeNull();

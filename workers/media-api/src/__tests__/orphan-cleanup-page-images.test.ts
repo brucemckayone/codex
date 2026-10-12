@@ -2,8 +2,8 @@
  * Codex-61zsk.10: the orphan sweep deletes a page image's OBJECTS, and only
  * once no page references it.
  *
- * A page image is queued as its three object keys
- * (`landing-pages/{page}/images/{image}/{sm,md,lg}.webp`) at upload and again
+ * A page image is queued as its four object keys
+ * (`landing-pages/{page}/images/{image}/{sm,md,lg,xl}.webp`) at upload and again
  * when a save drops it. The first version queued the BASE key instead, which
  * holds no object: the sweep deleted nothing, marked the row deleted, and the
  * variants stayed in R2 for good. These tests run the DO's real sweep against
@@ -31,10 +31,18 @@ const testEnv = env as TestEnv;
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/** The three object keys of a page image under a page that does not exist. */
+/**
+ * The four object keys of a page image under a page that does not exist: the
+ * three every still has and the page image's `xl` (Codex-61zsk.13).
+ */
 function pageImageObjects(): string[] {
   const base = `landing-pages/${crypto.randomUUID()}/images/${crypto.randomUUID()}`;
-  return [`${base}/sm.webp`, `${base}/md.webp`, `${base}/lg.webp`];
+  return [
+    `${base}/sm.webp`,
+    `${base}/md.webp`,
+    `${base}/lg.webp`,
+    `${base}/xl.webp`,
+  ];
 }
 
 function orphan(overrides: Partial<OrphanedFileRecord>): OrphanedFileRecord {
@@ -87,6 +95,27 @@ describe('reasonToKeep — page images', () => {
 
     expect(await reasonToKeep(orphan({}), s.r2, s.orphans)).toBeNull();
     expect(s.head).not.toHaveBeenCalled();
+  });
+
+  it('deletes the xl object of an image no page references (Codex-61zsk.13)', async () => {
+    // Before xl was a page-image object, this row was "left for review" for
+    // good, and the largest file of every replaced picture stayed in R2.
+    const s = stubs(false);
+    const record = orphan({ r2Key: pageImageObjects()[3] ?? '' });
+
+    expect(await reasonToKeep(record, s.r2, s.orphans)).toBeNull();
+    expect(s.isPageImageReferenced).toHaveBeenCalledWith(
+      record.r2Key.replace(/\/xl\.webp$/, '')
+    );
+  });
+
+  it('keeps the xl object of an image a page still references', async () => {
+    const s = stubs(true);
+    const record = orphan({ r2Key: pageImageObjects()[3] ?? '' });
+
+    expect(await reasonToKeep(record, s.r2, s.orphans)).toBe(
+      'still referenced by a landing page'
+    );
   });
 
   it('keeps a page_image row whose key is not a page-image object', async () => {
@@ -172,7 +201,7 @@ describe('OrphanedFileCleanupDO sweep — page images (Codex-61zsk.10)', () => {
     return rows.map((row) => row.status);
   }
 
-  it('deletes all three objects of an unreferenced image past its grace, and leaves a young one alone', async () => {
+  it('deletes all four objects of an unreferenced image past its grace, and leaves a young one alone', async () => {
     const ns = testEnv.ORPHAN_CLEANUP_DO;
     const stub = ns.get(ns.idFromName('singleton'));
 
@@ -183,12 +212,22 @@ describe('OrphanedFileCleanupDO sweep — page images (Codex-61zsk.10)', () => {
       if (!(await statuses(due)).includes('pending')) break;
     }
 
-    expect(await statuses(due)).toEqual(['deleted', 'deleted', 'deleted']);
+    expect(await statuses(due)).toEqual([
+      'deleted',
+      'deleted',
+      'deleted',
+      'deleted',
+    ]);
     for (const key of due) {
       expect(await testEnv.ASSETS_BUCKET.head(key)).toBeNull();
     }
 
-    expect(await statuses(young)).toEqual(['pending', 'pending', 'pending']);
+    expect(await statuses(young)).toEqual([
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+    ]);
     for (const key of young) {
       expect(await testEnv.ASSETS_BUCKET.head(key)).not.toBeNull();
     }
