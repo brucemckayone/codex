@@ -2468,4 +2468,7 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - `OfferAsk`'s extraction was proven once against the closing ask as it was before it
       (every layout, every offer state, page and canvas, 36 renders identical, the CSS moved
       rule for rule), then that comparison was removed with the old file.
-    - Every new test was calibrated against a planted fault: 30 plants, each red.
+    - Every new test was calibrated against a planted fault: 54 plants, each red.
+    - Two existing kit gates caught real faults during the build: a `heading__title` class the
+      org's brand sheet would have painted in its heading colour (the class-name test), and an
+      un-namespaced private in Soft's pebbles (the private-property registry).
