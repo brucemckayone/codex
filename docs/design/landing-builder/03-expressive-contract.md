@@ -1996,3 +1996,66 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     unbounded ("resilience" cut in Bold at 1440). Its first draft read the picture once, before the
     headlines, and failed this branch: the picture moves with the headline, so it now reads it for
     each.
+- **X61 · 2026-10-12 · 3c D1 · The page's first three dials: colour, corners and spacing, each one
+  step either side of the Style's (BUILT, decided without the owner; Codex-61zsk.50).** 04 §3.3
+  proposed five dials of three curated steps, each step proven, each with "use the Style's" as its
+  reset; §6 put the dials first. These three go first because every step lands on a state the kit
+  already proves: a scheme or a spacing any section may already pick, or corners a Style already
+  draws. Type drama and motion need new proofs, so they follow.
+  - **Stored as `design.dials`, and unset is the Style's.** Each dial holds one of two named steps;
+    the middle step is the absent key, so the reset deletes it and a page that sets no dial
+    renders exactly as before. Not in `brandOverrides`, which is the brand editor's own shape, and
+    not as top-level `density`, `motion` or `type`, which the write boundary strips as legacy axes.
+    The write boundary degrades each dial on its own (an unknown step reads as the Style's, a
+    reset, never a different look), as a section's scheme does. `upgradePage` now carries the
+    dials: it kept only the Style, and the editor saves what it returns, so any new key was
+    dropped on load and wiped on the next save.
+  - **Colour: one rung of ground → soft tint → brand colour.** Muted brings every coloured band the
+    Style picks (contrast, brand, second colour) down to the soft tint; vivid takes every soft tint
+    up to the brand colour. The ground stays the ground, so a page keeps its reading surface; a
+    scheme the creator chose and the org's moving background never move. Vivid's brand colour
+    yields to a band beside it: next to another brand band they read as one slab, and next to
+    contrast they smear for a dark brand, so `keepBandsApart` would step one back, and it steps
+    back the later one, which was Soft's closing ask (its questions are a soft tint right above
+    it). Some steps change nothing by construction: vivid on Bold and Poster (no soft tints), muted
+    on Cinematic (no coloured bands to bring down), and both on Quiet, which draws no bands. The
+    editor's control should say so (D4). Rejected: vivid as the second colour (beside contrast it
+    can smear too, and nothing guards that pair), lifting the ground (the page loses its reading
+    surface), and a special case for Quiet's ask. Proof: every scheme is already proven for 4,096
+    brands × both poles (`schemes.test.ts`, independent of the Style), so a dial that only
+    reassigns proven schemes needs no new contrast proof; the band rules are held for every Style
+    at every step.
+  - **Corners: the brand's own, or Soft's.** `brand` is the kit's own corners, the org's tokens as
+    its own pages draw them; `rounder` is Soft's recipe on any Style (cards and pictures twice the
+    org's radius, from a gentle floor to 2rem; buttons and chips pills when the brand is rounded at
+    all). Both are recipes the kit already ships. A Style's own devices keep their shape (Studio's
+    square print frames, Poster's pills). Drawn as one `kit.css` rule per step, one attribute above
+    each Style's tokens, so it wins by specificity and never by load order. Rejected: doubling each
+    Style's own factor (Bold at 0.5 or Soft at 4 are new looks no Style draws).
+  - **Spacing: the rhythm a section takes when it picks none.** Compact or spacious for every
+    section without its own spacing; a compact layout stays compact. It moves the band's padding
+    rung only, the one each Style already tunes; the gaps inside a section stay the Style's.
+    Rejected: scaling `--lp-gap` and `--lp-stack` (96 rules in 32 files read them, each an
+    unproven combination per Style).
+  - **Not yet:** type drama ("louder" has about 1% headroom on the hero at 56rem and up, X34, so it
+    comes with a committed fold harness or leaves the hero alone), motion (still and gentle need
+    the motion gates widened), and the editor's controls (D4). The gallery takes
+    `?dials=colour:muted,corners:rounder,spacing:spacious`.
+  - **Tests:** `resolve.test.ts` holds, for every Style at every step: muted leaves no coloured
+    band, vivid lifts every soft tint with no band beside it and only those, Soft's ask keeps the
+    brand colour, the ground stays and Quiet is unchanged, the creator's scheme and the moving
+    background stay, and no band sits beside its twin or the brand colour beside contrast; the
+    spacing dial sets the rhythm and keeps a section's own and a compact layout's.
+    `upgrade.test.ts`: dials carried, idempotent, sanitised. The validation tests and
+    `ids.parity.test.ts`: the twin lists equal, every dial validated, an unknown step degraded.
+    `dials.test.ts`: `brand` is the kit's own corners and `rounder` Soft's, every Style declares
+    its corners on its root and nothing below a root declares one. `PageRenderer.svelte.test.ts`:
+    the root names a known corners step only. `page-dials.spec.ts` (e2e, the seeded reference
+    page): in a real cascade, `brand` equals the kit's own, `rounder` equals Soft's, and the page's
+    button follows. Calibrated: each rule planted out (no neighbour yield, muted leaving brand, a
+    chosen scheme moved, the spacing dial ignored, vivid lifting the ground, dials dropped on
+    upgrade, a twin respelled, a dial unvalidated, a bad bag rejecting, dials off the save route,
+    `rounder` drifting from Soft, a corner declared below a root or in a component, a step's rule
+    renamed, an unknown step written, the attribute never written) fails its test; and the e2e passes on the branch and fails with the `brand` rule
+    cut to a Style's own specificity (`.lp[data-lp-corners='brand']`), where load order, not the
+    dial, decides: the Style's corners won on all four tokens.

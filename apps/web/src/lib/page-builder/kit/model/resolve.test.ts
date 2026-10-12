@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PAGE_STYLE_IDS, SECTION_LAYOUTS, SECTION_TYPE_IDS } from './ids';
+import {
+  type ColourSchemeId,
+  PAGE_STYLE_IDS,
+  type PageDials,
+  type PageStyleId,
+  SECTION_LAYOUTS,
+  SECTION_TYPE_IDS,
+} from './ids';
 import {
   atmosphereProven,
   continuingSections,
@@ -614,5 +621,148 @@ describe('continuingSections — no words of its own, on the ground above (03 X5
     expect(
       continuing([section({ id: 'faq', type: 'faq', design: base })])
     ).toEqual([]);
+  });
+});
+
+describe("the page's dials (03 X61)", () => {
+  /** A Style's whole page, in its own order, at a dial setting. */
+  const whole = (style: PageStyleId, dials?: PageDials): KitPage => ({
+    design: dials ? { style, dials } : { style },
+    sections: STYLES[style].order.map((type) => section({ id: type, type })),
+  });
+  const schemes = (page: KitPage, orgShader?: boolean) =>
+    resolveSections(page, { orgShader }).map((s) => s.scheme);
+  const COLOURED: readonly ColourSchemeId[] = ['contrast', 'brand', 'accent'];
+
+  it('leave a page that sets none exactly as its Style', () => {
+    for (const style of PAGE_STYLE_IDS)
+      expect(resolveSections(whole(style, {})), style).toEqual(
+        resolveSections(whole(style))
+      );
+  });
+
+  describe('colour', () => {
+    it('muted brings every coloured band the Style picks down to the soft tint', () => {
+      for (const style of PAGE_STYLE_IDS) {
+        const muted = schemes(whole(style, { colour: 'muted' }));
+        expect(
+          muted.filter((scheme) => COLOURED.includes(scheme)),
+          style
+        ).toEqual([]);
+      }
+      expect(schemes(whole('bold', { colour: 'muted' }))).toContain('soft');
+    });
+
+    it('vivid takes every soft tint up to the brand colour unless a band stands beside it', () => {
+      for (const style of PAGE_STYLE_IDS) {
+        const before = schemes(whole(style));
+        const vivid = schemes(whole(style, { colour: 'vivid' }));
+        before.forEach((scheme, i) => {
+          if (scheme !== 'soft') return;
+          const banded = [before[i - 1], before[i + 1]].some(
+            (beside) => beside === 'brand' || beside === 'contrast'
+          );
+          expect(vivid[i], `${style} ${i}`).toBe(banded ? 'soft' : 'brand');
+        });
+      }
+    });
+
+    it("vivid keeps the Style's closing ask in the brand colour", () => {
+      // Soft's questions are a soft tint right above its brand ask: taken to
+      // the brand colour, they would leave the ask stepped back to the ground.
+      expect(STYLES.soft.schemes.faq).toBe('soft');
+      expect(STYLES.soft.schemes.cta).toBe('brand');
+      const vivid = resolveSections(whole('soft', { colour: 'vivid' }));
+      expect(vivid.find((s) => s.type === 'cta')?.scheme).toBe('brand');
+      expect(vivid.find((s) => s.type === 'faq')?.scheme).toBe('soft');
+    });
+
+    it('keeps the ground the ground, and leaves Quiet, which draws no bands, as it is', () => {
+      for (const style of PAGE_STYLE_IDS) {
+        const before = schemes(whole(style));
+        for (const colour of ['muted', 'vivid'] as const) {
+          const after = schemes(whole(style, { colour }));
+          before.forEach((scheme, i) => {
+            if (scheme === 'base')
+              expect(after[i], `${style} ${colour} ${i}`).toBe('base');
+          });
+        }
+      }
+      for (const colour of ['muted', 'vivid'] as const)
+        expect(schemes(whole('quiet', { colour }))).toEqual(
+          schemes(whole('quiet'))
+        );
+    });
+
+    it("moves only the Style's choice: the creator's scheme and the org's moving background stay", () => {
+      const page = (colour: 'muted' | 'vivid'): KitPage => ({
+        design: { style: 'clean', dials: { colour } },
+        sections: [
+          section({ id: 'h', type: 'hero' }),
+          section({ id: 'v', type: 'video', design: { scheme: 'contrast' } }),
+          section({ id: 't', type: 'text', design: { scheme: 'soft' } }),
+        ],
+      });
+      expect(schemes(page('muted'), true)).toEqual([
+        'atmosphere',
+        'contrast',
+        'soft',
+      ]);
+      expect(schemes(page('vivid'), true)).toEqual([
+        'atmosphere',
+        'contrast',
+        'soft',
+      ]);
+    });
+
+    it('never puts a band beside its twin, or the brand colour beside contrast, in any Style', () => {
+      for (const style of PAGE_STYLE_IDS)
+        for (const colour of [undefined, 'muted', 'vivid'] as const) {
+          const drawn = schemes(whole(style, colour ? { colour } : undefined));
+          drawn.slice(1).forEach((scheme, i) => {
+            const above = drawn[i];
+            const label = `${style} ${colour ?? 'style'} ${i + 1}`;
+            if (scheme !== 'base') expect(scheme, label).not.toBe(above);
+            expect([scheme, above].sort().join(), label).not.toBe(
+              'brand,contrast'
+            );
+          });
+        }
+    });
+
+    it('applies the same rungs to one section on its own', () => {
+      expect(resolveScheme('cta', undefined, 'soft', {}, 'muted')).toBe('soft');
+      expect(resolveScheme('faq', undefined, 'soft', {}, 'vivid')).toBe(
+        'brand'
+      );
+      expect(
+        resolveScheme('cta', { scheme: 'brand' }, 'soft', {}, 'muted')
+      ).toBe('brand');
+      expect(
+        resolveScheme('hero', undefined, 'soft', { orgShader: true }, 'vivid')
+      ).toBe('atmosphere');
+    });
+  });
+
+  describe('spacing', () => {
+    it('sets the rhythm of every section that picks none', () => {
+      for (const spacing of ['compact', 'spacious'] as const) {
+        const drawn = resolveSections(whole('bold', { spacing }));
+        expect(new Set(drawn.map((s) => s.spacing))).toEqual(
+          new Set([spacing])
+        );
+      }
+      expect(resolveSpacing(undefined, 'band', 'spacious')).toBe('spacious');
+    });
+
+    it("keeps a section's own spacing, and a compact layout's", () => {
+      expect(resolveSpacing({ spacing: 'regular' }, 'band', 'spacious')).toBe(
+        'regular'
+      );
+      expect(resolveSpacing(undefined, 'compact', 'spacious')).toBe('compact');
+      expect(
+        resolveSpacing({ spacing: 'spacious' }, 'compact', 'compact')
+      ).toBe('spacious');
+    });
   });
 });

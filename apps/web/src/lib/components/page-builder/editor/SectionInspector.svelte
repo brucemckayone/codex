@@ -120,9 +120,12 @@
   const current = $derived(resolvedIn(page));
   const layout = $derived(current?.layout ?? resolveLayout(section.type, section.variant, style));
   const scheme = $derived(
-    current?.scheme ?? resolveScheme(section.type, section.design, style, drawn)
+    current?.scheme ??
+      resolveScheme(section.type, section.design, style, drawn, page.design.dials?.colour)
   );
-  const spacing = $derived(current?.spacing ?? resolveSpacing(section.design, layout));
+  const spacing = $derived(
+    current?.spacing ?? resolveSpacing(section.design, layout, page.design.dials?.spacing)
+  );
   const styleLayout = $derived(resolveLayout(section.type, undefined, style));
   const styleScheme = $derived.by(() => {
     const unset = {
@@ -131,7 +134,10 @@
         s.id === section.id ? { ...s, design: { ...s.design, scheme: undefined } } : s
       ),
     };
-    return resolvedIn(unset)?.scheme ?? resolveScheme(section.type, undefined, style, drawn);
+    return (
+      resolvedIn(unset)?.scheme ??
+      resolveScheme(section.type, undefined, style, drawn, page.design.dials?.colour)
+    );
   });
   // Item fields follow the layout too: a benefits tile's image only shows in `grid`.
   const fields = $derived(

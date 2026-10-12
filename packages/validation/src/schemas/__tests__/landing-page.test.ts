@@ -11,8 +11,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   COLOUR_SCHEME_IDS,
+  PAGE_DIALS,
   PAGE_STYLE_IDS,
   pageDesignSchema,
+  pageDialsSchema,
   SECTION_LAYOUTS,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
@@ -89,5 +91,45 @@ describe('pageDesignSchema', () => {
 
   it('accepts an empty bag', () => {
     expect(pageDesignSchema.parse({})).toEqual({});
+  });
+});
+
+describe('pageDialsSchema (03 X61)', () => {
+  it('accepts every step of every dial', () => {
+    for (const [dial, steps] of Object.entries(PAGE_DIALS))
+      for (const step of steps)
+        expect(pageDialsSchema.parse({ [dial]: step })).toEqual({
+          [dial]: step,
+        });
+  });
+
+  it('declares exactly the dials PAGE_DIALS lists', () => {
+    const all = Object.fromEntries(
+      Object.entries(PAGE_DIALS).map(([dial, steps]) => [dial, steps[1]])
+    );
+    expect(pageDialsSchema.parse(all)).toEqual(all);
+  });
+
+  // A dial's unknown step is the dial's reset (the Style's own), never a
+  // failed save: the same degrade as a section's scheme.
+  it("degrades an unknown step to the Style's, strips an unknown dial, and drops a bag that is not one", () => {
+    expect(
+      pageDialsSchema.parse({
+        colour: 'neon',
+        corners: 'brand',
+        motion: 'still',
+      })
+    ).toEqual({ corners: 'brand' });
+    for (const bag of ['muted', 7, null, ['vivid']])
+      expect(pageDialsSchema.parse(bag)).toBeUndefined();
+  });
+
+  it('rides on the page design, beside its Style', () => {
+    expect(
+      pageDesignSchema.parse({ style: 'soft', dials: { spacing: 'spacious' } })
+    ).toEqual({ style: 'soft', dials: { spacing: 'spacious' } });
+    expect(pageDesignSchema.parse({ style: 'soft', dials: 'airy' })).toEqual({
+      style: 'soft',
+    });
   });
 });

@@ -132,6 +132,25 @@
   overflow-x: clip;
 }
 
+/* The corners dial (03 X61): the org's own corners, unbent by the Style (the
+   kit's defaults above), or Soft's on any Style. One attribute above each
+   Style's own tokens (`.lp[data-lp-style='<id>']`), so it wins by specificity,
+   never by load order. `rounder` is Soft's recipe, held to `style-soft.css`
+   by `dials.test.ts`. */
+.lp[data-lp-style][data-lp-corners='brand'] {
+  --lp-radius-card: var(--radius-card);
+  --lp-radius-media: var(--radius-lg);
+  --lp-radius-button: var(--radius-button);
+  --lp-radius-chip: var(--radius-full);
+}
+
+.lp[data-lp-style][data-lp-corners='rounder'] {
+  --lp-radius-card: clamp(var(--space-2), calc(var(--radius-card) * 2), var(--space-8));
+  --lp-radius-media: clamp(var(--space-2), calc(var(--radius-lg) * 2), var(--space-8));
+  --lp-radius-button: var(--lp-radius-pill-if-rounded);
+  --lp-radius-chip: var(--lp-radius-pill-if-rounded);
+}
+
 /* The query container sections measure against. The root is deliberately NOT
    one: size containment implies layout containment, which makes an element the
    containing block of its `position: fixed` descendants — the sticky CTA would

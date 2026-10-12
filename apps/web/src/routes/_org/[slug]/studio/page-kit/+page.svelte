@@ -12,6 +12,8 @@
     ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>
       (`only` may list types, `only=hero,transformation`, drawn in that order:
       a layout or colour applies to each listed section it fits)
+    ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious
+      (the page's dials, 03 X61; any subset, any order)
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
@@ -32,6 +34,7 @@
     type KitPage,
     PAGE_STYLE_IDS,
     PageRenderer,
+    readPageDials,
     SAMPLE_OFFER_STATES,
     type SampleOfferState,
     SECTION_LAYOUTS,
@@ -154,9 +157,15 @@
     })
   );
 
+  /** `?dials=colour:muted,corners:rounder`: unknown dials and steps are dropped. */
+  const dials = $derived(
+    readPageDials(Object.fromEntries(param('dials').split(',').map((pair) => pair.split(':'))))
+  );
+
   const kitPage: KitPage = $derived.by(() => {
     const plain = only ? samplePage(style, only) : samplePage(style);
-    const sample = withMedia ? withSamplePictures(plain, pictures) : plain;
+    const pictured = withMedia ? withSamplePictures(plain, pictures) : plain;
+    const sample = dials ? { ...pictured, design: { ...pictured.design, dials } } : pictured;
     if (!only) return sample;
     const layout = param('layout');
     const scheme = param('scheme');

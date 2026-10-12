@@ -48,6 +48,13 @@ export type ColourSchemeId = (typeof COLOUR_SCHEME_IDS)[number];
 export const SECTION_SPACING_IDS = ['compact', 'regular', 'spacious'] as const;
 export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
 
+/** A page's dials and the two steps of each (03 X61); unset is the Style's. */
+export const PAGE_DIALS = {
+  colour: ['muted', 'vivid'],
+  corners: ['brand', 'rounder'],
+  spacing: ['compact', 'spacious'],
+} as const satisfies Record<string, readonly [string, string]>;
+
 /**
  * Every section type and its hand-designed layouts. The FIRST layout of each
  * type is its fallback when neither the section nor the Style names one.
@@ -112,6 +119,22 @@ export const sectionStyleSchema = z.object({
 export type SectionStyleBody = z.infer<typeof sectionStyleSchema>;
 
 /**
+ * A PAGE's dials (03 X61), shared by {@link pageDesignSchema} and
+ * `journeys.ts`'s `sectionDesignSchema`. Each dial DEGRADES like a section's
+ * scheme: a step this build doesn't know reads as the Style's, which is the
+ * dial's reset, never a different look; a value that is not an object
+ * degrades whole. Unknown dials are stripped.
+ */
+export const pageDialsSchema = z
+  .object({
+    colour: closedEnum(PAGE_DIALS.colour),
+    corners: closedEnum(PAGE_DIALS.corners),
+    spacing: closedEnum(PAGE_DIALS.spacing),
+  })
+  .optional()
+  .catch(undefined);
+
+/**
  * A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above.
  *
  * `style` REJECTS an unrecognised value instead of degrading — same
@@ -125,5 +148,6 @@ export const pageDesignSchema = z.object({
       error: 'Unknown page Style. Refresh and choose a Style again.',
     })
     .optional(),
+  dials: pageDialsSchema,
 });
 export type PageDesignBody = z.infer<typeof pageDesignSchema>;
