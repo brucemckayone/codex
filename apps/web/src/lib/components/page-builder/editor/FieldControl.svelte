@@ -5,14 +5,19 @@
   the creator types (blank = the key is removed, exactly as the canvas's
   inline edit commits), so the inspector and inline editing are two views of
   one value: whichever is typed in, the other follows. `mediaBaseUrl` is
-  only for `image` fields, which preview the stored image against it.
+  only for `image` fields, which preview the stored image against it. An
+  `image` field with `focalLayouts` offers its focal point under it (03 X64),
+  live in those layouts; an `action` field is a Button's destination.
 -->
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import type { BlockField } from '$lib/page-builder/kit';
+  import { isImageRef } from '$lib/page-builder/page-images';
   import { safeHref } from '$lib/page-builder/render/safe-href';
   import * as m from '$paraglide/messages';
+  import ButtonActionField from './ButtonActionField.svelte';
+  import FocalPointField from './FocalPointField.svelte';
   import ImageField from './ImageField.svelte';
   import ItemsField from './ItemsField.svelte';
   import ListField from './ListField.svelte';
@@ -23,9 +28,20 @@
     value: unknown;
     onChange: (value: unknown) => void;
     mediaBaseUrl?: string | null;
+    /** The section's resolved layout, for a field that depends on it (a focal point). */
+    layout?: string;
+    /** The section this field belongs to (a Button never targets itself). */
+    sectionId?: string;
   }
 
-  const { field, value, onChange, mediaBaseUrl = null }: Props = $props();
+  const {
+    field,
+    value,
+    onChange,
+    mediaBaseUrl = null,
+    layout,
+    sectionId = '',
+  }: Props = $props();
 
   const id = $props.id();
   const text = $derived(typeof value === 'string' ? value : '');
@@ -64,6 +80,16 @@
     {mediaBaseUrl}
     decorative={field.decorative}
   />
+  {#if field.focalLayouts && isImageRef(value)}
+    <FocalPointField
+      image={value}
+      {mediaBaseUrl}
+      active={layout !== undefined && field.focalLayouts.includes(layout)}
+      onChange={(next) => onChange(next)}
+    />
+  {/if}
+{:else if field.control === 'action'}
+  <ButtonActionField {field} {value} {onChange} {sectionId} />
 {:else if field.control === 'toggle'}
   <div class="field field--toggle">
     <span class="field__label" id="{id}-label">{field.label}</span>

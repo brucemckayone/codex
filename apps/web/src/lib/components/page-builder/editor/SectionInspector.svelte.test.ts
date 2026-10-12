@@ -209,7 +209,7 @@ describe('the background image, a control every section shares', () => {
   const backgroundControl = () =>
     document.body.querySelector<HTMLElement>('[data-control="background"]');
 
-  it('is offered exactly where the page draws one: every type but the hero and the call to action', () => {
+  it('is offered exactly where the page draws one: every type but the hero, the call to action and the four simple sections', () => {
     // Nothing here needs the layout thumbnails, so they never come on screen.
     vi.stubGlobal(
       'IntersectionObserver',
@@ -248,8 +248,12 @@ describe('the background image, a control every section shares', () => {
       app = null;
       document.body.innerHTML = '';
     }
+    // A simple section takes its neighbour's ground (03 X64): no picture of its own.
+    const simple = ['picture', 'heading', 'break', 'button'];
     expect(offered).toEqual(
-      SECTION_TYPE_IDS.filter((t) => t !== 'hero' && t !== 'cta')
+      SECTION_TYPE_IDS.filter(
+        (t) => t !== 'hero' && t !== 'cta' && !simple.includes(t)
+      )
     );
     expect(offered).toEqual(drawn);
   });

@@ -15232,3 +15232,219 @@ export const studio_page_editor_image_alt_missing = () => `Without a description
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_image_decorative = () => `Decorative — no description needed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_label = () => `Focal point`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_hint = () => `Tap the part of the picture that must stay in view. Arrow keys move it; hold Shift to move further.`
+
+
+/**
+ * @param {{ x: NonNullable<unknown>, y: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_readout = (params) => `Point at ${params.x}% across, ${params.y}% down`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_centre = () => `Use the centre`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_inactive = () => `The focal point only matters at full width, where the picture is cropped to fit the screen.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_wide = () => `Wide screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_tablet = () => `Tablet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_focus_crop_phone = () => `Phone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_join = () => `Join, with the page’s own price`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_section = () => `Go to a section on this page`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_preview = () => `Play the preview film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_link = () => `Open another website`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_join_hint = () => `The page’s own price and checkout, exactly as the closing ask shows them.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_action_preview_missing = () => `To play a preview film, add one in the Media tab first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_label = () => `Section`
+
+
+/**
+ * @param {{ section: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_hidden = (params) => `${params.section} (hidden)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_section_none = () => `There is no other section on this page to go to yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_label = () => `Web address`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_hint = () => `Opens in a new tab, away from your page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_button_link_invalid = () => `Use a full web address that starts with https://`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_matches_above = () => `Matches the section above`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_matches_below = () => `Matches the section below`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_colour_own = () => `This section’s own colour, set apart from the sections around it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_colour = () => `A pause has no colour of its own: it takes the colour of the section above.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_ground_change = () => `The colour change already makes a pause here. This one makes the section above run a step longer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_break_twice = () => `Two pauses in a row add up. One set to Large may read better.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_heading_fallback = () => `A heading reads best right above the section it introduces. Here it joins the section above.`

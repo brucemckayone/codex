@@ -1,6 +1,6 @@
 /**
- * The Button section's words (03 X64): the label each action starts with, the
- * name of each action in the inspector, and the canvas's warnings. They live
+ * The Button section's words (03 X64): the label each action starts with and
+ * the canvas's warnings (the inspector's own words are in `messages/en.json`). They live
  * beside the block until `kit/model/copy.ts` takes them (contract A1), as the
  * preview block's do.
  */
@@ -12,14 +12,6 @@ export const BUTTON_LABELS: Readonly<Record<ButtonActionId, string>> = {
   section: 'Read on',
   preview: 'Watch the preview',
   link: 'Find out more',
-};
-
-/** What each action is called in the inspector's picker. */
-export const BUTTON_ACTION_NAMES: Readonly<Record<ButtonActionId, string>> = {
-  join: 'Join: the page’s own price and checkout',
-  section: 'Go to a section on this page',
-  preview: 'Play the preview film',
-  link: 'Open another website',
 };
 
 export const BUTTON_COPY = {
