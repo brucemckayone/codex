@@ -19,7 +19,8 @@
   no picture, and when the picture fails.
 
   A picture with stored size variants passes them as `srcset` (with `sizes`),
-  so a small frame never fetches the largest file. `priority` is the page's
+  so a small frame never fetches the largest file. A picture with a focal
+  point (`focus`, Codex-61zsk.53) is cropped around it: `object-position`. `priority` is the page's
   largest picture; `early` is one on screen at first paint that must not
   compete with it, so it loads now at low priority.
 
@@ -44,6 +45,14 @@
     srcset?: string;
     /** How wide the frame is drawn, for choosing from `srcset`. */
     sizes?: string;
+    /**
+     * Where the picture's subject is, in percent across and down
+     * (`readFocus`): a frame that crops keeps it in view. Absent is the
+     * centre, as before.
+     */
+    focus?: { x: number; y: number };
+    /** The picture's own size (`readSize`), set on the image so a browser knows its shape before it loads. */
+    intrinsic?: { w: number; h: number } | null;
     /** The page's largest image: load it first. */
     priority?: boolean;
     /** On screen at first paint, but not the largest: load now, at low priority. */
@@ -69,6 +78,8 @@
     ratio,
     srcset,
     sizes,
+    focus,
+    intrinsic = null,
     priority = false,
     early = false,
     pending = false,
@@ -108,6 +119,9 @@
       src={still}
       srcset={srcset || undefined}
       sizes={srcset ? sizes : undefined}
+      width={intrinsic?.w}
+      height={intrinsic?.h}
+      style:object-position={focus ? `${focus.x}% ${focus.y}%` : undefined}
       {alt}
       loading={priority || early ? 'eager' : 'lazy'}
       fetchpriority={priority ? 'high' : early ? 'low' : undefined}

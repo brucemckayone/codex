@@ -95,9 +95,29 @@ export const SECTION_LAYOUTS = {
   gallery: ['mosaic', 'strip', 'grid'],
   // "What's inside": every practice as a card to swipe through (Codex-61zsk.52).
   inside: ['carousel'],
+  // The simple one-job sections (Codex-61zsk.53, 03 X64): each joins the
+  // neighbour it serves rather than starting a band of its own.
+  picture: ['contained', 'full', 'beside'],
+  heading: ['start', 'center'],
+  break: ['space'],
+  button: ['stack', 'row'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;
+
+/**
+ * Where a Button section goes (03 X64): the closing ask's own path (`join`,
+ * the default, priced), a section on the same page, the page's preview film,
+ * or an https link. A proven set rather than a free URL, so the price never
+ * sits beside a link that leaves the page.
+ */
+export const BUTTON_ACTION_IDS = [
+  'join',
+  'section',
+  'preview',
+  'link',
+] as const;
+export type ButtonActionId = (typeof BUTTON_ACTION_IDS)[number];
 export type LayoutId<T extends SectionTypeId = SectionTypeId> =
   (typeof SECTION_LAYOUTS)[T][number];
 
