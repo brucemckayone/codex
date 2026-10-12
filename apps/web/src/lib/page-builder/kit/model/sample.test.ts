@@ -17,6 +17,7 @@ const PICTURES: SamplePicture[] = Array.from({ length: 6 }, (_, i) => ({
 const TYPES: SectionTypeId[] = [
   'hero',
   'text',
+  'picture',
   'benefits',
   'story',
   'gallery',
@@ -56,6 +57,7 @@ describe('withSamplePictures', () => {
     expect(benefits.length).toBeGreaterThan(0);
     expect(benefits.every((item) => isImageRef(item.image))).toBe(true);
     expect(isImageRef(props(pictured, 'text').image)).toBe(true);
+    expect(isImageRef(props(pictured, 'picture').image)).toBe(true);
     const gallery = props(pictured, 'gallery').items as { image?: unknown }[];
     expect(gallery).toHaveLength(PICTURES.length);
     expect(gallery.every((item) => isImageRef(item.image))).toBe(true);

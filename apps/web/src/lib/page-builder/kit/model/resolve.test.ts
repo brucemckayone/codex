@@ -20,6 +20,7 @@ import {
   resolveSections,
   resolveSpacing,
   resolveStyle,
+  SIMPLE_SECTIONS,
 } from './resolve';
 import { STYLES } from './styles';
 import type { KitPage, KitSection } from './types';
@@ -258,10 +259,15 @@ describe('resolveSections', () => {
         ['starter', STYLES[style].starter],
         ['order', STYLES[style].order],
       ] as const) {
+        // The bands are the ORDINARY sections: a simple one takes the
+        // ground of the band it joins (03 X64), so it is that band, not a
+        // second one beside it. Its own joins are proven below.
         const schemes = resolveSections({
           design: { style },
           sections: types.map((type, i) => section({ id: `s${i}`, type })),
-        }).map((s) => s.scheme);
+        })
+          .filter((s) => !SIMPLE_SECTIONS.has(s.type))
+          .map((s) => s.scheme);
         for (let i = 1; i < schemes.length; i++) {
           const [above, below] = [schemes[i - 1], schemes[i]];
           const where = `${style} ${name} ${i}: ${above} → ${below}`;

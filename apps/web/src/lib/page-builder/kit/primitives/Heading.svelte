@@ -70,7 +70,7 @@
   style:--lp-heading-run-caps={run?.caps}
   style:--lp-heading-run-text={run?.text}
   style:--lp-heading-run-chars={run?.chars}
-  data-placeholder={edit ? placeholder : undefined}
+  data-placeholder={edit && !text ? placeholder : undefined}
   {...attrs}>{text}</svelte:element
 >
 

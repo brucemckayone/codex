@@ -7,8 +7,9 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import { priceWithCadence } from './model/copy';
-import { PAGE_STYLE_IDS } from './model/ids';
+import { PAGE_STYLE_IDS, type SectionTypeId } from './model/ids';
 import { pricingView } from './model/offer';
+import { SIMPLE_SECTIONS } from './model/resolve';
 import { sampleContext, samplePage } from './model/sample';
 import { STYLES } from './model/styles';
 import type { KitPage } from './model/types';
@@ -90,11 +91,51 @@ function publicMarkup(root: HTMLElement): string {
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
 
+/** Where the sample's Picture section finds its picture. */
+const PICTURE_CDN = 'https://cdn.example';
+
+/**
+ * A Style's sample page with a picture in its Picture section, so a
+ * visitor's page draws every section: an empty Picture is folded away
+ * (03 X64), and the definitions' own samples carry no picture.
+ */
+function everySection(style: (typeof PAGE_STYLE_IDS)[number]): KitPage {
+  const page = samplePage(style);
+  return {
+    ...page,
+    sections: page.sections.map((s) =>
+      s.type === 'picture'
+        ? {
+            ...s,
+            props: {
+              ...s.props,
+              image: {
+                key: 'landing-pages/page-1/images/image-1',
+                w: 1600,
+                h: 1067,
+              },
+            },
+          }
+        : s
+    ),
+  };
+}
+
+const pictureContext = () =>
+  sampleContext({
+    offer: 'tiers',
+    media: { heroImageUrl: '/hero.jpg' },
+    mediaBaseUrl: PICTURE_CDN,
+  });
+
 describe('PageRenderer', () => {
   it.each(
     PAGE_STYLE_IDS
   )('renders every section of the %s page, in order, under one h1', async (style) => {
-    const root = await render({ page: samplePage(style) });
+    const root = await render({
+      page: everySection(style),
+      context: pictureContext(),
+    });
     expect(root.dataset.lpStyle).toBe(style);
     const sections = [...root.querySelectorAll('.lp-section')];
     expect(sections.map((s) => s.getAttribute('data-lp-type'))).toEqual([
@@ -102,15 +143,44 @@ describe('PageRenderer', () => {
     ]);
     expect(sections.map((s) => s.id)).toEqual([...STYLES[style].order]);
     expect(root.querySelectorAll('h1')).toHaveLength(1);
-    for (const s of sections) {
-      expect(s.getAttribute('data-lp-scheme')).toBe(
-        STYLES[style].schemes[
-          s.getAttribute(
-            'data-lp-type'
-          ) as keyof (typeof STYLES)['bold']['schemes']
-        ]
+    sections.forEach((s, i) => {
+      const type = s.getAttribute('data-lp-type') as SectionTypeId;
+      const scheme = s.getAttribute('data-lp-scheme');
+      if (SIMPLE_SECTIONS.has(type)) {
+        // A simple section is on the ground of the band it joins (03 X64).
+        expect([
+          sections[i - 1]?.getAttribute('data-lp-scheme'),
+          sections[i + 1]?.getAttribute('data-lp-scheme'),
+        ]).toContain(scheme);
+      } else {
+        expect(scheme).toBe(STYLES[style].schemes[type]);
+      }
+    });
+  });
+
+  it('folds an empty Picture and Heading from a visitor’s page, and keeps them on the canvas', async () => {
+    const page = samplePage('studio', [
+      'problem',
+      'picture',
+      'heading',
+      'curriculum',
+    ]);
+    const heading = page.sections.find((s) => s.type === 'heading');
+    if (heading) heading.props = { eyebrow: 'Part two' };
+    const types = (root: HTMLElement) =>
+      [...root.querySelectorAll('.lp-section')].map((s) =>
+        s.getAttribute('data-lp-type')
       );
-    }
+    expect(types(await render({ page }))).toEqual(['problem', 'curriculum']);
+    unmount(app);
+    expect(types(await render({ page, edit: { commit: () => {} } }))).toEqual([
+      'problem',
+      'picture',
+      'heading',
+      'curriculum',
+    ]);
+    unmount(app);
+    expect(types(await render({ page, still: true }))).toHaveLength(4);
   });
 
   // Every Style, because each defaults different layouts (Clean/Soft reach
@@ -118,8 +188,8 @@ describe('PageRenderer', () => {
   it.each(
     PAGE_STYLE_IDS
   )('draws the %s page identical with and without the editor, apart from editing attributes', async (style) => {
-    const page = samplePage(style);
-    const publicRoot = await render({ page });
+    const page = everySection(style);
+    const publicRoot = await render({ page, context: pictureContext() });
     // Stripping edit-only prompts must never hide a public element: the
     // public render carries none at all.
     expect(publicRoot.querySelectorAll('[data-lp-edit-only]').length).toBe(0);
@@ -128,6 +198,7 @@ describe('PageRenderer', () => {
     const edit: PageEdit = { commit: () => {} };
     const editingRoot = await render({
       page,
+      context: pictureContext(),
       edit,
       selectedId: 'sample-pricing',
     });
@@ -410,6 +481,9 @@ describe('PageRenderer', () => {
             };
           if (s.type === 'text' || s.type === 'cta')
             return { ...s, props: { ...s.props, background: IMAGE } };
+          // A Picture with its picture, or the visitor's page folds it.
+          if (s.type === 'picture')
+            return { ...s, props: { ...s.props, image: IMAGE } };
           return s;
         }),
       };

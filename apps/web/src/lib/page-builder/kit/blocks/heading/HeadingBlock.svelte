@@ -39,7 +39,6 @@
       field="heading"
       placeholder={HEADING_PROMPT}
       {edit}
-      class="heading__title"
     />
   {/if}
 </header>
@@ -52,7 +51,7 @@
   }
 
   /* A long title reads at the middle size, still a head in the Style's scale. */
-  .heading :global(.heading__title[data-size='title']) {
+  .heading :global(.lp-heading[data-size='title']) {
     --lp-title-lift: 0.5;
   }
 
