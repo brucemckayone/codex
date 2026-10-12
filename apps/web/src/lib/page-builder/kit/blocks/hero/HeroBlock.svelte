@@ -40,7 +40,7 @@
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
   import { heroFacts } from '../../model/facts';
-  import { headingLength } from '../../model/long-heading';
+  import { headingLength, headingRuns } from '../../model/long-heading';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
   import ButtonRow from '../../primitives/ButtonRow.svelte';
@@ -60,6 +60,7 @@
   const heading = $derived(content.heading ?? context.course.title);
   const length = $derived(headingLength(heading));
   const chars = $derived(heading.length);
+  const runs = $derived(headingRuns(heading));
   const mode = $derived(content.media ?? 'auto');
   const layout = $derived(section.layout);
   // The course's shape and its way in, under the lede (`model/facts.ts`).
@@ -223,19 +224,18 @@
   <!-- Where the page is looked at, the picture's place is held (the clip or
        the plate fills it), so nothing moves when the stream settles; the
        public page sets the words round a picture only once it has one. The
-       poster's own box is the headline's parent, where a Style scales it;
-       this plain box only hands it the headline's length, and the section's
-       grid places it as it placed the poster. -->
-  <div style:--lp-heading-chars={chars}>
-    <HeroPoster
-      still={settled.still}
-      clip={settled.clip}
-      reserve={(previewing || heroComing) && mode !== 'none'}
-      {alt}
-      {copy}
-      watch={posterWatch}
-    />
-  </div>
+       poster's own box is the headline's parent, where a Style scales it,
+       so it takes the headline's length and its words' widths itself. -->
+  <HeroPoster
+    still={settled.still}
+    clip={settled.clip}
+    reserve={(previewing || heroComing) && mode !== 'none'}
+    {alt}
+    {copy}
+    {chars}
+    {runs}
+    watch={posterWatch}
+  />
 {:else if layout === 'split'}
   {#if framed}
     <div class="hero-split" style:--lp-heading-chars={chars}>

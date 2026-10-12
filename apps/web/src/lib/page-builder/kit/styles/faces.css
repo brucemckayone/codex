@@ -1,0 +1,352 @@
+/* GENERATED from model/faces.ts by apps/web/scripts/write-faces-sheet.ts:
+   do not edit. How many em a unit of word weight takes in each display
+   face, in capitals and as written, matched on the face as the page
+   resolves it, in every spelling its writers use. A face not listed, or a
+   browser without style queries, keeps the widest. */
+.lp {
+  --lp-face-caps: 0.753;
+  --lp-face-text: 0.796;
+}
+
+@container lp-page style(--lp-font-display: 'Inter') or style(--lp-font-display: "Inter") or style(--lp-font-display: Inter) or style(--lp-font-display: 'Inter', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Inter", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Inter, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.592;
+    --lp-face-text: 0.609;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'DM Sans') or style(--lp-font-display: "DM Sans") or style(--lp-font-display: 'DM Sans', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "DM Sans", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.558;
+    --lp-face-text: 0.583;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Source Sans 3') or style(--lp-font-display: "Source Sans 3") or style(--lp-font-display: 'Source Sans 3', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Source Sans 3", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.503;
+    --lp-face-text: 0.532;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Poppins') or style(--lp-font-display: "Poppins") or style(--lp-font-display: Poppins) or style(--lp-font-display: 'Poppins', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Poppins", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Poppins, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.569;
+    --lp-face-text: 0.624;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Nunito') or style(--lp-font-display: "Nunito") or style(--lp-font-display: Nunito) or style(--lp-font-display: 'Nunito', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Nunito", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Nunito, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.578;
+    --lp-face-text: 0.559;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Montserrat') or style(--lp-font-display: "Montserrat") or style(--lp-font-display: Montserrat) or style(--lp-font-display: 'Montserrat', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Montserrat", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Montserrat, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.618;
+    --lp-face-text: 0.627;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Raleway') or style(--lp-font-display: "Raleway") or style(--lp-font-display: Raleway) or style(--lp-font-display: 'Raleway', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Raleway", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Raleway, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.561;
+    --lp-face-text: 0.571;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Outfit') or style(--lp-font-display: "Outfit") or style(--lp-font-display: Outfit) or style(--lp-font-display: 'Outfit', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Outfit", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Outfit, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.57;
+    --lp-face-text: 0.555;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Space Grotesk') or style(--lp-font-display: "Space Grotesk") or style(--lp-font-display: 'Space Grotesk', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Space Grotesk", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.535;
+    --lp-face-text: 0.591;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Rubik') or style(--lp-font-display: "Rubik") or style(--lp-font-display: Rubik) or style(--lp-font-display: 'Rubik', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Rubik", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Rubik, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.599;
+    --lp-face-text: 0.624;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Manrope') or style(--lp-font-display: "Manrope") or style(--lp-font-display: Manrope) or style(--lp-font-display: 'Manrope', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Manrope", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Manrope, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.557;
+    --lp-face-text: 0.578;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Plus Jakarta Sans') or style(--lp-font-display: "Plus Jakarta Sans") or style(--lp-font-display: 'Plus Jakarta Sans', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Plus Jakarta Sans", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.596;
+    --lp-face-text: 0.597;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Figtree') or style(--lp-font-display: "Figtree") or style(--lp-font-display: Figtree) or style(--lp-font-display: 'Figtree', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Figtree", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Figtree, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.568;
+    --lp-face-text: 0.548;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Sora') or style(--lp-font-display: "Sora") or style(--lp-font-display: Sora) or style(--lp-font-display: 'Sora', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Sora", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Sora, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.621;
+    --lp-face-text: 0.628;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Urbanist') or style(--lp-font-display: "Urbanist") or style(--lp-font-display: Urbanist) or style(--lp-font-display: 'Urbanist', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Urbanist", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Urbanist, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.565;
+    --lp-face-text: 0.564;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Open Sans') or style(--lp-font-display: "Open Sans") or style(--lp-font-display: 'Open Sans', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Open Sans", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.567;
+    --lp-face-text: 0.588;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Lato') or style(--lp-font-display: "Lato") or style(--lp-font-display: Lato) or style(--lp-font-display: 'Lato', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Lato", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Lato, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.567;
+    --lp-face-text: 0.532;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Roboto') or style(--lp-font-display: "Roboto") or style(--lp-font-display: Roboto) or style(--lp-font-display: 'Roboto', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Roboto", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Roboto, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.545;
+    --lp-face-text: 0.559;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Playfair Display') or style(--lp-font-display: "Playfair Display") or style(--lp-font-display: 'Playfair Display', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Playfair Display", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.574;
+    --lp-face-text: 0.552;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Merriweather') or style(--lp-font-display: "Merriweather") or style(--lp-font-display: Merriweather) or style(--lp-font-display: 'Merriweather', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Merriweather", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Merriweather, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.602;
+    --lp-face-text: 0.605;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Lora') or style(--lp-font-display: "Lora") or style(--lp-font-display: Lora) or style(--lp-font-display: 'Lora', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Lora", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Lora, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.587;
+    --lp-face-text: 0.569;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Crimson Text') or style(--lp-font-display: "Crimson Text") or style(--lp-font-display: 'Crimson Text', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Crimson Text", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.563;
+    --lp-face-text: 0.56;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Libre Baskerville') or style(--lp-font-display: "Libre Baskerville") or style(--lp-font-display: 'Libre Baskerville', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Libre Baskerville", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.697;
+    --lp-face-text: 0.654;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'EB Garamond') or style(--lp-font-display: "EB Garamond") or style(--lp-font-display: 'EB Garamond', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "EB Garamond", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.587;
+    --lp-face-text: 0.523;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Cormorant Garamond') or style(--lp-font-display: "Cormorant Garamond") or style(--lp-font-display: 'Cormorant Garamond', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Cormorant Garamond", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.549;
+    --lp-face-text: 0.485;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Bitter') or style(--lp-font-display: "Bitter") or style(--lp-font-display: Bitter) or style(--lp-font-display: 'Bitter', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Bitter", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Bitter, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.571;
+    --lp-face-text: 0.57;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Source Serif 4') or style(--lp-font-display: "Source Serif 4") or style(--lp-font-display: 'Source Serif 4', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Source Serif 4", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.591;
+    --lp-face-text: 0.597;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Spectral') or style(--lp-font-display: "Spectral") or style(--lp-font-display: Spectral) or style(--lp-font-display: 'Spectral', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Spectral", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Spectral, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.628;
+    --lp-face-text: 0.569;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Bebas Neue') or style(--lp-font-display: "Bebas Neue") or style(--lp-font-display: 'Bebas Neue', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Bebas Neue", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.332;
+    --lp-face-text: 0.438;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Righteous') or style(--lp-font-display: "Righteous") or style(--lp-font-display: Righteous) or style(--lp-font-display: 'Righteous', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Righteous", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Righteous, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.542;
+    --lp-face-text: 0.576;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Fredoka') or style(--lp-font-display: "Fredoka") or style(--lp-font-display: Fredoka) or style(--lp-font-display: 'Fredoka', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Fredoka", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Fredoka, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.548;
+    --lp-face-text: 0.582;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Josefin Sans') or style(--lp-font-display: "Josefin Sans") or style(--lp-font-display: 'Josefin Sans', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Josefin Sans", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.607;
+    --lp-face-text: 0.593;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Abril Fatface') or style(--lp-font-display: "Abril Fatface") or style(--lp-font-display: 'Abril Fatface', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Abril Fatface", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.564;
+    --lp-face-text: 0.558;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Archivo Black') or style(--lp-font-display: "Archivo Black") or style(--lp-font-display: 'Archivo Black', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Archivo Black", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.644;
+    --lp-face-text: 0.645;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Unbounded') or style(--lp-font-display: "Unbounded") or style(--lp-font-display: Unbounded) or style(--lp-font-display: 'Unbounded', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Unbounded", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Unbounded, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.753;
+    --lp-face-text: 0.796;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Anton') or style(--lp-font-display: "Anton") or style(--lp-font-display: Anton) or style(--lp-font-display: 'Anton', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Anton", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Anton, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.418;
+    --lp-face-text: 0.48;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Oswald') or style(--lp-font-display: "Oswald") or style(--lp-font-display: Oswald) or style(--lp-font-display: 'Oswald', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Oswald", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Oswald, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.451;
+    --lp-face-text: 0.475;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Syne') or style(--lp-font-display: "Syne") or style(--lp-font-display: Syne) or style(--lp-font-display: 'Syne', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Syne", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Syne, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.694;
+    --lp-face-text: 0.699;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Lilita One') or style(--lp-font-display: "Lilita One") or style(--lp-font-display: 'Lilita One', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Lilita One", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.557;
+    --lp-face-text: 0.519;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Titan One') or style(--lp-font-display: "Titan One") or style(--lp-font-display: 'Titan One', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Titan One", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.578;
+    --lp-face-text: 0.664;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Caveat') or style(--lp-font-display: "Caveat") or style(--lp-font-display: Caveat) or style(--lp-font-display: 'Caveat', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Caveat", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Caveat, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.475;
+    --lp-face-text: 0.404;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Kalam') or style(--lp-font-display: "Kalam") or style(--lp-font-display: Kalam) or style(--lp-font-display: 'Kalam', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Kalam", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Kalam, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.537;
+    --lp-face-text: 0.528;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Patrick Hand') or style(--lp-font-display: "Patrick Hand") or style(--lp-font-display: 'Patrick Hand', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Patrick Hand", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.431;
+    --lp-face-text: 0.437;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Pacifico') or style(--lp-font-display: "Pacifico") or style(--lp-font-display: Pacifico) or style(--lp-font-display: 'Pacifico', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Pacifico", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Pacifico, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.708;
+    --lp-face-text: 0.558;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Dancing Script') or style(--lp-font-display: "Dancing Script") or style(--lp-font-display: 'Dancing Script', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Dancing Script", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.603;
+    --lp-face-text: 0.462;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Satisfy') or style(--lp-font-display: "Satisfy") or style(--lp-font-display: Satisfy) or style(--lp-font-display: 'Satisfy', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Satisfy", 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: Satisfy, 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.54;
+    --lp-face-text: 0.483;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'JetBrains Mono') or style(--lp-font-display: "JetBrains Mono") or style(--lp-font-display: 'JetBrains Mono', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "JetBrains Mono", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.597;
+    --lp-face-text: 0.76;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'IBM Plex Mono') or style(--lp-font-display: "IBM Plex Mono") or style(--lp-font-display: 'IBM Plex Mono', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "IBM Plex Mono", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.597;
+    --lp-face-text: 0.76;
+  }
+}
+
+@container lp-page style(--lp-font-display: 'Space Mono') or style(--lp-font-display: "Space Mono") or style(--lp-font-display: 'Space Mono', 'Inter-fallback', system-ui, -apple-system, sans-serif) or style(--lp-font-display: "Space Mono", 'Inter-fallback', system-ui, -apple-system, sans-serif) {
+  .lp-section {
+    --lp-face-caps: 0.609;
+    --lp-face-text: 0.776;
+  }
+}

@@ -12,7 +12,7 @@ import {
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
-import { isLongHeading } from '../../model/long-heading';
+import { headingRuns, isLongHeading } from '../../model/long-heading';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
 import PageRenderer from '../../PageRenderer.svelte';
@@ -344,12 +344,13 @@ describe('HeroBlock', () => {
     };
 
     // Where each layout carries it: on its own root, and nowhere else. The
-    // poster's root is HeroPoster's, so a plain box round it carries it.
+    // poster's root is HeroPoster's, which takes it as a prop (Codex-61zsk.36).
     const ROOT: Record<string, string> = {
       statement: 'hero-statement',
       split: 'hero-split',
       cover: 'hero-cover__copy',
       centered: 'hero-centered',
+      poster: 'hero-poster',
     };
 
     it.each(
@@ -367,11 +368,41 @@ describe('HeroBlock', () => {
           ...document.body.querySelectorAll<HTMLElement>('*'),
         ].filter((node) => node.style.getPropertyValue('--lp-heading-chars'));
         expect(carriers).toHaveLength(1);
-        if (layout === 'poster')
+        expect(carriers[0].classList.contains(ROOT[layout])).toBe(true);
+      }
+    });
+
+    it('poster: gives the poster how wide its headline’s words are, which sets how large it can be beside the picture (Codex-61zsk.33)', async () => {
+      for (const heading of [
+        'Your mornings, calmer',
+        'Self-compassion for the long haul',
+        LONG,
+      ]) {
+        if (app) unmount(app);
+        await render({ heading }, { layout: 'poster' });
+        const { first, widest } = headingRuns(heading);
+        const expected: Record<string, number> = {
+          '--lp-heading-first-caps': first.caps,
+          '--lp-heading-first-text': first.text,
+          '--lp-heading-first-chars': first.chars,
+          '--lp-heading-widest-caps': widest.caps,
+          '--lp-heading-widest-text': widest.text,
+          '--lp-heading-widest-chars': widest.chars,
+        };
+        for (const [name, value] of Object.entries(expected)) {
+          const carriers = [
+            ...document.body.querySelectorAll<HTMLElement>('*'),
+          ].filter((node) => node.style.getPropertyValue(name));
+          expect(carriers, name).toHaveLength(1);
+          expect(carriers[0].classList.contains('hero-poster'), name).toBe(
+            true
+          );
           expect(
-            carriers[0].firstElementChild?.classList.contains('hero-poster')
-          ).toBe(true);
-        else expect(carriers[0].classList.contains(ROOT[layout])).toBe(true);
+            carriers[0].style.getPropertyValue(name),
+            `${heading}: ${name}`
+          ).toBe(String(value));
+        }
+        expect(widest.text, heading).toBeGreaterThan(0);
       }
     });
 

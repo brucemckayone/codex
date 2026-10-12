@@ -1909,3 +1909,90 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Calibrated: a Style without the look, a second multiple, and the rule keyed back on Studio each
     fail the scheme tests; a veil forced to the thin end fails the proof over 'glow' light; and
     Path's route drawn faint fails it in both themes, which it could not have seen before.
+- **X60 · 2026-10-12 · 3b follow-up · A poster's headline no larger than its longest word fits
+  beside the picture, and its words wrap round all of the picture (BUILT, decided without the
+  owner; Codex-61zsk.33, Codex-61zsk.36).** V3 and V5 (X34) found two faults in the poster hero.
+  A word wider than the measure beside the picture was cut mid-word, with no hyphen, even in a
+  short headline ("Your mornings, calmer" in Poster at 1440). And the lede could run under the
+  picture's last stretch.
+  - **The widest word sets the size.** Beside the picture, a headline's widest word, not its
+    length, decides how large it can be: a long word is cut first. So the poster draws its
+    headline at the smallest of the Style's size, the column over its first word (which always
+    opens the first line, above the picture at the column's width) and what the picture leaves of
+    the column (0.54 of it, less the gap) over its widest word after that; a type-only poster has
+    the column for both. Where the words fit, the Style's size stands, steps and curves as X27, X31
+    and X34 left them; only a headline whose word would be cut comes out smaller.
+  - **A word weighed by its letters, a face by its scale.** Faces differ by more than two to one:
+    a long word in Unbounded's capitals takes 1.06em a letter, in Bebas Neue's 0.46. One factor for
+    every face would cut Unbounded's words or halve Bebas Neue's headlines, and `ch` (the face's
+    own "0") was no better: fitted so no face is cut, it left the narrowest faces' headlines a
+    third smaller than they fit. And counting letters overstates most words, since an "m" is about
+    three "i"s in any face. So a word is weighed by its letters, each relative to an average
+    lowercase letter (`GLYPH_WEIGHT`, the median over every face the brand editor offers), and each
+    face has one scale, in capitals and as written (`FACE_SCALE`, em per unit of weight, the most
+    any of 70 long, wide-lettered words needs): drawn no wider than weight × scale, less the
+    Style's tracking. HeroBlock weighs the headline's runs (`headingRuns`: between spaces, or just
+    after a hyphen, a dash or a slash), and the poster takes its first and widest in both cases.
+    Measured with canvas, one glyph at a time (kerning only narrows a word), at weights 400 and
+    700, the larger kept.
+  - **Matched in CSS, on the face the page resolves.** The face reaches the page through CSS
+    alone, from three writers (the org layout, the brand editor's preview, a page's own fonts),
+    all into `--brand-font-heading`. A fourth writer for a width would drift from them unseen. So
+    the lookup is CSS too: `styles/faces.css`, written from the table, matches
+    `--lp-font-display`, which already resolves the dark face and the body face behind the
+    heading. A style query compares the text as written: Chrome matched `"Archivo Black"` and not
+    `'Archivo Black'`, and a page's own fonts leave a one-word face bare (`Syne`), which the first
+    sweep's lookup missed. So each face is matched in all three spellings, alone and first in the
+    org's sans stack, and a test holds each writer's spelling to the sheet. An unknown face, or a
+    browser without style queries, keeps the widest face's scale: smaller, never cut. The Style's
+    tracking is divided by `1em` where a browser can divide a length by a length (behind a test on
+    a real property), and left out where it cannot, which only reckons a word wider.
+  - **The foot.** The picture ran off the band's foot with a negative margin, which shortened the
+    float, so the lines in its last padding ran full width under it. The float now keeps its
+    whole box, and the poster itself reaches into the band's padding, its words ending a padding
+    short of the foot. Where the words fit beside the picture nothing moves; where they run
+    longer, they now pass below it instead of under it.
+  - **HeroPoster takes the length and the widths as props** (`chars`, `runs`, set on its own
+    root), and the plain box HeroBlock wrapped round it to carry the length is gone.
+  - **Measured** in the kit's gallery (`/studio/page-kit`, the poster hero of every Style) over
+    104 headlines, 20 to 120 characters with a long word first, between, last or nowhere, in the
+    gallery's Archivo Black and Syne and, in Bold and Poster, Anton and Unbounded, at 1440 and 390:
+    4,160 headlines each before and after.
+
+    | | before | after |
+    |---|---|---|
+    | a word cut mid-word at 1440 | 47 (Bold, Poster, Cinematic, Path, Studio, Quiet) | 0 |
+    | a lede glyph over the picture | 67 (Soft, Cinematic, Path, Studio, Quiet) | 0 |
+    | a headline glyph or a button over the picture | 0 | 0 |
+    | a headline that fit, drawn at its own size, 1440 | | 1,903 of 2,033 (93.6%) |
+    | at 390 | | every one |
+
+    The 130 that come out smaller do by a median 6.6% (90th percentile 12.4%), and all have their
+    long word after the first: where it falls, on the first line, beside the picture or below it,
+    is not something CSS can know, so it is held to the measure beside the picture wherever it
+    falls. The most a fitting headline lost is 40.6%: Bold's "Back resilience for you" in Syne,
+    whose second word shares the open first line. Syne accounts for 82 of the 130: its letters
+    depart most from the shared shape, so its scale is set by its widest word. The first sweep,
+    with letters counted and each face's widest letter, cut nothing either, but drew 1,174 fitting
+    headlines smaller, up to 60%. The lede now ends a padding short of the foot, so a long one runs
+    on below the picture rather than under it, and a few more headlines' buttons fall below a
+    900px fold than before (Quiet's in Archivo Black, 17 to 20): those buttons were sitting on the
+    picture.
+  - **Tests:** `faces.test.ts` holds the sheet to its table, the table to the brand editor's
+    faces, each writer's spelling of a one-word and a two-word face to the sheet, the sans stack to
+    `org-brand.css`, the sheet to the kit's imports, and every Style's tracking to an em length (a
+    bare number would make the poster's size invalid, which drops it to the body's).
+    `long-heading.test.ts`: runs weighed by letters, the first apart, breaks after a hyphen, a dash
+    or a slash, an accented letter as its base, an unknown one as the widest. `HeroBlock` puts the
+    six widths on the poster's root and nowhere else, and the length there too, with the wrapper
+    gone. The page's editor-parity test now compares attributes in name order: the editor holds
+    the picture from the first paint and the page sets `data-pictured` when the still arrives, so
+    the order was timing. `poster-fit.spec.ts` (opt-in, local: the gallery is a development route)
+    is the sweep, holding no word cut at 1440 and nothing over the picture at either width.
+    Calibrated: the sheet edited by hand, a face dropped, the stack respelled, the sheet not
+    loaded, the widths left off the poster, the length passed for the widths, and the editor
+    differing from the page each fail their test; and the sweep passes on this branch and fails with the
+    float's margin put back (Soft's long ledes run under the picture at 1440) and with the size left
+    unbounded ("resilience" cut in Bold at 1440). Its first draft read the picture once, before the
+    headlines, and failed this branch: the picture moves with the headline, so it now reads it for
+    each.

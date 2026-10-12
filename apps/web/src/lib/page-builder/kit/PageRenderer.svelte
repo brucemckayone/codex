@@ -75,6 +75,7 @@
   import SectionShell from './SectionShell.svelte';
   import StickyCta from './StickyCta.svelte';
   import './styles/kit.css';
+  import './styles/faces.css';
   import './styles/schemes.css';
   import './styles/surfaces.css';
   import './styles/motion.css';

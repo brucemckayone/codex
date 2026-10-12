@@ -75,6 +75,17 @@ function publicMarkup(root: HTMLElement): string {
   copy.querySelector('.lp-sticky')?.remove();
   // The one sanctioned editor-only element (contract A4): an empty-state prompt.
   for (const el of copy.querySelectorAll('[data-lp-edit-only]')) el.remove();
+  // Attributes in name order: the markup keeps them in the order they were
+  // set, which is timing, not meaning. The editor holds the poster's picture
+  // from the first paint, so `data-pictured` is set with its root; the public
+  // page sets it when the still arrives, after the root's own style.
+  for (const el of [copy, ...copy.querySelectorAll('*')]) {
+    const attributes = [...el.attributes]
+      .map(({ name, value }) => [name, value] as const)
+      .sort(([a], [b]) => (a < b ? -1 : 1));
+    for (const [name] of attributes) el.removeAttribute(name);
+    for (const [name, value] of attributes) el.setAttribute(name, value);
+  }
   return copy.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
 }
 
