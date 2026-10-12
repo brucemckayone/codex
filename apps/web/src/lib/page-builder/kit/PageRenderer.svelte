@@ -57,6 +57,7 @@
   import type { JourneySalesContext } from '../render/types';
   import { priceWithCadence } from './model/copy';
   import { brandFontsHref } from './model/fonts';
+  import { isPageDialStep } from './model/ids';
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import {
@@ -128,6 +129,12 @@
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
+  // The corners dial is the one drawn in CSS (`kit.css`, 03 X61); colour and
+  // spacing are resolved per section.
+  const corners = $derived.by(() => {
+    const step = page.design.dials?.corners;
+    return isPageDialStep('corners', step) ? step : undefined;
+  });
   const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
   const sections = $derived(resolveSections(page, { orgShader, grounds }));
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
@@ -211,6 +218,7 @@
 <div
   class="lp"
   data-lp-style={style}
+  data-lp-corners={corners}
   data-lp-theme={theme}
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}

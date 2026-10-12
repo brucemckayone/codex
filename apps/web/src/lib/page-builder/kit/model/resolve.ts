@@ -5,9 +5,13 @@
  *
  *   layout  = section.variant (if valid for the type) → Style default → first layout
  *   scheme  = section.design.scheme → the org's shader (hero) → Style
- *             default → 'base'
- *   spacing = section.design.spacing → 'regular'
+ *             default, moved by the page's colour dial → 'base'
+ *   spacing = section.design.spacing → a compact layout's own → the page's
+ *             spacing dial → 'regular'
  *   style   = page.design.style → 'bold'
+ *
+ * A dial moves only what the Style would have chosen (03 X61): a creator's
+ * own choice in a section still wins over the page's dial.
  */
 import {
   type ColourSchemeId,
@@ -18,6 +22,7 @@ import {
   isPageStyleId,
   isSectionSpacingId,
   isSectionTypeId,
+  type PageDialStep,
   type PageStyleId,
   SECTION_LAYOUTS,
   type SectionSpacingId,
@@ -66,17 +71,23 @@ export interface ResolveOptions {
  * stays, so a closing ask can still take it. */
 const SHADER_SECTIONS: ReadonlySet<SectionTypeId> = new Set(['hero']);
 
+/**
+ * One section's scheme on its own. `colour` is the page's colour dial, applied
+ * as if no band stood beside it: `resolveSections`, which sees the whole page,
+ * lets a vivid band yield to its neighbours.
+ */
 export function resolveScheme(
   type: SectionTypeId,
   design: SectionStyle | null | undefined,
   style: PageStyleId,
-  options: ResolveOptions = {}
+  options: ResolveOptions = {},
+  colour?: PageDialStep<'colour'>
 ): ColourSchemeId {
   const scheme = isColourSchemeId(design?.scheme)
     ? design.scheme
     : options.orgShader && SHADER_SECTIONS.has(type)
       ? 'atmosphere'
-      : (STYLES[style].schemes[type] ?? 'base');
+      : dialColour(STYLES[style].schemes[type] ?? 'base', colour);
   return scheme === 'atmosphere' &&
     options.grounds &&
     !atmosphereProven(options.grounds)
@@ -84,13 +95,56 @@ export function resolveScheme(
     : scheme;
 }
 
-/** A chosen spacing wins; otherwise a `compact` layout sits in compact bands. */
+/**
+ * The colour dial on a Style's default (03 X61), one rung of ground → soft
+ * tint → brand colour: muted brings every coloured band down to the soft
+ * tint, vivid takes every soft tint up to the brand colour. The ground stays
+ * the ground, so the page keeps its reading surface, and Quiet, which draws
+ * no bands, is the same at every step.
+ */
+function dialColour(
+  scheme: ColourSchemeId,
+  colour: PageDialStep<'colour'> | undefined
+): ColourSchemeId {
+  if (colour === 'muted')
+    return scheme === 'contrast' || scheme === 'brand' || scheme === 'accent'
+      ? 'soft'
+      : scheme;
+  if (colour === 'vivid') return scheme === 'soft' ? 'brand' : scheme;
+  return scheme;
+}
+
+/**
+ * The colour dial on one section, in its place on the page. Vivid's brand
+ * colour yields to a band beside it: beside another brand band the two read
+ * as one slab, and beside a contrast band they smear when the brand is dark,
+ * so `keepBandsApart` would step one of them back, and it steps back the
+ * later one, which is often the Style's own closing ask. `styled` holds each
+ * section's scheme before the dial; a scheme the creator chose never moves.
+ */
+function dialBand(
+  styled: readonly ColourSchemeId[],
+  index: number,
+  colour: PageDialStep<'colour'> | undefined
+): ColourSchemeId {
+  const dialled = dialColour(styled[index], colour);
+  if (colour !== 'vivid' || dialled === styled[index]) return dialled;
+  const beside = [styled[index - 1], styled[index + 1]];
+  return beside.some((scheme) => scheme === 'brand' || scheme === 'contrast')
+    ? styled[index]
+    : dialled;
+}
+
+/** A chosen spacing wins; otherwise a `compact` layout sits in compact bands,
+ *  and every other section in the page's spacing dial (03 X61). */
 export function resolveSpacing(
   design: SectionStyle | null | undefined,
-  layout?: string
+  layout?: string,
+  dial?: PageDialStep<'spacing'>
 ): SectionSpacingId {
   if (isSectionSpacingId(design?.spacing)) return design.spacing;
-  return layout === 'compact' ? 'compact' : DEFAULT_SECTION_SPACING;
+  if (layout === 'compact') return 'compact';
+  return dial ?? DEFAULT_SECTION_SPACING;
 }
 
 /** The sections a page actually renders: enabled, and of a known type. */
@@ -111,21 +165,27 @@ export function resolveSections(
   options: ResolveOptions = {}
 ): ResolvedSection[] {
   const style = resolveStyle(page.design);
+  const dials = page.design?.dials;
+  const rendered = renderableSections(page);
+  const styled = rendered.map((section) =>
+    resolveScheme(section.type, section.design, style, options)
+  );
   const seen = new Map<SectionTypeId, number>();
   let heroTaken = false;
   let previousScheme: ColourSchemeId | null = null;
 
-  return renderableSections(page).map((section, index) => {
+  return rendered.map((section, index) => {
     const count = (seen.get(section.type) ?? 0) + 1;
     seen.set(section.type, count);
     const isPageHeading = section.type === 'hero' && !heroTaken;
     if (isPageHeading) heroTaken = true;
 
     const layout = resolveLayout(section.type, section.variant, style);
+    const chosen = isColourSchemeId(section.design?.scheme);
     const scheme = keepBandsApart(
-      resolveScheme(section.type, section.design, style, options),
+      chosen ? styled[index] : dialBand(styled, index, dials?.colour),
       previousScheme,
-      isColourSchemeId(section.design?.scheme)
+      chosen
     );
     previousScheme = scheme;
     return {
@@ -135,7 +195,7 @@ export function resolveSections(
       index,
       layout,
       scheme,
-      spacing: resolveSpacing(section.design, layout),
+      spacing: resolveSpacing(section.design, layout, dials?.spacing),
       headingLevel: isPageHeading ? 1 : 2,
     };
   });

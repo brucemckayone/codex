@@ -299,6 +299,57 @@ describe('PageRenderer', () => {
     );
   });
 
+  describe("the page's dials (03 X61)", () => {
+    const dialled = (dials: unknown): KitPage => {
+      const page = samplePage('soft');
+      return { ...page, design: { ...page.design, dials: dials as never } };
+    };
+
+    it('names the corners on the root', async () => {
+      const root = await render({ page: dialled({ corners: 'rounder' }) });
+      expect(root.dataset.lpCorners).toBe('rounder');
+    });
+
+    it('names no corners a page did not set', async () => {
+      expect((await render()).hasAttribute('data-lp-corners')).toBe(false);
+    });
+
+    it('never writes a step no rule draws: it would match nothing', async () => {
+      const root = await render({ page: dialled({ corners: 'square' }) });
+      expect(root.hasAttribute('data-lp-corners')).toBe(false);
+    });
+
+    it('draws each section in the colour and spacing its dials resolve to', async () => {
+      const root = await render({
+        page: dialled({ colour: 'vivid', spacing: 'spacious' }),
+      });
+      const sections = [...root.querySelectorAll('.lp-section')];
+      // Soft's questions stay a tint beside its brand ask; its other tints go brand.
+      expect(
+        sections
+          .filter(
+            (s) =>
+              STYLES.soft.schemes[s.getAttribute('data-lp-type') as 'faq'] ===
+              'soft'
+          )
+          .map((s) => s.getAttribute('data-lp-scheme'))
+      ).toEqual(
+        sections
+          .filter(
+            (s) =>
+              STYLES.soft.schemes[s.getAttribute('data-lp-type') as 'faq'] ===
+              'soft'
+          )
+          .map((s) =>
+            s.getAttribute('data-lp-type') === 'faq' ? 'soft' : 'brand'
+          )
+      );
+      expect(
+        new Set(sections.map((s) => s.getAttribute('data-lp-spacing')))
+      ).toEqual(new Set(['spacious']));
+    });
+  });
+
   describe('atmosphere and background images (03 §5)', () => {
     const IMAGE = { key: 'landing-pages/page-1/images/image-1' };
     const CDN = 'https://cdn.example';

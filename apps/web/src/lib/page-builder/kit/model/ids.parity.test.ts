@@ -12,7 +12,9 @@
  * one side of the write boundary.
  */
 import {
+  pageDialsSchema,
   COLOUR_SCHEME_IDS as VALIDATION_COLOUR_SCHEME_IDS,
+  PAGE_DIALS as VALIDATION_PAGE_DIALS,
   PAGE_STYLE_IDS as VALIDATION_PAGE_STYLE_IDS,
   SECTION_LAYOUTS as VALIDATION_SECTION_LAYOUTS,
   SECTION_SPACING_IDS as VALIDATION_SECTION_SPACING_IDS,
@@ -21,6 +23,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   COLOUR_SCHEME_IDS,
+  PAGE_DIALS,
   PAGE_STYLE_IDS,
   SECTION_LAYOUTS,
   SECTION_SPACING_IDS,
@@ -46,5 +49,16 @@ describe('ids.ts ↔ @codex/validation landing-page.ts', () => {
 
   it('SECTION_TYPE_IDS matches exactly', () => {
     expect(VALIDATION_SECTION_TYPE_IDS).toEqual(SECTION_TYPE_IDS);
+  });
+
+  it('PAGE_DIALS matches exactly — every dial, every step, in order', () => {
+    expect(VALIDATION_PAGE_DIALS).toEqual(PAGE_DIALS);
+  });
+
+  it('the write boundary validates every dial (an unlisted one is stripped)', () => {
+    const steps = Object.fromEntries(
+      Object.entries(PAGE_DIALS).map(([dial, [step]]) => [dial, step])
+    );
+    expect(pageDialsSchema.parse(steps)).toEqual(steps);
   });
 });

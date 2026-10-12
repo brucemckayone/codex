@@ -163,6 +163,12 @@ export interface SectionDesign {
     | 'poster'
     | 'studio'
     | 'quiet';
+  /** A page's dials; an unset dial is the Style's. Mirrors `PageDials` in `kit/model/ids.ts`. Page-only. */
+  dials?: {
+    colour?: 'muted' | 'vivid';
+    corners?: 'brand' | 'rounder';
+    spacing?: 'compact' | 'spacious';
+  };
 }
 
 /**

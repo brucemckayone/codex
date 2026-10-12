@@ -3,6 +3,7 @@ import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 import {
   COLOUR_SCHEME_IDS,
   PAGE_STYLE_IDS,
+  pageDialsSchema,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
   type SectionTypeId,
@@ -247,12 +248,13 @@ const designAxis = <const T extends readonly [string, ...string[]]>(
  * per-axis `.catch` for `scheme`/`spacing`, and REJECT for `style` (owner
  * decision 2026-09-28, Codex-61zsk.29 — see {@link designAxis} above).
  *
- * `scheme`/`spacing` are a SECTION's v2 style; `style` is the PAGE's v2 look
- * (this one object backs both `pageSectionSchema.design` and
+ * `scheme`/`spacing` are a SECTION's v2 style; `style` and `dials` are the
+ * PAGE's v2 look (this one object backs both `pageSectionSchema.design` and
  * `saveJourneyPageBodySchema.design`, exactly as it already backed both roles
- * for the nine legacy axes). A section never sets `style` and a page never
- * sets `scheme`/`spacing`; nothing reads the unused one for either role, so
- * the extra optional keys are harmless.
+ * for the nine legacy axes). A section never sets `style` or `dials` and a
+ * page never sets `scheme`/`spacing`; nothing reads the unused one for either
+ * role, so the extra optional keys are harmless. The page's dials degrade
+ * per dial (`landing-page.ts` `pageDialsSchema`, 03 X61).
  *
  * PRUNED (contract §3: "the server ... validates writes (v2 keys added by
  * WP1, legacy keys pruned by WP9)"): the nine legacy design axes
@@ -280,6 +282,7 @@ export const sectionDesignSchema = z.object({
       error: 'Unknown page Style. Refresh and choose a Style again.',
     })
     .optional(),
+  dials: pageDialsSchema,
 });
 export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
 

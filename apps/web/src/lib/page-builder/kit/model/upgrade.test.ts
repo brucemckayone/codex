@@ -1040,3 +1040,54 @@ describe('upgradePage · look → Style, all eight presets + unrecognised', () =
     });
   });
 });
+
+describe("upgradePage · the page's dials (03 X61)", () => {
+  // The editor saves what upgradePage returns, so a dial dropped here is
+  // dropped on load AND wiped on the next save.
+  it('carries the dials through, and again (idempotent)', () => {
+    const page = {
+      design: {
+        style: 'soft',
+        dials: { colour: 'vivid', corners: 'rounder', spacing: 'compact' },
+      },
+      sections: [],
+    };
+    const upgraded = upgradePage(page);
+    expect(upgraded.design).toEqual(page.design);
+    expect(
+      upgradePage(upgraded as unknown as { design: unknown; sections: unknown })
+    ).toEqual(upgraded);
+  });
+
+  it('keeps only known dials at known steps, and no dials key when none survive', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'bold',
+          dials: {
+            colour: 'neon',
+            corners: 'brand',
+            motion: 'still',
+            constructor: 'x',
+          },
+        },
+        sections: [],
+      }).design
+    ).toEqual({ style: 'bold', dials: { corners: 'brand' } });
+    for (const dials of [{ colour: 'neon' }, 'muted', null, ['vivid'], {}])
+      expect(
+        upgradePage({ design: { style: 'bold', dials }, sections: [] }).design
+      ).toEqual({
+        style: 'bold',
+      });
+  });
+
+  it('keeps the dials on a page whose look is still a legacy bundle', () => {
+    expect(
+      upgradePage({
+        design: { density: 'airy', dials: { spacing: 'spacious' } },
+        sections: [],
+      }).design.dials
+    ).toEqual({ spacing: 'spacious' });
+  });
+});

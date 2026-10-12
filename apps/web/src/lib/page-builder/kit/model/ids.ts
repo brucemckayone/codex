@@ -44,6 +44,28 @@ export type SectionSpacingId = (typeof SECTION_SPACING_IDS)[number];
 export const DEFAULT_SECTION_SPACING: SectionSpacingId = 'regular';
 
 /**
+ * A page's dials (03 X61): each moves one thing the Style sets, by one
+ * curated step either side of the Style's own. A dial left unset IS the
+ * Style's, so its reset deletes the key, and a page with no dials renders
+ * exactly as its Style.
+ *
+ *   colour   muted: the Style's coloured bands take the org's soft tint
+ *            vivid: the Style's soft tints take the brand colour
+ *   corners  brand: the org's own corners, unbent by the Style
+ *            rounder: Soft's corners, on any Style
+ *   spacing  the rhythm a section takes when it picks none of its own
+ */
+export const PAGE_DIALS = {
+  colour: ['muted', 'vivid'],
+  corners: ['brand', 'rounder'],
+  spacing: ['compact', 'spacious'],
+} as const satisfies Record<string, readonly [string, string]>;
+export type PageDialId = keyof typeof PAGE_DIALS;
+export type PageDialStep<D extends PageDialId> = (typeof PAGE_DIALS)[D][number];
+export type PageDials = { [D in PageDialId]?: PageDialStep<D> };
+export const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
+
+/**
  * Every section type and its hand-designed layouts. The FIRST layout of each
  * type is its fallback when neither the section nor the Style names one.
  */
@@ -105,4 +127,25 @@ export function isSectionSpacingId(value: unknown): value is SectionSpacingId {
     typeof value === 'string' &&
     (SECTION_SPACING_IDS as readonly string[]).includes(value)
   );
+}
+
+export function isPageDialStep<D extends PageDialId>(
+  dial: D,
+  value: unknown
+): value is PageDialStep<D> {
+  return (
+    typeof value === 'string' &&
+    (PAGE_DIALS[dial] as readonly string[]).includes(value)
+  );
+}
+
+/** A stored dials bag, keeping only known dials at known steps; none → undefined. */
+export function readPageDials(value: unknown): PageDials | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const dials: Record<string, string> = {};
+  for (const dial of PAGE_DIAL_IDS) {
+    const step = (value as Record<string, unknown>)[dial];
+    if (isPageDialStep(dial, step)) dials[dial] = step;
+  }
+  return Object.keys(dials).length > 0 ? (dials as PageDials) : undefined;
 }

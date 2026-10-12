@@ -15,6 +15,7 @@ import type { JourneySalesContext } from '../../render/types';
 import type { JourneySellMediaSlot } from '../../sell-media-store.svelte';
 import type {
   ColourSchemeId,
+  PageDials,
   PageStyleId,
   SectionSpacingId,
   SectionTypeId,
@@ -31,6 +32,8 @@ export interface SectionStyle {
 /** The page-level design (`landing_pages.design`). */
 export interface PageDesign {
   style?: PageStyleId;
+  /** The page's dials (03 X61); an unset dial is the Style's. */
+  dials?: PageDials;
 }
 
 /** A persisted section in kit vocabulary. `variant` is the layout id. */

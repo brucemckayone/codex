@@ -518,3 +518,25 @@ describe('saveJourneyPageBodySchema with structural sections', () => {
     ).toBe(false);
   });
 });
+
+describe("sectionDesignSchema · the page's dials (03 X61)", () => {
+  // The schema wired to the save route: the dials reach the page's row, each
+  // degrading on its own, and the legacy axes stay stripped beside them.
+  it('persists the dials, degrading an unknown step and stripping an unknown dial', () => {
+    expect(
+      sectionDesignSchema.parse({
+        style: 'clean',
+        dials: {
+          colour: 'muted',
+          corners: 'square',
+          spacing: 'compact',
+          type: 'louder',
+        },
+        density: 'airy',
+      })
+    ).toEqual({
+      style: 'clean',
+      dials: { colour: 'muted', spacing: 'compact' },
+    });
+  });
+});
