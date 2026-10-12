@@ -1,3 +1,5 @@
+import { runWeight } from './faces';
+
 /**
  * How long a heading drawn at display size is, in the kit's three tiers.
  *
@@ -30,4 +32,63 @@ export function headingLength(
 
 export function isLongHeading(text: string | undefined): boolean {
   return headingLength(text) === 'long';
+}
+
+/** A run's width in units of an average lowercase letter, and its length. */
+export interface RunSize {
+  /** Drawn in capitals. */
+  caps: number;
+  /** Drawn as written. */
+  text: number;
+  /** Characters as drawn, each spaced by the Style's tracking. */
+  chars: number;
+}
+
+export interface HeadingRuns {
+  /** The heading's first run, which always opens the first line. */
+  first: RunSize;
+  /**
+   * Its widest run after that, which may fall beside the picture: the widest
+   * in each case, with the length of the widest as written.
+   */
+  widest: RunSize;
+}
+
+const NO_RUN: RunSize = { caps: 0, text: 0, chars: 0 };
+
+const round = (weight: number) => Math.round(weight * 1000) / 1000;
+
+function sizeOf(run: string): RunSize {
+  return {
+    caps: round(runWeight(run.toUpperCase())),
+    text: round(runWeight(run)),
+    chars: Array.from(run).length,
+  };
+}
+
+/**
+ * The runs a heading cannot break: between two places the browser may break
+ * it, a space or just after a hyphen, a dash or a slash, the mark kept with
+ * the run before it. Beside a poster's picture the widest of them, not the
+ * heading's length, sets how large it can be (Codex-61zsk.33): a run wider
+ * than its measure is cut mid-word. The first is apart, because it always
+ * opens the first line, which runs above the picture at the column's width.
+ */
+export function headingRuns(text: string | undefined): HeadingRuns {
+  const runs = (text ?? '')
+    .split(/\s+/)
+    .flatMap((word) => word.split(/(?<=[-‐–—/])/))
+    .filter((run) => run.length > 0)
+    .map(sizeOf);
+  const [first = NO_RUN, ...rest] = runs;
+  return { first, widest: rest.reduce(max, NO_RUN) };
+}
+
+/** The wider of two runs in each case, with the length of the wider as written. */
+function max(a: RunSize, b: RunSize): RunSize {
+  return {
+    caps: Math.max(a.caps, b.caps),
+    text: Math.max(a.text, b.text),
+    chars: b.text > a.text ? b.chars : a.chars,
+  };
 }
