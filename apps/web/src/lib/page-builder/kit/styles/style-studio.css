@@ -97,7 +97,8 @@
     .gallery-picture__frame,
     .benefits-grid .lp-media,
     .story-strip__card > .lp-media,
-    .practice-card__picture
+    .practice-card__picture,
+    .lp-section[data-lp-type='picture']:not([data-lp-layout='full']) .picture__shot
   ) {
   --_print-edge: clamp(var(--space-2), 0.8cqi, var(--space-3));
   --_print-paper: oklch(
@@ -119,7 +120,8 @@
     .text__media,
     .guide__portrait .clip,
     .gallery-picture__frame,
-    .practice-card__picture
+    .practice-card__picture,
+    .lp-section[data-lp-type='picture']:not([data-lp-layout='full']) .picture__shot
   )
   .lp-media {
   border-radius: 0;
@@ -202,15 +204,17 @@
 /* ── the pen: marks drawn in the mark ink ───────────────────────────────── */
 /* An underline under the closing ask's heading, a length of its own. The pen
    underlines the opening and the ask, and nothing between them (3b round 1):
-   under every section's heading it marked nothing. */
+   under every section's heading it marked nothing. A Heading section is the
+   one exception (03 X64): it is a chapter head, and the pen is what makes a
+   head read as this Style's. */
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section[data-lp-type='cta']
+  .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
   .lp-heading:is([data-size='heading'], [data-size='display']) {
   position: relative;
 }
 
 :is(.lp, #lp-style)[data-lp-style='studio']
-  .lp-section[data-lp-type='cta']
+  .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
   .lp-heading:is([data-size='heading'], [data-size='display'])::after {
   content: '';
   position: absolute;
@@ -408,7 +412,7 @@
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
     .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
-    .lp-section[data-lp-type='cta']
+    .lp-section:is([data-lp-type='cta'], [data-lp-type='heading'])
     .lp-heading:is([data-size='heading'], [data-size='display'])::after,
   :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
   :root[data-theme]
@@ -437,4 +441,28 @@
    plain ground stays exactly as it was. */
 .org-layout[data-hero-shader-active] .lp[data-lp-style='studio'] {
   --lp-atmosphere-ground: tint;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A centred Heading's underline is centred under it. */
+:is(.lp, #lp-style)[data-lp-style='studio']
+  .lp-section[data-lp-type='heading'][data-lp-layout='center']
+  .lp-heading::after {
+  inset-inline: 0;
+  margin-inline: auto;
+}
+
+/* A Picture's caption in the display face's italic, like a note on a print. */
+:is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='picture'] .picture__caption {
+  font-family: var(--lp-font-display);
+  font-style: italic;
+}
+
+/* A Break's mark: a short stroke of the pen, centred, drawn on as it enters
+   (`data-lp-draw`, as the hero's underline is). */
+:is(.lp, #lp-style)[data-lp-style='studio'] .lp-break__mark {
+  inline-size: var(--space-24);
+  block-size: var(--space-3);
+  background: var(--lp-mark-ink);
+  mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
 }

@@ -235,3 +235,23 @@
     animation-direction: alternate-reverse;
   }
 }
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A Button reads down the middle, as Soft's asks do. */
+:is(.lp, #lp-style)[data-lp-style='soft'] .lp-section[data-lp-type='button'] {
+  --lp-actions-align: center;
+}
+
+/* A marked Break: three small pebbles in the mark ink, a pebble's width
+   apart (one tile of two widths each, the pebble at its start). */
+:is(.lp, #lp-style)[data-lp-style='soft'] .lp-break__mark {
+  --_pebble: var(--space-3);
+  inline-size: calc(var(--_pebble) * 5);
+  block-size: calc(var(--_pebble) * 0.8);
+  background: radial-gradient(
+      ellipse calc(var(--_pebble) / 2) calc(var(--_pebble) * 0.4) at calc(var(--_pebble) / 2) 50%,
+      var(--lp-mark-ink) 92%,
+      transparent
+    )
+    0 0 / calc(var(--_pebble) * 2) 100% repeat-x;
+}

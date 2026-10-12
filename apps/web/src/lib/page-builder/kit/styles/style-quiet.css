@@ -142,12 +142,15 @@
    rest. Only real sections (the editor's colour tiles are `.lp-section`s
    too), and never where a band, a picture or the shader already parts them,
    or where the lower one continues the upper (03 X58): it is not a new
-   section, and the line would touch its words. */
+   section, and the line would touch its words. Never on a Break, which is
+   space, nor under a marked one, whose mark is this line (03 X64). */
 :is(.lp, #lp-style)[data-lp-style='quiet']
   .lp-section[data-lp-type][data-lp-scheme='base']:not([data-lp-on-media])
   + .lp-section[data-lp-type][data-lp-scheme='base']:not(
     [data-lp-on-media],
-    [data-lp-continues]
+    [data-lp-continues],
+    [data-lp-type='break'],
+    .lp-section:has(.lp-break[data-mark]) + *
   )::before {
   content: '';
   position: absolute;
@@ -225,4 +228,12 @@
   --lp-actions-align: center;
   justify-items: center;
   text-align: center;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break draws Quiet's one hairline in the middle of the pause. */
+:is(.lp, #lp-style)[data-lp-style='quiet'] .lp-break__mark {
+  inline-size: 100%;
+  block-size: var(--border-width);
+  background: var(--lp-line);
 }

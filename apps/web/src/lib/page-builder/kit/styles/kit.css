@@ -263,9 +263,12 @@
 }
 
 /* A full-width picture runs to its band's foot; with a caption under it the
-   foot is the compact rung, so the words never touch the next section. */
+   foot is the compact rung, so the words never touch the next section. In a
+   Style whose sections rise into the one above along an edge (a curve, an
+   angle: `surfaces.css`), the foot is exactly that edge's depth, so the next
+   band's cut lands in padding and never on the photograph. */
 .lp-section[data-lp-type='picture'][data-lp-layout='full'] {
-  --lp-pad-end: 0px;
+  --lp-pad-end: var(--_edge-d, 0px);
 }
 
 .lp-section[data-lp-type='picture'][data-lp-layout='full']:has(.picture__caption) {

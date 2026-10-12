@@ -248,12 +248,16 @@
    slab (the colour already parts it), or over an image or the shader. The
    structural `+` also keeps it off the editor's one-section colour tiles.
    Not on a section that continues the band above (03 X58): the slab says a
-   new section starts, and it would sit in that section's words. */
+   new section starts, and it would sit in that section's words. Never on a
+   Break, which is space, nor under a marked one, whose mark is this slab
+   (03 X64). */
 :is(.lp, #lp-style)[data-lp-style='bold']
   .lp-section
   + .lp-section:is([data-lp-scheme='base'], [data-lp-scheme='soft']):not(
     [data-lp-on-media],
-    [data-lp-continues]
+    [data-lp-continues],
+    [data-lp-type='break'],
+    .lp-section:has(.lp-break[data-mark]) + *
   ) {
   background:
     linear-gradient(var(--lp-ink) 0 0) 50%
@@ -419,4 +423,22 @@
    plain ground stays exactly as it was. */
 .org-layout[data-hero-shader-active] .lp[data-lp-style='bold'] {
   --lp-atmosphere-ground: tint;
+}
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break draws the slab Bold already parts its sections with, in the
+   middle of the pause, across the column. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .lp-break__mark {
+  inline-size: 100%;
+  block-size: var(--_bold-slab);
+  background: var(--lp-ink);
+}
+
+/* A Picture's caption under a printed rule, except across the page, where
+   the photograph's own edge is the rule. */
+:is(.lp, #lp-style)[data-lp-style='bold']
+  .lp-section[data-lp-type='picture']:not([data-lp-layout='full'])
+  .picture__caption {
+  padding-block-start: var(--space-2);
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
 }
