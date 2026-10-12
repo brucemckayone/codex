@@ -43,9 +43,8 @@ test.describe('Studio Stripe Connect Onboarding', () => {
   test.describe.configure({ mode: 'serial' });
 
   // Single fresh user shared across 1.a + 1.b. Auth setup uses
-  // `createFreshOwnerWithBypass`, which routes the sign-in call through a
-  // synthetic CF-Connecting-IP — bypasses the auth worker's rate limit
-  // (5 req / 15min, default-keyed by IP). See helpers/subscription.ts.
+  // `createFreshOwnerWithBypass`, whose one sign-in is the first charge to a
+  // brand-new credential (5 req / 15min). See helpers/subscription.ts.
   let freshOwner: Awaited<ReturnType<typeof createFreshOwnerWithBypass>>;
   // Seeded-creator cookies, captured once in beforeAll for 1.c.
   let creatorCookies: Awaited<ReturnType<typeof captureSeededCreatorCookies>>;
@@ -83,9 +82,8 @@ test.describe('Studio Stripe Connect Onboarding', () => {
       test.skip(true, 'Organization-api worker not running on port 42071');
     }
 
-    // One fresh org-owner user with NO Connect account yet.
-    // Bypasses the auth worker rate limiter (synthetic CF-Connecting-IP)
-    // and writes the org + membership rows directly via dbHttp. The
+    // One fresh org-owner user with NO Connect account yet, signed in once
+    // with the org + membership rows written directly via dbHttp. The
     // monetisation page gates on org membership role ('owner'), not
     // platform role — verified at apps/web/src/routes/_org/[slug]/studio/
     // +layout.server.ts.
