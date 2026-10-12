@@ -858,6 +858,39 @@ export interface JourneyCourseView {
    * streamed field.
    */
   heroImageUrl?: string | null;
+  /**
+   * Which films the STREAMED `CourseSellPreview` can carry, known at first
+   * paint (Codex-61zsk.40). See {@link JourneyFilmsAttached}.
+   *
+   * OPTIONAL-additive: an older worker omits it and the blocks keep their
+   * stream-settled behaviour.
+   */
+  filmsAttached?: JourneyFilmsAttached;
+}
+
+/**
+ * Which films a course's streamed `CourseSellPreview` can carry (Codex-61zsk.40).
+ * The films ride the stream, so without this the server cannot tell a section
+ * with a film on its way from one with none: a hero whose only media is a video
+ * drew its words alone and re-framed once the video arrived (an above-the-fold
+ * shift), and the film sections were sent whole, then folded away.
+ *
+ * ONE-SIDED, by design. Each flag reads the course's own columns, with no join:
+ * the media ref is set, the course is PUBLISHED and a CDN base is configured,
+ * the gates `getCourseSellPreview` applies before it resolves anything. So
+ * `false` means the stream CANNOT carry that film, and the page draws without it
+ * from the first paint. `true` means it probably will. A film that then fails to
+ * resolve (its preview never transcoded) still folds after load.
+ *
+ * Keyed by the streamed field each one predicts.
+ */
+export interface JourneyFilmsAttached {
+  /** `courses.introVideoMediaId` → `CourseSellPreview.intro`. */
+  intro: boolean;
+  /** `courses.previewVideoMediaId` → `CourseSellPreview.reel`. */
+  reel: boolean;
+  /** `courses.heroMediaId` → `heroClip`, and its poster as `heroImageUrl`. */
+  hero: boolean;
 }
 
 /** One testimonial rendered by the `proof` section. */
