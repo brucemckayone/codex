@@ -25,6 +25,11 @@ export const CLEAN: StyleDefinition = {
     cta: 'split',
     stats: 'grid',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // The ground, a whisper of tint for the passages that ask to be read, and
   // the dark inverse as the screening room — the film, the look inside, and
@@ -49,6 +54,12 @@ export const CLEAN: StyleDefinition = {
     pricing: 'soft',
     faq: 'base',
     cta: 'contrast',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   featured: {
     base: 'contrast',

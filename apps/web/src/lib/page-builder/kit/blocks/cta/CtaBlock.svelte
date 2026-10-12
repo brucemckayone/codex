@@ -20,17 +20,14 @@
 -->
 <script lang="ts">
   import { resolvePageImageUrl } from '../../../page-images';
-  import { COPY, derivedNote, pathActionName } from '../../model/copy';
-  import { pathHref } from '../../model/cta';
   import { pricingView } from '../../model/offer';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
   import { getKitPage } from '../../page-context';
-  import Button from '../../primitives/Button.svelte';
-  import ButtonRow from '../../primitives/ButtonRow.svelte';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Media from '../../primitives/Media.svelte';
+  import OfferAsk from '../../primitives/OfferAsk.svelte';
   import Text from '../../primitives/Text.svelte';
   import { ctaDefinition } from './definition';
 
@@ -44,7 +41,6 @@
   const view = $derived(pricingView(context, page.offerProps));
   // The note reassures a buyer: it has no place once there is nothing to buy.
   const selling = $derived(view.state === 'priced' || view.state === 'unpriced');
-  const label = $derived(content.ctaLabel ?? COPY.cta.buy);
   const panel = $derived(featuredScheme(page.style, section.scheme));
   const backdrop = $derived(
     layout === 'band'
@@ -86,26 +82,7 @@
 {/snippet}
 
 {#snippet offer(size: 'md' | 'lg')}
-  {#if view.featured}
-    <div class="cta__offer">
-      <p class="cta__price">
-        <span class="cta__amount">{view.featured.priceLabel}</span>
-        <span class="cta__cadence">{view.featured.cadenceLabel}</span>
-      </p>
-      <Button
-        href={pathHref(context, view.featured)}
-        {label}
-        name={pathActionName(label, view.featured)}
-        {size}
-        section="cta"
-        field="ctaLabel"
-        {edit}
-      />
-      <p class="cta__billing">{derivedNote(view.featured)}</p>
-    </div>
-  {:else}
-    <ButtonRow {context} section="cta" label={content.ctaLabel} {size} {edit} />
-  {/if}
+  <OfferAsk {context} section="cta" label={content.ctaLabel} {size} {edit} />
 {/snippet}
 
 <div class="cta" data-layout={layout} data-lp-on-media={backdrop ? '' : undefined}>
@@ -232,55 +209,6 @@
     }
   }
 
-  /* ── the offer: price and period, the button, its own billing line ─────── */
-  /* Aligned as the Style aligns a section's actions (`--lp-actions-align`, as
-     ButtonRow reads it), so a centred band centres its offer too. */
-  .cta__offer {
-    --_align: var(--lp-actions-align, start);
-    display: grid;
-    gap: var(--space-3);
-    justify-items: var(--_align);
-    text-align: var(--_align);
-  }
-
-  .cta__price {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: var(--_align);
-    gap: var(--space-1) var(--space-2);
-    margin: 0;
-  }
-
-  .cta__amount {
-    font-family: var(--lp-font-display);
-    font-size: var(--lp-size-title);
-    font-weight: var(--lp-weight-title);
-    font-synthesis: none;
-    font-variant-numeric: lining-nums tabular-nums;
-    line-height: var(--lp-leading-title);
-  }
-
-  .cta__cadence,
-  .cta__billing {
-    color: var(--lp-ink-soft);
-  }
-
-  .cta__cadence {
-    font-size: var(--lp-size-body);
-  }
-
-  .cta__billing {
-    margin: 0;
-    font-size: var(--lp-size-small);
-    line-height: var(--lp-leading-body);
-  }
-
-  /* A phone-width band: the way in spans it, as every way in does there. */
-  @container (max-width: 30rem) {
-    .cta__offer {
-      justify-self: stretch;
-      justify-items: stretch;
-    }
-  }
+  /* The offer itself (price and period, the button, its own billing line)
+     is `OfferAsk`, shared with the Button section (03 X64). */
 </style>

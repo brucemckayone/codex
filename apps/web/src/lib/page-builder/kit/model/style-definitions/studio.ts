@@ -31,6 +31,11 @@ export const STUDIO: StyleDefinition = {
     cta: 'split',
     stats: 'row',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // Paper and tinted paper in turn, whichever sections a page keeps: the
   // starter and every recipe alternate without a repeat to step back from.
@@ -52,6 +57,12 @@ export const STUDIO: StyleDefinition = {
     pricing: 'soft',
     faq: 'base',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // A card is a sheet of the other paper: tinted on the ground, plain on the
   // tint, plain on a colour field.

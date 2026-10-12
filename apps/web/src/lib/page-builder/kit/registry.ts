@@ -9,13 +9,17 @@
  */
 import type { Component } from 'svelte';
 import BenefitsBlock from './blocks/benefits/BenefitsBlock.svelte';
+import BreakBlock from './blocks/break/BreakBlock.svelte';
+import ButtonBlock from './blocks/button/ButtonBlock.svelte';
 import CtaBlock from './blocks/cta/CtaBlock.svelte';
 import CurriculumBlock from './blocks/curriculum/CurriculumBlock.svelte';
 import FaqBlock from './blocks/faq/FaqBlock.svelte';
 import GalleryBlock from './blocks/gallery/GalleryBlock.svelte';
+import HeadingBlock from './blocks/heading/HeadingBlock.svelte';
 import HeroBlock from './blocks/hero/HeroBlock.svelte';
 import InsideBlock from './blocks/inside/InsideBlock.svelte';
 import InstructorBlock from './blocks/instructor/InstructorBlock.svelte';
+import PictureBlock from './blocks/picture/PictureBlock.svelte';
 import PreviewBlock from './blocks/preview/PreviewBlock.svelte';
 import PricingBlock from './blocks/pricing/PricingBlock.svelte';
 import ProblemBlock from './blocks/problem/ProblemBlock.svelte';
@@ -49,6 +53,10 @@ export const BLOCKS: Readonly<Record<SectionTypeId, KitBlockComponent>> = {
   story: StoryBlock,
   gallery: GalleryBlock,
   inside: InsideBlock,
+  picture: PictureBlock,
+  heading: HeadingBlock,
+  break: BreakBlock,
+  button: ButtonBlock,
 };
 
 export interface KitBlock {

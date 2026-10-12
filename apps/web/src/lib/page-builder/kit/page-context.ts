@@ -28,6 +28,12 @@ export interface KitPageContext {
    * pricing section, and for a block mounted on its own.
    */
   readonly offerProps: Readonly<Record<string, unknown>>;
+  /**
+   * The anchor (`id`) of a section this page draws, by section id, so a
+   * Button can jump to it (03 X64). `undefined` for a section the page does
+   * not draw (hidden, deleted, folded), and for a block mounted on its own.
+   */
+  anchorOf(id: string): string | undefined;
 }
 
 /**
@@ -50,6 +56,7 @@ export function getKitPage(): KitPageContext {
       style: DEFAULT_PAGE_STYLE,
       still: false,
       offerProps: {},
+      anchorOf: () => undefined,
     }
   );
 }

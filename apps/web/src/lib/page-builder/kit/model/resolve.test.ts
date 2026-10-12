@@ -677,6 +677,47 @@ describe("the page's dials (03 X61)", () => {
       expect(vivid.find((s) => s.type === 'faq')?.scheme).toBe('soft');
     });
 
+    it('vivid looks past a simple section to the band beyond it (03 X64)', () => {
+      // A Picture between Soft's questions and its brand ask takes one of
+      // their bands, so the questions must still yield to the ask: taken to
+      // the brand colour, they would leave the ask stepped back.
+      const order = STYLES.soft.order;
+      expect(order.indexOf('cta') - order.indexOf('faq')).toBe(1);
+      const vivid = resolveSections({
+        design: { style: 'soft', dials: { colour: 'vivid' } },
+        sections: order.flatMap((type) =>
+          type === 'cta'
+            ? [
+                section({ id: 'picture', type: 'picture' }),
+                section({ id: type, type }),
+              ]
+            : [section({ id: type, type })]
+        ),
+      });
+      expect(vivid.find((s) => s.type === 'faq')?.scheme).toBe('soft');
+      expect(vivid.find((s) => s.type === 'cta')?.scheme).toBe('brand');
+    });
+
+    it('vivid finds nothing before the first section, not the last band on the page', () => {
+      const sections = [
+        section({ id: 'faq', type: 'faq' }),
+        section({ id: 'text', type: 'text' }),
+        section({ id: 'cta', type: 'cta' }),
+      ];
+      // The premise: a soft tint first, the ground, the brand ask last.
+      expect(schemes({ design: { style: 'soft' }, sections })).toEqual([
+        'soft',
+        'base',
+        'brand',
+      ]);
+      expect(
+        schemes({
+          design: { style: 'soft', dials: { colour: 'vivid' } },
+          sections,
+        })[0]
+      ).toBe('brand');
+    });
+
     it('keeps the ground the ground, and leaves Quiet, which draws no bands, as it is', () => {
       for (const style of PAGE_STYLE_IDS) {
         const before = schemes(whole(style));

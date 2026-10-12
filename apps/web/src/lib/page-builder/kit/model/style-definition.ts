@@ -56,20 +56,27 @@ export interface StyleDefinition {
  * The sales narrative: promise, pain, the journey, shift, proof, offer,
  * objections, ask. What the course holds comes straight after its promise
  * (03 X63): a visitor sees what they would be buying before being sold it.
+ * The simple sections sit where a full page shows each at work (03 X64): a
+ * Picture after the pain, a Heading announcing the curriculum and a Button
+ * closing it, and a Break before the proof. No starter takes them.
  */
 export const STORY_ORDER = [
   'hero',
   'inside',
   'video',
   'problem',
+  'picture',
   'story',
   'text',
   'transformation',
   'benefits',
+  'heading',
   'curriculum',
+  'button',
   'preview',
   'gallery',
   'instructor',
+  'break',
   'testimonials',
   'stats',
   'pricing',

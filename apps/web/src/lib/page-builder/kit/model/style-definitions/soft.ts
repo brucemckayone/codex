@@ -34,6 +34,11 @@ export const SOFT: StyleDefinition = {
     cta: 'band',
     stats: 'grid',
     text: 'centered',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'center',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'soft',
@@ -56,6 +61,12 @@ export const SOFT: StyleDefinition = {
     pricing: 'base',
     faq: 'soft',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The one filled card is a pebble of the primary on page and tint alike; on
   // a dark band it is the light tint, inside a colour field the page, and
