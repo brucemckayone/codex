@@ -105,7 +105,7 @@
   );
   /* A stop sits on the middle of the section heading's first line. */
   --_path-y: calc(
-    var(--lp-pad) + var(--lp-edge-offset, 0px) + var(--_path-eyebrow, 0px) +
+    var(--lp-pad-start) + var(--lp-edge-offset, 0px) + var(--_path-eyebrow, 0px) +
       var(--lp-size-heading) * var(--lp-leading-heading) / 2
   );
   --_path-ink: var(--lp-mark-ink);

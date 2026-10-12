@@ -160,10 +160,14 @@
   position: relative;
   isolation: isolate;
   overflow: clip;
-  padding-block: var(--lp-pad);
+  padding-block: var(--lp-pad-start) var(--lp-pad);
   background: var(--lp-bg);
   color: var(--lp-ink);
   --lp-pad: var(--lp-pad-regular);
+  /* The band's top padding: its spacing, unless it continues the band above.
+     Anything placed from the top of a section that can continue reads this,
+     not `--lp-pad`. */
+  --lp-pad-start: var(--lp-pad);
 }
 
 .lp-section[data-lp-spacing='compact'] {
@@ -172,6 +176,13 @@
 
 .lp-section[data-lp-spacing='spacious'] {
   --lp-pad: var(--lp-pad-spacious);
+}
+
+/* No words of its own on the ground of the section above (03 X58): nothing
+   announces a new section, so the page spends no break on it, and the band
+   above's foot is the whole joint. */
+.lp-section[data-lp-continues] {
+  --lp-pad-start: 0px;
 }
 
 .lp-section:target,

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { PAGE_STYLE_IDS, SECTION_LAYOUTS, SECTION_TYPE_IDS } from './ids';
 import {
   atmosphereProven,
+  continuingSections,
   featuredScheme,
   GROUND_BANDS,
   groundBand,
+  HEADED_BY_WORDS,
   resolveGroundBands,
   resolveLayout,
   resolveScheme,
@@ -464,5 +466,153 @@ describe('an org shader — the hero defaults to atmosphere, the closing ask kee
     expect(schemes(page('cinematic'), true)).toEqual(
       schemes(page('cinematic'))
     );
+  });
+});
+
+describe('continuingSections — no words of its own, on the ground above (03 X58)', () => {
+  const base = { scheme: 'base' } as const;
+  const pricing = section({
+    id: 'pricing',
+    type: 'pricing',
+    design: base,
+    props: { heading: 'Join' },
+  });
+  const continuing = (sections: KitSection[]) => {
+    const page: KitPage = { design: { style: 'studio' }, sections };
+    return [...continuingSections(page, resolveSections(page))];
+  };
+
+  it('continues untitled questions under the offer on one ground', () => {
+    expect(
+      continuing([
+        pricing,
+        section({ id: 'faq', type: 'faq', design: base, props: { items: [] } }),
+      ])
+    ).toEqual(['faq']);
+  });
+
+  it('keeps a section apart once any of its eyebrow, heading or lead is written', () => {
+    for (const key of ['eyebrow', 'heading', 'body']) {
+      expect(
+        continuing([
+          pricing,
+          section({
+            id: 'faq',
+            type: 'faq',
+            design: base,
+            props: { [key]: 'Questions' },
+          }),
+        ])
+      ).toEqual([]);
+    }
+  });
+
+  it('counts words that are only spaces as none, as the block does', () => {
+    expect(
+      continuing([
+        pricing,
+        section({
+          id: 'faq',
+          type: 'faq',
+          design: base,
+          props: { heading: '   ' },
+        }),
+      ])
+    ).toEqual(['faq']);
+  });
+
+  it('never continues across a change of ground', () => {
+    expect(
+      continuing([
+        pricing,
+        section({ id: 'faq', type: 'faq', design: { scheme: 'soft' } }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('never continues on the shader, on a picture or under one', () => {
+    const atmosphere = { scheme: 'atmosphere' } as const;
+    const picture = { mediaId: 'm1', key: 'k' };
+    expect(
+      continuing([
+        section({
+          id: 'a',
+          type: 'benefits',
+          design: atmosphere,
+          props: { heading: 'In it' },
+        }),
+        section({ id: 'b', type: 'faq', design: atmosphere }),
+      ])
+    ).toEqual([]);
+    expect(
+      continuing([
+        pricing,
+        section({
+          id: 'faq',
+          type: 'faq',
+          design: base,
+          props: { background: picture },
+        }),
+      ])
+    ).toEqual([]);
+    expect(
+      continuing([
+        section({
+          id: 'pricing',
+          type: 'pricing',
+          design: base,
+          props: { background: picture },
+        }),
+        section({ id: 'faq', type: 'faq', design: base }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('never continues the opening or the closing ask, which draw their own backdrops', () => {
+    expect(
+      continuing([
+        section({ id: 'hero', type: 'hero', design: base }),
+        section({ id: 'benefits', type: 'benefits', design: base }),
+        section({ id: 'cta', type: 'cta', design: base }),
+        section({ id: 'faq', type: 'faq', design: base }),
+      ])
+    ).toEqual([]);
+  });
+
+  it('only for blocks whose head is their eyebrow, heading and lead', () => {
+    // An untitled pricing section still draws its own head (the offers' words).
+    expect(
+      continuing([
+        section({
+          id: 'faq',
+          type: 'faq',
+          design: base,
+          props: { heading: 'Questions' },
+        }),
+        section({ id: 'pricing', type: 'pricing', design: base }),
+      ])
+    ).toEqual([]);
+    expect(HEADED_BY_WORDS.has('pricing')).toBe(false);
+  });
+
+  it('reads the section rendered above: a hidden one between is not there', () => {
+    expect(
+      continuing([
+        pricing,
+        section({
+          id: 'hidden',
+          type: 'gallery',
+          enabled: false,
+          design: { scheme: 'soft' },
+        }),
+        section({ id: 'faq', type: 'faq', design: base }),
+      ])
+    ).toEqual(['faq']);
+  });
+
+  it('never continues the first section', () => {
+    expect(
+      continuing([section({ id: 'faq', type: 'faq', design: base })])
+    ).toEqual([]);
   });
 });

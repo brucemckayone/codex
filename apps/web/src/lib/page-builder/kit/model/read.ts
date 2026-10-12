@@ -92,3 +92,16 @@ export function paragraphs(text: string | undefined): string[] {
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
 }
+
+/**
+ * Whether a section's props give its block a head: the eyebrow, heading and
+ * lead set over its content. The blocks that draw one (`HEADED_BY_WORDS` in
+ * `resolve.ts`) read it here, and so does the page, which spaces a section
+ * with none as the continuation of the band above it (03 X58). One reading,
+ * so the two can never disagree about which sections have words of their own.
+ */
+export function hasHead(props: object): boolean {
+  return (['eyebrow', 'heading', 'body'] as const).some(
+    (key) => readText(props as Raw, key) !== undefined
+  );
+}

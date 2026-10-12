@@ -16,6 +16,7 @@
   column.
 -->
 <script lang="ts">
+  import { hasHead } from '../../model/read';
   import { resolvePageImageUrl } from '../../../page-images';
   import type { BlockProps } from '../../model/types';
   import Eyebrow from '../../primitives/Eyebrow.svelte';
@@ -45,7 +46,7 @@
 </script>
 
 <div class="story lp-bleed" data-layout={layout}>
-  {#if content.eyebrow || content.heading || content.body}
+  {#if hasHead(content)}
     <header class="story__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="story" {edit} />{/if}
       {#if content.heading}

@@ -246,6 +246,40 @@ describe('PageRenderer', () => {
     ).toBe('base');
   });
 
+  it('marks the section that continues the band above, and only it (03 X58)', async () => {
+    const page: KitPage = {
+      design: { style: 'studio' },
+      sections: [
+        {
+          id: 'p',
+          type: 'pricing',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: { heading: 'Join' },
+        },
+        {
+          id: 'q',
+          type: 'faq',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: {},
+        },
+        {
+          id: 'r',
+          type: 'faq',
+          enabled: true,
+          design: { scheme: 'base' },
+          props: { heading: 'More' },
+        },
+      ],
+    };
+    const root = await render({ page });
+    const marked = [
+      ...root.querySelectorAll('.lp-section[data-lp-continues]'),
+    ].map((s) => s.id);
+    expect(marked).toEqual(['faq']);
+  });
+
   it('previews a theme on its own root, never on <html>', async () => {
     const root = await render({ theme: 'dark' });
     expect(root.dataset.lpTheme).toBe('dark');
