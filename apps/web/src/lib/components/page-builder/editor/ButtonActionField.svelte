@@ -17,7 +17,6 @@
 <script lang="ts">
   import Select from '$lib/components/ui/Select/Select.svelte';
   import {
-    BUTTON_ACTION_IDS,
     type BlockField,
     type ButtonActionId,
     DEFINITIONS,
@@ -27,6 +26,7 @@
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import * as m from '$paraglide/messages';
+  import { type ActionWrite, actionKinds, chooseAction, linkWrite } from './button-action-choice';
 
   interface Props {
     field: BlockField;
@@ -66,12 +66,11 @@
     preview: m.studio_page_editor_button_action_preview,
     link: m.studio_page_editor_button_action_link,
   };
-  // Preview is offered only once there is a film to play; a stored preview
-  // stays listed so the creator can see what it is and change it.
   const options = $derived(
-    BUTTON_ACTION_IDS.filter(
-      (action) => action !== 'preview' || hasFilm || stored?.kind === 'preview'
-    ).map((action) => ({ value: action, label: NAMES[action]() }))
+    actionKinds(hasFilm, stored?.kind).map((action) => ({
+      value: action,
+      label: NAMES[action](),
+    }))
   );
 
   let href = $state(untrackedHref());
@@ -84,30 +83,21 @@
     return action?.kind === 'link' ? action.href : '';
   }
 
+  /** Write what the pick makes writable; hold the kind here until then. */
+  function apply(kind: ButtonActionId, write: ActionWrite): void {
+    picked = write.write ? null : kind;
+    if (write.write) onChange(write.value);
+  }
+
   function choose(next: string | undefined): void {
-    if (next === 'join') {
-      picked = null;
-      onChange(undefined);
-    } else if (next === 'section') {
-      const first = targets[0]?.value;
-      picked = first ? null : 'section';
-      if (first) onChange({ kind: 'section', target: first });
-    } else if (next === 'preview') {
-      picked = null;
-      onChange({ kind: 'preview' });
-    } else if (next === 'link') {
-      const ready = isButtonHref(href.trim());
-      picked = ready ? null : 'link';
-      if (ready) onChange({ kind: 'link', href: href.trim() });
-    }
+    const kind = options.find((option) => option.value === next)?.value;
+    if (kind) apply(kind, chooseAction(kind, { firstTarget: targets[0]?.value, href }));
   }
 
   function writeHref(next: string): void {
     href = next;
-    if (isButtonHref(next.trim())) {
-      picked = null;
-      onChange({ kind: 'link', href: next.trim() });
-    }
+    const write = linkWrite(next);
+    if (write.write) apply('link', write);
   }
 </script>
 
