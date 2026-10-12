@@ -366,7 +366,12 @@ app.get(
       );
       if (!canEnter) return null;
 
-      return ctx.services.courseJourney.getCourseDashboard(userId, courseId);
+      return ctx.services.courseJourney.getCourseDashboard(
+        userId,
+        courseId,
+        // Resolves each practice's picture to a CDN URL (Codex-e140e).
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
@@ -440,7 +445,8 @@ app.get(
       const data = await ctx.services.courseJourney.getInCoursePractice(
         userId,
         courseId,
-        contentSlug
+        contentSlug,
+        ctx.env.R2_PUBLIC_URL_BASE
       );
       if (!data) return null;
 
@@ -1569,7 +1575,9 @@ app.get(
       );
       return ctx.services.courseJourney.getCourseCurriculumForEditor(
         ctx.organizationId,
-        courseId
+        courseId,
+        // The canvas draws each practice's picture (Codex-e140e, -61zsk.52).
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })

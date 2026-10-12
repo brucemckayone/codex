@@ -789,7 +789,7 @@ export interface EnrolledCourseSummary {
  * MUST keep the FE mirror structurally equal.
  */
 
-/** One practice on the PUBLIC sales page — no completion/media (public shell). */
+/** One practice on the PUBLIC sales page — no completion or stream (public shell). */
 export interface JourneyPracticeView {
   contentId: string;
   slug: string | null;
@@ -802,6 +802,13 @@ export interface JourneyPracticeView {
    * older worker deployment omits it and the curriculum names the kind alone.
    */
   durationSeconds?: number | null;
+  /**
+   * The practice's picture as a full CDN URL (the `lg` variant): the creator's
+   * own thumbnail, else its film's frame, else null (Codex-61zsk.52). The same
+   * public object its own content page shows. OPTIONAL-additive: an older
+   * worker omits it and the "What's inside" cards draw their brand tile.
+   */
+  thumbnailUrl?: string | null;
   /** Completion — dashboard / in-course only; omitted on the public sales page. */
   completed?: boolean;
 }

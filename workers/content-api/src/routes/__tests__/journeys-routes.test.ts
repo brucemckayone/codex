@@ -1394,7 +1394,10 @@ describe('GET /api/journeys/courses/:courseId/dashboard — gated read', () => {
     expect(accessSpies.canEnterCourse).toHaveBeenCalledWith(USER.id, COURSE_ID);
     expect(journeySpies.getCourseDashboard).toHaveBeenCalledWith(
       USER.id,
-      COURSE_ID
+      COURSE_ID,
+      // The route hands the CDN base down, so a practice's picture is a URL
+      // and never a bare R2 key (Codex-e140e).
+      R2_PUBLIC_URL_BASE
     );
   });
 
@@ -1437,6 +1440,14 @@ describe('GET /api/journeys/courses/:courseId/practices/:contentSlug — in-cour
     expect(accessSpies.getStreamingUrl).toHaveBeenCalledWith(
       USER.id,
       expect.objectContaining({ contentId: CONTENT_ID })
+    );
+    // The CDN base reaches the read, so the practice's picture is a URL
+    // and never a bare R2 key (Codex-e140e).
+    expect(journeySpies.getInCoursePractice).toHaveBeenCalledWith(
+      USER.id,
+      COURSE_ID,
+      CONTENT_SLUG,
+      R2_PUBLIC_URL_BASE
     );
   });
 

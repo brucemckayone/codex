@@ -48,6 +48,12 @@ export interface JourneyPracticeView {
    * older worker deployment omits it and the curriculum names the kind alone.
    */
   durationSeconds?: number | null;
+  /**
+   * The practice's picture as a full CDN URL (the `lg` variant): the creator's
+   * own thumbnail, else its film's frame, else null (Codex-61zsk.52).
+   * OPTIONAL-additive: an older worker omits it and a card draws its tile.
+   */
+  thumbnailUrl?: string | null;
   /** Completion — dashboard / in-course only; omitted on the public sales page. */
   completed?: boolean;
 }
