@@ -83,7 +83,10 @@ the auth host, collapsing every user into a single bucket. So:
   names nothing in a middleware mounted ahead of auth; use
   `presentedSessionSubject()` there, which reads the forwarded session cookie.
 - `trustedIpSubject()` — the transport address, and **only** where it is
-  trustworthy (`trustedClientIp` withholds Cloudflare egress ranges).
+  trustworthy (`trustedClientIp` withholds Cloudflare egress ranges, and
+  loopback: miniflare stamps the caller's socket address, so on the local stack
+  every call reads 127.0.0.1 or ::1, and counting it merged a whole E2E run into
+  one bucket, Codex-4p2l7).
 - `combineSubjects(...)` — charges each its own bucket and blocks if **any** is
   exhausted. Note the consequence: a spent address bucket blocks a caller whose
   own session bucket is untouched.

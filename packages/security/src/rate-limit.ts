@@ -230,11 +230,31 @@ export function isCloudflareEgressIp(address: string): boolean {
 }
 
 /**
+ * Loopback: on the local stack, the platform's own server-side hop.
+ *
+ * Miniflare stamps the caller's socket address on `CF-Connecting-IP`, so under
+ * `pnpm dev` and in CI every server-side call from apps/web reads 127.0.0.1 or
+ * ::1 — the part a Cloudflare egress address plays in production. Counted, it
+ * put a whole E2E run in one 100-a-minute bucket on organization-api, and the
+ * org layout's lookup 429'd into a 503 for users who had made one request
+ * (Codex-4p2l7). Cloudflare's edge never reports a loopback caller, so this
+ * changes nothing deployed.
+ */
+const LOOPBACK_PREFIXES = ['127.0.0.0/8', '::1/128'] as const;
+
+function isLoopbackIp(address: string): boolean {
+  const parsed = parseIp(address);
+  if (!parsed) return false;
+  return LOOPBACK_PREFIXES.some((prefix) => ipInPrefix(parsed, prefix));
+}
+
+/**
  * The client IP, but only when it can be believed.
  *
  * Returns null when the request arrived over a worker-to-worker hop, or when
  * `CF-Connecting-IP` is a Cloudflare address — in both cases the header holds
  * the calling worker's egress address, and keying on it merges unrelated users.
+ * A loopback address is withheld for the same reason (`isLoopbackIp`).
  *
  * `X-Forwarded-For` is never consulted: it is client-settable, so trusting it
  * would let an attacker both evade their own bucket and pin a bucket onto
@@ -246,7 +266,9 @@ export function trustedClientIp(c: Context): string | null {
   const address = c.req.header('cf-connecting-ip');
   if (!address) return null;
 
-  return isCloudflareEgressIp(address) ? null : address;
+  return isCloudflareEgressIp(address) || isLoopbackIp(address)
+    ? null
+    : address;
 }
 
 // ============================================================================

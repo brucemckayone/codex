@@ -115,10 +115,9 @@ function buildBrowserCookies(setCookieHeaders: string[]): BrowserCookie[] {
  * `get-session` endpoint, and only a dead cache pays a rate-limited sign-in.
  *
  * Designed for `test.beforeAll` use: re-use the cookies across all tests in
- * the describe block via `page.context().addCookies(...)`. The live sign-in
- * (when needed) carries a synthetic CF-Connecting-IP header so its trusted-ip
- * bucket is unique per call; the credential bucket it shares with every other
- * sign-in as this user is why the cache exists.
+ * the describe block via `page.context().addCookies(...)`. A live sign-in is
+ * charged to its credential, a bucket shared with every other sign-in as this
+ * user, which is why the cache exists.
  */
 export async function captureSeededCreatorCookies(): Promise<BrowserCookie[]> {
   const cached = await loadValidatedSeededCreatorCookies(SEEDED_CREATOR.email);
@@ -138,17 +137,6 @@ export async function captureSeededCreatorCookies(): Promise<BrowserCookie[]> {
 export async function signInSeededCreatorForCapture(): Promise<
   BrowserCookie[]
 > {
-  // The auth worker rate-limits `/api/auth/sign-in/email` at 5 req / 15min
-  // per IP (`RATE_LIMIT_PRESETS.auth`). On localhost the IP fallback is the
-  // string "unknown", which means EVERY developer / CI process shares one
-  // bucket — easily exhausted by a single failed test run. Send a synthetic
-  // CF-Connecting-IP per spec invocation so each run gets its own bucket.
-  // The header is honoured by `defaultKeyGenerator` in
-  // packages/security/src/rate-limit.ts:135-143.
-  const syntheticIp = `127.${Math.floor(Math.random() * 200) + 50}.${Math.floor(
-    Math.random() * 200
-  )}.${Math.floor(Math.random() * 200)}`;
-
   // Host MUST be lvh.me (not localhost) so the `Domain=.lvh.me` cookie that
   // the auth worker emits is accepted by the fetch's cookie jar — see
   // apps/web/e2e/CLAUDE.md "Cookie domain gotcha". Origin header satisfies
@@ -159,7 +147,6 @@ export async function signInSeededCreatorForCapture(): Promise<
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'CF-Connecting-IP': syntheticIp,
       // Origin MUST match BetterAuth's trustedOrigins for the test env
       // (packages/urls/src/cors-origins.ts case 'test') — lvh.me:5173 is
       // the Playwright webServer port and an entry in the trusted list.
@@ -183,21 +170,17 @@ export async function signInSeededCreatorForCapture(): Promise<
 }
 
 /**
- * Create a fresh org-owner user without going through the auth-worker's
- * rate-limited `/api/auth/sign-in/email` path.
+ * Create a fresh org-owner user with one sign-in as a brand-new user.
  *
- * Why this exists: `@codex/test-utils`'s `orgFixture.createOrgMember` calls
- * `authFixture.registerUser`, which uses fast-register first then falls back
- * to `_loginFallback` (POST sign-in/email) when fast-register doesn't return
- * session cookies. That fallback uses the auth worker's rate-limited bucket
- * (5 req / 15min per IP), which is shared across all parallel/sequential
- * test runs and is easily exhausted by retries / failed runs.
+ * The auth worker charges a sign-in to its credential (5 req / 15min,
+ * `RATE_LIMIT_PRESETS.auth`), so a fresh email starts a fresh bucket. On the
+ * local stack nothing else is charged: the transport address is loopback,
+ * which `trustedClientIp` withholds (Codex-4p2l7). Before that, the address
+ * was one bucket for every sign-in in the run, which the synthetic
+ * CF-Connecting-IP this helper used to send was dodging.
  *
- * This helper does the same work as `registerSharedStudioUser` but routes
- * the (mandatory) sign-in call through a unique synthetic CF-Connecting-IP,
- * which the auth worker honours per `defaultKeyGenerator`
- * (packages/security/src/rate-limit.ts:135-143). Result: every spec invocation
- * lands in a fresh rate-limit bucket and never collides with the shared bucket.
+ * Does the same work as `registerSharedStudioUser`, writing the org and its
+ * membership directly, so it is the fastest fresh-org path.
  *
  * @returns user + org + cookie ready for `injectOrgCookies` (or set directly
  *          via `page.context().addCookies` with domain `lvh.me`).
@@ -250,16 +233,12 @@ export async function createFreshOwnerWithBypass(opts: {
     );
   }
 
-  // Step 2: Sign in with a synthetic IP — bypasses the rate limiter.
-  const syntheticIp = `127.${Math.floor(Math.random() * 200) + 50}.${Math.floor(
-    Math.random() * 200
-  )}.${Math.floor(Math.random() * 200)}`;
+  // Step 2: Sign in — the first charge to this brand-new credential.
   // lvh.me host + Origin header — see captureSeededCreatorCookies note above.
   const signInRes = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'CF-Connecting-IP': syntheticIp,
       // Origin matches the Playwright webServer port (lvh.me:5173) which
       // is in BetterAuth's trustedOrigins for `test` env — see note in
       // captureSeededCreatorCookies above.

@@ -80,7 +80,7 @@ apps/web/e2e/helpers/
 | `loginAsSeededCreator` (subscription.ts) | Test needs `creator@test.com` (Studio Alpha owner) | Real `/api/auth/sign-in/email` via form | Slow + rate-limited |
 | `captureSeededCreatorCookies` (subscription.ts) | Same as above but for `beforeAll` — share cookies across tests | Run-scoped cache validated via `get-session`; live sign-in only on cache miss (Codex-ty7ly) | Fast; ≤1 rate-limited sign-in per run |
 | `registerSharedStudioUser` (studio.ts) | Test needs a fresh org with isolated state | `orgFixture.createOrgMember` (multi-step) | Slow, but isolated |
-| `createFreshOwnerWithBypass` (subscription.ts) | Same as above but rate-limit-immune | fast-register + synthetic-IP sign-in + direct DB org insert | Fastest fresh-org path |
+| `createFreshOwnerWithBypass` (subscription.ts) | Same as above but rate-limit-immune | fast-register + one sign-in on a fresh credential + direct DB org insert | Fastest fresh-org path |
 | `createOwnerAndCreator` (agreements.ts) | Two-actor negotiation tests | Two `createOrgMember` calls | Slowest, two users |
 
 **Rule of thumb**: prefer seed-user helpers (idempotency burden, but fast). Use fresh-org helpers when the test mutates state in ways that would corrupt the next run.
@@ -117,12 +117,14 @@ One more rule specific to this surface:
 
 ## Rate limits
 
-The auth worker enforces `RATE_LIMIT_PRESETS.auth` (5 req / 15 min) on the four canonical BetterAuth POST surfaces. The counter is keyed on the **credential** (submitted email, normalised) with the trusted client address as a second signal (`workers/auth/src/middleware/rate-limiter.ts`). Credential-keying means a synthetic `CF-Connecting-IP` no longer protects repeated sign-ins as the SAME seeded user — every charge lands on that user's one bucket, and CI retries re-running `beforeAll` exhaust it (Codex-ty7ly).
+The auth worker enforces `RATE_LIMIT_PRESETS.auth` (5 req / 15 min) on the four canonical BetterAuth POST surfaces. The counter is keyed on the **credential** (submitted email, normalised) with the trusted client address as a second signal (`workers/auth/src/middleware/rate-limiter.ts`). Every charge to the SAME seeded user lands on that user's one bucket, and CI retries re-running `beforeAll` exhaust it (Codex-ty7ly).
+
+**On the local stack the address signal is off.** Miniflare stamps the caller's socket address on `CF-Connecting-IP`, so every request a test or apps/web makes reads loopback. `trustedClientIp` withholds loopback, as it withholds a Cloudflare egress address in production, so only the credential, session or token counts here. Before that, every worker's IP bucket was one bucket for the whole run: organization-api took ~110 requests a minute against the 100-a-minute `api` preset, and the org layout's lookup 429'd. A failure snapshot reading **503 "Organization … could not be loaded right now"** while a studio test waits for `.studio-layout` was that (Codex-4p2l7). `packages/security/src/rate-limit.ts`.
 
 Three escape hatches:
 
 1. **`/api/test/fast-signin`** — bypasses the form flow entirely. No rate limit. Used by `loginAsSeedViewer`.
-2. **Run-scoped session cache** (`helpers/seeded-creator-session.ts`, primed by `e2e/global-setup.ts`) — signs in as the seeded creator at most once per run; every later `captureSeededCreatorCookies()` validates the cached cookies against the unlimited `get-session` endpoint and reuses them. The synthetic-IP header is still sent on the rare live sign-in (fresh IP bucket) but the credential bucket is what the cache protects.
+2. **Run-scoped session cache** (`helpers/seeded-creator-session.ts`, primed by `e2e/global-setup.ts`) — signs in as the seeded creator at most once per run; every later `captureSeededCreatorCookies()` validates the cached cookies against the unlimited `get-session` endpoint and reuses them. The credential bucket is what the cache protects.
 3. **Wait 15 minutes** — only useful in extreme cases; just use one of the above.
 
 ---
@@ -191,7 +193,7 @@ The seed is not re-run between iterations of the full suite. Long debug loops ac
 workers: 2,   // CI AND local both capped at 2 (the Neon ceiling).
 ```
 
-**Why 2 (not 1, not 4+)**: the consolidation PRs (#262, #263) + the `fast-signin` test endpoint + `CF-Connecting-IP` rate-limit bypass eliminated the auth-worker rate-limit contention that originally forced `workers=1`. Memory `feedback_e2e_vitest_forks_neon_contention` caps at 2 — beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers race on the same DB). The local default was previously `undefined` (= one worker per CPU core, ~8 on a dev box) — 4× over the ceiling — which made the data-heavy two-actor `agreements/` specs intermittently red locally: the owner page rendered fine but the just-created creator membership read back empty/stale ("No team creators yet") so the creator card never appeared. A parallelism sweep (workers=1 → pass, 2 → pass, 8 → 4 fail + 2 flaky) confirmed real contention (not flake, not app breakage), so `workers` is now a flat `2` for CI and local alike.
+**Why 2 (not 1, not 4+)**: the consolidation PRs (#262, #263) + the `fast-signin` test endpoint + credential-keyed limits (loopback withheld from the address signal, Codex-4p2l7) eliminated the auth-worker rate-limit contention that originally forced `workers=1`. Memory `feedback_e2e_vitest_forks_neon_contention` caps at 2 — beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers race on the same DB). The local default was previously `undefined` (= one worker per CPU core, ~8 on a dev box) — 4× over the ceiling — which made the data-heavy two-actor `agreements/` specs intermittently red locally: the owner page rendered fine but the just-created creator membership read back empty/stale ("No team creators yet") so the creator card never appeared. A parallelism sweep (workers=1 → pass, 2 → pass, 8 → 4 fail + 2 flaky) confirmed real contention (not flake, not app breakage), so `workers` is now a flat `2` for CI and local alike.
 
 **Gate criteria for keeping workers=2**: ≥99% pass rate across 3 consecutive green CI runs.
 
