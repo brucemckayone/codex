@@ -53,6 +53,8 @@ export const PAGE_DIALS = {
   colour: ['muted', 'vivid'],
   corners: ['brand', 'rounder'],
   spacing: ['compact', 'spacious'],
+  drama: ['calmer', 'louder'],
+  motion: ['still', 'gentle'],
 } as const satisfies Record<string, readonly [string, string]>;
 
 /**
@@ -132,6 +134,8 @@ export const pageDialsSchema = z
     colour: closedEnum(PAGE_DIALS.colour),
     corners: closedEnum(PAGE_DIALS.corners),
     spacing: closedEnum(PAGE_DIALS.spacing),
+    drama: closedEnum(PAGE_DIALS.drama),
+    motion: closedEnum(PAGE_DIALS.motion),
   })
   .optional()
   .catch(undefined);

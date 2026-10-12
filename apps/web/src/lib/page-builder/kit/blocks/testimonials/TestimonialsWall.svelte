@@ -84,7 +84,7 @@
   }
 
   .tm-wall__tile > :global(.voice[data-featured]:not([data-length='long'])) {
-    --_quote: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+    --_quote: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
   }
 
   @container (min-width: 40rem) {

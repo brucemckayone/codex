@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runWeight } from './faces';
-import { headingLength, headingRuns } from './long-heading';
+import { headingLength, headingRuns, widestRun } from './long-heading';
 
 describe('headingLength', () => {
   it('marks a heading short to 24 characters, medium to 64, long past it', () => {
@@ -63,5 +63,29 @@ describe('headingRuns — the runs a line can never break (Codex-61zsk.33)', () 
       widest: { caps: 0, text: 0, chars: 0 },
     });
     expect(headingRuns(undefined).first.chars).toBe(0);
+  });
+});
+
+describe('widestRun — what louder may grow a heading to fit (03 X62)', () => {
+  const size = (run: string) => ({
+    caps: Math.round(runWeight(run.toUpperCase()) * 1000) / 1000,
+    text: Math.round(runWeight(run) * 1000) / 1000,
+    chars: Array.from(run).length,
+  });
+
+  it('counts the first run, which a section heading does not set apart', () => {
+    expect(widestRun('Transformation: a new way')).toEqual(
+      size('Transformation:')
+    );
+    expect(widestRun('Breathwork')).toEqual(size('Breathwork'));
+  });
+
+  it('takes the widest after the first when that is wider', () => {
+    expect(widestRun('Find your mindfulness')).toEqual(size('mindfulness'));
+  });
+
+  it('is nothing for no words', () => {
+    expect(widestRun('  ')).toEqual({ caps: 0, text: 0, chars: 0 });
+    expect(widestRun(undefined)).toEqual({ caps: 0, text: 0, chars: 0 });
   });
 });

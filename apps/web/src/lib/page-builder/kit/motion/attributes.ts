@@ -5,6 +5,22 @@
  * no rule there fails.
  */
 
+/**
+ * Where motion stops, beside reduced motion and print (03 X62). The CSS
+ * spells the same lists inside `.lp:not(…)`, and `motion.test.ts` holds each
+ * rule to one of them.
+ *
+ * NOTHING_MOVES: a still page (thumbnails, galleries, the editing canvas) or
+ * the motion dial at `still`, which is the page reduced motion sees. An
+ * entrance, and what answers a hover or a click, stops here.
+ *
+ * NOTHING_FOLLOWS: those, and the dial at any step. What follows the scroll
+ * or moves on its own (a route drawn down the page, parallax, a drift, the
+ * marquee, the org's moving background) stops at `gentle` too.
+ */
+export const NOTHING_MOVES = "[data-lp-still], [data-lp-motion='still']";
+export const NOTHING_FOLLOWS = '[data-lp-still], [data-lp-motion]';
+
 /** `data-lp-reveal` and `--lp-media-reveal`: how an element enters. */
 export const REVEALS = ['rise', 'fade', 'wipe', 'scale'] as const;
 

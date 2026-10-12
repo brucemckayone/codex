@@ -253,6 +253,8 @@
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       align-items: start;
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The heading's room is its share (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
     }
 
     .stats[data-layout='grid'] .stats__list:is([data-count='3'], [data-count='5'], [data-count='6']) {

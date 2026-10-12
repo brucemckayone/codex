@@ -118,7 +118,7 @@ describe('pageDialsSchema (03 X61)', () => {
       pageDialsSchema.parse({
         colour: 'neon',
         corners: 'brand',
-        motion: 'still',
+        texture: 'grain',
       })
     ).toEqual({ corners: 'brand' });
     for (const bag of ['muted', 7, null, ['vivid']])

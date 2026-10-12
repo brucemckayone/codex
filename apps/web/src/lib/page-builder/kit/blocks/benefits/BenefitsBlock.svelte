@@ -320,6 +320,8 @@
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       align-items: center;
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The heading's room is its half (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) / 2);
     }
 
     .benefits[data-layout='split'][data-long] {

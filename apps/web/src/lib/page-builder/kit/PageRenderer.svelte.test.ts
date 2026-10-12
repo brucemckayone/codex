@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
 import {
   flushSync,
   mount,
@@ -319,6 +320,47 @@ describe('PageRenderer', () => {
       expect(root.hasAttribute('data-lp-corners')).toBe(false);
     });
 
+    // 03 X62.
+    it('names the type and motion steps on the root, and only steps a rule draws', async () => {
+      let root = await render({
+        page: dialled({ drama: 'louder', motion: 'gentle' }),
+      });
+      expect([root.dataset.lpDrama, root.dataset.lpMotion]).toEqual([
+        'louder',
+        'gentle',
+      ]);
+      unmount(app!);
+      app = null;
+      root = await render({
+        page: dialled({ drama: 'shouty', motion: 'frantic' }),
+      });
+      expect(root.hasAttribute('data-lp-drama')).toBe(false);
+      expect(root.hasAttribute('data-lp-motion')).toBe(false);
+    });
+
+    it.each([
+      'still',
+      'gentle',
+    ])("holds the org's moving background still at %s while the page is shown, and lets go after", async (motion) => {
+      await render({ page: dialled({ motion }) });
+      expect(shaderTone.held).toBe(true);
+      unmount(app!);
+      app = null;
+      expect(shaderTone.held).toBe(false);
+    });
+
+    it.each([
+      ['with no motion dial', {}, undefined],
+      ['on the canvas', { edit: { commit: () => {} } }, 'still'],
+      ['in a still thumbnail', { still: true }, 'still'],
+    ])('never holds it %s', async (_, props, motion) => {
+      await render({
+        page: dialled(motion ? { motion } : undefined),
+        ...props,
+      });
+      expect(shaderTone.held).toBe(false);
+    });
+
     it('draws each section in the colour and spacing its dials resolve to', async () => {
       const root = await render({
         page: dialled({ colour: 'vivid', spacing: 'spacious' }),
@@ -602,9 +644,24 @@ describe('PageRenderer entrances (03 X13)', () => {
     );
   });
 
+  const moving = (motion: string): KitPage => {
+    const page = samplePage('bold');
+    return { ...page, design: { ...page.design, dials: { motion } as never } };
+  };
+
+  it("stages the page at the motion dial's gentle, which keeps its entrances (03 X62)", async () => {
+    const root = await render({ page: moving('gentle') });
+    const [, ...below] = headings(root);
+    for (const heading of below) wake(heading, 'below');
+    expect(below.map((h) => h.getAttribute('data-lp-enter'))).toEqual(
+      below.map(() => 'wait')
+    );
+  });
+
   it.each([
     ['the canvas', { edit: { commit: () => {} } }],
     ['a still thumbnail', { still: true }],
+    ['a page with the motion dial at still', { page: moving('still') }],
   ])('stages nothing on %s', async (_, props) => {
     const root = await render(props);
     for (const heading of headings(root)) wake(heading, 'below');

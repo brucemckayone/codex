@@ -150,10 +150,12 @@
     gap: var(--lp-gap);
   }
 
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .pricing__head {
     display: grid;
     gap: var(--lp-stack);
     max-inline-size: var(--lp-measure);
+    --lp-heading-column: var(--lp-measure);
   }
 
   /* Soft centres its cards' head, so the states that stand in for the cards
@@ -265,6 +267,7 @@
     .pricing[data-layout='focus'] > .pricing__head {
       position: sticky;
       top: var(--space-12);
+      --lp-heading-column: min(var(--lp-measure), (var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
     }
   }
 
@@ -349,6 +352,12 @@
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       column-gap: var(--lp-gap);
+    }
+
+    /* Beside a price drawn at its own width, the heading's room is not known:
+       louder holds it at the Style's size (03 X62). */
+    .pricing[data-layout='band'] > .pricing__head {
+      --lp-heading-column: 0px;
     }
 
     .pricing__band {

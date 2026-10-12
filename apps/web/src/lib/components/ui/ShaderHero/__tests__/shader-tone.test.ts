@@ -6,6 +6,7 @@ const frame = (v: number) =>
   new Uint8ClampedArray(TONE_COLS * TONE_ROWS * 4).fill(v);
 
 afterEach(() => {
+  shaderTone.onHold(null);
   shaderTone.onDemand(null);
   shaderTone.clear();
 });
@@ -55,5 +56,21 @@ describe('shaderTone', () => {
     shaderTone.record(frame(90), { still: false, blur: 20 });
     expect(shaderTone.settled).toBe(true);
     expect(shaderTone.blur).toBe(20);
+  });
+
+  // 03 X62: a page's motion dial holds the org's moving background still.
+  it('is held while any page holds it, telling the shader only as the first takes hold and the last lets go', () => {
+    const told = vi.fn();
+    shaderTone.onHold(told);
+    const one = shaderTone.hold();
+    const two = shaderTone.hold();
+    expect(shaderTone.held).toBe(true);
+    expect(told.mock.calls).toEqual([[true]]);
+    one();
+    one();
+    expect(shaderTone.held).toBe(true);
+    two();
+    expect(shaderTone.held).toBe(false);
+    expect(told.mock.calls).toEqual([[true], [false]]);
   });
 });

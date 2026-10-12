@@ -40,12 +40,12 @@
 
 .lp[data-lp-style='poster'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.75rem, 0.4rem + 8.8cqi, 8.25rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2.1rem, 0.7rem + 4.4cqi, 5.25rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.75rem, 0.4rem + 8.8cqi, 8.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2.1rem, 0.7rem + 4.4cqi, 5.25rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.25rem, 0.95rem + 1.1cqi, 1.85rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.6cqi, 1.625rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(3.5rem, 1.2rem + 7.5cqi, 8rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.75rem, 0.4rem + 8cqi, 7.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.75rem, 0.4rem + 8cqi, 7.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.88;
   --lp-leading-heading: 0.92;
@@ -99,9 +99,13 @@
 
 /* ── capitals ────────────────────────────────────────────────────────────── */
 /* Section headings join the display line in capitals; titles, the reading
-   voice of cards and questions, stay in sentence case. */
+   voice of cards and questions, stay in sentence case. The type dial's
+   `louder` weighs a heading's widest run as it is drawn, so here, where the
+   case is set, in capitals (`primitives/Heading.svelte`, 03 X62). */
 :is(.lp, #lp-style)[data-lp-style='poster'] .lp-heading[data-size='heading'] {
   text-transform: uppercase;
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
 }
 
 /* A phone column is narrow for a long word in capitals: break it where a

@@ -516,15 +516,15 @@
 
   /* ── the one entrance (keyframes named by the Style) ───────────────────── */
   @media (prefers-reduced-motion: no-preference) {
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-h {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-h {
       animation: var(--lp-enter-headline);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-c {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-c {
       animation: var(--lp-enter-copy);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero__enter-m {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-m {
       animation: var(--lp-enter-media);
     }
   }

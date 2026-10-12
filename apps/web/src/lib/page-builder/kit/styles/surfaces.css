@@ -118,7 +118,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .lp:not([data-lp-still])
+  .lp:not([data-lp-still], [data-lp-motion])
     .lp-section[data-lp-scheme='atmosphere']:not([data-lp-on-media])
     > .lp-surface::before {
     animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth) infinite

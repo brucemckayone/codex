@@ -234,6 +234,8 @@
     .text[data-layout='columns'] > .text__head {
       position: sticky;
       top: var(--space-12);
+      /* The heading's room is its half (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) / 2);
     }
 
     .text[data-layout='columns'] .text__media {
@@ -244,6 +246,7 @@
        image turns wide and low rather than towering over the band. */
     .text[data-layout='columns']:not(:has(> :global(.text__body))) > .text__head {
       grid-column: 1 / -1;
+      --lp-heading-column: var(--lp-column);
     }
 
     .text[data-layout='columns']:not(:has(> :global(.text__body))) .text__media {

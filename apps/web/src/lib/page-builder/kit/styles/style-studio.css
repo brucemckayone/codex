@@ -42,10 +42,10 @@
 
 .lp[data-lp-style='studio'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.75rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.5rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.5rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.8cqi, 1.55rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.1rem, 1rem + 3.8cqi, 4.25rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.1rem, 1rem + 3.8cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1.04;
   --lp-leading-heading: 1.1;
@@ -382,6 +382,8 @@
     grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
     column-gap: calc(var(--lp-gap) * 1.5);
     align-items: start;
+    /* The heading's room is its share (louder's fit, 03 X62). */
+    --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 5 / 12);
   }
 
   :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] > .problem__head {
@@ -396,7 +398,7 @@
   }
 
   :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] .problem__lines li {
-    font-size: calc(var(--lp-size-heading) * 0.68);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1) * 0.68);
     line-height: var(--lp-leading-heading);
   }
 }
@@ -405,12 +407,12 @@
    host; `--lp-mark-draw` exists only on a host it armed). */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
     .lp-section[data-lp-type='cta']
     .lp-heading:is([data-size='heading'], [data-size='display'])::after,
-  :root[data-theme] .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio'] .stat__value::after,
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
     .guide__portrait:not([data-layout='quote'])
     .clip::after {
     animation: var(--lp-mark-draw, none);
@@ -419,7 +421,7 @@
   /* The hero's underline, drawn once the headline has risen (in time, at
      load: the hero is never staged). */
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='studio']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='studio']
     .lp-section[data-lp-type='hero']
     .lp-heading[data-size='display']::after {
     animation: lp-wipe var(--duration-slowest) var(--ease-smooth)

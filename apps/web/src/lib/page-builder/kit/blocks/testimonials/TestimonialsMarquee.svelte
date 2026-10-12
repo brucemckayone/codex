@@ -163,11 +163,11 @@
 
   /* ── moving: motion welcome, JavaScript running, a live page ─────────────── */
   @media screen and (prefers-reduced-motion: no-preference) {
-    :global(:root[data-theme] .lp:not([data-lp-still])) .tm-marquee[data-moving] {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion])) .tm-marquee[data-moving] {
       --_fade: clamp(var(--space-6), 6cqi, var(--space-24));
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__controls {
       display: flex;
@@ -175,7 +175,7 @@
 
     /* The sets start at the window's own edge, so one cycle ends exactly
        where it began. The edges fade, so no card is cut by a hard line. */
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__window {
       display: flex;
@@ -190,7 +190,7 @@
       );
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__lane {
       display: flex;
@@ -202,14 +202,14 @@
         linear infinite;
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]
       .tm-marquee__card {
       flex: none;
       inline-size: var(--_card);
     }
 
-    :global(:root[data-theme] .lp:not([data-lp-still]))
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion]))
       .tm-marquee[data-moving]:is(:hover, :focus-within, [data-paused])
       .tm-marquee__lane {
       animation-play-state: paused;

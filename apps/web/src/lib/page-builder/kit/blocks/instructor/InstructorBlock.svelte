@@ -225,6 +225,8 @@
     .guide-split:has(> .guide__portrait) {
       grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
       column-gap: calc(var(--lp-gap) * 1.5);
+      /* The words' share is the heading's room (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap) * 1.5) * 7 / 12);
     }
 
     /* The face stays in view while a long story scrolls past it. */
@@ -273,6 +275,8 @@
       align-items: stretch;
       margin-block: calc(-1 * var(--lp-pad));
       padding-inline-end: var(--_edge);
+      /* Across the band, less its end edge. */
+      --lp-heading-column: calc((100cqi - var(--_edge) - var(--lp-gap) * 1.5) * 7 / 12);
     }
 
     :global(.lp:is([data-lp-style='bold'], [data-lp-style='cinematic']))
@@ -395,6 +399,8 @@
       grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
       grid-template-areas: 'head portrait' 'line portrait' 'by portrait' 'more portrait';
       column-gap: 0;
+      /* The heading's room is its share (louder's fit, 03 X62). */
+      --lp-heading-column: calc(var(--lp-column) * 7 / 12);
     }
 
     :global(.lp[data-lp-style='cinematic']) .guide-quote > .guide__portrait {

@@ -84,6 +84,16 @@ export function headingRuns(text: string | undefined): HeadingRuns {
   return { first, widest: rest.reduce(max, NO_RUN) };
 }
 
+/**
+ * A heading's widest run, its first included. The type dial's `louder` grows
+ * a section heading only as far as this fits its column (03 X62): a heading
+ * has no picture beside it, so no run is apart.
+ */
+export function widestRun(text: string | undefined): RunSize {
+  const { first, widest } = headingRuns(text);
+  return max(first, widest);
+}
+
 /** The wider of two runs in each case, with the length of the wider as written. */
 function max(a: RunSize, b: RunSize): RunSize {
   return {

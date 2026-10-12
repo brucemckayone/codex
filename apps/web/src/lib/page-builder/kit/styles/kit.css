@@ -16,8 +16,8 @@
   --lp-font-body: var(--font-body, var(--font-sans));
   --lp-scale: var(--text-scale, 1);
 
-  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 6.4cqi, 6.5rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1rem + 3.2cqi, 3.5rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 6.4cqi, 6.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1rem + 3.2cqi, 3.5rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.9cqi, 1.6rem) * var(--lp-scale));
   /* Supporting text is quiet by colour and weight, never by size: body never
      drops below 1.125rem, and the smallest line on a page is 0.9375rem. */
@@ -27,7 +27,7 @@
   --lp-size-label: calc(clamp(0.9375rem, 0.9rem + 0.08cqi, 1rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(2.75rem, 1.6rem + 4cqi, 4.75rem) * var(--lp-scale));
   /* The closing call to action's heading: one step up from a section heading. */
-  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4.2cqi, 4.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4.2cqi, 4.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1;
   --lp-leading-heading: 1.05;
@@ -151,6 +151,46 @@
   --lp-radius-chip: var(--lp-radius-pill-if-rounded);
 }
 
+/* The type dial (03 X62): a factor beside the org's own text scale in every
+   headline size the kit and each Style declare, so each Style's sizes, steps
+   and curves keep their shape. Calmer takes every headline a step down;
+   louder takes the section headings a step up and leaves the opening's and
+   the closing ask's, which are drawn as large as they fit (X34). */
+.lp[data-lp-drama='calmer'] {
+  --lp-drama-display: 0.85;
+  --lp-drama-heading: 0.85;
+}
+
+/* `--lp-drama-held` takes louder's step back out of `--lp-size-heading`. A
+   quote, a price, a number or a lead tile's name is drawn at the heading's
+   size in a card's or a column's room, where no fit bound can see its words,
+   so it follows the dial down and never up. */
+.lp[data-lp-drama='louder'] {
+  --lp-drama-heading: 1.15;
+  --lp-drama-held: calc(1 / var(--lp-drama-heading));
+}
+
+/* The motion dial at still (03 X62) is the page reduced motion sees. Beside
+   the gates (`motion/attributes.ts`), the timing tokens go instant as
+   `tokens/motion.css` makes them for reduced motion, so what answers a hover
+   or a click changes at once. The transitions are declared again because a
+   custom property takes its `var()`s where it is declared: `:root`'s would
+   keep `:root`'s durations. 0.01ms, not 0: a transition of no length fires no
+   `transitionend`. `dials.test.ts` holds this to the token file. */
+.lp[data-lp-motion='still'] {
+  --duration-fast: 0.01ms;
+  --duration-normal: 0.01ms;
+  --duration-slow: 0.01ms;
+  --duration-slower: 0.01ms;
+  --duration-slowest: 0.01ms;
+  --transition-colors: color var(--duration-fast) var(--ease-default),
+    background-color var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default);
+  --transition-transform: transform var(--duration-normal) var(--ease-out);
+  --transition-opacity: opacity var(--duration-normal) var(--ease-default);
+  --transition-shadow: box-shadow var(--duration-normal) var(--ease-default);
+}
+
 /* The query container sections measure against. The root is deliberately NOT
    one: size containment implies layout containment, which makes an element the
    containing block of its `position: fixed` descendants — the sticky CTA would
@@ -187,6 +227,11 @@
      Anything placed from the top of a section that can continue reads this,
      not `--lp-pad`. */
   --lp-pad-start: var(--lp-pad);
+  /* The content column `.lp-inner` sets, for what is sized against it (a
+     heading's fit, 03 X62). It is declared on the section because a Style can
+     re-set the gutter or the container there, and `cqi` resolves where it is
+     used: against this section. */
+  --lp-column: calc(100cqi - 2 * max(var(--lp-gutter), (100cqi - var(--lp-container)) / 2));
 }
 
 .lp-section[data-lp-spacing='compact'] {
@@ -264,7 +309,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .lp:not([data-lp-still]) .lp-atmos[data-drift] {
+  .lp:not([data-lp-still], [data-lp-motion]) .lp-atmos[data-drift] {
     animation: lp-drift calc(var(--duration-slowest) * 30) var(--ease-smooth)
       infinite alternate;
   }

@@ -289,17 +289,17 @@
   /* The flip crossfades; the panel leaving keeps its place until it has
      faded, then drops out of reach. */
   @media (prefers-reduced-motion: no-preference) {
-    :global(.lp:not([data-lp-still])) .tf-toggle__tab {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .tf-toggle__tab {
       transition: var(--transition-colors);
     }
 
-    :global(.lp:not([data-lp-still])) .tf-toggle__panel {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .tf-toggle__panel {
       transition:
         opacity var(--duration-slow) var(--ease-out),
         visibility 0s;
     }
 
-    :global(.lp:not([data-lp-still])) .tf-toggle__panel[hidden] {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .tf-toggle__panel[hidden] {
       opacity: 0;
       transition:
         opacity var(--duration-slow) var(--ease-out),

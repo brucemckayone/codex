@@ -53,9 +53,9 @@
   --lp-tint-soft: 10%;
 
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.4rem, 0.8rem + 5.8cqi, 5.75rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
+  --lp-size-cta: calc(clamp(2.4rem, 0.8rem + 5.8cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.98;
   --lp-leading-heading: 1.02;

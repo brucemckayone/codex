@@ -12,8 +12,9 @@
     ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>
       (`only` may list types, `only=hero,transformation`, drawn in that order:
       a layout or colour applies to each listed section it fits)
-    ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious
-      (the page's dials, 03 X61; any subset, any order)
+    ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious,
+      drama:calmer|louder,motion:still|gentle
+      (the page's dials, 03 X61, X62; any subset, any order)
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->

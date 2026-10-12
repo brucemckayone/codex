@@ -39,13 +39,13 @@
 
 .lp[data-lp-style='quiet'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.75rem, 1.2rem + 5cqi, 6rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.75rem, 1.2rem + 5cqi, 6rem) * var(--lp-scale) * var(--lp-drama-display, 1));
   /* Section headings stay modest: room and the reading text do the work. */
-  --lp-size-heading: calc(clamp(1.75rem, 1.15rem + 1.8cqi, 2.6rem) * var(--lp-scale));
+  --lp-size-heading: calc(clamp(1.75rem, 1.15rem + 1.8cqi, 2.6rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1.02rem + 0.7cqi, 1.5rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.3rem, 1.12rem + 0.55cqi, 1.625rem) * var(--lp-scale));
   --lp-size-body: calc(clamp(1.125rem, 1.06rem + 0.26cqi, 1.3125rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.3rem, 1.2rem + 3.6cqi, 4.4rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.3rem, 1.2rem + 3.6cqi, 4.4rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1.06;
   --lp-leading-heading: 1.14;

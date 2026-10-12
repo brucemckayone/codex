@@ -158,8 +158,11 @@
   }
 
   /* ── band ──────────────────────────────────────────────────────────────── */
+  /* The band's heading is drawn at the ask's size, which louder leaves (03
+     X62): there is no step in it for the heading's fit to take back. */
   .cta[data-layout='band'] {
     --lp-size-heading: var(--lp-size-cta);
+    --lp-drama-held: 1;
     padding-block: var(--space-4);
   }
 
@@ -211,6 +214,8 @@
     .cta[data-layout='split'] {
       grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
       align-items: center;
+      /* The heading's room is its share (louder's fit, 03 X62). */
+      --lp-heading-column: calc((var(--lp-column) - var(--lp-gap)) * 7 / 12);
     }
   }
 
