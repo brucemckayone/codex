@@ -217,8 +217,9 @@
 <SkipLink />
 
 <!-- The FALLBACK bar. It sits above every route group's chrome, so it can never
-     inherit an org's brand; `_org/[slug]/+layout.svelte` mounts its own inside
-     `.org-layout`, and this one stands down while that is mounted (Codex-451j0). -->
+     inherit an org's brand; `_org/[slug]/+layout.svelte` and, on an org host,
+     `(auth)/+layout.svelte` mount their own inside their brand scope, and this
+     one stands down while one is mounted (Codex-451j0). -->
 <NavigationProgress placement="root" />
 
 {@render children()}

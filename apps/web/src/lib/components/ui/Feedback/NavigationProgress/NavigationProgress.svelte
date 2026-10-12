@@ -9,20 +9,28 @@
      * silently take the other's role (see `navigation-progress-scope`).
      *  - `root`: the root layout's fallback bar. Draws only while no brand
      *    scope has a bar of its own mounted.
-     *  - `brand`: mounted INSIDE a brand scope (`.org-layout`), so the bar
-     *    inherits that scope's `--color-interactive` and `--color-focus`.
+     *  - `brand`: mounted INSIDE a brand scope (`[data-org-brand]`), so the
+     *    bar inherits that scope's `--color-interactive` and `--color-focus`.
+     *    Draws while it is the newest brand bar mounted.
      */
     placement: 'root' | 'brand';
   }
 
   const { placement }: Props = $props();
 
-  onMount(() => (placement === 'brand' ? brandBars.register() : undefined));
+  /** This instance's identity in the brand-bar list. */
+  const bar = Symbol('navigation-progress');
 
-  // The root bar keeps tracking navigation while it stands down, so a hand-off
-  // mid-navigation (leaving the org tree for an `(auth)` page on the same host
-  // unmounts the org layout's bar) finishes the bar instead of cutting it.
-  const standsDown = $derived(placement === 'root' && brandBars.mounted);
+  onMount(() => (placement === 'brand' ? brandBars.register(bar) : undefined));
+
+  // Every instance keeps tracking navigation while it stands down, so a
+  // hand-off mid-navigation finishes the bar instead of cutting it: when the
+  // last brand scope unmounts the root bar picks up where it was, and a brand
+  // bar the incoming layout mounts still shows, because SvelteKit mounts the new
+  // tree before it clears `navigating`.
+  const standsDown = $derived(
+    placement === 'root' ? brandBars.mounted : !brandBars.draws(bar)
+  );
 
   let visible = $state(false);
   let completing = $state(false);

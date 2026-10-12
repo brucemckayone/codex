@@ -14,6 +14,7 @@
   import type { Snippet } from 'svelte';
   import { setContext } from 'svelte';
   import AuthShaderPane from '$lib/components/auth/AuthShaderPane.svelte';
+  import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import {
     darkTokenOverridesToCssVars,
     parseDarkColorOverrides,
@@ -134,6 +135,16 @@
   style:--brand-shader-logo-url={brandLogoUrl}
   style={tokenOverrideStyle}
 >
+  <!-- On an org host, login and sign-up are that org's pages, so they hold the
+       page-load bar HERE, where it inherits this element's brand remap (dark:
+       `--brand-color-dark` first), and the root layout's bar stands down
+       (Codex-451j0). Gated on `branding`, which the load sets only on an org
+       host, so a platform host keeps the root bar: one bar either way. Fixed
+       positioning takes it out of the grid, and this element sets no transform,
+       filter or z-index and no view-transition name. -->
+  {#if branding}
+    <NavigationProgress placement="brand" />
+  {/if}
   <AuthShaderPane {branding} fallbackPreset={data.defaultPreset} />
 
   <section class="auth-form-pane">

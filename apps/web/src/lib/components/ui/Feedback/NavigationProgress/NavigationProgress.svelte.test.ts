@@ -7,13 +7,16 @@
  * an element by INHERITANCE alone. The root bar is not a descendant of
  * `.org-layout`, so on every org page it drew the platform colour.
  *
- * THE FIX, and what is pinned here: the org layout mounts a second instance
- * INSIDE `.org-layout` (`placement="brand"`), and the root instance stands down
- * while one is mounted. So:
+ * THE FIX, and what is pinned here: each brand scope (the org layout, and the
+ * `(auth)` layout on an org host) mounts its own instance INSIDE itself
+ * (`placement="brand"`), and the root instance stands down while one is
+ * mounted. So:
  *   1. a page with no brand scope still gets the root bar;
  *   2. an org page gets exactly ONE bar, and it is the one inside the carrier;
  *   3. an unbranded org still gets a visible bar, on the platform default;
- *   4. when the brand scope unmounts, the root bar takes over again;
+ *   4. hand-offs never show two bars or none: org → auth on one host swaps one
+ *      brand scope for another mid-navigation, the two may briefly overlap,
+ *      and when the last brand scope goes the root bar takes over;
  *   5. what the bar paints is a token `org-brand.css` remaps in BOTH themes —
  *      light to `--brand-color`, dark to `--brand-color-dark` FIRST.
  *
@@ -52,6 +55,13 @@ function mountBar(placement: 'root' | 'brand', target: Element): Mounted {
   mounted.push(component);
   flushSync();
   return component;
+}
+
+/** Tear one bar down mid-test, as a layout swap does. */
+function unmountBar(component: Mounted): void {
+  unmount(component);
+  mounted = mounted.filter((c) => c !== component);
+  flushSync();
 }
 
 /** A stand-in for `.org-layout`: the element that carries the brand remap. */
@@ -109,16 +119,46 @@ describe('NavigationProgress: one bar, drawn inside the brand scope', () => {
     expect(bars()[0].closest('[data-org-brand]')).toBeNull();
   });
 
-  test('the root bar takes over when the brand scope unmounts mid-navigation', () => {
+  test('org → auth on one host: the incoming brand scope draws the one bar', () => {
     mountBar('root', document.body);
-    const brand = mountBar('brand', orgLayout({ branded: true }));
+    const org = mountBar('brand', orgLayout({ branded: true }));
     expect(bars()).toHaveLength(1);
 
-    // Leaving the org tree for an (auth) page on the same host unmounts the
-    // org layout while the navigation is still in flight.
-    unmount(brand);
-    mounted = mounted.filter((c) => c !== brand);
-    flushSync();
+    // SvelteKit tears the org layout down and mounts the (auth) layout while
+    // `navigating` is still set: it only clears it after the new tree renders.
+    unmountBar(org);
+    const auth = orgLayout({ branded: true });
+    mountBar('brand', auth);
+
+    expect(bars()).toHaveLength(1);
+    expect(bars()[0].closest('[data-org-brand]')).toBe(auth);
+  });
+
+  test('two brand scopes mounted at once still draw one bar, the newest', () => {
+    // If the outgoing layout were still mounted when the incoming one mounts,
+    // the count would sit at 2 — and both would draw without the newest rule.
+    mountBar('root', document.body);
+    const outgoing = orgLayout({ branded: true });
+    const org = mountBar('brand', outgoing);
+    const incoming = orgLayout({ branded: true });
+    mountBar('brand', incoming);
+
+    expect(bars()).toHaveLength(1);
+    expect(bars()[0].closest('[data-org-brand]')).toBe(incoming);
+
+    unmountBar(org);
+    expect(bars()).toHaveLength(1);
+    expect(bars()[0].closest('[data-org-brand]')).toBe(incoming);
+  });
+
+  test('the root bar takes over when the last brand scope unmounts mid-navigation', () => {
+    mountBar('root', document.body);
+    const org = mountBar('brand', orgLayout({ branded: true }));
+    expect(bars()).toHaveLength(1);
+
+    // Leaving the org tree for a route with no brand scope (an (auth) page
+    // whose org branding did not resolve) while the navigation is in flight.
+    unmountBar(org);
 
     expect(bars()).toHaveLength(1);
     expect(bars()[0].closest('.org-layout')).toBeNull();
