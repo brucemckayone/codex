@@ -1758,10 +1758,54 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     heading (only the hero's headline falls back), so the questions began untitled. The seed's
     copy type now requires one, so a new portal cannot ship without it.
   - **Not in this part:** the large gaps under the pricing cards and above the questions, which
-    need the page in a browser (the local dev stack is down). The seed change reaches a database
-    only through a re-seed, which is the owner's to run.
+    needed the page in a browser (the local dev stack was down); X58 is that part. The seed change
+    reaches a database only through a re-seed, which is the owner's to run.
   - **Tests:** `PageRenderer.svelte.test.ts` authors `best` on the one-off, where the platform would
     recommend the cheapest tier, and requires the call to action's price and deep link, the pricing
     section's link and the floating bar's price to name the same path (two plants: the call to
     action back on `{}`, and the context handing out nothing, each fail with `'£15'` for `'£49'`).
     Removing a seeded FAQ heading fails the seed's own type check.
+- **X58 · 2026-10-12 · 3b round 4, second part · A section with no words of its own continues the
+  band above it (BUILT, decided without the owner; Codex-61zsk.48).** The reference plan
+  (`phase3-sources/ref-plan`, sections 7 and 8): "The large gap under the cards goes", and "Today
+  the questions start with no title after a large gap."
+  - **What the gap was.** Measured on Ancestral Threads at 1440 (Studio), it is exactly 192px:
+    pricing's foot (96) and the questions' own top padding (96). That is the joint every pair of
+    sections on one ground gets. It read as a hole only because the questions have no heading. A
+    heading set in the same place (in the browser alone, never in the database) made the same
+    192px read as an ordinary section break. So the gap is not the page's rhythm being too loose.
+    It is a section with nothing to announce it, spaced as if it announced something.
+  - **The fix.** X56 titles every seeded FAQ, but that reaches a database only through a re-seed,
+    and a creator may leave any section untitled. The kit keeps such a section legitimate: the
+    hero's headline is its one sanctioned fallback, so the kit never invents a heading. Instead,
+    a section whose block has no head, on the same plain ground as the section above, continues
+    that band. It gives up its top padding (`--lp-pad-start`, which is now the band's top padding
+    for anything placed from it), so the band above's foot is the whole joint. Ancestral Threads'
+    questions now sit 96px under the cards at 1440 and 64px at 390. Across the eight Styles the
+    joint is that Style's own foot: Studio, Path and Cinematic 96, Poster 96, Soft 106, Bold 120,
+    Clean and Quiet 123. Soft and Poster keep their edge's overlap, since the cut is the ground's
+    own colour there.
+  - **Where it never applies:** across a change of ground (the bands part it), on or under a
+    picture, on the shader, or under the hero or the closing ask (each draws its own backdrop).
+  - **What "no head" means.** It is the block's own reading, not a guess from the outside. Nine
+    blocks draw their head from the eyebrow, heading and lead (benefits, curriculum, FAQ, gallery,
+    stats, story, testimonials, transformation, video), and all nine now read it through one
+    `hasHead`, which the page reads too. The other five (pricing, problem, instructor, preview,
+    text) head themselves another way and never continue.
+  - **The Styles.** Bold's slab and Quiet's hairline say "a new section starts here", so a
+    continuing section gets neither; the slab would also have sat in its words. Path's stop is
+    measured from the band's top padding, so on a continuing section it sits where it sits on any
+    untitled one, half a heading line below the band's top. A story with no heading already ran its
+    first scene to the band's top edge; it still does.
+  - **Not done:** the questions' heading itself on the owner's page, which needs the re-seed X56
+    already notes, or a heading typed in the editor.
+  - **Tests:** `continuingSections` against each condition: the untitled questions under the offer
+    continue; any one of the eyebrow, heading and lead keeps them apart; words that are only spaces
+    count as none; never across a change of ground, on the shader, on or under a picture, under the
+    hero or the closing ask, or for a type outside the nine; a hidden section between is not there;
+    and never the first. The page marks exactly that section. A guard test holds `HEADED_BY_WORDS`
+    to exactly the blocks that call `hasHead`, and leaves no block reading the three fields by hand.
+    Every condition was calibrated against a planted tree: removing each of the seven checks fails
+    a test, dropping a type from the list or hand-rolling one block's head fails the guard, and a
+    page that never passes the mark fails the page test. In the browser, removing the mark brings
+    Bold's slab and Quiet's hairline back.
