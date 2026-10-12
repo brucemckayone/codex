@@ -105,8 +105,8 @@
   );
   /* A stop sits on the middle of the section heading's first line. */
   --_path-y: calc(
-    var(--lp-pad-start) + var(--lp-edge-offset, 0px) + var(--_path-eyebrow, 0px) +
-      var(--lp-size-heading) * var(--lp-leading-heading) / 2
+    var(--lp-pad-start) + var(--lp-edge-offset, 0px) + var(--_path-lead, 0px) +
+      var(--_path-eyebrow, 0px) + var(--lp-size-heading) * var(--lp-leading-heading) / 2
   );
   --_path-ink: var(--lp-mark-ink);
   --_path-ahead: var(--lp-button-line);
@@ -128,6 +128,22 @@
 :is(.lp, #lp-style)[data-lp-style='path']
   .lp-section[data-lp-type]:has(.lp-eyebrow + .lp-heading, .hero__eyebrow + .hero__headline) {
   --_path-eyebrow: calc(var(--lp-size-label) * var(--lp-leading-title) + var(--lp-stack));
+}
+
+/* The guide's split, stacked (Codex-61zsk.26): its portrait comes first, a
+   4:5 picture as wide as the content column, then the split's gap, and the
+   heading under both, so the stop moves down by that much. Side by side (the
+   split's own 52rem) the heading heads its column again. In container units,
+   never `%`: the length is used in a gradient's position and in an inset,
+   where a percentage means two different boxes. */
+@container lp-page not (min-width: 52rem) {
+  :is(.lp, #lp-style)[data-lp-style='path']
+    .lp-section[data-lp-type='instructor']:has(> .lp-inner > .guide-split > .guide__portrait) {
+    --_path-lead: calc(
+      (100cqi - 2 * max(var(--lp-gutter), (100cqi - var(--lp-container)) / 2)) * 5 / 4 +
+        var(--lp-gap)
+    );
+  }
 }
 
 /* The closing band sets its heading at the ask's size, below the band's own
