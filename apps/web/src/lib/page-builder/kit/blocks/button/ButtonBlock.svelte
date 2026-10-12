@@ -81,7 +81,10 @@
   const shown = $derived(!dead || page.still || !!edit);
 </script>
 
-{#if shown}
+{#if !shown}
+  <!-- Nowhere to go, found once the stream settled: no band either. -->
+  <span class="button-none" hidden></span>
+{:else}
   <div class="button" data-layout={section.layout} data-action={kind}>
     {#if kind === 'join' && !unreadable}
       <OfferAsk {context} section="button" label={content.ctaLabel} size="lg" {edit} />
@@ -138,6 +141,11 @@
 {/if}
 
 <style>
+  /* ── nowhere to go on the live page: no band either ────────────────────── */
+  :global(.lp:not([data-lp-still]) .lp-section:has(> .lp-inner > .button-none)) {
+    display: none;
+  }
+
   .button {
     display: grid;
     gap: var(--space-3);
