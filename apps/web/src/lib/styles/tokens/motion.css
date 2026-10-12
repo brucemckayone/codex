@@ -30,7 +30,11 @@
   --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
-/* Reduced Motion Support */
+/* Reduced Motion Support. The near-zero tokens time what the collapse in
+   `reset.css` cannot reach: script (the page kit's count-up), and a
+   component's own `!important` transition, which outranks a `*` rule. The
+   collapse itself lives in `reset.css` alone. This file is imported after
+   it, so a copy of that rule here would override it (Codex-1vs02). */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-fast: 0.01ms;
@@ -38,10 +42,5 @@
     --duration-slow: 0.01ms;
     --duration-slower: 0.01ms;
     --duration-slowest: 0.01ms;
-  }
-
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
   }
 }
