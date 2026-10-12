@@ -165,9 +165,11 @@ describe('ScrollStrip', () => {
         writable: true,
         value: scrollTo,
       });
-      // Each item sits at its start, less the scroll, past a 48px inset.
+      // Each item sits at its start, less the scroll, past a 48px inset; the
+      // row's own window is 800 wide.
       vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
         function (this: Element) {
+          if (isTrack(this)) return { left: 0, width: 800 } as DOMRect;
           const i = Number(this.getAttribute('data-i') ?? 0);
           return {
             left: 48 + STARTS[i] - scrollLeft,
@@ -234,6 +236,34 @@ describe('ScrollStrip', () => {
       scrollTo.mockReset();
       next.click();
       expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    // Codex-61zsk.52: "1–3 of 18" beside the arrows of a long row.
+    const position = (first: number, last: number, total: number) =>
+      `${first}–${last} of ${total}`;
+    const readout = () =>
+      document.body.querySelector('.lp-strip__position') as HTMLElement | null;
+
+    it('says which items are wholly in view, counted from 1, as the row scrolls', () => {
+      render(WIDTHS.length, { position });
+      // At the start: 48–348 and 368–568 fit the 800 window; 588–888 does not.
+      expect(readout()?.textContent).toBe('1–2 of 6');
+      scrolled(320);
+      expect(readout()?.textContent).toBe('2–4 of 6');
+      scrolled(1100);
+      expect(readout()?.textContent).toBe('5–6 of 6');
+    });
+
+    it('keeps the position from a screen reader, which hears the list itself', () => {
+      render(WIDTHS.length, { position });
+      expect(readout()?.getAttribute('aria-hidden')).toBe('true');
+      // It leads the buttons' row.
+      expect(readout()?.parentElement?.firstElementChild).toBe(readout());
+    });
+
+    it('draws no position for a row that does not ask for one', () => {
+      render(WIDTHS.length);
+      expect(readout()).toBeNull();
     });
 
     it('jumps rather than glides under reduced motion', () => {
