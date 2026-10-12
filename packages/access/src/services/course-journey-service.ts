@@ -3772,7 +3772,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the editor.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -4145,7 +4154,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the dashboard.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),

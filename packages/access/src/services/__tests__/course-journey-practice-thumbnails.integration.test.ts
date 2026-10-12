@@ -211,6 +211,23 @@ describe('CourseJourneyService practice thumbnails (Codex-61zsk.52, Codex-e140e)
     for (const p of practices) expect(p.thumbnailUrl).not.toBe(keys.framed);
   });
 
+  // The frame object outlives a media delete (`MediaItemService.delete`
+  // clears `thumbnails/`, frames live under `media-thumbnails/`), so a join
+  // that ignores `deletedAt` would show members the deleted film's frame.
+  it('the member dashboard lends a deleted media item no picture and no length, and keeps its practice', async () => {
+    const dashboard = await svc.getCourseDashboard(creatorId, courseId, BASE);
+    const practices = dashboard?.stages[0]?.practices ?? [];
+    const gone = practices.find((p) => p.contentId === ids.gone);
+    expect(gone).toBeDefined();
+    expect([gone?.thumbnailUrl, gone?.durationSeconds]).toEqual([null, null]);
+    // A live media item still lends both.
+    const framed = practices.find((p) => p.contentId === ids.framed);
+    expect([framed?.thumbnailUrl, framed?.durationSeconds]).toEqual([
+      `${BASE}/${keys.framed}`,
+      600,
+    ]);
+  });
+
   it('the in-course player resolves the frame on its practice (Codex-e140e)', async () => {
     const data = await svc.getInCoursePractice(
       creatorId,
@@ -237,5 +254,33 @@ describe('CourseJourneyService practice thumbnails (Codex-61zsk.52, Codex-e140e)
     expect(byId.get(ids.custom)).toBe(customUrl);
     expect(byId.get(ids.written)).toBeNull();
     expect(byId.get(ids.draft)).toBe(`${BASE}/${keys.draft}`);
+  });
+
+  it('the studio curriculum editor lends a deleted media item no picture and no length, and keeps its practice', async () => {
+    const curriculum = await svc.getCourseCurriculumForEditor(
+      orgId,
+      courseId,
+      BASE
+    );
+    const practices = curriculum.stages[0]?.practices ?? [];
+    const gone = practices.find((p) => p.contentId === ids.gone);
+    expect(gone).toBeDefined();
+    expect([gone?.thumbnailUrl, gone?.durationSeconds]).toEqual([null, null]);
+    const framed = practices.find((p) => p.contentId === ids.framed);
+    expect([framed?.thumbnailUrl, framed?.durationSeconds]).toEqual([
+      `${BASE}/${keys.framed}`,
+      600,
+    ]);
+  });
+
+  it('the public sales read lends a deleted media item no length either', async () => {
+    const page = await svc.getCoursePage(orgId, pageSlug, BASE);
+    const practices = page?.stages[0]?.practices ?? [];
+    expect(
+      practices.find((p) => p.contentId === ids.gone)?.durationSeconds
+    ).toBeNull();
+    expect(
+      practices.find((p) => p.contentId === ids.framed)?.durationSeconds
+    ).toBe(600);
   });
 });

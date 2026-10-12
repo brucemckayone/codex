@@ -2118,8 +2118,12 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     `fetchpriority="low"`, behind the hero's, and the rest lazily, through `srcset` (`Media`
     gained `srcset`, `sizes` and `early`). The other curriculum reads used to hand out the
     frame's raw R2 key as the URL (Codex-e140e). Now one resolver, `resolvePracticeThumbnail`,
-    serves all of them. The canvas mapping now carries `durationSeconds` too, which it had
+    serves all of them. A deleted media item lends no picture and no length on any of them: its
+    frame object outlives the delete, so every read joins only live media, in the join, which
+    keeps the practice. The canvas mapping now carries `durationSeconds` too, which it had
     dropped since X57.
+  - **Drafts.** The canvas shows draft practices and the live page omits them, as the
+    curriculum section already does: the canvas draws from the editor's read.
   - **Shared with the curriculum.** `PracticeCard`, `PracticeTile` and `practiceCard()` live in
     `blocks/inside/`. A curriculum layout that groups practices by stage (Codex-61zsk.55) lays
     out the same cards with the stage line left off, so the kind, length and picture are never
