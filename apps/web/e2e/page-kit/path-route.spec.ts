@@ -12,6 +12,14 @@
  * heading's first line, as drawn at rest, in every section. Each seeded section is
  * pinned (`SEEDED_SECTIONS`); the guide's portrait is asserted, so its stacked
  * case is measured, never skipped.
+ *
+ * Except a cover hero, which the seed pins for this org. Its words are set at
+ * the foot of the band (`align-content: end`), so where its headline starts
+ * depends on how tall the words run, which no length worked out from the top
+ * can know. Path sets its route out from the cover's foot instead
+ * (`style-path.css`, the cover rule). The cover is held to that: its stop sits
+ * below the last of its words, so the route never runs through them, and
+ * inside its own band.
  */
 import { expect, test } from '@playwright/test';
 import {
@@ -82,23 +90,42 @@ for (const viewport of [
         const stop = probe.getBoundingClientRect().height;
         probe.remove();
         const heading = section.querySelector('h1, h2');
-        const top = section.getBoundingClientRect().top;
+        const box = section.getBoundingClientRect();
         const line = heading
           ? heading.getBoundingClientRect().top -
-            top +
+            box.top +
             Number.parseFloat(getComputedStyle(heading).lineHeight) / 2
           : null;
+        // A cover's words: from its headline to the foot of its last line.
+        const copy = section.querySelector('.hero-cover__copy');
+        const words = copy?.lastElementChild?.getBoundingClientRect();
         return {
           type: section.dataset.lpType ?? '',
+          cover: copy !== null,
           stop: Math.round(stop * 10) / 10,
           line: line === null ? null : Math.round(line * 10) / 10,
+          wordsEnd: words
+            ? Math.round((words.bottom - box.top) * 10) / 10
+            : null,
+          height: Math.round(box.height * 10) / 10,
         };
       })
     );
 
     expect(stops.map((s) => s.type)).toEqual(SHORELINE.sections);
-    for (const { type, stop, line } of stops) {
+    for (const { type, cover, stop, line, wordsEnd, height } of stops) {
       expect(line, `${type} has a heading`).not.toBeNull();
+      if (type === 'hero' && cover) {
+        expect(
+          stop,
+          `the cover's stop at ${stop}px sets out below its words (to ${wordsEnd}px)`
+        ).toBeGreaterThan(wordsEnd ?? Number.POSITIVE_INFINITY);
+        expect(
+          stop,
+          `the cover's stop at ${stop}px is inside its band (${height}px)`
+        ).toBeLessThan(height);
+        continue;
+      }
       expect(
         Math.abs(stop - (line ?? 0)),
         `${type}: the stop at ${stop}px, its heading's first line at ${line}px`
