@@ -93,4 +93,7 @@ export const QUIET: StyleDefinition = {
   fonts: { heading: 'Spectral', body: 'DM Sans' },
   // No colour bands, the bar included: it floats on the brand's own ground.
   sticky: 'base',
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

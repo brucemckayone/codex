@@ -77,4 +77,7 @@ export const PATH: StyleDefinition = {
   ],
   // A humanist pair, the faces of wayfinding signs (03 §4.1).
   fonts: { heading: 'Lato', body: 'Source Sans 3' },
+  // Hazy, as Studio: the org's moving background through a third of the
+  // inner pages' blur and a thinner veil, so it is seen moving (03 X53, X59).
+  atmosphere: 'hazy',
 };

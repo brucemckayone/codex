@@ -17,6 +17,7 @@ import {
 } from '$lib/components/ui/ShaderHero/tone-grid';
 import {
   atmosphereVeil,
+  imageColours,
   sectionNeed,
   type VeilLine,
   type VeilSection,
@@ -449,5 +450,34 @@ describe('atmosphereVeil', () => {
     flush();
     expect(read).toHaveBeenCalledTimes(2);
     detach?.();
+  });
+});
+
+describe('imageColours — a mark drawn with gradients (03 X59)', () => {
+  it("reads every stop of Path's route, as the browser computes it", () => {
+    expect(
+      imageColours(
+        'radial-gradient(circle at 50% 20.6px, color(srgb 0.51 0.32 0.0015) 4px, rgba(0, 0, 0, 0) 5px), radial-gradient(circle, oklch(0.6 0.1 80) 1px, rgba(0, 0, 0, 0) 1.5px)'
+      )
+    ).toEqual([
+      'color(srgb 0.51 0.32 0.0015)',
+      'rgba(0, 0, 0, 0)',
+      'oklch(0.6 0.1 80)',
+      'rgba(0, 0, 0, 0)',
+    ]);
+  });
+
+  it('reads nothing where nothing is drawn', () => {
+    expect(imageColours('none')).toEqual([]);
+  });
+
+  it('cannot read a picture, alone or among gradients', () => {
+    expect(imageColours('url("data:image/png;base64,AAAA")')).toBeNull();
+    expect(
+      imageColours(
+        'linear-gradient(rgb(0, 0, 0) 0px, rgb(0, 0, 0) 0px), url("paper.png")'
+      )
+    ).toBeNull();
+    expect(imageColours('image-set("a.png" 1x)')).toBeNull();
   });
 });

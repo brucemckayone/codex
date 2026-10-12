@@ -434,12 +434,3 @@
 .org-layout[data-hero-shader-active] .lp[data-lp-style='studio'] {
   --lp-atmosphere-ground: tint;
 }
-
-/* And that veil lets 1.6 times as much of the shader through as the proven
-   one (0.71 light / 0.78 dark on the first bands, 03 X53), under a third of
-   the inner pages' blur (`atmosphere: 'hazy'`): the owner's "a blur or
-   opacity over the full thing, just less". Measured over a real shader, not
-   proven over black and white (`schemes.test.ts`). */
-.org-layout[data-hero-shader-active] .lp[data-lp-style='studio'] {
-  --lp-atmosphere-show: 1.6;
-}

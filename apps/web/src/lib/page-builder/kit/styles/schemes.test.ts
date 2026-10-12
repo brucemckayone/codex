@@ -19,6 +19,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { PAGE_STYLE_IDS } from '../model/ids';
 import {
   atmosphereProven,
   GROUND_BANDS,
@@ -27,6 +28,7 @@ import {
   INK_CROSSOVER,
   resolveGroundBands,
 } from '../model/resolve';
+import { STYLES } from '../model/styles';
 
 const CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), 'schemes.css'),
@@ -4339,13 +4341,16 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
     );
   });
 
-  // 03 X54: a Style may let more of the shader through than the proven veil
-  // does (`--lp-atmosphere-show`). That veil is not proven over black and
+  // 03 X54: the hazy look lets more of the shader through than the proven
+  // veil does (`--lp-atmosphere-show`). That veil is not proven over black and
   // white, and no one multiple holds over every shader (X53's 1.6, measured
   // on 'flow', left 'glow' at 3.4:1 for 4.5:1 text), so the section is only
   // ever as thin as the page has measured, behind its own inks: the live
   // veil's `--_atmos-need` (`atmosphere-veil.ts`), which no stylesheet sets.
-  it('lets more of the shader through only where the page has measured it, on Studio alone', () => {
+  // 03 X59: one rule sets it, for every Style that asks for the hazy look,
+  // so no Style takes the thinner veil without the blur it was measured
+  // under.
+  it('lets more of the shader through only where the page has measured it, for the hazy look alone', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const stylesheets = readdirSync(dir)
       .filter((file) => file.endsWith('.css'))
@@ -4362,8 +4367,11 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
         show: Number(m[1]),
       }))
     );
-    expect(shows.map((s) => s.file)).toEqual(['style-studio.css']);
+    expect(shows.map((s) => s.file)).toEqual(['schemes.css']);
     expect(shows[0]?.show).toBeGreaterThanOrEqual(1);
+    expect(CODE).toMatch(
+      /\.org-layout\[data-hero-shader-active\] \.lp\[data-lp-atmosphere='hazy'\] \{\s*--lp-atmosphere-show: [\d.]+;\s*\}/
+    );
     // Unmeasured, the veil is the proven one: the need falls back to the floor.
     const rule =
       CODE.match(/\.lp \[data-lp-scheme='atmosphere'\] \{([^}]*)\}/)?.[1] ?? '';
@@ -4378,6 +4386,29 @@ describe('atmosphere on every band — the thinnest veil that holds, or none (03
       expect(CODE).toContain(
         `@property --_atmos-${end} { syntax: '<number>'; inherits: true; initial-value: 1; }`
       );
+  });
+
+  // 03 X59: the owner judged the inner pages' heavy blur under the proven
+  // veil "terrible" for a Moving background. So no Style keeps it: each takes
+  // the hazy look, or draws the shader sharp with its words on a panel (the
+  // panel is what keeps a sharp shader legible: X52's words-only veil over a
+  // sharp one was rejected).
+  it('shows every Style’s moving background hazy, or sharp behind a panel', () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const panelled = PAGE_STYLE_IDS.filter((style) =>
+      /--lp-atmosphere-veil:\s*panel/.test(
+        readFileSync(join(dir, `style-${style}.css`), 'utf8').replace(
+          /\/\*[\s\S]*?\*\//g,
+          ''
+        )
+      )
+    );
+    expect(panelled.length).toBeGreaterThan(0);
+    for (const style of PAGE_STYLE_IDS) {
+      expect(STYLES[style].atmosphere, style).toBe(
+        panelled.includes(style) ? 'sharp' : 'hazy'
+      );
+    }
   });
 });
 

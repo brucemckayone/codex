@@ -28,7 +28,8 @@
                                              proven veil lets through (03 X53).
                                              No longer proven over black and
                                              white, so it is measured over a
-                                             real shader first. Studio only.
+                                             real shader first. Set once, by
+                                             the hazy look (`schemes.css`).
      --lp-atmosphere-veil: section | panel   where that veil is drawn (03 X9).
                                              `section` (default): the whole
                                              band. `panel`: one card behind the
