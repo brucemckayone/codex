@@ -62,3 +62,44 @@ export function pageImageObjectKeys(baseKey: string): string[] {
 export function pageImageKeyOfObject(r2Key: string): string | null {
   return OBJECT_KEY.exec(r2Key)?.[1] ?? null;
 }
+
+/**
+ * Every page-image key anywhere in a value: the save diff's scan
+ * (`CourseJourneyService.saveJourneyPage`). It walks every string LEAF of
+ * the tree and keeps the ones that are EXACTLY a key the upload route mints
+ * (`pageIdOfPageImageKey`), so it needs no per-type schema knowledge: a
+ * Picture's `{ key, alt, focus, w, h }` (03 X64), a gallery's items and a
+ * section's background are all found the same way. Page copy, a link or a
+ * string that merely shares the prefix is inert.
+ *
+ * Takes `unknown` on purpose: it reads the OLD stored value (whatever an
+ * earlier version of the type persisted) as well as the NEW input, and a
+ * shape it does not recognise is walked past, never thrown on.
+ */
+export function pageImageKeysIn(
+  value: unknown,
+  into: Set<string> = new Set()
+): Set<string> {
+  if (typeof value === 'string') {
+    if (pageIdOfPageImageKey(value)) into.add(value);
+  } else if (Array.isArray(value)) {
+    for (const item of value) pageImageKeysIn(item, into);
+  } else if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) pageImageKeysIn(nested, into);
+  }
+  return into;
+}
+
+/**
+ * The keys a save drops: referenced before it and nowhere after it. This only
+ * NOMINATES them; the sweep decides, after a grace period, by asking whether
+ * any page in the org still shows the key, so an undo, a duplicate or a
+ * second Picture with the same picture keeps it.
+ */
+export function droppedPageImageKeys(
+  before: unknown,
+  after: unknown
+): string[] {
+  const kept = pageImageKeysIn(after);
+  return [...pageImageKeysIn(before)].filter((key) => !kept.has(key));
+}
