@@ -2458,10 +2458,29 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Style. `edge-clearance.test.ts` holds the rule, the full Picture's foot, and the depth's
     name in `surfaces.css`. Calibrated: removing the Break's padding failed its test, and
     renaming the depth failed the name's.
+    - A full-width Picture with no caption, in Soft and Poster at 1440 and 390: the next
+      section starts exactly at the photograph's foot, and the Picture's foot padding equals
+      the edge's depth (61.4px at 1440; 30.7px and 23px at 390), so the curve or angle is drawn
+      in the padding and never on the photograph. In Bold, which has no edge, both are 0. With a
+      caption (planted, since the gallery gives a Picture none), the foot is the compact rung:
+      the caption ends 0px above the next section at 1440 in Soft and Poster, where the edge's
+      depth is capped at exactly that rung, and 7.7px and 15.4px above it at 390. The edge never
+      covers the words, as for any compactly spaced section in those Styles. The curve's highest
+      point is mid-page and the caption starts at the left, so the words read clear of it.
+    - The Button's actions, planted one at a time in the gallery, in Bold and Soft, live and on
+      the canvas. A link opens in a new tab with `rel="noopener"`, its accessible name is "Find
+      out more (opens in a new tab)", and no price is shown beside it. A section jump goes to the
+      FAQ's anchor and scrolls to it. A Button aimed at a missing section is not drawn on the
+      live page; on the canvas it carries "The section this button goes to is hidden or deleted.
+      Visitors will not see this button until you choose another." A preview with no film hides
+      its whole section once the stream settles, so it leaves no band; on the canvas it stands
+      with "This journey has no preview film. Visitors will not see this button until you add
+      one."
+    - The canvas's prompts: an empty Picture says "Add a picture: tap here, then choose one.",
+      and a Break says "Pause · Medium. Visitors see only the space." The visitor's view of the
+      same page drops the empty Picture and shows neither prompt.
   - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading;
-    louder's fit (X62) over the Heading section's heading, to be run once X62 is on dev;
-    in a browser, a full Picture in Soft and Poster against the next edge, the Button's
-    actions, and the canvas's prompts.
+    louder's fit (X62) over the Heading section's heading, to be run once X62 is on dev.
   - **Tests:**
     - The bands: every Style's ordinary sections unchanged with the four in place, and every
       pair of every Style's ordinary types with each simple type between them (the premise
