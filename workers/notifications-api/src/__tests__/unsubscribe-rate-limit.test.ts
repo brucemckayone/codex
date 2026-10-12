@@ -45,6 +45,27 @@ import { describe, expect, it } from 'vitest';
 
 // RATE_LIMIT_PRESETS.api = 100 requests per 60s.
 const BUDGET = 100;
+const PERIOD_MS = 60_000;
+
+/**
+ * Miniflare simulates the rate-limit binding in fixed wall-clock windows: a
+ * request counts in window `floor(Date.now() / period)`, and the first request
+ * in a new window clears EVERY bucket. A burn that straddles a boundary is
+ * refilled part-way, so request 101 passes ("expected 200 to be 429", PR #571,
+ * Codex-3285r). A burn takes about 2.3s in CI, so one starts only with this
+ * much of the window left, and otherwise at the start of the next window.
+ */
+const ROOM_MS = 15_000;
+
+/** The longest wait for a fresh window, plus the burn and its checks. */
+const BURN_TIMEOUT_MS = 30_000;
+
+async function inOneWindow(): Promise<void> {
+  const left = PERIOD_MS - (Date.now() % PERIOD_MS);
+  if (left < ROOM_MS) {
+    await new Promise((resolve) => setTimeout(resolve, left + 250));
+  }
+}
 
 /**
  * Hit the unsubscribe endpoint. Each call charges the token bucket for `path`
@@ -64,8 +85,9 @@ async function hit(
   return res;
 }
 
-/** Spend the whole budget on one (path, ip) pair. */
+/** Spend the whole budget on one (path, ip) pair, inside one window. */
 async function burnBudget(path: string, ip: string): Promise<void> {
+  await inOneWindow();
   for (let i = 0; i < BUDGET; i++) {
     const res = await hit(path, ip);
     // Sanity: while still under budget, never 429.
@@ -96,43 +118,62 @@ describe('unsubscribe rate-limit middleware (Codex-ttavz.8 / kgrdp.17)', () => {
     expect(res.headers.get('X-RateLimit-Reset')).toBeNull();
   });
 
-  it('returns 429 with Retry-After once the budget is exceeded (negative path)', async () => {
-    const path = '/unsubscribe/exhaust-budget-token';
-    const ip = '203.0.113.20';
+  it(
+    'returns 429 with Retry-After once the budget is exceeded (negative path)',
+    async () => {
+      const path = '/unsubscribe/exhaust-budget-token';
+      const ip = '203.0.113.20';
 
-    await burnBudget(path, ip);
+      await burnBudget(path, ip);
 
-    const overBudget = await hit(path, ip);
-    expect(overBudget.status).toBe(429);
-    expect(overBudget.headers.get('Retry-After')).not.toBeNull();
-  });
+      const overBudget = await hit(path, ip);
+      expect(overBudget.status).toBe(429);
+      expect(overBudget.headers.get('Retry-After')).not.toBeNull();
+    },
+    BURN_TIMEOUT_MS
+  );
 
-  it('keeps separate budgets per token: a fresh token AND a fresh address pass', async () => {
-    const ip = '203.0.113.30';
-    await burnBudget('/unsubscribe/token-isolation-a', ip);
-    expect((await hit('/unsubscribe/token-isolation-a', ip)).status).toBe(429);
+  it(
+    'keeps separate budgets per token: a fresh token AND a fresh address pass',
+    async () => {
+      const ip = '203.0.113.30';
+      await burnBudget('/unsubscribe/token-isolation-a', ip);
+      expect((await hit('/unsubscribe/token-isolation-a', ip)).status).toBe(
+        429
+      );
 
-    // Both signals must differ. The address bucket for .30 is spent too, so a
-    // fresh token on the SAME address is still blocked — that is
-    // combineSubjects working, not a keying bug.
-    expect((await hit('/unsubscribe/token-isolation-b', ip)).status).toBe(429);
+      // Both signals must differ. The address bucket for .30 is spent too, so a
+      // fresh token on the SAME address is still blocked — that is
+      // combineSubjects working, not a keying bug.
+      expect((await hit('/unsubscribe/token-isolation-b', ip)).status).toBe(
+        429
+      );
 
-    // Fresh token + fresh address → both buckets fresh → allowed.
-    const allowed = await hit('/unsubscribe/token-isolation-b', '203.0.113.31');
-    expect(allowed.status).not.toBe(429);
-  });
+      // Fresh token + fresh address → both buckets fresh → allowed.
+      const allowed = await hit(
+        '/unsubscribe/token-isolation-b',
+        '203.0.113.31'
+      );
+      expect(allowed.status).not.toBe(429);
+    },
+    BURN_TIMEOUT_MS
+  );
 
-  it('the token bucket blocks even from an untouched address', async () => {
-    // The inverse of the case above, and the one that matters for the DB
-    // write-amplification threat: replaying ONE valid token is capped no
-    // matter how many addresses the replay comes from.
-    const path = '/unsubscribe/token-bucket-token';
-    await burnBudget(path, '203.0.113.40');
-    expect((await hit(path, '203.0.113.40')).status).toBe(429);
+  it(
+    'the token bucket blocks even from an untouched address',
+    async () => {
+      // The inverse of the case above, and the one that matters for the DB
+      // write-amplification threat: replaying ONE valid token is capped no
+      // matter how many addresses the replay comes from.
+      const path = '/unsubscribe/token-bucket-token';
+      await burnBudget(path, '203.0.113.40');
+      expect((await hit(path, '203.0.113.40')).status).toBe(429);
 
-    const otherAddress = await hit(path, '203.0.113.41');
-    expect(otherAddress.status).toBe(429);
-  });
+      const otherAddress = await hit(path, '203.0.113.41');
+      expect(otherAddress.status).toBe(429);
+    },
+    BURN_TIMEOUT_MS
+  );
 
   // `/health` composes `standardDatabaseCheck`, so every probe is a real Neon
   // round trip (~3s in CI). Four of them serially blows the 5s default, which
