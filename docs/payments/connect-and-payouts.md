@@ -69,6 +69,15 @@ Owner decisions Q1 and Q2 (SEC-01).
 organisation in the query string but acts on the one in the body, so any
 organisation owner or admin can open any other organisation's payout dashboard.
 
+## Payout timing
+
+Money reaches a payee's **Stripe balance** when their transfer is made, but moves
+from there to their **bank** only after the **14-day refund window** (owner
+decision 2026-10-13, "Hold for the window"). That way a refund within the window
+can always be clawed back from the Stripe balance. The platform sets every
+connected account's payout schedule; creators cannot change it — **gap**:
+`Codex-2hxff.29` (today Stripe's default schedule applies).
+
 ---
 
 ## Organisation ownership
@@ -209,7 +218,9 @@ alignment.
 Refunds and disputes reverse paid slices in proportion and adjust pending ones;
 see [refunds](purchases.md#refunds) and [disputes](purchases.md#disputes). When
 a payee's balance cannot cover a reversal, a `refund_reviews` row records the
-debt for manual settlement.
+debt, and it is deducted from their next payouts until cleared — they are told,
+and the debt and each deduction show in their earnings — **gap**:
+`Codex-2hxff.30`.
 
 ## Earnings screens
 

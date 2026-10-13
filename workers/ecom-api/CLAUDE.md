@@ -74,8 +74,10 @@ verifyStripeSignature → createWebhookHandler (logs; 200, or 500 on a transient
   (`Codex-2hxff.7`).
 - **MUST** ignore events about Stripe objects created by another environment —
   production and local development share one sandbox (`Codex-2hxff.5`).
-- **MUST** use `createWebhookDbClient(env)` and `await cleanup()` in a `finally`
-  block.
+- **MUST** use `createWebhookDbClient(env)` and release it in a `finally` block.
+  Every handler `await`s `cleanup()` today; whether it should be
+  `waitUntil(cleanup())` instead is open in `Codex-ev3k` (webhook lifecycle
+  hygiene).
 - **MUST** fire-and-forget cache invalidation and emails through `waitUntil`;
   never block the webhook response on them.
 - **NEVER** put DB queries or email composition in handlers — delegate to services.
@@ -88,7 +90,7 @@ verifyStripeSignature → createWebhookHandler (logs; 200, or 500 on a transient
 ## Configuration
 
 Secrets and vars are listed in
-[docs/payments/operations.md → Secrets and configuration](../../docs/payments/operations.md#secrets-and-configuration).
+[docs/payments/operations.md → Secrets and configuration](../../docs/payments/operations.md#secrets-and-configuration-ecom-api).
 Production secrets live in the GitHub environment `production` and reach the
 worker (`ecom-api-production`) at deploy time.
 

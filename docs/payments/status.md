@@ -48,12 +48,14 @@ add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.26` | P1 | This documentation (in progress) | — |
-| `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard | [purchases](purchases.md#refunds) |
+| `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
+| `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
+| `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
+| `Codex-2hxff.31` | P2 | Customer refund policy and creator payout terms drafted for legal review | [status](#open-questions) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
-Related open beads outside the epic: `Codex-aqk92` (refund policy questions),
-`Codex-in0g4` (refund reviews for subscriptions), `Codex-rtwpv` (fee writes not
+Related open beads outside the epic: `Codex-in0g4` (refund reviews for subscriptions), `Codex-rtwpv` (fee writes not
 atomic), `Codex-sing6` (tier-change epic), `Codex-1ilxl` (account-wide seed
 cleanup), `Codex-xyb7v` (fee admin app), `Codex-gvx03` (raw Stripe error shown in
 the portal form), `Codex-chh3e` and `Codex-vas3y` (skipped payout and
@@ -91,7 +93,12 @@ option chosen. All dated 2026-10-13 unless noted.
 | Early fraud warnings | "Refund automatically" |
 | Payout schedule | "Bank account only" — creators change their bank account, not their schedule |
 | Who issues refunds | "Platform support" |
-| Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (`docs/archive` is kept) |
+| Refund window | "14 days" |
+| Funding refunds | "Hold for the window" — bank payouts wait out the 14-day refund window |
+| Clawback shortfalls | "From future earnings" |
+| Policy text | "Draft both" — customer refund policy and creator payout terms, for legal review |
+| Billing portal configuration | "Create it now" → `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` |
+| Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (`docs/archive` is kept). Their generator script and the Stripe skill reference: "Yes, add to #585 now" |
 | Refund clawback (earlier, `Codex-13v21`) | Reverse transfers on refund; record a `refund_reviews` debt when the payee's balance is too low |
 | Agreements (2026-05-17) | One-off sales use only the uploading creator's agreement; the creator's share is fixed at acceptance while the platform fee is read at each sale; no pro-rating — whoever is active at the invoice gets its full share |
 | Cancellation (2026-04-21) | Cancelling keeps access until the end of the paid period |
@@ -107,9 +114,11 @@ recover at checkout.
 
 Decisions still needed from the owner:
 
-1. **Refund operations** (`Codex-aqk92`): the refund window, how to keep enough
-   platform balance to fund refunds, what happens when a creator's balance stays
-   negative, the customer-facing refund policy (UK consumer law for digital
-   content), and what the creator terms say about clawbacks. (Who issues refunds
-   is decided: platform support.)
-2. **Ownership transfer screen**: waiting on an HTML mockup and data design.
+1. **Legal review** of the customer refund policy and creator payout terms once
+   drafted (`Codex-2hxff.31`) — including how UK consumer law for digital content
+   applies.
+2. **Ownership transfer screen**: an HTML mockup and data design are being
+   prepared for review.
+
+The refund-policy questions in `Codex-aqk92` were all answered on 2026-10-13 and
+that bead is closed.

@@ -133,9 +133,9 @@ Refunds are issued by **platform support only** — never by creators, and never
 self-served by customers (owner decision 2026-10-13, "Platform support") — from
 an admin screen that calls Stripe and then lets the `charge.refunded` webhook do
 the rest, so there is one refund path — **gap**: `Codex-2hxff.28` (today refunds
-can only be started in the Stripe Dashboard). The refund window, how the platform
-stays able to fund refunds and the customer-facing policy are still open in
-`Codex-aqk92` (refund policy).
+can only be started in the Stripe Dashboard). Support can refund up to **14 days**
+after the purchase (owner decision 2026-10-13, "14 days"). The customer-facing
+refund policy is being drafted for legal review — `Codex-2hxff.31`.
 
 Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. Each event is
 handled for the amount **newly** refunded — the charge's cumulative
@@ -167,10 +167,14 @@ be expanded — Stripe stopped including it by default in API version
 2022-11-15) — **gap**: `Codex-2hxff.8`.
 
 - If the payee's Connect balance is too low, a `refund_reviews` row is written
-  for manual settlement: `creator_absorbed`, `platform_absorbed` or
-  `manually_reversed`. This is the chosen policy — reverse on refund, with a
-  debt ledger as the fallback (`Codex-13v21`). Refund reviews need an operations
-  screen — **gap**: `Codex-2hxff.8` (no reader today).
+  recording the debt. This is the chosen policy — reverse on refund, with a debt
+  ledger as the fallback (`Codex-13v21`). The debt is **recovered from the
+  payee's future earnings** (owner decision 2026-10-13, "From future earnings") —
+  **gap**: `Codex-2hxff.30`. Because payouts are held for the 14-day refund window
+  ([payout timing](connect-and-payouts.md#payout-timing)), a refund normally finds
+  the money still in the payee's Stripe balance; debts mostly come from disputes,
+  which can arrive later. Refund reviews need an operations screen — **gap**:
+  `Codex-2hxff.8` (no reader today).
 - Any other reversal failure is retried. A row is marked `reversed` only once
   the reversal succeeds — **gap**: `Codex-2hxff.8`.
 
