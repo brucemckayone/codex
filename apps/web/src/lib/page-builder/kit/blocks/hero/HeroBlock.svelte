@@ -24,7 +24,9 @@
   the public page it appears only while a hero video the awaited view says is
   attached (`course.filmsAttached.hero`, Codex-61zsk.40) is on its way, so a
   video-only hero is framed from the first paint rather than re-framed above
-  the fold; one that then fails to resolve leaves the words alone.
+  the fold; one that then fails to resolve leaves the words alone. The cover
+  draws its play button in the words' column, not over the picture, so it
+  holds that button's place too, hidden, while the video is on its way.
 
   A medium or a long headline is marked `data-medium` / `data-long` (the
   kit's tiers, `model/long-heading.ts`; long as the problem statement's): a
@@ -218,7 +220,20 @@
     style:--lp-heading-chars={chars}
   >
     {@render copy('start')}
-    {#if settled.clip}<div class="hero__enter-c">{@render watchControl(settled)}</div>{/if}
+    <!-- One box for the play button, held while the video is on its way, so
+         the words neither rise nor push the band taller when it lands. -->
+    {#if settled.clip || heroComing}
+      <div
+        class="hero-cover__watch hero__enter-c"
+        data-held={settled.clip ? undefined : ''}
+        inert={!settled.clip}
+      >
+        <WatchButton
+          label={content.watchLabel ?? COPY.hero.watch}
+          onclick={() => settled.clip && watch(settled.clip)}
+        />
+      </div>
+    {/if}
   </div>
 {:else if layout === 'poster'}
   <!-- Where the page is looked at, the picture's place is held (the clip or
@@ -457,6 +472,11 @@
     padding-block: calc(var(--lp-pad) * 1.5) var(--lp-pad);
     color: var(--lp-ink);
     isolation: isolate;
+  }
+
+  /* Held for a video still on its way: its place, not yet the button. */
+  .hero-cover__watch[data-held] {
+    visibility: hidden;
   }
 
   /* A scrim shaped to the WORDS: every line sits on at least 72% of the scrim
