@@ -463,6 +463,45 @@ describe('PageRenderer', () => {
     });
   });
 
+  // The Type rules are keyed on the root's Type, never on the Style, so a page
+  // that names none must still name its own: an unset root would draw no
+  // Style's type at all.
+  describe("the page's Type (03 X73)", () => {
+    const typed = (style: 'bold' | 'soft', facets: unknown): KitPage => {
+      const page = samplePage(style);
+      return { ...page, design: { ...page.design, facets: facets as never } };
+    };
+
+    it.each(
+      PAGE_STYLE_IDS
+    )('names the %s page’s own Type when it borrows none', async (style) => {
+      const root = await render({ page: samplePage(style) });
+      expect(root.dataset.lpTypeFacet).toBe(style);
+    });
+
+    // The allow-list is empty until each pair is proven, so every pair is
+    // one the Style may not take, and the page draws its own.
+    it.each([
+      ['a Type the Style may not take yet', { type: 'poster' }],
+      ['a Type that is no Type', { type: 'path' }],
+      ['a bag that is not one', 'poster'],
+    ])('draws its own Type for %s', async (_, facets) => {
+      const root = await render({ page: typed('bold', facets) });
+      expect(root.dataset.lpTypeFacet).toBe('bold');
+    });
+
+    it('draws the gallery’s proof Type whatever the list says', async () => {
+      const root = await render({
+        page: samplePage('soft'),
+        proofType: 'bold',
+      });
+      expect([root.dataset.lpStyle, root.dataset.lpTypeFacet]).toEqual([
+        'soft',
+        'bold',
+      ]);
+    });
+  });
+
   describe('atmosphere and background images (03 §5)', () => {
     const IMAGE = { key: 'landing-pages/page-1/images/image-1' };
     const CDN = 'https://cdn.example';

@@ -3063,3 +3063,84 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     heading's line too (a section's `--lp-heading-column` elsewhere is a cap, not a line). An hour
     of a run was once lost to one slow worker, so a page that does not load is now a fault and the
     run goes on, and faults are printed as each page is read.
+- **X73 · 2026-10-13 · 3c · The Type facet's mechanism, drawing nothing new (Codex-61zsk.56, part
+  one; BUILT. The owner approved the data design, `phase3-sources/type-facet/data-design.md`, from
+  the D0 spike's option B′, 05 §6. Three choices below were decided without the owner, each marked.)**
+  A page can name another Style's Type, `design.facets.type` (Bold, Poster, Soft or Quiet): that
+  Style's sizes, weights, case, tracking and leading and its fitted hero, in the page's own faces.
+  The page keeps its own surfaces, marks, motion, spacing and order. This part builds the mechanism
+  with an empty allow-list, so no page can draw a borrowed Type yet and every page draws exactly as
+  before; part two proves each pair (its hero fit, the louder sweep with a Type axis, Poster's Type
+  under Bold's lift) and lists the ones that pass.
+  - **The data.** `TYPE_FACETS` in `ids.ts` and its validation twin (pinned by
+    `ids.parity.test.ts`), `facets` on the kit's `PageDesign` and on shared-types' `SectionDesign`,
+    and `TYPE_FACET_BASES`, the allow-list, a Type list per Style, empty. The write boundary
+    (`pageFacetsSchema`, on both design schemas) degrades an unknown Type to the Style's own, never
+    a failed save. `upgradePage` carries a Type its Style may take and drops any other, so the
+    editor's next save wipes it.
+  - **Decided without the owner: the allow-list is checked on read, not at the write boundary.** The
+    data design put both checks at the boundary. Which Style may take which Type is checked where a
+    page is read (`readPageFacets`, by the renderer and by `upgradePage`), so the boundary checks
+    only the vocabulary and the list lives once, in `ids.ts`. A pair taken off the list later must
+    stop drawing on the pages saved before, which only a read can see; a second copy at the boundary
+    would also need the default Style's twin. Rejected: both checks (two copies of a list that
+    changes with every proof).
+  - **Decided without the owner: the root always names its Type.** The data design set
+    `data-lp-type-facet` only for an allowed pair. The renderer sets it on every page, to the
+    page's own Style unless it borrows one, and every Type rule is keyed on it. A Type rule then
+    weighs exactly what it weighed keyed on the Style, one attribute for one, so no specificity
+    moves (the corners dial still wins by one attribute, X34's continuous fit still beats its
+    steps). Rejected: setting it only for a borrowed Type, which needs every Type rule written
+    twice, once per key.
+  - **Decided without the owner: the filing.** TYPE is how the words are set: sizes, weights, case,
+    tracking, leading and hyphenation, a line's measure in `ch`, the hero's fit
+    (`--lp-display-scale`), and the heading fit's face and run. The spike filed rhythm (padding,
+    margin, gap, the column and the section pads) under Type as well. Here spacing stays the
+    Style's: the design's own list for the Type ("faces, sizes, case, tracking, leading") names no
+    spacing; a borrowed column width or section pad would reflow every band, which is not a
+    headline; and every one of the 26 rules outside the roots that set spacing alone is a Style's
+    own arrangement (a gallery's gaps, a caption's inset, a portrait's margin). Also the Style's: a
+    centred line's balance (`text-wrap`, which answers the centring), a title's lift (a layout's
+    hook, `Heading.svelte` says so), a button drawn as a link (`text-decoration`), and Cinematic's
+    titles lit from behind (`text-shadow`, a light in the accent). Rejected: the spike's filing,
+    and filing by property alone, which would have moved Soft's card padding away from its border.
+  - **The re-key.** 66 rules in the eight sheets move from the Style's key to the Type's, whole: an
+    attribute for an attribute. Each Style's root splits in two, its Type
+    (`.lp[data-lp-type-facet='<id>']`) and the rest, and five rules split the same way: Bold's
+    stage list (the block's size stays, the name's size moves), Bold's stat label (its type moves,
+    its ink stays), Cinematic's opening card (its display step moves, the card stays) and Bold's
+    credentials in their two variants (the weight moves, the rules stay).
+  - **The couplings** (the data design's H1–H15), each a Style's device that carries type and stays
+    the Style's, whole: Bold's lift (H1: its clip is measured in the headline's em, read from the
+    Type's size), Bold's stage number (H9: the block's size, the Type's tracking token, so it
+    follows whichever Type is drawn), Cinematic's scroll numerals (H10), Poster's sticker (H15) and
+    Poster's chapter figure, a device as H10's numerals are. H2 and H3 are part two's proofs.
+  - **The gallery** takes `?type=<id>` (`proofType`), which draws any pair, listed or not, so a pair
+    is measured before it is offered. A page never passes it.
+  - **Measured: nothing changes.** Every element's computed style (and its `::before` and
+    `::after`) and every kit token on the root and each section were read before and after the
+    re-key: the full gallery page and five layout pages (every section type at each of its
+    layouts, the hero again at its medium and long fits), 8 Styles, 1440 and 390, light (and dark
+    on the full page). 336 cases and 154,207 paths, none changed by the re-key. The one case that
+    differed drew a missing-picture tile where a photograph failed to load in the earlier run (CSS
+    cannot add an element; every other path matched), and the same case read twice on the final
+    head is identical. The probe is calibrated: with the gallery's `?type=poster` on Bold's and
+    Soft's pages, 717 of 1,276 and 1,004 of 1,296 paths change.
+  - **What a borrowed Type draws** (the gallery's proof, none offered): a section heading takes
+    the Type's size and case (Bold's 90.2px is 74.6px in capitals under Poster's Type and 41.6px
+    under Quiet's; Soft's 51.2px is 90.2px under Bold's), while the column, the corners and the
+    buttons' padding stay the page's (Bold 82rem, Soft 68rem, Clean 76rem, Quiet 64rem), and no
+    page scrolls sideways at 1440 or 390.
+  - **Tests** (CI):
+    - `type-facet.test.ts`, read from every sheet and block: each rule keyed on the Type or on the
+      Style, never both (a second key may sit inside `:where()`); nothing but type on a Type's key;
+      no type on a Style's key but for the five devices, each of which must still name a rule; no
+      token declared by both a Type's root and a Style's; every Style has a Type root;
+    - `facets.test.ts` (the reader, with a list of its own), `upgrade.test.ts`,
+      `PageRenderer.svelte.test.ts` (the root always names its Type; a pair off the list, an
+      unknown Type and a stray bag draw the Style's own; the proof draws any pair),
+      `ids.parity.test.ts`, and the validation schemas' tests.
+    - Calibrated: 13 plants (6 on the data path, 7 on the guards), each failing its own tests, and
+      a second key inside `:where()` passing.
+  - **No new request, no cache change.** The Types use the page's own faces, and the facet travels
+    in the page document as the dials do.

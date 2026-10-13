@@ -40,7 +40,10 @@
    Fonts: suggests Bitter over Figtree; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='studio'] {
+/* Studio's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='studio'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
   --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-display, 1));
   --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.5rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
@@ -56,6 +59,11 @@
   --lp-tracking-heading: -0.012em;
   --lp-tracking-title: -0.005em;
 
+  --lp-measure: 58ch;
+  --lp-measure-lead: 40ch;
+}
+
+.lp[data-lp-style='studio'] {
   /* ── shape: the org's corners bent by 0.5, never past `--radius-md` ───── */
   --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.5), var(--radius-md));
   --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.5), var(--radius-md));
@@ -66,8 +74,6 @@
 
   /* ── rhythm: a notebook column ────────────────────────────────────────── */
   --lp-container: 72rem;
-  --lp-measure: 58ch;
-  --lp-measure-lead: 40ch;
 
   /* ── surfaces ─────────────────────────────────────────────────────────── */
   --lp-texture: paper;
@@ -189,12 +195,12 @@
    as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(68 / var(--lp-heading-chars, 120), 0.34));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='hero']
       .hero-poster:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(31 / var(--lp-heading-chars, 120), 0.21));
     }
@@ -307,7 +313,7 @@
 /* A figure is drawn at three quarters of its cell, so the widest one and
    its circle together just fill it, and the label steps clear of the
    circle's foot (in the figure's own em). */
-:is(.lp, #lp-style)[data-lp-style='studio'] .stat__value {
+:is(.lp, #lp-style)[data-lp-type-facet='studio'] .stat__value {
   font-size: min(1em, 100cqi / (var(--_chars) * 0.62) * 0.74);
 }
 
@@ -401,7 +407,7 @@
     grid-row: 1 / span 2;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='studio'] .problem[data-layout='list'] .problem__lines li {
+  :is(.lp, #lp-style)[data-lp-type-facet='studio'] .problem[data-layout='list'] .problem__lines li {
     font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1) * 0.68);
     line-height: var(--lp-leading-heading);
   }
@@ -453,7 +459,7 @@
 }
 
 /* A Picture's caption in the display face's italic, like a note on a print. */
-:is(.lp, #lp-style)[data-lp-style='studio'] .lp-section[data-lp-type='picture'] .picture__caption {
+:is(.lp, #lp-style)[data-lp-type-facet='studio'] .lp-section[data-lp-type='picture'] .picture__caption {
   font-family: var(--lp-font-display);
   font-style: italic;
 }

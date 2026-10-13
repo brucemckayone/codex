@@ -1091,3 +1091,34 @@ describe("upgradePage · the page's dials (03 X61)", () => {
     ).toEqual({ spacing: 'spacious' });
   });
 });
+
+describe("upgradePage · the page's Type (03 X73)", () => {
+  // A Type the page's Style may not take reads as the Style's own and leaves
+  // no key, so the editor's next save drops it. The allow-list is empty until
+  // each pair is proven (`readPageFacets` is tested with a list in facets.test.ts).
+  it('drops a Type the Style may not take, an unknown one, and a bag that is not one', () => {
+    for (const facets of [
+      { type: 'poster' },
+      { type: 'path' },
+      'poster',
+      null,
+      {},
+    ])
+      expect(
+        upgradePage({ design: { style: 'bold', facets }, sections: [] }).design
+      ).toEqual({ style: 'bold' });
+  });
+
+  it('keeps the dials beside a Type it drops', () => {
+    expect(
+      upgradePage({
+        design: {
+          style: 'soft',
+          dials: { drama: 'louder' },
+          facets: { type: 'bold' },
+        },
+        sections: [],
+      }).design
+    ).toEqual({ style: 'soft', dials: { drama: 'louder' } });
+  });
+});

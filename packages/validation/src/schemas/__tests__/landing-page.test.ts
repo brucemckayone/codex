@@ -15,10 +15,12 @@ import {
   PAGE_STYLE_IDS,
   pageDesignSchema,
   pageDialsSchema,
+  pageFacetsSchema,
   SECTION_LAYOUTS,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
   sectionStyleSchema,
+  TYPE_FACETS,
 } from '../landing-page';
 
 describe('SECTION_LAYOUTS / SECTION_TYPE_IDS', () => {
@@ -133,5 +135,28 @@ describe('pageDialsSchema (03 X61)', () => {
     expect(pageDesignSchema.parse({ style: 'soft', dials: 'airy' })).toEqual({
       style: 'soft',
     });
+  });
+});
+
+describe('pageFacetsSchema (03 X73)', () => {
+  it('accepts every Type', () => {
+    for (const type of TYPE_FACETS)
+      expect(pageFacetsSchema.parse({ type })).toEqual({ type });
+  });
+
+  // An unknown Type is the Style's own, never a failed save, as a dial's
+  // unknown step is. Which Style may take which Type is checked on read.
+  it("degrades an unknown Type to the Style's, and drops a bag that is not one", () => {
+    expect(pageFacetsSchema.parse({ type: 'path', surface: 'soft' })).toEqual(
+      {}
+    );
+    for (const bag of ['poster', 7, null, ['bold']])
+      expect(pageFacetsSchema.parse(bag)).toBeUndefined();
+  });
+
+  it('rides on the page design, beside its dials', () => {
+    expect(
+      pageDesignSchema.parse({ style: 'clean', facets: { type: 'poster' } })
+    ).toEqual({ style: 'clean', facets: { type: 'poster' } });
   });
 });

@@ -70,7 +70,36 @@ export const PAGE_DIALS = {
 export type PageDialId = keyof typeof PAGE_DIALS;
 export type PageDialStep<D extends PageDialId> = (typeof PAGE_DIALS)[D][number];
 export type PageDials = { [D in PageDialId]?: PageDialStep<D> };
-export const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
+const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
+
+/**
+ * The Type facet (03 X73): a Style's headline type on another Style's page,
+ * its sizes, weights, case, tracking and leading, and its fitted hero, in
+ * the page's own faces. The page keeps its own surfaces, marks, motion,
+ * spacing and order. The page's own Type is the absent key, so its reset
+ * deletes it.
+ */
+export const TYPE_FACETS = ['bold', 'poster', 'soft', 'quiet'] as const;
+export type TypeFacet = (typeof TYPE_FACETS)[number];
+export type PageFacets = { type?: TypeFacet };
+
+/**
+ * The Types each Style may take: the allow-list (03 X73). A pair is listed
+ * only once it is proven (its hero fit, the louder sweep), so a pair not
+ * listed is never offered and never drawn. Empty until the proofs land.
+ */
+export const TYPE_FACET_BASES: Readonly<
+  Record<PageStyleId, readonly TypeFacet[]>
+> = {
+  bold: [],
+  clean: [],
+  soft: [],
+  cinematic: [],
+  path: [],
+  poster: [],
+  studio: [],
+  quiet: [],
+};
 
 /**
  * Every section type and its hand-designed layouts. The FIRST layout of each
@@ -158,7 +187,7 @@ export function isSectionSpacingId(value: unknown): value is SectionSpacingId {
   );
 }
 
-export function isPageDialStep<D extends PageDialId>(
+function isPageDialStep<D extends PageDialId>(
   dial: D,
   value: unknown
 ): value is PageDialStep<D> {
@@ -177,4 +206,28 @@ export function readPageDials(value: unknown): PageDials | undefined {
     if (isPageDialStep(dial, step)) dials[dial] = step;
   }
   return Object.keys(dials).length > 0 ? (dials as PageDials) : undefined;
+}
+
+export function isTypeFacet(value: unknown): value is TypeFacet {
+  return (
+    typeof value === 'string' &&
+    (TYPE_FACETS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * A stored facets bag, keeping a Type only where `style` may take it; none →
+ * undefined. A Style change that leaves the Type off the new Style's list
+ * drops it here, on read, and the editor saves what `upgradePage` returns.
+ */
+export function readPageFacets(
+  value: unknown,
+  style: PageStyleId,
+  bases: Readonly<Record<PageStyleId, readonly TypeFacet[]>> = TYPE_FACET_BASES
+): PageFacets | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const type = (value as Record<string, unknown>).type;
+  return isTypeFacet(type) && bases[style].includes(type)
+    ? { type }
+    : undefined;
 }

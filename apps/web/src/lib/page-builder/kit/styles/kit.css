@@ -2,8 +2,10 @@
    PAGE KIT — BASE TOKENS AND FRAME (contract §4, §6)
 
    The `--lp-*` token system every primitive and block reads. These are the
-   neutral defaults; each Style (`style-<id>.css`) re-sets them on
-   `.lp[data-lp-style=…]`. Sizes are CONTAINER-relative (`cqi`) so a section
+   neutral defaults; each Style (`style-<id>.css`) re-sets them, its type on
+   `.lp[data-lp-type-facet=…]` (the page's Type, which another Style's page
+   may borrow: 03 X73) and the rest on `.lp[data-lp-style=…]`. Sizes are
+   CONTAINER-relative (`cqi`) so a section
    lays out by the width it is given — a 390px canvas frame gets the phone
    layout even inside a desktop window — and scale with the brand's text scale.
 

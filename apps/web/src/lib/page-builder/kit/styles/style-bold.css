@@ -45,7 +45,10 @@
    Fonts: no suggestion — the brand's own face is the point.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='bold'] {
+/* Bold's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='bold'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
   --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale) * var(--lp-drama-display, 1));
   --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
@@ -65,7 +68,16 @@
   --lp-tracking-heading: -0.03em;
   --lp-tracking-title: -0.015em;
   --lp-weight-label: var(--font-bold);
+  --lp-measure-lead: 36ch;
 
+  /* ── the button's label: larger, at the weight the org gives its loudest
+     call, its home hero's (semibold) ───────────────────────────────────── */
+  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
+  --lp-button-weight: var(--font-semibold);
+  --lp-button-tracking: -0.01em;
+}
+
+.lp[data-lp-style='bold'] {
   /* ── shape: a quarter of the org's corners, never past `--radius-sm` ──── */
   --lp-radius-card: clamp(0rem, calc(var(--radius-card) * 0.25), var(--radius-sm));
   --lp-radius-media: clamp(0rem, calc(var(--radius-lg) * 0.25), var(--radius-sm));
@@ -76,18 +88,13 @@
   --_bold-slab: calc(var(--border-width-thick) * 3);
 
   /* ── buttons: square-shouldered, solid ────────────────────────────────── */
-  /* The org's button height (kit.css), at the weight the org gives its
-     loudest call, its home hero's (semibold); wide, with a larger label. */
+  /* The org's button height (kit.css), wide (its label is the Type's). */
   --lp-button-pad: var(--space-8);
-  --lp-button-size: calc(clamp(1.05rem, 1rem + 0.3cqi, 1.25rem) * var(--lp-scale));
-  --lp-button-weight: var(--font-semibold);
-  --lp-button-tracking: -0.01em;
 
   /* ── rhythm: the widest column, room for the type to be big ───────────── */
   --lp-pad-regular: clamp(var(--space-16), var(--space-6) + 7cqi, var(--space-32));
   --lp-pad-spacious: clamp(var(--space-20), var(--space-8) + 10cqi, calc(var(--space-32) * 1.25));
   --lp-container: 82rem;
-  --lp-measure-lead: 36ch;
 
   /* ── motion ───────────────────────────────────────────────────────────── */
   /* The hero's headline lifts out of its own baseline; the words under it
@@ -137,23 +144,23 @@
    picture, which drops by one headline line, steps down with it. A phone
    draws the display at its floor already, where a long headline runs on. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-statement:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.7;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-centered:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-centered:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.62;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-cover__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.5;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-poster:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.45;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-split__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.4;
   }
 }
@@ -168,19 +175,19 @@
    step above the long one, so a longer headline is never set larger. The
    centred hero holds every medium headline at its own size. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-statement:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.9;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-cover__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.7;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-poster:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.65;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='bold'] .hero-split__copy:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.55;
   }
 }
@@ -200,22 +207,22 @@
    value. An unset length counts as the longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(43 / var(--lp-heading-chars, 120), 0.45));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-split__copy:has(> .hero__headline) {
       --lp-display-scale: calc(0.7 * min(1, pow(31 / var(--lp-heading-chars, 120), 0.36)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(19 / var(--lp-heading-chars, 120), 0.39));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='bold'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='bold'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(57 / var(--lp-heading-chars, 120), 0.55)));
     }
@@ -324,7 +331,7 @@
    portrait — steps down one size, so it keeps to two or three lines in its
    share of the column instead of breaking a word to a line. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='bold']
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']
     :is(
       .pricing[data-layout='focus'] > .pricing__head,
       .stats[data-layout='grid'] > .stats__head,
@@ -346,9 +353,15 @@
    the stage's name can stand beside, its number set in the display face. */
 :is(.lp, #lp-style)[data-lp-style='bold'] .timeline {
   --_marker: clamp(var(--space-12), 4.5cqi, var(--space-20));
+}
+
+/* Bold's Type sets the stage's name larger beside it (03 X73, H9). */
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .timeline {
   --lp-size-title: calc(clamp(1.5rem, 1rem + 1.8cqi, 2.6rem) * var(--lp-scale));
 }
 
+/* The number is the block's: its size is the block's, and its tracking is
+   read from the page's Type, so it follows whichever Type is drawn (H9). */
 :is(.lp, #lp-style)[data-lp-style='bold'] .timeline__marker {
   font-size: calc(var(--_marker) * 0.6);
   letter-spacing: var(--lp-tracking-display);
@@ -357,7 +370,7 @@
 /* ── the story told as headlines ─────────────────────────────────────────── */
 /* Each moment's name at a heading's scale, so the scroll reads as a run of
    headlines, each coming to full ink as it becomes the one in view. */
-:is(.lp, #lp-style)[data-lp-style='bold'] .story-scroll {
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .story-scroll {
   --lp-size-title: calc(clamp(1.75rem, 0.9rem + 3cqi, 3.5rem) * var(--lp-scale));
   --lp-leading-title: var(--lp-leading-heading);
   --lp-tracking-title: var(--lp-tracking-heading);
@@ -409,7 +422,7 @@
 /* ── the numbers: counted up, at display size ────────────────────────────── */
 /* Fewer to a line, so each figure can take the display size: four make two
    pairs, never four small ones. Labels read at body size under them. */
-:is(.lp, #lp-style)[data-lp-style='bold'] .stats[data-layout='row'] {
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .stats[data-layout='row'] {
   --_figure: var(--lp-size-display);
 }
 
@@ -421,10 +434,13 @@
   }
 }
 
-:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
+:is(.lp, #lp-style)[data-lp-type-facet='bold'] .stat__label {
   max-inline-size: 24ch;
   font-size: var(--lp-size-body);
   font-weight: var(--lp-weight-label);
+}
+
+:is(.lp, #lp-style)[data-lp-style='bold'] .stat__label {
   color: var(--lp-ink);
 }
 

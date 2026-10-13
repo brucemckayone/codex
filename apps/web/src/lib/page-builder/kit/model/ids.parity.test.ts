@@ -21,6 +21,7 @@ import {
   SECTION_LAYOUTS as VALIDATION_SECTION_LAYOUTS,
   SECTION_SPACING_IDS as VALIDATION_SECTION_SPACING_IDS,
   SECTION_TYPE_IDS as VALIDATION_SECTION_TYPE_IDS,
+  TYPE_FACETS as VALIDATION_TYPE_FACETS,
   isButtonHref as validationIsButtonHref,
 } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
@@ -33,6 +34,8 @@ import {
   SECTION_LAYOUTS,
   SECTION_SPACING_IDS,
   SECTION_TYPE_IDS,
+  TYPE_FACET_BASES,
+  TYPE_FACETS,
 } from './ids';
 
 describe('ids.ts ↔ @codex/validation landing-page.ts', () => {
@@ -65,6 +68,19 @@ describe('ids.ts ↔ @codex/validation landing-page.ts', () => {
       Object.entries(PAGE_DIALS).map(([dial, [step]]) => [dial, step])
     );
     expect(pageDialsSchema.parse(steps)).toEqual(steps);
+  });
+
+  it('TYPE_FACETS matches exactly (03 X73)', () => {
+    expect(VALIDATION_TYPE_FACETS).toEqual(TYPE_FACETS);
+  });
+
+  // Each Type is another Style's own, so it can only be one of them; every
+  // Style has a list, and none lists its own Type (that is the absent key).
+  it('every Type is a Style, and every Style lists only Types not its own', () => {
+    for (const type of TYPE_FACETS) expect(PAGE_STYLE_IDS).toContain(type);
+    expect(Object.keys(TYPE_FACET_BASES)).toEqual([...PAGE_STYLE_IDS]);
+    for (const [style, types] of Object.entries(TYPE_FACET_BASES))
+      expect(types, style).not.toContain(style);
   });
 
   it('BUTTON_ACTION_IDS matches exactly (03 X64)', () => {
