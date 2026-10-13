@@ -2,6 +2,8 @@
 
 Revenue-share agreement state machine and share math for creator↔organization relationships. Operates on the `creator_organization_agreements` / `agreement_proposals` schema and feeds the payout pipeline.
 
+**Behaviour lives in the payments spec:** [docs/payments/agreements.md](../../docs/payments/agreements.md) — share units, negotiation, the review date, ending an agreement, and how a share applies to each kind of sale. It marks every place the code does not match yet with its bead.
+
 ## Key Exports
 
 - **`AgreementService`** — proposal lifecycle (propose → counter → accept/decline/withdraw → terminate) and active-agreement reads
@@ -28,6 +30,8 @@ const service = new AgreementService({
 - Owner lookups filter `organizationMemberships.status = 'active'` — a removed owner keeps `role='owner'` with `status='inactive'` and must never resolve as a party
 - Share math is integer-only (basis points); `sumActiveCreatorShares` + org share must satisfy the invariant in `agreement-math.ts`
 - Pending proposals have NO agreement row yet — proposal reads and agreement reads are separate paths by design
+- A share is basis points of the **post-platform** pool. Read it from the accepted proposal (`proposed_creator_share_percent`); never read the legacy `organization_fee_percentage` (`10000 − share`) in new code
+- The term is a **review date**, not an expiry — either side may terminate at any time, and an agreement keeps paying after its review date until it is ended
 
 ## Strict Rules
 

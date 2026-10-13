@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * Subscription Paused → Resumed Roundtrip E2E (PR 2 — defense-in-depth)
  *
- * Covers the PR 2 row in docs/subscription-cache-audit/testing-matrix.md:
+ * Covers the pause/resume rules in docs/payments/access.md:
  *   "Paused → resumed roundtrip"
  *   "subscription.paused writes revocation + invalidates"
  *   "subscription.resumed clears revocation + invalidates"
@@ -53,7 +53,7 @@ const BLOCKER_MESSAGE =
   'Blocked by Codex-z1wuz — seeded subscription has synthetic stripeSubscriptionId. ' +
   'Enable by adding a test-only POST /_test/subscription-event to ecom-api ' +
   '(gated by env.ALLOW_TEST_HOOKS) that dispatches handleSubscriptionPaused / ' +
-  'handleSubscriptionResumed directly. See docs/subscription-cache-audit/phase-2-followup.md.';
+  'handleSubscriptionResumed directly. See docs/payments/access.md.';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   await page.goto('/login');

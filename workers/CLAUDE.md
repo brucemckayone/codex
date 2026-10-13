@@ -35,7 +35,7 @@ All ports from `@codex/constants` `SERVICE_PORTS`. Use `buildServiceUrl(service,
 | Check org slug availability | organization-api | `GET /api/organizations/check-slug/:slug` |
 | Process payments | ecom-api | `POST /checkout/create`, `POST /webhooks/stripe/booking` |
 | Manage subscriptions | ecom-api | `POST /subscriptions/checkout`, `POST /subscriptions/cancel` |
-| Stripe Connect onboarding | ecom-api | `POST /connect/onboard` |
+| Stripe Connect onboarding | ecom-api | `POST /connect/me/onboard` (self-scoped; the org routes are being retired) |
 | View purchase history | ecom-api | `GET /purchases` |
 | Admin analytics | admin-api | `GET /api/admin/analytics/revenue`, `GET /api/admin/analytics/dashboard-stats` |
 | Admin content mgmt | admin-api | `POST /api/admin/content/:id/publish`, `DELETE /api/admin/content/:id` |

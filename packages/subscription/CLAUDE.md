@@ -1,50 +1,71 @@
 # @codex/subscription
 
-Subscription tier management, checkout lifecycle, Stripe Connect account onboarding, and revenue split calculation.
+Organisation tiers, subscriptions, course subscription plans, Stripe Connect
+accounts and the payouts ledger (transfers, pending payouts, drains).
+
+**Behaviour lives in the payments spec — read it before changing money code:**
+[docs/payments/subscriptions.md](../../docs/payments/subscriptions.md) (tiers,
+lifecycle, tier and price changes, failed payments, refunds),
+[docs/payments/connect-and-payouts.md](../../docs/payments/connect-and-payouts.md)
+(Connect, ownership, ledger, drains) and
+[docs/payments/fees-and-splits.md](../../docs/payments/fees-and-splits.md)
+(invoice split maths). The spec describes the intended behaviour and marks every
+place the code does not match yet with its bead.
 
 ## Key Exports
 
-**Services**:
-- **`TierService`** — Subscription tier CRUD with Stripe Product/Price sync
-- **`SubscriptionService`** — Checkout sessions, webhook handling, tier changes, cancellation
-- **`ConnectAccountService`** — Stripe Express Connect onboarding and account management
+- **`TierService`** — tier CRUD and Stripe Product/Price sync
+- **`SubscriptionService`** — subscription checkout, webhook handling, tier
+  changes, cancellation, invoice transfers, pending-payout drains, earnings reads
+- **`CourseSubscriptionService`** — course subscription plans and their webhooks
+- **`ConnectAccountService`** — Connect onboarding, status, login links
+- **`calculateRevenueSplit(amountCents, platformFeeBps, orgFeeBps)`** — integer
+  three-way split; the platform and organisation round up, the creator pool takes
+  the remainder
 
-**Utilities**:
-- **`calculateRevenueSplit(amountCents, platformFeePercent, orgFeePercent)`** — Three-way revenue split (platform → org → creator pool). Integer math only (pence). Returns `RevenueSplit: { platformFeeCents, organizationFeeCents, creatorPayoutCents }`.
+Errors (`src/errors.ts`): `TierNotFoundError`, `TierHasSubscribersError`,
+`TierSortOrderConflictError`, `SubscriptionNotFoundError`,
+`AlreadySubscribedError`, `SubscriptionCheckoutError`,
+`SubscriptionPaymentRequiredError`, `CourseSubscriptionPlanNotFoundError`,
+`CourseSubscriptionPlanExistsError`, `AlreadyCourseSubscribedError`,
+`ConnectAccountNotFoundError`, `ConnectAccountNotReadyError`,
+`CreatorConnectRequiredError`, `ConnectPlatformNotConfiguredError`.
 
-**Error classes**: `TierNotFoundError`, `TierHasSubscribersError`, `TierSortOrderConflictError`, `SubscriptionNotFoundError`, `AlreadySubscribedError`, `SubscriptionCheckoutError`, `ConnectAccountNotFoundError`, `ConnectAccountNotReadyError`, `CreatorConnectRequiredError`
+## Construction
 
-**Validation schemas** (re-exported from `@codex/validation`): `createTierSchema`, `updateTierSchema`, `reorderTiersSchema`, `createSubscriptionCheckoutSchema`, `cancelSubscriptionSchema`, `changeTierSchema`, `connectOnboardSchema`, `listSubscribersQuerySchema`, etc.
-
-## Constructor Pattern
-
-All three services take `(config: ServiceConfig, stripe: Stripe)`:
+In `procedure()` handlers use `ctx.services.tier`, `ctx.services.subscription`,
+`ctx.services.connect` — the registry
+(`packages/worker-utils/src/procedure/service-registry.ts`) wires everything:
 
 ```ts
-import { TierService, SubscriptionService, ConnectAccountService } from '@codex/subscription';
-import { createStripeClient } from '@codex/purchase';
-
-const stripe = createStripeClient(env.STRIPE_SECRET_KEY);
-const tier = new TierService({ db, environment }, stripe);
-const subscription = new SubscriptionService({ db, environment }, stripe);
-const connect = new ConnectAccountService({ db, environment }, stripe);
+new SubscriptionService(
+  { db, environment, cache, waitUntil, mailer, payoutMailer, webAppUrl, feeConfig },
+  stripe // createStripeClient(secretKey) from @codex/purchase
+);
 ```
 
-In `procedure()` handlers, access via `ctx.services.tier`, `ctx.services.subscription`, `ctx.services.connect` — the service registry handles construction.
+Webhook handlers and the payouts cron build their own instances and must pass
+the **same** config. Leaving out `feeConfig` silently applies the `FEES`
+constants instead of fee configuration, and leaving out `payoutMailer` drops the
+payout-released email — the open defects `Codex-2hxff.7` and `Codex-2hxff.13`.
 
-## TierService Responsibilities
+## Tiers
 
-- Create / update / delete / list / reorder tiers scoped by `organizationId`
-- Sync tiers to Stripe: `stripe.products.create()` + 2x `stripe.prices.create()` (monthly + annual)
-- Price changes create new Stripe Prices (immutable) and archive old ones
-- Idempotency keys on all Stripe create calls — safe to retry
-- Orphan prevention: if DB insert fails, archives the Stripe Product
-- Only one tier per org can have `isRecommended: true` (enforced in a transaction)
-- Soft delete only; cannot delete tiers with active subscribers (`TierHasSubscribersError`)
+- Scoped by `organizationId`. One Stripe Product plus a monthly and an annual
+  Price, on the platform account.
+- A price change creates new Prices (Prices are immutable) and archives the old
+  ones. How existing subscribers move is specified in
+  [subscriptions.md → Price changes](../../docs/payments/subscriptions.md#price-changes).
+- If the DB insert fails, the new Stripe Product is archived (orphan prevention).
+- One `isRecommended` tier per organisation (enforced in a transaction).
+- `sortOrder` **is** the access hierarchy. Soft delete only; a tier with
+  subscribers who have not cancelled cannot be deleted (`TierHasSubscribersError`).
 
-### Archived-tier semantic (Q8 product decision)
+### Archived tiers resolve on read paths
 
-Soft-deleted tiers behave as **archived, not gone**. They are excluded from active-tier listings and cannot receive new writes or new subscription checkouts, but they **must still resolve for read/historic paths**: access-control checks, subscription → tier joins in notification/reporting code, and any query that resolves tier metadata for a subscription that predates the delete.
+A soft-deleted tier is **archived, not gone**: it takes no new writes or
+checkouts, but must still resolve for access checks, notification joins and
+historic reads of subscriptions that predate the delete.
 
 | Path | Helper | Filters `deletedAt` |
 |---|---|---|
@@ -52,108 +73,96 @@ Soft-deleted tiers behave as **archived, not gone**. They are excluded from acti
 | Read (access check, email/notification joins, historic reads) | public `TierService.getTierForAccessCheck(tierId)` | **No** — archived tiers resolve |
 | Active-tier list (storefront, admin) | `listTiers` / `listAllTiers` | Yes — strict |
 
-Callers MUST pick the variant that matches their path. Using the strict helper for a read path silently breaks subscribers whose tier was archived after they subscribed; using the loose helper for a write path lets a deleted tier silently receive new subscriptions.
+Pick the variant that matches the path. The strict helper on a read path breaks
+subscribers whose tier was archived; the loose helper on a write path lets a
+deleted tier take new subscriptions.
 
-## SubscriptionService Responsibilities
+## Access hierarchy
 
-- Create Stripe Checkout sessions in `subscription` mode
-- Handle Stripe webhook events: `customer.subscription.created/updated/deleted`, `invoice.payment_succeeded/failed`
-- Execute multi-party revenue transfers on `invoice.payment_succeeded`:
-  1. `stripe.transfers.create()` to org Connect account
-  2. `stripe.transfers.create()` to each creator's Connect account
-  3. Platform retains its fee in Stripe balance
-- Tier changes (upgrade/downgrade) via `stripe.subscriptions.update()` with proration
-- Cancel / reactivate subscriptions
-- Query subscriber stats and current subscription
+`subscribers ⊇ followers ⊇ public`: an active subscription unlocks
+followers-only content without a follower row (the follower row is the fallback
+for ex-subscribers who still follow). Tier-gated content needs a tier whose
+`sortOrder` is at least the content's minimum tier. The grant path is in
+`ContentAccessService` (`packages/access/CLAUDE.md`); the full rules are in
+[docs/payments/access.md](../../docs/payments/access.md).
 
-### Access hierarchy (Codex-xybr3)
+## Webhook ordering (self-heal)
 
-The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**: an active subscription to an org grants followers-only content access automatically — subscribers do **not** need an explicit follower row for `accessType='followers'` content. The follower row remains as a fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
+Stripe does not guarantee delivery order: `invoice.payment_succeeded` or
+`invoice.payment_failed` can arrive before `checkout.session.completed` has
+recorded the subscription. `SubscriptionService.ensureSubscriptionDataPresent`
+is the single self-heal helper:
 
-Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierarchy: a subscription only unlocks tier-gated content if the subscriber's tier `sortOrder >= content.minimumTierId.sortOrder`. The grant path is implemented in `ContentAccessService` (see `packages/access/CLAUDE.md`).
+1. Fast path: the row exists → use it.
+2. Slow path: retrieve the subscription from Stripe, validate the
+   `codex_user_id` / `codex_organization_id` / `codex_tier_id` metadata, and insert
+   the subscription, follower and membership rows in one transaction.
+3. Unique violation → another handler won the race; re-select.
+4. Stripe 404 or missing metadata → warn and exit with 200.
+5. Stripe 5xx or a DB error → let it propagate so the webhook returns 500 and
+   Stripe retries.
 
-Revenue split defaults: Platform 10% of gross, Org 15% of post-platform, Creators 85% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
+Subscriptions are created from `checkout.session.completed`;
+`customer.subscription.created` is not handled. Invoice handlers never log
+"unknown subscription" — they self-heal. Concurrent self-heal and completion
+yield exactly one row.
 
-### Webhook ordering resilience (Codex-t7psp)
+## Payouts pipeline invariants
 
-Stripe does **NOT** guarantee webhook delivery order. On a fresh subscription, `invoice.payment_succeeded` and `invoice.payment_failed` can arrive **before** `customer.subscription.created`. Without resilience the first payout (race #1) and the first past_due flip (race #2) were silently dropped.
+Read [connect-and-payouts.md](../../docs/payments/connect-and-payouts.md) before
+touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
+`resolvePendingPayouts`, `sweepUnresolvedPayouts` or `assertGbpOnly`.
 
-`SubscriptionService.ensureSubscriptionDataPresent(stripeSubId, context)` is the central self-heal helper. It:
+- **GBP only.** Every `stripe.transfers.create()` hard-codes `currency:
+  CURRENCY.GBP` and is preceded by `assertGbpOnly(...)`. A new transfer call site
+  without the guard and a test is a regression.
+- **Deterministic idempotency keys.** `${chargeId}_org_fee`,
+  `${chargeId}_creator_${creatorId}`, `${chargeId}_creator_pool_owner`,
+  `payout_${payoutId}`. Never random or time-based keys.
+- **Every slice gets a ledger row** — paid, or pending until the payee is payable.
+  Never drop a slice with only a log line.
+- **`wasActive` comes from our DB row** (`getAccountByStripeId`), not Stripe's
+  `previous_attributes`, which is unreliable on capability-ricochet events.
+- **Per-row error isolation** in `resolvePendingPayouts` and
+  `sweepUnresolvedPayouts`: one bad row never stops the batch.
+- The sweep is an ecom-api cron at `0 * * * *`, **production only**; minute `0`
+  is load-bearing (shared database wake).
 
-1. Fast-paths: SELECT subscription. If present → `{ subscription, justInserted: false }`.
-2. Slow-path: retrieves the subscription from Stripe (or uses caller's `knownStripeSub`), validates `codex_user_id` / `codex_organization_id` / `codex_tier_id` metadata, and inserts `subscriptions` + `organizationFollowers` + `organizationMemberships` rows in one transaction.
-3. On `isUniqueViolation`: another handler raced us — re-SELECT and return `justInserted: false`.
-4. On Stripe 404 or missing metadata: WARN + return `null` (caller exits cleanly with 200).
-5. On Stripe 5xx / DB error: bubble (caller returns 5xx, Stripe retries).
+## Connect accounts
 
-`handleSubscriptionCreated` always fires welcome-email + cache invalidation, even when `justInserted: false` — the old "swallow on unique-violation" was incompatible with self-heal because it silently dropped 5 side effects when self-heal pre-inserted the row. Cost: a rare Stripe redelivery of the create event may send the welcome email twice. Mitigated long-term by event-id dedupe (Layer D, Codex-257ia).
-
-**Hard invariants** (regression-tested):
-- Invoice handlers never log "Invoice for unknown subscription" — they self-heal instead.
-- A `customer.subscription.created` arriving AFTER self-heal still emits welcome email + bumps caches.
-- Concurrent self-heal + create-event yield exactly one row (unique constraint), both invocations complete cleanly.
-- Stripe 404 / metadata-missing on retrieve never crashes the handler — they exit 200.
-
-### Payout pipeline (audit closed 2026-05-13)
-
-The invoice → transfer → pending-payout → drain flow is documented end-to-end in **`docs/payouts/payout-pipeline.md`**. Read that doc before touching any of:
-
-- `handleInvoicePaymentSucceeded` — currency guard + split + transfers
-- `executeTransfers` — fan-out + per-creator min-transfer floor
-- `resolvePendingPayouts` — primary drain (webhook-triggered)
-- `sweepUnresolvedPayouts` — safety-net drain (15-min cron)
-- `assertGbpOnly` — single source of truth for the GBP-only currency guard
-
-Hard invariants enforced by tests — do not regress:
-
-- **GBP-only** (Codex-yv18n). Every `stripe.transfers.create()` call hardcodes `currency: CURRENCY.GBP` AND is preceded by `assertGbpOnly(source, context)`. New transfer call sites without a guard are a regression.
-- **Idempotency keys** (Codex-90ocz). Org transfers use `${chargeId}_org_fee`, creator transfers use `${chargeId}_creator_${creatorId}`, pending-payout resolutions use `payout_${pendingPayoutId}`. Never use random/timestamp keys — they defeat replay safety.
-- **Webhook `wasActive` source** (Codex-qigid). `connect-webhook.ts` reads prior state from the DB row via `getAccountByStripeId`, NOT from Stripe's `previous_attributes` (which is unreliable on capability-ricochet events).
-- **Per-row error isolation** (Codex-vv77x). Both `resolvePendingPayouts` and `sweepUnresolvedPayouts` log per-row/per-group failures and continue. One bad row never poisons the batch.
-
-## ConnectAccountService Responsibilities
-
-- Create Express-equivalent Connect accounts (new Stripe API with `controller` properties)
-- Generate Account Link URLs for onboarding
-- Handle `account.updated` webhooks to track `chargesEnabled` + `payoutsEnabled`
-- Generate Express Dashboard login links
-- One account per user per org (unique constraint enforced)
-
-Onboarding flow: `createAccount()` → user completes Stripe-hosted flow → `account.updated` webhook → `isReady()` returns `true`
-
-## calculateRevenueSplit
-
-```ts
-import { calculateRevenueSplit } from '@codex/subscription';
-
-// FEES.PLATFORM_PERCENT and FEES.ORG_PERCENT come from @codex/constants
-const split = calculateRevenueSplit(1000, 1000, 1500);
-// { platformFeeCents: 100, organizationFeeCents: 135, creatorPayoutCents: 765 }
-// All amounts in pence; sum equals input exactly
-```
-
-Fee percentages are in basis points (10000 = 100%).
+- **One account per user** (`uq_stripe_connect_user`), whatever organisations they
+  belong to. Created with controller properties (Express-equivalent), key
+  `connect_acct_${userId}`.
+- Status (`active` = charges and payouts enabled) comes from `account.updated`.
+- Only the account's owner gets an Express Dashboard login link.
 
 ## Strict Rules
 
-- **MUST** scope all tier and subscription queries by `organizationId`
-- **MUST** use transactions for multi-step DB + Stripe operations
-- **MUST** validate org's Connect account is ready before allowing subscription creation
-- **MUST** use idempotency keys for Stripe API calls
-- **MUST** handle `AlreadySubscribedError` — check before creating checkout session
-- **NEVER** store raw Stripe webhook payloads — verify HMAC first (handled in ecom-api worker)
-- All amounts in **pence (GBP)** — default currency is GBP, never USD
+- **MUST** scope tier and subscription queries by `organizationId`.
+- **MUST** use transactions for multi-step DB writes.
+- **MUST** check the organisation owner's Connect account is payable before
+  creating a tier, a course plan or a subscription checkout.
+- **MUST** use deterministic idempotency keys on Stripe calls.
+- **MUST** check for an existing live subscription before creating a checkout
+  (`AlreadySubscribedError`) — and handle a duplicate that completes anyway.
+- **NEVER** process a webhook before the ecom-api worker has verified its
+  signature.
+- Amounts in **pence (GBP)**, never USD.
 
 ## Integration
 
-- **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`, `@codex/constants`, Stripe SDK
-- **Used by**: ecom-api worker (checkout, webhooks, Connect onboarding), organization-api worker (tier management), via `ctx.services.tier`, `ctx.services.subscription`, `ctx.services.connect`
-- **Registered in**: `packages/worker-utils/src/procedure/service-registry.ts`
+- **Depends on**: `@codex/database`, `@codex/purchase`, `@codex/cache`,
+  `@codex/service-errors`, `@codex/validation`, `@codex/constants`, Stripe SDK
+- **Used by**: ecom-api (checkout, webhooks, Connect, payouts cron) and
+  organization-api (tier management), via the service registry
 
 ## Reference Files
 
-- `packages/subscription/src/services/tier-service.ts`
-- `packages/subscription/src/services/subscription-service.ts`
-- `packages/subscription/src/services/connect-account-service.ts`
-- `packages/subscription/src/services/revenue-split.ts`
-- `packages/subscription/src/errors.ts`
+- `src/services/tier-service.ts`
+- `src/services/subscription-service.ts`
+- `src/services/course-subscription-service.ts`
+- `src/services/connect-account-service.ts`
+- `src/services/stripe-status-mapper.ts`
+- `src/services/subscription-invalidation.ts`
+- `src/services/revenue-split.ts`
+- `src/errors.ts`

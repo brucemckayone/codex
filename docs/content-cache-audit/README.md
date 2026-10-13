@@ -1,6 +1,6 @@
 # Content Mutation Cache Integrity (Codex-c01do)
 
-Sibling epic to the subscription cache audit (`docs/subscription-cache-audit/`).
+Sibling epic to the 2026-04 subscription cache audit, whose rules now live in [docs/payments/access.md](../payments/access.md).
 Where that epic closed the subscription-lifecycle invalidation gaps, this one
 closes the **content-mutation** invalidation gaps: content update (access-config
 edits), unpublish, delete, publish, membership role changes, and follow/unfollow.

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * Streaming Revocation E2E (PR 2 — defense-in-depth)
  *
- * Covers the PR 2 row in docs/subscription-cache-audit/testing-matrix.md:
+ * Covers "Streaming revocation" in docs/payments/access.md:
  *   "Revoked user: streaming URL returns 403 within 10 min"
  *   "AccessRevokedOverlay renders with reason = subscription_deleted"
  *
@@ -71,7 +71,7 @@ const BLOCKER_MESSAGE =
   'Blocked by Codex-z1wuz — seeded subscription has synthetic stripeSubscriptionId. ' +
   'Enable by: (a) landing a test-only /_test/revocation endpoint on ecom-api and ' +
   'implementing seedRevocation()/clearRevocation() below, or (b) fixing the seed ' +
-  'to use a real Stripe test-mode subscription. See docs/subscription-cache-audit/phase-2-followup.md.';
+  'to use a real Stripe test-mode subscription. See docs/payments/access.md.';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   await page.goto('/login');

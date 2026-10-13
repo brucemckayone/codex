@@ -59,8 +59,8 @@ Services (depend on Foundation):
   identity     → database, service-errors, validation, cloudflare-clients, cache
   access       → database, service-errors, cloudflare-clients, purchase
   agreements   → database, service-errors, validation, shared-types, observability, constants
-  purchase     → database, service-errors, validation, agreements (+ Stripe SDK)
-  subscription → database, service-errors, validation, constants, agreements (+ Stripe SDK)
+  purchase     → database, service-errors, validation, constants, cache (+ Stripe SDK)
+  subscription → database, service-errors, validation, constants, cache, purchase (+ Stripe SDK)
   notifications→ database, service-errors, validation, platform-settings
   admin        → database, service-errors
   transcoding  → database, service-errors, cloudflare-clients

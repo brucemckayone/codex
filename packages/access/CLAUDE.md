@@ -2,6 +2,8 @@
 
 Content access control, signed URL generation, and playback progress tracking. Co-deployed with content-api worker because it requires direct R2 access.
 
+**Rules for what grants and removes paid access — sources, revocation, the streaming block list, cache invalidation — are in [docs/payments/access.md](../../docs/payments/access.md).** `content_access` is NOT an access source; never add a reader.
+
 ## Key Exports
 
 ```typescript
@@ -59,7 +61,7 @@ granted-but-unauthorized paths map to `AccessDeniedError` (403).
 
 Content does NOT have to be **published**. Owner decision, 2026-09-23: *a one-off
 purchase outlives unpublication; a relationship does not.* A one-off payment (or
-a per-person `content_access` grant standing in for one) BUYS that item, whereas
+a per-person `grant` entitlement standing in for one) BUYS that item, whereas
 a subscription, a follow, a free listing or a staff role grants access **while
 the item is on offer**. Unpublishing withdraws the offer; it does not undo a sale.
 
@@ -92,7 +94,7 @@ The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**. A
 
 Inside the followers branch, checks run in this order:
 
-1. **Subscription** — `status IN (active, cancelling)` AND `currentPeriodEnd > now()`. Any tier qualifies (followers-only content has no tier gate at all). Paused / past_due / expired subscriptions are filtered out. On grant, `obs.info` emits `reason='followers_content_granted_via_subscription'` so analytics can distinguish the subscription-driven path from an explicit follow.
+1. **Subscription** — `status IN (active, cancelling)` AND `currentPeriodEnd > now()`. Any tier qualifies (followers-only content has no tier gate at all). Paused / past_due / expired subscriptions are filtered out (the spec keeps `past_due` granting while Stripe retries — `Codex-2hxff.10`). On grant, `obs.info` emits `reason='followers_content_granted_via_subscription'` so analytics can distinguish the subscription-driven path from an explicit follow.
 2. **Follower row** — fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
 3. **Management membership** — owner/admin/creator implicitly bypass the gate.
 

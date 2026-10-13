@@ -1,7 +1,7 @@
 /**
  * ContentAccessService.savePlaybackProgress — access gate tests.
  *
- * Covers Phase 4.1 of docs/subscription-cache-audit/phase-2-followup.md:
+ * Covers "Playback progress" in docs/payments/access.md:
  * the progress-save path MUST reject users without current access OR
  * with a revocation key present, before touching videoPlayback.
  *

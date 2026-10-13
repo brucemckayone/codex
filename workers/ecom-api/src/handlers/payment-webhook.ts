@@ -10,7 +10,7 @@
  * for the affected user (their newly-revoked content must disappear from the
  * library view on the next fetch). One-time purchases are content-scoped,
  * not org-scoped, so COLLECTION_USER_SUBSCRIPTION is not touched here.
- * See docs/subscription-cache-audit/phase-1-p0.md and phase-2-followup.md.
+ * See docs/payments/access.md ("Keeping caches in step", "Streaming revocation").
  *
  * Security:
  * - Signature already verified by verifyStripeSignature middleware

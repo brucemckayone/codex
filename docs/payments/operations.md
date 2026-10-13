@@ -1,0 +1,212 @@
+# Operations
+
+Running the payment system: environments, webhooks, secrets, the Stripe
+Dashboard settings it depends on, local development and testing.
+
+A **gap** marker means the code does not behave this way yet; see
+[status.md](status.md).
+
+---
+
+## Environments and Stripe accounts
+
+| Environment | Stripe account | Secrets live in |
+|---|---|---|
+| **Production** | "Codex sandbox", `acct_1SMY6J7wyGmo4sh6`, **test mode** | GitHub environment `production`, uploaded to the worker at deploy |
+| **Local development** | The same sandbox | Each developer's local worker config (never committed) |
+| **CI** | Test-mode keys | GitHub Actions secrets used by the testing workflows |
+
+Production deliberately runs on the test-mode sandbox until launch, so nobody
+can be charged real money while the site is being tested. At launch it moves to
+a live-mode account and every endpoint, Product, Price and portal configuration
+is recreated there (see [docs/deployment/production-go-live.md](../deployment/production-go-live.md)).
+
+**The shared sandbox.** Production and local development receive **every**
+event from the sandbox, by design. Each environment must ignore events about
+objects it did not create: every object we create carries `metadata.codex_env`,
+and handlers log and acknowledge (200) events whose object belongs to another
+environment, writing nothing — **gap**: `Codex-2hxff.5`. Until then production
+also processes local test events, which fail harmlessly on unknown users and are
+acknowledged.
+
+Seed scripts clean up Stripe objects across the **whole** sandbox, so a local
+seed can archive Prices that production uses — `Codex-1ilxl` (in progress).
+
+## Webhook endpoints (production)
+
+Base URL: `https://ecom-api.revelations.studio`. Each endpoint has its own
+signing secret.
+
+| Path | Events | Secret | Handler | Endpoint |
+|---|---|---|---|---|
+| `/webhooks/stripe/booking` | `checkout.session.completed` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` (payment mode only) | `we_1UQ7HY7wyGmo4sh6BYwlrb80` |
+| `/webhooks/stripe/payment` | `charge.refunded` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `we_1UQ7HZ7wyGmo4sh6x477bv6C` |
+| `/webhooks/stripe/dispute` | `charge.dispute.created`, `.updated`, `.closed`, `radar.early_fraud_warning.created` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | `handlePaymentWebhook` | `we_1UQ7Ha7wyGmo4sh6CuTHPE8O` |
+| `/webhooks/stripe/subscription` | `checkout.session.completed`, `customer.subscription.updated`, `.deleted`, `.paused`, `.resumed`, `.trial_will_end`, `invoice.payment_succeeded`, `invoice.payment_failed`, `product.updated`, `price.created`, `price.updated` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` (subscription mode only) | `we_1UQ75i7wyGmo4sh6e12nck3K` |
+| `/webhooks/stripe/connect` | `account.updated`, `account.application.deauthorized` — **connected-accounts** endpoint | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `we_1UQ71a7wyGmo4sh6qjaGNKFW` |
+
+- Both booking and subscription receive `checkout.session.completed`; each
+  ignores the other's mode, so a session is processed once.
+- The connect endpoint must be created as a **connected accounts** endpoint
+  (`connect: true`). A platform-only endpoint never receives creators'
+  `account.updated`. The scope cannot be changed after creation.
+- `/webhooks/stripe/customer` is a log-only stub with no handler, and its
+  endpoint is disabled. It is to be removed with its secret — **gap**:
+  `Codex-2hxff.24`. A Customer deleted in Stripe needs no webhook: checkout
+  clears the stale id and retries.
+- `/webhooks/stripe/dev` exists for local development only and returns 404 in
+  production.
+
+### Webhook error policy
+
+| Response | When |
+|---|---|
+| 400 | No `stripe-signature` header |
+| 401 | The signature does not match the endpoint's secret |
+| 501 | The secret or Stripe key is not configured |
+| **500** | A **transient** failure: database connection or timeout, Stripe 5xx, rate limit or network error. Stripe retries (for up to 3 days in live mode). |
+| 200 `{ received: true }` | Processed, skipped (wrong mode, another environment, unknown type), or failed **permanently** (bad data, unknown object) |
+
+Errors wrapped as `ServiceError` by a service must still be classified by their
+cause, so a database outage inside a service returns 500 — **gap**:
+`Codex-2hxff.6`. There is no event-id table; safety on redelivery comes from
+unique keys (payment intent, ledger rows) and deterministic idempotency keys.
+
+## Secrets and configuration (ecom-api)
+
+| Name | Kind | Notes |
+|---|---|---|
+| `DATABASE_URL` | secret | |
+| `STRIPE_SECRET_KEY` | secret | Also needed by organization-api, which creates tier Products and Prices |
+| `STRIPE_WEBHOOK_SECRET_BOOKING`, `_PAYMENT`, `_DISPUTE`, `_SUBSCRIPTION`, `_CONNECT` | secret | One per endpoint |
+| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | secret | To be removed — **gap**: `Codex-2hxff.24` |
+| `STRIPE_PORTAL_CONFIGURATION_ID` | secret or var | The locked billing-portal configuration — `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` in the sandbox — **gap**: `Codex-2hxff.4` (not read today) |
+| `ENVIRONMENT` | var | `production` disables the dev webhook route |
+| `WEB_APP_URL` | var | Required — agreement emails need it — **gap**: `Codex-2hxff.7` (declared optional) |
+| `API_URL` | var | Must be declared under `env.production` — **gap**: `Codex-2hxff.24` |
+| `RATE_LIMIT_STRICT`, `RATE_LIMIT_API` | rate-limit bindings | A route's preset needs its binding, or it fails open |
+
+**Production secrets** are stored only in the GitHub environment `production`
+(none at repository level). The deploy workflow uploads them to the worker
+(`.github/scripts/upload-worker-secrets.sh`, `wrangler secret bulk`). To change
+one without a deploy, set it in **both** places:
+
+```bash
+printf '%s' "$VALUE" | gh secret set NAME --env production
+cd workers/ecom-api && printf '%s' "$VALUE" | npx wrangler secret put NAME --env production
+# must print: Creating the secret for the Worker "ecom-api-production"
+```
+
+Never commit a secret or write one into a document.
+
+## Recreating a webhook endpoint
+
+An endpoint's signing secret is only shown when it is created, and its
+connected-accounts scope cannot be changed. When a secret is lost or wrong, or
+the scope is wrong:
+
+1. Create a new endpoint with the same URL and the events in the table above;
+   copy its signing secret from the response.
+2. Set the secret in the GitHub `production` environment **and** on the live
+   worker (above).
+3. Disable the old endpoint and describe it as retired, naming its replacement.
+4. Verify a delivery (below). A green response from Stripe's API proves nothing
+   about our worker.
+
+All six production endpoints were recreated this way on 2026-10-13, after every
+delivery had been failing with 401 because the stored secrets matched none of
+them (`Codex-2hxff.27`).
+
+### Verifying delivery
+
+Watch the production worker's log in one terminal:
+
+```bash
+npx wrangler tail ecom-api-production --format json
+```
+
+The tail prints nothing until a request arrives. Then trigger an event:
+
+- **subscription:** edit the metadata of a test Product in the sandbox
+  (`product.updated`);
+- **booking, payment, dispute:** these have no harmless real trigger, so sign an
+  inert event with the endpoint's secret — Stripe's scheme is HMAC-SHA256 over
+  `"<timestamp>.<body>"`:
+
+```js
+import { createHmac } from 'node:crypto';
+const [path, secret] = process.argv.slice(2);
+const t = Math.floor(Date.now() / 1000);
+// booking ignores sessions that are not mode 'payment'; payment/dispute log unknown types
+const body = JSON.stringify({
+  id: `evt_check_${t}`, object: 'event', type: 'codex.signature_check', livemode: false, created: t,
+  data: { object: { id: 'cs_check', object: 'checkout.session', mode: 'setup' } },
+});
+const sig = createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
+const res = await fetch(`https://ecom-api.revelations.studio/webhooks/stripe/${path}`, {
+  method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': `t=${t},v1=${sig}` }, body,
+});
+console.log(path, res.status);
+```
+
+Success is a 200 **and** the log line `Webhook signature verified`. Also send one
+event signed with a wrong secret and confirm it gets 401, which proves the check
+is real.
+
+## Stripe Dashboard settings
+
+These live in Stripe, not in the repository. Check them in every environment,
+and again when moving to live mode.
+
+| Area | Setting |
+|---|---|
+| Webhook endpoints | Exactly the endpoints and events above; connect as a connected-accounts endpoint |
+| Billing customer portal | A configuration with cancelling, plan switching, pausing and profile edits **off**: `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` (created 2026-10-13; deliberately not the account default). Its id goes in `STRIPE_PORTAL_CONFIGURATION_ID`. The account default still allows cancelling, so the code must pass the id — **gap**: `Codex-2hxff.4` |
+| Billing failed-payment retries | The retry schedule Stripe follows while a subscriber is `past_due`, with **cancel the subscription** as the action when all retries fail, so access ends when retries run out (owner decision P-3) |
+| Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only"). The schedule itself (a 14-day delay) is set per account by our code — **gap**: `Codex-2hxff.29` |
+| Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |
+
+If a creator cannot pass Stripe's check when changing bank details, the platform
+can generate an external-account update code from the connected account's page
+(live mode only; the platform takes on liability for the change).
+
+## Scheduled jobs
+
+| Job | Worker | Schedule | Environment |
+|---|---|---|---|
+| Payouts sweep | ecom-api | `0 * * * *` | Production only |
+| Agreement review reminders | notifications-api | `0 8 * * *` | Production only |
+
+Both run at minute `0` so they share one database wake
+([why](connect-and-payouts.md#releasing-pending-money)).
+
+## Local development
+
+- `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev`, with
+  every `STRIPE_WEBHOOK_SECRET_*` set to the secret the CLI prints. The dev route
+  dispatches each event to the right handler by type. It must route every event
+  production handles — **gap**: `Codex-2hxff.24` (no `product.*` or `price.*`).
+- Hosted dev endpoints are created by `.github/scripts/setup-stripe-dev-webhooks.sh`.
+  They must match production's endpoints, events and connected-accounts scope —
+  **gap**: `Codex-2hxff.24`.
+- A Cloudflare tunnel (`ecom-api-local.revelations.studio` → `localhost:42072`)
+  can receive real endpoint deliveries locally.
+- Seeds refuse live keys. Seeded data should exercise the real fee split and
+  include agreements — **gap**: `Codex-2hxff.24`.
+- Run the dev stack with `pnpm dev` from the repository root.
+
+## Testing
+
+Continuous integration should exercise the money paths end to end, delivering
+signed webhook events (the scheme above) so the handlers run for real — **gap**:
+`Codex-2hxff.25`:
+
+- one-off purchase completion → entitlement → payouts;
+- full and partial refunds; a dispute opened and closed;
+- subscription created, renewed, cancelled, and its payment failing;
+- pending payouts drained when a Connect account becomes payable;
+- an agreement changing a split;
+- a support grant giving access.
+
+Constraints: one pull request in CI at a time, no sharding of E2E Web, no paid
+Neon plan.

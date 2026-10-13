@@ -8,7 +8,7 @@
  * so `ContentAccessService.getStreamingUrl()` can reject already-minted
  * presigned R2 URLs within the revocation TTL window.
  *
- * Coverage matrix (docs/subscription-cache-audit/phase-2-followup.md + task brief):
+ * Coverage (rules: docs/payments/access.md, "Streaming revocation"):
  *
  * | Event                              | Positive | Negative | Fire-and-forget |
  * | ---------------------------------- | -------- | -------- | --------------- |

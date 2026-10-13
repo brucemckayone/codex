@@ -194,7 +194,7 @@
       //
       // Safe because the cron is INSURANCE, not the primary path: the
       // account.updated webhook resolves these rows first and Stripe retries
-      // it for 3 days (see docs/payouts/payout-pipeline.md stage 5). The
+      // it for 3 days (see docs/payments/connect-and-payouts.md, "Releasing pending money"). The
       // sweep's own DEFAULT_OLDER_THAN_MINUTES=15 age threshold is unchanged,
       // so this only widens the detection window for a DROPPED webhook from
       // ~15 min to ~1 h.
