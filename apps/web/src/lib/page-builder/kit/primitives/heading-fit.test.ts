@@ -73,13 +73,18 @@ function declarations(source: string) {
 }
 
 /** Every kit component, by path from the kit. */
+/** Every component's styles and every stylesheet in the kit, a Style's included. */
 function kitComponents(dir = KIT): { file: string; source: string }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return kitComponents(path);
-    return entry.name.endsWith('.svelte')
-      ? [{ file: relative(KIT, path), source: readFileSync(path, 'utf8') }]
-      : [];
+    const file = relative(KIT, path);
+    if (entry.name.endsWith('.svelte'))
+      return [{ file, source: readFileSync(path, 'utf8') }];
+    // A stylesheet is read as a component's styles, by the same parser.
+    if (entry.name.endsWith('.css'))
+      return [{ file, source: `<style>${readFileSync(path, 'utf8')}</style>` }];
+    return [];
   });
 }
 
@@ -334,16 +339,58 @@ describe('where a layout holds its head, or names its room', () => {
     declarations(source).map((d) => ({ file, ...d }))
   );
 
-  // The band draws its price at the price's own width beside the head, so the
-  // head's room is not known (03 X66). A new hold is a heading drawn at the
-  // Style's size whatever its words: it is counted here so it is a decision.
-  it('holds only the pricing band, and only where it is a row', () => {
+  // A held head is drawn at the Style's size whatever its words, so a long
+  // word runs past its line. The pricing band held its head until X70; a new
+  // hold is counted here so it is a decision.
+  it('holds no head', () => {
     const holds = kit.filter((d) => d.property === '--lp-heading-hold');
     expect(
       holds.map((d) => `${d.file} ${d.at} ${d.selector}: ${d.value}`)
-    ).toEqual([
-      "blocks/pricing/PricingBlock.svelte @container (min-width: 60rem) .pricing[data-layout='band'] > .pricing__head: 1",
-    ]);
+    ).toEqual([]);
+  });
+
+  // X70: the band's head shares its row with the price only where its widest
+  // word fits beside it. The head grows from nothing, so its narrowest is its
+  // own longest word (a flex item's automatic minimum), and the row wraps
+  // before that word could run into the price. A minimum of the head's own,
+  // or an overflow that is not visible (which zeroes that minimum), would let
+  // the row keep a word that does not fit; so would a grid head, whose
+  // narrowest drops a child with a minimum of 0 (the sweep, louder-fit, sets
+  // one on every heading it reads).
+  it("puts the pricing band's price under a head whose widest word does not fit beside it", () => {
+    const pricing = kit.filter(
+      (d) => d.file === 'blocks/pricing/PricingBlock.svelte'
+    );
+    const rule = (selector: string) =>
+      Object.fromEntries(
+        pricing
+          .filter(
+            (d) =>
+              d.at === '@container (min-width: 60rem)' &&
+              d.selector === selector
+          )
+          .map((d) => [d.property, d.value])
+      );
+    expect(rule(".pricing[data-layout='band']")).toMatchObject({
+      display: 'flex',
+      'flex-wrap': 'wrap',
+    });
+    expect(rule(".pricing[data-layout='band'] > .pricing__head")).toEqual({
+      display: 'flex',
+      'flex-direction': 'column',
+      flex: '1 1 0',
+    });
+    expect(
+      pricing
+        .filter(
+          (d) =>
+            d.selector.includes('pricing__head') &&
+            /^(min-inline-size|min-width|overflow(-x|-inline)?|contain)$/.test(
+              d.property
+            )
+        )
+        .map((d) => `${d.at} ${d.selector}: ${d.property}`)
+    ).toEqual([]);
   });
 
   // The hold before X66 was a room of nothing (`--lp-heading-column: 0px`),
