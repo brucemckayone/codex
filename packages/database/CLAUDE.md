@@ -35,12 +35,13 @@ ctx.waitUntil(cleanup()); // MUST close pool — use waitUntil so it runs after 
 | **Users** | `users` |
 | **Organization** | `organizations`, `organizationMemberships` |
 | **Content** | `content`, `mediaItems` |
-| **Ecommerce** | `purchases`, `contentAccess`, `platformFeeConfig` |
+| **Ecommerce** | `purchases`, `entitlements`, `refundReviews`, `creatorOrganizationAgreements`, `agreementProposals`, `feeConfig*` (`fee-config.ts`); legacy: `contentAccess` (not read for access), `platformFeeConfig` (dormant) |
 | **Playback** | `videoPlayback` |
 | **Notifications** | `emailAuditLogs` |
 | **Settings** | `platformSettings` (branding, features, contact) |
 | **Storage** | orphaned entity/image tracking |
-| **Subscriptions** | `subscriptions`, `subscriptionTiers`, `stripeConnectAccounts`, `pendingPayouts` |
+| **Subscriptions** | `subscriptions`, `subscriptionTiers`, `stripeConnectAccounts`, course plans + course subscriptions (`course-commerce.ts`) |
+| **Payouts** | `payouts` — the ledger (`payouts.ts`); legacy `pendingPayouts` gets no new rows. Spec: [docs/payments/connect-and-payouts.md](../../docs/payments/connect-and-payouts.md#the-payouts-ledger) |
 | **Followers** | `organizationFollowers` |
 
 Import: `import * as schema from '@codex/database'` (re-exported as namespace).

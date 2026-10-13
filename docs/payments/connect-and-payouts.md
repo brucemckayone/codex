@@ -56,8 +56,10 @@ Owner decisions Q1 and Q2 (SEC-01).
   the person who owns that Connect account**, through `POST
   /connect/me/dashboard`. Nobody can open anyone else's.
 - Creators **can change their payout bank account** there; Stripe allows it by
-  default in the Express Dashboard. In a sandbox the login link is the only way
-  in.
+  default in the Express Dashboard. They **cannot change their payout schedule**:
+  the platform keeps control of it, which leaves room to delay payouts if refunds
+  ever need covering (owner decision 2026-10-13, "Bank account only"). In a
+  sandbox the login link is the only way in.
 - Other organisation members see the organisation's payout **status** only,
   through one read-only organisation endpoint. They never get a login link.
 - The organisation-level routes (`/connect/onboard`, `/connect/status`,

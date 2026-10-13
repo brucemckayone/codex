@@ -17,8 +17,9 @@ A **gap** marker means the code does not behave this way yet; see
   **post-platform pool** (gross minus platform fee) — never of the gross.
 - One-off purchases: the platform fee and organisation fee are rounded **up**;
   the creator gets the remainder, so the three always sum to the amount paid.
-- Subscription invoices with agreements: each slice is rounded **down**, so a
-  penny or two can be left over — see [rounding remainders](#rounding-remainders).
+- Subscription invoices with agreements: each slice is rounded **down**, and the
+  penny or two left over goes to the organisation — see
+  [rounding remainders](#rounding-remainders).
 
 ## Fee configuration
 
@@ -136,12 +137,12 @@ organisation's active `subscription` agreements (Σ = the sum of their shares):
 whole remaining creator pool both go to the owner — the pool as a
 `creator_payout_to_owner` row.
 
-| £10.00 invoice (1000p; pool 900p) | Platform | Organisation | Creators | Left over |
-|---|---|---|---|---|
-| No agreements | 100 | 135 + pool 765 → owner | — | 0 |
-| One creator at 60% | 100 | 360 | 540 | 0 |
-| One creator at 30% | 100 | 630 | 270 | 0 |
-| Two creators at 30% and 33.33% | 100 | 330 | 270 + 299 | 1 |
+| £10.00 invoice (1000p; pool 900p) | Platform | Organisation | Creators |
+|---|---|---|---|
+| No agreements | 100 | 135 + pool 765 → owner | — |
+| One creator at 60% | 100 | 360 | 540 |
+| One creator at 30% | 100 | 630 | 270 |
+| Two creators at 30% and 33.33% | 100 | 330 + 1p remainder = 331 | 270 + 299 |
 
 Which agreements count is decided at the invoice's own time; see
 [agreements.md](agreements.md#how-a-share-applies).
@@ -153,10 +154,11 @@ the course creator's `subscription` agreement if they have one.
 
 ### Rounding remainders
 
-Rounding down on subscription invoices can leave a penny or two unassigned (the
-last row above). Today those pennies stay on the platform's balance with no
-ledger row. Which slice should absorb them is an open question in
-[status.md](status.md#open-questions).
+Rounding down on subscription invoices can leave a penny or two over (the last
+row above). Owner decision 2026-10-13, "The organisation": the remainder is
+added to the organisation slice and recorded with it, so every penny of the
+invoice is in the ledger — **gap**: `Codex-2hxff.12` (today the pennies stay on
+the platform's balance with no ledger row).
 
 ---
 

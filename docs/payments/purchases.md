@@ -129,9 +129,12 @@ the library and subscription collections itself — **gap**: `Codex-2hxff.22`.
 
 ## Refunds
 
-Refunds are issued by the platform from the Stripe Dashboard. There is no
-customer self-service or creator-initiated refund yet; who may refund, the
-refund window and the customer-facing policy are open questions in
+Refunds are issued by **platform support only** — never by creators, and never
+self-served by customers (owner decision 2026-10-13, "Platform support") — from
+an admin screen that calls Stripe and then lets the `charge.refunded` webhook do
+the rest, so there is one refund path — **gap**: `Codex-2hxff.28` (today refunds
+can only be started in the Stripe Dashboard). The refund window, how the platform
+stays able to fund refunds and the customer-facing policy are still open in
 `Codex-aqk92` (refund policy).
 
 Stripe sends `charge.refunded` to `/webhooks/stripe/payment`. Each event is
@@ -193,9 +196,16 @@ Stripe sends `charge.dispute.created`, `.updated` and `.closed` to
 | **Won** | Restored: the disputed mark is cleared. | The reversed slices are paid again; held slices are released. |
 | **Lost** | Ends for good. | The reversals stand; held slices are cancelled. |
 
-The platform pays Stripe's dispute fee. Early fraud warnings
-(`radar.early_fraud_warning.created`) are logged for review; no automatic action
-is taken. A lost dispute does not produce a `charge.refunded` event, so dispute
+The platform pays Stripe's dispute fee.
+
+**Early fraud warnings.** When the card issuer reports a charge as likely fraud
+(`radar.early_fraud_warning.created`), the charge is **refunded in full
+automatically** (owner decision 2026-10-13, "Refund automatically"). That usually
+heads off a dispute and its fee. Access ends and the creator and organisation
+slices are clawed back, as for any full refund — **gap**: `Codex-2hxff.9` (today
+the warning is only logged).
+
+A lost dispute does not produce a `charge.refunded` event, so dispute
 handling never relies on one.
 
 The same rules apply to course purchases and to disputed subscription invoices

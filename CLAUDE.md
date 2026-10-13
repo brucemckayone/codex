@@ -39,7 +39,7 @@ All ports are defined in `@codex/constants` `SERVICE_PORTS` — use `buildServic
 | 2 | **content-api** | 4001 | Content CRUD, media registration, access control, streaming | `POST /api/content`, `GET /api/access/content/:id/stream` |
 | 3 | **organization-api** | 42071 | Org CRUD, membership, settings, tiers, followers | `POST /api/organizations`, `GET /api/organizations/slug/:slug` |
 | 4 | **ecom-api** | 42072 | Stripe checkout, webhooks, purchase history | `POST /checkout/create`, `POST /webhooks/stripe/payment` |
-| 5 | **admin-api** | 42073 | Analytics, content/customer management (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
+| 5 | **admin-api** | 42073 | Analytics, content/customer management (org owner/admin); fee configuration (platform_owner) | `GET /api/admin/analytics/revenue`, `POST /api/admin/content/:contentId/publish` |
 | 6 | **identity-api** | 42074 | User profiles, preferences, creator onboarding, org membership (user side) | `GET /api/user/profile`, `PATCH /api/user/profile`, `GET /api/user/public/:username` (the worker's only anonymous route) |
 | 7 | **notifications-api** | 42075 | Email templates, sending (Resend) | `POST /api/templates`, `POST /internal/send` (worker HMAC) |
 | 8 | **media-api** | 4002 | Transcoding pipeline (RunPod), webhooks, HLS | `POST /internal/media/:id/transcode` (worker HMAC), `POST /api/transcoding/webhook` (RunPod HMAC) |

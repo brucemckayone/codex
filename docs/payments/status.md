@@ -15,11 +15,10 @@ references to today's code — is in
 [docs/audits/payments-2026-10-13/bug-ledger.md](../audits/payments-2026-10-13/bug-ledger.md)
 under the ledger ids listed on each bead.
 
-The first five carry the label `payments-fix-pr-1` and are planned as one pull
-request. The owner asked for the payout-dashboard, ownership and price-change
-fixes to ship together ("put all of these fixes in together as one PR"); adding
-the portal lockdown (`.4`) and environment tagging (`.5`) to the same pull request
-is a proposal awaiting the owner's agreement.
+The first five carry the label `payments-fix-pr-1` and ship together in one pull
+request: the owner asked for the payout-dashboard, ownership and price-change
+fixes together ("put all of these fixes in together as one PR"), then agreed to
+add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
@@ -49,6 +48,7 @@ is a proposal awaiting the owner's agreement.
 | `Codex-2hxff.24` | P3 | Dev and CI Stripe setup mirrors production; customer stub removed | [operations](operations.md#local-development) |
 | `Codex-2hxff.25` | P2 | CI exercises real webhook round trips | [operations](operations.md#testing) |
 | `Codex-2hxff.26` | P1 | This documentation (in progress) | — |
+| `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard | [purchases](purchases.md#refunds) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -75,7 +75,7 @@ option chosen. All dated 2026-10-13 unless noted.
 | Price changes (Q4–Q7) | "For 4B, the correct answer is: they move at the next renewal." Email at the change, applied at the first renewal at least 30 days later; increases and decreases alike; "Studio is the only place." |
 | Course plan price changes (P-6) | "Same rule as tiers" |
 | Ownership | "I think there should only be one owner, and the only person who can be the owner is the person who makes the organization. The only person who can transfer ownership should therefore be the owner. The proposed ownership model seems perfect to me." Money is held as pending until a new owner sets up payouts; money earned before a transfer stays with the old owner; "No migration concerns here." |
-| One pull request | "Yeah, I think we should put all of these fixes in together as one PR, to be honest." |
+| One pull request | "Yeah, I think we should put all of these fixes in together as one PR, to be honest." Adding the portal lockdown and environment tagging: "Include both" |
 | Production on the sandbox | "Right now, production is using the dev sandbox endpoints just so that nobody accidentally buys anything, as we are still testing, and production is not live yet, despite the website being there." "Right now, both production and this local should be receiving the same information from endpoints." |
 | Partial refunds (P-1) | "Keep access" |
 | Disputes (P-2) | "Creators share it" |
@@ -87,6 +87,11 @@ option chosen. All dated 2026-10-13 unless noted.
 | Agreement term (AGR-01) | "Keeps paying"; then, asked whether either side can end an agreement early: "Yes, any time" |
 | Leaving an organisation (AGR-09) | "End on removal" |
 | One-off sale with no agreement | "Org default fee" — supersedes the 2026-05-17 note that the organisation keeps everything |
+| Rounding remainders | "The organisation" |
+| Early fraud warnings | "Refund automatically" |
+| Payout schedule | "Bank account only" — creators change their bank account, not their schedule |
+| Who issues refunds | "Platform support" |
+| Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (`docs/archive` is kept) |
 | Refund clawback (earlier, `Codex-13v21`) | Reverse transfers on refund; record a `refund_reviews` debt when the payee's balance is too low |
 | Agreements (2026-05-17) | One-off sales use only the uploading creator's agreement; the creator's share is fixed at acceptance while the platform fee is read at each sale; no pro-rating — whoever is active at the invoice gets its full share |
 | Cancellation (2026-04-21) | Cancelling keeps access until the end of the paid period |
@@ -102,16 +107,9 @@ recover at checkout.
 
 Decisions still needed from the owner:
 
-1. **Refund operations** (`Codex-aqk92`): who may issue refunds (customers,
-   creators, support), the refund window, how to keep enough platform balance to
-   fund refunds, what happens when a creator's balance stays negative, the
-   customer-facing refund policy (UK consumer law for digital content), and what
-   the creator terms say about clawbacks.
-2. **Rounding remainders**: on subscription invoices split between several
-   creators, a penny or two can be left over. Which slice should receive it? Today
-   it stays with the platform, unrecorded.
-3. **Early fraud warnings**: should Codex refund proactively when Stripe raises
-   one, or only log it for review (today)?
-4. **Payout schedule**: may creators change their own payout schedule in the
-   Express Dashboard, or only their bank account?
-5. **Ownership transfer screen**: waiting on an HTML mockup and data design.
+1. **Refund operations** (`Codex-aqk92`): the refund window, how to keep enough
+   platform balance to fund refunds, what happens when a creator's balance stays
+   negative, the customer-facing refund policy (UK consumer law for digital
+   content), and what the creator terms say about clawbacks. (Who issues refunds
+   is decided: platform support.)
+2. **Ownership transfer screen**: waiting on an HTML mockup and data design.

@@ -163,7 +163,7 @@ and again when moving to live mode.
 | Webhook endpoints | Exactly the endpoints and events above; connect as a connected-accounts endpoint |
 | Billing customer portal | A configuration with cancelling, plan switching and pausing **off**; its id in `STRIPE_PORTAL_CONFIGURATION_ID`. Today the account default allows cancelling — **gap**: `Codex-2hxff.4` |
 | Billing failed-payment retries | The retry schedule Stripe follows while a subscriber is `past_due`, with **cancel the subscription** as the action when all retries fail, so access ends when retries run out (owner decision P-3) |
-| Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default). Whether they may also change their payout schedule is an [open question](status.md#open-questions). |
+| Connect Express Dashboard features | Creators can change their payout bank account (Stripe's default) but **not** their payout schedule — schedule editing turned off (owner decision "Bank account only") |
 | Connect branding | Platform name and icon shown during onboarding and in the Express Dashboard |
 
 If a creator cannot pass Stripe's check when changing bank details, the platform
