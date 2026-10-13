@@ -46,6 +46,10 @@
 
   :global(.lp[data-lp-style='bold']) .creds[data-variant='ledger'] li {
     border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+  }
+
+  /* Bold's Type sets a credential semibold, in a list or as a chip (03 X73). */
+  :global(.lp[data-lp-type-facet='bold']) .creds[data-variant='ledger'] li {
     font-weight: var(--font-semibold);
   }
 
@@ -64,6 +68,9 @@
 
   :global(.lp[data-lp-style='bold']) .creds[data-variant='chips'] li {
     border: var(--lp-rule) var(--border-style) var(--lp-ink);
+  }
+
+  :global(.lp[data-lp-type-facet='bold']) .creds[data-variant='chips'] li {
     font-weight: var(--font-semibold);
   }
 </style>

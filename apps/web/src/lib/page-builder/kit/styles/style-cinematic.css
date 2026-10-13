@@ -44,14 +44,10 @@
    Fonts: suggests Unbounded over Sora; designed to hold in the brand's own.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.lp[data-lp-style='cinematic'] {
-  /* ── the room: the brand's dark ground, or the primary taken down ─────── */
-  --lp-dark-ground-in: var(
-    --brand-bg-dark,
-    oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
-  );
-  --lp-tint-soft: 10%;
-
+/* Cinematic's Type, wherever it is drawn: its own page, or another Style's that
+   borrows it (03 X73). Keyed on the page's Type, never on its Style, and it
+   declares no token the Style block below does. */
+.lp[data-lp-type-facet='cinematic'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
   --lp-size-display: calc(clamp(2.6rem, 0.8rem + 7.4cqi, 7rem) * var(--lp-scale) * var(--lp-drama-display, 1));
   --lp-size-heading: calc(clamp(2rem, 1rem + 3.6cqi, 3.9rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
@@ -65,6 +61,15 @@
   --lp-tracking-heading: -0.015em;
   --lp-tracking-label: 0.04em;
   --lp-weight-label: var(--font-medium);
+}
+
+.lp[data-lp-style='cinematic'] {
+  /* ── the room: the brand's dark ground, or the primary taken down ─────── */
+  --lp-dark-ground-in: var(
+    --brand-bg-dark,
+    oklch(from var(--lp-brand) 0.16 min(c * 0.22, 0.027) h)
+  );
+  --lp-tint-soft: 10%;
 
   /* ── shape: the org's corners exactly (03 §4.2, k 1) ──────────────────── */
   --lp-radius-card: max(0rem, var(--radius-card));
@@ -109,10 +114,14 @@
   --lp-pad-spacious: clamp(var(--space-20), 28svh, calc(var(--space-32) * 2.5));
 }
 
-/* The opening card: the words centred in it, the card as tall as they are. */
+/* The opening card: the words centred in it, the card as tall as they are,
+   Cinematic's display a step down to fit it (the Type's, 03 X73). */
+:is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-cover__copy:not([data-lp-on-media]) {
+  --lp-display-scale: 0.82;
+}
+
 :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-cover__copy:not([data-lp-on-media]) {
   --lp-actions-align: center;
-  --lp-display-scale: 0.82;
   justify-items: center;
   align-content: center;
   min-block-size: 0;
@@ -130,16 +139,16 @@
    headline's parent, so the poster's picture steps with it. The centred
    hero holds: its measure is counted in characters. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-statement:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-statement:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.8;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic']
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic']
     :is(.hero-cover__copy, .hero-poster):has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.62;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-split__copy:has(> .hero__headline[data-long]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-split__copy:has(> .hero__headline[data-long]) {
     --lp-display-scale: 0.55;
   }
 }
@@ -151,11 +160,11 @@
    1440 × 900 fold in Archivo Black with no word split — a step above the
    long one. The other layouts, and the pictured cover, hold it. */
 @container (min-width: 56rem) {
-  :is(.lp, #lp-style)[data-lp-style='cinematic'] .hero-poster:has(> .hero__headline[data-medium]) {
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .hero-poster:has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.85;
   }
 
-  :is(.lp, #lp-style)[data-lp-style='cinematic']
+  :is(.lp, #lp-style)[data-lp-type-facet='cinematic']
     .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline[data-medium]) {
     --lp-display-scale: 0.75;
   }
@@ -180,27 +189,27 @@
    longest the field takes. */
 @supports (line-height: pow(2, 0.5)) {
   @container (min-width: 56rem) {
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-statement:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(85 / var(--lp-heading-chars, 120), 0.39));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-split__copy:has(> .hero__headline) {
       --lp-display-scale: calc(0.7 * min(1, pow(78 / var(--lp-heading-chars, 120), 0.51)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-cover__copy[data-lp-on-media]:has(> .hero__headline) {
       --lp-display-scale: min(1, pow(45 / var(--lp-heading-chars, 120), 0.38));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-cover__copy:not([data-lp-on-media]):has(> .hero__headline) {
       --lp-display-scale: calc(0.82 * min(1, pow(53 / var(--lp-heading-chars, 120), 0.43)));
     }
 
-    :is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-section[data-lp-type='hero']
+    :is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .lp-section[data-lp-type='hero']
       .hero-centered:has(> .hero__headline) {
       --lp-display-scale: calc(0.84 * min(1, pow(106 / var(--lp-heading-chars, 120), 1.36)));
     }
@@ -255,7 +264,7 @@
    number, silent to assistive tech — the list already counts. Wide, and
    pictured, the moments stand apart, so the sticky picture holds each one
    for a while; words alone keep the block's own pace. */
-:is(.lp, #lp-style)[data-lp-style='cinematic'] .story-scroll {
+:is(.lp, #lp-style)[data-lp-type-facet='cinematic'] .story-scroll {
   --lp-size-title: calc(clamp(1.45rem, 1rem + 1.5cqi, 2.4rem) * var(--lp-scale));
 }
 
