@@ -7,7 +7,7 @@
  * drives the page kit's gallery (`/studio/page-kit`), a development route
  * that a production build (CI's) does not have, and it sets 60 texts in every
  * section heading of the sample page, in 8 Styles at 5 widths, which takes
- * about sixteen minutes. Run it on any change to a heading's fit, to a
+ * about twenty-five minutes. Run it on any change to a heading's fit, to a
  * heading size, or to a layout that gives a head less room than its section's
  * column (that layout names the room, `--lp-heading-column`).
  *
@@ -55,7 +55,7 @@ import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(
   !process.env.LOUDER_FIT,
-  'opt-in: LOUDER_FIT=1 (a development route, ~13 min)'
+  'opt-in: LOUDER_FIT=1 (a development route, ~25 min)'
 );
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(60 * 60_000);
