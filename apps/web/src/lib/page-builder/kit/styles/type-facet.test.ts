@@ -15,7 +15,8 @@
  *
  * TYPE is how the words are set: their sizes, weights, case, tracking,
  * leading and hyphenation, a line's measure in `ch`, the hero's fit
- * (`--lp-display-scale`) and the heading fit's face and run (Heading.svelte).
+ * (`--lp-display-scale`, and a borrowed Type's factor, `--lp-type-fit`, X74)
+ * and the heading fit's face and run (Heading.svelte).
  * Spacing stays the Style's, and so do a centred line's balance
  * (`text-wrap`), a title's lift (a layout's hook, Heading.svelte), a button
  * drawn as a link (`text-decoration`) and a light behind a title
@@ -34,7 +35,7 @@ const KIT = dirname(STYLES);
 const TYPE_PROPERTY =
   /^(font|font-[a-z-]+|letter-spacing|line-height|text-transform|hyphens|hyphenate-[a-z-]+)$/;
 const TYPE_TOKEN =
-  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
+  /^--lp-(size|leading|tracking|weight|case|font)-|^--lp-(display-scale|type-fit|heading-face|heading-run)$|^--lp-button-(size|weight|tracking)$|^--lp-measure|^--_figure$/;
 
 /** A type declaration, as the header files it. */
 function isType(property: string, value: string): boolean {

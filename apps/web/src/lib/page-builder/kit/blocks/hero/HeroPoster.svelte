@@ -179,7 +179,7 @@
       --_column: calc(100cqi - 2 * var(--_inset));
       --_beside: var(--_column);
       --_display: min(
-        var(--lp-size-display) * var(--lp-display-scale, 1),
+        var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1),
         var(--_column) /
           max(
             0.01,

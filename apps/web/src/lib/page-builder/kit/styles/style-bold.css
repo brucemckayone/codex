@@ -130,7 +130,7 @@
 }
 
 :is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
-  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
 }
 
 /* ── a long promise steps down ───────────────────────────────────────────── */

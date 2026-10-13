@@ -112,12 +112,15 @@
   /* `--lp-display-scale` is a layout's hook (a split hero draws the display
      size smaller): a separate property, because re-declaring
      `--lp-size-display` in terms of itself would be a cycle.
+     `--lp-type-fit` is a borrowed Type's (03 X74): the factor that fits its
+     hero to another Style's column, measured per pair and layout, and unset
+     on a page's own Type.
      A display statement is fitted as a section heading is (below, 03 X71):
      its room is the section's column, or the one its layout names, and it is
      never drawn smaller than a title. A fixed size cut words: Bold's problem
      statement draws "Transformation:" wider than a phone's column. */
   .lp-heading[data-size='display'] {
-    --_own: calc(var(--lp-size-display) * var(--lp-display-scale, 1));
+    --_own: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
     --_column: min(
       var(--lp-column, 100cqi),
       var(--lp-heading-column, var(--lp-column, 100cqi))
