@@ -19,7 +19,11 @@ import {
 } from '../../primitives/swap.testing';
 import CurriculumBlock from './CurriculumBlock.svelte';
 import { CURRICULUM_COPY } from './copy';
-import { CURRICULUM_EMPTY, curriculumDefinition } from './definition';
+import {
+  CURRICULUM_EMPTY,
+  CURRICULUM_EMPTY_STAGE,
+  curriculumDefinition,
+} from './definition';
 
 let app: ReturnType<typeof mount> | null = null;
 
@@ -39,6 +43,7 @@ function mountCurriculum(
     headingLevel?: 1 | 2;
     context?: JourneySalesContext;
     edit?: BlockEdit | null;
+    scheme?: ResolvedSection['scheme'];
   } = {}
 ) {
   const section: ResolvedSection = {
@@ -47,7 +52,7 @@ function mountCurriculum(
     type: 'curriculum',
     index: 6,
     layout: options.layout ?? 'timeline',
-    scheme: 'base',
+    scheme: options.scheme ?? 'base',
     spacing: 'regular',
     headingLevel: options.headingLevel ?? 2,
   };
@@ -73,7 +78,24 @@ const withStages = (stages: JourneyStageView[]) => ({
   ...sampleContext(),
   stages,
 });
-const practiceRows = () => [...document.body.querySelectorAll('.practice')];
+// A practice is a row in most layouts and a picture-led card in the layered one.
+const practiceRows = () => [
+  ...document.body.querySelectorAll('.practice, .practice-card'),
+];
+/**
+ * What a screen reader hears of a practice, in order. A row's text is that,
+ * exactly. A card's paragraphs are read as lines of their own, so the
+ * whitespace between them is never heard: its name, then its kind and length.
+ */
+const spoken = (row: Element) => {
+  if (!row.classList.contains('practice-card')) return row.textContent;
+  const part = (name: string) =>
+    row
+      .querySelector(`.practice-card__${name}`)
+      ?.textContent?.replace(/\s+/g, ' ')
+      .trim() ?? '';
+  return `${part('name')}${part('meta')}`;
+};
 const toggles = () => [...document.body.querySelectorAll('button')];
 const panel = (button: HTMLButtonElement) =>
   document.getElementById(button.getAttribute('aria-controls') ?? '');
@@ -118,7 +140,7 @@ describe('CurriculumBlock', () => {
       const length = CURRICULUM_COPY.length(practice.durationSeconds);
       expect(row.querySelector('svg')).not.toBeNull();
       // What a screen reader hears, in order; the dot between is drawn.
-      expect(row.textContent).toBe(
+      expect(spoken(row)).toBe(
         `${practice.title}, ${CURRICULUM_COPY.kind(practice.contentType)}${
           length ? `, ${length}` : ''
         }`
@@ -449,5 +471,156 @@ describe('CurriculumBlock — the timeline folds on a phone', () => {
     expect(document.activeElement).toBe(
       stage.querySelector('.timeline__words')
     );
+  });
+});
+
+describe('CurriculumBlock — layered stages (Codex-61zsk.55)', () => {
+  const regions = () => [...document.body.querySelectorAll('[role="region"]')];
+  const stageItems = () => [
+    ...document.body.querySelectorAll('.layers__stage'),
+  ];
+  /** A stage of `count` practices, from the sample's first stage. */
+  const stageOf = (
+    id: string,
+    name: string,
+    count: number
+  ): JourneyStageView => ({
+    ...STAGES[0],
+    id,
+    name,
+    practices: Array.from({ length: count }, (_, i) => ({
+      ...STAGES[0].practices[i % STAGES[0].practices.length],
+      contentId: `${id}-p${i}`,
+    })),
+  });
+
+  it('gives each stage of two or more practices its own row, named for its stage', async () => {
+    await render(SAMPLE, { layout: 'layered' });
+    expect(stageItems()).toHaveLength(STAGES.length);
+    expect(regions().map((r) => r.getAttribute('aria-label'))).toEqual(
+      STAGES.map((stage, i) => CURRICULUM_COPY.stageLine(i + 1, stage.name))
+    );
+    // Each row's buttons say which stage they move, in its heading's line.
+    stageItems().forEach((item, i) => {
+      const [previous, next] = [...item.querySelectorAll('button')];
+      expect(previous.getAttribute('aria-label')).toBe(
+        CURRICULUM_COPY.previousIn(i + 1)
+      );
+      expect(next.getAttribute('aria-label')).toBe(
+        CURRICULUM_COPY.nextIn(i + 1)
+      );
+      const line = item.querySelector('.lp-strip__nav--head');
+      expect(line?.querySelector('.lp-strip__head h3')?.textContent).toBe(
+        STAGES[i].name
+      );
+    });
+  });
+
+  it('heads each stage with its number and how many practices it holds', async () => {
+    await render(SAMPLE, { layout: 'layered' });
+    stageItems().forEach((item, i) => {
+      expect(
+        item
+          .querySelector('.layers__label')
+          ?.textContent?.replace(/\s+/g, ' ')
+          .trim()
+      ).toBe(
+        `${CURRICULUM_COPY.stage} ${i + 1} · ${CURRICULUM_COPY.practices(STAGES[i].practices.length)}`
+      );
+    });
+  });
+
+  it('draws a stage of one practice as a plain card: no region, no buttons, no tab stop', async () => {
+    await render(SAMPLE, {
+      layout: 'layered',
+      context: withStages([
+        stageOf('a', 'Arriving', 1),
+        stageOf('b', 'Breath', 3),
+      ]),
+    });
+    const [one, three] = stageItems();
+    expect(one.querySelector('[role="region"]')).toBeNull();
+    expect(one.querySelector('button')).toBeNull();
+    expect(one.querySelector('[tabindex]')).toBeNull();
+    expect(one.querySelectorAll('.practice-card')).toHaveLength(1);
+    expect(three.querySelector('[role="region"]')).not.toBeNull();
+    expect(three.querySelectorAll('.practice-card')).toHaveLength(3);
+  });
+
+  it('keeps a stage with nothing in it to its heading, prompting only while editing', async () => {
+    const stages = [stageOf('a', 'Arriving', 0), stageOf('b', 'Breath', 2)];
+    await render(SAMPLE, { layout: 'layered', context: withStages(stages) });
+    const [empty] = stageItems();
+    expect(empty.querySelector('h3')?.textContent).toBe('Arriving');
+    expect(empty.querySelector('.practice-card, [role="region"]')).toBeNull();
+    expect(empty.querySelector('.layers__label')?.textContent?.trim()).toBe(
+      'Stage 1'
+    );
+    expect(text()).not.toContain(CURRICULUM_EMPTY_STAGE);
+    unmount(app);
+    await render(SAMPLE, {
+      layout: 'layered',
+      context: withStages(stages),
+      edit: { commit: () => {} },
+    });
+    expect(
+      stageItems()[0].querySelector('[data-lp-edit-only]')?.textContent
+    ).toBe(CURRICULUM_EMPTY_STAGE);
+  });
+
+  it('leaves the stage line off its cards: the row names the stage', async () => {
+    await render(SAMPLE, { layout: 'layered' });
+    expect(document.body.querySelector('.practice-card__stage')).toBeNull();
+  });
+
+  it('draws a missing picture on the band’s panel on a filled band, the brand elsewhere', async () => {
+    for (const [scheme, ground] of [
+      ['base', 'brand'],
+      ['contrast', 'panel'],
+      ['accent', 'panel'],
+      ['brand', 'panel'],
+    ] as const) {
+      await render(SAMPLE, { layout: 'layered', scheme });
+      const grounds = [
+        ...document.body.querySelectorAll('.layers [data-ground]'),
+      ].map((tile) => tile.getAttribute('data-ground'));
+      expect(grounds.length, scheme).toBeGreaterThan(0);
+      expect(new Set(grounds), scheme).toEqual(new Set([ground]));
+      unmount(app);
+      app = null;
+    }
+  });
+
+  it('loads every picture lazily, with What’s inside’s sizes, behind the hero', async () => {
+    await render(SAMPLE, {
+      layout: 'layered',
+      context: sampleContext({
+        practicePictures: ['https://cdn.test/m1/lg.webp'],
+      }),
+    });
+    const pictures = [...document.body.querySelectorAll('.layers img')];
+    expect(pictures.length).toBeGreaterThan(0);
+    for (const img of pictures) {
+      expect(img.getAttribute('loading')).toBe('lazy');
+      expect(img.hasAttribute('fetchpriority')).toBe(false);
+      expect(img.getAttribute('sizes')).toBe('(max-width: 40rem) 80vw, 23rem');
+    }
+  });
+
+  it('runs its rows to the band’s edges only when it has stages to show', async () => {
+    await render(SAMPLE, { layout: 'layered' });
+    expect(
+      document.body.querySelector('.curriculum')?.classList.contains('lp-bleed')
+    ).toBe(true);
+    unmount(app);
+    await render(SAMPLE, { layout: 'layered', context: withStages([]) });
+    expect(
+      document.body.querySelector('.curriculum')?.classList.contains('lp-bleed')
+    ).toBe(false);
+    unmount(app);
+    await render(SAMPLE, { layout: 'cards' });
+    expect(
+      document.body.querySelector('.curriculum')?.classList.contains('lp-bleed')
+    ).toBe(false);
   });
 });

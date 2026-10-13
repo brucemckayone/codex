@@ -1,10 +1,10 @@
 /**
- * Reads a block component's style block for the source tests: each rule with
- * its declarations and the at-rules it sits in, through svelte's own parser
- * (which drops the comments). Imported by tests only.
+ * Reads a block component's style block, or a kit sheet, for the source
+ * tests: each rule with its declarations and the at-rules it sits in, through
+ * svelte's own parser (which drops the comments). Imported by tests only.
  */
 import { readFileSync } from 'node:fs';
-import { parse } from 'svelte/compiler';
+import { parse, parseCss } from 'svelte/compiler';
 
 type CssNode = {
   type: string;
@@ -27,7 +27,16 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 export function componentRules(path: string): CssRule[] {
   const source = readFileSync(path, 'utf8');
-  const css = parse(source, { modern: true }).css;
+  return rulesOf(source, parse(source, { modern: true }).css?.children);
+}
+
+/** The same, for a plain `.css` sheet (a Style's, or the kit's own). */
+export function sheetRules(path: string): CssRule[] {
+  const source = readFileSync(path, 'utf8');
+  return rulesOf(source, parseCss(source).children);
+}
+
+function rulesOf(source: string, children: unknown[] | undefined): CssRule[] {
   const rules: CssRule[] = [];
   const visit = (children: CssNode[], within: string[]) => {
     for (const node of children) {
@@ -49,6 +58,6 @@ export function componentRules(path: string): CssRule[] {
       }
     }
   };
-  visit((css?.children ?? []) as unknown as CssNode[], []);
+  visit((children ?? []) as CssNode[], []);
   return rules;
 }

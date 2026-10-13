@@ -69,7 +69,7 @@ export const SECTION_LAYOUTS = {
   problem: ['statement', 'list', 'split'],
   transformation: ['columns', 'steps', 'statement', 'toggle'],
   benefits: ['grid', 'checklist', 'split', 'bento'],
-  curriculum: ['timeline', 'accordion', 'cards', 'map'],
+  curriculum: ['timeline', 'accordion', 'cards', 'map', 'layered'],
   preview: ['feature', 'split'],
   instructor: ['split', 'quote', 'centered'],
   testimonials: ['grid', 'featured', 'quote', 'marquee', 'wall'],
