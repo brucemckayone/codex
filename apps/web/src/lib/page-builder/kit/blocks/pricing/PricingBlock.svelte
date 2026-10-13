@@ -354,10 +354,11 @@
       column-gap: var(--lp-gap);
     }
 
-    /* Beside a price drawn at its own width, the heading's room is not known:
-       louder holds it at the Style's size (03 X62). */
+    /* Beside a price drawn at its own width, the heading's room is not known,
+       so it is drawn at the Style's size: neither fitted nor grown by louder
+       (03 X62, X66). */
     .pricing[data-layout='band'] > .pricing__head {
-      --lp-heading-column: 0px;
+      --lp-heading-hold: 1;
     }
 
     .pricing__band {

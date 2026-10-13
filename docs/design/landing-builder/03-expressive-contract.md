@@ -2098,6 +2098,7 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
           Cinematic's quote, the CTA split, and Clean's heads with their lead beside them;
         - `0px` where a head shares its row with something drawn at its own width (pricing's band,
           beside its price). CSS cannot know that room, so the heading holds at the Style's size.
+          (Since X66, that hold is `--lp-heading-hold: 1`: a room of nothing is now the title floor.)
       - **Everything else drawn at the heading's size follows the dial down, never up.** A lifted
         title, the bento's lead tile, a quote, a price, a stage or chapter number, and Studio's
         problem lines all sit in a card's or a column's room, where no fit bound can see their words.
@@ -2115,7 +2116,7 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
         all that heading, which the narrowed run counts at 45 on its own. Over half of each of
         those two is on a phone, in the problem's statement at display size, where Poster
         hyphenates by design. The rest are long words in split heads at 1024 and 1440. That is filed as Codex-61zsk.60, which
-        reuses this fit at the Style's own size.
+        reuses this fit at the Style's own size (X66: 992 of the 1,065 headings fitted, 0 still over).
       - **Known limit.** Path's route stop is worked out from the heading's size token, not from the
         size it is drawn at. Where the fit holds a heading back, the stop sits up to the step's
         share of half a line low (about 5px at 1440).
@@ -2574,7 +2575,79 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     fails or none is attached; and the rule that hides it. Each was calibrated against a
     planted fault (nothing held, the held box visible, the held box not inert, the box remounted
     when the clip lands), and each failed on its own assertion.
+- **X66 · 2026-10-13 · 3c follow-up · A section heading drawn no larger than its widest word
+  fits, at the Style's own size as at louder (BUILT, decided without the owner; Codex-61zsk.60).**
+  X62 fitted a section heading to its room only at louder. At the Style's own size it was the
+  Style's size whatever its words, and X62's census counted what that cut: in Poster's FAQ,
+  "Transformation:" at 74.56px in a 5/12 track at 1440, across the questions beside it.
+  - **The rule.** Every section heading is drawn at `min(cap, max(title, hold × own, (1 − hold) ×
+    room ÷ run))`. `cap` is the dial's size for it (`--lp-size-heading`: the Style's, its step up
+    at louder, its step down at calmer), `own` is the Style's size before louder's step, `room` is
+    X62's (the section's column, or the room a layout names), and `run` is X62's weight of its
+    widest run in the page's face. So a heading is drawn at the dial's size wherever its words fit,
+    and only as much smaller as its widest word needs: X60's poster headline, and X62's louder, are
+    the same rule. A heading with no words is drawn at the dial's size.
+  - **Never smaller than a title.** A heading stays a head, and a room that came to nothing (a
+    layout's rule gone wrong, or a column a Style collapses) cannot draw it at no size. A word too
+    long even at a title's size runs past its line, as every word did before. In the sweep none
+    did.
+  - **A held head: `--lp-heading-hold: 1`, in place of X62's `--lp-heading-column: 0px`.** Where a
+    head shares its row with something drawn at its own width (pricing's band beside its price, at
+    60rem and up), CSS cannot know its room. X62 named that room `0px`, which louder read as
+    "hold". Under this rule a room of nothing is fitted to the title floor, so the band now says
+    what it means: hold, at the Style's size, which louder does not grow (`--lp-drama-held` takes
+    the step back out) and calmer still takes down.
+  - **Measured** with `louder-fit.spec.ts`, which now reads each heading three ways: held at the
+    Style's size as it was drawn before (the census), at its own size, and at louder. Over the 8
+    Styles, the gallery's face and, in Bold and Poster, Anton and Unbounded, 5 widths and 60 texts
+    (60 runs, 24 minutes):
 
+    | (heading, text) pairs with a run wider than its line | before | after |
+    |---|---|---|
+    | section headings fitted (the column, or a named room) | 992 | 0 |
+    | section headings held (the pricing band, 1024 and 1440, Poster) | 73 | 73 |
+    | titles and the problem's display statement (not fitted here) | 302 | 302 |
+    | at louder, a run the Style's size keeps within its line | 0 | 0 |
+
+    The before is 1,367, X64's own-size count, and the census held at the Style's size counts the
+    same 1,367 on the after. A fitted heading came out a median 16.5% smaller, a tenth of them over
+    27%. The most was 50.5%: Poster in Unbounded at 1024, the FAQ's "Transformation:" alone, 56.3
+    to 27.8px. 606 of the 992 are Poster and Bold in Unbounded, the widest face offered.
+  - **What it costs.** The run is weighed with each face's scale (X60's `FACE_SCALE`), set by the
+    widest of 70 long words, so most words read a little wider than they draw: 507 (heading, text)
+    pairs whose words fit at the Style's size come out smaller, by a median 3.9% (90th 6.4%, the
+    most 13.4%: Cinematic's closing band at 360, "Transformation:" alone). 168 of them are the
+    story's chapter heads, and 297 are in Poster. X60 took the same trade for the poster headline.
+  - **Known limits.**
+    - The 73 held: the pricing band's heading is drawn at the Style's size beside its price, so a
+      long word there still runs past its line, in Poster at 1024 and 1440 (Codex-61zsk.63).
+    - Titles (260) and the display statement (42): a title sits in a card's room, which no rule
+      names yet, and the statement is drawn at display size, where Poster hyphenates by design
+      on a phone (X62). Filed as Codex-61zsk.62.
+  - **Tests.** `heading-fit.test.ts` (CI) parses `Heading.svelte`'s rule and computes it, units
+    and all, from the properties a page, the dial and a layout give it: the Style's size where
+    words fit, a long word fitted exactly, the title floor, a named room narrower and wider than
+    the column, capitals, tracking, no words, louder, calmer, and the hold. It fails as the browser
+    does on a `max()` that mixes a number with a length, which is invalid and leaves the heading
+    at its parent's size. It counts every `--lp-heading-hold` in the kit (only the band, only at
+    60rem) and every named room (none of nothing). `louder-fit.spec.ts` (opt-in, local) adds the
+    own-size check: no fitted heading draws a run past its line unless it sits on the title floor,
+    which it logs. Calibrated: the guard's seven plants (the cap, the floor or the hold term
+    dropped, the hold given as a number, the cap at the own size, the band unheld, the FAQ given a
+    room of `0px`) each fail only their own tests, and the sweep fails with the fit removed (1,319
+    faults), with the band unheld (95, all the band) and with the FAQ's room removed (104, all the
+    FAQ).
+  - Rejected:
+    - **A floor at a share of the Style's size.** The census held at
+      the Style's size shows what each would still cut: at 0.9 of it, 540 of the 1,065; at 0.8,
+      227; at 0.7, 83; at 0.5, 3. A floor low enough to cut nothing is no floor, and it is a number
+      to tune for every Style.
+    - **Fitting only Poster and Bold**, where most of the count is. The rule is the same in every
+      Style and changes nothing where words fit, and Cinematic, Path, Soft and Studio have 66
+      fitted pairs between them.
+    - **Measuring the heading in script after it is drawn.** It draws at the Style's size until
+      the script runs, then changes: a layout shift on every page with a long word, and no fit at
+      all where the script never runs.
 - **X68 · 2026-10-13 · 3b follow-up · The black-and-white proof holds the proven veil; the veil
   drawn is held between its two ends (Codex-61zsk.65; BUILT, decided without the owner;
   test only).** `org-shader.spec.ts` (B2, X50, X51) held every ink on studio-alpha's hero to its

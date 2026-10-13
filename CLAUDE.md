@@ -169,10 +169,13 @@ comments. The reasoning for its settings lives here.
   typecheck reported one package while tearing down others mid-run — they print
   `ELIFECYCLE Command failed.` with zero diagnostics, indistinguishable from a
   pass.
-- **Package tests are NOT typechecked.** 23 of 24 packages exclude
-  `**/*.test.ts` (their tsconfig drives the `dist` build too). Workers and
-  apps/web do include theirs. Tracked in Codex-629bw — until it lands, a broken
-  package test only surfaces at runtime.
+- **Package tests ARE typechecked** (Codex-629bw, PR #523, 2026-09-17). A
+  package's `tsconfig.json` still excludes `**/*.test.ts`, because it drives
+  the `dist` build; its `typecheck` runs `tsc -p tsconfig.typecheck.json`,
+  which takes all of `src/**/*`, tests included (identity's own tsconfig
+  never excluded them). `noUncheckedIndexedAccess` is on there too, so a
+  test-only edit needs `pnpm typecheck` like any other: `keys[0]` is
+  `string | undefined` (it failed PR #574's static-analysis).
 - **`.fallowrc.json` is also comment-free strict JSON**, so its reasoning lives
   here too.
   - **Never suppress a class member by name in `usedClassMembers`.** A name
