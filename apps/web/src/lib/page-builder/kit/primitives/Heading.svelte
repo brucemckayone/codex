@@ -56,8 +56,9 @@
 
   const tag = $derived(`h${level}`);
   const attrs = $derived(editAttrs(type, field, edit));
-  /* Only a section heading is weighed: the type dial's `louder` grows that
-     size alone, as far as its widest run fits (below, 03 X62). */
+  /* Only a section heading is weighed: it is drawn no larger than its widest
+     run fits (below, 03 X66), and the type dial's `louder` grows that size
+     alone (X62). */
   const run = $derived(size === 'heading' ? widestRun(text) : undefined);
 </script>
 
@@ -102,28 +103,28 @@
     text-transform: var(--lp-case-display);
   }
 
+  /* A section heading is drawn no larger than its widest run fits its room
+     (03 X66, as the poster's headline is, X60): at the Style's own size
+     wherever its words fit, and only as much smaller as a word needs, so no
+     word is cut and none runs over the column beside it. The type dial moves
+     the size this caps (`--lp-size-heading`): `louder` (X62) grows a heading
+     only as far as its widest run still fits, `calmer` takes it down. A
+     fixed size cut words: Poster's FAQ draws "Transformation:" at 74.56px
+     in a 5/12 track at 1440, across the questions.
+     A run is weighed in the page's display face (`styles/faces.css`): as
+     written, or in capitals where a Style draws them (`--lp-heading-face`
+     and `--lp-heading-run`, set where it sets the case). Its room is the
+     section's content column (`--lp-column`). Where a layout gives its head
+     less room, it names that room (`--lp-heading-column`): a measure's cap,
+     or a split's share. Where the head shares a row with something drawn at
+     its own width, its room is not known, so it holds the heading at the
+     Style's size (`--lp-heading-hold: 1`). A heading with no words is drawn
+     at the size the dial gives it. It is never drawn smaller than a title,
+     so it stays a head, and a room that came to nothing could never draw it
+     at no size at all; a word too long even at that runs past its line. */
   .lp-heading[data-size='heading'] {
-    font-size: var(--lp-size-heading);
-    font-weight: var(--lp-weight-heading);
-    line-height: var(--lp-leading-heading);
-    letter-spacing: var(--lp-tracking-heading);
-  }
-
-  /* The type dial's `louder` (03 X62) grows a section heading only as far as
-     its widest run still fits its column, and never below the Style's own
-     size. A fixed factor cut words: Poster's phone heading sits on its
-     clamp's floor (2.1rem), where "Transformation:" just fits, so every step
-     above 1 cut it. A run is weighed in the page's display face
-     (`styles/faces.css`): as written, or in capitals where a Style draws them
-     (`--lp-heading-face` and `--lp-heading-run`, set where it sets the case).
-     Its column is the section's content column (`--lp-column`). Where a
-     layout gives its head less room, it names that room
-     (`--lp-heading-column`): a measure's cap, a split's share, or `0px` where
-     the head shares a row with something drawn at its own width, which
-     holds the heading at the Style's size. A heading with no words grows the
-     whole step. */
-  :global(.lp[data-lp-drama='louder']) .lp-heading[data-size='heading'] {
     --_own: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
+    --_hold: var(--lp-heading-hold, 0);
     --_column: min(
       var(--lp-column, 100cqi),
       var(--lp-heading-column, var(--lp-column, 100cqi))
@@ -134,14 +135,24 @@
         var(--lp-heading-face, var(--lp-face-text)) +
         var(--lp-heading-run-chars, 0) * var(--_track, 0)
     );
-    font-size: min(var(--lp-size-heading), max(var(--_own), var(--_column) / var(--_em)));
+    font-size: min(
+      var(--lp-size-heading),
+      max(
+        var(--lp-size-title, 0px),
+        var(--_hold) * var(--_own),
+        (1 - var(--_hold)) * var(--_column) / var(--_em)
+      )
+    );
+    font-weight: var(--lp-weight-heading);
+    line-height: var(--lp-leading-heading);
+    letter-spacing: var(--lp-tracking-heading);
   }
 
   /* The Style's tracking per character, in em: a real property, since a test
      of a custom one always passes. Without it the run is reckoned untracked,
      which only reads it wider (every Style tracks its headings tight). */
   @supports (width: calc(1px * (1px / 1px))) {
-    :global(.lp[data-lp-drama='louder']) .lp-heading[data-size='heading'] {
+    .lp-heading[data-size='heading'] {
       --_track: calc(var(--lp-tracking-heading) / 1em);
     }
   }
