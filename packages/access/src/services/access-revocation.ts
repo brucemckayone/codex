@@ -5,7 +5,7 @@
  * cryptographic presigned R2 URL outlives its access check. Checked before
  * minting signed URLs in `ContentAccessService.getStreamingUrl()`.
  *
- * Design decisions (see docs/subscription-cache-audit/phase-2-followup.md):
+ * Design decisions (see docs/payments/access.md, "Streaming revocation"):
  * - Keyspace `revoked:` is deliberately distinct from `cache:` so there is
  *   zero confusion with `@codex/cache` / `VersionedCache`. This is NOT a
  *   versioned cache — it's an authoritative short-TTL block list and does

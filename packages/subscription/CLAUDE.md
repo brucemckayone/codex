@@ -72,7 +72,7 @@ The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**: a
 
 Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierarchy: a subscription only unlocks tier-gated content if the subscriber's tier `sortOrder >= content.minimumTierId.sortOrder`. The grant path is implemented in `ContentAccessService` (see `packages/access/CLAUDE.md`).
 
-Revenue split defaults: Platform 10% of gross, Org 15% of post-platform, Creators 85% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
+Revenue split defaults: Platform 10% of gross, Org 15% of post-platform, Creators 85% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payments/fees-and-splits.md` (which also flags where webhook paths still skip it).
 
 ### Webhook ordering resilience (Codex-t7psp)
 
@@ -96,7 +96,7 @@ Stripe does **NOT** guarantee webhook delivery order. On a fresh subscription, `
 
 ### Payout pipeline (audit closed 2026-05-13)
 
-The invoice → transfer → pending-payout → drain flow is documented end-to-end in **`docs/payouts/payout-pipeline.md`**. Read that doc before touching any of:
+The invoice → transfer → pending-payout → drain flow is specified in **`docs/payments/connect-and-payouts.md`** and **`docs/payments/fees-and-splits.md`**. Read those docs before touching any of:
 
 - `handleInvoicePaymentSucceeded` — currency guard + split + transfers
 - `executeTransfers` — fan-out + per-creator min-transfer floor

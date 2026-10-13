@@ -52,7 +52,7 @@ import type { StripeWebhookEnv } from '../types';
  * window where a presigned R2 URL issued before revocation is still usable.
  *
  * See packages/access/src/services/access-revocation.ts and
- * docs/subscription-cache-audit/phase-2-followup.md for the design.
+ * docs/payments/access.md ("Streaming revocation") for the design.
  *
  * No-op when:
  *   - CACHE_KV binding absent (dev stub / misconfigured env) — revocation is
@@ -118,7 +118,7 @@ function revokeAccess(
  * Errors are swallowed inside the `waitUntil` promise so a KV hiccup never
  * surfaces as a webhook 500 (Stripe would retry unnecessarily).
  *
- * See bead Codex-13ml3 and docs/subscription-cache-audit/phase-2-followup.md.
+ * See bead Codex-13ml3 and docs/payments/access.md ("Streaming revocation").
  */
 function clearAccess(
   c: Context<StripeWebhookEnv>,
@@ -430,7 +430,7 @@ export async function handleSubscriptionWebhook(
         // Revocation is deliberately NOT written here by default:
         //  - `cancel_at_period_end=true` toggles status to CANCELLING but
         //    the user has paid access through `currentPeriodEnd` (product
-        //    decision — see docs/subscription-cache-audit/phase-2-followup.md)
+        //    decision — see docs/payments/access.md)
         //  - mid-subscription tier changes do not reduce access
         //  - transitions TO active (reactivation) are handled by a sibling
         //    bead (Codex-13ml3) which issues `revocation.clear`

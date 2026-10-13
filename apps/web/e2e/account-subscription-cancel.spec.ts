@@ -4,14 +4,14 @@ import { loginAsSeedViewer } from './helpers/seed-auth';
 /**
  * Account Subscription Cancel Flow E2E Tests
  *
- * Covers the PR 1 critical paths from docs/subscription-cache-audit/phase-1-p0.md:
+ * Covers the cancel paths in docs/payments/subscriptions.md and docs/payments/access.md:
  *
  *   1. Cancel button → optimistic CANCELLING flip (no hard refresh)
  *   2. currentPeriodEnd remains visible (revocation at period end)
  *   3. Refresh persists CANCELLING (server-reconciled, not just optimistic)
  *   4. Network error during cancel rolls back to ACTIVE
  *
- * Fixture strategy — Option C (seed-based, per docs/subscription-cache-audit/phase-1-p0.md):
+ * Fixture strategy — seed-based:
  *   The monorepo seed (`packages/database/scripts/seed/commerce.ts`) creates an
  *   ACTIVE subscription for `viewer@test.com` on `studio-alpha` (tier "Standard").
  *   We log in as the seeded viewer because the seed guarantees this state on every

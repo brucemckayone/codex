@@ -58,6 +58,6 @@ Return a JSON array of findings (empty `[]` if clean), each:
 `{ reviewer:"commerce-stripe", severity, file, line, rule_ref, what, why, evidence, fix }`.
 
 ## Authority
-`CLAUDE.md#Currency`; `docs/payouts/README.md`. Memory: `feedback_stripe_portal_lockdown`,
+`CLAUDE.md#Currency`; `docs/payments/README.md`. Memory: `feedback_stripe_portal_lockdown`,
 `feedback_security_deep_test`, `feedback_drizzle_for_update_pattern`, `feedback_stripe_cli_account_mismatch`.
 Absorbed from `stripe-best-practices`, `pr-review-agent-team/agents/security.md`, `backend-dev`.

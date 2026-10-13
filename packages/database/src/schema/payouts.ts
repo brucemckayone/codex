@@ -28,7 +28,7 @@ import { users } from './users';
  *
  * `pending_payouts` remains in the schema for one release cycle while data
  * migrates; it receives no new inserts after this PR. See
- * `docs/payouts/payout-pipeline.md` for the full lifecycle.
+ * `docs/payments/connect-and-payouts.md` for the full lifecycle.
  */
 export const payouts = pgTable(
   'payouts',

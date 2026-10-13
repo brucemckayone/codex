@@ -67,7 +67,7 @@ import {
  * Callers may override by passing `input.expirySeconds` — bounded by the
  * Zod schema (`getStreamingUrlSchema`) to [300, 7200].
  *
- * See docs/subscription-cache-audit/phase-2-followup.md — Phase 3.
+ * See docs/payments/access.md — "Streaming revocation".
  */
 export const DEFAULT_STREAMING_URL_TTL_SECONDS = 600;
 
@@ -276,8 +276,8 @@ export class ContentAccessService
       // (~0.5ms) is dramatically cheaper than opening a read-only transaction
       // and issuing the access-decision queries, so any revocation hit
       // rejects without touching the DB. Mirrors the sibling gate in
-      // `savePlaybackProgress` (see Phase 4.1 of
-      // docs/subscription-cache-audit/phase-2-followup.md).
+      // `savePlaybackProgress` (see "Playback progress" in
+      // docs/payments/access.md).
       //
       // This runs only when `this.revocation` is wired (i.e. CACHE_KV is
       // bound). Standalone factory callers that omit the KV binding skip

@@ -2329,7 +2329,7 @@ describe('SubscriptionService', () => {
 
     // Codex-0g6yq: return shape carries { userId, orgId } so the route handler
     // can feed invalidateForUser without re-fetching. See
-    // docs/subscription-cache-audit/phase-1-p0.md.
+    // docs/payments/access.md ("Keeping caches in step").
     it('should return { userId, orgId, subscription } with org matching the subscription', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-return-shape');
       await db
@@ -3056,7 +3056,7 @@ describe('SubscriptionService', () => {
     // Codex-0g6yq: explicit { userId, orgId } return-shape assertions for the
     // initial (subscription_create) invoice and the renewal (subscription_cycle)
     // invoice. Negative path: unknown subscription returns undefined rather
-    // than throwing. See docs/subscription-cache-audit/phase-1-p0.md.
+    // than throwing. See docs/payments/access.md.
     it('should return { userId, orgId } for an initial invoice (subscription_create)', async () => {
       const { org, tier1 } = await createFullOrg('invoice-success-initial');
       const sub = takeFirst(

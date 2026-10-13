@@ -443,7 +443,7 @@ export interface WebhookEmailPayload {
  * `userId` + `orgId` feed the shared `invalidateForUser` helper so each
  * subscription lifecycle event bumps both COLLECTION_USER_LIBRARY and,
  * when an org is involved, COLLECTION_USER_SUBSCRIPTION. See
- * docs/subscription-cache-audit/phase-1-p0.md for the gap matrix.
+ * docs/payments/access.md ("Keeping caches in step").
  */
 export interface WebhookHandlerResult {
   /** User ID for cache invalidation (COLLECTION_USER_LIBRARY) */

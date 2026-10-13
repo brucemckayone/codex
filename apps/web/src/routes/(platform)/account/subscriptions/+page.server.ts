@@ -6,8 +6,7 @@
  *
  * Registers a dedicated dependency key (`account:subscriptions`) so that the
  * page can re-run this load in isolation after a cancel / reactivate mutation.
- * See `docs/subscription-cache-audit/phase-1-p0.md` → "Design — account page
- * refresh" for the root cause (the old `invalidate('cache:versions')` call hit
+ * The root cause it fixed (the old `invalidate('cache:versions')` call hit
  * the platform layout's key, not this page's load).
  *
  * Error shape is a tagged `loadError` discriminator so the page renders a

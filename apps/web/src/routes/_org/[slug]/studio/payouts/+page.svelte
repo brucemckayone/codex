@@ -291,7 +291,7 @@
    * Only two states earn a colour here: settled (success) and failed (error).
    *
    * `pending` used to fall through to `warning` — amber reads as "a problem to
-   * fix", but pending is the pipeline's normal pre-drain state (docs/payouts:
+   * fix", but pending is the pipeline's normal pre-drain state (docs/payments/connect-and-payouts.md:
    * the webhook drain plus the safety-net cron drain both resolve it), so it
    * was colouring healthy rows as exceptions. `reversed` and
    * `cancelled_by_refund` are terminal bookkeeping outcomes, and

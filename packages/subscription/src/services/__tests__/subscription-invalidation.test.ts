@@ -5,7 +5,7 @@
  * mocked so we can assert exactly which keys would be invalidated and that
  * `waitUntil` is wired up for fire-and-forget semantics.
  *
- * Coverage (see docs/subscription-cache-audit/testing-matrix.md — PR 1 Unit):
+ * Coverage (rule: docs/payments/access.md, "Keeping caches in step"):
  * - Library-only path when no orgId
  * - Library + subscription path when orgId present
  * - waitUntil called synchronously (does not block return)
