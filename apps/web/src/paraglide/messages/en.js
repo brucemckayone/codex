@@ -14791,6 +14791,14 @@ export const studio_page_editor_with_default = (params) => `${params.name} (the 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_layout_repeat = () => `Your What’s inside section already shows these practices as cards. Most pages need only one of the two.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_colour_title = () => `Colour`
 
 

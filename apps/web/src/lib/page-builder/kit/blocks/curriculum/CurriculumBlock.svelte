@@ -2,13 +2,15 @@
   @component CurriculumBlock
 
   The course's stages and what is in each, straight from the curriculum the
-  page renders (`context.stages`). Three layouts:
+  page renders (`context.stages`). Five layouts:
     timeline  — the stages as a sequence: numbered markers on a spine, each
                 stage's practices beside it
     accordion — one numbered row per stage, opening to its practices
     cards     — each stage its own tile, side by side
     map       — the stages as stops on a drawn route, each opening to its
                 practices (StageMap)
+    layered   — each stage its own row of picture-led practice cards that
+                visitors swipe through, What's inside's cards (StageLayers)
 
   A practice's kind reads by its icon's shape. A join button appears only when
   the creator writes one. No stages yet: the public page keeps only the words;
@@ -21,9 +23,11 @@
   import Eyebrow from '../../primitives/Eyebrow.svelte';
   import Heading from '../../primitives/Heading.svelte';
   import Text from '../../primitives/Text.svelte';
+  import { practiceTileGround } from '../inside/practice-card';
   import { CURRICULUM_EMPTY, curriculumDefinition } from './definition';
   import StageAccordion from './StageAccordion.svelte';
   import StageCards from './StageCards.svelte';
+  import StageLayers from './StageLayers.svelte';
   import StageMap from './StageMap.svelte';
   import StageTimeline from './StageTimeline.svelte';
   import { orderedStages } from './stages';
@@ -33,7 +37,10 @@
   const content = $derived(curriculumDefinition.coerce(props));
   const stages = $derived(orderedStages(context.stages));
   const layout = $derived(
-    section.layout === 'accordion' || section.layout === 'cards' || section.layout === 'map'
+    section.layout === 'accordion' ||
+      section.layout === 'cards' ||
+      section.layout === 'map' ||
+      section.layout === 'layered'
       ? section.layout
       : 'timeline'
   );
@@ -44,7 +51,7 @@
   const level = $derived<2 | 3>(content.heading && section.headingLevel === 2 ? 3 : 2);
 </script>
 
-<div class="curriculum" data-layout={layout}>
+<div class="curriculum" class:lp-bleed={layout === 'layered' && stages.length > 0} data-layout={layout}>
   {#if headed}
     <header class="curriculum__head">
       {#if content.eyebrow}<Eyebrow text={content.eyebrow} type="curriculum" {edit} />{/if}
@@ -71,6 +78,14 @@
     <StageCards {stages} {level} />
   {:else if layout === 'map'}
     <StageMap {stages} {level} />
+  {:else if layout === 'layered'}
+    <StageLayers
+      {stages}
+      {level}
+      anchor={section.anchor}
+      tile={practiceTileGround(section.scheme)}
+      edit={Boolean(edit)}
+    />
   {:else}
     <StageTimeline {stages} {level} anchor={section.anchor} />
   {/if}
@@ -99,6 +114,24 @@
     gap: var(--lp-gap);
   }
 
+  /* Layered: the rows run to the section's edges while the words keep the
+     column, the section's own tracks with no gap between them (a column gap
+     would narrow the content track and push it off the section's). */
+  .curriculum.lp-bleed {
+    grid-template-columns: inherit;
+    gap: 0;
+    row-gap: var(--lp-gap);
+  }
+
+  .curriculum.lp-bleed > :global(*) {
+    grid-column: content;
+    min-inline-size: 0;
+  }
+
+  .curriculum.lp-bleed > :global(.layers) {
+    grid-column: bleed;
+  }
+
   /* The heading measures itself in its own `ch`, not the body face's. */
   .curriculum__head :global(.lp-heading) {
     max-inline-size: 20ch;
@@ -117,17 +150,19 @@
   }
 
   /* Soft centres a head over a row of cards, as its pricing does. */
-  :global(.lp[data-lp-style='soft']) .curriculum[data-layout='cards'] {
+  :global(.lp[data-lp-style='soft']) .curriculum:is([data-layout='cards'], [data-layout='layered']) {
     --lp-actions-align: center;
   }
 
-  :global(.lp[data-lp-style='soft']) .curriculum[data-layout='cards'] .curriculum__head {
+  :global(.lp[data-lp-style='soft'])
+    .curriculum:is([data-layout='cards'], [data-layout='layered'])
+    .curriculum__head {
     justify-items: center;
     text-align: center;
   }
 
   :global(.lp[data-lp-style='soft'])
-    .curriculum[data-layout='cards']
+    .curriculum:is([data-layout='cards'], [data-layout='layered'])
     .curriculum__head
     :global(:is(.lp-eyebrow, .lp-heading, .lp-text)) {
     justify-self: center;

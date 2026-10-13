@@ -14,10 +14,5 @@ export const INSIDE_COPY = {
   position: (first: number, last: number, count: number) =>
     first === last ? `${first} of ${count}` : `${first}–${last} of ${count}`,
   /** The stage a practice sits in: "Stage 2 · Breath", or "Stage 2" unnamed. */
-  stage: (number: number, name: string) => {
-    const named = name.trim();
-    return named
-      ? `${CURRICULUM_COPY.stage} ${number} · ${named}`
-      : `${CURRICULUM_COPY.stage} ${number}`;
-  },
+  stage: CURRICULUM_COPY.stageLine,
 } as const;

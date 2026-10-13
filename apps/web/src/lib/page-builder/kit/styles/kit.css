@@ -113,6 +113,12 @@
   /* The tallest a Picture section stands in the column (03 X64): it narrows
      instead, so a portrait never runs past a laptop screen. */
   --lp-picture-tall: 45rem;
+  /* A practice card's width and the gap between cards, wherever practices
+     sit in a row (What's inside, the layered curriculum): four-fifths of a
+     phone, so the next card shows at the edge. One width, so a picture shown
+     in both picks the same size and is fetched once (PRACTICE_CARD_SIZES). */
+  --lp-practice-card: clamp(17rem, 80cqi, 22.5rem);
+  --lp-practice-gap: clamp(var(--space-4), 0.5rem + 1.2cqi, var(--space-8));
   --lp-gutter: clamp(var(--space-4), 4.5cqi, var(--space-12));
   --lp-gap: clamp(var(--space-6), var(--space-4) + 2cqi, var(--space-12));
   --lp-stack: clamp(var(--space-4), var(--space-3) + 0.8cqi, var(--space-6));

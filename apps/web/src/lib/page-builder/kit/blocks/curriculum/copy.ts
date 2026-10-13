@@ -30,10 +30,22 @@ function length(seconds: number | null | undefined): string | null {
   return rest > 0 ? `${hours} hr ${rest} min` : `${hours} hr`;
 }
 
+/** Read before a stage's number: "Stage 3". */
+const STAGE = 'Stage';
+
+/** A stage named in full: "Stage 2 · Breath", or "Stage 2" unnamed. */
+function stageLine(number: number, name: string): string {
+  const named = name.trim();
+  return named ? `${STAGE} ${number} · ${named}` : `${STAGE} ${number}`;
+}
+
 export const CURRICULUM_COPY = {
-  /** Read before a stage's number: "Stage 3". */
-  stage: 'Stage',
+  stage: STAGE,
+  stageLine,
   practices: COPY.course.practices,
+  /** A stage's row of practices, its buttons (the layered layout). */
+  previousIn: (number: number) => `Previous practice in ${STAGE} ${number}`,
+  nextIn: (number: number) => `Next practice in ${STAGE} ${number}`,
   /** What a practice is, beside its title: "Video", "Reading". */
   kind: (type: PracticeType) => KINDS[type] ?? KINDS.video,
   length,

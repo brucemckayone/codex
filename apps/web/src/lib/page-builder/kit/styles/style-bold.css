@@ -399,6 +399,13 @@
   border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
 }
 
+/* A layered stage is topped by the same rule, over its heading's whole line
+   (`StageLayers.svelte` draws the row). */
+:is(.lp, #lp-style)[data-lp-style='bold'] .layers__stage::before {
+  content: '';
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
+}
+
 /* ── the numbers: counted up, at display size ────────────────────────────── */
 /* Fewer to a line, so each figure can take the display size: four make two
    pairs, never four small ones. Labels read at body size under them. */

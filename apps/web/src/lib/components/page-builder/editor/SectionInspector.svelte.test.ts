@@ -517,3 +517,50 @@ describe('the inspector for a simple section', () => {
     expect(input?.hasAttribute('aria-invalid')).toBe(false);
   });
 });
+
+// ── Layered stages beside What's inside (Codex-61zsk.55) ───────────────────
+
+describe('the curriculum’s layered stages beside What’s inside', () => {
+  const REPEAT =
+    'Your What’s inside section already shows these practices as cards. Most pages need only one of the two.';
+  const curriculum = (variant?: string): PageSection => ({
+    id: 'c',
+    type: 'curriculum',
+    enabled: true,
+    props: { heading: 'Six weeks' },
+    ...(variant ? { variant } : {}),
+  });
+  const inside = (enabled = true): PageSection => ({
+    id: 'i',
+    type: 'inside',
+    enabled,
+    props: { heading: 'Inside' },
+  });
+  const note = () =>
+    document.body
+      .querySelector<HTMLElement>('[data-note="repeat"]')
+      ?.textContent?.trim();
+
+  it('says the cards are shown twice when the page has a What’s inside section', () => {
+    render([hero('h'), inside(), curriculum('layered')], 'c');
+    expect(note()).toBe(REPEAT);
+  });
+
+  it('says it the moment the layout is chosen', () => {
+    render([hero('h'), inside(), curriculum('timeline')], 'c');
+    expect(note()).toBeUndefined();
+    pageBuilder.setSectionLayout('c', 'layered');
+    flushSync();
+    expect(note()).toBe(REPEAT);
+  });
+
+  it.each([
+    ['a hidden What’s inside', [inside(false), curriculum('layered')]],
+    ['no What’s inside', [curriculum('layered')]],
+    ['another layout', [inside(), curriculum('cards')]],
+  ])('says nothing for %s', (_, sections) => {
+    render([hero('h'), ...sections], 'c');
+    expect(document.body.textContent).toContain('Layout');
+    expect(note()).toBeUndefined();
+  });
+});

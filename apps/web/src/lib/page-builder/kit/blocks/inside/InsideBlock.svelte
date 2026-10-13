@@ -32,14 +32,12 @@
   import { INSIDE_EMPTY, insideDefinition } from './definition';
   import PracticeCard from './PracticeCard.svelte';
   import PracticeTile from './PracticeTile.svelte';
-  import { stagedPracticeCards } from './practice-card';
+  import { PRACTICE_CARD_SIZES, practiceTileGround, stagedPracticeCards } from './practice-card';
 
   const { props, section, context, edit }: BlockProps = $props();
 
   /** As many cards as a wide screen shows at once: their pictures load now. */
   const EARLY = 4;
-  /** A card's drawn width: four-fifths of a phone, at most about 23rem. */
-  const SIZES = '(max-width: 40rem) 80vw, 23rem';
   /** The tiles an empty preview draws: enough to show the row's shape. */
   const PREVIEW = ['video', 'audio', 'written', 'video'] as const;
 
@@ -48,12 +46,7 @@
   const cards = $derived(stagedPracticeCards(context.stages));
   const empty = $derived(cards.length === 0);
   const shown = $derived(!empty || page.still || !!edit);
-  // A brand tile vanishes into a brand band and smears against a dark one.
-  const tile = $derived<'brand' | 'panel'>(
-    section.scheme === 'brand' || section.scheme === 'accent' || section.scheme === 'contrast'
-      ? 'panel'
-      : 'brand'
-  );
+  const tile = $derived(practiceTileGround(section.scheme));
 </script>
 
 {#if empty}
@@ -102,7 +95,7 @@
         >
           {#each cards as { card, stage }, index (index)}
             <li class="inside__item">
-              <PracticeCard {card} {stage} {tile} early={index < EARLY} sizes={SIZES} />
+              <PracticeCard {card} {stage} {tile} early={index < EARLY} sizes={PRACTICE_CARD_SIZES} />
             </li>
           {/each}
         </ScrollStrip>
@@ -117,10 +110,10 @@
     display: none;
   }
 
+  /* The card's width and gap are shared with the layered curriculum (kit.css). */
   .inside {
-    /* Four-fifths of a phone, so the next card shows at the edge. */
-    --_card: clamp(17rem, 80cqi, 22.5rem);
-    --_gap: clamp(var(--space-4), 0.5rem + 1.2cqi, var(--space-8));
+    --_card: var(--lp-practice-card);
+    --_gap: var(--lp-practice-gap);
     display: grid;
     row-gap: var(--lp-gap);
   }

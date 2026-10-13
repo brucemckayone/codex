@@ -466,3 +466,11 @@
   background: var(--lp-mark-ink);
   mask: var(--lp-mark-underline) center / 100% 100% no-repeat;
 }
+
+/* ── the course's layered stages (03 X72) ────────────────────────────────── */
+/* A hairline over each stage's heading line (`StageLayers.svelte` draws the
+   row). */
+:is(.lp, #lp-style)[data-lp-style='studio'] .layers__stage::before {
+  content: '';
+  border-block-start: var(--border-width) var(--border-style) var(--lp-line);
+}

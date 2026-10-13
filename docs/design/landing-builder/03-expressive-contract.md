@@ -2921,12 +2921,17 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - Before the map's fix, all four pages in all 8 Styles at 5 widths and 3 faces: the only
       faults were the map's 72. Every room a card names was its title's line within 0.5px, and
       at louder no heading ran past its line. After the fix and the sweep's correction, the map's
-      page alone passes. The full sweep is run again on the final tree before the merge.
+      page alone passes. The full sweep on the merged head (e1bfdcc0, PR #583; recorded with
+      X72) passed with no fault: of 2,583 (heading, text) pairs the Style's size draws too wide
+      (1,267 titles, 84 display statements, 1,232 section headings), none is after the fit, and
+      every named room is its title's line.
     - **What it costs.** On the sample page, re-taken on dev with the same sweep, section headings
       are unchanged: 1,164 pairs drawn smaller on both, none by a different amount. The titles and
       statements now fitted take a little off words that already fit, as X66's headings do (the
       run is weighed with the face's widest-word scale). In each Style's own face that is a
-      median 3.5% and at most 5.2%, and in Unbounded at most 7.3%. In Anton the sweep reads up to
+      median 3.5% and at most 5.2%, and in Unbounded at most 7.3%. Over the full sweep (every
+      page): titles a median 2.9%, at most 5.5%; statements 4.0%, at most 4.5%; section headings
+      3.1%. In Anton the sweep reads up to
       35%, as it reads up to 49% for dev's own headings. The sweep swaps a face in as a bare
       family name, which may never take that face's own fit factor (Codex-61zsk.68).
   - **Rejected:**
@@ -2966,3 +2971,95 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     and the count let shrink. In the browser, the sweep's room check fired on both plants: Soft's inset dropped read a
     room 48px too wide at every width on both pages that draw it, and the timeline's wide room
     dropped read 862.7px for a 349.9px line at 1024 and 1018.9px for 414.9px at 1440.
+- **X72 · 2026-10-13 · 3c · The course's practices as one row of cards per stage: Layered stages
+  (Codex-61zsk.55; BUILT, the owner approved the design and the mockup).** A fifth curriculum
+  layout, `layered`, beside the timeline, the accordion, the cards and the map. Each stage is a
+  heading and a row of the course's practices drawn as What's inside's picture-led cards
+  (`PracticeCard`), with the card's stage line left off because the row's heading names the stage.
+  The data, loading and caching design is `phase3-sources/whats-inside/data-design.md`
+  §"Layered stages": no new fields, no new reads, no caching.
+  - **A row is a `ScrollStrip`**: the browser's own scrolling, snapping card by card, never moving
+    by itself, a labelled region ("Stage 2 · Breath") with its own previous and next buttons
+    ("Previous practice in Stage 2"). The buttons sit in the stage's heading line, level with the
+    heading's last line, so a row that fits pays no line for them. That needed one additive prop on
+    the strip, `head`: with it, the heading and the buttons share a line above the row, and only
+    the buttons hide when there is nothing to scroll or no script. Without it the strip's markup is
+    as before (a test proves it).
+  - **A stage of one practice is a plain card**, not a strip: nothing to scroll, so no region, no
+    buttons and no tab stop. **A stage with none** shows its heading alone, and while editing a
+    prompt under it points to the Curriculum tab. It never reaches the live page.
+  - **The heading**: "Stage 2 · 5 practices", the stage's name as a title lifted 0.4 toward the
+    heading's size (as the benefits grid's names), and the stage's line. The name is an h3 under
+    the section's h2, as in the other four layouts.
+  - **The name's room** (X71). Beside the buttons, the heading's room is the line (the column: the
+    strip pads its line in by the same inset) less both buttons, the two gaps on the line and its
+    own margin, and the strip names it (`--lp-heading-column` on its heading). With no script the
+    buttons are gone and the room is understated: drawn a little small, never cut. A strip with a
+    heading draws no position readout, whose width is its words' and could not be taken from the
+    room. A stage of one practice, or none, has the column.
+  - **The rows run to the band's edges** while every word keeps the content column: the section's
+    tracks are inherited through the list and each stage, and the root is a bleed only when there
+    are stages to show.
+  - **Shared with What's inside**, moved out of `InsideBlock` with no change to it: the card's
+    width and gap (`--lp-practice-card`, `--lp-practice-gap`, kit.css), its picture `sizes`, and
+    the tile rule (a missing picture draws on the brand on the page's grounds, on the band's panel
+    on a brand, accent or contrast band; Bold's curriculum is contrast and Poster's accent). Every
+    picture loads lazily with the same `sizes`, so none competes with the hero and a picture both
+    sections show is fetched once.
+  - **Per Style.** Studio draws a hairline over each stage, Bold its ink rule, Soft none. The rule
+    is the stage's first grid row, on the content column, so it spans the heading's whole line, the
+    buttons too. The layout places that row and never draws it: an empty row would still take a
+    gap in every Style, so it exists only where a Style gives it content. The stage's number is
+    drawn with the eyebrow's dials, so it is a chip exactly where a Style fills its eyebrow (Soft,
+    whose labels are pills whenever the brand is rounded) and the plain word everywhere else.
+    Prints, Bold's card rule and the hung heads carry over by class name.
+  - **The editor.** The layout picker lists it from the definition, previewed with the creator's
+    own stages and pictures. When it is chosen and the page has a What's inside section that is
+    not hidden, one line under the layouts: "Your What’s inside section already shows these
+    practices as cards. Most pages need only one of the two." Advice only; nothing is hidden. The
+    design's check read `s.enabled`; the inspector treats only `enabled === false` as hidden, so
+    the check is `enabled !== false`.
+  - **Vocabulary**: `layered` in `ids.ts` and its validation twin. An older web build renders the
+    Style's own curriculum layout instead. No Style defaults to it, so no starter, order or band
+    moves.
+  - **Measured** in the gallery (Studio, Bold and Soft; light and dark; 1440 and 390; every stage
+    read), with the photographs:
+    - a row per stage, a region named "Stage N · Name" with "Previous / Next practice in Stage N";
+      the buttons level with the heading's last line (0px off, every stage);
+    - Studio's rule 1px in the line colour, Bold's 3px in the band's ink, Soft none; Soft's number
+      a chip, every other Style's the plain word;
+    - every row runs to the band's edges and the page never scrolls sideways; no stage line on a
+      card, no link, no picture loaded early, every photograph loaded once in view;
+    - a stage's name at 1440: 37.3px in Studio, 55.3px in Bold, 34.9px in Soft; none wider than
+      its room.
+    The gallery's course has six stages of four, so one practice and none are the unit tests'.
+    The louder-fit sweep on the layered page (8 Styles, 5 widths, 3 faces) passed with no fault:
+    every stage name's line is its named room to half a pixel.
+  - **Rejected:**
+    - A strip for a one-practice stage: a region and a tab stop with nothing to scroll.
+    - The buttons under each row, as the strip drew them: every stage would pay a line, empty on
+      rows that fit.
+    - The rule on the strip's button line: that line pads itself in from the band's edge, so its
+      border would run the band's full width.
+    - A Soft rule for the chip: the eyebrow's dials already say which Styles fill a label.
+    - Hiding What's inside, or the curriculum, when both show the cards: the creator decides.
+  - **Tests** (CI):
+    - `CurriculumBlock.svelte.test.ts`: every layout's shared checks, with the selector taught the
+      card and each card's spoken text read part by part; and 8 for this layout (rows and their
+      labels, the count, one practice as a plain card, an empty stage and its prompt, no stage
+      line, the tile per scheme, lazy pictures with `sizes`, the bleed only with stages);
+    - `ScrollStrip.svelte.test.ts`: without `head` the markup is as before; with it the heading
+      leads; only the buttons hide;
+    - `layers.source.test.ts`: the rule's row is placed, never drawn, by the layout; Studio's and
+      Bold's rules; no other Style's; the number's dials;
+    - `SectionInspector.svelte.test.ts`: the note with What's inside, the moment the layout is
+      chosen, and none for a hidden one, none without one, none for another layout;
+    - `heading-fit.test.ts`: the strip heading's room, evaluated with distinct sizes, is the line
+      less the two buttons, two gaps and the margin.
+    - Calibrated: 16 unit plants, each failing only its own test; in the browser, a room that counts one button faults at every width
+      (the room 44px wider than the line), and a page that never loads faults at each width while
+      the rest of the run still reads.
+  - **The sweep** (`louder-fit.spec.ts`) reads the layered page, and its room check reads a strip
+    heading's line too (a section's `--lp-heading-column` elsewhere is a cap, not a line). An hour
+    of a run was once lost to one slow worker, so a page that does not load is now a fault and the
+    run goes on, and faults are printed as each page is read.

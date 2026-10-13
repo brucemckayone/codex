@@ -22,6 +22,12 @@
   in view, "4–6 of 18", at the start of the buttons' row. It is the eye's
   shortcut only, hidden from a screen reader, which already hears the list's
   length and walks it item by item.
+
+  A row with a heading of its own (`head`) carries its buttons in that
+  heading's line, above the row, so a row that fits pays no empty line under
+  it. The heading stays when there is nothing to scroll and without
+  JavaScript; only the buttons step aside. Without `head` the strip is drawn
+  exactly as before.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -50,6 +56,13 @@
     ordered?: boolean;
     /** Words for the items in view, counted from 1: "4–6 of 18". */
     position?: (first: number, last: number, count: number) => string;
+    /**
+     * The row's own heading, drawn in the buttons' line above the row. Its
+     * room is that line less the buttons, so a row with a heading draws no
+     * `position`: the readout is as wide as its words, which no rule can take
+     * from the heading's room.
+     */
+    head?: Snippet;
     class?: string;
     parts?: Parts;
     children: Snippet;
@@ -63,6 +76,7 @@
     count,
     ordered = false,
     position,
+    head,
     class: className,
     parts = {},
     children,
@@ -162,7 +176,40 @@
   }
 </script>
 
+{#snippet buttons()}
+  {#if position && !head}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
+  <button
+    type="button"
+    class="lp-strip__move {parts.move ?? ''}"
+    aria-label={previousLabel}
+    aria-controls={id}
+    aria-disabled={atStart}
+    onclick={() => move(-1)}
+  >
+    <ChevronLeftIcon size="1.25em" />
+  </button>
+  <button
+    type="button"
+    class="lp-strip__move {parts.move ?? ''}"
+    aria-label={nextLabel}
+    aria-controls={id}
+    aria-disabled={atEnd}
+    onclick={() => move(1)}
+  >
+    <ChevronRightIcon size="1.25em" />
+  </button>
+{/snippet}
+
 <div class="lp-strip {className ?? ''}">
+  {#if head}
+    <div
+      class="lp-strip__nav lp-strip__nav--head {parts.nav ?? ''}"
+      data-idle={atStart && atEnd ? '' : undefined}
+    >
+      <div class="lp-strip__head">{@render head()}</div>
+      {@render buttons()}
+    </div>
+  {/if}
   <!-- A scrolling region must take focus, or a keyboard cannot scroll it. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
@@ -177,29 +224,11 @@
       {@render children()}
     </svelte:element>
   </div>
-  <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
-    {#if position}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
-    <button
-      type="button"
-      class="lp-strip__move {parts.move ?? ''}"
-      aria-label={previousLabel}
-      aria-controls={id}
-      aria-disabled={atStart}
-      onclick={() => move(-1)}
-    >
-      <ChevronLeftIcon size="1.25em" />
-    </button>
-    <button
-      type="button"
-      class="lp-strip__move {parts.move ?? ''}"
-      aria-label={nextLabel}
-      aria-controls={id}
-      aria-disabled={atEnd}
-      onclick={() => move(1)}
-    >
-      <ChevronRightIcon size="1.25em" />
-    </button>
-  </div>
+  {#if !head}
+    <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
+      {@render buttons()}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -261,9 +290,35 @@
     line-height: var(--lp-leading-body);
   }
 
-  /* Nothing to scroll: the buttons step aside but keep their room. */
-  .lp-strip__nav[data-idle] {
+  /* Nothing to scroll: the buttons step aside but keep their room; a row's
+     own heading stays. */
+  .lp-strip__nav[data-idle] > :not(.lp-strip__head) {
     visibility: hidden;
+  }
+
+  /* A row's own heading leads the buttons' line, above the row; the buttons
+     keep its end, level with its last line. */
+  .lp-strip__nav--head {
+    align-items: end;
+  }
+
+  .lp-strip__nav--head > :not(.lp-strip__head) {
+    flex: none;
+  }
+
+  /* Its room is the line's (the column: the line is padded in by the same
+     inset) less the two buttons, the gaps beside them and its own margin,
+     so a title in it is fitted beside the buttons (03 X71). With no script
+     the buttons are gone and the room is understated: drawn a little small,
+     never cut. */
+  .lp-strip__head {
+    --lp-heading-column: calc(
+      var(--lp-column) - 2 * var(--tap-target-min) - 2 * var(--space-2) -
+        (var(--space-4) - var(--space-2))
+    );
+    flex: 1 1 0;
+    min-inline-size: 0;
+    margin-inline-end: calc(var(--space-4) - var(--space-2));
   }
 
   .lp-strip__move {
@@ -290,7 +345,8 @@
   }
 
   @media (scripting: none) {
-    .lp-strip__nav {
+    .lp-strip__nav:not(.lp-strip__nav--head),
+    .lp-strip__nav--head > :not(.lp-strip__head) {
       display: none;
     }
   }

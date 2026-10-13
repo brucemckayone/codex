@@ -161,6 +161,13 @@
   });
   const headingFallback = $derived(section.type === 'heading' && current?.join === 'above');
   const layout = $derived(current?.layout ?? resolveLayout(section.type, section.variant, style));
+  // Layered stages draws the course's practices as What's inside's cards, so
+  // a page with both shows every card twice. Advice only: nothing is hidden.
+  const repeatsInside = $derived(
+    section.type === 'curriculum' &&
+      layout === 'layered' &&
+      page.sections.some((s) => s.type === 'inside' && s.enabled !== false)
+  );
   const scheme = $derived(
     current?.scheme ??
       resolveScheme(section.type, section.design, style, drawn, page.design.dials?.colour)
@@ -262,6 +269,9 @@
         {theme}
         onChoose={(next) => pageBuilder.setSectionLayout(section.id, next)}
       />
+      {#if repeatsInside}
+        <p class="section-inspector__hint" data-note="repeat">{m.studio_page_editor_layout_repeat()}</p>
+      {/if}
     </section>
   {/if}
 

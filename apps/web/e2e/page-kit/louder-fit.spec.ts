@@ -22,8 +22,9 @@
  *                  unless the fit has taken it to its floor (logged): a title's
  *                  is the body's size, every other's a title's. A held one is
  *                  not fitted
- *   rooms exact    where a card names its title's room, it is the title's
- *                  line, its parent's content box, to half a pixel
+ *   rooms exact    where a card names its title's room, or a strip's heading
+ *                  line its heading's, it is the title's line, its parent's
+ *                  content box, to half a pixel
  *   nothing over   no run is drawn wider than its heading's line at louder
  *                  that the Style draws within it
  *   never below    louder never draws a heading smaller than the Style does
@@ -87,9 +88,9 @@ const LOOKS =
 const WIDTHS = [360, 390, 768, 1024, 1440];
 /**
  * The sample page draws each section in its Style's own layout, so it reads a
- * layout only in the Styles that choose it. Three more pages draw every layout
+ * layout only in the Styles that choose it. Four more pages draw every layout
  * with titles, and the problem's display statement, in every Style: a page
- * holds a type once, and the course has three (`layout=type:id`, one per type).
+ * holds a type once, and the course has four (`layout=type:id`, one per type).
  * `LOUDER_FIT_PAGES=3` reads only the pages at those places here, likewise.
  */
 const PAGES = [
@@ -97,6 +98,7 @@ const PAGES = [
   'only=benefits,curriculum,faq,pricing,testimonials,text,problem&offer=tiers&layout=benefits:grid,curriculum:timeline,faq:columns,pricing:cards,testimonials:quote,text:statement,problem:statement',
   'only=benefits,curriculum&layout=benefits:bento,curriculum:cards',
   'only=curriculum&layout=map',
+  'only=curriculum&layout=layered',
 ].filter(
   (_, place) =>
     !process.env.LOUDER_FIT_PAGES ||
@@ -185,6 +187,8 @@ test('a heading fits its widest word at its own size and at louder', async ({
   const texts = corpus();
   const runs = texts.map(({ text }) => widestRun(text));
   const faults: string[] = [];
+  /** Faults are printed as they are found, so a run cut short still says. */
+  let logged = 0;
   /** Each Style and face, and whether louder took any heading the whole step. */
   const grew = new Map<string, boolean>();
   let pairs = 0;
@@ -203,13 +207,26 @@ test('a heading fits its widest word at its own size and at louder', async ({
     for (const style of STYLES)
       for (const { brand, face, extra } of LOADS) {
         if (face && style !== 'poster' && style !== 'bold') continue;
-        await page.goto(
-          `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
-        );
-        await page
-          .locator('.lp .lp-section')
-          .first()
-          .waitFor({ timeout: 60_000 });
+        // A page that does not load is a fault, not the end of the run: an
+        // hour of reading was once lost to one slow worker (a 408 on the
+        // studio's membership check). The run still fails; the rest of it
+        // still reads.
+        try {
+          await page.goto(
+            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
+          );
+          await page
+            .locator('.lp .lp-section')
+            .first()
+            .waitFor({ timeout: 60_000 });
+        } catch (error) {
+          faults.push(
+            `${width} ${style}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}: the gallery did not load: ${String(error).split('\n')[0]}`
+          );
+          console.log(`FAULT ${faults[faults.length - 1]}`);
+          logged = faults.length;
+          continue;
+        }
         if (face)
           await page.evaluate(async (family) => {
             const link = document.createElement('link');
@@ -371,21 +388,25 @@ test('a heading fits its widest word at its own size and at louder', async ({
             const own = await measure(false);
             const louder = await measure(true);
             await measure(false);
-            // Where a card names its title's room (03 X71), the room is the
-            // title's line: its parent's content box, read beside a probe
+            // Where a card names its title's room (03 X71), or a strip's
+            // heading line names its heading's (Codex-61zsk.55), the room is
+            // the title's line: its parent's content box, read beside a probe
             // drawn at that room. Too wide and a word runs past its line;
-            // too narrow and a name that fits is drawn smaller.
+            // too narrow and a name that fits is drawn smaller. A section's
+            // `--lp-heading-column` elsewhere is a cap, not a line, so it is
+            // read only in a strip's heading line.
             const rooms = headings.map((h) => {
-              if (
-                h.dataset.size !== 'title' ||
-                !getComputedStyle(h)
-                  .getPropertyValue('--lp-title-column')
-                  .trim()
-              )
-                return null;
+              if (h.dataset.size !== 'title') return null;
+              const name = getComputedStyle(h)
+                .getPropertyValue('--lp-title-column')
+                .trim()
+                ? '--lp-title-column'
+                : h.closest('.lp-strip__head')
+                  ? '--lp-heading-column'
+                  : null;
+              if (!name) return null;
               const probe = document.createElement('div');
-              probe.style.cssText =
-                'position:absolute;visibility:hidden;inline-size:var(--lp-title-column)';
+              probe.style.cssText = `position:absolute;visibility:hidden;inline-size:var(${name})`;
               h.appendChild(probe);
               const named = probe.getBoundingClientRect().width;
               probe.remove();
@@ -464,7 +485,7 @@ test('a heading fits its widest word at its own size and at louder', async ({
         for (const h of read)
           if (h.room && Math.abs(h.room.named - h.room.line) > 0.5)
             faults.push(
-              `${at} ${h.where}: its card names a room of ${h.room.named.toFixed(1)}px for a line of ${h.room.line.toFixed(1)}px`
+              `${at} ${h.where}: its layout names a room of ${h.room.named.toFixed(1)}px for a line of ${h.room.line.toFixed(1)}px`
             );
         // The own-size fit (03 X66, X71): a heading's own size draws no run
         // wider than its line, unless it is on its floor; and what it takes
@@ -526,6 +547,8 @@ test('a heading fits its widest word at its own size and at louder', async ({
           ).toBe(true);
         else
           expect(read.length, `${at} has section headings`).toBeGreaterThan(10);
+        for (const fault of faults.slice(logged)) console.log(`FAULT ${fault}`);
+        logged = faults.length;
         pairs++;
       }
     await context.close();
@@ -541,8 +564,8 @@ test('a heading fits its widest word at its own size and at louder', async ({
       `the fit drew ${by.length} headings that fit smaller: median ${(100 * by[Math.floor(by.length / 2)]).toFixed(1)}%, ` +
         `90th ${(100 * by[Math.floor(by.length * 0.9)]).toFixed(1)}%, most ${(100 * by[by.length - 1]).toFixed(1)}%`
     );
-  expect(pairs).toBe(WIDTHS.length * LOOKS * PAGES.length);
   for (const [look, any] of grew)
     if (!any) faults.push(`${look}: louder took no heading the whole step`);
   expect(faults).toEqual([]);
+  expect(pairs).toBe(WIDTHS.length * LOOKS * PAGES.length);
 });

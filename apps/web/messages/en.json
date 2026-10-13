@@ -1846,6 +1846,7 @@
   "studio_page_editor_layout_title": "Layout",
   "studio_page_editor_default_short": "Style default",
   "studio_page_editor_with_default": "{name} (the Style’s default)",
+  "studio_page_editor_layout_repeat": "Your What’s inside section already shows these practices as cards. Most pages need only one of the two.",
   "studio_page_editor_colour_title": "Colour",
   "studio_page_editor_colour_reset": "Use the Style’s default",
   "studio_page_editor_scheme_base": "Page",
