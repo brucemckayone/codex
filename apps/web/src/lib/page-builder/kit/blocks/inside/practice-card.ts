@@ -34,6 +34,27 @@ export interface PracticeCardView {
   srcset: string;
 }
 
+/**
+ * How wide a card is drawn, for choosing its picture's size: the card is
+ * `--lp-practice-card` (kit.css), four-fifths of a phone and at most about
+ * 23rem. Every row of cards passes this, so a picture shown in two of them
+ * picks the same variant and is fetched once.
+ */
+export const PRACTICE_CARD_SIZES = '(max-width: 40rem) 80vw, 23rem';
+
+/**
+ * The ground a card's picture tile draws on: the brand colour on the page's
+ * grounds, the band's panel on a filled band, where a brand tile would
+ * vanish into a brand band and smear against a dark one.
+ */
+export function practiceTileGround(
+  scheme: string | undefined
+): 'brand' | 'panel' {
+  return scheme === 'brand' || scheme === 'accent' || scheme === 'contrast'
+    ? 'panel'
+    : 'brand';
+}
+
 /** A card and the stage it sits in, for a run of cards across stages. */
 export interface StagedPracticeCard {
   card: PracticeCardView;
