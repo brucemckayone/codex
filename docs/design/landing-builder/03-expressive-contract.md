@@ -2648,6 +2648,95 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - **Measuring the heading in script after it is drawn.** It draws at the Style's size until
       the script runs, then changes: a layout shift on every page with a long word, and no fit at
       all where the script never runs.
+- **X67 · 2026-10-13 · 3b follow-up · A brand face on its way draws in a fallback sized for it,
+  so the page does not re-wrap when the face lands (BUILT, decided without the owner;
+  Codex-61zsk.61).** X65 measured a cover hero at 390 still shifting once its brand faces
+  arrived, and put it down to every face falling back to one Arial tuned for Inter.
+  - **What was actually happening (corrects X65 and the bead).** With a brand face set,
+    `org-brand.css` made `--font-body` and `--font-heading` that face alone, with no fallback
+    after it. Until the web font landed, the page drew in the browser's default serif (Times
+    New Roman), on an org that sets Inter as well, and 'Inter-fallback' was never reached.
+    X65's "2 lines to 4" misread the line height. The headline went from one line (43px) to
+    two (87px), and the swap re-wrapped 18 of the page's 252 text blocks.
+  - **The decision.** Three changes:
+    - Every font stack now ends the way `--font-sans` does (`'Inter-fallback', system-ui,
+      -apple-system, sans-serif`), light and dark.
+    - Every face the brand editor offers gets its own fallback: a face the visitor already
+      has, sized and set on the brand face's lines, one per weight the page asks for
+      (`lib/brand-editor/font-fallbacks.ts`, written to `font-fallbacks.css`). Every writer of
+      a brand face puts the fallback after the face (`withFallback`): the org layout, the
+      brand editor and its live preview, and a page's own fonts.
+    - 'Inter-fallback' itself is now Inter's row of that table. Before, 500 borrowed 400 and
+      600 borrowed 700, and both bold faces were set at regular's 107%, about 5% too wide.
+  - **How a fallback is made.** Each face is drawn at each weight with
+    `font-synthesis: none`, as the kit draws it, so a face with one weight is measured at that
+    weight. `size-adjust` is its width over the local face's on one running sentence.
+    `ascent-override` and `descent-override` are its own line metrics divided by that size,
+    because `size-adjust` scales them too.
+    - A face's local face is whichever of Arial and Times New Roman re-wraps less of the
+      corpus; every row's choice was checked against the data. Courier New is used for the
+      three monospace faces.
+    - Each local face is named with its Liberation twin, which Linux ships with the same
+      widths.
+  - **Measured: the corpus.** 49 faces each set 24 headlines and 8 ledes, at 9 widths and 6 of
+    the kit's sizes and weights, 864 settings per face.
+    - A face's own fallback re-wraps a median of 1.9% (the most is Unbounded at 5.1%).
+    - The alternatives re-wrap far more: Arial sized for Inter 13.1%, and the default serif a
+      bare face drew 17.0%.
+    - In three faces the face's own fallback only ties the one fallback for all, or misses it
+      by one setting: Rubik 2.78% against 2.66%, Manrope tied, and Lilita One tied with the
+      serif.
+  - **Measured: the pages.** Three sell pages at 390, 768, 1024 and 1440. Each page was drawn
+    with every font file refused, then again loaded, once everything had settled, and every
+    text block was matched by order.
+    - Blocks re-wrapped by the swap: of-blood-and-bones tending-the-grief went from 18/24/10/21
+    to 3/6/4/5, studio-alpha tending-the-grief from 4/9/7/10 to 0/1/4/4, and bone-deep from
+    6/4/3/2 to 0/0/0/0.
+    - Of the 27 left, 22 are blocks whose own width moves with the font. The page kit sets
+      about 55 measures in `ch`, which is the width of a "0" in whichever face is drawing, and
+      no fallback can hold that (Codex-61zsk.64).
+    - Re-wraps at an unchanged width went from 82 to 5. One of the five is a facts line in
+      tabular figures that sits within 3px of its box (Figtree's tabular digits are wider than
+      Arial's). It re-wrapped as built too.
+  - **Why the measure has no timing in it.** A timed probe (layout-shift entries during a real
+    load) read of-blood-and-bones at 390 as 0.1011, against 0.0826 as built, in one run. Its
+    0.0698 shift was the cover's play button arriving about 2s after the fonts, which is
+    X65's race with the stream and not a font. A frame-by-frame timeline found the line that
+    really moved: the facts line, at Figtree's arrival.
+  - **Rejected:**
+    - **The tail alone** (every face on 'Inter-fallback'): it re-wraps a median 13.1%.
+    - **Georgia for the serif faces**: Linux has no metric twin for it, so Linux would draw
+      something nobody had measured.
+    - **Emitting only the faces in use**: it would save about 2.3KB brotli per org page, but
+      needs three places to emit them (the org layout, the brand editor's preview, a page's own
+      fonts) and three ways to drift. The sheet costs 49KB raw, 3.2KB gzip and 2.3KB brotli.
+      Its `local()` faces fetch nothing, and a face no text uses is never resolved.
+    - **`font-display: optional`**: there would be no swap, but no brand face either on a
+      first visit over a slow connection.
+  - **The face lookup** (`faces.css`, X60) matches the face as the page resolves it. Each
+    spelling is now the face as written, or followed by its own fallback, and then the tail;
+    the spellings of a face on its own are gone, because no stack produces one any more. Its
+    sheet went from 36.5KB to 31.5KB (2.1KB gzip, dev's 2.0KB).
+  - **Tests.**
+    - `font-fallbacks.test.ts` holds:
+      - the sheet to its table;
+      - one entry for every face the brand editor offers, with Courier New for the monospace
+        faces;
+      - four weights each, within bounds;
+      - the sheet loaded by the org layout;
+      - `typography.css`'s 'Inter-fallback' to Inter's row;
+      - `withFallback` and `firstFamily`.
+    - `faces.test.ts` holds that every writer's value followed by the tail is matched, and
+      that all 7 font stacks end with that tail.
+    - `brand-overrides.test.ts` holds that a face with a fallback is quoted and followed by
+      it, and that the function is idempotent, as its docblock says.
+    - Nine faults were planted, and each was caught by the test written for it.
+  - **Opt-in measure** (`e2e/page-kit/font-fallbacks.spec.ts`, `FONT_FALLBACKS=1`). It
+    measures the table again, and reproduced it exactly: 49 of 49 faces, the same local faces,
+    0 difference. It holds every row within half a point of size and one point of each line
+    metric, and holds the rates above. On the seeded pages it holds that 0 blocks re-wrap at
+    the same width; dev as built has 29. `FONT_FALLBACKS=measure` prints the table again. It
+    was calibrated against a planted row, a swapped local face and dev as built.
 - **X68 · 2026-10-13 · 3b follow-up · The black-and-white proof holds the proven veil; the veil
   drawn is held between its two ends (Codex-61zsk.65; BUILT, decided without the owner;
   test only).** `org-shader.spec.ts` (B2, X50, X51) held every ink on studio-alpha's hero to its
