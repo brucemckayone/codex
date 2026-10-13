@@ -272,6 +272,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -287,6 +288,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -301,6 +303,7 @@
       .benefits__head,
       .curriculum__head,
       .gallery__head,
+      .inside__head,
       .story__head,
       .tf__head,
       .tm:not([data-layout='quote']) > .tm__head,
@@ -376,6 +379,12 @@
 :is(.lp, #lp-style)[data-lp-style='bold'] .benefits-bento__tile[data-pictured]:not([data-lead]) {
   padding-block-end: 0;
   border-block-start: none;
+}
+
+/* A practice card is topped by its picture, so the rule tops its words. */
+:is(.lp, #lp-style)[data-lp-style='bold'] .practice-card__meta {
+  padding-block-start: var(--space-3);
+  border-block-start: var(--lp-rule) var(--border-style) var(--lp-ink);
 }
 
 /* ── the numbers: counted up, at display size ────────────────────────────── */

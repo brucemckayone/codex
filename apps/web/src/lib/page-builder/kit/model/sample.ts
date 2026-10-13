@@ -85,7 +85,10 @@ type PracticeType = JourneyStageView['practices'][number]['contentType'];
 /**
  * Believable practices per stage (one film each) — thumbnails show them —
  * each with its length in seconds, null for a reading, as the course sends
- * them.
+ * them. None carries a picture (`thumbnailUrl`): a sample never points at a
+ * made-up URL, so "What's inside" previews its cards as their kinds' tiles,
+ * which is what a course with no thumbnails really shows (03 X63). A caller
+ * whose pictures really exist deals some in (`practicePictures`).
  */
 const STAGE_PRACTICES: readonly (readonly (readonly [
   string,
@@ -234,6 +237,34 @@ export interface SampleContextOptions {
    * configured `R2_PUBLIC_URL_BASE`.
    */
   mediaBaseUrl?: string | null;
+  /**
+   * Pictures that really exist (the dev gallery's), as full URLs, for the
+   * practices: see `withPracticePictures`. None (the default) leaves every
+   * card its kind's tile.
+   */
+  practicePictures?: readonly string[];
+}
+
+/**
+ * The stages with a picture on two practices in every three, dealt in turn,
+ * and every third left without: one view of "What's inside" then shows a
+ * pictured card beside its kind's tile in every Style (03 X63).
+ */
+function withPracticePictures(
+  stages: JourneyStageView[],
+  pictures: readonly string[]
+): JourneyStageView[] {
+  if (pictures.length === 0) return stages;
+  let seen = 0;
+  let dealt = 0;
+  return stages.map((stage) => ({
+    ...stage,
+    practices: stage.practices.map((practice) =>
+      seen++ % 3 === 2
+        ? practice
+        : { ...practice, thumbnailUrl: pictures[dealt++ % pictures.length] }
+    ),
+  }));
 }
 
 export function sampleContext(
@@ -252,7 +283,10 @@ export function sampleContext(
   };
   return {
     course,
-    stages: sampleStages(),
+    stages: withPracticePictures(
+      sampleStages(),
+      options.practicePictures ?? []
+    ),
     testimonials: SAMPLE_TESTIMONIALS.map((testimonial) => ({
       ...testimonial,
     })),

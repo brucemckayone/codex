@@ -86,6 +86,8 @@ export const SECTION_LAYOUTS = {
   text: ['statement', 'columns', 'centered'],
   story: ['scroll', 'chapters', 'strip'],
   gallery: ['mosaic', 'strip', 'grid'],
+  // "What's inside": every practice as a card to swipe through (Codex-61zsk.52).
+  inside: ['carousel'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;

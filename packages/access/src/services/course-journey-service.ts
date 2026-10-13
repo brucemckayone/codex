@@ -93,6 +93,7 @@ import type {
 } from '@codex/shared-types';
 import { PAGE_STYLE_IDS } from '@codex/validation';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { resolvePracticeThumbnail } from './practice-thumbnail';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -531,7 +532,7 @@ export class CourseJourneyService extends BaseService {
 
       // 3. Curriculum + social proof (bounded, parallel).
       const [stages, testimonials] = await Promise.all([
-        this.loadPublicStages(courseRow.id),
+        this.loadPublicStages(courseRow.id, r2PublicUrlBase),
         this.loadTestimonials(courseRow.id),
       ]);
 
@@ -701,7 +702,7 @@ export class CourseJourneyService extends BaseService {
       if (!courseRow) return null;
 
       const [stages, testimonials] = await Promise.all([
-        this.loadPublicStages(courseRow.id),
+        this.loadPublicStages(courseRow.id, r2PublicUrlBase),
         this.loadTestimonials(courseRow.id),
       ]);
 
@@ -963,7 +964,9 @@ export class CourseJourneyService extends BaseService {
    */
   async getCourseDashboard(
     userId: string,
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<CourseDashboardData | null> {
     try {
       const course = await this.loadCourseSummaryById(courseId);
@@ -982,7 +985,7 @@ export class CourseJourneyService extends BaseService {
             completedAt: true,
           },
         }),
-        this.loadStages(courseId),
+        this.loadStages(courseId, r2PublicUrlBase),
       ]);
 
       const completions = await this.loadCompletions(userId, stages);
@@ -1022,13 +1025,15 @@ export class CourseJourneyService extends BaseService {
   async getInCoursePractice(
     userId: string,
     courseId: string,
-    contentSlug: string
+    contentSlug: string,
+    /** Env-owned; resolves the practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<InCoursePracticeData | null> {
     try {
       const course = await this.loadCourseSummaryById(courseId);
       if (!course) return null;
 
-      const stages = await this.loadStages(courseId);
+      const stages = await this.loadStages(courseId, r2PublicUrlBase);
 
       // Find the target practice + its stage within the loaded curriculum.
       let stageMatch: { id: string; name: string } | null = null;
@@ -1206,7 +1211,8 @@ export class CourseJourneyService extends BaseService {
       // `loadStages` + `loadCompletions` pair was O(N) round trips in
       // catalogue size (Codex-kgrdp.23 defect 2).
       const stagesByCourse = await this.loadStagesForCourses(
-        rows.map((row) => row.courseId)
+        rows.map((row) => row.courseId),
+        r2PublicUrlBase
       );
       const allCompletions = await this.loadCompletions(
         userId,
@@ -3382,11 +3388,13 @@ export class CourseJourneyService extends BaseService {
    */
   async getCourseCurriculumForEditor(
     organizationId: string,
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture (Codex-e140e). */
+    r2PublicUrlBase?: string
   ): Promise<EditorCurriculum> {
     try {
       await this.assertCourseInOrg(organizationId, courseId);
-      const stages = await this.loadEditorStages(courseId);
+      const stages = await this.loadEditorStages(courseId, r2PublicUrlBase);
       return { courseId, stages };
     } catch (error) {
       this.handleError(error, 'getCourseCurriculumForEditor');
@@ -3728,7 +3736,10 @@ export class CourseJourneyService extends BaseService {
    * PUBLISHED filter (drafts must remain visible in the editor) and WITH the
    * linked content's publish `status` for the inspector.
    */
-  private async loadEditorStages(courseId: string): Promise<EditorStageView[]> {
+  private async loadEditorStages(
+    courseId: string,
+    r2PublicUrlBase?: string
+  ): Promise<EditorStageView[]> {
     const stageRows = await this.db
       .select({
         id: courseStages.id,
@@ -3761,7 +3772,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the editor.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -3779,7 +3799,11 @@ export class CourseJourneyService extends BaseService {
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
         status: toPageStatus(row.status),
-        thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         // From the already-joined media item — null for a written practice, or
         // media whose duration was never probed.
         durationSeconds: row.mediaDurationSeconds ?? null,
@@ -4054,14 +4078,21 @@ export class CourseJourneyService extends BaseService {
    * Load the ordered curriculum: non-deleted stages (by `sortOrder`) each with
    * their PUBLISHED, non-deleted practice content (by `stage_practices.sortOrder`).
    * Two bounded queries (stages, then practices) so a stage with no practices
-   * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item.
+   * still appears. `durationSeconds` / `thumbnailUrl` fall back to the media item
+   * (the picture resolved against `r2PublicUrlBase`, never a bare key).
    *
    * Thin wrapper over {@link loadStagesForCourses} so the grouping logic exists
    * once. Callers loading MORE THAN ONE course must call the batched form
    * directly — see Codex-kgrdp.23 defect 2.
    */
-  private async loadStages(courseId: string): Promise<JourneyStage[]> {
-    const byCourse = await this.loadStagesForCourses([courseId]);
+  private async loadStages(
+    courseId: string,
+    r2PublicUrlBase?: string
+  ): Promise<JourneyStage[]> {
+    const byCourse = await this.loadStagesForCourses(
+      [courseId],
+      r2PublicUrlBase
+    );
     return byCourse.get(courseId) ?? [];
   }
 
@@ -4080,7 +4111,8 @@ export class CourseJourneyService extends BaseService {
    * with `?? []`.
    */
   private async loadStagesForCourses(
-    courseIds: readonly string[]
+    courseIds: readonly string[],
+    r2PublicUrlBase?: string
   ): Promise<Map<string, JourneyStage[]>> {
     const byCourse = new Map<string, JourneyStage[]>();
     if (courseIds.length === 0) return byCourse;
@@ -4122,7 +4154,16 @@ export class CourseJourneyService extends BaseService {
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      // In the ON clause, as the public read has it: a deleted media item
+      // lends no length or picture (its frame object outlives the delete)
+      // but never drops its practice from the dashboard.
+      .leftJoin(
+        mediaItems,
+        and(
+          eq(mediaItems.id, content.mediaItemId),
+          isNull(mediaItems.deletedAt)
+        )
+      )
       .where(
         and(
           inArray(stagePractices.stageId, stageIds),
@@ -4140,7 +4181,11 @@ export class CourseJourneyService extends BaseService {
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
         durationSeconds: row.mediaDurationSeconds ?? null,
-        thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         sortOrder: row.sortOrder,
       };
       const list = practicesByStage.get(row.stageId);
@@ -4172,14 +4217,19 @@ export class CourseJourneyService extends BaseService {
    * Load the ordered curriculum for the PUBLIC sales page (SPEC §5): non-deleted
    * stages (by `sortOrder`), each with its PUBLISHED, non-deleted practices (by
    * `stage_practices.sortOrder`). Distinct from {@link loadStages} (the member
-   * dashboard shape): the public view carries NO completion flag and no
-   * thumbnail or stream. It does carry each practice's LENGTH, from the
-   * already-public media item (null for a written practice, or media never
-   * probed), so the curriculum can say what a visitor is signing up to
-   * (Codex-61zsk.46).
+   * dashboard shape): the public view carries NO completion flag (per viewer)
+   * and NO stream (access-controlled). It does carry each practice's LENGTH
+   * (Codex-61zsk.46) and its PICTURE (Codex-61zsk.52, the "What's inside"
+   * carousel), both from the already-public media item. The picture is the
+   * same public CDN object the practice's own content page already serves to
+   * anonymous visitors (`routes/public.ts` resolves it identically, and its
+   * by-slug read is exempt from the course-only filter), and only published
+   * content reaches this read, so nothing becomes visible that was not.
    */
   private async loadPublicStages(
-    courseId: string
+    courseId: string,
+    /** Env-owned; resolves each practice's picture. Omitted → no pictures. */
+    r2PublicUrlBase?: string
   ): Promise<JourneyStageView[]> {
     const stageRows = await this.db
       .select({
@@ -4206,12 +4256,14 @@ export class CourseJourneyService extends BaseService {
         slug: content.slug,
         title: content.title,
         contentType: content.contentType,
+        thumbnailUrl: content.thumbnailUrl,
+        mediaThumbnailKey: mediaItems.thumbnailKey,
         mediaDurationSeconds: mediaItems.durationSeconds,
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
-      // In the ON clause, so a deleted media item lends no length but never
-      // drops its practice from the page.
+      // In the ON clause, so a deleted media item lends no length or picture
+      // but never drops its practice from the page.
       .leftJoin(
         mediaItems,
         and(
@@ -4236,6 +4288,11 @@ export class CourseJourneyService extends BaseService {
         title: row.title,
         contentType: toPracticeContentType(row.contentType),
         durationSeconds: row.mediaDurationSeconds ?? null,
+        thumbnailUrl: resolvePracticeThumbnail(
+          row.thumbnailUrl,
+          row.mediaThumbnailKey,
+          r2PublicUrlBase
+        ),
         sortOrder: row.sortOrder,
       };
       const list = practicesByStage.get(row.stageId);

@@ -16,6 +16,7 @@ export const BOLD: StyleDefinition = {
     curriculum: 'timeline',
     preview: 'feature',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'featured',
     faq: 'columns',
@@ -43,6 +44,7 @@ export const BOLD: StyleDefinition = {
     curriculum: 'contrast',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'base',
     stats: 'brand',
@@ -66,6 +68,7 @@ export const BOLD: StyleDefinition = {
   // The numbers are half the signature, so a new page counts something.
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',

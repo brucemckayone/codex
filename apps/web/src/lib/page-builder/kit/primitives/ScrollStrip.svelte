@@ -17,6 +17,11 @@
   `--lp-strip-item` (a grid column size) and `--lp-strip-gap`. A block whose
   Styles already style its strip by the block's own names passes them as
   `parts`: they are added beside the strip's own, which still do the work.
+
+  A long row can say where the visitor is in it (`position`): the items wholly
+  in view, "4–6 of 18", at the start of the buttons' row. It is the eye's
+  shortcut only, hidden from a screen reader, which already hears the list's
+  length and walks it item by item.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -42,6 +47,8 @@
     count: number;
     /** An ordered list for a real sequence, a plain one otherwise. */
     ordered?: boolean;
+    /** Words for the items in view, counted from 1: "4–6 of 18". */
+    position?: (first: number, last: number, count: number) => string;
     class?: string;
     parts?: Parts;
     children: Snippet;
@@ -54,6 +61,7 @@
     nextLabel,
     count,
     ordered = false,
+    position,
     class: className,
     parts = {},
     children,
@@ -62,6 +70,18 @@
   let atStart = $state(true);
   let atEnd = $state(true);
   let track = $state<HTMLElement>();
+  /** The first and last item wholly in view, from 0; unknown until measured. */
+  let inView = $state<readonly [number, number] | null>(null);
+  // A boolean, so a consumer passing a fresh function never re-measures the row.
+  const reads = $derived(Boolean(position));
+  const readout = $derived(
+    position && inView ? position(inView[0] + 1, inView[1] + 1, count) : ''
+  );
+
+  /** The row's items, in order. */
+  function itemsOf(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>(':scope > .lp-strip__items > li')];
+  }
 
   /** Keeps the buttons' resting state true to the row's scroll position. */
   function measure(items: number): Attachment<HTMLElement> {
@@ -71,6 +91,7 @@
       const update = () => {
         atStart = node.scrollLeft <= 1;
         atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1;
+        if (reads) inView = seen(node);
       };
       update();
       node.addEventListener('scroll', update, { passive: true });
@@ -92,10 +113,32 @@
    * item is exactly the scroll position that snaps it.
    */
   function stops(row: HTMLElement): number[] {
-    const items = [...row.querySelectorAll<HTMLElement>(':scope > .lp-strip__items > li')];
+    const items = itemsOf(row);
     if (items.length === 0) return [];
     const origin = items[0].getBoundingClientRect().left;
     return items.map((item) => item.getBoundingClientRect().left - origin);
+  }
+
+  /**
+   * The first and last item wholly inside the row's window. An item wider
+   * than the window is never wholly in it: then the one nearest the snap line.
+   */
+  function seen(row: HTMLElement): readonly [number, number] | null {
+    const items = itemsOf(row);
+    if (items.length === 0) return null;
+    const view = row.getBoundingClientRect();
+    const whole = items.map((item) => {
+      const box = item.getBoundingClientRect();
+      return box.left >= view.left - 1 && box.left + box.width <= view.left + view.width + 1;
+    });
+    const first = whole.indexOf(true);
+    if (first >= 0) return [first, whole.lastIndexOf(true)];
+    const at = row.scrollLeft;
+    const nearest = stops(row).reduce(
+      (best, stop, index, all) => (Math.abs(stop - at) < Math.abs(all[best] - at) ? index : best),
+      0
+    );
+    return [nearest, nearest];
   }
 
   /** One item along, to the next item's own start. */
@@ -132,6 +175,7 @@
     </svelte:element>
   </div>
   <div class="lp-strip__nav {parts.nav ?? ''}" data-idle={atStart && atEnd ? '' : undefined}>
+    {#if position}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
     <button
       type="button"
       class="lp-strip__move {parts.move ?? ''}"
@@ -200,6 +244,18 @@
     justify-content: flex-end;
     gap: var(--space-2);
     padding-inline: var(--_inset);
+  }
+
+  /* The position leads the row; the buttons keep the end. global.css caps
+     every `p` at 65ch and spaces it. */
+  .lp-strip__position {
+    align-self: center;
+    margin-block: 0;
+    margin-inline: 0 auto;
+    color: var(--lp-ink-soft);
+    font-size: var(--lp-size-small);
+    font-variant-numeric: lining-nums tabular-nums;
+    line-height: var(--lp-leading-body);
   }
 
   /* Nothing to scroll: the buttons step aside but keep their room. */

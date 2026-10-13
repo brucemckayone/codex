@@ -26,6 +26,7 @@ export const SOFT: StyleDefinition = {
     curriculum: 'cards',
     preview: 'split',
     gallery: 'mosaic',
+    inside: 'carousel',
     instructor: 'centered',
     testimonials: 'featured',
     faq: 'accordion',
@@ -45,6 +46,10 @@ export const SOFT: StyleDefinition = {
     curriculum: 'soft',
     preview: 'base',
     gallery: 'soft',
+    // On the page, under the tinted hero. The mock-up continued the hero's
+    // tint, but a Style's own order never runs one tint into the next: the
+    // two would read as one oversized slab (03 X63).
+    inside: 'base',
     instructor: 'base',
     testimonials: 'soft',
     stats: 'base',
@@ -66,6 +71,7 @@ export const SOFT: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',

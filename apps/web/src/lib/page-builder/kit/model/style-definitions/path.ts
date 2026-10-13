@@ -27,6 +27,7 @@ export const PATH: StyleDefinition = {
     curriculum: 'map',
     preview: 'feature',
     gallery: 'strip',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'featured',
     faq: 'accordion',
@@ -46,6 +47,7 @@ export const PATH: StyleDefinition = {
     curriculum: 'soft',
     preview: 'base',
     gallery: 'soft',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'contrast',
     stats: 'soft',
@@ -66,6 +68,7 @@ export const PATH: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'story',
     'curriculum',

@@ -236,6 +236,7 @@ export const HEADED_BY_WORDS: ReadonlySet<SectionTypeId> =
     'curriculum',
     'faq',
     'gallery',
+    'inside',
     'stats',
     'story',
     'testimonials',

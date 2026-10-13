@@ -42,8 +42,11 @@ export const RECIPES: Readonly<Record<RecipeId, Recipe>> = {
     label: 'The full story',
     description:
       'Every part of the case for your course, from the problem it solves to the questions people ask.',
+    // What the course holds straight after its promise, as every Style's
+    // starter has it (03 X63). The shorter recipes keep their own point.
     sections: [
       { type: 'hero' },
+      { type: 'inside' },
       { type: 'problem' },
       { type: 'transformation' },
       { type: 'benefits' },

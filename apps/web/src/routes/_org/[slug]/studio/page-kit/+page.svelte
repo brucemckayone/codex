@@ -191,6 +191,11 @@
       // page-image block (`resolvePageImageUrl`) previews here too instead of
       // rendering its designed empty state on every gallery load.
       mediaBaseUrl: LOCAL_CDN,
+      // The same photographs on the practices, so "What's inside" shows a
+      // pictured card, in each Style's frame, beside a kind's tile.
+      practicePictures: withMedia
+        ? PHOTOS.map((_, index) => `${LOCAL_CDN}/page-kit/img${index + 1}.jpg`)
+        : [],
     })
   );
 

@@ -14,7 +14,14 @@
 
   A MARK stands in for the picture where the page shows one anyway (the
   guide's initials): designed content on the scheme the block gives it, never
-  treated as an empty frame.
+  treated as an empty frame. A block with a stand-in of its own (a practice
+  card's kind tile) passes it as `fallback`, drawn the same way: when there is
+  no picture, and when the picture fails.
+
+  A picture with stored size variants passes them as `srcset` (with `sizes`),
+  so a small frame never fetches the largest file. `priority` is the page's
+  largest picture; `early` is one on screen at first paint that must not
+  compete with it, so it loads now at low priority.
 
   The clip is decoration (`HeroLoopVideo` is silent, `aria-hidden`, and shows
   its still under reduced motion); anything meant to be watched is a separate
@@ -33,8 +40,14 @@
     alt?: string;
     /** CSS aspect ratio, e.g. `'4 / 5'`; omit to fill the parent. */
     ratio?: string;
+    /** The image's stored sizes (`getThumbnailSrcset`); `''` or omitted for none. */
+    srcset?: string;
+    /** How wide the frame is drawn, for choosing from `srcset`. */
+    sizes?: string;
     /** The page's largest image: load it first. */
     priority?: boolean;
+    /** On screen at first paint, but not the largest: load now, at low priority. */
+    early?: boolean;
     /** Waiting for the streamed media — the plate holds the space. */
     pending?: boolean;
     scrim?: boolean;
@@ -42,6 +55,8 @@
     mark?: string;
     /** The scheme the mark's ground takes: the section's filled one. */
     scheme?: ColourSchemeId;
+    /** The block's own stand-in for a missing or failed picture, in place of the plate. */
+    fallback?: Snippet;
     /** Controls laid over the media (a play button). */
     children?: Snippet;
     class?: string;
@@ -52,11 +67,15 @@
     clip = null,
     alt = '',
     ratio,
+    srcset,
+    sizes,
     priority = false,
+    early = false,
     pending = false,
     scrim = false,
     mark,
     scheme,
+    fallback,
     children,
     class: className,
   }: Props = $props();
@@ -71,11 +90,12 @@
   });
   const empty = $derived(!clip && !still);
   const marked = $derived(empty && Boolean(mark));
+  const stoodIn = $derived(empty && !marked && Boolean(fallback));
 </script>
 
 <div
   class="lp-media {className ?? ''}"
-  data-empty={empty && !marked ? '' : undefined}
+  data-empty={empty && !marked && !stoodIn ? '' : undefined}
   data-mark={marked ? '' : undefined}
   data-lp-scheme={marked ? scheme : undefined}
   data-pending={pending ? '' : undefined}
@@ -86,14 +106,18 @@
   {:else if still}
     <img
       src={still}
+      srcset={srcset || undefined}
+      sizes={srcset ? sizes : undefined}
       {alt}
-      loading={priority ? 'eager' : 'lazy'}
-      fetchpriority={priority ? 'high' : undefined}
+      loading={priority || early ? 'eager' : 'lazy'}
+      fetchpriority={priority ? 'high' : early ? 'low' : undefined}
       decoding="async"
       onerror={() => (failed = still)}
     />
   {:else if marked}
     <span class="lp-media__mark" aria-hidden="true">{mark}</span>
+  {:else if stoodIn && fallback}
+    {@render fallback()}
   {:else}
     <span class="lp-media__plate" aria-hidden="true"></span>
   {/if}

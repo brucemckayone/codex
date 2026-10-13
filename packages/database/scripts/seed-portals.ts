@@ -97,6 +97,7 @@ const PRACTICES_PER_PORTAL = 4;
 const RECIPES = {
   full: [
     { type: 'hero' },
+    { type: 'inside' },
     { type: 'problem' },
     { type: 'transformation' },
     { type: 'benefits' },
@@ -1168,6 +1169,15 @@ function buildSections(spec: PortalSpec, orgSlug: string) {
         body: spec.lede,
         ctaLabel: copy.hero.ctaLabel,
         note: copy.hero.note,
+      },
+    }),
+    // Every practice as a card, straight from the curriculum (03 X63): only
+    // the framing is authored, and it names the portal's own course.
+    inside: () => ({
+      name: "What's inside",
+      props: {
+        heading: "What's inside",
+        body: `Every practice in ${spec.title}, in the order you'll meet them.`,
       },
     }),
     problem: () => ({

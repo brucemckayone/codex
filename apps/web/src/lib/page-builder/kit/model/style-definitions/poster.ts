@@ -24,6 +24,7 @@ export const POSTER: StyleDefinition = {
     curriculum: 'cards',
     preview: 'feature',
     gallery: 'strip',
+    inside: 'carousel',
     instructor: 'split',
     testimonials: 'marquee',
     faq: 'accordion',
@@ -43,6 +44,7 @@ export const POSTER: StyleDefinition = {
     curriculum: 'accent',
     preview: 'base',
     gallery: 'base',
+    inside: 'base',
     instructor: 'base',
     testimonials: 'accent',
     stats: 'brand',
@@ -65,6 +67,7 @@ export const POSTER: StyleDefinition = {
   order: STORY_ORDER,
   starter: [
     'hero',
+    'inside',
     'problem',
     'transformation',
     'benefits',

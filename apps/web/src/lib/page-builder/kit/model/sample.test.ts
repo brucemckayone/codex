@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { isImageRef } from '../../page-images';
 import { PAGE_STYLE_IDS, type SectionTypeId } from './ids';
-import { type SamplePicture, samplePage, withSamplePictures } from './sample';
+import {
+  type SamplePicture,
+  sampleContext,
+  samplePage,
+  withSamplePictures,
+} from './sample';
 import type { KitPage } from './types';
 
 const PICTURES: SamplePicture[] = Array.from({ length: 6 }, (_, i) => ({
@@ -97,5 +102,32 @@ describe('withSamplePictures', () => {
     withSamplePictures(page, PICTURES);
     expect(page).toEqual(before);
     expect(withSamplePictures(page, [])).toBe(page);
+  });
+});
+
+describe('sampleContext practicePictures', () => {
+  const URLS = ['http://cdn.test/a.jpg', 'http://cdn.test/b.jpg'];
+  const practicesOf = (pictures?: readonly string[]) =>
+    sampleContext({ practicePictures: pictures }).stages.flatMap(
+      (stage) => stage.practices
+    );
+
+  it('pictures two practices in every three, in turn, and leaves every third its tile', () => {
+    const practices = practicesOf(URLS);
+    expect(practices.length).toBeGreaterThan(6);
+    const pictured = practices.filter((practice) => practice.thumbnailUrl);
+    expect(practices.map((practice) => Boolean(practice.thumbnailUrl))).toEqual(
+      practices.map((_, index) => index % 3 !== 2)
+    );
+    expect(pictured.map((practice) => practice.thumbnailUrl)).toEqual(
+      pictured.map((_, index) => URLS[index % URLS.length])
+    );
+  });
+
+  it('pictures no practice by default: a sample never points at a made-up URL', () => {
+    for (const pictures of [undefined, []])
+      expect(
+        practicesOf(pictures).some((practice) => practice.thumbnailUrl)
+      ).toBe(false);
   });
 });

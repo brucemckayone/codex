@@ -74,7 +74,15 @@ export interface BuilderContextInput {
   mediaBaseUrl?: string | null;
 }
 
-/** `EditorPracticeView` → the public `JourneyPracticeView` it is a superset of. */
+/**
+ * `EditorPracticeView` → the public `JourneyPracticeView` it is a superset of.
+ *
+ * Every field the public read carries is carried here too, or the canvas draws
+ * a different page from the published one. `durationSeconds` was once dropped,
+ * so the curriculum's "Video · 12 min" read as a bare "Video" in the studio
+ * only; `thumbnailUrl` is what the "What's inside" cards are picture-led by
+ * (Codex-61zsk.52). Both are already resolved URLs/numbers on the editor read.
+ */
 function toPracticeView(
   practice: EditorStageView['practices'][number],
   sortOrder: number
@@ -85,6 +93,8 @@ function toPracticeView(
     title: practice.title,
     contentType: practice.contentType,
     sortOrder,
+    durationSeconds: practice.durationSeconds,
+    thumbnailUrl: practice.thumbnailUrl,
   };
 }
 
