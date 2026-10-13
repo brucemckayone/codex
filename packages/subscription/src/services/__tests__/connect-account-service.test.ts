@@ -5,7 +5,7 @@
  * Tests the full Connect account lifecycle:
  * - Account creation and onboarding
  * - Account status transitions (webhook handler)
- * - Dashboard link generation
+ * - Dashboard link generation (self-scoped) and the org payout status
  * - Readiness checks
  *
  * Verified against Stripe Connect testing best practices:
@@ -101,9 +101,9 @@ describe('ConnectAccountService', () => {
     await teardownTestDatabase();
   });
 
-  // ─── createAccount ──────────────────────────────────────────────────
+  // ─── createAccountForUser ───────────────────────────────────────────
 
-  describe('createAccount', () => {
+  describe('createAccountForUser', () => {
     it('should create Express account + onboarding URL with DB record', async () => {
       // Fresh org to avoid leftover data from previous test runs
       const freshOrg = takeFirst(
@@ -117,8 +117,7 @@ describe('ConnectAccountService', () => {
           .returning()
       );
 
-      const result = await service.createAccount(
-        freshOrg.id,
+      const result = await service.createAccountForUser(
         creatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -181,8 +180,7 @@ describe('ConnectAccountService', () => {
         })
       );
 
-      const result = await service.createAccount(
-        resumeOrg.id,
+      const result = await service.createAccountForUser(
         otherCreatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -217,8 +215,7 @@ describe('ConnectAccountService', () => {
       );
 
       const returnUrl = 'https://example.com/return';
-      const result = await service.createAccount(
-        isolatedOrg.id,
+      const result = await service.createAccountForUser(
         creatorId,
         returnUrl,
         'https://example.com/refresh'
@@ -230,19 +227,7 @@ describe('ConnectAccountService', () => {
     });
 
     it('should store correct metadata on Stripe account', async () => {
-      const metaOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('meta'),
-            })
-          )
-          .returning()
-      );
-
-      await service.createAccount(
-        metaOrg.id,
+      await service.createAccountForUser(
         creatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -263,19 +248,7 @@ describe('ConnectAccountService', () => {
     });
 
     it('should create account with GB country and correct capabilities', async () => {
-      const gbOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('gb'),
-            })
-          )
-          .returning()
-      );
-
-      await service.createAccount(
-        gbOrg.id,
+      await service.createAccountForUser(
         creatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -316,8 +289,7 @@ describe('ConnectAccountService', () => {
         .mockRejectedValue(new Error('stripe down'));
 
       await expect(
-        service.createAccount(
-          org.id,
+        service.createAccountForUser(
           creatorId,
           'https://example.com/return',
           'https://example.com/refresh'
@@ -334,8 +306,7 @@ describe('ConnectAccountService', () => {
         .fn()
         .mockResolvedValue({ url: 'https://connect.stripe.com/setup/retry' });
 
-      const resumed = await service.createAccount(
-        org.id,
+      const resumed = await service.createAccountForUser(
         creatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -381,8 +352,7 @@ describe('ConnectAccountService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValue(winner);
 
-      const result = await service.createAccount(
-        org.id,
+      const result = await service.createAccountForUser(
         creatorId,
         'https://example.com/return',
         'https://example.com/refresh'
@@ -420,8 +390,7 @@ describe('ConnectAccountService', () => {
       stripe.accounts.create = vi.fn().mockRejectedValue(stripeErr);
 
       const err = await service
-        .createAccount(
-          org.id,
+        .createAccountForUser(
           creatorId,
           'https://example.com/return',
           'https://example.com/refresh'
@@ -438,17 +407,6 @@ describe('ConnectAccountService', () => {
     });
 
     it('does NOT map unrelated invalid-request errors to the platform-not-configured error', async () => {
-      const org = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('otherinvalid'),
-            })
-          )
-          .returning()
-      );
-
       // A different StripeInvalidRequestError (bad param) must NOT be swallowed
       // as "platform not configured" — the discriminator is deliberately narrow.
       const stripeErr = Object.assign(new Error('Invalid country: XX'), {
@@ -457,8 +415,7 @@ describe('ConnectAccountService', () => {
       stripe.accounts.create = vi.fn().mockRejectedValue(stripeErr);
 
       const err = await service
-        .createAccount(
-          org.id,
+        .createAccountForUser(
           creatorId,
           'https://example.com/return',
           'https://example.com/refresh'
@@ -1082,8 +1039,8 @@ describe('ConnectAccountService', () => {
 
   // ─── createDashboardLink ────────────────────────────────────────────
 
-  describe('createDashboardLink', () => {
-    it('should return Express dashboard URL', async () => {
+  describe('createDashboardLinkForUser', () => {
+    it("returns a login link for the user's OWN account", async () => {
       const dashOrg = takeFirst(
         await db
           .insert(organizations)
@@ -1095,34 +1052,25 @@ describe('ConnectAccountService', () => {
           .returning()
       );
 
-      await db
-        .insert(stripeConnectAccounts)
-        .values(createTestConnectAccountInput(dashOrg.id, creatorId));
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, dashOrg.id));
-
-      const result = await service.createDashboardLink(dashOrg.id);
-      expect(result.url).toBeDefined();
-      expect(stripe.accounts.createLoginLink).toHaveBeenCalled();
-    });
-
-    it('should throw ConnectAccountNotFoundError when none exists', async () => {
-      const noAccOrg = takeFirst(
+      const own = takeFirst(
         await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('noacc'),
-            })
-          )
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(dashOrg.id, creatorId))
           .returning()
       );
 
-      await expect(service.createDashboardLink(noAccOrg.id)).rejects.toThrow(
-        ConnectAccountNotFoundError
+      const result = await service.createDashboardLinkForUser(creatorId);
+      expect(result.url).toBeDefined();
+      expect(stripe.accounts.createLoginLink).toHaveBeenCalledWith(
+        own.stripeAccountId
       );
+    });
+
+    it('throws ConnectAccountNotFoundError when the user has no account', async () => {
+      await expect(
+        service.createDashboardLinkForUser(otherCreatorId)
+      ).rejects.toThrow(ConnectAccountNotFoundError);
+      expect(stripe.accounts.createLoginLink).not.toHaveBeenCalled();
     });
   });
 
@@ -1199,34 +1147,8 @@ describe('ConnectAccountService', () => {
 
   // ─── getStatus (requirements + cache) ────────────────────────────────
 
-  describe('getStatus', () => {
-    it('returns disconnected sentinel when no DB row exists', async () => {
-      const emptyOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('status-empty'),
-            })
-          )
-          .returning()
-      );
-
-      const result = await service.getStatus(emptyOrg.id);
-
-      expect(result).toEqual({
-        isConnected: false,
-        accountId: null,
-        chargesEnabled: false,
-        payoutsEnabled: false,
-        status: null,
-        requirements: null,
-        requirementsFetchFailed: false,
-      });
-      // No Stripe call when there's no DB account
-      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
-    });
-
+  // The disconnected sentinel is covered under `getStatusForUser` below.
+  describe('getStatusForUser requirements payload', () => {
     it('returns full requirements payload when account exists', async () => {
       const reqOrg = takeFirst(
         await db
@@ -1251,10 +1173,6 @@ describe('ConnectAccountService', () => {
           )
           .returning()
       );
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, reqOrg.id));
 
       const deadline = 1_800_000_000;
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -1278,7 +1196,7 @@ describe('ConnectAccountService', () => {
         },
       } as unknown as Stripe.Account);
 
-      const result = await service.getStatus(reqOrg.id);
+      const result = await service.getStatusForUser(creatorId);
 
       expect(result.isConnected).toBe(true);
       expect(result.status).toBe('restricted');
@@ -1316,17 +1234,13 @@ describe('ConnectAccountService', () => {
           payoutsEnabled: true,
         })
       );
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, failOrg.id));
 
       // Stripe unreachable on the cache-miss path.
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Stripe API unavailable')
       );
 
-      const result = await service.getStatus(failOrg.id);
+      const result = await service.getStatusForUser(creatorId);
 
       // DB-derived fields still surface (graceful degradation)...
       expect(result.isConnected).toBe(true);
@@ -1356,10 +1270,6 @@ describe('ConnectAccountService', () => {
           .values(createTestConnectAccountInput(normOrg.id, creatorId))
           .returning()
       );
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, normOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: inserted.stripeAccountId,
@@ -1377,7 +1287,7 @@ describe('ConnectAccountService', () => {
         },
       } as unknown as Stripe.Account);
 
-      const result = await service.getStatus(normOrg.id);
+      const result = await service.getStatusForUser(creatorId);
 
       expect(result.requirements?.currentlyDue).toEqual([]);
       expect(result.requirements?.eventuallyDue).toEqual([]);
@@ -1412,16 +1322,12 @@ describe('ConnectAccountService', () => {
           )
           .returning()
       );
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, degOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Stripe API unreachable')
       );
 
-      const result = await service.getStatus(degOrg.id);
+      const result = await service.getStatusForUser(creatorId);
 
       // Still surfaces the DB-known fields even if Stripe is down
       expect(result.isConnected).toBe(true);
@@ -1739,6 +1645,71 @@ describe('ConnectAccountService', () => {
       );
       const account = await service.getAccount(noneOrg.id);
       expect(account).toBeNull();
+    });
+  });
+
+  // ─── getOrganizationPayoutStatus (Codex-2hxff.1) ─────────────────────
+
+  describe('getOrganizationPayoutStatus', () => {
+    it("returns the payee's status fields ONLY — no account id, no requirements, no Stripe call", async () => {
+      const payOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('org-payout-status'),
+            })
+          )
+          .returning()
+      );
+      await db.insert(organizationMemberships).values({
+        organizationId: payOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(payOrg.id, creatorId, {
+          status: 'restricted',
+          chargesEnabled: true,
+          payoutsEnabled: false,
+        })
+      );
+
+      const result = await service.getOrganizationPayoutStatus(payOrg.id);
+
+      // toEqual on the exact shape: an `accountId` or `requirements` key
+      // leaking into a members-visible payload fails here.
+      expect(result).toEqual({
+        isConnected: true,
+        chargesEnabled: true,
+        payoutsEnabled: false,
+        status: 'restricted',
+      });
+      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('reports not connected when the org has no payee account', async () => {
+      const bareOrg = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({
+              slug: createUniqueSlug('org-payout-none'),
+            })
+          )
+          .returning()
+      );
+
+      const result = await service.getOrganizationPayoutStatus(bareOrg.id);
+
+      expect(result).toEqual({
+        isConnected: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: null,
+      });
+      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     });
   });
 

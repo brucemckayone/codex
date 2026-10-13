@@ -361,33 +361,19 @@ export const getSubscriptionStats = query(
 // Stripe Connect Commands
 // ─────────────────────────────────────────────────────────────────────────────
 
-const connectOnboardCommandSchema = z.object({
-  organizationId: z.string().uuid(),
-  returnUrl: z.string().url(),
-  refreshUrl: z.string().url(),
-});
-
 /**
- * Start Stripe Connect onboarding for an org.
+ * The org's payout status — read-only, status fields only (Codex-2hxff.1).
+ *
+ * The org-level onboard/status/sync/dashboard remotes are gone with the routes
+ * they called: a person sets up, checks and opens only their OWN payout
+ * account, through the self-scoped /me remotes below.
  */
-export const connectOnboard = command(
-  connectOnboardCommandSchema,
-  async (input) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-    return api.connect.onboard(input);
-  }
-);
-
-/**
- * Get Connect account status for an org.
- */
-export const getConnectStatus = query(
+export const getOrganizationPayoutStatus = query(
   z.string().uuid(),
   async (organizationId) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.connect.getStatus(organizationId);
+    return api.connect.getOrganizationStatus(organizationId);
   }
 );
 
@@ -539,39 +525,6 @@ export const getPayoutsByCreatorBreakdown = query(
       organizationId,
       params
     );
-  }
-);
-
-const connectDashboardCommandSchema = z.object({
-  organizationId: z.string().uuid(),
-});
-
-/**
- * Get a Stripe Express dashboard login link.
- */
-export const getConnectDashboardLink = command(
-  connectDashboardCommandSchema,
-  async ({ organizationId }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-    return api.connect.getDashboardLink(organizationId);
-  }
-);
-
-const syncConnectCommandSchema = z.object({
-  organizationId: z.string().uuid(),
-});
-
-/**
- * Sync Connect account status with Stripe.
- * Polls Stripe's API directly — used when webhooks can't reach the server.
- */
-export const syncConnectStatus = command(
-  syncConnectCommandSchema,
-  async ({ organizationId }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-    return api.connect.syncStatus(organizationId);
   }
 );
 

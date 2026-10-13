@@ -200,7 +200,6 @@ and the new price applies from their first renewal at least 30 days later.
 
 | Promise | Bead |
 |---|---|
-| Only the account holder can open their payout dashboard | `Codex-2hxff.1` |
 | One owner per organisation; transfer by offer and acceptance | `Codex-2hxff.2` |
 | Price changes wait for the 30-day renewal | `Codex-2hxff.3` |
 | Fees and the minimum platform fee apply to real sales | `Codex-2hxff.7` |

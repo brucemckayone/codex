@@ -5,7 +5,7 @@
  *
  * Flow B — tri-party (org ↔ creator agreement):
  *   1. Org owner creates an organization and onboards Stripe Connect
- *      (POST /connect/onboard for the org). We also seed the org's
+ *      (POST /connect/me/onboard — the owner's own account). We also seed the org's
  *      primaryConnectAccountUserId and a chargesEnabled Connect account
  *      so organization_fee rows ARE written.
  *   2. Creator joins the org and the owner proposes a revenue-share
@@ -175,7 +175,7 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     // ======================================================================
     // Step 2: Seed org Connect account with chargesEnabled=true so that
     //         organization_fee rows ARE written (not just pending).
-    //         The /connect/onboard route may fail Stripe-side without a live key,
+    //         The /connect/me/onboard route may fail Stripe-side without a live key,
     //         so we seed directly into the DB and wire primaryConnectAccountUserId.
     // ======================================================================
     const orgStripeAccountId = `acct_test_org_${Date.now()}_${Math.random().toString(36).slice(2)}`;

@@ -134,7 +134,10 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
   belong to. Created with controller properties (Express-equivalent), key
   `connect_acct_${userId}`.
 - Status (`active` = charges and payouts enabled) comes from `account.updated`.
-- Only the account's owner gets an Express Dashboard login link.
+- Only the account's owner gets an Express Dashboard login link. Every
+  `ConnectAccountService` method that ACTS on an account (onboard, sync, login
+  link) is keyed by the caller's own `userId`; the one org-keyed read,
+  `getOrganizationPayoutStatus`, returns status fields only (`Codex-2hxff.1`).
 
 ## Strict Rules
 

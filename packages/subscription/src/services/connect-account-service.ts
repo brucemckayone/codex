@@ -18,10 +18,10 @@
  *   the org→account link lives on `organizations.primaryConnectAccountUserId`
  *
  * Onboarding Flow:
- * 1. createAccount() → Stripe account + Account Link
+ * 1. createAccountForUser() → Stripe account + Account Link
  * 2. User completes Stripe-hosted onboarding
  * 3. account.updated webhook → handleAccountUpdated()
- * 4. isReady() returns true when charges_enabled + payouts_enabled
+ * 4. isReadyForUser() returns true when charges_enabled + payouts_enabled
  */
 
 import { CacheType, type VersionedCache } from '@codex/cache';
@@ -89,6 +89,18 @@ export interface ConnectStatusPayload {
 }
 
 /**
+ * An organisation's payout readiness, as any member may see it.
+ *
+ * Deliberately a subset of {@link ConnectStatusPayload}: no `accountId` and no
+ * `requirements` — those describe the account holder's own Stripe account and
+ * are theirs alone (Codex-2hxff.1).
+ */
+export type OrganizationPayoutStatus = Pick<
+  ConnectStatusPayload,
+  'isConnected' | 'chargesEnabled' | 'payoutsEnabled' | 'status'
+>;
+
+/**
  * Cache TTL for Connect status (10 min).
  *
  * Webhook delivery (`account.updated`) invalidates the cache so worst-case
@@ -98,10 +110,9 @@ export interface ConnectStatusPayload {
 const CONNECT_STATUS_TTL_SECONDS = 600;
 
 /**
- * Status payload for a user/org that has never onboarded a Connect account.
+ * Status payload for a user who has never onboarded a Connect account.
  *
- * Shared by the user- and org-keyed status paths so the "no account" branch is
- * identical regardless of how the lookup was keyed.
+ * Returned by the cache-miss status path when the user has no account row.
  */
 const DISCONNECTED_STATUS: ConnectStatusPayload = {
   isConnected: false,
@@ -147,10 +158,10 @@ function normaliseRequirements(
 
 export interface ConnectAccountServiceConfig extends ServiceConfig {
   /**
-   * Optional VersionedCache for `getStatus(orgId)` cache-aside.
+   * Optional VersionedCache for `getStatusForUser(userId)` cache-aside.
    *
    * Wired in workers via the service-registry. When omitted (e.g. unit tests),
-   * `getStatus()` falls back to direct Stripe + DB reads on every call.
+   * `getStatusForUser()` falls back to direct Stripe + DB reads on every call.
    */
   cache?: VersionedCache;
 }
@@ -318,20 +329,6 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
-   * @deprecated Org-context shim retained for the current studio onboarding
-   * route until WP3 migrates it to the creator-scoped `/connect/me` flow. The
-   * account is keyed on the user (org-independent); `orgId` is ignored.
-   */
-  async createAccount(
-    _orgId: string,
-    userId: string,
-    returnUrl: string,
-    refreshUrl: string
-  ): Promise<{ accountId: string; onboardingUrl: string }> {
-    return this.createAccountForUser(userId, returnUrl, refreshUrl);
-  }
-
-  /**
    * Get a user's single Connect account (one account per user, Codex-69t7c —
    * org-independent). Returns null when the user has not onboarded.
    */
@@ -390,21 +387,14 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
-   * Get the full Connect status for an org — cache-aside.
+   * Get the full Connect status for a user — cache-aside, keyed by `userId`.
    *
    * Returns the local DB-cached `isConnected/chargesEnabled/payoutsEnabled/status`
    * fields PLUS the live `requirements` payload from Stripe (currently_due,
    * eventually_due, current_deadline, errors, disabled_reason). The Stripe
    * `requirements` shape changes only via `account.updated` webhooks, so the
-   * webhook handler is responsible for invalidating this cache.
-   *
-   * Falls back to direct fetch when no cache is wired (e.g. unit tests).
-   *
-   * @param orgId - Organization ID (cache key namespace)
-   * @returns Connect status payload with requirements
-   */
-  /**
-   * Get the full Connect status for a user — cache-aside, keyed by `userId`.
+   * webhook handler is responsible for invalidating this cache. Falls back to
+   * direct fetch when no cache is wired (e.g. unit tests).
    *
    * Keying on the user (not the org) means `account.updated` can invalidate the
    * cache reliably: the webhook always has the account's `userId`, whereas the
@@ -427,15 +417,33 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
-   * Get the full Connect status for an org.
+   * The organisation's payout readiness — whether the account its money is
+   * paid to can take charges and receive payouts.
    *
-   * @deprecated orgId-first shim — resolves org → primary user, then delegates
-   * to `getStatusForUser`. Prefer `getStatusForUser(userId)`.
+   * Any member may read this, so it is status only (see
+   * {@link OrganizationPayoutStatus}). DB-only: it never calls Stripe, because
+   * `account.updated` keeps the row's flags current and the live
+   * `requirements` read is the account holder's business, not the members'.
    */
-  async getStatus(orgId: string): Promise<ConnectStatusPayload> {
-    const userId = await this.resolveUserIdForOrg(orgId);
-    if (!userId) return DISCONNECTED_STATUS;
-    return this.getStatusForUser(userId);
+  async getOrganizationPayoutStatus(
+    orgId: string
+  ): Promise<OrganizationPayoutStatus> {
+    const account = await resolvePrimaryConnect(this.db, orgId);
+    if (!account) {
+      return {
+        isConnected: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: null,
+      };
+    }
+    return {
+      isConnected: true,
+      chargesEnabled: account.chargesEnabled,
+      payoutsEnabled: account.payoutsEnabled,
+      // varchar column, pinned to these four values by `check_connect_status`.
+      status: account.status as OrganizationPayoutStatus['status'],
+    };
   }
 
   /**
@@ -592,18 +600,6 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
-   * @deprecated orgId-first shim — resolves org → primary user, then delegates
-   * to `createDashboardLinkForUser`.
-   */
-  async createDashboardLink(orgId: string): Promise<{ url: string }> {
-    const userId = await this.resolveUserIdForOrg(orgId);
-    if (!userId) {
-      throw new ConnectAccountNotFoundError(orgId);
-    }
-    return this.createDashboardLinkForUser(userId);
-  }
-
-  /**
    * Check if a user's Connect account is fully ready for transactions.
    */
   async isReadyForUser(userId: string): Promise<boolean> {
@@ -644,25 +640,6 @@ export class ConnectAccountService extends BaseService {
 
     // Return the updated record
     return this.getAccountForUser(userId);
-  }
-
-  /**
-   * @deprecated orgId-first shim. With `userId`, delegates directly; with only
-   * `orgId`, resolves org → primary user then delegates to
-   * `syncAccountStatusForUser`.
-   */
-  async syncAccountStatus(
-    orgId: string,
-    userId?: string
-  ): Promise<StripeConnectAccount | null> {
-    if (userId) {
-      return this.syncAccountStatusForUser(userId);
-    }
-    const resolvedUserId = await this.resolveUserIdForOrg(orgId);
-    if (!resolvedUserId) {
-      throw new ConnectAccountNotFoundError(orgId);
-    }
-    return this.syncAccountStatusForUser(resolvedUserId);
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────

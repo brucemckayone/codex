@@ -76,7 +76,6 @@ import type {
   CancelSubscriptionInput,
   ChangeTierInput,
   ConnectMeOnboardInput,
-  ConnectOnboardInput,
   CreateCategoryInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
@@ -143,6 +142,7 @@ import type {
   CurrentSubscription,
   MediaItemWithRelations,
   OrganizationData,
+  OrganizationPayoutStatusResponse,
   OrgMemberItem,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
@@ -2899,51 +2899,15 @@ export function createServerApi(
      */
     connect: {
       /**
-       * Start Connect onboarding — creates Express account + returns onboarding URL
+       * The org's payout status — read-only, for any member. GET
+       * /connect/organization-status. Status fields only: the account holder's
+       * own details and dashboard link are reachable only through /me below
+       * (Codex-2hxff.1).
        */
-      onboard: (data: ConnectOnboardInput) =>
-        request<ConnectOnboardResponse>(
+      getOrganizationStatus: (organizationId: string) =>
+        request<OrganizationPayoutStatusResponse>(
           'ecom',
-          `/connect/onboard?organizationId=${encodeURIComponent(data.organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify(data),
-          }
-        ),
-
-      /**
-       * Get Connect account status for an org
-       */
-      getStatus: (organizationId: string) =>
-        request<ConnectAccountStatusResponse>(
-          'ecom',
-          `/connect/status?organizationId=${encodeURIComponent(organizationId)}`
-        ),
-
-      /**
-       * Get Stripe Express dashboard link
-       */
-      getDashboardLink: (organizationId: string) =>
-        request<ConnectDashboardResponse>(
-          'ecom',
-          `/connect/dashboard?organizationId=${encodeURIComponent(organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ organizationId }),
-          }
-        ),
-
-      /**
-       * Sync Connect account status with Stripe (polls Stripe API)
-       */
-      syncStatus: (organizationId: string) =>
-        request<ConnectAccountStatusResponse>(
-          'ecom',
-          `/connect/sync?organizationId=${encodeURIComponent(organizationId)}`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ organizationId }),
-          }
+          `/connect/organization-status?organizationId=${encodeURIComponent(organizationId)}`
         ),
 
       // ── Creator-self-scoped /me routes (Codex-69t7c.3 / WP3) ──────────────

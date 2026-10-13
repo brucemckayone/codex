@@ -22,7 +22,6 @@ add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.1` | P0 | Only the account owner can open a payout dashboard; organisation Connect routes retired | [connect-and-payouts](connect-and-payouts.md#the-payout-dashboard-and-bank-details) |
 | `Codex-2hxff.2` | P1 | One owner per organisation, transfer-only; organisation money follows the current owner | [connect-and-payouts](connect-and-payouts.md#organisation-ownership) |
 | `Codex-2hxff.3` | P0 | Price changes reach existing subscribers only at their next renewal, after 30 days' notice; Studio-only prices | [subscriptions](subscriptions.md#price-changes) |
 | `Codex-2hxff.4` | P1 | The billing portal is locked down by an explicit configuration | [subscriptions](subscriptions.md#billing-portal) |

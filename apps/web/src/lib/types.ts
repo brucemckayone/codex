@@ -239,7 +239,7 @@ export interface ConnectRequirements {
 
 /**
  * Connect account status response.
- * Returned by GET /connect/status
+ * Returned by GET /connect/me/status and POST /connect/me/sync
  */
 export interface ConnectAccountStatusResponse {
   isConnected: boolean;
@@ -265,8 +265,17 @@ export interface ConnectAccountStatusResponse {
 }
 
 /**
+ * An organisation's payout status — status fields only, for any member.
+ * Returned by GET /connect/organization-status (Codex-2hxff.1).
+ */
+export type OrganizationPayoutStatusResponse = Pick<
+  ConnectAccountStatusResponse,
+  'isConnected' | 'chargesEnabled' | 'payoutsEnabled' | 'status'
+>;
+
+/**
  * Connect onboard response.
- * Returned by POST /connect/onboard
+ * Returned by POST /connect/me/onboard
  */
 export interface ConnectOnboardResponse {
   accountId: string;
@@ -275,7 +284,7 @@ export interface ConnectOnboardResponse {
 
 /**
  * Connect dashboard link response.
- * Returned by POST /connect/dashboard
+ * Returned by POST /connect/me/dashboard
  */
 export interface ConnectDashboardResponse {
   url: string;

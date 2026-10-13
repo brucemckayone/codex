@@ -23,7 +23,7 @@ All routes use `procedure()`. Mounted in `src/index.ts`:
 | `/subscriptions` | `routes/subscriptions.ts` | `POST /checkout`, `/preview-tier-change`, `/change-tier`, `/cancel`, `/reactivate`, `/resume` · `GET /verify`, `/current`, `/mine` · organisation management: `GET /stats`, `/subscribers`, `/payouts`, `/payouts/summary`, `/payouts/by-creator` · self: `GET /me/payouts`, `/me/earnings-summary` |
 | `/courses` | `routes/courses.ts` | `GET /:courseId/offer` |
 | `/studio/courses` | `routes/course-monetisation.ts` | `PUT`/`DELETE /:courseId/subscription-plan`, `PUT /:courseId/tier-access` |
-| `/connect` | `routes/connect.ts` | self: `POST /me/onboard`, `/me/sync`, `/me/dashboard` · `GET /me/status`. The organisation routes (`/onboard`, `/status`, `/sync`, `/dashboard`) are being retired — `/dashboard` is an IDOR (`Codex-2hxff.1`) |
+| `/connect` | `routes/connect.ts` | self: `POST /me/onboard`, `/me/sync`, `/me/dashboard` · `GET /me/status`. Org, read-only, any member: `GET /organization-status` (status fields only). The old organisation routes (`/onboard`, `/status`, `/sync`, `/dashboard`) are retired — `/dashboard` was an IDOR (`Codex-2hxff.1`); never add an org-keyed route that acts on a Connect account |
 | `/agreements` | `routes/agreements.ts` | see [agreements.md → Routes](../../docs/payments/agreements.md#routes) |
 
 ## Webhooks

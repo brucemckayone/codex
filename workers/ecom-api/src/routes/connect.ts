@@ -1,13 +1,13 @@
 /**
  * Stripe Connect Endpoints
  *
- * Manages Connect account onboarding and status. Two route families:
+ * Manages Connect account onboarding and status. Only the person who owns a
+ * Connect account can act on it (docs/payments/connect-and-payouts.md → The
+ * payout dashboard and bank details). The org-level onboard/status/sync/
+ * dashboard routes are retired (Codex-2hxff.1).
  *
- * Org-scoped (owner/admin, `requireOrgManagement`) — the org's primary account:
- * - POST /connect/onboard    - Create Connect account + return onboarding URL
- * - GET  /connect/status     - Get Connect account status
- * - POST /connect/sync       - Force a Stripe status sync
- * - POST /connect/dashboard  - Get Stripe Express dashboard link
+ * Org-scoped, read-only (`requireOrgMembership`):
+ * - GET  /connect/organization-status - The org's payout status, status only
  *
  * Creator-scoped (`/connect/me/*`, `auth: 'required'`, self-scoped to
  * `ctx.user.id`) — one Connect account per user, no org context (Codex-69t7c.3):
@@ -19,9 +19,7 @@
 
 import type { HonoEnv } from '@codex/shared-types';
 import {
-  connectDashboardSchema,
   connectMeOnboardSchema,
-  connectOnboardSchema,
   connectStatusQuerySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -30,110 +28,27 @@ import { Hono } from 'hono';
 const app = new Hono<HonoEnv>();
 
 /**
- * POST /connect/onboard
- * Create a Stripe Connect Express account and return the onboarding URL.
- */
-app.post(
-  '/onboard',
-  procedure({
-    policy: {
-      auth: 'required',
-      requireOrgManagement: true,
-      rateLimit: 'strict',
-    },
-    input: { body: connectOnboardSchema },
-    successStatus: 201,
-    handler: async (ctx) => {
-      return await ctx.services.connect.createAccount(
-        ctx.input.body.organizationId,
-        ctx.user.id,
-        ctx.input.body.returnUrl,
-        ctx.input.body.refreshUrl
-      );
-    },
-  })
-);
-
-/**
- * GET /connect/status
- * Get the Connect account status for an org.
+ * GET /connect/organization-status?organizationId=
+ * The organisation's payout readiness, for any member.
  *
- * Returns the full status payload including Stripe's `requirements`
- * (currently_due, eventually_due, current_deadline, errors). Cached
- * 10 min via VersionedCache; invalidated by `account.updated` webhook.
+ * Reads the org from `ctx.organizationId` — the org the policy resolved AND
+ * checked membership of — never from a client-supplied field. The retired
+ * `POST /connect/dashboard` authorised the query org but acted on the body org,
+ * which let any org owner/admin open any other org's Express Dashboard
+ * (Codex-2hxff.1). Status fields only: no account id, no requirements, no
+ * login link — those belong to the account holder, through `/connect/me/*`.
  */
 app.get(
-  '/status',
+  '/organization-status',
   procedure({
     policy: {
       auth: 'required',
-      requireOrgManagement: true,
+      requireOrgMembership: true,
     },
     input: { query: connectStatusQuerySchema },
     handler: async (ctx) => {
-      return await ctx.services.connect.getStatus(
-        ctx.input.query.organizationId
-      );
-    },
-  })
-);
-
-/**
- * POST /connect/sync
- * Sync Connect account status with Stripe (polls Stripe API).
- * Used when webhooks can't reach the server (local dev) or as a fallback.
- */
-app.post(
-  '/sync',
-  procedure({
-    policy: {
-      auth: 'required',
-      requireOrgManagement: true,
-      rateLimit: 'strict',
-    },
-    input: { body: connectDashboardSchema },
-    handler: async (ctx) => {
-      const account = await ctx.services.connect.syncAccountStatus(
-        ctx.input.body.organizationId,
-        ctx.user.id
-      );
-
-      if (!account) {
-        return {
-          isConnected: false,
-          accountId: null,
-          chargesEnabled: false,
-          payoutsEnabled: false,
-          status: null,
-        };
-      }
-
-      return {
-        isConnected: true,
-        accountId: account.stripeAccountId,
-        chargesEnabled: account.chargesEnabled,
-        payoutsEnabled: account.payoutsEnabled,
-        status: account.status,
-      };
-    },
-  })
-);
-
-/**
- * POST /connect/dashboard
- * Get a Stripe Express dashboard login link for the org owner.
- */
-app.post(
-  '/dashboard',
-  procedure({
-    policy: {
-      auth: 'required',
-      requireOrgManagement: true,
-    },
-    input: { body: connectDashboardSchema },
-    handler: async (ctx) => {
-      return await ctx.services.connect.createDashboardLink(
-        ctx.input.body.organizationId
+      return await ctx.services.connect.getOrganizationPayoutStatus(
+        ctx.organizationId
       );
     },
   })

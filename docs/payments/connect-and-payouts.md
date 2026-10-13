@@ -61,13 +61,16 @@ Owner decisions Q1 and Q2 (SEC-01).
   ever need covering (owner decision 2026-10-13, "Bank account only"). In a
   sandbox the login link is the only way in.
 - Other organisation members see the organisation's payout **status** only,
-  through one read-only organisation endpoint. They never get a login link.
+  through `GET /connect/organization-status?organizationId=` (any member). It
+  returns `isConnected`, `chargesEnabled`, `payoutsEnabled` and `status` — no
+  account id, no outstanding requirements, never a login link — and reads only
+  the organisation the membership check resolved, never one named elsewhere in
+  the request.
 - The organisation-level routes (`/connect/onboard`, `/connect/status`,
   `/connect/sync`, `/connect/dashboard` with `?organizationId=`) are retired.
-
-— **gap**: `Codex-2hxff.1`. Today `POST /connect/dashboard` checks the
-organisation in the query string but acts on the one in the body, so any
-organisation owner or admin can open any other organisation's payout dashboard.
+  Until 2026-10-13 `POST /connect/dashboard` checked the organisation in the
+  query string but acted on the one in the body, so any organisation owner or
+  admin could open any other organisation's payout dashboard (`Codex-2hxff.1`).
 
 ## Payout timing
 
