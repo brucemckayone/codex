@@ -38,7 +38,7 @@
 -->
 <script lang="ts">
   import IntroVideoModal from '$lib/components/ui/IntroVideoModal/IntroVideoModal.svelte';
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
   import type { PreviewMedia, SellPreview } from '../../../render/types';
   import { COPY } from '../../model/copy';
   import { heroFacts } from '../../model/facts';
@@ -81,6 +81,16 @@
   );
   // Decorative unless described; only the creator's image can carry words.
   const alt = $derived(ownStill ? (content.image?.alt ?? '') : '');
+  // The creator's image offers every size it has, at the width its layout
+  // draws it: one 800px image across a cover band upscales (Codex-61zsk.13).
+  // Wherever there is one, it is the still every layout draws (`pick`); a
+  // course still from the journey is not a page image, so it has none.
+  const ownSrcset = $derived(
+    ownStill ? pageImageSrcset(content.image, context.mediaBaseUrl) : ''
+  );
+  const frameSizes = $derived(
+    layout === 'split' ? '(min-width: 50rem) 50vw, 100vw' : '100vw'
+  );
 
   // The uploaded hero still rides the AWAITED envelope, so it is in the
   // server-rendered HTML (the page's largest paint); the streamed preview can
@@ -192,11 +202,28 @@
 
 {#snippet frame(media: HeroMedia, pending: boolean, ratio: string)}
   {#if media.clip}
-    <Media image={media.still} clip={media.clip} {ratio} {pending} priority {alt}>
+    <Media
+      image={media.still}
+      clip={media.clip}
+      srcset={ownSrcset}
+      sizes={frameSizes}
+      {ratio}
+      {pending}
+      priority
+      {alt}
+    >
       {@render watchControl(media)}
     </Media>
   {:else}
-    <Media image={media.still} {ratio} {pending} priority {alt} />
+    <Media
+      image={media.still}
+      srcset={ownSrcset}
+      sizes={frameSizes}
+      {ratio}
+      {pending}
+      priority
+      {alt}
+    />
   {/if}
 {/snippet}
 
@@ -208,7 +235,14 @@
   {#if coverOwnsBand}
     <div class="hero-cover__media lp-bleed hero__enter-m" data-lp-on-media>
       {#if hasMedia}
-        <Media image={settled.still} clip={settled.clip} priority {alt} />
+        <Media
+          image={settled.still}
+          clip={settled.clip}
+          srcset={ownSrcset}
+          sizes="100vw"
+          priority
+          {alt}
+        />
       {:else}
         <span class="lp-atmos" data-drift aria-hidden="true"></span>
       {/if}
@@ -243,6 +277,7 @@
        so it takes the headline's length and its words' widths itself. -->
   <HeroPoster
     still={settled.still}
+    srcset={ownSrcset}
     clip={settled.clip}
     reserve={(previewing || heroComing) && mode !== 'none'}
     {alt}

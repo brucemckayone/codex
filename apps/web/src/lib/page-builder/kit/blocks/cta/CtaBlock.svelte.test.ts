@@ -143,6 +143,24 @@ describe('CtaBlock', () => {
       expect(link(COPY.cta.buy)).toBeDefined();
     });
 
+    // Codex-61zsk.13: one 800px image across the band upscales.
+    it('offers every size it has, at the width of the band', async () => {
+      await render(
+        { heading: 'Join', background: { ...background, w: 3000, h: 2000 } },
+        'band',
+        'buy',
+        null,
+        CDN
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w', 'xl.webp 1600w']
+          .map((size) => `${CDN}/${background.key}/${size}`)
+          .join(', ')
+      );
+      expect(img?.getAttribute('sizes')).toBe('100vw');
+    });
+
     it.each(['split', 'compact'])('%s ignores it', async (layout) => {
       await render({ heading: 'Join', background }, layout, 'buy', null, CDN);
       expect(document.body.querySelector('img')).toBeNull();

@@ -2771,3 +2771,41 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       dark over white);
     - a veil drawn 0.05 under the Style's end failed both (0.662, 0.726);
     - one 0.05 over the proven veil failed both (0.87, 0.91).
+- **X69 · 2026-10-13 · 3b follow-up · A full-bleed page image offers every size it has, at the
+  width it is drawn (Codex-61zsk.13; BUILT, decided without the owner).** #574 gave page images an
+  `xl` variant (1600, never upscaled) and the Picture section a srcset. A section's backdrop, the
+  closing ask's band and the creator's own hero image still drew `lg`, one 800px file, at every
+  width: upscaled 1.8 times across a 1440 band, and twice the bytes a phone at 1x needs.
+  - **The rule.** All three draw `pageImageSrcset` (sm, md and lg, and `xl` only for an image that
+    carries its size), with `sizes` taken from each layout's own geometry:
+    - `100vw` for whatever runs full bleed or across the content column: the cover, statement and
+      centred heroes, the closing ask's band, and a backdrop;
+    - `(min-width: 50rem) 50vw, 100vw` for split, whose columns halve at its 50rem container;
+    - `(min-width: 56rem) 46vw, 100vw` for the poster, whose picture takes 46% at 56rem.
+
+    A still from the journey is not a page image, so it keeps its one URL (filed as
+    Codex-61zsk.66, "A journey's hero still reaches the page as one URL").
+  - **Measured.** The candidate Chromium chooses for each `sizes`:
+    - full bleed takes `xl` at 1440 and 1024 at 1x, and at 390 at 3x;
+    - split and the poster take `lg` at 1x, where their column is at most 800px, and `xl` at 2x;
+    - every layout takes `md` at 390 at 1x.
+
+    An image without its size tops out at `lg`, as before. No seeded page draws a page image in
+    these three places, so there is no page to check them on; the seeded pages' markup is
+    unchanged.
+  - **Rejected:**
+    - `sizes="auto"`: it applies only to lazy images, and a full-bleed image is drawn edge to edge,
+      where `100vw` is exact.
+    - A `sizes` per container width: `sizes` reads the viewport, and the kit's breakpoints are
+      container queries. A viewport-width overestimate costs at most the page's side gutters.
+    - A 1200px variant between `lg` and `xl`: it would change the image pipeline and every stored
+      image for a step `xl` already covers.
+  - **Tests** (HeroBlock, CtaBlock and PageRenderer):
+    - each hero layout offers all four sizes, with its own `sizes`;
+    - an image without its size has no `xl`;
+    - the course still has no srcset;
+    - the band and a backdrop at `100vw`.
+
+    Seven plants each failed only their own tests: the cover's srcset dropped, split's and the
+    poster's `sizes` set to `100vw`, a srcset on the course still, `xl` never listed, the band's
+    srcset dropped, and a backdrop at `50vw`.

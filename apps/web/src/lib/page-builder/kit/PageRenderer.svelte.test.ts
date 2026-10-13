@@ -561,6 +561,14 @@ describe('PageRenderer', () => {
       const text = root.querySelector<HTMLElement>('#text');
       const img = text?.querySelector('.lp-surface > img');
       expect(img?.getAttribute('src')).toBe(`${CDN}/${IMAGE.key}/lg.webp`);
+      // Edge to edge, so every size it has, at the viewport's width
+      // (Codex-61zsk.13); a key without its size has no xl.
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${IMAGE.key}/${size}`)
+          .join(', ')
+      );
+      expect(img?.getAttribute('sizes')).toBe('100vw');
       expect(img?.getAttribute('alt')).toBe('');
       expect(img?.getAttribute('loading')).toBe('lazy');
       expect(img?.getAttribute('decoding')).toBe('async');

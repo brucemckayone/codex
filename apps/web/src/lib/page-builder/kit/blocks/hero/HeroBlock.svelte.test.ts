@@ -274,6 +274,70 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('img, video')).toBeNull();
     });
 
+    // Codex-61zsk.13: one 800px image across a cover band upscales.
+    const DRAWN_AT: Record<string, string> = {
+      statement: '100vw',
+      split: '(min-width: 50rem) 50vw, 100vw',
+      cover: '100vw',
+      centered: '100vw',
+      poster: '(min-width: 56rem) 46vw, 100vw',
+    };
+
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: offers every size it has, at the width it is drawn', async (layout) => {
+      const context = {
+        ...sampleContext({
+          course: { heroImageUrl: '/uploaded.jpg' },
+          mediaBaseUrl: CDN,
+        }),
+        sellPreview: new Promise<never>(() => {}),
+      };
+      await render(
+        { heading: 'H', image: { ...image, w: 2400, h: 1600 } },
+        { layout, context }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w', 'xl.webp 1600w']
+          .map((size) => `${CDN}/${image.key}/${size}`)
+          .join(', ')
+      );
+      expect(DRAWN_AT[layout], layout).toBeDefined();
+      expect(img?.getAttribute('sizes')).toBe(DRAWN_AT[layout]);
+    });
+
+    it('offers no xl for an image uploaded before there was one', async () => {
+      await render(
+        { heading: 'H', image },
+        {
+          layout: 'cover',
+          context: sampleContext({ mediaBaseUrl: CDN }),
+        }
+      );
+      expect(document.body.querySelector('img')?.getAttribute('srcset')).toBe(
+        ['sm.webp 200w', 'md.webp 400w', 'lg.webp 800w']
+          .map((size) => `${CDN}/${image.key}/${size}`)
+          .join(', ')
+      );
+    });
+
+    it('offers no sizes for the course still, which is not a page image', async () => {
+      await render(
+        { heading: 'H' },
+        {
+          layout: 'cover',
+          context: sampleContext({
+            media: { heroImageUrl: '/hero.jpg' },
+            mediaBaseUrl: CDN,
+          }),
+        }
+      );
+      const img = document.body.querySelector('img');
+      expect(img?.getAttribute('src')).toBe('/hero.jpg');
+      expect(img?.hasAttribute('srcset')).toBe(false);
+    });
+
     it('without a CDN base, keeps the course still and builds no broken URL', async () => {
       await render(
         { heading: 'H', image },

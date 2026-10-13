@@ -14,7 +14,9 @@
   uniform scrim. `hero` has its own media and `cta` its own backdrop (01 A5),
   so neither takes one here, and nor does a simple section (a Picture,
   Heading, Break or Button, 03 X64), which takes its neighbour's ground. An image that fails to load leaves the section in
-  its own scheme, as if none were set.
+  its own scheme, as if none were set. The image runs edge to edge, so it
+  offers every size it has (`pageImageSrcset`), drawn at the viewport's width:
+  one 800px image across a 1440px band upscales (Codex-61zsk.13).
 
   CONTINUES (03 X58): `data-lp-continues` marks a section with no words of
   its own on the ground of the one above (`continuingSections`). It gives up
@@ -26,7 +28,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { resolvePageImageUrl } from '../page-images';
+  import { pageImageSrcset, resolvePageImageUrl } from '../page-images';
   import { OWN_BACKDROP, SIMPLE_SECTIONS } from './model/resolve';
   import type { ResolvedSection } from './model/types';
 
@@ -61,6 +63,9 @@
     const url = resolvePageImageUrl(background, 'lg', mediaBaseUrl);
     return url && url !== failed ? url : null;
   });
+  const backdropSrcset = $derived(
+    backdrop ? pageImageSrcset(background, mediaBaseUrl) : ''
+  );
 </script>
 
 <section
@@ -80,6 +85,8 @@
       <img
         class="lp-surface__image"
         src={backdrop}
+        srcset={backdropSrcset || undefined}
+        sizes={backdropSrcset ? '100vw' : undefined}
         alt=""
         loading="lazy"
         decoding="async"
