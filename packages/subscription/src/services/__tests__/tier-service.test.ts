@@ -38,7 +38,7 @@ import {
   describe,
   expect,
   it,
-  type vi,
+  vi,
 } from 'vitest';
 import {
   ConnectAccountNotReadyError,
@@ -334,6 +334,34 @@ describe('TierService', () => {
       // One new price created (monthly), one archived
       expect(stripe.prices.create).toHaveBeenCalledOnce();
       expect(stripe.prices.update).toHaveBeenCalledOnce(); // archive old
+    });
+
+    // Codex-2hxff.3: the interval must reach the fan-out, or an annual edit
+    // moves monthly subscribers onto the annual Price.
+    it('fires the subscriber fan-out once, for ONLY the interval that changed', async () => {
+      const propagator = vi.fn();
+      const withPropagator = new TierService(
+        { db, dbWs: db, environment: 'test', propagator },
+        stripe
+      );
+      const org = await createOrgWithConnect('update-propagate');
+      const tier = await withPropagator.createTier(org.id, {
+        name: 'T',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      const updated = await withPropagator.updateTier(tier.id, org.id, {
+        priceAnnual: 5990,
+      });
+
+      expect(propagator).toHaveBeenCalledTimes(1);
+      expect(propagator).toHaveBeenCalledWith({
+        tierId: tier.id,
+        newStripePriceId: updated.stripePriceAnnualId,
+        organizationId: org.id,
+        interval: 'year',
+      });
     });
 
     it('should create new prices + archive old when annual price changes', async () => {
@@ -971,142 +999,157 @@ describe('TierService', () => {
     });
   });
 
-  // ─── applyStripePriceCreated (Q1 Dashboard sync-back) ───────────────────
+  // ─── recordStripePriceDrift (Codex-2hxff.3) ─────────────────────────────
+  //
+  // Studio is the only place a tier price is set. A Price created in the
+  // Stripe Dashboard is logged as drift and NOT applied — this replaced the
+  // old adopt-and-propagate sync-back.
 
-  describe('applyStripePriceCreated', () => {
-    /** Helper: build a minimal Stripe.Price payload. */
+  describe('recordStripePriceDrift', () => {
     function buildPrice(args: {
       id: string;
       product: string;
-      orgId: string;
       interval: 'month' | 'year';
-      unitAmount?: number;
+      /** Studio stamps this; a Dashboard-created Price has none. */
+      orgId?: string;
       active?: boolean;
     }) {
       return {
         id: args.id,
         active: args.active ?? true,
-        unit_amount: args.unitAmount ?? 1999,
+        unit_amount: 1500,
         currency: 'gbp',
         recurring: { interval: args.interval },
         product: args.product,
-        metadata: {
-          codex_organization_id: args.orgId,
-          interval: args.interval,
-        },
+        metadata: args.orgId
+          ? { codex_organization_id: args.orgId, interval: args.interval }
+          : {},
       } as unknown as import('stripe').default.Price;
     }
 
-    it('should adopt the new Price for the monthly interval and archive the old Price in Stripe', async () => {
-      const org = await createOrgWithConnect('sync-price-month');
+    function spyOnObs() {
+      const obs = (
+        service as unknown as {
+          obs: {
+            error: (...a: unknown[]) => void;
+            info: (...a: unknown[]) => void;
+          };
+        }
+      ).obs;
+      return {
+        error: vi.spyOn(obs, 'error'),
+        info: vi.spyOn(obs, 'info'),
+      };
+    }
+
+    async function tierRow(tierId: string) {
+      return takeFirst(
+        await db
+          .select({
+            priceMonthly: subscriptionTiers.priceMonthly,
+            stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
+          })
+          .from(subscriptionTiers)
+          .where(eq(subscriptionTiers.id, tierId))
+      );
+    }
+
+    it('a Dashboard Price on a tier is logged as drift and changes nothing', async () => {
+      const org = await createOrgWithConnect('drift-dashboard');
       const tier = await service.createTier(org.id, {
         name: 'Fan',
         priceMonthly: 500,
         priceAnnual: 5000,
       });
-
-      const oldMonthlyId = tier.stripePriceMonthlyId ?? 'missing-old-id';
       const pricesUpdate = stripe.prices.update as unknown as ReturnType<
         typeof vi.fn
       >;
       pricesUpdate.mockClear();
+      const { error } = spyOnObs();
 
-      const result = await service.applyStripePriceCreated(
+      await service.recordStripePriceDrift(
         buildPrice({
-          id: 'price_new_month_1500',
+          id: 'price_dashboard_1500',
           product: tier.stripeProductId ?? 'missing-product-id',
-          orgId: org.id,
           interval: 'month',
-          unitAmount: 1500,
         })
       );
 
-      expect(result).toEqual({
-        tierId: tier.id,
-        organizationId: org.id,
-        changed: true,
-      });
-
-      const row = takeFirst(
-        await db
-          .select({
-            priceMonthly: subscriptionTiers.priceMonthly,
-            priceAnnual: subscriptionTiers.priceAnnual,
-            stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
-            stripePriceAnnualId: subscriptionTiers.stripePriceAnnualId,
-          })
-          .from(subscriptionTiers)
-          .where(eq(subscriptionTiers.id, tier.id))
-      );
-      expect(row.priceMonthly).toBe(1500);
-      expect(row.stripePriceMonthlyId).toBe('price_new_month_1500');
-      // Annual must remain untouched.
-      expect(row.priceAnnual).toBe(5000);
-      expect(row.stripePriceAnnualId).toBe(tier.stripePriceAnnualId);
-      // Old monthly price archived via Stripe API.
-      expect(pricesUpdate).toHaveBeenCalledWith(oldMonthlyId, {
-        active: false,
-      });
-    });
-
-    it('should return changed=false when the tier already references the incoming price (idempotent replay)', async () => {
-      const org = await createOrgWithConnect('sync-price-replay');
-      const tier = await service.createTier(org.id, {
-        name: 'Replay',
-        priceMonthly: 999,
-        priceAnnual: 9990,
-      });
-      const pricesUpdate = stripe.prices.update as unknown as ReturnType<
-        typeof vi.fn
-      >;
-      pricesUpdate.mockClear();
-
-      const result = await service.applyStripePriceCreated(
-        buildPrice({
-          id: tier.stripePriceMonthlyId ?? 'missing-monthly-id',
-          product: tier.stripeProductId ?? 'missing-product-id',
-          orgId: org.id,
-          interval: 'month',
-          unitAmount: 999,
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('drift'),
+        expect.objectContaining({
+          tierId: tier.id,
+          stripePriceId: 'price_dashboard_1500',
         })
       );
-
-      expect(result?.changed).toBe(false);
-      // No Stripe archive call on a replay.
+      // Not adopted, nothing archived — the tier still sells its own Price.
+      expect(await tierRow(tier.id)).toEqual({
+        priceMonthly: 500,
+        stripePriceMonthlyId: tier.stripePriceMonthlyId,
+      });
       expect(pricesUpdate).not.toHaveBeenCalled();
     });
 
-    it('should return null for non-Codex prices (metadata missing codex_organization_id)', async () => {
-      const result = await service.applyStripePriceCreated({
-        id: 'price_external',
-        active: true,
-        unit_amount: 1000,
-        currency: 'gbp',
-        recurring: { interval: 'month' },
-        product: 'prod_external',
-        metadata: {},
-      } as unknown as import('stripe').default.Price);
-      expect(result).toBeNull();
+    it("Studio's own Price (tagged) is not drift", async () => {
+      const org = await createOrgWithConnect('drift-studio');
+      const tier = await service.createTier(org.id, {
+        name: 'Studio',
+        priceMonthly: 999,
+        priceAnnual: 9990,
+      });
+      const { error } = spyOnObs();
+
+      await service.recordStripePriceDrift(
+        buildPrice({
+          id: 'price_studio_inflight',
+          product: tier.stripeProductId ?? 'missing-product-id',
+          interval: 'month',
+          orgId: org.id,
+        })
+      );
+
+      expect(error).not.toHaveBeenCalled();
+      expect(await tierRow(tier.id)).toEqual({
+        priceMonthly: 999,
+        stripePriceMonthlyId: tier.stripePriceMonthlyId,
+      });
     });
 
-    it('should return null for archived prices (active=false) — we never adopt a dead Price', async () => {
-      const org = await createOrgWithConnect('sync-price-archived');
+    it("the tier's current Price, an inactive Price, or an unknown Product is a silent no-op", async () => {
+      const org = await createOrgWithConnect('drift-noop');
       const tier = await service.createTier(org.id, {
         name: 'Guard',
         priceMonthly: 499,
         priceAnnual: 4990,
       });
+      const { error, info } = spyOnObs();
 
-      const result = await service.applyStripePriceCreated(
+      for (const price of [
+        buildPrice({
+          id: tier.stripePriceMonthlyId ?? 'missing-monthly-id',
+          product: tier.stripeProductId ?? 'missing-product-id',
+          interval: 'month',
+        }),
         buildPrice({
           id: 'price_dead',
           product: tier.stripeProductId ?? 'missing-product-id',
-          orgId: org.id,
           interval: 'month',
           active: false,
-        })
+        }),
+        buildPrice({
+          id: 'price_other',
+          product: 'prod_not_ours',
+          interval: 'month',
+        }),
+      ]) {
+        await service.recordStripePriceDrift(price);
+      }
+
+      expect(error).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalledWith(
+        expect.stringContaining('Studio-created'),
+        expect.anything()
       );
-      expect(result).toBeNull();
     });
   });
 

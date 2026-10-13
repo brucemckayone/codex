@@ -90,8 +90,7 @@ can each pay only one connected account, so neither can split a sale three ways.
    Every transfer site asserts the currency before calling Stripe — **gap**:
    `Codex-2hxff.23` (one-off transfer site has no assertion).
 2. **Studio is the only place prices are set.** A price edited in the Stripe
-   Dashboard is recorded as drift and never applied to anyone — **gap**:
-   `Codex-2hxff.3` (price changes).
+   Dashboard is recorded as drift and never applied to anyone.
 3. **No £0 offers.** A price of £0 is refused when it is written.
 4. **Every penny is accounted for.** Each sale stores its split, and every
    slice that is owed to someone has a row in the payouts ledger — paid, or

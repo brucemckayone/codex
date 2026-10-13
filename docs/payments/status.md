@@ -23,7 +23,6 @@ add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
 | `Codex-2hxff.2` | P1 | One owner per organisation, transfer-only; organisation money follows the current owner | [connect-and-payouts](connect-and-payouts.md#organisation-ownership) |
-| `Codex-2hxff.3` | P0 | Price changes reach existing subscribers only at their next renewal, after 30 days' notice; Studio-only prices | [subscriptions](subscriptions.md#price-changes) |
 | `Codex-2hxff.6` | P0 | Transient webhook failures return 500 so Stripe retries | [operations](operations.md#webhook-error-policy) |
 | `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |
@@ -76,6 +75,8 @@ option chosen. All dated 2026-10-13 unless noted.
 | Bank details | "We likely would want the creators to be able to update their payout details, yes." |
 | Price changes (Q4–Q7) | "For 4B, the correct answer is: they move at the next renewal." Email at the change, applied at the first renewal at least 30 days later; increases and decreases alike; "Studio is the only place." |
 | Course plan price changes (P-6) | "Same rule as tiers" |
+| Price-change mechanism | "Deferred swap (Recommended)": the pending price rides on the Stripe subscription's metadata and is switched in, without proration, once the next renewal is at least 30 days after the email — not subscription schedules |
+| Two price changes in a row | "Latest wins (Recommended)": a second change replaces a pending one; one move, to the newest price |
 | Ownership | "I think there should only be one owner, and the only person who can be the owner is the person who makes the organization. The only person who can transfer ownership should therefore be the owner. The proposed ownership model seems perfect to me." Money is held as pending until a new owner sets up payouts; money earned before a transfer stays with the old owner; "No migration concerns here." |
 | Ownership transfer | Recipient "An admin or creator"; "Yes, they accept"; the previous owner becomes "Admin"; started from "Studio settings"; an offer lasts "7 days"; emails "Both + other admins"; support reassignment "Support API, no screen". Mockup review: "Card on Settings (Recommended)", "Type the org name (Recommended)", no email on expiry "No — show on next visit (Recommended)", and the previous owner's subscription income "Agreements decide (Recommended)" — an agreement they hold keeps paying; one without is warned that it stops (`Codex-2hxff.2`) |
 | One pull request | "Yeah, I think we should put all of these fixes in together as one PR, to be honest." Adding the portal lockdown and environment tagging: "Include both" |

@@ -1001,7 +1001,8 @@ export async function createServiceRegistry(
             await registry.subscription.propagateTierPriceToActiveSubscriptions(
               args.tierId,
               args.newStripePriceId,
-              { organizationId: args.organizationId }
+              // Only the changed interval's subscribers move (Codex-2hxff.3).
+              { organizationId: args.organizationId, interval: args.interval }
             );
           };
           if (executionCtx) {
@@ -1057,11 +1058,21 @@ export async function createServiceRegistry(
         // Course-sub payouts resolve fees via the same 3-tier fallback chain as
         // purchases/subscriptions; Stripe client is deferred (read-only course
         // pages never construct it) — same pattern as `subscription`/`tier`.
+        // A plan price change emails each moved subscriber and runs its
+        // fan-out after the response (Codex-2hxff.3) — same wiring as the
+        // org-tier mailer above.
         _courseSubscription = new CourseSubscriptionService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
             feeConfig: registry.feeConfig,
+            mailer: executionCtx
+              ? (params) => sendEmailToWorker(env, executionCtx, params)
+              : undefined,
+            webAppUrl: env.WEB_APP_URL,
+            waitUntil: executionCtx
+              ? (promise) => executionCtx.waitUntil(promise)
+              : undefined,
           },
           getLazyStripeClient()
         );

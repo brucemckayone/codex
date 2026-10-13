@@ -73,7 +73,9 @@ import {
   CourseSubscriptionPlanNotFoundError,
   SubscriptionCheckoutError,
 } from '../errors';
+import { schedulePriceChange } from './pending-price-change';
 import { resolveStatus } from './stripe-status-mapper';
+import type { TierPriceChangeMailer } from './subscription-service';
 
 /** Marks a Stripe subscription as a course sub (vs. an org tier sub). */
 export const COURSE_SUBSCRIPTION_METADATA_TYPE = 'course_subscription';
@@ -84,6 +86,23 @@ const GRANTING_STATUSES = ['active', 'cancelling', 'past_due'];
 interface CourseSubscriptionServiceConfig extends ServiceConfig {
   /** Injected so invoice payouts resolve fees via the 3-tier fallback chain. */
   feeConfig?: FeeConfigService;
+  /** Price-change notices (`subscription-tier-price-change`). Absent → no email. */
+  mailer?: TierPriceChangeMailer;
+  /** Base for the notice's manage-subscription link. */
+  webAppUrl?: string;
+  /**
+   * Runs a plan's subscriber fan-out after the response. Absent (tests) → the
+   * fan-out is awaited inline.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+/** One interval of a plan whose Price changed. */
+interface PlanPriceMove {
+  interval: 'month' | 'year';
+  newPriceId: string;
+  oldAmountCents: number;
+  newAmountCents: number;
 }
 
 /** Minimal per-event result so the webhook can bump the buyer's caches. */
@@ -95,11 +114,17 @@ export interface CourseSubscriptionWebhookResult {
 export class CourseSubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeConfigService | undefined;
+  private readonly mailer: TierPriceChangeMailer | undefined;
+  private readonly webAppUrl: string | undefined;
+  private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
 
   constructor(config: CourseSubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
+    this.waitUntil = config.waitUntil;
   }
 
   // ─── Plan management (Stripe Product + 2 Prices, per course) ─────────────────
@@ -324,9 +349,11 @@ export class CourseSubscriptionService extends BaseService {
    * cannot silently diverge (a diverged row would sell at a price the creator
    * never set).
    *
-   * Existing subscribers are deliberately NOT migrated: their subscription keeps
-   * billing the archived Price it was created with (grandfathering, same as org
-   * tiers). Only new checkouts see the new amount.
+   * Existing subscribers on a changed interval move to its new Price under the
+   * same rule as org tiers (owner decision P-6, "Same rule as tiers"): at their
+   * first renewal at least 30 days after they are emailed, no proration — see
+   * `movePlanSubscribers` (Codex-2hxff.3). New checkouts pay the new amount at
+   * once.
    *
    * RE-LISTS a withdrawn plan (`isActive` back to true, Stripe Product
    * un-archived). Saving an offer is the creator asserting "this is what I sell",
@@ -462,6 +489,38 @@ export class CourseSubscriptionService extends BaseService {
             }
           );
         }
+
+        const moves: PlanPriceMove[] = [];
+        if (monthlyChanged && newMonthlyPriceId) {
+          moves.push({
+            interval: 'month',
+            newPriceId: newMonthlyPriceId,
+            oldAmountCents: existing.priceMonthly,
+            newAmountCents: input.priceMonthly,
+          });
+        }
+        if (annualChanged && newAnnualPriceId) {
+          moves.push({
+            interval: 'year',
+            newPriceId: newAnnualPriceId,
+            oldAmountCents: existing.priceAnnual,
+            newAmountCents: input.priceAnnual,
+          });
+        }
+        if (moves.length > 0) {
+          // After the commit, so the plan row already points at the new Prices.
+          const fanOut = this.movePlanSubscribers(existing.id, moves).catch(
+            (error) => {
+              this.obs.error('Course plan price fan-out failed', {
+                planId: existing.id,
+                courseId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          );
+          if (this.waitUntil) this.waitUntil(fanOut);
+          else await fanOut;
+        }
         return updated;
       } catch (dbError) {
         this.obs.warn(
@@ -483,6 +542,108 @@ export class CourseSubscriptionService extends BaseService {
       }
     } catch (error) {
       this.handleError(error, 'savePlanPrices');
+    }
+  }
+
+  /**
+   * Move a plan's existing subscribers on each changed interval to its new
+   * Price — at their first renewal at least 30 days after this notice, with no
+   * proration (`schedulePriceChange`), and email each one. Past-due and paused
+   * subscribers get the pending marker and move once active again. One failed
+   * subscriber never stops the rest.
+   */
+  private async movePlanSubscribers(
+    planId: string,
+    moves: PlanPriceMove[]
+  ): Promise<void> {
+    const noticeAt = new Date();
+    for (const move of moves) {
+      const rows = await this.db
+        .select({
+          id: courseSubscriptions.id,
+          stripeSubscriptionId: courseSubscriptions.stripeSubscriptionId,
+          organizationId: courseSubscriptions.organizationId,
+          userId: courseSubscriptions.userId,
+          userEmail: users.email,
+          userName: users.name,
+          courseTitle: courses.title,
+        })
+        .from(courseSubscriptions)
+        .leftJoin(users, eq(users.id, courseSubscriptions.userId))
+        .leftJoin(courses, eq(courses.id, courseSubscriptions.courseId))
+        .where(
+          and(
+            eq(courseSubscriptions.planId, planId),
+            eq(courseSubscriptions.billingInterval, move.interval),
+            inArray(courseSubscriptions.status, [
+              'active',
+              'cancelling',
+              'past_due',
+              'paused',
+            ])
+          )
+        );
+
+      const batchSize = 8;
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((row) =>
+            schedulePriceChange(this.stripe, {
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              newPriceId: move.newPriceId,
+              newAmountCents: move.newAmountCents,
+              interval: move.interval,
+              noticeAt,
+            })
+          )
+        );
+        for (const [idx, result] of results.entries()) {
+          const row = batch[idx];
+          if (!row) continue;
+          if (result.status === 'rejected') {
+            this.obs.error('Course plan price change failed for a subscriber', {
+              planId,
+              courseSubscriptionId: row.id,
+              error:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : String(result.reason),
+            });
+            continue;
+          }
+          const outcome = result.value;
+          if (outcome.kind !== 'applied' && outcome.kind !== 'pending')
+            continue;
+          if (!this.mailer || !row.userEmail) continue;
+          try {
+            this.mailer({
+              to: row.userEmail,
+              toName: row.userName || undefined,
+              templateName: 'subscription-tier-price-change',
+              category: 'transactional',
+              userId: row.userId,
+              organizationId: row.organizationId,
+              data: {
+                userName: row.userName || 'there',
+                planName: row.courseTitle || 'your subscription',
+                oldPriceFormatted: `£${(move.oldAmountCents / 100).toFixed(2)}`,
+                newPriceFormatted: `£${(move.newAmountCents / 100).toFixed(2)}`,
+                billingInterval: move.interval,
+                effectiveDate: outcome.effectiveAt.toLocaleDateString('en-GB', {
+                  timeZone: 'UTC',
+                }),
+                manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
+              },
+            });
+          } catch (error) {
+            this.obs.warn('Course plan price notice: mailer threw', {
+              courseSubscriptionId: row.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
     }
   }
 

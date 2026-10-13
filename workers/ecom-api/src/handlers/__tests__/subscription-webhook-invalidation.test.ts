@@ -54,8 +54,10 @@ vi.mock('@codex/subscription', () => ({
   // events are not routed through them, so this is a safe no-op).
   TierService: vi.fn().mockImplementation(() => ({
     applyStripeProductUpdate: vi.fn().mockResolvedValue(null),
-    applyStripePriceCreated: vi.fn().mockResolvedValue(null),
+    recordStripePriceDrift: vi.fn().mockResolvedValue(undefined),
   })),
+  // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
+  applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
   // `invalidateForUser` is a named export from `@codex/subscription` that
   // both webhook handlers import. We spy on it to assert the contract.
   invalidateForUser: vi.fn(),

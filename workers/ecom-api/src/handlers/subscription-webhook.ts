@@ -36,6 +36,7 @@ import type {
   WebhookHandlerResult,
 } from '@codex/subscription';
 import {
+  applyDuePendingPriceChange,
   CourseSubscriptionService,
   SubscriptionService,
   TierService,
@@ -195,51 +196,21 @@ export async function handleSubscriptionWebhook(
       : undefined;
     const waitUntil = c.executionCtx.waitUntil.bind(c.executionCtx);
 
-    // Q1.3 (Codex-7kc83): wire a mailer thunk so Dashboard-originated
-    // price changes (price.created → applyStripePriceCreated →
-    // propagateTierPriceToActiveSubscriptions) notify each affected
-    // subscriber. Mirrors the service-registry wiring used by
-    // `procedure()` routes. Same fire-and-forget semantics as
-    // cache invalidation: the webhook response returns 200 immediately
-    // and emails land on `waitUntil`.
-    const mailer = (params: {
-      to: string;
-      toName?: string;
-      templateName: 'subscription-tier-price-change';
-      category: 'transactional';
-      userId?: string;
-      organizationId?: string | null;
-      data: Record<string, string | number | boolean>;
-    }) => {
-      sendEmailToWorker(c.env, c.executionCtx, params);
-    };
-
     const service = new SubscriptionService(
       {
         db,
         environment: c.env.ENVIRONMENT || 'development',
         cache,
         waitUntil,
-        mailer,
         webAppUrl: c.env.WEB_APP_URL,
       },
       stripe
     );
 
-    // TierService is constructed lazily — only `product.updated` and
-    // `price.created` events use it for Dashboard sync-back. All other
-    // events fall through to SubscriptionService.
-    //
-    // Q1.2 (Codex-3xyyb): inject a propagator thunk so
-    // `applyStripePriceCreated` fans the newly-adopted canonical Price
-    // id out to every active/cancelling subscription on the tier. The
-    // propagator runs on `executionCtx.waitUntil` — the webhook returns
-    // 200 immediately, and the per-sub Stripe updates (batched inside
-    // the service) complete asynchronously. This keeps the webhook
-    // response well under Stripe's delivery-timeout window even for
-    // tiers with many subscribers. The inner method owns per-sub error
-    // handling; a fire-and-forget catch on the outer promise just
-    // prevents unhandled-rejection noise on a catastrophic failure.
+    // TierService serves `product.updated` / `price.created` from the
+    // Dashboard. It gets NO propagator: Studio is the only place a price is
+    // set, so a Price created in the Dashboard is logged as drift and never
+    // moves a subscriber (Codex-2hxff.3).
     const tierService = new TierService(
       {
         db,
@@ -249,29 +220,6 @@ export async function handleSubscriptionWebhook(
         // reuses the WebSocket connection.
         dbWs: db,
         environment: c.env.ENVIRONMENT || 'development',
-        propagator: (args) => {
-          c.executionCtx.waitUntil(
-            service
-              .propagateTierPriceToActiveSubscriptions(
-                args.tierId,
-                args.newStripePriceId,
-                { organizationId: args.organizationId }
-              )
-              .then(() => undefined)
-              .catch((error) => {
-                obs?.warn(
-                  'subscription-webhook: propagateTierPriceToActiveSubscriptions threw (tail caught)',
-                  {
-                    tierId: args.tierId,
-                    organizationId: args.organizationId,
-                    newStripePriceId: args.newStripePriceId,
-                    error:
-                      error instanceof Error ? error.message : String(error),
-                  }
-                );
-              })
-          );
-        },
       },
       stripe
     );
@@ -415,6 +363,7 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
+          await applyDuePendingPriceChange(stripe, subscription);
           obs?.info('Course subscription updated', {
             subscriptionId: subscription.id,
           });
@@ -460,6 +409,13 @@ export async function handleSubscriptionWebhook(
         if (subscription.status === 'active') {
           clearAccess(c, result);
         }
+
+        // A renewal is a `customer.subscription.updated`: if a Studio price
+        // change is pending and this subscription's next renewal is ≥ 30 days
+        // after the notice, swap it in now (no proration — the next renewal
+        // bills it). After the DB sync, so a failed swap never skips it
+        // (Codex-2hxff.3).
+        await applyDuePendingPriceChange(stripe, subscription);
 
         obs?.info('Subscription updated', {
           subscriptionId: subscription.id,
@@ -648,25 +604,11 @@ export async function handleSubscriptionWebhook(
       }
 
       case STRIPE_EVENTS.PRICE_CREATED: {
-        // Q1 product decision (sync-back part b): when a Dashboard
-        // operator creates a new Price on a Codex-managed Product (the
-        // workflow for changing an amount, because Stripe Prices are
-        // immutable), adopt it as canonical for the tier+interval and
-        // archive whichever Price the tier previously referenced.
-        // See TierService.applyStripePriceCreated for the idempotency
-        // + metadata contract.
+        // Studio is the only place a tier price is set. A Price created in
+        // the Dashboard is logged as drift and never adopted or propagated
+        // (Codex-2hxff.3) — see TierService.recordStripePriceDrift.
         const price = event.data.object as Stripe.Price;
-        const syncResult = await tierService.applyStripePriceCreated(price);
-
-        if (syncResult?.changed) {
-          obs?.info('Adopted Stripe Dashboard-created Price as canonical', {
-            tierId: syncResult.tierId,
-            organizationId: syncResult.organizationId,
-            stripePriceId: price.id,
-            eventId: event.id,
-          });
-          invalidateOrgAfterSyncBack(syncResult);
-        }
+        await tierService.recordStripePriceDrift(price);
         break;
       }
 

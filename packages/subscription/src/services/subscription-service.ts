@@ -89,6 +89,10 @@ import {
   SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
+import {
+  CLEAR_PENDING_PRICE_METADATA,
+  schedulePriceChange,
+} from './pending-price-change';
 import { calculateRevenueSplit } from './revenue-split';
 import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
 import {
@@ -367,21 +371,16 @@ function derivePayoutStatus(status: string): PayoutDisplayStatus {
 /**
  * Options for `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
  *
- * All fields are optional — sensible defaults apply when omitted. The
- * proration policy is surfaced as a named parameter because Q1 product
- * may overturn the `create_prorations` default at any time (see bead
- * Codex-3xyyb and the separate follow-up for the policy decision).
+ * `interval` is required: a price change reaches only the subscribers on the
+ * interval whose Price changed (Codex-2hxff.3). The batching knobs are optional.
  */
 export interface PropagateTierPriceOptions {
   /**
-   * Stripe proration behaviour for the mid-cycle Price swap. Defaults to
-   * `'create_prorations'` — matches Stripe's default, charges the
-   * difference on the next invoice. `'none'` defers the new amount to
-   * the next billing cycle without any immediate adjustment.
-   * `'always_invoice'` invoices the proration amount immediately rather
-   * than adding it to the next invoice.
+   * The billing interval whose Price changed. Subscribers on the other interval
+   * are never touched — moving a monthly subscriber onto an annual Price resets
+   * the billing cycle and charges a year at once.
    */
-  prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+  interval: 'month' | 'year';
   /**
    * Upper bound on concurrent Stripe API calls per batch. Stripe's
    * per-account rate limit is 25 req/sec (test) / 100 req/sec (live) —
@@ -408,18 +407,17 @@ export interface PropagateTierPriceOptions {
 /**
  * Result shape returned by
  * `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
- *
- * Informational only — DB state for the per-subscription amount is
- * reconciled by the existing `customer.subscription.updated` webhook
- * that Stripe emits for each updated subscription. Callers should not
- * branch on these counts for correctness; they exist for observability.
  */
 export interface PropagateTierPriceResult {
-  /** Number of active/cancelling subscriptions discovered for the tier. */
+  /** Subscriptions on the tier and interval that were considered. */
   total: number;
-  /** Subscriptions whose Stripe Price was successfully swapped. */
+  /** Swapped now or marked pending — every subscriber who was emailed. */
   updated: number;
-  /** Subscriptions whose swap failed (logged individually via obs.error). */
+  /** Of `updated`: swapped now (next renewal already ≥ 30 days away). */
+  applied: number;
+  /** Of `updated`: marked pending, swapped at a later renewal. */
+  pending: number;
+  /** Subscriptions whose scheduling failed (logged individually via obs.error). */
   failed: number;
 }
 
@@ -568,7 +566,7 @@ interface SubscriptionServiceConfig extends ServiceConfig {
  * into this slot. Returns `void` — failures are the mailer's concern
  * (notifications-api audit log on the remote side).
  */
-type TierPriceChangeMailer = (params: {
+export type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';
@@ -2350,6 +2348,9 @@ export class SubscriptionService extends BaseService {
               codex_tier_id: newTierId,
               codex_user_id: userId,
               codex_organization_id: orgId,
+              // A pending price change belonged to the OLD tier's Price; the
+              // new tier's Price supersedes it (Codex-2hxff.3).
+              ...CLEAR_PENDING_PRICE_METADATA,
             },
           },
           isUpgrade
@@ -3885,86 +3886,50 @@ export class SubscriptionService extends BaseService {
     return sub;
   }
 
-  // ─── Tier Price Propagation (Q1.2 — Codex-3xyyb) ───────────────────────────
+  // ─── Tier Price Propagation (Codex-2hxff.3) ────────────────────────────────
 
   /**
-   * Propagate a tier's new Stripe Price ID to EVERY active/cancelling
-   * subscription currently on that tier. Q1.2 of the subscription audit
-   * epic (Codex-kqmvd) closes the gap where Q1.1's sync-back (and the
-   * existing Codex-UI `updateTier` flow) updated the tier record but left
-   * in-flight subscriptions billing on the superseded Price.
+   * Move a tier's existing subscribers on ONE interval to that interval's new
+   * Price, under the 30-day rule (docs/payments/subscriptions.md → Price
+   * changes; mechanism in `./pending-price-change.ts`).
    *
-   * Design contract:
-   * - Scope: subscriptions with `tierId = tierId` AND status IN
-   *   ('active', 'cancelling'). `paused`, `past_due`, `cancelled`,
-   *   `incomplete` are deliberately SKIPPED — swapping a Price under a
-   *   paused subscription triggers an unwanted reactivation path, and a
-   *   cancelled sub has no ongoing billing to reprice. The status list
-   *   mirrors the PR #5 filter (`getSubscriptionOrThrow`) minus
-   *   `past_due` (past-due subs are awaiting retry; changing their Price
-   *   mid-flight creates Stripe edge cases — they'll re-sync on the next
-   *   invoice attempt).
-   * - For each subscription: retrieve the live Stripe sub to get its
-   *   item id, then call `stripe.subscriptions.update` with the new
-   *   Price and the caller's proration policy (default
-   *   `create_prorations`). Stripe emits `customer.subscription.updated`
-   *   which flows through the existing `handleSubscriptionUpdated`
-   *   webhook → shared status mapper → our DB `amountCents` update.
-   *   We do NOT write the DB directly from this path — one write path
-   *   for subscription price changes keeps webhook-reconciliation
-   *   semantics intact.
-   * - Idempotency: each Stripe call uses a deterministic idempotency key
-   *   `tier-price-propagate:${subId}:${newPriceId}`, so retries on
-   *   partial batch failure reissue the same mutation safely. If a
-   *   subscription already carries the new Price (e.g. prior run
-   *   succeeded before the failure point), Stripe treats the replay as
-   *   a no-op — the idempotency key protects us without requiring a
-   *   pre-check round trip.
-   * - Batching: subscriptions are processed in parallel batches of
-   *   `batchSize` (default 8) with `interBatchDelayMs` (default 50ms)
-   *   between batches to respect Stripe's per-account rate limit (25
-   *   req/sec test, 100 req/sec live). A tier with 500 subs completes
-   *   in ~2.5s at the default settings — well within a `waitUntil`
-   *   fire-and-forget budget.
-   * - Per-sub error handling: one failed update MUST NOT abort the
-   *   batch. Failures are logged via `this.obs.error` with the offending
-   *   subscriptionId + error, and we continue. After all batches, an
-   *   aggregate error log fires if `failed > 0`. Callers (webhook
-   *   handler, UI-driven tier update) treat this method as
-   *   fire-and-forget — they never surface individual failures.
+   * - Scope: `tierId`, the changed `interval`, and status active, cancelling,
+   *   past_due or paused. Past-due and paused subscribers get the pending
+   *   marker only and move once Stripe reports them active; cancelled and
+   *   incomplete ones have no renewal to reprice.
+   * - Each subscriber is emailed (`subscription-tier-price-change`) with the
+   *   renewal that first bills the new price. One `noticeAt` for the whole
+   *   fan-out, so every subscriber gets the same 30 days.
+   * - Nothing is charged now and nothing is prorated: a same-interval swap
+   *   with `proration_behavior: 'none'` only changes what the NEXT renewal
+   *   bills. Stripe's `customer.subscription.updated` then re-syncs our
+   *   `amountCents` through the existing webhook path — we never write the DB
+   *   here.
+   * - One failed subscriber never aborts the batch; failures are logged and
+   *   counted. Callers run this fire-and-forget after the tier's DB commit.
    *
-   * Called from:
-   * - `TierService.applyStripePriceCreated` (Dashboard sync-back)
-   * - `TierService.updateTier` (Codex-UI price change)
-   *
-   * Both call sites invoke AFTER the DB persist + cache bump succeeds,
-   * so a propagation failure does not roll back the tier price change —
-   * the canonical Price lives on the tier; this method just fans out
-   * the billing effect. An operator can re-run propagation manually by
-   * re-adopting the same Price (no-op on the tier, re-runs against
-   * current active subs).
-   *
-   * @param tierId — subscription tier whose price changed
-   * @param newStripePriceId — canonical Stripe Price id the tier now points at
-   * @param options — see `PropagateTierPriceOptions`
-   * @returns `{ total, updated, failed }` counts — informational only;
-   *          the webhook path is authoritative for DB state.
+   * Called from `TierService.updateTier` (Studio — the only place a price is
+   * set). A Price created in the Stripe Dashboard is never propagated.
    */
   async propagateTierPriceToActiveSubscriptions(
     tierId: string,
     newStripePriceId: string,
-    options: PropagateTierPriceOptions = {}
+    options: PropagateTierPriceOptions
   ): Promise<PropagateTierPriceResult> {
-    const prorationBehavior = options.prorationBehavior ?? 'create_prorations';
+    const { interval } = options;
     const batchSize = Math.max(1, options.batchSize ?? 8);
     const interBatchDelayMs = Math.max(0, options.interBatchDelayMs ?? 50);
+    const noticeAt = new Date();
 
     try {
       const conditions = [
         eq(subscriptions.tierId, tierId),
+        eq(subscriptions.billingInterval, interval),
         inArray(subscriptions.status, [
           SUBSCRIPTION_STATUS.ACTIVE,
           SUBSCRIPTION_STATUS.CANCELLING,
+          SUBSCRIPTION_STATUS.PAST_DUE,
+          SUBSCRIPTION_STATUS.PAUSED,
         ]),
       ];
       if (options.organizationId) {
@@ -3973,14 +3938,9 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      // Left-join users + tiers so the per-sub success branch can dispatch
-      // the price-change notice email (Codex-7kc83) without a second round
-      // trip per subscription. Tiers are LEFT-joined because the tier could
-      // be soft-deleted between propagation runs and the archived-tier
-      // semantic lets reads still resolve (see subscription CLAUDE.md).
-      // Users LEFT-join preserves the propagation path even when a user
-      // somehow has no email (shouldn't happen — email is the BetterAuth
-      // primary key material — but we skip the email not the Stripe swap).
+      // Left-join users + tiers so each subscriber's notice email needs no
+      // second round trip. Tiers are LEFT-joined because the tier could be
+      // soft-deleted between runs (archived tiers still resolve on reads).
       const rows = await this.db
         .select({
           id: subscriptions.id,
@@ -3989,7 +3949,6 @@ export class SubscriptionService extends BaseService {
           userId: subscriptions.userId,
           billingInterval: subscriptions.billingInterval,
           amountCents: subscriptions.amountCents,
-          currentPeriodEnd: subscriptions.currentPeriodEnd,
           userEmail: users.email,
           userName: users.name,
           tierName: subscriptionTiers.name,
@@ -4004,16 +3963,27 @@ export class SubscriptionService extends BaseService {
         )
         .where(and(...conditions));
 
+      const empty = { total: 0, updated: 0, applied: 0, pending: 0, failed: 0 };
       if (rows.length === 0) {
-        this.obs.info('Tier price propagation: no active subscriptions', {
+        this.obs.info('Tier price propagation: no subscribers on interval', {
           tierId,
+          interval,
           newStripePriceId,
         });
-        return { total: 0, updated: 0, failed: 0 };
+        return empty;
       }
 
-      let updated = 0;
-      let failed = 0;
+      const newAmountCents =
+        interval === 'year'
+          ? rows[0]?.tierPriceAnnual
+          : rows[0]?.tierPriceMonthly;
+      if (newAmountCents === null || newAmountCents === undefined) {
+        throw new InternalServiceError(
+          'Tier price propagation: the tier has no price for the interval'
+        );
+      }
+
+      const counts = { ...empty, total: rows.length };
       const errors: Array<{
         subscriptionId: string;
         stripeSubscriptionId: string;
@@ -4023,51 +3993,41 @@ export class SubscriptionService extends BaseService {
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
         const results = await Promise.allSettled(
-          batch.map(async (row) => {
-            const stripeSub = await this.stripe.subscriptions.retrieve(
-              row.stripeSubscriptionId
-            );
-            const itemId = stripeSub.items.data[0]?.id;
-            if (!itemId) {
-              throw new InternalServiceError(
-                'Stripe subscription has no items to update'
-              );
-            }
-
-            await this.stripe.subscriptions.update(
-              row.stripeSubscriptionId,
-              {
-                items: [{ id: itemId, price: newStripePriceId }],
-                proration_behavior: prorationBehavior,
-              },
-              {
-                idempotencyKey: `tier-price-propagate:${row.id}:${newStripePriceId}`,
-              }
-            );
-          })
+          batch.map((row) =>
+            schedulePriceChange(this.stripe, {
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              newPriceId: newStripePriceId,
+              newAmountCents,
+              interval,
+              noticeAt,
+            })
+          )
         );
 
         for (const [idx, result] of results.entries()) {
           const row = batch[idx];
-          // `batch[idx]` is always defined inside a `results.entries()`
-          // loop — `Promise.allSettled` returns an array of the same
-          // length as the input. The guard is strictly to satisfy
-          // `noUncheckedIndexedAccess`; in practice it cannot fire.
+          // `Promise.allSettled` returns one result per input; the guard only
+          // satisfies `noUncheckedIndexedAccess`.
           if (!row) continue;
           if (result.status === 'fulfilled') {
-            updated++;
-            // Q1.3 (Codex-7kc83): notify the subscriber that their
-            // Stripe Price is changing. Fire-and-forget — mailer is
-            // already inside the background `waitUntil` tail that
-            // wraps the propagator, so we don't add our own. A failed
-            // email MUST NOT fail the propagation; the mailer handles
-            // its own error suppression (see `sendEmailToWorker`).
-            this.dispatchTierPriceChangeEmail(row, newStripePriceId, {
-              tierId,
-              prorationBehavior,
-            });
+            const outcome = result.value;
+            if (outcome.kind === 'applied' || outcome.kind === 'pending') {
+              counts.updated++;
+              counts[outcome.kind]++;
+              this.dispatchTierPriceChangeEmail(row, newAmountCents, {
+                tierId,
+                newStripePriceId,
+                effectiveAt: outcome.effectiveAt,
+              });
+            } else if (outcome.kind === 'skipped') {
+              this.obs.warn('Tier price propagation: subscription skipped', {
+                tierId,
+                subscriptionId: row.id,
+                reason: outcome.reason,
+              });
+            }
           } else {
-            failed++;
+            counts.failed++;
             const message =
               result.reason instanceof Error
                 ? result.reason.message
@@ -4078,7 +4038,7 @@ export class SubscriptionService extends BaseService {
               error: message,
             });
             this.obs.error(
-              'Tier price propagation: subscription update failed',
+              'Tier price propagation: scheduling the change failed',
               {
                 tierId,
                 newStripePriceId,
@@ -4091,9 +4051,7 @@ export class SubscriptionService extends BaseService {
           }
         }
 
-        // Inter-batch delay to stay under Stripe's per-account rate
-        // limit. Only sleep when another batch follows — avoids a
-        // trailing delay after the last batch.
+        // Stay under Stripe's per-account rate limit; no trailing delay.
         if (i + batchSize < rows.length && interBatchDelayMs > 0) {
           await new Promise((resolve) =>
             setTimeout(resolve, interBatchDelayMs)
@@ -4101,100 +4059,65 @@ export class SubscriptionService extends BaseService {
         }
       }
 
-      if (failed > 0) {
+      if (counts.failed > 0) {
         this.obs.error(
           'Tier price propagation completed with failures (operator review required)',
           {
             tierId,
+            interval,
             newStripePriceId,
-            total: rows.length,
-            updated,
-            failed,
+            ...counts,
             sampleErrors: errors.slice(0, 5),
           }
         );
       } else {
         this.obs.info('Tier price propagation complete', {
           tierId,
+          interval,
           newStripePriceId,
-          total: rows.length,
-          updated,
-          prorationBehavior,
+          ...counts,
         });
       }
 
-      return { total: rows.length, updated, failed };
+      return counts;
     } catch (error) {
       this.handleError(error, 'propagateTierPriceToActiveSubscriptions');
     }
   }
 
   /**
-   * Dispatch the `subscription-tier-price-change` email for a single
-   * subscription that was just successfully swapped by
-   * `propagateTierPriceToActiveSubscriptions` (Q1.3 — Codex-7kc83).
+   * Email one subscriber about a scheduled price change
+   * (`subscription-tier-price-change`).
    *
-   * Design contract:
-   * - Called ONLY in the per-sub fulfilled branch — a failed Stripe
-   *   update does not trigger an email (the subscription is still on
-   *   the old Price; nothing to notify). A failed email MUST NOT fail
-   *   the propagation loop.
-   * - Copy is neutral regarding direction: reads correctly whether the
-   *   new price is higher, lower, or equal to the old price. The
-   *   template surfaces both values plus the effective date + a
-   *   manage-subscription URL for cancellation before the change
-   *   takes effect.
-   * - Amounts are GBP pence; we format using the same `£X.XX` helper
-   *   the other subscription lifecycle emails use (see
-   *   `buildSubscriptionCreatedEmail`).
-   * - Effective date = the next billing cycle. Stripe's
-   *   `create_prorations` invoices the delta on the NEXT invoice — so
-   *   "effective from the next billing cycle" is the correct framing
-   *   regardless of proration override. We use the subscription's
-   *   `currentPeriodEnd` as the effective date; that's the boundary
-   *   between the old-price period and the new-price period.
-   * - Category is `transactional` — billing lifecycle emails are
-   *   legally required in many jurisdictions (UK/EU typically 30 days
-   *   notice for increases) and bypass the notification-preferences
-   *   opt-out per `NotificationsService.sendEmail`.
-   *
-   * Missing email / missing tier (defensive — BetterAuth enforces
-   * email on users and propagation already filtered by active status
-   * scoped to the tier) is logged at warn level and skipped without
-   * affecting the propagation result counts.
+   * - `effectiveAt` is the renewal that first bills the new price — at least
+   *   30 days after this email (Codex-2hxff.3).
+   * - Copy is neutral on direction: increases and decreases read the same.
+   * - Category `transactional`: billing notices bypass the opt-out.
+   * - A missing mailer (unit tests), email or price is logged and skipped; a
+   *   mailer that throws never breaks the fan-out.
    */
   private dispatchTierPriceChangeEmail(
     row: {
       id: string;
-      stripeSubscriptionId: string;
       organizationId: string;
       userId: string;
       billingInterval: string;
       amountCents: number;
-      currentPeriodEnd: Date;
       userEmail: string | null;
       userName: string | null;
       tierName: string | null;
-      tierPriceMonthly: number | null;
-      tierPriceAnnual: number | null;
     },
-    newStripePriceId: string,
-    context: { tierId: string; prorationBehavior: string }
+    newPriceCents: number,
+    context: { tierId: string; newStripePriceId: string; effectiveAt: Date }
   ): void {
-    if (!this.mailer) {
-      // No mailer wired (unit test harness). Propagation succeeds
-      // without side-effect — silent no-op to match the `cache` /
-      // `waitUntil` graceful-degrade semantics elsewhere on the
-      // service.
-      return;
-    }
+    if (!this.mailer) return;
 
     if (!row.userEmail) {
       this.obs.warn(
         'Tier price propagation: subscriber has no email; skipping notice',
         {
           tierId: context.tierId,
-          newStripePriceId,
+          newStripePriceId: context.newStripePriceId,
           subscriptionId: row.id,
           userId: row.userId,
           organizationId: row.organizationId,
@@ -4202,44 +4125,6 @@ export class SubscriptionService extends BaseService {
       );
       return;
     }
-
-    // Old price = the subscription's current `amountCents` snapshot
-    // (this is the amount that was billing immediately before the
-    // swap). New price = the tier's now-authoritative pence amount
-    // for the subscription's billing interval. Annual subscribers
-    // see the annual column; monthly subscribers see the monthly
-    // column.
-    const newPriceCents =
-      row.billingInterval === 'year'
-        ? row.tierPriceAnnual
-        : row.tierPriceMonthly;
-
-    if (newPriceCents === null || newPriceCents === undefined) {
-      this.obs.warn(
-        'Tier price propagation: could not resolve new price amount; skipping notice',
-        {
-          tierId: context.tierId,
-          newStripePriceId,
-          subscriptionId: row.id,
-          billingInterval: row.billingInterval,
-        }
-      );
-      return;
-    }
-
-    const oldPriceFormatted = `£${(row.amountCents / 100).toFixed(2)}`;
-    const newPriceFormatted = `£${(newPriceCents / 100).toFixed(2)}`;
-
-    // Effective date = the end of the CURRENT billing period
-    // (== start of the first period that bills at the new price).
-    // Matches "effective from the next billing cycle" regardless of
-    // the caller's proration override: Stripe always respects period
-    // boundaries for the actual Price swap, `create_prorations` only
-    // governs whether the mid-cycle delta is invoiced now or rolled
-    // into the next invoice.
-    const effectiveDate = row.currentPeriodEnd
-      ? row.currentPeriodEnd.toLocaleDateString('en-GB')
-      : 'your next billing cycle';
 
     try {
       this.mailer({
@@ -4252,22 +4137,22 @@ export class SubscriptionService extends BaseService {
         data: {
           userName: row.userName || 'there',
           planName: row.tierName || 'your subscription',
-          oldPriceFormatted,
-          newPriceFormatted,
+          // The amount billing today, from the subscription's own snapshot.
+          oldPriceFormatted: `£${(row.amountCents / 100).toFixed(2)}`,
+          newPriceFormatted: `£${(newPriceCents / 100).toFixed(2)}`,
           billingInterval: row.billingInterval,
-          effectiveDate,
+          effectiveDate: context.effectiveAt.toLocaleDateString('en-GB', {
+            timeZone: 'UTC',
+          }),
           manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
         },
       });
     } catch (error) {
-      // The mailer itself is expected to be fire-and-forget and not
-      // throw — but catch synchronously anyway so a mis-wired
-      // implementation can never take down the propagation loop.
       this.obs.warn(
         'Tier price propagation: mailer threw synchronously; notice skipped',
         {
           tierId: context.tierId,
-          newStripePriceId,
+          newStripePriceId: context.newStripePriceId,
           subscriptionId: row.id,
           error: error instanceof Error ? error.message : String(error),
         }

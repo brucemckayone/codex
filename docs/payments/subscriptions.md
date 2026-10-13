@@ -174,13 +174,37 @@ plans alike**.
 - A price edited in the Stripe Dashboard is logged as drift and is **not**
   applied to any subscriber.
 
-— **gap**: `Codex-2hxff.3`. Today a tier price change moves every subscriber,
-on both intervals, to the changed Price at once. Stripe treats an interval
-change as an immediate charge and a new billing cycle, so an annual price edit
-bills every monthly subscriber for a year. Course plans keep existing
-subscribers on their old price for good. The fix uses Stripe subscription
-schedules (a new phase at the renewal), the same mechanism that scheduled
-downgrades need (`Codex-sing6`).
+**How it works.** Studio creates a new Stripe Price for the changed interval
+and points the tier (or plan) at it; new checkouts use it at once. Existing
+subscribers on that interval are then each handled by `schedulePriceChange`
+(`packages/subscription/src/services/pending-price-change.ts`):
+
+- If their next renewal is already at least 30 days after the email, their
+  subscription is switched to the new Price **now** with
+  `proration_behavior: 'none'`. A same-interval switch keeps the billing dates
+  and charges nothing; the next renewal simply bills the new price.
+- Otherwise the new Price is recorded on the Stripe subscription's metadata
+  (`codex_pending_price_id`, `codex_pending_price_from` = the email + 30 days).
+  Stripe sends `customer.subscription.updated` at every renewal; once the next
+  renewal is on or after that date, the switch is made as above.
+- Past-due and paused subscribers are only marked pending, and move when they
+  are active again. A subscriber already paying the new amount is not emailed.
+- The other interval's subscribers are never touched: switching a monthly
+  subscription onto an annual Price would reset its cycle and bill a year.
+- A second change before the first has landed **replaces** it (owner decision
+  2026-10-13, "Latest wins"): one move, to the newest price, at the first
+  renewal at least 30 days after the newest email.
+- A tier change clears a pending price change; cancelling and reactivating
+  keep it.
+- Each subscriber is emailed (`subscription-tier-price-change`) with the date
+  of the renewal that first bills the new price.
+- A Price created in the Stripe Dashboard is logged as drift
+  (`TierService.recordStripePriceDrift`); the tier keeps its own Price and no
+  subscriber moves.
+
+The mechanism is this deferred switch, not Stripe subscription schedules (owner
+decision 2026-10-13): schedules would have had to take over cancel, reactivate
+and tier change. Scheduled downgrades (`Codex-2hxff.16`) will still need them.
 
 ## Failed payments
 
@@ -236,6 +260,6 @@ configuration, which allows cancelling.
 | `subscription-created` | The subscription is recorded |
 | `subscription-renewed` | A cycle renewal is paid |
 | `payment-failed` | A renewal fails (with the next retry date) |
-| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies (**gap**: `Codex-2hxff.3`) |
+| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Production's copy still says "on the next billing cycle" — `Codex-2hxff.35` |
 | `subscription-cancelled` | The subscription ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |
