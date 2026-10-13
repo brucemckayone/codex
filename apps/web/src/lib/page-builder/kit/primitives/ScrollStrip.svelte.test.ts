@@ -332,6 +332,19 @@ describe('ScrollStrip', () => {
       expect(readout()).toBeNull();
     });
 
+    // Codex-61zsk.55: a heading's room is its line less the buttons; the
+    // readout's width is its words', which no rule can take from that room.
+    it('draws no position beside a row’s own heading', () => {
+      render(WIDTHS.length, {
+        position,
+        head: createRawSnippet(() => ({
+          render: () => '<h3 class="stage-name">Stage 2</h3>',
+        })),
+      });
+      expect(document.body.querySelector('.lp-strip__head')).not.toBeNull();
+      expect(readout()).toBeNull();
+    });
+
     it('jumps rather than glides under reduced motion', () => {
       preferReducedMotion();
       render(WIDTHS.length);

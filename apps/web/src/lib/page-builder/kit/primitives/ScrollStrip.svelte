@@ -56,7 +56,12 @@
     ordered?: boolean;
     /** Words for the items in view, counted from 1: "4–6 of 18". */
     position?: (first: number, last: number, count: number) => string;
-    /** The row's own heading, drawn in the buttons' line above the row. */
+    /**
+     * The row's own heading, drawn in the buttons' line above the row. Its
+     * room is that line less the buttons, so a row with a heading draws no
+     * `position`: the readout is as wide as its words, which no rule can take
+     * from the heading's room.
+     */
     head?: Snippet;
     class?: string;
     parts?: Parts;
@@ -172,7 +177,7 @@
 </script>
 
 {#snippet buttons()}
-  {#if position}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
+  {#if position && !head}<p class="lp-strip__position" aria-hidden="true">{readout}</p>{/if}
   <button
     type="button"
     class="lp-strip__move {parts.move ?? ''}"
@@ -301,7 +306,16 @@
     flex: none;
   }
 
+  /* Its room is the line's (the column: the line is padded in by the same
+     inset) less the two buttons, the gaps beside them and its own margin,
+     so a title in it is fitted beside the buttons (03 X71). With no script
+     the buttons are gone and the room is understated: drawn a little small,
+     never cut. */
   .lp-strip__head {
+    --lp-heading-column: calc(
+      var(--lp-column) - 2 * var(--tap-target-min) - 2 * var(--space-2) -
+        (var(--space-4) - var(--space-2))
+    );
     flex: 1 1 0;
     min-inline-size: 0;
     margin-inline-end: calc(var(--space-4) - var(--space-2));

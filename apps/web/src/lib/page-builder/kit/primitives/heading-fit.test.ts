@@ -712,3 +712,41 @@ describe("where a card names its title's room (03 X71)", () => {
     ).toEqual([]);
   });
 });
+
+const STRIP = 'primitives/ScrollStrip.svelte';
+
+describe('a row’s own heading beside its buttons (Codex-61zsk.55)', () => {
+  // A strip's heading shares its line with the two buttons, so its room is
+  // the line (the column) less the buttons, the two gaps on the line and its
+  // own margin. Evaluated with distinct sizes, so a term dropped, doubled or
+  // read from the wrong rule is a wrong number.
+  it('names its room as the line less what stands beside it', () => {
+    const own = (selector: string, property: string) => {
+      const value = kit.find(
+        (d) =>
+          d.file === STRIP &&
+          d.at === '' &&
+          d.selector === selector &&
+          d.property === property
+      )?.value;
+      if (value === undefined)
+        throw new Error(`${selector} sets no ${property}`);
+      return value;
+    };
+    const tokens: Record<string, string> = {
+      '--lp-column': '1000px',
+      '--tap-target-min': '44px',
+      '--space-2': '8px',
+      '--space-4': '16px',
+    };
+    const px = (text: string) =>
+      evaluate(parseMath(text), (name) => tokens[name]).n;
+    const move = px(own('.lp-strip__move', 'inline-size'));
+    const gap = px(own('.lp-strip__nav', 'gap'));
+    const margin = px(own('.lp-strip__head', 'margin-inline-end'));
+    expect(px(own('.lp-strip__head', '--lp-heading-column'))).toBe(
+      1000 - 2 * move - 2 * gap - margin
+    );
+    expect(1000 - 2 * move - 2 * gap - margin).toBe(1000 - 88 - 16 - 8);
+  });
+});
