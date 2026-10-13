@@ -241,6 +241,13 @@ export type Bindings = {
    */
   STRIPE_WEBHOOK_SECRET_DISPUTE?: string;
 
+  /**
+   * The locked Stripe Billing Portal configuration id (`bpc_...`) passed on
+   * every portal session — payment methods and invoices only (Codex-2hxff.4).
+   * ecom-api only. Without it the portal refuses to open.
+   */
+  STRIPE_PORTAL_CONFIGURATION_ID?: string;
+
   // ==========================================================================
   // Email / Notifications
   // ==========================================================================

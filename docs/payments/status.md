@@ -24,7 +24,6 @@ add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 |---|---|---|---|
 | `Codex-2hxff.2` | P1 | One owner per organisation, transfer-only; organisation money follows the current owner | [connect-and-payouts](connect-and-payouts.md#organisation-ownership) |
 | `Codex-2hxff.3` | P0 | Price changes reach existing subscribers only at their next renewal, after 30 days' notice; Studio-only prices | [subscriptions](subscriptions.md#price-changes) |
-| `Codex-2hxff.4` | P1 | The billing portal is locked down by an explicit configuration | [subscriptions](subscriptions.md#billing-portal) |
 | `Codex-2hxff.5` | P1 | Each environment tags its Stripe objects and ignores the other's events | [operations](operations.md#environments-and-stripe-accounts) |
 | `Codex-2hxff.6` | P0 | Transient webhook failures return 500 so Stripe retries | [operations](operations.md#webhook-error-policy) |
 | `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |

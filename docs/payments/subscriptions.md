@@ -222,9 +222,10 @@ ends — **gap**: `Codex-2hxff.9`.
 The Stripe Billing Portal (`POST /checkout/portal-session`) is for updating
 payment methods and viewing invoices only. Every portal session passes an
 explicit configuration with cancelling, plan switching and pausing turned off,
-so our database and Stripe can never disagree about a subscription — **gap**:
-`Codex-2hxff.4` (today no configuration is passed, and production's default
-configuration allows cancelling).
+so our database and Stripe can never disagree about a subscription. The id comes
+from `STRIPE_PORTAL_CONFIGURATION_ID`; without it the portal **refuses to open**
+(`STRIPE_NOT_CONFIGURED`) rather than fall back to the account's default
+configuration, which allows cancelling.
 
 ---
 

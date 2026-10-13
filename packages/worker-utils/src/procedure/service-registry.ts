@@ -788,6 +788,7 @@ export async function createServiceRegistry(
             feeConfig: registry.feeConfig,
             mailer: purchaseMailer,
             webAppUrl: env.WEB_APP_URL,
+            portalConfigurationId: env.STRIPE_PORTAL_CONFIGURATION_ID,
           },
           getLazyStripeClient()
         );

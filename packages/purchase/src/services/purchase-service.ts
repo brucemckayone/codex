@@ -40,7 +40,11 @@ import {
   stripeConnectAccounts,
   users,
 } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  type ServiceConfig,
+  StripeNotConfiguredError,
+} from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
   CreateCourseCheckoutInput,
@@ -162,6 +166,15 @@ interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
   mailer?: PurchaseMailer;
   webAppUrl?: string;
+  /**
+   * The locked Billing Portal configuration (`bpc_...`, from
+   * `STRIPE_PORTAL_CONFIGURATION_ID`): payment methods and invoices only, with
+   * cancelling, plan switching and pausing off. Optional so a worker that never
+   * opens a portal still boots; `createPortalSession` refuses without it rather
+   * than fall back to the account default, which allows cancelling
+   * (Codex-2hxff.4).
+   */
+  portalConfigurationId?: string;
 }
 
 /**
@@ -226,6 +239,7 @@ export class PurchaseService extends BaseService {
   private readonly feeConfig: FeeConfigService | undefined;
   private readonly mailer: PurchaseMailer | undefined;
   private readonly webAppUrl: string | undefined;
+  private readonly portalConfigurationId: string | undefined;
 
   /**
    * Initialize purchase service
@@ -239,6 +253,7 @@ export class PurchaseService extends BaseService {
     this.feeConfig = config.feeConfig;
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.portalConfigurationId = config.portalConfigurationId;
   }
 
   /**
@@ -2541,7 +2556,10 @@ export class PurchaseService extends BaseService {
    * Create Stripe Billing Portal session
    *
    * Allows customers to manage their billing (view invoices, update payment
-   * methods). Delegates Customer resolution to `resolveOrCreateCustomer`
+   * methods) — and nothing else. Every session passes the locked portal
+   * configuration, so a subscription can only be cancelled, switched or paused
+   * in our own UI and our database and Stripe never disagree about it
+   * (docs/payments/subscriptions.md → Billing portal). Delegates Customer resolution to `resolveOrCreateCustomer`
    * (Codex-49gev) so portal sessions open the SAME `cus_...` the user's
    * checkout sessions use — one Stripe Customer per Codex user across every
    * org (Codex-pkqxd / Codex-ssfes).
@@ -2551,6 +2569,8 @@ export class PurchaseService extends BaseService {
    * @param userId - Codex user ID (used for lookup + idempotency key)
    * @param returnUrl - URL to redirect to after portal session
    * @returns Portal session URL
+   * @throws {StripeNotConfiguredError} If no portal configuration is set —
+   *   never open the account-default portal, which allows cancelling.
    * @throws {NotFoundError} If the Codex user row is missing/soft-deleted.
    * @throws {PaymentProcessingError} If Stripe portal session creation fails.
    */
@@ -2560,6 +2580,17 @@ export class PurchaseService extends BaseService {
     returnUrl: string
   ): Promise<{ url: string }> {
     const validated = createPortalSessionSchema.parse({ returnUrl });
+
+    const configuration = this.portalConfigurationId;
+    if (!configuration) {
+      // The client gets the generic STRIPE_NOT_CONFIGURED message; the operator
+      // gets the binding name here.
+      this.obs.error(
+        'STRIPE_PORTAL_CONFIGURATION_ID is not set; refusing to open the default (unlocked) billing portal',
+        { userId }
+      );
+      throw new StripeNotConfiguredError();
+    }
 
     try {
       // Resolve the unified Customer id (cached on the user row, reused by
@@ -2574,6 +2605,7 @@ export class PurchaseService extends BaseService {
           this.stripe.billingPortal.sessions.create({
             customer: stripeCustomerId,
             return_url: validated.returnUrl,
+            configuration,
           }),
         {
           onStaleRecovery: (info) =>

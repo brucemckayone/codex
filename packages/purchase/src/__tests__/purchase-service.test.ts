@@ -19,6 +19,7 @@
 import { ContentService, MediaItemService } from '@codex/content';
 import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
+import { StripeNotConfiguredError } from '@codex/service-errors';
 import {
   createTestConnectAccountInput,
   createTestMembershipInput,
@@ -49,6 +50,10 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
+
+/** The locked Billing Portal configuration (Codex-2hxff.4). */
+const PORTAL_CONFIG_ID = 'bpc_test_locked_portal';
+
 import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 
 describe('PurchaseService Integration', () => {
@@ -108,7 +113,10 @@ describe('PurchaseService Integration', () => {
       },
     } as unknown as Stripe;
 
-    purchaseService = new PurchaseService(config, mockStripe);
+    purchaseService = new PurchaseService(
+      { ...config, portalConfigurationId: PORTAL_CONFIG_ID },
+      mockStripe
+    );
 
     // Seed test users
     const userIds = await seedTestUsers(db, 2);
@@ -3690,8 +3698,34 @@ describe('PurchaseService Integration', () => {
         expect.objectContaining({
           customer: cachedId,
           return_url: 'http://localhost:3000/settings',
+          // The locked configuration rides on every session — without it
+          // Stripe opens the account default, which allows cancelling.
+          configuration: PORTAL_CONFIG_ID,
         })
       );
+    });
+
+    it('refuses to open a portal without the locked configuration — never the account default', async () => {
+      const unlocked = new PurchaseService(
+        { db, environment: 'test' },
+        mockStripe
+      );
+      const create = vi.mocked(
+        mockStripe.billingPortal.sessions.create as unknown as Mock
+      );
+      create.mockClear();
+      vi.mocked(mockStripe.customers.list as unknown as Mock).mockClear();
+
+      await expect(
+        unlocked.createPortalSession(
+          'test@example.com',
+          userId,
+          'http://localhost:3000/settings'
+        )
+      ).rejects.toThrow(StripeNotConfiguredError);
+      // Refused before any Stripe call — not even Customer resolution.
+      expect(create).not.toHaveBeenCalled();
+      expect(mockStripe.customers.list).not.toHaveBeenCalled();
     });
 
     it('resolves and persists a Customer id when the user has none cached', async () => {
