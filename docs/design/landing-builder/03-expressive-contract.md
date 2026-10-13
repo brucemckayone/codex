@@ -2624,7 +2624,9 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       long word there still runs past its line, in Poster at 1024 and 1440 (Codex-61zsk.63).
     - Titles (260) and the display statement (42): a title sits in a card's room, which no rule
       names yet, and the statement is drawn at display size, where Poster hyphenates by design
-      on a phone (X62). Filed as Codex-61zsk.62.
+      on a phone (X62). Filed as Codex-61zsk.62. *Amended by X71: every layout that sets a title
+      in a card names that card's room, and titles and the display statement are fitted as a
+      section heading is.*
   - **Tests.** `heading-fit.test.ts` (CI) parses `Heading.svelte`'s rule and computes it, units
     and all, from the properties a page, the dial and a layout give it: the Style's size where
     words fit, a long word fitted exactly, the title floor, a named room narrower and wider than
@@ -2855,3 +2857,112 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Seven plants each failed only their own tests: the hold put back in the band, a hold in Poster's
     stylesheet, the head's minimum set to 0, its overflow hidden, the row unwrapped, the head's
     basis set to `auto`, and the head made a grid again.
+- **X71 · 2026-10-13 · 3c follow-up · A title is drawn no larger than its widest word fits its card,
+  and a display statement no larger than it fits its column (Codex-61zsk.62; BUILT, decided without
+  the owner; amends X66).** X66 fitted section headings only. At the Style's own size the sweep still
+  counted 302 (heading, text) pairs with a run wider than its line. 260 were titles: the benefits
+  grid 132, the bento 74, the course's cards 36 and its timeline 18. The other 42 were the problem's
+  display statement, in Bold and Poster on a phone and in Poster in Unbounded at 768. A title sits in
+  a card, and no layout named a card's room.
+  - **The rule.** Heading weighs every heading but the hero's headline, whose layouts size it (X60).
+    The weight and the hold are read once, in the base rule, and each size is fitted as a section
+    heading is: `min(own, max(floor, room / widest run))`.
+    - A display statement: its own size is the display size at its layout's scale, and its room is
+      the column, or the one its layout names. It is never drawn smaller than a title.
+    - A title: its own size is the lifted title (X55), and its room is the least of the column, the
+      room its head names, and its card's (`--lp-title-column`). It is never drawn smaller than the
+      body, so it stays a title.
+    - Poster weighs its display line and its bento lead in capitals, where it sets their case.
+  - **Each card names its title's room:** its share of the column, less its inset (its padding and
+    border across).
+    - The benefits grid is `--_n` across, and that count now draws the tracks too
+      (`repeat(var(--_n), …)`). Soft's boxed cards are inset by their padding and border.
+    - The bento's tile spans `--_span` of `--_cols`, and the span now places it too
+      (`grid-column: span var(--_span)`). Bold opens every tile but the lead, inset 0. The lead was
+      drawn at the heading's size by a rule that beat the title's; it now takes the heading's size,
+      weight, leading and tracking as the title's own tokens (`--lp-title-lift: 1`), so it is fitted
+      to its tile like every other name.
+    - The course's cards are `--_n` across, inset by `--space-6` and the border; Bold's open cards 0.
+    - The timeline's name has the row past its marker, and wide its 5/12 beside the practices. Path
+      reaches the list past the column to sit its markers on the route; that reach is now the
+      timeline's own `--_reach`, which its margin is drawn from, so the room counts it.
+    - The course's map: a stop's name shares its row with the marker, the practice count and the
+      sign, and from 48rem a stop is 60% of the list. The count is as wide as its words, which no
+      rule can subtract, so the name and its count are now one `<hgroup>`, the heading and its
+      line. (A `<summary>` holds phrasing and heading content, and `<hgroup>` is heading content;
+      a `<div>` there is not allowed.) The hgroup's track is the room: the stop, less the marker,
+      the sign and the gaps beside them, with Path's reach counted. The count stands beside the
+      name while the name's longest word leaves it room, and under the name when it does not, as it
+      already did on a phone. Beside the name it now stands on the name's first baseline. As built
+      it stood at the top of its row: the padding meant to centre it on the marker was never valid
+      (`--space-0` is a unitless 0, and `max()` of a number and a length is dropped; the names'
+      own padding has the same fault, filed as Codex-61zsk.67). So across 30 stops beside their
+      names, at 600 to 1440, the count is now 5 to 14px lower, on the line it labels. Path's map reach
+      is the map's own `--_reach` too, and its margin is drawn from it. The sweep's own map page
+      found these: 72 pairs, all at 768 in Bold and Poster in Unbounded, with the name's line at
+      223px of a 699px column.
+    - A lone card's measure is in the body's `ch`, which no title can read, so its room is the
+      column. A title in a card that names no room (the questions' columns, the offer cards) and a
+      section heading drawn at title size are fitted to the column and to the room their head
+      names, which are never narrower than their line.
+  - **Measured** with `louder-fit.spec.ts`, which now also reads the four layouts with titles that
+    the gallery's sample page does not draw (the course's map, the pricing cards, the quote, the text
+    statement), and checks that every room a card names is its title's line. The sweep held every
+    heading's box to its room by zeroing its `min-inline-size`, which is right for a grid item:
+    its automatic minimum stretches it past its track and hides a word that runs over. For a flex
+    item that minimum is the layout. On the map it is what moves the count under a long name, so
+    zeroing it read a line the page never draws, and the first sweep of the map's fix still
+    counted all 72. The sweep now zeroes only a grid item's minimum. Calibrated on the map page:
+    the fix passes with no fault. With the row unwrapped (`flex-wrap: nowrap`, planted), it faults
+    36 times on a phone, where the count must go under the name. On dev's build, where the name
+    is a grid item, it still finds dev's 72. One limit stays: unwrapped at 768, the name keeps its
+    width and the count runs into the sign instead, which a heading's own check cannot see, so a
+    test in CI holds the row's wrap (below). The full sweep:
+    - Before the map's fix, all four pages in all 8 Styles at 5 widths and 3 faces: the only
+      faults were the map's 72. Every room a card names was its title's line within 0.5px, and
+      at louder no heading ran past its line. After the fix and the sweep's correction, the map's
+      page alone passes. The full sweep is run again on the final tree before the merge.
+    - **What it costs.** On the sample page, re-taken on dev with the same sweep, section headings
+      are unchanged: 1,164 pairs drawn smaller on both, none by a different amount. The titles and
+      statements now fitted take a little off words that already fit, as X66's headings do (the
+      run is weighed with the face's widest-word scale). In each Style's own face that is a
+      median 3.5% and at most 5.2%, and in Unbounded at most 7.3%. In Anton the sweep reads up to
+      35%, as it reads up to 49% for dev's own headings. The sweep swaps a face in as a bare
+      family name, which may never take that face's own fit factor (Codex-61zsk.68).
+  - **Rejected:**
+    - Making each card an inline-size query container, so that `100cqi` is its room. Every kit size
+      is a `cqi` token that resolves where it is used, so inside a card container every size in the
+      card (title, body, small text, buttons, gaps) would be measured against the card, not the
+      section, and shrink. Naming the container does not help: an unnamed query and every `cq` unit
+      bind to the nearest container of its type.
+    - Making the title its own container, with its text in an inner block. The canvas edits a
+      heading's text in place (`textContent`, an `:empty` placeholder), which an inner element
+      breaks. A container around the heading would rescale its own size, a `cqi` token, as a card
+      container would. The map's `<hgroup>` is a flex row and no container.
+    - On the map, a fixed track for the count, so the room could subtract it. The count's width
+      differs with the count ("1 practice", "12 practices") and with the face, and a wider one
+      would run into the sign. Setting the count under the name at every width was rejected as well: it
+      changes every stop to fix only the long words.
+    - Measuring each title in script and writing its room. The server's page and the first paint
+      would draw the word cut, then jump.
+    - The title size as a title's floor: the benefits grid lifts its names (X55), and a long word
+      there needs to go below the unlifted size.
+  - **Tests** (CI): `heading-fit.test.ts` computes the display and title rules as it computes the
+    heading's: the Style's size where words fit, a long word fitted exactly, the floors, a named room
+    narrower and wider than the column, the head's room, capitals, louder, and the hold. Its census
+    finds the room named in each of the five layouts, an inset beside every padding or border a
+    Style gives a card, the timeline and the map widened only by their reach, the map's room as its
+    stop less every track beside the name and a gap for each, its stop stepped by the share its
+    stops are drawn at, the map's row wrapping a name that grows from nothing and is capped at its
+    track with nothing giving it a minimum of its own, and no room of nothing. `lift.source.test.ts` reads the lift from the
+    title's own size and the count from `--_n`.
+
+    Eighteen plants each failed only their own tests: the title's floor dropped, the title blind to
+    its card, the display unfitted, Soft's inset dropped, Bold's tile inset dropped, Bold's card
+    inset dropped, Path's margin back in place of its reach, the timeline's wide room dropped, a
+    room of nothing, and on the map its room without the sign, its stop at a share its stops are
+    not drawn at, Path's margin back in place of its reach, a track added beside the name with no
+    room for it, its row unwrapped, the name's basis `auto`, its minimum zeroed, its cap dropped,
+    and the count let shrink. In the browser, the sweep's room check fired on both plants: Soft's inset dropped read a
+    room 48px too wide at every width on both pages that draw it, and the timeline's wide room
+    dropped read 862.7px for a 349.9px line at 1024 and 1018.9px for 414.9px at 1440.
