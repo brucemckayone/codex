@@ -112,9 +112,11 @@ export interface SellPreview {
 
 /**
  * The read-only context every section component renders against. Assembled once
- * by `JourneyRenderer` from the awaited {@link JourneyCoursePage} plus the
- * streamed preview promise, so a section reads course/stage/testimonial data
- * without re-threading props through the catalogue loop.
+ * per page, by `buildPublicContext` (`public-context.ts`) from the awaited
+ * {@link JourneyCoursePage} plus the streamed preview promise, or by
+ * `builderSalesContext` for the studio canvas, so a section reads
+ * course/stage/testimonial data without re-threading props through the
+ * catalogue loop.
  */
 export interface JourneySalesContext {
   course: JourneyCourseView;
@@ -156,7 +158,7 @@ export interface JourneySalesContext {
   offer: CourseOffer | null;
   /**
    * Whether this course has AT LEAST ONE real way in — i.e. whether the checkout
-   * can actually sell it. Derived once by `JourneyRenderer` from
+   * can actually sell it. Derived once by `buildPublicContext` from
    * `deriveOfferPaths(offer, course).length > 0`, so every section shares one
    * answer instead of each re-deriving it (and only `invite` ever did).
    *
@@ -186,7 +188,7 @@ export interface JourneySalesContext {
    * type system said so; only this comment did.
    *
    * Making it required moves that from a comment to a compile error. Every host
-   * now states its answer — `JourneyRenderer` derives it, `builderSalesContext`
+   * now states its answer — `buildPublicContext` derives it, `builderSalesContext`
    * pins `true` for the canvas (and says why), and each test fixture declares the
    * state it is testing. `!context.purchasable` and `purchasable !== false` are
    * then the same predicate, so a new section cannot get it subtly wrong.
@@ -209,9 +211,9 @@ export interface JourneySalesContext {
    * `getCoursePage`/`getCoursePagePreview` so the web never needs its own copy
    * of the value. Null with no configured base.
    *
-   * OPTIONAL, not just nullable: `JourneyRenderer` (the pre-kit renderer, still
-   * live for checkout + the studio canvas — `render/builder-context.ts`
-   * defaults it there) and every existing block-test fixture across
+   * OPTIONAL, not just nullable: the studio canvas's context
+   * (`render/builder-context.ts` defaults it there) and every existing
+   * block-test fixture across
    * `kit/blocks/**` build a `JourneySalesContext` with no opinion on page
    * images at all. Fifty-plus call sites constructed this object before this
    * field existed (`grep -rl JourneySalesContext apps/web/src` at the time of
@@ -222,206 +224,3 @@ export interface JourneySalesContext {
    */
   mediaBaseUrl?: string | null;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-section prop shapes (all fields optional — renderer falls back)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** `hero` — opening headline, kicker and primary CTA (SPEC §4.1). */
-export interface HeroSectionProps {
-  eyebrow?: string;
-  headline?: string;
-  subheadline?: string;
-  ctaLabel?: string;
-  secondaryLabel?: string;
-  secondaryHref?: string;
-  /** A quiet trust line under the CTAs ("Practised by 2,400+ …"). */
-  trust?: string;
-  /**
-   * The three keys the builder has always written and the renderer never read
-   * (`Codex-tqr51`; they were `OWED_READS.hero` until the WT-3 pilot wired them).
-   * They are not aliases of an existing prop — each needs its own markup, which is
-   * why the bridge in `coerce.ts` could not close them.
-   *
-   * `accent` — an emphasised ending to the headline, set on its own line.
-   * `felt` — a short emphasis line between the sub-line and the CTAs.
-   * `bg` — the atmosphere recipe (`ember` | `blood` | `still`). Note this is an
-   * AXIS IN DISGUISE and a candidate for a later collapse: `still` is
-   * `motion: none` plus a dimmer accent, and `ember`/`blood` are two accent
-   * recipes. It is kept as a prop for now because retiring it would need its own
-   * forward-map entry and stored-data migration; it is scoped to the glow's own
-   * recipe and still gated by `--jp-sec-atmos`, so it composes with the axes
-   * rather than fighting them.
-   */
-  accent?: string;
-  felt?: string;
-  bg?: string;
-}
-
-/** `introVideo` — the 90-second sell film (streamed preview). */
-export interface IntroVideoSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  sub?: string;
-  posterUrl?: string;
-}
-
-/** `ache` — names the held pain as a sequence of beats before hope is offered. */
-export interface AcheSectionProps {
-  eyebrow?: string;
-  beats?: string[];
-}
-
-/**
- * `turn` — the pivot from pain to promise.
- *
- * NOTE: there is deliberately no `stages` field. `TurnSection` derives its roman
- * -numeralled stage list FROM `points` by splitting each entry on an en/em dash
- * ("Regulation — finding the ground"), so the authored shape stays one flat string
- * array. A separate `stages` prop would be a second, divergent source for the same
- * list.
- */
-export interface TurnSectionProps {
-  eyebrow?: string;
-  statement?: string;
-  lede?: string;
-  points?: string[];
-}
-
-/** `reel` — a cinematic practice-preview clip (streamed preview). */
-export interface ReelSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  sub?: string;
-  posterUrl?: string;
-  /**
-   * The whispered caption under the letterboxed frame. `captions` takes
-   * precedence and cross-fades on a slow cycle; `caption` is the single-line
-   * form. Absent ⇒ no caption line renders.
-   */
-  caption?: string;
-  captions?: string[];
-  /** Corner tag label above the frame. Defaults to `Preview` when absent. */
-  tag?: string;
-}
-
-/** `map` — the descent map (public, no progress); renders from context.stages. */
-export interface MapSectionProps {
-  eyebrow?: string;
-  title?: string;
-  sub?: string;
-  foot?: string;
-}
-
-/** One "what's inside" row for the `feel` section. */
-export interface FeelInclusion {
-  label: string;
-  detail?: string;
-}
-
-/** `feel` — what it feels like (left) + what's inside (right). */
-export interface FeelSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  body?: string;
-  inclusions?: FeelInclusion[];
-  /**
-   * The "free-taste" preview player. TWO conditions now gate it, and both are
-   * required: `previewTitle` is the AUTHOR's switch, and
-   * `context.sellPreview.reel` is the FACT — a real 30s public HLS manifest. With
-   * a title and no clip the player does not render, because there is nothing to
-   * play (`Codex-scab9`).
-   *
-   * It used to be a MOCK: `playing` was a boolean, `elapsed` was advanced by a rAF
-   * accumulator, and there was no media element anywhere in the section. A visitor
-   * pressed play on the most conversion-critical page in the product, watched a
-   * clock run and a waveform move, and heard nothing — and under
-   * `prefers-reduced-motion` the rAF loop bailed, so the button reported
-   * `aria-pressed="true"` while the clock never moved at all.
-   *
-   * `previewDuration` is in seconds and is now only a PRE-METADATA fallback for
-   * the clock: the element's own `loadedmetadata` duration is the truth and wins
-   * as soon as it lands. It no longer defaults to 480 — an invented 8-minute
-   * runtime on a 30-second clip. The synthetic waveform survives as DECORATION
-   * over real playback, which is all it ever was.
-   */
-  previewTitle?: string;
-  previewSub?: string;
-  previewDuration?: number;
-}
-
-/** `proof` — testimonials; renders from context.testimonials. */
-export interface ProofSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  /**
-   * The quiet aggregate trust line beside the testimonials ("2,400+ practising").
-   * `ProofSection` also accepts the legacy key `trust` for pages authored before
-   * this name settled, so both are declared.
-   */
-  trustLabel?: string;
-  trust?: string;
-}
-
-/** `guide` — the maker's bio. */
-export interface GuideSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  name?: string;
-  bio?: string[];
-  portraitUrl?: string;
-  credentials?: string[];
-  /** The pull-quote climax under the bio. Omitted entirely when absent. */
-  quote?: string;
-}
-
-/** One FAQ entry. */
-export interface FaqEntry {
-  question: string;
-  answer: string;
-}
-
-/** `faq` — the honest answers (accordion). */
-export interface FaqSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  items?: FaqEntry[];
-}
-
-/**
- * Authored DECORATION for one offer path on the `invite` section (SPEC §7 —
- * tier / course-subscription / course-purchase).
- *
- * `id` must name a CANONICAL path id (`purchase`, `subscription-monthly`,
- * `subscription-annual`, `tier:<tierId>`); an entry naming anything else
- * decorates nothing and is dropped. The rest is copy.
- *
- * NOTE the field that is gone: `priceLabel`. Until Codex-2pryk.2.4.3 the invite
- * section (and the checkout) took its prices from this authored string, so a
- * page could advertise "£12 a month" for a tier that cost £15 and for a course
- * subscription that did not exist at all. Prices now come only from
- * {@link JourneySalesContext.offer}. `cadenceLabel` is likewise derived — it
- * follows from which canonical path the entry names.
- */
-export interface InviteOffer {
-  id: string;
-  name?: string;
-  who?: string;
-  blurb?: string;
-  bullets?: string[];
-  best?: boolean;
-}
-
-/** `invite` — the offer and pricing (the primary conversion moment). */
-export interface InviteSectionProps {
-  eyebrow?: string;
-  heading?: string;
-  sub?: string;
-  ctaLabel?: string;
-  priceNote?: string;
-  /** Authored copy that DECORATES real paths — never creates or prices one. */
-  offers?: InviteOffer[];
-}
-
-/** Re-export the envelope for section-component prop typing convenience. */
-export type { JourneyCoursePage };

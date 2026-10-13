@@ -54,22 +54,4 @@ export {
   editFieldLabel,
   editFieldName,
 } from './editable';
-export type {
-  AcheSectionProps,
-  FaqEntry,
-  FaqSectionProps,
-  FeelInclusion,
-  FeelSectionProps,
-  GuideSectionProps,
-  HeroSectionProps,
-  IntroVideoSectionProps,
-  InviteOffer,
-  InviteSectionProps,
-  JourneySalesContext,
-  MapSectionProps,
-  PreviewMedia,
-  ProofSectionProps,
-  ReelSectionProps,
-  SellPreview,
-  TurnSectionProps,
-} from './types';
+export type { JourneySalesContext, PreviewMedia, SellPreview } from './types';
