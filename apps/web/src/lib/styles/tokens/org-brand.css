@@ -162,8 +162,15 @@
   --tap-target-min: max(2.75rem, var(--space-11));
 
   /* ─── TYPOGRAPHY ────────────────────────────────────────────────────── */
-  --font-body: var(--brand-font-body, var(--font-sans));
-  --font-heading: var(--brand-font-heading, var(--font-sans));
+  /* Every stack ends as --font-sans does, so a brand face still on its way
+     draws in its own fallback (the org layout writes it after the face,
+     `font-fallbacks.css`), then 'Inter-fallback', and never the browser's
+     default serif. A brand face alone left no fallback at all: the page drew
+     in Times New Roman until the face landed, then re-wrapped (a sell page at
+     390: 18 of its 252 text blocks, Codex-61zsk.61). faces.ts spells the
+     tail as `SANS_STACK_TAIL`, and faces.test.ts holds every stack to it. */
+  --font-body: var(--font-sans);
+  --font-heading: var(--brand-font-heading, var(--brand-font-body, 'Inter')), 'Inter-fallback', system-ui, -apple-system, sans-serif;
   /* Re-declare --font-sans at org scope so descendants using it pick up the brand font.
      At :root, --brand-font-body isn't set (it lives on .org-layout), so :root --font-sans
      always resolves to the 'Inter' fallback. This override fixes that within org scope. */
@@ -550,9 +557,10 @@
      a dark-mode font rides darkTokenOverrides and emits as
      --brand-font-body-dark/-heading-dark. Prefer the dark value, fall back to
      the light font, then the system stack — so light and dark fonts are
-     independent and an unset dark font transparently inherits light. */
-  --font-body: var(--brand-font-body-dark, var(--brand-font-body, var(--font-sans)));
-  --font-heading: var(--brand-font-heading-dark, var(--brand-font-heading, var(--font-sans)));
+     independent and an unset dark font transparently inherits light. Each
+     ends with --font-sans's fallbacks, as the light stacks do. */
+  --font-body: var(--brand-font-body-dark, var(--brand-font-body, 'Inter')), 'Inter-fallback', system-ui, -apple-system, sans-serif;
+  --font-heading: var(--brand-font-heading-dark, var(--brand-font-heading, var(--brand-font-body, 'Inter'))), 'Inter-fallback', system-ui, -apple-system, sans-serif;
 
   /* Shader (hero effect) — ShaderHero reads the --brand-shader-* vars directly
      via getComputedStyle (shader-config.ts). We can NOT rebind them here: the
