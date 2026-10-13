@@ -2325,7 +2325,9 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
       the words at its foot like a gallery label.
     - *Heading* (`start`, `center`; centred by default in Soft and Cinematic): an optional small
       label and a chapter title at the section-heading size, an `<h2>`. Over 64 characters it
-      steps down to a lifted title size. A label alone counts as empty.
+      steps down to a lifted title size. A label alone counts as empty. Its head is drawn as
+      every section's head is: the measure, the heading within 20ch of its own face, and the
+      measure named as that heading's room (X62; below).
     - *Break* (`space`): space, exactly one rhythm step high. A new one stores no spacing and
       reads Medium; Small and Large are stored. It has no colour control. An optional mark
       (off by default) in each Style's own drawing.
@@ -2479,8 +2481,24 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - The canvas's prompts: an empty Picture says "Add a picture: tap here, then choose one.",
       and a Break says "Pause · Medium. Visitors see only the space." The visitor's view of the
       same page drops the empty Picture and shows neither prompt.
-  - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading;
-    louder's fit (X62) over the Heading section's heading, to be run once X62 is on dev.
+  - **The Heading section's width (decided WITHOUT the owner, on rebasing onto X62).** The head
+    was held to the lead's measure (`--lp-measure-lead`, 36 to 44ch of the BODY face, about
+    400px) and named no room. louder-fit over every Style's page found two faults with that.
+    - Louder grew the heading against the whole column: 95 faults, all on this heading.
+    - Even at the Style's own size it broke long words: the run's own-size count rose from 1313
+      to 1552, +239 pairs from this one heading, in the one section whose whole job is its
+      heading.
+    The head is now drawn as every other section's head: the measure, the heading within 20ch
+    of its own face (so the cap grows with the type), and `--lp-heading-column: var(--lp-measure)`.
+    louder-fit then passed with no faults (60 runs, 14 minutes), and the own-size count was 1367:
+    +54, this heading's share like any other head's, which is Codex-61zsk.60's. Calibrated: with
+    the room planted out and the width kept, 46 faults, all on this heading, in Bold and Poster at
+    1024 and 1440.
+    - *Rejected: naming the lead's measure as the room and keeping the narrow head.* It clears
+      louder's faults by holding the heading at the Style's size, but keeps the 239 broken words.
+    - *Rejected: a measure of its own for a chapter head.* It is a section's head; a second
+      measure is one more width for every Style to tune.
+  - **Not done:** the canvas's "Make this a Heading" swap for a Text holding only a heading.
   - **Tests:**
     - The bands: every Style's ordinary sections unchanged with the four in place, and every
       pair of every Style's ordinary types with each simple type between them (the premise

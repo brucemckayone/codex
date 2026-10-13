@@ -44,10 +44,20 @@
 </header>
 
 <style>
+  /* A chapter head is drawn as every section's head is: the measure, its
+     heading within 20ch of its own face, and the measure named as that
+     heading's room (louder's fit, 03 X62). The lead's measure, set in the body
+     face, broke a heading's long words at the Style's own size. */
   .heading {
     display: grid;
     gap: var(--lp-stack);
-    max-inline-size: var(--lp-measure-lead);
+    max-inline-size: var(--lp-measure);
+    --lp-heading-column: var(--lp-measure);
+  }
+
+  /* The heading measures itself in its own `ch`, not the body face's. */
+  .heading :global(.lp-heading) {
+    max-inline-size: 20ch;
   }
 
   /* A long title reads at the middle size, still a head in the Style's scale. */
