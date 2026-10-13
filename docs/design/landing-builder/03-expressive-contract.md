@@ -2596,7 +2596,8 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     60rem and up), CSS cannot know its room. X62 named that room `0px`, which louder read as
     "hold". Under this rule a room of nothing is fitted to the title floor, so the band now says
     what it means: hold, at the Style's size, which louder does not grow (`--lp-drama-held` takes
-    the step back out) and calmer still takes down.
+    the step back out) and calmer still takes down. *Amended by X70: the band wraps its price
+    under a head whose widest word does not fit beside it, and holds nothing.*
   - **Measured** with `louder-fit.spec.ts`, which now reads each heading three ways: held at the
     Style's size as it was drawn before (the census), at its own size, and at louder. Over the 8
     Styles, the gallery's face and, in Bold and Poster, Anton and Unbounded, 5 widths and 60 texts
@@ -2809,3 +2810,48 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     Seven plants each failed only their own tests: the cover's srcset dropped, split's and the
     poster's `sizes` set to `100vw`, a srcset on the course still, `xl` never listed, the band's
     srcset dropped, and a backdrop at `50vw`.
+- **X70 · 2026-10-13 · 3c follow-up · The pricing band puts its price under a heading whose widest
+  word does not fit beside it (Codex-61zsk.63; BUILT, decided without the owner; amends X66).** At
+  60rem and up the band drew its head beside a price strip drawn at its own width
+  (`minmax(0, 1fr) auto`), so CSS could not know the head's room, and X66 held it at the Style's size
+  (`--lp-heading-hold: 1`). 73 pairs still drew a run wider than the line: Poster and Poster in
+  Unbounded at 1024 and 1440, where "TRANSFORMATION:" ran into the £49.
+  - **The rule.** The band's row is a wrapping flex row whose head grows from nothing
+    (`flex: 1 1 0`). A flex item's automatic minimum is its min-content, its own longest word at the
+    size the fit draws it, so the row wraps exactly when that word would not fit beside the price,
+    and the price strip goes under the head. On a row of its own the head's room is its measure,
+    which the fit already knows; on a shared row it has more than its word. The hold is gone. The
+    price keeps the row's end (`justify-content: space-between`), or its start when it is alone.
+    `--lp-heading-hold` stays in the rule, because louder-fit uses it to draw a heading as it was.
+  - **The head is a column flex, not a grid.** As a grid it drew right in the gallery and failed the
+    sweep with 73 faults: a grid's min-content leaves out any child whose own minimum is 0, and
+    `min-width: 0` on a heading is a common cure for a grid blowout (the sweep sets it to read a
+    heading's room). The head's minimum fell to nothing, the row never wrapped, and the word ran
+    into the price as before. A flex column keeps each child's min-content in its own.
+  - **Measured** in the gallery, as built and now:
+    - with the gallery's own heading, in Poster at 1440 and 1024 and in Clean at 1440, light and
+      dark, the band is byte-identical;
+    - so is Clean's band with "Transformation: your calm", which fits beside its price;
+    - in Poster that heading ran into the price at both widths. It is now drawn whole, with the price
+      under it: 74.6px fitted to 64.2px at 1440, and 56.3px at 1024.
+  - **The sweep** (`louder-fit.spec.ts`, every Style, 5 widths, 60 texts): 1 passed, no fault. The
+    73 band pairs no longer run over, and no other row of the census moved. The fit now draws 10
+    band headings whose words fit a little smaller (2.5 to 4.7%, all Poster in Unbounded), within
+    its own spread (X66: median 4%). The 302 pairs still over are the titles and the display
+    statement (Codex-61zsk.62).
+  - **Rejected:**
+    - Capping the price strip at a share of the column (`fit-content(5/12)`) and naming the rest
+      as the head's room. A large price and its button can be wider than the cap, and
+      `fit-content` then grows past it, so the named room would overstate the real one and the
+      word would still reach the price.
+    - A fixed 7 : 5 split: it narrows every band's heading for the rare long word.
+    - Keeping the hold, which leaves the overflow.
+  - **Tests** (`heading-fit.test.ts`, CI):
+    - no layout holds its head;
+    - the band's row is `flex` with `wrap`, and its head is a column `flex: 1 1 0`;
+    - nothing gives the head a minimum of its own or an overflow that zeroes it;
+    - the census now reads every stylesheet in the kit too, a Style's included.
+
+    Seven plants each failed only their own tests: the hold put back in the band, a hold in Poster's
+    stylesheet, the head's minimum set to 0, its overflow hidden, the row unwrapped, the head's
+    basis set to `auto`, and the head made a grid again.
