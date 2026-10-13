@@ -84,6 +84,9 @@ let nextInspectorPort = 9240;
 // Store spawned processes for cleanup
 const runningProcesses: ChildProcess[] = [];
 
+/** How much of a worker's own output a failed start reports: the last 4KB. */
+const STARTUP_OUTPUT_KEPT = 4000;
+
 /**
  * Kill any process running on a specific port
  * Uses lsof (macOS/Linux) or fuser (Linux fallback) to find PIDs and kills them
@@ -235,18 +238,30 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
 
     runningProcesses.push(proc);
 
-    let _startupOutput = '';
     let hasStarted = false;
+
+    // The last of everything the worker writes, so a start that fails says
+    // why. A timeout used to report only its name: notifications-api hung for
+    // 60s in CI (PR #574) and started in 3s locally, with nothing to tell the
+    // two apart (Codex-ftvne).
+    let output = '';
+    const keep = (text: string) => {
+      output = (output + text).slice(-STARTUP_OUTPUT_KEPT);
+    };
+    const failure = (reason: string) =>
+      new Error(
+        `${worker.name} ${reason}; its last output:\n${output.trim() || '(nothing)'}`
+      );
 
     // Listen to stdout for "Ready on" message
     proc.stdout?.on('data', (data) => {
-      const output = data.toString();
-      _startupOutput += output;
+      const text = data.toString();
+      keep(text);
 
       // Wrangler logs "Ready on http://..." when server starts
       if (
-        output.includes('Ready on') ||
-        output.includes(`localhost:${worker.port}`)
+        text.includes('Ready on') ||
+        text.includes(`localhost:${worker.port}`)
       ) {
         hasStarted = true;
         console.log(`✅ ${worker.name} started successfully`);
@@ -257,6 +272,7 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
     // Log errors
     proc.stderr?.on('data', (data) => {
       const error = data.toString();
+      keep(error);
       // Wrangler logs warnings to stderr, not always errors
       if (error.includes('Error') || error.includes('ERROR')) {
         console.error(`❌ ${worker.name} error:`, error);
@@ -266,14 +282,14 @@ async function startWorker(worker: WorkerConfig): Promise<void> {
     // Handle process exit
     proc.on('exit', (code) => {
       if (!hasStarted && code !== 0) {
-        reject(new Error(`${worker.name} failed to start (exit code ${code})`));
+        reject(failure(`failed to start (exit code ${code})`));
       }
     });
 
     // Timeout after 60 seconds (auth worker cold starts can exceed 30s)
     setTimeout(() => {
       if (!hasStarted) {
-        reject(new Error(`${worker.name} startup timeout (60s)`));
+        reject(failure('startup timeout (60s)'));
       }
     }, 60000);
   });
