@@ -363,7 +363,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
 
     // The cap is on images; each is nominated as every object behind it.
     expect(await pendingOrphansFor(page.pageId)).toHaveLength(
-      100 * pageImageObjectKeys(keys[0]).length
+      keys.slice(0, 100).flatMap((key) => pageImageObjectKeys(key)).length
     );
   });
 
