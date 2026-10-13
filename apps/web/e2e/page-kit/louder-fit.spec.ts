@@ -51,11 +51,19 @@
  * fit drew smaller, and by how much (the log gives the median and the most).
  *
  * The faces: the gallery's brand 0 (Archivo Black, the widest measured), and
- * in Bold and Poster, which draw the largest, Anton and Unbounded, the
- * narrowest and the widest the brand editor offers.
+ * in Bold's and Poster's Type, which draw the largest, Anton and Unbounded,
+ * the narrowest and the widest the brand editor offers.
+ *
+ * `LOUDER_FIT_TYPES=offered` also draws each Style in each Type it may take
+ * (03 X73, X74), and `LOUDER_FIT_TYPES=all` in every Type, offered or not,
+ * to measure a pair before the allow-list offers it.
  */
 import { writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import {
+  TYPE_FACET_BASES,
+  TYPE_FACETS,
+} from '../../src/lib/page-builder/kit/model/ids';
 import { widestRun } from '../../src/lib/page-builder/kit/model/long-heading';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
@@ -64,7 +72,8 @@ test.skip(
   'opt-in: LOUDER_FIT=1 (a development route, ~25 min)'
 );
 test.describe.configure({ mode: 'serial' });
-test.setTimeout(60 * 60_000);
+// Every Type on every base draws about three times the looks.
+test.setTimeout((process.env.LOUDER_FIT_TYPES ? 180 : 60) * 60_000);
 
 /** `LOUDER_FIT_STYLES=poster,bold` narrows the sweep, to calibrate a plant fast. */
 const STYLES = [
@@ -81,10 +90,25 @@ const STYLES = [
     !process.env.LOUDER_FIT_STYLES ||
     process.env.LOUDER_FIT_STYLES.split(',').includes(style)
 );
-/** Bold and Poster are also read in the swapped faces. */
+/** The page's own Type (`''`), and with `LOUDER_FIT_TYPES` each it may take. */
+function typesOf(style: string): string[] {
+  const types = process.env.LOUDER_FIT_TYPES;
+  if (!types) return [''];
+  return [
+    '',
+    ...(types === 'all'
+      ? TYPE_FACETS.filter((type) => type !== style)
+      : TYPE_FACET_BASES[style as keyof typeof TYPE_FACET_BASES]),
+  ];
+}
+/** Each Style in each of its Types, and the Type it draws. */
+const DRAWN = STYLES.flatMap((style) =>
+  typesOf(style).map((type) => ({ style, type, drawn: type || style }))
+);
+/** Bold's and Poster's Type are also read in the swapped faces. */
 const LOOKS =
-  STYLES.length +
-  2 * STYLES.filter((s) => s === 'bold' || s === 'poster').length;
+  DRAWN.length +
+  2 * DRAWN.filter((d) => d.drawn === 'bold' || d.drawn === 'poster').length;
 const WIDTHS = [360, 390, 768, 1024, 1440];
 /**
  * The sample page draws each section in its Style's own layout, so it reads a
@@ -204,16 +228,17 @@ test('a heading fits its widest word at its own size and at louder', async ({
     });
     await context.addCookies(cookies);
     const page = await context.newPage();
-    for (const style of STYLES)
+    for (const { style, type, drawn } of DRAWN)
       for (const { brand, face, extra } of LOADS) {
-        if (face && style !== 'poster' && style !== 'bold') continue;
+        if (face && drawn !== 'poster' && drawn !== 'bold') continue;
+        const named = `${style}${type ? ` as ${type}` : ''}`;
         // A page that does not load is a fault, not the end of the run: an
         // hour of reading was once lost to one slow worker (a 408 on the
         // studio's membership check). The run still fails; the rest of it
         // still reads.
         try {
           await page.goto(
-            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
+            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}${type ? `&type=${type}` : ''}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
           );
           await page
             .locator('.lp .lp-section')
@@ -221,7 +246,7 @@ test('a heading fits its widest word at its own size and at louder', async ({
             .waitFor({ timeout: 60_000 });
         } catch (error) {
           faults.push(
-            `${width} ${style}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}: the gallery did not load: ${String(error).split('\n')[0]}`
+            `${width} ${named}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}: the gallery did not load: ${String(error).split('\n')[0]}`
           );
           console.log(`FAULT ${faults[faults.length - 1]}`);
           logged = faults.length;
@@ -457,8 +482,8 @@ test('a heading fits its widest word at its own size and at louder', async ({
           },
           { list: texts, weights: runs }
         );
-        const at = `${width} ${style}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}`;
-        const look = `${style}${face ? ` ${face}` : ''}`;
+        const at = `${width} ${named}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}`;
+        const look = `${named}${face ? ` ${face}` : ''}`;
         let wholeStep = false;
         for (const h of read)
           texts.forEach(({ id }, j) => {

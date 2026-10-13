@@ -36,6 +36,7 @@
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
+import { TYPE_FACETS } from '../../src/lib/page-builder/kit/model/ids';
 import { resolveGroundBands } from '../../src/lib/page-builder/kit/model/resolve';
 import {
   expectSellPageRendered,
@@ -111,6 +112,8 @@ interface Setup {
   /** Inline brand inputs on the kit root, as a page's own overrides land. */
   readonly carrier?: string;
   readonly drawAs?: string;
+  /** Draw the page's root in this Type (CSS only), as `drawAs` draws a Style. */
+  readonly typeAs?: string;
 }
 
 /**
@@ -153,6 +156,7 @@ async function apply(page: Page, setup: Setup): Promise<void> {
       const root = document.querySelector<HTMLElement>('.lp');
       if (!root) throw new Error('no .lp root on the page');
       if (s.drawAs) root.dataset.lpStyle = s.drawAs;
+      if (s.typeAs) root.dataset.lpTypeFacet = s.typeAs;
       if (s.preview) root.dataset.lpTheme = s.preview;
       if (s.carrier) {
         root.setAttribute('data-org-brand', '');
@@ -365,6 +369,27 @@ for (const item of CASES) {
         expect(mismatches(reading), JSON.stringify(reading)).toEqual([]);
       });
     }
+  });
+}
+
+// ── a borrowed Type (03 X73, X74) ─────────────────────────────────────────────
+// A Type sets how a page's words are drawn, never their ink: each of the four,
+// drawn on the root (CSS only, keyed on the Type attribute alone), resolves
+// every colour the page's own Type does, so the org's tokens still hold.
+for (const item of CASES) {
+  test(`${item.org}/${item.slug}: every Type draws the page’s own ink`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const page = await openAs(browser, baseURL as string, item, 'light');
+    await apply(page, { drawAs: item.drawAs });
+    const own = await page.evaluate(readColours, 'main');
+    expect(mismatches(own), JSON.stringify(own)).toEqual([]);
+    for (const type of TYPE_FACETS) {
+      await apply(page, { drawAs: item.drawAs, typeAs: type });
+      expect(await page.evaluate(readColours, 'main'), type).toEqual(own);
+    }
+    await page.context().close();
   });
 }
 
