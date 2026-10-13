@@ -25,6 +25,7 @@
  */
 
 import { CacheType, type VersionedCache } from '@codex/cache';
+import { stripeEnvMetadata } from '@codex/constants';
 import {
   organizationMemberships,
   organizations,
@@ -245,6 +246,7 @@ export class ConnectAccountService extends BaseService {
           country: 'GB',
           metadata: {
             codex_user_id: userId,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `connect_acct_${userId}` }

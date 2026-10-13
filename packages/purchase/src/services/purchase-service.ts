@@ -26,6 +26,7 @@ import {
   CONTENT_STATUS,
   CURRENCY,
   PURCHASE_STATUS,
+  stripeEnvMetadata,
 } from '@codex/constants';
 import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
 import {
@@ -417,7 +418,11 @@ export class PurchaseService extends BaseService {
       // as `SubscriptionService.createCheckoutSession`.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -460,6 +465,12 @@ export class PurchaseService extends BaseService {
               ...(organizationId !== null ? { organizationId } : {}),
               creatorId: contentRecord.creatorId,
               contentTitle: contentRecord.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            // Onto the PaymentIntent, from which Stripe snapshots it onto the
+            // Charge — so charge.refunded and friends carry the tag too.
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -926,7 +937,11 @@ export class PurchaseService extends BaseService {
 
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email },
+        {
+          userId: customerId,
+          email: user.email,
+          environment: this.environment,
+        },
         (resolvedCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'payment',
@@ -957,6 +972,10 @@ export class PurchaseService extends BaseService {
               courseId: validated.courseId,
               customerId,
               courseTitle: course.title,
+              ...stripeEnvMetadata(this.environment),
+            },
+            payment_intent_data: {
+              metadata: stripeEnvMetadata(this.environment),
             },
             client_reference_id: customerId,
           }),
@@ -1554,6 +1573,7 @@ export class PurchaseService extends BaseService {
             purchase_id: purchase.id,
             type: payoutType,
             stripe_charge_id: stripeChargeId,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey }
@@ -2178,6 +2198,7 @@ export class PurchaseService extends BaseService {
                   purchase_id: purchase.id,
                   payout_id: row.id,
                   type: 'refund_reversal',
+                  ...stripeEnvMetadata(this.environment),
                 },
               },
               {
@@ -2600,7 +2621,7 @@ export class PurchaseService extends BaseService {
       // raw Stripe errors from billingPortal.sessions.create.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email },
+        { userId, email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.billingPortal.sessions.create({
             customer: stripeCustomerId,

@@ -275,7 +275,13 @@ describe('PurchaseService Integration', () => {
           metadata: expect.objectContaining({
             contentId: content.id,
             customerId: otherUserId,
+            codex_env: 'test',
           }),
+          // Onto the PaymentIntent, whence Stripe snapshots it onto the Charge,
+          // so refund and dispute events are tagged too (Codex-2hxff.5).
+          payment_intent_data: {
+            metadata: { codex_env: 'test' },
+          },
         })
       );
     });

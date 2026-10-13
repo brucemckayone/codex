@@ -142,6 +142,8 @@ describe('ConnectAccountService', () => {
           // the org→account link is materialised at activation via the pin.
           metadata: {
             codex_user_id: creatorId,
+            // Production and local dev share one Stripe sandbox (Codex-2hxff.5).
+            codex_env: 'test',
           },
         }),
         // Replay-safe: keyed on the user so a retry reuses the same account.
@@ -239,6 +241,8 @@ describe('ConnectAccountService', () => {
           // the user; there is no single owning org for a user account.
           metadata: {
             codex_user_id: creatorId,
+            // Production and local dev share one Stripe sandbox (Codex-2hxff.5).
+            codex_env: 'test',
           },
         }),
         expect.objectContaining({

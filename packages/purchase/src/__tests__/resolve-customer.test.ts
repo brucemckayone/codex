@@ -34,18 +34,22 @@ import { resolveOrCreateCustomer } from '../services/resolve-customer';
 
 type StripeCustomersList = Stripe.Customer[];
 
+/** The calling worker's environment in these tests (Codex-2hxff.5). */
+const ENV = 'test';
+
 /** Build a minimal Stripe.Customer shape for list/create mock returns. */
 function mockStripeCustomer(
   id: string,
   email: string,
-  created: number
+  created: number,
+  metadata: Record<string, string> = {}
 ): Stripe.Customer {
   return {
     id,
     object: 'customer',
     email,
     created,
-    metadata: {},
+    metadata,
   } as Stripe.Customer;
 }
 
@@ -85,7 +89,7 @@ describe('resolveOrCreateCustomer', () => {
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: 'cached@example.com' }
+      { userId, email: 'cached@example.com', environment: ENV }
     );
 
     expect(result).toBe(cachedId);
@@ -111,7 +115,7 @@ describe('resolveOrCreateCustomer', () => {
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: user.email }
+      { userId, email: user.email, environment: ENV }
     );
 
     expect(result).toBe(existingId);
@@ -156,7 +160,7 @@ describe('resolveOrCreateCustomer', () => {
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: user.email }
+      { userId, email: user.email, environment: ENV }
     );
 
     expect(result).toBe(oldestId);
@@ -181,7 +185,12 @@ describe('resolveOrCreateCustomer', () => {
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: user.email, metadata: { source: 'checkout' } }
+      {
+        userId,
+        email: user.email,
+        environment: ENV,
+        metadata: { source: 'checkout' },
+      }
     );
 
     expect(result).toBe(newId);
@@ -227,11 +236,104 @@ describe('resolveOrCreateCustomer', () => {
 
     await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: user.email }
+      { userId, email: user.email, environment: ENV }
     );
 
     const args = customersCreate.mock.calls[0]![0];
-    expect(args.metadata).toEqual({ codex_user_id: userId });
+    expect(args.metadata).toEqual({ codex_user_id: userId, codex_env: ENV });
+  });
+
+  // ── Environments share one Stripe sandbox (Codex-2hxff.5) ────
+
+  it("never adopts another environment's Customer — even the oldest", async () => {
+    const [userId] = await seedTestUsers(db, 1);
+    const user = takeFirst(
+      await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+    );
+
+    const ownId = `cus_own_${createUniqueSlug()}`;
+    customersList.mockResolvedValue({
+      data: [
+        // Older, but production's: must be passed over.
+        mockStripeCustomer(
+          `cus_prod_${createUniqueSlug()}`,
+          user.email,
+          1_500_000_000,
+          { codex_env: 'production' }
+        ),
+        mockStripeCustomer(ownId, user.email, 1_700_000_000, {
+          codex_env: ENV,
+        }),
+      ] satisfies StripeCustomersList,
+    });
+
+    const result = await resolveOrCreateCustomer(
+      { db, stripe: mockStripe },
+      { userId, email: user.email, environment: ENV }
+    );
+
+    expect(result).toBe(ownId);
+    expect(customersCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates a new Customer when the only match is another environment's", async () => {
+    const [userId] = await seedTestUsers(db, 1);
+    const user = takeFirst(
+      await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+    );
+
+    const newId = `cus_fresh_${createUniqueSlug()}`;
+    customersList.mockResolvedValue({
+      data: [
+        mockStripeCustomer(
+          `cus_dev_${createUniqueSlug()}`,
+          user.email,
+          1_500_000_000,
+          { codex_env: 'development' }
+        ),
+      ],
+    });
+    customersCreate.mockResolvedValue(
+      mockStripeCustomer(newId, user.email, 1_900_000_000)
+    );
+
+    const result = await resolveOrCreateCustomer(
+      { db, stripe: mockStripe },
+      { userId, email: user.email, environment: ENV }
+    );
+
+    expect(result).toBe(newId);
+    expect(customersCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // Customers created before tagging began carry no tag; they stay adoptable.
+  it('still adopts an UNTAGGED Customer', async () => {
+    const [userId] = await seedTestUsers(db, 1);
+    const user = takeFirst(
+      await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+    );
+
+    const legacyId = `cus_legacy_${createUniqueSlug()}`;
+    customersList.mockResolvedValue({
+      data: [mockStripeCustomer(legacyId, user.email, 1_500_000_000)],
+    });
+
+    const result = await resolveOrCreateCustomer(
+      { db, stripe: mockStripe },
+      { userId, email: user.email, environment: ENV }
+    );
+
+    expect(result).toBe(legacyId);
+    expect(customersCreate).not.toHaveBeenCalled();
   });
 
   // ── Race-safety / idempotency ────────────────────────────────
@@ -275,7 +377,7 @@ describe('resolveOrCreateCustomer', () => {
 
     const result = await resolveOrCreateCustomer(
       { db, stripe: mockStripe },
-      { userId, email: user.email }
+      { userId, email: user.email, environment: ENV }
     );
 
     // Winner id is returned, not the loser's freshly-created one.
@@ -297,7 +399,11 @@ describe('resolveOrCreateCustomer', () => {
     await expect(
       resolveOrCreateCustomer(
         { db, stripe: mockStripe },
-        { userId: 'nonexistent-user-id', email: 'nobody@example.com' }
+        {
+          userId: 'nonexistent-user-id',
+          email: 'nobody@example.com',
+          environment: ENV,
+        }
       )
     ).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -312,7 +418,7 @@ describe('resolveOrCreateCustomer', () => {
     await expect(
       resolveOrCreateCustomer(
         { db, stripe: mockStripe },
-        { userId, email: 'deleted@example.com' }
+        { userId, email: 'deleted@example.com', environment: ENV }
       )
     ).rejects.toBeInstanceOf(NotFoundError);
 
@@ -336,7 +442,7 @@ describe('resolveOrCreateCustomer', () => {
     await expect(
       resolveOrCreateCustomer(
         { db, stripe: mockStripe },
-        { userId, email: user.email }
+        { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBeInstanceOf(PaymentProcessingError);
   });
@@ -362,7 +468,7 @@ describe('resolveOrCreateCustomer', () => {
     await expect(
       resolveOrCreateCustomer(
         { db, stripe: mockStripe },
-        { userId, email: user.email }
+        { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBeInstanceOf(PaymentProcessingError);
   });
@@ -382,7 +488,7 @@ describe('resolveOrCreateCustomer', () => {
     await expect(
       resolveOrCreateCustomer(
         { db, stripe: mockStripe },
-        { userId, email: user.email }
+        { userId, email: user.email, environment: ENV }
       )
     ).rejects.toBe(plainErr);
   });

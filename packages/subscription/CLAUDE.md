@@ -146,6 +146,11 @@ touching `handleInvoicePaymentSucceeded`, `executeTransfers`,
 - **MUST** check the organisation owner's Connect account is payable before
   creating a tier, a course plan or a subscription checkout.
 - **MUST** use deterministic idempotency keys on Stripe calls.
+- **MUST** spread `stripeEnvMetadata(this.environment)` (`@codex/constants`) into
+  the metadata of every Stripe object created — and into `payment_intent_data` /
+  `subscription_data` on a Checkout Session. Production and local dev share one
+  Stripe sandbox; an untagged object's events are processed by BOTH
+  (`Codex-2hxff.5`, docs/payments/operations.md → Environments).
 - **MUST** check for an existing live subscription before creating a checkout
   (`AlreadySubscribedError`) — and handle a duplicate that completes anyway.
 - **NEVER** process a webhook before the ecom-api worker has verified its

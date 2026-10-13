@@ -17,15 +17,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StripeWebhookEnv } from '../../types';
 import { createWebhookHandler } from '../webhook-handler';
 
-function createContext(): {
+function createContext(object: Record<string, unknown> = {}): {
   context: Context<StripeWebhookEnv>;
   mock: MockHonoContext<StripeWebhookEnv['Bindings']>;
 } {
+  // createMockHonoContext's env has ENVIRONMENT: 'test'.
   const mock = createMockHonoContext<StripeWebhookEnv['Bindings']>({
     variables: {
       stripeEvent: {
         id: 'evt_test_1',
         type: 'test.event',
+        data: { object },
       } as unknown as Stripe.Event,
       stripe: {} as Stripe,
     },
@@ -142,6 +144,76 @@ describe('createWebhookHandler', () => {
           id: 'evt_test_1',
         })
       );
+    });
+  });
+
+  // Codex-2hxff.5: production and local dev share one Stripe sandbox and both
+  // receive every event. The guard runs before the handler, so "skipped" here
+  // means the handler — and therefore every DB write — never ran.
+  describe("another environment's objects", () => {
+    it('an event about an object another environment created → 200, handler NOT called', async () => {
+      const inner = vi.fn();
+      const handler = createWebhookHandler('Test', inner);
+      const { context, mock } = createContext({
+        object: 'checkout.session',
+        metadata: { codex_env: 'production' },
+      });
+
+      const response = await handler(context);
+
+      expect(response.status).toBe(200);
+      expect(inner).not.toHaveBeenCalled();
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        expect.stringContaining('another environment'),
+        expect.objectContaining({
+          objectEnvironment: 'production',
+          environment: 'test',
+        })
+      );
+    });
+
+    it("an invoice is judged by its subscription's snapshot, not its own metadata", async () => {
+      const inner = vi.fn();
+      const handler = createWebhookHandler('Test', inner);
+      const { context } = createContext({
+        object: 'invoice',
+        metadata: {},
+        parent: {
+          subscription_details: { metadata: { codex_env: 'development' } },
+        },
+      });
+
+      await handler(context);
+
+      expect(inner).not.toHaveBeenCalled();
+    });
+
+    it('an object this environment created is processed', async () => {
+      const inner = vi.fn();
+      const handler = createWebhookHandler('Test', inner);
+      const { context } = createContext({
+        object: 'customer.subscription',
+        metadata: { codex_env: 'test' },
+      });
+
+      await handler(context);
+
+      expect(inner).toHaveBeenCalledTimes(1);
+    });
+
+    // Every object created before tagging began — every live subscription —
+    // is untagged. Skipping these would stop production renewals.
+    it('an UNTAGGED object is still processed', async () => {
+      const inner = vi.fn();
+      const handler = createWebhookHandler('Test', inner);
+      const { context } = createContext({
+        object: 'customer.subscription',
+        metadata: { codex_user_id: 'u1' },
+      });
+
+      await handler(context);
+
+      expect(inner).toHaveBeenCalledTimes(1);
     });
   });
 });

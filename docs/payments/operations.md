@@ -22,12 +22,23 @@ a live-mode account and every endpoint, Product, Price and portal configuration
 is recreated there (see [docs/deployment/production-go-live.md](../deployment/production-go-live.md)).
 
 **The shared sandbox.** Production and local development receive **every**
-event from the sandbox, by design. Each environment must ignore events about
-objects it did not create: every object we create carries `metadata.codex_env`,
-and handlers log and acknowledge (200) events whose object belongs to another
-environment, writing nothing — **gap**: `Codex-2hxff.5`. Until then production
-also processes local test events, which fail harmlessly on unknown users and are
-acknowledged.
+event from the sandbox, by design. Each environment ignores events about
+objects it did not create:
+
+- Every object we create carries `metadata.codex_env` — the worker's
+  `ENVIRONMENT` (`production`, `development`, `test`): Customers, Checkout
+  Sessions and, through `payment_intent_data` / `subscription_data`, their
+  PaymentIntents (whose Charges inherit it) and Subscriptions (whose Invoices
+  snapshot it in `parent.subscription_details.metadata`), Connect accounts,
+  Products, Prices and transfers.
+- `createWebhookHandler` reads the tag before any handler runs and acknowledges
+  (200) an event whose object names another environment, writing nothing.
+- An **untagged** object is processed. Everything created before tagging began —
+  every existing subscription among them — has no tag, and skipping it would
+  stop production renewals. Subscription charges, disputes and Connect
+  deauthorisations carry none of our metadata, so they are always processed;
+  they fail harmlessly on unknown rows.
+- Customer resolution by email never adopts another environment's Customer.
 
 Seed scripts clean up Stripe objects across the **whole** sandbox, so a local
 seed can archive Prices that production uses — `Codex-1ilxl` (in progress).

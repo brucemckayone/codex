@@ -68,6 +68,11 @@ emails — the open defect `Codex-2hxff.7`.
   never a £0 price.
 - **MUST** use a deterministic idempotency key on every money-moving Stripe call
   (`${chargeId}_creator`, `${chargeId}_org_fee`, `${transferId}_reversal_${refundId}`).
+- **MUST** spread `stripeEnvMetadata(this.environment)` (`@codex/constants`) into
+  the metadata of every Stripe object created — and into `payment_intent_data` /
+  `subscription_data` on a Checkout Session. Production and local dev share one
+  Stripe sandbox; an untagged object's events are processed by BOTH
+  (`Codex-2hxff.5`, docs/payments/operations.md → Environments).
 - **MUST** write the entitlement for every completed purchase. `content_access` is
   not an access source — never add a reader.
 - The charge model is **separate charges and transfers** (never destination

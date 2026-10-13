@@ -30,6 +30,37 @@ export const STRIPE_EVENTS = {
   PRICE_UPDATED: 'price.updated',
 } as const;
 
+/**
+ * The Stripe metadata key naming the environment that created an object — the
+ * worker's `ENVIRONMENT` (`production`, `development`, `test`).
+ *
+ * Production and local development share ONE Stripe sandbox, so both receive
+ * every event. Each environment tags what it creates and ignores events about
+ * what another environment created (docs/payments/operations.md → Environments
+ * and Stripe accounts; Codex-2hxff.5).
+ */
+export const STRIPE_ENV_METADATA_KEY = 'codex_env';
+
+/** `{ codex_env: environment }` — spread into the metadata of every Stripe object we create. */
+export function stripeEnvMetadata(environment: string): Record<string, string> {
+  return { [STRIPE_ENV_METADATA_KEY]: environment };
+}
+
+/**
+ * True only when `metadata` names a DIFFERENT environment.
+ *
+ * Untagged is NOT foreign: every object created before tagging began — every
+ * existing subscription among them — carries no tag, and treating it as foreign
+ * would silently stop production renewals. So: tagged AND different.
+ */
+export function isForeignStripeEnvironment(
+  metadata: Readonly<Record<string, string>> | null | undefined,
+  environment: string
+): boolean {
+  const tag = metadata?.[STRIPE_ENV_METADATA_KEY];
+  return typeof tag === 'string' && tag !== '' && tag !== environment;
+}
+
 export const PURCHASE_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'completed',

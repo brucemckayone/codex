@@ -23,7 +23,7 @@
  * All queries scoped by organizationId. Soft delete only.
  */
 
-import { CURRENCY } from '@codex/constants';
+import { CURRENCY, stripeEnvMetadata } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import {
   content,
@@ -215,6 +215,7 @@ export class TierService extends BaseService {
           metadata: {
             codex_organization_id: orgId,
             codex_type: 'subscription_tier',
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `tier-product-${idempotencyBase}` }
@@ -228,7 +229,11 @@ export class TierService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_organization_id: orgId, interval: 'month' },
+            metadata: {
+              codex_organization_id: orgId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `tier-price-monthly-${idempotencyBase}` }
         ),
@@ -238,7 +243,11 @@ export class TierService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_organization_id: orgId, interval: 'year' },
+            metadata: {
+              codex_organization_id: orgId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `tier-price-annual-${idempotencyBase}` }
         ),
@@ -373,7 +382,11 @@ export class TierService extends BaseService {
               unit_amount: input.priceMonthly,
               currency: CURRENCY.GBP,
               recurring: { interval: 'month' },
-              metadata: { codex_organization_id: orgId, interval: 'month' },
+              metadata: {
+                codex_organization_id: orgId,
+                interval: 'month',
+                ...stripeEnvMetadata(this.environment),
+              },
             },
             { idempotencyKey: `tier-update-price-monthly-${idempotencyBase}` }
           );
@@ -396,7 +409,11 @@ export class TierService extends BaseService {
               unit_amount: input.priceAnnual,
               currency: CURRENCY.GBP,
               recurring: { interval: 'year' },
-              metadata: { codex_organization_id: orgId, interval: 'year' },
+              metadata: {
+                codex_organization_id: orgId,
+                interval: 'year',
+                ...stripeEnvMetadata(this.environment),
+              },
             },
             { idempotencyKey: `tier-update-price-annual-${idempotencyBase}` }
           );

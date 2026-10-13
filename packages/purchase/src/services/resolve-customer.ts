@@ -8,6 +8,8 @@
  * Resolution order:
  *   1. users.stripe_customer_id is set          → return it.
  *   2. Stripe has a Customer with matching email → reuse oldest, persist, return.
+ *      Customers tagged by ANOTHER environment are never adopted — production
+ *      and local dev share one Stripe sandbox (Codex-2hxff.5).
  *   3. Neither                                   → create new Customer with a
  *                                                  deterministic idempotency
  *                                                  key, persist, return.
@@ -22,6 +24,10 @@
  * @see Codex-ssfes (Q4.3 — swap checkout sessions to customer: <id>)
  */
 
+import {
+  isForeignStripeEnvironment,
+  stripeEnvMetadata,
+} from '@codex/constants';
 import type { Database, DatabaseWs } from '@codex/database';
 import { users } from '@codex/database/schema';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -47,6 +53,12 @@ export interface ResolveCustomerDeps {
 export interface ResolveCustomerInput {
   userId: string;
   email: string;
+  /**
+   * The calling worker's environment (`ServiceConfig.environment`). A new
+   * Customer is tagged with it, and a Customer another environment tagged is
+   * never adopted by email (Codex-2hxff.5).
+   */
+  environment: string;
   /**
    * Extra metadata to merge into the Stripe Customer on create. The caller's
    * keys override `codex_user_id` only if they explicitly set it; prefer
@@ -83,7 +95,7 @@ export async function resolveOrCreateCustomer(
   input: ResolveCustomerInput
 ): Promise<string> {
   const { db, stripe } = deps;
-  const { userId, email, metadata } = input;
+  const { userId, email, environment, metadata } = input;
 
   // ── 1. Cached id? ────────────────────────────────────────────
   const user = await db.query.users.findFirst({
@@ -106,9 +118,14 @@ export async function resolveOrCreateCustomer(
   let resolvedCustomerId: string;
   try {
     const existing = await stripe.customers.list({ email, limit: 10 });
+    // The same email can hold a Customer in each environment — never take
+    // another environment's. Untagged (pre-tagging) Customers stay adoptable.
+    const candidates = existing.data.filter(
+      (customer) => !isForeignStripeEnvironment(customer.metadata, environment)
+    );
 
-    if (existing.data.length > 0) {
-      const oldest = existing.data.reduce((a, b) =>
+    if (candidates.length > 0) {
+      const oldest = candidates.reduce((a, b) =>
         a.created <= b.created ? a : b
       );
       resolvedCustomerId = oldest.id;
@@ -122,6 +139,7 @@ export async function resolveOrCreateCustomer(
           email,
           metadata: {
             codex_user_id: userId,
+            ...stripeEnvMetadata(environment),
             ...metadata,
           },
         },

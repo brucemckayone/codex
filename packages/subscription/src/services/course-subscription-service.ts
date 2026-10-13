@@ -28,7 +28,12 @@
  * keys, mirroring `PurchaseService.writePurchasePayouts`.
  */
 
-import { BILLING_INTERVAL, CONTENT_STATUS, CURRENCY } from '@codex/constants';
+import {
+  BILLING_INTERVAL,
+  CONTENT_STATUS,
+  CURRENCY,
+  stripeEnvMetadata,
+} from '@codex/constants';
 import { getConstraintName, isUniqueViolation } from '@codex/database';
 import {
   type CourseSubscription,
@@ -172,6 +177,7 @@ export class CourseSubscriptionService extends BaseService {
             codex_organization_id: course.organizationId,
             codex_course_id: courseId,
             codex_type: COURSE_SUBSCRIPTION_METADATA_TYPE,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `course-plan-product-${idempotencyBase}` }
@@ -184,7 +190,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_course_id: courseId, interval: 'month' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-price-monthly-${idempotencyBase}` }
         ),
@@ -194,7 +204,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_course_id: courseId, interval: 'year' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-price-annual-${idempotencyBase}` }
         ),
@@ -385,7 +399,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceMonthly,
             currency: CURRENCY.GBP,
             recurring: { interval: 'month' },
-            metadata: { codex_course_id: courseId, interval: 'month' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'month',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-reprice-monthly-${idempotencyBase}` }
         );
@@ -404,7 +422,11 @@ export class CourseSubscriptionService extends BaseService {
             unit_amount: input.priceAnnual,
             currency: CURRENCY.GBP,
             recurring: { interval: 'year' },
-            metadata: { codex_course_id: courseId, interval: 'year' },
+            metadata: {
+              codex_course_id: courseId,
+              interval: 'year',
+              ...stripeEnvMetadata(this.environment),
+            },
           },
           { idempotencyKey: `course-plan-reprice-annual-${idempotencyBase}` }
         );
@@ -633,11 +655,14 @@ export class CourseSubscriptionService extends BaseService {
         codex_course_id: input.courseId,
         codex_plan_id: plan.id,
         codex_organization_id: course.organizationId,
+        // On the session AND (via subscription_data) the subscription, whose
+        // invoices snapshot it — the tag the webhook guard reads (Codex-2hxff.5).
+        ...stripeEnvMetadata(this.environment),
       };
 
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email },
+        { userId, email: user.email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -1187,6 +1212,7 @@ export class CourseSubscriptionService extends BaseService {
             course_subscription_id: sub.id,
             type: payoutType,
             stripe_charge_id: stripeChargeId,
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey }

@@ -63,7 +63,7 @@ The session uses `mode: 'subscription'`, the buyer's single Stripe Customer and
 the tier's Price for the chosen interval. Metadata on the session and on
 `subscription_data` carries `codex_user_id`, `codex_organization_id`,
 `codex_tier_id`, `codex_billing_interval` (or `type: 'course_subscription'` with
-the course and plan ids) and `codex_env` — **gap**: `Codex-2hxff.5`. There are
+the course and plan ids) and `codex_env`. There are
 no trials. No `application_fee_percent` or `transfer_data` is passed.
 
 **One live subscription per buyer per organisation** is enforced twice: at

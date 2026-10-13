@@ -34,6 +34,7 @@ import {
   CURRENCY,
   FEES,
   SUBSCRIPTION_STATUS,
+  stripeEnvMetadata,
 } from '@codex/constants';
 import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
@@ -870,7 +871,7 @@ export class SubscriptionService extends BaseService {
       // session create exactly once. A second `resource_missing` propagates.
       const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email },
+        { userId, email: user.email, environment: this.environment },
         (stripeCustomerId) =>
           this.stripe.checkout.sessions.create({
             mode: 'subscription',
@@ -883,12 +884,17 @@ export class SubscriptionService extends BaseService {
               codex_organization_id: orgId,
               codex_tier_id: tierId,
               codex_billing_interval: billingInterval,
+              ...stripeEnvMetadata(this.environment),
             },
+            // Every invoice snapshots these into
+            // parent.subscription_details.metadata — the tag the webhook guard
+            // reads on renewals (Codex-2hxff.5).
             subscription_data: {
               metadata: {
                 codex_user_id: userId,
                 codex_organization_id: orgId,
                 codex_tier_id: tierId,
+                ...stripeEnvMetadata(this.environment),
               },
             },
           }),
@@ -3789,6 +3795,7 @@ export class SubscriptionService extends BaseService {
               purchase_id: payout.purchaseId,
               source_type: payout.sourceType,
               type: 'pending_payout_resolution',
+              ...stripeEnvMetadata(this.environment),
             },
           },
           { idempotencyKey: `payout_${payout.id}` }
@@ -4339,6 +4346,7 @@ export class SubscriptionService extends BaseService {
           metadata: {
             subscription_id: subscriptionId,
             type: 'creator_payout_to_owner',
+            ...stripeEnvMetadata(this.environment),
           },
         },
         { idempotencyKey: `${chargeId}_creator_pool_owner` }
@@ -4507,6 +4515,7 @@ export class SubscriptionService extends BaseService {
                   charge_id: chargeId,
                   payout_id: row.id,
                   type: 'refund_reversal',
+                  ...stripeEnvMetadata(this.environment),
                 },
               },
               {
@@ -4796,6 +4805,7 @@ export class SubscriptionService extends BaseService {
             metadata: {
               subscription_id: subscriptionId,
               type: 'organization_fee',
+              ...stripeEnvMetadata(this.environment),
             },
           },
           { idempotencyKey: `${chargeId}_org_fee` }
@@ -5079,6 +5089,7 @@ export class SubscriptionService extends BaseService {
                 subscription_id: subscriptionId,
                 creator_id: agreement.creatorId,
                 type: 'creator_payout',
+                ...stripeEnvMetadata(this.environment),
               },
             },
             { idempotencyKey: `${chargeId}_creator_${agreement.creatorId}` }

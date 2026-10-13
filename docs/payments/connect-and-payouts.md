@@ -25,7 +25,7 @@ behave like an Express account:
 | `controller.requirement_collection` | `stripe` | Stripe collects identity and bank details |
 | Capabilities | `card_payments`, `transfers` | |
 | Country | `GB` | |
-| Metadata | `codex_user_id`, `codex_env` | **gap**: `Codex-2hxff.5` (no environment tag) |
+| Metadata | `codex_user_id`, `codex_env` | |
 | Idempotency key | `connect_acct_${userId}` | One account per person, even on retry |
 
 Our row is written before the onboarding link is created, so an abandoned

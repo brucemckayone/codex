@@ -230,6 +230,13 @@ describe('SubscriptionService', () => {
             codex_user_id: otherCreatorId,
             codex_organization_id: org.id,
             codex_tier_id: tier1.id,
+            codex_env: 'test',
+          }),
+          // The subscription carries the tag too: each renewal invoice
+          // snapshots it, and that snapshot is what the webhook guard reads
+          // (Codex-2hxff.5).
+          subscription_data: expect.objectContaining({
+            metadata: expect.objectContaining({ codex_env: 'test' }),
           }),
         })
       );

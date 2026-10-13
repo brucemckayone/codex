@@ -5,6 +5,7 @@
  * Eliminates duplication across webhook endpoints.
  */
 
+import { isForeignStripeEnvironment } from '@codex/constants';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -18,6 +19,28 @@ type WebhookHandler = (
   stripe: Stripe,
   c: Context<StripeWebhookEnv>
 ) => Promise<void> | void;
+
+/**
+ * Where OUR metadata sits on an event's object.
+ *
+ * Almost every object carries it on `metadata`. An invoice is the exception:
+ * Stripe snapshots the subscription's metadata into
+ * `parent.subscription_details.metadata` when the invoice is created, and the
+ * invoice's own `metadata` is never set by us. A charge carries the
+ * PaymentIntent's metadata (also a snapshot, taken when the charge is made).
+ */
+function ownMetadata(event: Stripe.Event): Stripe.Metadata | null {
+  const object = event.data.object as {
+    object?: string;
+    metadata?: Stripe.Metadata | null;
+  };
+  if (object.object === 'invoice') {
+    return (
+      (object as Stripe.Invoice).parent?.subscription_details?.metadata ?? null
+    );
+  }
+  return object.metadata ?? null;
+}
 
 /**
  * Create a webhook handler with standard logging and error handling
@@ -51,6 +74,23 @@ export function createWebhookHandler(
       type: event.type,
       id: event.id,
     });
+
+    // Production and local development share one Stripe sandbox and both get
+    // every event. An event about an object ANOTHER environment created is
+    // acknowledged and ignored before any handler — so before any DB client
+    // opens or any row is written (Codex-2hxff.5). Untagged objects (everything
+    // created before tagging began) are still processed.
+    const environment = c.env.ENVIRONMENT || 'development';
+    const metadata = ownMetadata(event);
+    if (isForeignStripeEnvironment(metadata, environment)) {
+      obs?.info(`${eventType} webhook ignored: another environment's object`, {
+        type: event.type,
+        id: event.id,
+        objectEnvironment: metadata?.codex_env,
+        environment,
+      });
+      return c.json({ received: true });
+    }
 
     try {
       // Execute custom handler if provided
