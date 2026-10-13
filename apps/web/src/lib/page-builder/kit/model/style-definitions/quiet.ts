@@ -31,6 +31,11 @@ export const QUIET: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'statement',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'base',
@@ -50,6 +55,12 @@ export const QUIET: StyleDefinition = {
     pricing: 'base',
     faq: 'base',
     cta: 'base',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // One card may lift off the ground: a tint of it. Inside a band a creator
   // chose, the card is the plain ground.
@@ -68,14 +79,18 @@ export const QUIET: StyleDefinition = {
     'inside',
     'text',
     'problem',
+    'picture',
     'video',
     'story',
     'transformation',
     'benefits',
+    'heading',
     'curriculum',
+    'button',
     'preview',
     'gallery',
     'instructor',
+    'break',
     'testimonials',
     'stats',
     'pricing',

@@ -12,7 +12,8 @@
   so public and editing markup stay identical. A background image
   (`props.background`) puts the whole section on the on-media colours over a
   uniform scrim. `hero` has its own media and `cta` its own backdrop (01 A5),
-  so neither takes one here. An image that fails to load leaves the section in
+  so neither takes one here, and nor does a simple section (a Picture,
+  Heading, Break or Button, 03 X64), which takes its neighbour's ground. An image that fails to load leaves the section in
   its own scheme, as if none were set.
 
   CONTINUES (03 X58): `data-lp-continues` marks a section with no words of
@@ -26,7 +27,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { resolvePageImageUrl } from '../page-images';
-  import { OWN_BACKDROP } from './model/resolve';
+  import { OWN_BACKDROP, SIMPLE_SECTIONS } from './model/resolve';
   import type { ResolvedSection } from './model/types';
 
   interface Props {
@@ -54,7 +55,9 @@
 
   let failed = $state<string | null>(null);
   const backdrop = $derived.by(() => {
-    if (OWN_BACKDROP.has(section.type)) return null;
+    // A simple section takes its neighbour's ground (03 X64): a picture
+    // behind it would make it a band of its own.
+    if (OWN_BACKDROP.has(section.type) || SIMPLE_SECTIONS.has(section.type)) return null;
     const url = resolvePageImageUrl(background, 'lg', mediaBaseUrl);
     return url && url !== failed ? url : null;
   });

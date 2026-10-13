@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { type ImageRef, isImageRef, resolvePageImageUrl } from './page-images';
+import {
+  type ImageRef,
+  isImageRef,
+  pageImageSrcset,
+  readFocus,
+  readSize,
+  resolvePageImageUrl,
+} from './page-images';
 
 describe('isImageRef', () => {
   it('accepts a key-only ref', () => {
@@ -91,5 +98,89 @@ describe('resolvePageImageUrl', () => {
     // string (not wrapped in `{ key }`) is not an ImageRef and resolves to
     // null rather than being treated as a key itself.
     expect(resolvePageImageUrl(key, 'md', cdnBase)).toBeNull();
+  });
+});
+
+describe('the xl variant (Codex-61zsk.13) and the size that unlocks it', () => {
+  const cdnBase = 'https://cdn-assets.example.com';
+  const key = 'landing-pages/page-1/images/image-1';
+
+  it('resolves xl for a reference that carries its size', () => {
+    expect(resolvePageImageUrl({ key, w: 2400, h: 1600 }, 'xl', cdnBase)).toBe(
+      `${cdnBase}/${key}/xl.webp`
+    );
+  });
+
+  it('answers lg for xl when the reference has no size: it predates xl, so has no such file', () => {
+    expect(resolvePageImageUrl({ key }, 'xl', cdnBase)).toBe(
+      `${cdnBase}/${key}/lg.webp`
+    );
+  });
+
+  it('lists every written width, xl included, never wider than the picture', () => {
+    expect(pageImageSrcset({ key, w: 2400, h: 1600 }, cdnBase)).toBe(
+      [
+        `${cdnBase}/${key}/sm.webp 200w`,
+        `${cdnBase}/${key}/md.webp 400w`,
+        `${cdnBase}/${key}/lg.webp 800w`,
+        `${cdnBase}/${key}/xl.webp 1600w`,
+      ].join(', ')
+    );
+    // A 600px picture: lg and xl are both 600 wide, so only one is listed.
+    expect(pageImageSrcset({ key, w: 600, h: 400 }, cdnBase)).toBe(
+      [
+        `${cdnBase}/${key}/sm.webp 200w`,
+        `${cdnBase}/${key}/md.webp 400w`,
+        `${cdnBase}/${key}/lg.webp 600w`,
+      ].join(', ')
+    );
+  });
+
+  it('never offers xl to a reference without its size', () => {
+    expect(pageImageSrcset({ key }, cdnBase)).not.toContain('xl.webp');
+    expect(pageImageSrcset({ key }, null)).toBe('');
+    expect(pageImageSrcset('not a ref', cdnBase)).toBe('');
+  });
+
+  it.each([
+    [{ key, w: 0, h: 10 }],
+    [{ key, w: 10.5, h: 10 }],
+    [{ key, w: '100', h: 100 }],
+    [{ key, w: 100 }],
+  ])('reads no size from %p', (ref) => {
+    expect(readSize(ref)).toBeNull();
+  });
+});
+
+describe('readFocus — the focal point (Codex-61zsk.53)', () => {
+  const key = 'landing-pages/page-1/images/image-1';
+
+  it('reads a stored point', () => {
+    expect(readFocus({ key, focus: { x: 64, y: 36 } })).toEqual({
+      x: 64,
+      y: 36,
+    });
+  });
+
+  it('rounds to whole percent and clamps to the frame', () => {
+    expect(readFocus({ key, focus: { x: 64.4, y: 120 } })).toEqual({
+      x: 64,
+      y: 100,
+    });
+    expect(readFocus({ key, focus: { x: -5, y: 0.6 } })).toEqual({
+      x: 0,
+      y: 1,
+    });
+  });
+
+  it.each([
+    [{ key }],
+    [{ key, focus: null }],
+    [{ key, focus: { x: '50', y: 20 } }],
+    [{ key, focus: { x: Number.NaN, y: 20 } }],
+    [{ key, focus: { y: 20 } }],
+    [null],
+  ])('falls back to the centre for %p', (ref) => {
+    expect(readFocus(ref)).toEqual({ x: 50, y: 50 });
   });
 });

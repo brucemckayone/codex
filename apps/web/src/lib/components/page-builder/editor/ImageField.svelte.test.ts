@@ -320,6 +320,57 @@ describe('ImageField', () => {
     });
   });
 
+  describe('the picture’s own fields: focal point and size (Codex-61zsk.53)', () => {
+    const PICTURE = { key: KEY, focus: { x: 64, y: 36 }, w: 2400, h: 1600 };
+
+    it('keeps them when the description is typed, and when it is cleared', () => {
+      const { writes } = render({ ...PICTURE });
+      const input = altInput();
+      input!.value = 'A lake at dawn';
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      expect(writes.at(-1)).toEqual({ ...PICTURE, alt: 'A lake at dawn' });
+      input!.value = '';
+      input!.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      expect(writes.at(-1)).toEqual(PICTURE);
+    });
+
+    it('keeps them when a decorative field drops its words', () => {
+      const { writes } = render(
+        { ...PICTURE, alt: 'A lake' },
+        { decorative: true }
+      );
+      (
+        document.body.querySelector('[role="switch"]') as HTMLButtonElement
+      ).click();
+      flushSync();
+      expect(writes).toEqual([PICTURE]);
+    });
+
+    it('stores the uploaded picture’s size, and drops the old picture’s focal point', async () => {
+      const { writes } = render({ ...PICTURE, alt: 'A lake' });
+      remote.next.result = {
+        outcome: 'uploaded',
+        key: `${KEY}-new`,
+        url: '/preview.webp',
+        width: 3000,
+        height: 2000,
+      };
+      await submit();
+      expect(writes).toEqual([
+        { key: `${KEY}-new`, alt: 'A lake', w: 3000, h: 2000 },
+      ]);
+    });
+
+    it('stores no size when an older worker sends none', async () => {
+      const { writes } = render(undefined);
+      remote.next.result = { outcome: 'uploaded', key: KEY, url: '/p.webp' };
+      await submit();
+      expect(writes).toEqual([{ key: KEY }]);
+    });
+  });
+
   it('gives each field its own form instance', () => {
     render(undefined);
     const first = remote.keys[0];

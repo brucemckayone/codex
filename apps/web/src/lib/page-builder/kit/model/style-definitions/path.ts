@@ -35,6 +35,11 @@ export const PATH: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'columns',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   schemes: {
     hero: 'base',
@@ -54,6 +59,12 @@ export const PATH: StyleDefinition = {
     pricing: 'base',
     faq: 'soft',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The recommended way in is the other ground, ringed in the route's colour
   // (style-path.css); on a coloured band it is the plain ground.

@@ -25,8 +25,9 @@ describe('SECTION_LAYOUTS / SECTION_TYPE_IDS', () => {
   it('derives the type ids from the layout record keys, in declaration order', () => {
     expect(SECTION_TYPE_IDS).toEqual(Object.keys(SECTION_LAYOUTS));
     // 14 from 01-contract §2, + story and gallery (03-expressive-contract §3),
-    // + inside, "What's inside" (03 X63, Codex-61zsk.52).
-    expect(SECTION_TYPE_IDS).toHaveLength(17);
+    // + inside, "What's inside" (03 X63, Codex-61zsk.52), + the four simple
+    // sections, picture, heading, break and button (03 X64, Codex-61zsk.53).
+    expect(SECTION_TYPE_IDS).toHaveLength(21);
   });
 
   it("every type's layout list is non-empty", () => {

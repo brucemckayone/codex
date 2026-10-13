@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { urlSchema } from '../primitives';
 
 /**
  * The page kit's v2 vocabulary — the zod TWIN of
@@ -81,10 +82,78 @@ export const SECTION_LAYOUTS = {
   gallery: ['mosaic', 'strip', 'grid'],
   // "What's inside": every practice as a card to swipe through (Codex-61zsk.52).
   inside: ['carousel'],
+  // The simple one-job sections (Codex-61zsk.53, 03 X64): each joins the
+  // neighbour it serves rather than starting a band of its own.
+  picture: ['contained', 'full', 'beside'],
+  heading: ['start', 'center'],
+  break: ['space'],
+  button: ['stack', 'row'],
 } as const satisfies Record<string, readonly [string, ...string[]]>;
 
 export type SectionTypeId = keyof typeof SECTION_LAYOUTS;
 export const SECTION_TYPE_IDS = Object.keys(SECTION_LAYOUTS) as SectionTypeId[];
+
+/**
+ * Where a Button section goes (03 X64). Twin of `ids.ts` `BUTTON_ACTION_IDS`.
+ * Validated at the write boundary by {@link buttonActionSchema}.
+ */
+export const BUTTON_ACTION_IDS = [
+  'join',
+  'section',
+  'preview',
+  'link',
+] as const;
+export type ButtonActionId = (typeof BUTTON_ACTION_IDS)[number];
+
+/** The longest link a Button may hold. */
+export const BUTTON_HREF_MAX = 2000;
+
+/**
+ * The one rule for a Button's link (03 X64): a full https address with a
+ * host and no credentials. Never `http:`, `javascript:`, `data:` or a bare
+ * path. The renderer's `isButtonHref` (web, no zod) applies the same rule to
+ * what it reads, and a parity test holds the two together.
+ */
+export function isButtonHref(value: string): boolean {
+  if (value.length > BUTTON_HREF_MAX) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname.length > 0 &&
+      url.username === '' &&
+      url.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A Button section's action (`props.action`, 03 X64), checked where it is
+ * written. A link must pass {@link isButtonHref}; a section target is a
+ * section id on the same page (the renderer checks it still exists, and
+ * hides the button on the live page when it does not).
+ */
+export const buttonActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('join') }).strict(),
+  z
+    .object({ kind: z.literal('section'), target: z.string().min(1).max(100) })
+    .strict(),
+  z.object({ kind: z.literal('preview') }).strict(),
+  z
+    .object({
+      kind: z.literal('link'),
+      // `urlSchema` (http/https, no script or data URLs), narrowed to the
+      // Button's own rule.
+      href: urlSchema.refine(
+        isButtonHref,
+        'A button link must be a full web address that starts with https://'
+      ),
+    })
+    .strict(),
+]);
+export type ButtonActionBody = z.infer<typeof buttonActionSchema>;
 
 // ─── Write-boundary schemas ─────────────────────────────────────────────────
 

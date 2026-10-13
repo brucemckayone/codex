@@ -374,3 +374,12 @@
 :is(.lp, #lp-style)[data-lp-style='poster'] .lp-section[data-lp-type='cta'] {
   --lp-build-heading: track;
 }
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break is a thick printed rule across the column, in the strong
+   tone every printed line here takes. */
+:is(.lp, #lp-style)[data-lp-style='poster'] .lp-break__mark {
+  inline-size: 100%;
+  block-size: calc(var(--lp-rule) * 2);
+  background: var(--lp-line);
+}

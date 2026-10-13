@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 import {
+  buttonActionSchema,
   COLOUR_SCHEME_IDS,
   PAGE_STYLE_IDS,
   pageDialsSchema,
@@ -327,38 +328,55 @@ export type SectionDesignBody = z.infer<typeof sectionDesignSchema>;
  * declares `sections: PageSection[]`, so any drift between this schema and the
  * frozen contract fails `pnpm typecheck` at that call site.
  */
-export const pageSectionSchema = z.object({
-  // Capped like every other string here; the builder mints uuids (36 chars).
-  id: z.string().min(1).max(100),
-  type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
-  enabled: z.boolean(),
-  variant: z.string().max(60).optional(),
-  name: z.string().max(200).optional(),
-  design: sectionDesignSchema.optional(),
-  // BOUNDED, not merely typed (Codex-us9ay residual 1). `props` is a passthrough
-  // record by design — its per-type shape belongs to the renderer + editor, and
-  // `render/coerce.ts` treats every field as untrusted at the read boundary — but
-  // "no shape" was being read as "no size", so a management-role client could
-  // write an arbitrarily large document into `landing_pages.sections`.
-  //
-  // A SERIALISED-BYTE cap rather than a key count: the cost is the jsonb we store
-  // and re-serialise on every builder load, and a key count bounds neither one
-  // long string nor a deep nested array. 16KB is ~70x the largest section this
-  // platform has ever stored (measured: 228 bytes across all 28 stored sections),
-  // so it cannot reject a real page while still refusing a pasted document.
-  //
-  // The `.default({})` stays OUTERMOST-in-effect: `.refine` appends a check rather
-  // than wrapping, so the INPUT type is still widened (the key is optional for the
-  // caller) while the OUTPUT stays required — which is what keeps the inferred body
-  // assignable to the service's `sections: PageSection[]` with no boundary cast.
-  props: z
-    .record(z.string(), z.unknown())
-    .default({})
-    .refine(
-      (props) => JSON.stringify(props).length <= 16_384,
-      'Section props are too large (16KB limit)'
-    ),
-});
+export const pageSectionSchema = z
+  .object({
+    // Capped like every other string here; the builder mints uuids (36 chars).
+    id: z.string().min(1).max(100),
+    type: z.enum(SECTION_TYPE_IDS as [SectionTypeId, ...SectionTypeId[]]),
+    enabled: z.boolean(),
+    variant: z.string().max(60).optional(),
+    name: z.string().max(200).optional(),
+    design: sectionDesignSchema.optional(),
+    // BOUNDED, not merely typed (Codex-us9ay residual 1). `props` is a passthrough
+    // record by design — its per-type shape belongs to the renderer + editor, and
+    // `render/coerce.ts` treats every field as untrusted at the read boundary — but
+    // "no shape" was being read as "no size", so a management-role client could
+    // write an arbitrarily large document into `landing_pages.sections`.
+    //
+    // A SERIALISED-BYTE cap rather than a key count: the cost is the jsonb we store
+    // and re-serialise on every builder load, and a key count bounds neither one
+    // long string nor a deep nested array. 16KB is ~70x the largest section this
+    // platform has ever stored (measured: 228 bytes across all 28 stored sections),
+    // so it cannot reject a real page while still refusing a pasted document.
+    //
+    // The `.default({})` stays OUTERMOST-in-effect: `.refine` appends a check rather
+    // than wrapping, so the INPUT type is still widened (the key is optional for the
+    // caller) while the OUTPUT stays required — which is what keeps the inferred body
+    // assignable to the service's `sections: PageSection[]` with no boundary cast.
+    props: z
+      .record(z.string(), z.unknown())
+      .default({})
+      .refine(
+        (props) => JSON.stringify(props).length <= 16_384,
+        'Section props are too large (16KB limit)'
+      ),
+  })
+  .superRefine((section, ctx) => {
+    // The one prop this schema DOES shape (03 X64): a Button's action decides
+    // where a visitor is sent, so a link that is not https, or an action
+    // outside the proven set, is refused here rather than trusted to the
+    // renderer alone. The editor only ever writes a valid one.
+    if (section.type !== 'button' || section.props.action === undefined) return;
+    const action = buttonActionSchema.safeParse(section.props.action);
+    if (action.success) return;
+    for (const issue of action.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        message: issue.message,
+        path: ['props', 'action', ...issue.path.map(String)],
+      });
+    }
+  });
 
 /**
  * Page-level SEO / share metadata (`PageBuilderState.seo`) — the SEO panel's

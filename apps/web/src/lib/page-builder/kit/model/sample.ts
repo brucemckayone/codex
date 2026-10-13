@@ -341,7 +341,8 @@ function eachEntry(value: unknown, remake: (entry: Entry) => Entry): unknown {
 
 /**
  * The page with a picture in every picture field — each moment of a story,
- * each benefit, the text's image, and a gallery holding every picture — so a
+ * each benefit, the text's image, a Picture section's own (03 X64), and a
+ * gallery holding every picture — so a
  * Style's frames, mosaics and strips can be judged on real photographs. The
  * pictures are dealt in turn down the page, so no section repeats one while
  * another goes unused. Only a caller whose pictures really exist passes any
@@ -383,6 +384,7 @@ export function withSamplePictures(
             },
           };
         case 'text':
+        case 'picture':
           return { ...section, props: { ...props, image: next().image } };
         case 'gallery':
           return {

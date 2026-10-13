@@ -42,7 +42,7 @@ import {
 } from '@codex/database/schema';
 import type { OrphanedFileService } from '@codex/image-processing';
 import {
-  pageIdOfPageImageKey,
+  droppedPageImageKeys,
   pageImageObjectKeys,
   recordOrphansOrLog,
 } from '@codex/image-processing';
@@ -211,47 +211,6 @@ function resolveFilmsAttached(
     reel: servable && course.previewVideoMediaId !== null,
     hero: servable && course.heroMediaId !== null,
   };
-}
-
-/**
- * Deep-scan arbitrary `sections` content for page-image keys (contract
- * amendment A3, Codex-61zsk.10).
- *
- * NO PER-TYPE SCHEMA KNOWLEDGE, deliberately. A page image is referenced as
- * an `ImageRef = { key: string; alt?: string }` from anywhere a block author
- * chooses — `props.image`, `props.background`, `items[].image`, one nested
- * inside another — and this file has no catalogue of block prop shapes (that
- * lives in `apps/web`'s page-kit). So rather than name known keys, this walks
- * every string LEAF in the tree and keeps the ones that are EXACTLY a key the
- * upload route mints (`pageIdOfPageImageKey`). Page copy, a CTA href or a
- * string that merely shares the prefix is inert.
- *
- * Any page's key counts, not only this page's: a duplicated page renders its
- * source's keys, and dropping one must still nominate it. Nominating is all a
- * save does. The sweep deletes a page image only after a grace period, and
- * only if no page in the key's own org references it
- * (`OrphanedFileService.isPageImageReferenced`), so a key pasted in from
- * another org can neither keep that org's image nor lose it.
- *
- * Takes `unknown` rather than `PageSection[]` on purpose: it is called once
- * for the OLD stored value (whatever an earlier, possibly different, version
- * of the type persisted) and once for the NEW input, and a shape it does not
- * recognise should be walked past, never thrown on.
- */
-function collectPageImageKeys(
-  value: unknown,
-  into: Set<string> = new Set()
-): Set<string> {
-  if (typeof value === 'string') {
-    if (pageIdOfPageImageKey(value)) into.add(value);
-  } else if (Array.isArray(value)) {
-    for (const item of value) collectPageImageKeys(item, into);
-  } else if (value !== null && typeof value === 'object') {
-    for (const nested of Object.values(value)) {
-      collectPageImageKeys(nested, into);
-    }
-  }
-  return into;
 }
 
 /**
@@ -2184,7 +2143,12 @@ export class CourseJourneyService extends BaseService {
     // is referenced from ANYWHERE in `sections` as an `ImageRef = { key,
     // alt? }`, with no per-type schema knowledge, so finding what changed
     // means deep-scanning both trees for page-image keys rather than diffing
-    // named columns — see {@link collectPageImageKeys}.
+    // named columns — see `droppedPageImageKeys` (`@codex/image-processing`,
+    // beside the key rules the upload and the sweep share). Any page's key
+    // counts, not only this page's: a duplicated page renders its source's
+    // keys, and dropping one must still nominate it. The sweep deletes one
+    // only if no page in the key's own org references it, so a key pasted
+    // in from another org can neither keep that org's image nor lose it.
     //
     // What this queues is a NOMINATION, not a verdict. Undo, a duplicated
     // page and two overlapping saves can all put a reference back after the
@@ -2207,9 +2171,7 @@ export class CourseJourneyService extends BaseService {
     // outer try here is defensive insurance around the scan itself, not
     // around the record call.
     try {
-      const oldKeys = collectPageImageKeys(oldSections);
-      const newKeys = collectPageImageKeys(record.sections);
-      const removedKeys = [...oldKeys].filter((key) => !newKeys.has(key));
+      const removedKeys = droppedPageImageKeys(oldSections, record.sections);
 
       if (removedKeys.length === 0) {
         return;

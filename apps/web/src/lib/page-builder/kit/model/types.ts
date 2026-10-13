@@ -65,6 +65,14 @@ export interface ResolvedSection {
   spacing: SectionSpacingId;
   /** 1 for the page's single hero heading, 2 everywhere else. */
   headingLevel: 1 | 2;
+  /**
+   * A simple section's join (03 X64, `joinSimpleSections`): it takes the
+   * ground of the section `above` (a Picture, Break or Button finishing that
+   * band) or `below` (a Heading announcing the next one). Absent for every
+   * ordinary section, and for a simple one that stands on its own: a colour
+   * the creator chose, or no neighbour it may join.
+   */
+  join?: 'above' | 'below';
 }
 
 // ─── Blocks ──────────────────────────────────────────────────────────────────
@@ -104,7 +112,9 @@ export interface BlockField {
     | 'list'
     | 'items'
     | 'media'
-    | 'image';
+    | 'image'
+    /** A Button's action (03 X64): where it goes, from the proven set. */
+    | 'action';
   inline?: boolean;
   placeholder?: string;
   maxLength?: number;
@@ -119,6 +129,13 @@ export interface BlockField {
    *  hides a field whose layout doesn't use it; the block never force-hides
    *  content the creator filled (layouts arrange, they don't censor). */
   layouts?: readonly string[];
+  /** The Styles this field applies to. Absent = every Style. A Break's mark
+   *  is offered only where the Style has one to draw (03 X64). */
+  styles?: readonly PageStyleId[];
+  /** `image` only: the layouts that crop this picture. The inspector offers
+   *  a focal point under the upload, live in these layouts and explained in
+   *  the others (03 X64). */
+  focalLayouts?: readonly string[];
 }
 
 export interface BlockLayout {
@@ -128,7 +145,9 @@ export interface BlockLayout {
 }
 
 /** Where a section type sits in the add-section gallery. */
-export type BlockGroup = 'opening' | 'story' | 'proof' | 'offer' | 'details';
+export type BlockGroup =
+  /** The simple one-job sections, first in the gallery (03 X64). */
+  'basics' | 'opening' | 'story' | 'proof' | 'offer' | 'details';
 
 /** Inputs for writing a new section's starter props. */
 export interface TemplateContext {

@@ -63,6 +63,7 @@
   import { readText } from './model/read';
   import {
     continuingSections,
+    foldForVisitors,
     resolveGroundBands,
     resolveSections,
     resolveStyle,
@@ -144,9 +145,21 @@
     if (holdsShader) return shaderTone.hold();
   });
   const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
-  const sections = $derived(resolveSections(page, { orgShader, grounds }));
+  // A visitor's page folds what nobody would see (03 X64): an empty Picture
+  // or Heading, a Button with nowhere to go. It happens before the bands
+  // resolve, so no band rule counts it. The canvas and stills keep them all.
+  const drawn = $derived(
+    edit || still
+      ? page
+      : foldForVisitors(page, {
+          previewFilm: context.course.filmsAttached?.reel === false ? false : undefined,
+        })
+  );
+  const sections = $derived(resolveSections(drawn, { orgShader, grounds }));
   const propsById = $derived(new Map(page.sections.map((s) => [s.id, s.props])));
-  const continuing = $derived(continuingSections(page, sections));
+  const continuing = $derived(continuingSections(drawn, sections));
+  // Each drawn section's anchor, for a Button that jumps to one (03 X64).
+  const anchors = $derived(new Map(sections.map((s) => [s.id, s.anchor])));
   const edits = $derived(
     new Map<string, BlockEdit | null>(
       sections.map((s) => [
@@ -180,6 +193,9 @@
     },
     get offerProps() {
       return offerProps;
+    },
+    anchorOf(id: string) {
+      return anchors.get(id);
     },
   });
 

@@ -40,7 +40,7 @@ export const ctaDefinition: BlockDefinition<CtaProps> = {
     layout(
       'compact',
       'Slim strip',
-      'One line and a button, to sit between other sections.'
+      'A band of its own: one line and a button.'
     ),
   ],
   fields: [

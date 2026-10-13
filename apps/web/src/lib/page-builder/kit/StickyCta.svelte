@@ -3,7 +3,7 @@
 
   The page's standing way in, for a reader who has scrolled past the hero's
   button. It appears once the first section leaves the viewport and yields
-  whenever a pricing or call-to-action section is on screen — it stands in for
+  whenever a pricing, call-to-action or Button section is on screen — it stands in for
   a button the reader cannot see, so it never covers one they can.
 
   On a phone it is a bar above the org layout's fixed bottom nav (hidden from
@@ -52,7 +52,10 @@
       const page = bar.parentElement?.querySelector(':scope > .lp-page');
       if (!page || typeof IntersectionObserver === 'undefined') return;
       const opening = page.querySelector('[data-lp-type="hero"]') ?? page.firstElementChild;
-      const offers = page.querySelectorAll('[data-lp-type="pricing"], [data-lp-type="cta"]');
+      // A Button section is an ask too (03 X64): the bar never shows beside it.
+      const offers = page.querySelectorAll(
+        '[data-lp-type="pricing"], [data-lp-type="cta"], [data-lp-type="button"]'
+      );
       const onScreen = new WeakSet<Element>();
       let count = 0;
 

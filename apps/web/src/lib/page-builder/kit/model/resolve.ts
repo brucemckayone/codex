@@ -13,6 +13,9 @@
  * A dial moves only what the Style would have chosen (03 X61): a creator's
  * own choice in a section still wins over the page's dial.
  */
+
+import { isImageRef } from '../../page-images';
+import { readButtonAction } from './button-action';
 import {
   type ColourSchemeId,
   DEFAULT_PAGE_STYLE,
@@ -28,7 +31,7 @@ import {
   type SectionSpacingId,
   type SectionTypeId,
 } from './ids';
-import { hasHead } from './read';
+import { hasHead, readText } from './read';
 import { STYLES } from './styles';
 import type {
   KitPage,
@@ -125,11 +128,21 @@ function dialColour(
 function dialBand(
   styled: readonly ColourSchemeId[],
   index: number,
-  colour: PageDialStep<'colour'> | undefined
+  colour: PageDialStep<'colour'> | undefined,
+  banded: readonly boolean[]
 ): ColourSchemeId {
   const dialled = dialColour(styled[index], colour);
   if (colour !== 'vivid' || dialled === styled[index]) return dialled;
-  const beside = [styled[index - 1], styled[index + 1]];
+  // Beside means the nearest band: a simple section between two bands takes
+  // one of theirs (03 X64), so a Picture under a brand hero does not hide the
+  // hero from the band below it. (`lastIndexOf` reads a negative start from
+  // the end, so the first section looks before itself only by this guard.)
+  const before = index > 0 ? banded.lastIndexOf(true, index - 1) : -1;
+  const after = banded.indexOf(true, index + 1);
+  const beside = [
+    before >= 0 ? styled[before] : undefined,
+    after >= 0 ? styled[after] : undefined,
+  ];
   return beside.some((scheme) => scheme === 'brand' || scheme === 'contrast')
     ? styled[index]
     : dialled;
@@ -170,24 +183,34 @@ export function resolveSections(
   const styled = rendered.map((section) =>
     resolveScheme(section.type, section.design, style, options)
   );
+  const banded = rendered.map((section) => !SIMPLE_SECTIONS.has(section.type));
   const seen = new Map<SectionTypeId, number>();
   let heroTaken = false;
   let previousScheme: ColourSchemeId | null = null;
 
-  return rendered.map((section, index) => {
+  const resolved = rendered.map((section, index) => {
     const count = (seen.get(section.type) ?? 0) + 1;
     seen.set(section.type, count);
     const isPageHeading = section.type === 'hero' && !heroTaken;
     if (isPageHeading) heroTaken = true;
 
     const layout = resolveLayout(section.type, section.variant, style);
+    // A simple section is transparent to the bands (03 X64): it never
+    // advances `previousScheme`, so dropping a Picture between a brand hero
+    // and a contrast problem cannot stop the problem stepping back. It takes
+    // no dial either: it joins a neighbour's band, already dialled.
+    const simple = SIMPLE_SECTIONS.has(section.type);
     const chosen = isColourSchemeId(section.design?.scheme);
-    const scheme = keepBandsApart(
-      chosen ? styled[index] : dialBand(styled, index, dials?.colour),
-      previousScheme,
-      chosen
-    );
-    previousScheme = scheme;
+    const scheme = simple
+      ? styled[index]
+      : keepBandsApart(
+          chosen
+            ? styled[index]
+            : dialBand(styled, index, dials?.colour, banded),
+          previousScheme,
+          chosen
+        );
+    if (!simple) previousScheme = scheme;
     return {
       id: section.id,
       anchor: count === 1 ? section.type : `${section.type}-${count}`,
@@ -197,8 +220,128 @@ export function resolveSections(
       scheme,
       spacing: resolveSpacing(section.design, layout, dials?.spacing),
       headingLevel: isPageHeading ? 1 : 2,
-    };
+    } satisfies ResolvedSection;
   });
+  return joinSimpleSections(resolved, page);
+}
+
+// ── The simple sections (03 X64, Codex-61zsk.53) ────────────────────────────
+
+/**
+ * The one-job sections: a Picture, a Heading, a Break and a Button. None
+ * starts a band of its own. Each joins the neighbour it serves: the first
+ * three finish the band above, a Heading announces the band below.
+ */
+export const SIMPLE_SECTIONS: ReadonlySet<SectionTypeId> =
+  new Set<SectionTypeId>(['picture', 'heading', 'break', 'button']);
+
+/** The props each section carries, for the rules that read them. */
+function propsOf(page: KitPage): (id: string) => Record<string, unknown> {
+  const props = new Map(page.sections.map((s) => [s.id, s.props ?? {}]));
+  return (id) => props.get(id) ?? {};
+}
+
+/**
+ * Whether a section stands on a picture of its own (`props.background`,
+ * counted when set at all). A simple section never draws one
+ * (`SectionShell`), so a stray value there counts for nothing.
+ */
+function onMediaOf(page: KitPage): (section: ResolvedSection) => boolean {
+  const props = propsOf(page);
+  return (section) =>
+    !SIMPLE_SECTIONS.has(section.type) && props(section.id).background != null;
+}
+
+/**
+ * A full-width Picture with no caption runs to its band's foot (`kit.css`),
+ * so the section under it never gives up its top padding: nothing may sit
+ * flush against a picture's bleed edge.
+ */
+function bleedsToFoot(
+  page: KitPage
+): (section: ResolvedSection | undefined) => boolean {
+  const props = propsOf(page);
+  return (section) =>
+    section?.type === 'picture' &&
+    section.layout === 'full' &&
+    readText(props(section.id), 'caption') === undefined;
+}
+
+/**
+ * Each run of simple sections takes the ground of the ordinary sections
+ * around it (03 X64):
+ *
+ *   - everything before the run's first Heading joins A, the section above;
+ *   - everything from that Heading on joins B, the section below, because a
+ *     heading announces what follows (Heading, Picture, Stages: the Picture
+ *     belongs to the stages' part);
+ *   - with no B (the page's end), the Heading's part falls back to A.
+ *
+ * X58's guards hold: nothing joins a section with its own backdrop (the
+ * hero, the closing ask), one on a picture, or one on the shader. An
+ * up-joiner that cannot join A stands on its own (its Style default, padded
+ * both sides), except a Break, which then takes B's ground: a Break never
+ * has a ground of its own, so it can never be an empty band. A Heading that
+ * can join neither stands on its own.
+ *
+ * A colour the creator chose wins: that section is not joined, keeps its
+ * padding on both sides, and nothing joins it. A Break has no colour control,
+ * so a stored scheme on one is ignored.
+ */
+export function joinSimpleSections(
+  sections: readonly ResolvedSection[],
+  page: KitPage
+): ResolvedSection[] {
+  const designs = new Map(page.sections.map((s) => [s.id, s.design]));
+  const onMedia = onMediaOf(page);
+  const chosen = (section: ResolvedSection) =>
+    section.type !== 'break' &&
+    isColourSchemeId(designs.get(section.id)?.scheme);
+  const joinable = (section: ResolvedSection | undefined) =>
+    section !== undefined &&
+    !SIMPLE_SECTIONS.has(section.type) &&
+    section.scheme !== 'atmosphere' &&
+    !OWN_BACKDROP.has(section.type) &&
+    !onMedia(section);
+  const free = (section: ResolvedSection | undefined) =>
+    section !== undefined &&
+    SIMPLE_SECTIONS.has(section.type) &&
+    !chosen(section);
+
+  const out = sections.map((section) => ({ ...section }));
+  const take = (
+    section: ResolvedSection,
+    from: ResolvedSection,
+    join: 'above' | 'below'
+  ) => {
+    section.scheme = from.scheme;
+    section.join = join;
+  };
+
+  for (let start = 0; start < out.length; start++) {
+    if (!free(out[start])) continue;
+    let end = start;
+    while (free(out[end + 1])) end++;
+    const run = out.slice(start, end + 1);
+    const above = out[start - 1];
+    const below = out[end + 1];
+    const a = joinable(above) ? above : undefined;
+    const b = joinable(below) ? below : undefined;
+
+    const heading = run.findIndex((section) => section.type === 'heading');
+    const up = heading === -1 ? run : run.slice(0, heading);
+    const down = heading === -1 ? [] : run.slice(heading);
+    for (const section of up) {
+      if (a) take(section, a, 'above');
+      else if (section.type === 'break' && b) take(section, b, 'below');
+    }
+    for (const section of down) {
+      if (b) take(section, b, 'below');
+      else if (a) take(section, a, 'above');
+    }
+    start = end;
+  }
+  return out;
 }
 
 /**
@@ -266,25 +409,97 @@ export function continuingSections(
   page: KitPage,
   sections: readonly ResolvedSection[]
 ): ReadonlySet<string> {
-  const props = new Map(page.sections.map((s) => [s.id, s.props ?? {}]));
-  const onMedia = (id: string) => props.get(id)?.background != null;
+  const props = propsOf(page);
+  const onMedia = onMediaOf(page);
+  const bleeds = bleedsToFoot(page);
   const continuing = new Set<string>();
   sections.forEach((section, index) => {
     const above = sections[index - 1];
+    // Nothing sits flush against a picture's bleed edge (03 X64).
+    if (!above || bleeds(above) || section.scheme !== above.scheme) return;
     if (
-      above &&
-      HEADED_BY_WORDS.has(section.type) &&
-      !hasHead(props.get(section.id) ?? {}) &&
-      section.scheme === above.scheme &&
-      section.scheme !== 'atmosphere' &&
-      !OWN_BACKDROP.has(above.type) &&
-      !onMedia(section.id) &&
-      !onMedia(above.id)
+      // A joined Picture, Break or Button finishes the band above, and
+      // everything after a joined Heading belongs to the part it opens. A
+      // Heading itself keeps its top: a new part starts there (03 X64).
+      (section.join !== undefined && section.type !== 'heading') ||
+      // The section a joined Heading announces gives up its top padding,
+      // even when it has a head of its own (03 X64).
+      // A Break is space in front of that part, so the part keeps its own.
+      (!SIMPLE_SECTIONS.has(section.type) &&
+        above.join === 'below' &&
+        above.type !== 'break') ||
+      // No words of its own on the ground above (03 X58).
+      (HEADED_BY_WORDS.has(section.type) &&
+        !hasHead(props(section.id)) &&
+        section.scheme !== 'atmosphere' &&
+        !OWN_BACKDROP.has(above.type) &&
+        !onMedia(section) &&
+        !onMedia(above))
     ) {
       continuing.add(section.id);
     }
   });
   return continuing;
+}
+
+/** What a visitor's page knows of its films, for {@link foldForVisitors}. */
+export interface FoldOptions {
+  /** `false` when the page certainly has no preview film (`filmsAttached.reel`). */
+  readonly previewFilm?: boolean;
+}
+
+/**
+ * The sections a VISITOR's page draws: an empty Picture (no picture) or
+ * Heading (no title) is folded here, before the bands are resolved, so the
+ * band rules never count a section nobody can see (03 X64). So is a Button
+ * whose action has nowhere to go: a section that is gone or hidden, a
+ * preview film the page does not have, or a link it cannot trust. Its label
+ * was written for that destination, so it is hidden rather than sent to the
+ * checkout under the wrong words. The canvas and still thumbnails keep every
+ * section: there an empty one draws its prompt, and a dead Button its
+ * warning.
+ */
+export function foldForVisitors(
+  page: KitPage,
+  options: FoldOptions = {}
+): KitPage {
+  const shown = page.sections.filter((section) => {
+    const props = section.props ?? {};
+    if (section.type === 'picture') return isImageRef(props.image);
+    if (section.type === 'heading')
+      return readText(props, 'heading') !== undefined;
+    return true;
+  });
+  const drawn = new Set(
+    shown
+      .filter((s) => s.enabled !== false && isSectionTypeId(s.type))
+      .map((s) => s.id)
+  );
+  return {
+    ...page,
+    sections: shown.filter(
+      (section) =>
+        section.type !== 'button' ||
+        buttonGoes(section.props ?? {}, section.id, drawn, options)
+    ),
+  };
+}
+
+/** Whether a Button's action has somewhere to go on the visitor's page. */
+function buttonGoes(
+  props: Record<string, unknown>,
+  id: string,
+  drawn: ReadonlySet<string>,
+  options: FoldOptions
+): boolean {
+  if (props.action === undefined) return true;
+  const action = readButtonAction(props.action);
+  if (!action) return false;
+  if (action.kind === 'section') {
+    return action.target !== id && drawn.has(action.target);
+  }
+  if (action.kind === 'preview') return options.previewFilm !== false;
+  return true;
 }
 
 /** The scheme a featured card renders in, inside a section of `scheme`. */

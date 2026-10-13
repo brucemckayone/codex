@@ -282,3 +282,12 @@
     gap: clamp(var(--space-16), 22svh, calc(var(--space-32) * 1.5));
   }
 }
+
+/* ── the simple sections (03 X64) ────────────────────────────────────────── */
+/* A marked Break: a hairline in the mark ink that fades out at both ends,
+   like a light across the dark. */
+:is(.lp, #lp-style)[data-lp-style='cinematic'] .lp-break__mark {
+  inline-size: min(100%, calc(var(--lp-container) / 2));
+  block-size: var(--border-width);
+  background: linear-gradient(to right, transparent, var(--lp-mark-ink), transparent);
+}

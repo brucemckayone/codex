@@ -24,6 +24,11 @@ export const BOLD: StyleDefinition = {
     cta: 'band',
     stats: 'row',
     text: 'statement',
+    // The simple sections (03 X64).
+    picture: 'contained',
+    heading: 'start',
+    break: 'space',
+    button: 'stack',
   },
   // Slabs, not stripes. The brand colour where the page makes its three
   // loudest claims — the promise, the proof (the numbers), the ask — and its
@@ -51,6 +56,12 @@ export const BOLD: StyleDefinition = {
     pricing: 'base',
     faq: 'base',
     cta: 'brand',
+    // The simple sections take a neighbour's ground (03 X64,
+    // `joinSimpleSections`); this is where one stands when it cannot.
+    picture: 'base',
+    heading: 'base',
+    break: 'base',
+    button: 'base',
   },
   // The one filled card is a slab of the other pole: the inverse on the
   // ground, the ground on the inverse (a brand card there vanishes for a very

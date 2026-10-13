@@ -110,6 +110,9 @@
   --lp-container: 76rem;
   --lp-measure: 62ch;
   --lp-measure-lead: 44ch;
+  /* The tallest a Picture section stands in the column (03 X64): it narrows
+     instead, so a portrait never runs past a laptop screen. */
+  --lp-picture-tall: 45rem;
   --lp-gutter: clamp(var(--space-4), 4.5cqi, var(--space-12));
   --lp-gap: clamp(var(--space-6), var(--space-4) + 2cqi, var(--space-12));
   --lp-stack: clamp(var(--space-4), var(--space-3) + 0.8cqi, var(--space-6));
@@ -219,7 +222,7 @@
   position: relative;
   isolation: isolate;
   overflow: clip;
-  padding-block: var(--lp-pad-start) var(--lp-pad);
+  padding-block: var(--lp-pad-start) var(--lp-pad-end);
   background: var(--lp-bg);
   color: var(--lp-ink);
   --lp-pad: var(--lp-pad-regular);
@@ -227,6 +230,9 @@
      Anything placed from the top of a section that can continue reads this,
      not `--lp-pad`. */
   --lp-pad-start: var(--lp-pad);
+  /* Its foot: the spacing too, unless the section ends flush (a Break, a
+     full-width picture, 03 X64). `--lp-pad` stays the rung other rules read. */
+  --lp-pad-end: var(--lp-pad);
   /* The content column `.lp-inner` sets, for what is sized against it (a
      heading's fit, 03 X62). It is declared on the section because a Style can
      re-set the gutter or the container there, and `cqi` resolves where it is
@@ -247,6 +253,35 @@
    above's foot is the whole joint. */
 .lp-section[data-lp-continues] {
   --lp-pad-start: 0px;
+}
+
+/* A Break is its rung and nothing else (03 X64): no padding of its own, so
+   the pause is exactly one Small, Medium or Large step. */
+.lp-section[data-lp-type='break'] {
+  --lp-pad-start: 0px;
+  --lp-pad-end: 0px;
+}
+
+/* In a Style whose sections rise into the one above along an edge (a curve,
+   an angle: `surfaces.css`), the next section covers the Break's foot to the
+   edge's depth, and a mark centred in the whole step was cut by it (Soft's
+   pebbles, Poster's rule). A mark is centred in what the cut leaves; the
+   pause stays one step. */
+.lp-section[data-lp-type='break'] .lp-break[data-mark] {
+  padding-block-end: var(--_edge-d, 0px);
+}
+
+/* A full-width picture runs to its band's foot; with a caption under it the
+   foot is the compact rung, so the words never touch the next section. In a
+   Style whose sections rise into the one above along an edge (a curve, an
+   angle: `surfaces.css`), the foot is exactly that edge's depth, so the next
+   band's cut lands in padding and never on the photograph. */
+.lp-section[data-lp-type='picture'][data-lp-layout='full'] {
+  --lp-pad-end: var(--_edge-d, 0px);
+}
+
+.lp-section[data-lp-type='picture'][data-lp-layout='full']:has(.picture__caption) {
+  --lp-pad-end: var(--lp-pad-compact);
 }
 
 .lp-section:target,

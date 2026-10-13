@@ -152,6 +152,31 @@ describe('Media', () => {
     expect(plain?.hasAttribute('sizes')).toBe(false);
   });
 
+  // Codex-61zsk.53: a crop steered by the picture's focal point, and its
+  // shape known before it loads.
+  it('crops around the focal point it is given, and the centre without one', () => {
+    app = mount(Media, {
+      target: document.body,
+      props: {
+        image: '/a.webp',
+        focus: { x: 64, y: 36 },
+        intrinsic: { w: 2400, h: 1600 },
+      },
+    });
+    flushSync();
+    const img = document.body.querySelector('img');
+    expect(img?.style.objectPosition).toBe('64% 36%');
+    expect(img?.getAttribute('width')).toBe('2400');
+    expect(img?.getAttribute('height')).toBe('1600');
+    unmount(app);
+
+    app = mount(Media, { target: document.body, props: { image: '/a.webp' } });
+    flushSync();
+    const plain = document.body.querySelector('img');
+    expect(plain?.style.objectPosition).toBe('');
+    expect(plain?.hasAttribute('width')).toBe(false);
+  });
+
   it('loads the page’s largest picture first, an early one now but behind it, and the rest lazily', () => {
     const load = (props: Record<string, unknown>) => {
       app = mount(Media, {

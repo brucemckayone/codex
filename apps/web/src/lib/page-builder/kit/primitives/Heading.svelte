@@ -37,6 +37,8 @@
     build?: Build;
     id?: string;
     class?: string;
+    /** The canvas's faint words for an empty heading the creator types into. Never on the public page. */
+    placeholder?: string;
   }
 
   const {
@@ -49,6 +51,7 @@
     build,
     id,
     class: className,
+    placeholder,
   }: Props = $props();
 
   const tag = $derived(`h${level}`);
@@ -67,6 +70,7 @@
   style:--lp-heading-run-caps={run?.caps}
   style:--lp-heading-run-text={run?.text}
   style:--lp-heading-run-chars={run?.chars}
+  data-placeholder={edit && !text ? placeholder : undefined}
   {...attrs}>{text}</svelte:element
 >
 
@@ -79,6 +83,12 @@
     text-wrap: balance;
     overflow-wrap: break-word;
     hyphens: manual;
+  }
+
+  /* An empty heading on the canvas shows what to type, in the soft ink. */
+  .lp-heading[data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: var(--lp-ink-soft);
   }
 
   /* `--lp-display-scale` is a layout's hook (a split hero draws the display

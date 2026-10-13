@@ -123,7 +123,12 @@ function hero(id: string): PageSection {
   return { id, type: 'hero', enabled: true, props: { heading: id } };
 }
 
-function render(sections: PageSection[], selectedId: string) {
+function render(
+  sections: PageSection[],
+  selectedId: string,
+  style: string = 'bold',
+  mediaBaseUrl: string | null = null
+) {
   pageBuilder.open(PAGE_ID, {
     pageType: 'course',
     slug: 'quiet-hours',
@@ -132,7 +137,7 @@ function render(sections: PageSection[], selectedId: string) {
     subjectType: 'course',
     subjectId: 'course-1',
     brandOverrides: null,
-    design: { style: 'bold' },
+    design: { style },
     sections,
   } as PageBuilderState);
   pageBuilder.selectSection(selectedId);
@@ -149,7 +154,7 @@ function render(sections: PageSection[], selectedId: string) {
       get selectedId() {
         return pageBuilder.selectedSectionId;
       },
-      context: sampleContext(),
+      context: sampleContext({ mediaBaseUrl }),
       onDuplicate: vi.fn(),
       onToggle: vi.fn(),
       onDelete: vi.fn(),
@@ -209,7 +214,7 @@ describe('the background image, a control every section shares', () => {
   const backgroundControl = () =>
     document.body.querySelector<HTMLElement>('[data-control="background"]');
 
-  it('is offered exactly where the page draws one: every type but the hero and the call to action', () => {
+  it('is offered exactly where the page draws one: every type but the hero, the call to action and the four simple sections', () => {
     // Nothing here needs the layout thumbnails, so they never come on screen.
     vi.stubGlobal(
       'IntersectionObserver',
@@ -248,8 +253,12 @@ describe('the background image, a control every section shares', () => {
       app = null;
       document.body.innerHTML = '';
     }
+    // A simple section takes its neighbour's ground (03 X64): no picture of its own.
+    const simple = ['picture', 'heading', 'break', 'button'];
     expect(offered).toEqual(
-      SECTION_TYPE_IDS.filter((t) => t !== 'hero' && t !== 'cta')
+      SECTION_TYPE_IDS.filter(
+        (t) => t !== 'hero' && t !== 'cta' && !simple.includes(t)
+      )
     );
     expect(offered).toEqual(drawn);
   });
@@ -319,5 +328,192 @@ describe('the colour the canvas draws for the hero', () => {
     layout.org = org({ 'shader-preset': 'glow' }, '#D2C3A8');
     render([hero('h')], 'h');
     expect(swatches()).toEqual({ value: ['base'], default: ['base'] });
+  });
+});
+
+// ── The simple sections (03 X64, Codex-61zsk.53) ───────────────────────────
+
+describe('the inspector for a simple section', () => {
+  const section = (
+    id: string,
+    type: PageSection['type'],
+    props: Record<string, unknown> = {},
+    extra: Partial<PageSection> = {}
+  ): PageSection => ({ id, type, enabled: true, props, ...extra });
+  const problem = section('a', 'problem', { heading: 'Stuck?' });
+  const curriculum = section('b', 'curriculum', { heading: 'Six weeks' });
+  const note = (kind: string) =>
+    document.body
+      .querySelector<HTMLElement>(`[data-note="${kind}"]`)
+      ?.textContent?.trim();
+  const swatches = () => document.body.querySelectorAll('[data-scheme]').length;
+
+  it('says a Picture matches the section above, and offers it no background picture', () => {
+    render([problem, section('p', 'picture'), curriculum], 'p');
+    expect(note('join')).toBe('Matches the section above');
+    expect(swatches()).toBeGreaterThan(0);
+    expect(
+      document.body.querySelector('[data-control="background"]')
+    ).toBeNull();
+  });
+
+  it('says a Heading matches the section below, and with nothing below, why it joins the one above', () => {
+    render(
+      [problem, section('h', 'heading', { heading: 'Part two' }), curriculum],
+      'h'
+    );
+    expect(note('join')).toBe('Matches the section below');
+    expect(note('heading')).toBeUndefined();
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render([problem, section('h', 'heading', { heading: 'Part two' })], 'h');
+    expect(note('join')).toBe('Matches the section above');
+    expect(note('heading')).toContain(
+      'reads best right above the section it introduces'
+    );
+  });
+
+  it('a colour the creator picked is the section’s own', () => {
+    render(
+      [
+        problem,
+        section('p', 'picture', {}, { design: { scheme: 'accent' } }),
+        curriculum,
+      ],
+      'p'
+    );
+    expect(note('join')).toBeUndefined();
+    expect(note('own')).toContain('own colour');
+  });
+
+  it('a Break has no colour to pick, and says when the colour already changes or two pauses add up', () => {
+    render([problem, section('k', 'break'), curriculum], 'k');
+    expect(swatches()).toBe(0);
+    expect(document.body.textContent).toContain(
+      'A pause has no colour of its own'
+    );
+    // Bold: the problem is a contrast band, the curriculum the page.
+    const breakNotes = () =>
+      [...document.body.querySelectorAll('[data-note="break"]')].map(
+        (n) => n.textContent
+      );
+    expect(
+      breakNotes().some((t) =>
+        t?.includes('colour change already makes a pause')
+      )
+    ).toBe(true);
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render(
+      [problem, section('k', 'break'), section('k2', 'break'), curriculum],
+      'k'
+    );
+    expect(breakNotes().some((t) => t?.includes('Two pauses in a row'))).toBe(
+      true
+    );
+  });
+
+  it('offers a Break’s mark only in a Style that draws one', () => {
+    const markSwitch = () =>
+      [...document.body.querySelectorAll('.field__label')].some(
+        (label) => label.textContent === 'Show a small mark in the middle'
+      );
+    render([problem, section('k', 'break'), curriculum], 'k', 'bold');
+    expect(markSwitch()).toBe(true);
+    for (const style of ['clean', 'path']) {
+      unmount(app);
+      app = null;
+      pageBuilder.close();
+      render([problem, section('k', 'break'), curriculum], 'k', style);
+      expect(markSwitch(), style).toBe(false);
+    }
+  });
+
+  it('offers a picture’s focal point at full width, and explains it elsewhere', () => {
+    const image = { key: KEY, w: 1600, h: 1067 };
+    render(
+      [
+        problem,
+        section('p', 'picture', { image }, { variant: 'full' }),
+        curriculum,
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    const pad = document.body.querySelector<HTMLButtonElement>('.focus__pad');
+    expect(pad).not.toBeNull();
+    expect(
+      document.body.querySelector('.focus__readout')?.textContent
+    ).toContain('Point at 50% across, 50% down');
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
+    );
+    flushSync();
+    expect(stored('p')?.props.image).toEqual({
+      ...image,
+      focus: { x: 52, y: 50 },
+    });
+    pad?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        shiftKey: true,
+        bubbles: true,
+      })
+    );
+    flushSync();
+    expect(stored('p')?.props.image).toEqual({
+      ...image,
+      focus: { x: 52, y: 60 },
+    });
+    document.body.querySelector<HTMLButtonElement>('.focus__centre')?.click();
+    flushSync();
+    // The centre is the default: never stored, and the rest of the reference kept.
+    expect(stored('p')?.props.image).toEqual(image);
+
+    unmount(app);
+    app = null;
+    pageBuilder.close();
+    render(
+      [
+        problem,
+        section('p', 'picture', { image }, { variant: 'contained' }),
+        curriculum,
+      ],
+      'p',
+      'bold',
+      'https://cdn.test'
+    );
+    expect(document.body.querySelector('.focus__pad')).toBeNull();
+    expect(document.body.textContent).toContain('only matters at full width');
+  });
+
+  it('keeps a half-typed link out of the page, and writes it once it is a full https address', () => {
+    const link = { kind: 'link', href: 'https://example.com/a' };
+    render(
+      [problem, section('u', 'button', { action: link }), curriculum],
+      'u'
+    );
+    const input =
+      document.body.querySelector<HTMLInputElement>('input[type="url"]');
+    expect(input?.value).toBe(link.href);
+    const type = (value: string) => {
+      if (!input) return;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+    };
+    type('http://example.com');
+    expect(stored('u')?.props.action).toEqual(link);
+    expect(input?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.textContent).toContain('starts with https://');
+    type('https://example.com/b');
+    expect(stored('u')?.props.action).toEqual({
+      kind: 'link',
+      href: 'https://example.com/b',
+    });
+    expect(input?.hasAttribute('aria-invalid')).toBe(false);
   });
 });

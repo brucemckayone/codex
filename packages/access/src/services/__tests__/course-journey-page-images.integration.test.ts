@@ -28,7 +28,10 @@ import {
   organizations,
   orphanedImageFiles,
 } from '@codex/database/schema';
-import { OrphanedFileService } from '@codex/image-processing';
+import {
+  OrphanedFileService,
+  pageImageObjectKeys,
+} from '@codex/image-processing';
 import {
   createUniqueSlug,
   type Database,
@@ -149,11 +152,13 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
       brandOverrides: null,
     });
 
-    // The three OBJECTS, never the base key: nothing lives at the base key,
-    // so a sweep given it deletes nothing and marks the row done.
+    // Every OBJECT behind the key, never the base key: nothing lives at the
+    // base key, so a sweep given it deletes nothing and marks the row done.
+    // The objects are the upload's own list (`pageImageObjectKeys`), so a size
+    // added to it (xl, Codex-61zsk.13) is nominated with the rest.
     const orphans = await pendingOrphansFor(pageId);
     expect(orphans.map((orphan) => orphan.r2Key).sort()).toEqual(
-      [`${key}/lg.webp`, `${key}/md.webp`, `${key}/sm.webp`].sort()
+      pageImageObjectKeys(key).sort()
     );
     expect(orphans[0]).toMatchObject({
       imageType: 'page_image',
@@ -330,7 +335,7 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
 
     expect(
       (await pendingOrphansFor(copy.pageId)).map((row) => row.r2Key).sort()
-    ).toEqual([`${key}/lg.webp`, `${key}/md.webp`, `${key}/sm.webp`].sort());
+    ).toEqual(pageImageObjectKeys(key).sort());
   });
 
   it('ignores a string that only shares the prefix', async () => {
@@ -356,7 +361,10 @@ describe('Page image orphan scan (Codex-61zsk.10)', () => {
     await saveImages(orgId, page, keys);
     await saveImages(orgId, page, []);
 
-    expect(await pendingOrphansFor(page.pageId)).toHaveLength(300);
+    // The cap is on images; each is nominated as every object behind it.
+    expect(await pendingOrphansFor(page.pageId)).toHaveLength(
+      keys.slice(0, 100).flatMap((key) => pageImageObjectKeys(key)).length
+    );
   });
 
   // The sweep's side of the contract (OrphanedFileService), against the same

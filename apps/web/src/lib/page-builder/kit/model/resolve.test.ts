@@ -20,6 +20,7 @@ import {
   resolveSections,
   resolveSpacing,
   resolveStyle,
+  SIMPLE_SECTIONS,
 } from './resolve';
 import { STYLES } from './styles';
 import type { KitPage, KitSection } from './types';
@@ -258,10 +259,15 @@ describe('resolveSections', () => {
         ['starter', STYLES[style].starter],
         ['order', STYLES[style].order],
       ] as const) {
+        // The bands are the ORDINARY sections: a simple one takes the
+        // ground of the band it joins (03 X64), so it is that band, not a
+        // second one beside it. Its own joins are proven below.
         const schemes = resolveSections({
           design: { style },
           sections: types.map((type, i) => section({ id: `s${i}`, type })),
-        }).map((s) => s.scheme);
+        })
+          .filter((s) => !SIMPLE_SECTIONS.has(s.type))
+          .map((s) => s.scheme);
         for (let i = 1; i < schemes.length; i++) {
           const [above, below] = [schemes[i - 1], schemes[i]];
           const where = `${style} ${name} ${i}: ${above} → ${below}`;
@@ -632,6 +638,12 @@ describe("the page's dials (03 X61)", () => {
   });
   const schemes = (page: KitPage, orgShader?: boolean) =>
     resolveSections(page, { orgShader }).map((s) => s.scheme);
+  /** The page's bands: its ordinary sections. A simple one takes the band it
+   *  joins (03 X64), so it is that band, not a second one beside it. */
+  const bands = (page: KitPage) =>
+    resolveSections(page)
+      .filter((s) => !SIMPLE_SECTIONS.has(s.type))
+      .map((s) => s.scheme);
   const COLOURED: readonly ColourSchemeId[] = ['contrast', 'brand', 'accent'];
 
   it('leave a page that sets none exactly as its Style', () => {
@@ -655,8 +667,8 @@ describe("the page's dials (03 X61)", () => {
 
     it('vivid takes every soft tint up to the brand colour unless a band stands beside it', () => {
       for (const style of PAGE_STYLE_IDS) {
-        const before = schemes(whole(style));
-        const vivid = schemes(whole(style, { colour: 'vivid' }));
+        const before = bands(whole(style));
+        const vivid = bands(whole(style, { colour: 'vivid' }));
         before.forEach((scheme, i) => {
           if (scheme !== 'soft') return;
           const banded = [before[i - 1], before[i + 1]].some(
@@ -675,6 +687,47 @@ describe("the page's dials (03 X61)", () => {
       const vivid = resolveSections(whole('soft', { colour: 'vivid' }));
       expect(vivid.find((s) => s.type === 'cta')?.scheme).toBe('brand');
       expect(vivid.find((s) => s.type === 'faq')?.scheme).toBe('soft');
+    });
+
+    it('vivid looks past a simple section to the band beyond it (03 X64)', () => {
+      // A Picture between Soft's questions and its brand ask takes one of
+      // their bands, so the questions must still yield to the ask: taken to
+      // the brand colour, they would leave the ask stepped back.
+      const order = STYLES.soft.order;
+      expect(order.indexOf('cta') - order.indexOf('faq')).toBe(1);
+      const vivid = resolveSections({
+        design: { style: 'soft', dials: { colour: 'vivid' } },
+        sections: order.flatMap((type) =>
+          type === 'cta'
+            ? [
+                section({ id: 'picture', type: 'picture' }),
+                section({ id: type, type }),
+              ]
+            : [section({ id: type, type })]
+        ),
+      });
+      expect(vivid.find((s) => s.type === 'faq')?.scheme).toBe('soft');
+      expect(vivid.find((s) => s.type === 'cta')?.scheme).toBe('brand');
+    });
+
+    it('vivid finds nothing before the first section, not the last band on the page', () => {
+      const sections = [
+        section({ id: 'faq', type: 'faq' }),
+        section({ id: 'text', type: 'text' }),
+        section({ id: 'cta', type: 'cta' }),
+      ];
+      // The premise: a soft tint first, the ground, the brand ask last.
+      expect(schemes({ design: { style: 'soft' }, sections })).toEqual([
+        'soft',
+        'base',
+        'brand',
+      ]);
+      expect(
+        schemes({
+          design: { style: 'soft', dials: { colour: 'vivid' } },
+          sections,
+        })[0]
+      ).toBe('brand');
     });
 
     it('keeps the ground the ground, and leaves Quiet, which draws no bands, as it is', () => {
@@ -718,7 +771,7 @@ describe("the page's dials (03 X61)", () => {
     it('never puts a band beside its twin, or the brand colour beside contrast, in any Style', () => {
       for (const style of PAGE_STYLE_IDS)
         for (const colour of [undefined, 'muted', 'vivid'] as const) {
-          const drawn = schemes(whole(style, colour ? { colour } : undefined));
+          const drawn = bands(whole(style, colour ? { colour } : undefined));
           drawn.slice(1).forEach((scheme, i) => {
             const above = drawn[i];
             const label = `${style} ${colour ?? 'style'} ${i + 1}`;

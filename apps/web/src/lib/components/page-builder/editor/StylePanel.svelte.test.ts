@@ -384,7 +384,19 @@ describe('SectionGallery', () => {
     const faq = el('.gallery__item[data-type="faq"]');
     expect(el('.lp', faq).dataset.lpStyle).toBe('clean');
     expect(el('[data-lp-type="faq"]', faq)).toBeTruthy();
-    expect(document.querySelectorAll('.gallery__group-title').length).toBe(5);
+    // Basics (the simple sections, 03 X64) first, then the five a sales page tells.
+    expect(
+      [...document.querySelectorAll('.gallery__group-title')].map(
+        (h) => h.textContent
+      )
+    ).toEqual([
+      'Basics',
+      'Opening',
+      'Your story',
+      'Proof',
+      'The offer',
+      'Details',
+    ]);
   });
 
   it('shows Story and Gallery in their groups, the gallery drawing its plates before any picture exists', () => {

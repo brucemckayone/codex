@@ -129,6 +129,7 @@ import type {
   JourneySellMedia,
   PageOffer,
 } from '$lib/page-builder';
+import type { PageImageUpload } from '$lib/page-builder/page-images';
 import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
@@ -1661,8 +1662,8 @@ export function createServerApi(
         organizationId: string,
         pageId: string,
         file: File
-      ): Promise<{ key: string; url: string }> =>
-        forwardMultipartUpload<{ key: string; url: string }>({
+      ): Promise<PageImageUpload> =>
+        forwardMultipartUpload<PageImageUpload>({
           url: `${serverApiUrl(
             platform,
             'access'
