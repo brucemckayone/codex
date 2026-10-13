@@ -70,7 +70,7 @@ export const PAGE_DIALS = {
 export type PageDialId = keyof typeof PAGE_DIALS;
 export type PageDialStep<D extends PageDialId> = (typeof PAGE_DIALS)[D][number];
 export type PageDials = { [D in PageDialId]?: PageDialStep<D> };
-export const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
+const PAGE_DIAL_IDS = Object.keys(PAGE_DIALS) as PageDialId[];
 
 /**
  * The Type facet (03 X73): a Style's headline type on another Style's page,
@@ -187,7 +187,7 @@ export function isSectionSpacingId(value: unknown): value is SectionSpacingId {
   );
 }
 
-export function isPageDialStep<D extends PageDialId>(
+function isPageDialStep<D extends PageDialId>(
   dial: D,
   value: unknown
 ): value is PageDialStep<D> {
