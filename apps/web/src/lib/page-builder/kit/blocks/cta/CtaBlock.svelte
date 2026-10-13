@@ -16,10 +16,11 @@
 
   `band` may carry the creator's background image (contract A5): the whole
   band sits on the media ink set, over a full-strength scrim, so every line is
-  legible wherever the Style aligns it.
+  legible wherever the Style aligns it. The image runs edge to edge, so it
+  offers every size it has, drawn at the viewport's width (Codex-61zsk.13).
 -->
 <script lang="ts">
-  import { resolvePageImageUrl } from '../../../page-images';
+  import { pageImageSrcset, resolvePageImageUrl } from '../../../page-images';
   import { pricingView } from '../../model/offer';
   import { featuredScheme } from '../../model/resolve';
   import type { BlockProps } from '../../model/types';
@@ -46,6 +47,9 @@
     layout === 'band'
       ? resolvePageImageUrl(content.background, 'lg', context.mediaBaseUrl)
       : null
+  );
+  const backdropSrcset = $derived(
+    backdrop ? pageImageSrcset(content.background, context.mediaBaseUrl) : ''
   );
 </script>
 
@@ -88,7 +92,12 @@
 <div class="cta" data-layout={layout} data-lp-on-media={backdrop ? '' : undefined}>
   {#if backdrop}
     <div class="cta__backdrop">
-      <Media image={backdrop} alt={content.background?.alt ?? ''} />
+      <Media
+        image={backdrop}
+        srcset={backdropSrcset}
+        sizes="100vw"
+        alt={content.background?.alt ?? ''}
+      />
     </div>
   {:else}
     <span class="lp-atmos cta__atmos" data-drift aria-hidden="true"></span>
