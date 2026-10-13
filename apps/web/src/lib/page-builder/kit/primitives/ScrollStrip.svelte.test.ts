@@ -136,6 +136,72 @@ describe('ScrollStrip', () => {
     ).toBe(true);
   });
 
+  // Codex-61zsk.55: a row with a heading of its own carries its buttons in
+  // that heading's line, above the row. Without one, nothing changes.
+  const parts = () =>
+    [...(document.body.querySelector('.lp-strip')?.children ?? [])].map((el) =>
+      el.className.replace(/\s*svelte-\S+/g, '').trim()
+    );
+
+  it('without a heading, keeps its buttons in their own line under the row', () => {
+    render(3);
+    expect(parts()).toEqual(['lp-strip__track', 'lp-strip__nav']);
+    const nav = document.body.querySelector('.lp-strip__nav') as HTMLElement;
+    expect([...nav.children].map((el) => el.tagName)).toEqual([
+      'BUTTON',
+      'BUTTON',
+    ]);
+    expect(document.body.querySelector('.lp-strip__head')).toBeNull();
+  });
+
+  it('with a heading, leads the buttons’ line with it, above the row', () => {
+    render(3, {
+      head: createRawSnippet(() => ({
+        render: () => '<h3 class="stage-name">Stage 2</h3>',
+      })),
+    });
+    expect(parts()).toEqual([
+      'lp-strip__nav lp-strip__nav--head',
+      'lp-strip__track',
+    ]);
+    const nav = document.body.querySelector('.lp-strip__nav') as HTMLElement;
+    expect(nav.firstElementChild?.className).toMatch(/lp-strip__head/);
+    expect(nav.querySelector('.lp-strip__head > h3')?.textContent).toBe(
+      'Stage 2'
+    );
+    const [previous, next] = buttons();
+    expect(previous.getAttribute('aria-controls')).toBe('gallery-pictures');
+    expect(next.getAttribute('aria-label')).toBe('Next picture');
+    expect(nav.hasAttribute('data-idle')).toBe(true);
+  });
+
+  // Hidden by CSS, which the test DOM does not apply: read the rules, comments
+  // stripped, so a rule commented out reads as gone.
+  it('hides only the buttons, never the heading, with nothing to scroll or no script', async () => {
+    const source = (await import('./ScrollStrip.svelte?raw')).default as string;
+    const css = (source.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '').replace(
+      /\/\*[\s\S]*?\*\//g,
+      ''
+    );
+    const block = (selector: string) =>
+      css.match(
+        new RegExp(
+          `${selector.replace(/[[\]().*+?^$|\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`
+        )
+      )?.[1] ?? '';
+    expect(block('.lp-strip__nav[data-idle] > :not(.lp-strip__head)')).toMatch(
+      /visibility:\s*hidden/
+    );
+    expect(css).not.toMatch(/\.lp-strip__nav\[data-idle\]\s*\{/);
+    const scriptless =
+      css.match(/@media \(scripting: none\)\s*\{([\s\S]*?\})\s*\}/)?.[1] ?? '';
+    expect(scriptless).toMatch(/\.lp-strip__nav:not\(\.lp-strip__nav--head\)/);
+    expect(scriptless).toMatch(
+      /\.lp-strip__nav--head > :not\(\.lp-strip__head\)/
+    );
+    expect(scriptless).not.toMatch(/\.lp-strip__head\b(?!\))/);
+  });
+
   describe('with a row wider than the screen, of items that differ in width', () => {
     // Items of 300 and 200 alternating, 20 apart: they start at 0, 320, 540, 860…
     const WIDTHS = [300, 200, 300, 200, 300, 200];
