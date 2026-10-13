@@ -387,6 +387,12 @@
   border-block-start: none;
 }
 
+/* An open tile's name has the tile's whole width, so its room is that
+   (`BenefitsBento.svelte`, 03 X71). */
+:is(.lp, #lp-style)[data-lp-style='bold'] .benefits-bento__tile:not([data-lead]) {
+  --_inset: 0px;
+}
+
 /* A practice card is topped by its picture, so the rule tops its words. */
 :is(.lp, #lp-style)[data-lp-style='bold'] .practice-card__meta {
   padding-block-start: var(--space-3);

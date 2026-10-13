@@ -134,13 +134,19 @@
 </ol>
 
 <style>
+  /* A stage's name has the row past its marker (03 X71): the column, and how
+     far a Style reaches the list past its start (`--_reach`, Path's route),
+     less the marker and its gap. */
   .timeline {
     --_marker: var(--space-12);
     --_gap: var(--space-5);
+    --_reach: 0px;
     /* From a row's rule down to its marker. */
     --_rise: var(--space-5);
+    --lp-title-column: calc(var(--lp-column) + var(--_reach) - var(--_marker) - var(--_gap));
     display: grid;
     margin: 0;
+    margin-inline-start: calc(-1 * var(--_reach));
     padding: 0;
     list-style: none;
   }
@@ -229,8 +235,12 @@
   }
 
   @container (min-width: 52rem) {
+    /* The name's share of that row, beside its practices. */
     .timeline {
       --_gap: var(--space-6);
+      --lp-title-column: calc(
+        (var(--lp-column) + var(--_reach) - var(--_marker) - 2 * var(--_gap)) * 5 / 12
+      );
     }
 
     .timeline__stage {

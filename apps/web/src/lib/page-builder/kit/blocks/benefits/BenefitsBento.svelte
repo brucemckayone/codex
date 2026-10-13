@@ -63,16 +63,27 @@
   .benefits-bento {
     --_gap: clamp(var(--space-3), 0.5rem + 1cqi, var(--space-5));
     --_row: clamp(9rem, 6rem + 5cqi, 12rem);
+    --_cols: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(var(--_cols), minmax(0, 1fr));
     gap: var(--_gap);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
+  /* A tile spans `--_span` of the row's `--_cols`, so its name knows its
+     room (03 X71): those columns and the gaps between them, less its inset,
+     its padding and border (Bold opens every tile but the lead). */
   .benefits-bento__tile {
     --_pad: clamp(var(--space-5), var(--space-4) + 1cqi, var(--space-8));
+    --_span: 1;
+    --_inset: calc(var(--_pad) + var(--lp-border));
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_cols) - 1) * var(--_gap)) / var(--_cols) * var(--_span) +
+        (var(--_span) - 1) * var(--_gap) - 2 * var(--_inset)
+    );
+    grid-column: span var(--_span);
     display: grid;
     align-content: end;
     gap: var(--space-4);
@@ -121,13 +132,15 @@
     gap: var(--space-2);
   }
 
-  /* The lead speaks a size up; single-weight display faces keep their weight. */
+  /* The lead speaks a size up, in a heading's size, weight, leading and
+     tracking, through the title's own rule, so it is fitted to its tile as
+     every name is (03 X71). Single-weight display faces keep their weight. */
   .benefits-bento__tile[data-lead] :global(.lp-heading) {
+    --lp-title-lift: 1;
+    --lp-weight-title: var(--lp-weight-heading);
+    --lp-leading-title: var(--lp-leading-heading);
+    --lp-tracking-title: var(--lp-tracking-heading);
     max-inline-size: 18ch;
-    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
-    font-weight: var(--lp-weight-heading);
-    line-height: var(--lp-leading-heading);
-    letter-spacing: var(--lp-tracking-heading);
   }
 
   /* global.css caps every `p` at 65ch and spaces it; a tile sets its own. */
@@ -143,12 +156,12 @@
   /* Two to a row: the lead across both, and a last tile left alone too. */
   @container (36rem <= width < 56rem) {
     .benefits-bento {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_cols: 2;
     }
 
     .benefits-bento__tile[data-lead],
     .benefits-bento__tile:last-child:nth-child(even) {
-      grid-column: span 2;
+      --_span: 2;
     }
   }
 
@@ -156,7 +169,7 @@
      a picture fills whatever its tile leaves above the words. */
   @container (min-width: 56rem) {
     .benefits-bento {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
+      --_cols: 6;
       grid-auto-rows: minmax(var(--_row), auto);
     }
 
@@ -165,30 +178,30 @@
     }
 
     [data-tile='whole'] {
-      grid-column: span 6;
+      --_span: 6;
       grid-row: span 2;
     }
 
     [data-tile='lead'] {
-      grid-column: span 4;
+      --_span: 4;
       grid-row: span 2;
     }
 
     [data-tile='side'] {
-      grid-column: span 2;
+      --_span: 2;
       grid-row: span 2;
     }
 
     [data-tile='wide'] {
-      grid-column: span 4;
+      --_span: 4;
     }
 
     [data-tile='half'] {
-      grid-column: span 3;
+      --_span: 3;
     }
 
     [data-tile='small'] {
-      grid-column: span 2;
+      --_span: 2;
     }
   }
 </style>

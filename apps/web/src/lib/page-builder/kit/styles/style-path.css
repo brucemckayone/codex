@@ -351,11 +351,13 @@
    itself rather than a second line beside it. Inside the map its own line
    is the route: the page's line is covered there, and the names start on
    the column the rest of the page's words start on. Its route takes the
-   page route's weight, and a stop small enough to ride the rail on a phone. */
+   page route's weight, and a stop small enough to ride the rail on a phone.
+   The map draws its margin from its reach, and its stops' names count it in
+   their room (03 X71). */
 :is(.lp, #lp-style)[data-lp-style='path'] .map {
   --_route: var(--_path-w);
   --_dot: clamp(var(--space-8), 1.5rem + 1.6cqi, var(--space-12));
-  margin-inline-start: calc(-1 * (var(--_path-lane) + var(--_dot) / 2));
+  --_reach: calc(var(--_path-lane) + var(--_dot) / 2);
 }
 
 /* Over the shader or a picture an opaque cover would show as a stripe, so
@@ -421,7 +423,7 @@
    own spine steps aside); circles whatever the brand's corners. */
 :is(.lp, #lp-style)[data-lp-style='path'] .timeline {
   --_marker: clamp(var(--space-8), 1.5rem + 1.6cqi, var(--space-12));
-  margin-inline-start: calc(-1 * (var(--_path-lane) + var(--_marker) / 2));
+  --_reach: calc(var(--_path-lane) + var(--_marker) / 2);
 }
 
 :is(.lp, #lp-style)[data-lp-style='path'] .timeline__stage::before {
