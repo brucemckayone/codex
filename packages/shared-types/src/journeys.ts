@@ -171,6 +171,10 @@ export interface SectionDesign {
     drama?: 'calmer' | 'louder';
     motion?: 'still' | 'gentle';
   };
+  /** Another Style's Type on the page; unset is the Style's own. Mirrors `PageFacets` in `kit/model/ids.ts`. Page-only. */
+  facets?: {
+    type?: 'bold' | 'poster' | 'soft' | 'quiet';
+  };
 }
 
 /**

@@ -16,6 +16,9 @@
     ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious,
       drama:calmer|louder,motion:still|gentle
       (the page's dials, 03 X61, X62; any subset, any order)
+    ?type=bold|poster|soft|quiet (another Style's Type, 03 X73: drawn on any
+      Style, offered or not, so a pair is proven before the allow-list
+      offers it)
     ?img=1..6 (the hero's photo; every picture field takes the next ones)
     ?edit=1 (inline-edit attributes on)   ?chrome=0 (hide the studio chrome)
 -->
@@ -33,6 +36,7 @@
     isPageStyleId,
     isSectionSpacingId,
     isSectionTypeId,
+    isTypeFacet,
     type KitPage,
     PAGE_STYLE_IDS,
     PageRenderer,
@@ -164,6 +168,12 @@
   const dials = $derived(
     readPageDials(Object.fromEntries(param('dials').split(',').map((pair) => pair.split(':'))))
   );
+
+  /** `?type=poster`: an unknown Type is dropped. */
+  const proofType = $derived.by(() => {
+    const type = param('type');
+    return isTypeFacet(type) ? type : undefined;
+  });
 
   const kitPage: KitPage = $derived.by(() => {
     const plain = only ? samplePage(style, only) : samplePage(style);
@@ -299,6 +309,7 @@
     {edit}
     orgGrounds={grounds}
     orgShader={shader}
+    {proofType}
   />
 </div>
 

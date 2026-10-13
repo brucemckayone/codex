@@ -613,3 +613,14 @@ describe("sectionDesignSchema · the page's dials (03 X61)", () => {
     });
   });
 });
+
+describe("sectionDesignSchema · the page's Type (03 X73)", () => {
+  it('persists a Type, and degrades an unknown one to the Style’s own', () => {
+    expect(
+      sectionDesignSchema.parse({ style: 'clean', facets: { type: 'soft' } })
+    ).toEqual({ style: 'clean', facets: { type: 'soft' } });
+    expect(
+      sectionDesignSchema.parse({ style: 'clean', facets: { type: 'studio' } })
+    ).toEqual({ style: 'clean', facets: {} });
+  });
+});

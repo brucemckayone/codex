@@ -59,6 +59,15 @@ export const PAGE_DIALS = {
 } as const satisfies Record<string, readonly [string, string]>;
 
 /**
+ * The Types a page may borrow from another Style (03 X73); unset is the
+ * Style's own. Which Style may take which Type is `ids.ts`'s
+ * `TYPE_FACET_BASES`, checked where a page is READ (`readPageFacets`), not
+ * here: a pair taken off that list later must stop drawing on pages saved
+ * before, and the read is the one place that sees both.
+ */
+export const TYPE_FACETS = ['bold', 'poster', 'soft', 'quiet'] as const;
+
+/**
  * Every section type and its hand-designed layouts. The FIRST layout of each
  * type is its fallback when neither the section nor the Style names one.
  * Twin of `ids.ts` `SECTION_LAYOUTS` — `ids.parity.test.ts` asserts equality.
@@ -210,6 +219,17 @@ export const pageDialsSchema = z
   .catch(undefined);
 
 /**
+ * A PAGE's facets (03 X73), shared like {@link pageDialsSchema}. An unknown
+ * Type DEGRADES to the Style's own, never a failed save; a Type the page's
+ * Style may not take is stored and reads as the Style's own (see
+ * {@link TYPE_FACETS}).
+ */
+export const pageFacetsSchema = z
+  .object({ type: closedEnum(TYPE_FACETS) })
+  .optional()
+  .catch(undefined);
+
+/**
  * A PAGE's v2 look (`landing_pages.design`, contract §2/§3). See note above.
  *
  * `style` REJECTS an unrecognised value instead of degrading — same
@@ -224,5 +244,6 @@ export const pageDesignSchema = z.object({
     })
     .optional(),
   dials: pageDialsSchema,
+  facets: pageFacetsSchema,
 });
 export type PageDesignBody = z.infer<typeof pageDesignSchema>;

@@ -43,6 +43,11 @@
   Style asks wherever the shader drawn behind it allows (`atmosphere-veil.ts`,
   03 X54).
 
+  THE TYPE FACET (03 X73): `data-lp-type-facet` names the Style whose type
+  the page is set in, which is the page's own Style unless the page borrows
+  a Type its Style may take (`TYPE_FACET_BASES`). It is ALWAYS set, so a
+  Type rule keyed on it weighs exactly what it weighed keyed on the Style.
+
   ENTRANCES (03 X13): the root hosts the page's stage (`motion/entrances.ts`),
   which plays each reveal, build and mark once as the visitor reaches it.
   Nothing is staged while still.
@@ -58,7 +63,7 @@
   import type { JourneySalesContext } from '../render/types';
   import { priceWithCadence } from './model/copy';
   import { brandFontsHref } from './model/fonts';
-  import { readPageDials } from './model/ids';
+  import { readPageDials, readPageFacets, type TypeFacet } from './model/ids';
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import {
@@ -115,6 +120,12 @@
      * hero then defaults to `atmosphere`. Plain data, as above.
      */
     orgShader?: boolean;
+    /**
+     * The kit gallery's proof (03 X73): draw this Type whether or not this
+     * Style may take it yet, so a pair is measured before it is offered. A
+     * page never passes it.
+     */
+    proofType?: TypeFacet;
   }
 
   const {
@@ -128,6 +139,7 @@
     sticky = true,
     orgGrounds = {},
     orgShader = false,
+    proofType,
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
@@ -135,6 +147,9 @@
   // (`kit.css`, `motion.css`; 03 X61); colour and spacing are resolved per
   // section.
   const dials = $derived(readPageDials(page.design.dials));
+  const typeFacet = $derived(
+    proofType ?? readPageFacets(page.design.facets, style)?.type ?? style
+  );
   // Nothing moves on its own at either step of the motion dial, and the org's
   // moving background behind the page is that too (03 X62). Held only while
   // the page is shown live: the studio's shader is still already. A boolean,
@@ -242,6 +257,7 @@
 <div
   class="lp"
   data-lp-style={style}
+  data-lp-type-facet={typeFacet}
   data-lp-corners={dials?.corners}
   data-lp-drama={dials?.drama}
   data-lp-motion={dials?.motion}

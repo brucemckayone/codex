@@ -36,6 +36,7 @@ import {
   isSectionTypeId,
   type PageStyleId,
   readPageDials,
+  readPageFacets,
   type SectionTypeId,
 } from './ids';
 import { DENSITY_TO_SPACING, SURFACE_TO_SCHEME } from './legacy/axis-style-map';
@@ -205,17 +206,18 @@ function resolveSectionStyle(rawDesign: unknown): SectionStyle | undefined {
 }
 
 /**
- * The page's v2 `PageDesign` (`{ style, dials? }`). Its dials pass through,
- * each kept only at a known step (03 X61): this is the one place a stored
- * page reaches the kit, and the editor saves what it returns, so a key left
- * out here is dropped on load AND wiped on the next save.
+ * The page's v2 `PageDesign` (`{ style, dials?, facets? }`). Its dials pass
+ * through, each kept only at a known step (03 X61), and its Type only where
+ * its Style may take it (03 X73): this is the one place a stored page
+ * reaches the kit, and the editor saves what it returns, so a key left out
+ * here is dropped on load AND wiped on the next save.
  */
 function resolvePageDesign(rawDesign: unknown): PageDesign {
   const style = resolvePageStyle(rawDesign);
-  const dials = isPlainObject(rawDesign)
-    ? readPageDials(rawDesign.dials)
-    : undefined;
-  return dials ? { style, dials } : { style };
+  const raw = isPlainObject(rawDesign) ? rawDesign : {};
+  const dials = readPageDials(raw.dials);
+  const facets = readPageFacets(raw.facets, style);
+  return { style, ...(dials && { dials }), ...(facets && { facets }) };
 }
 
 /**
