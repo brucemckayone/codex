@@ -116,9 +116,11 @@
      and `--lp-heading-run`, set where it sets the case). Its room is the
      section's content column (`--lp-column`). Where a layout gives its head
      less room, it names that room (`--lp-heading-column`): a measure's cap,
-     or a split's share. Where the head shares a row with something drawn at
-     its own width, its room is not known, so it holds the heading at the
-     Style's size (`--lp-heading-hold: 1`). A heading with no words is drawn
+     or a split's share. A layout that cannot know its head's room may hold
+     the heading at the Style's size (`--lp-heading-hold: 1`, which the fit's
+     own sweep uses to draw it as it was); none does, since the pricing band
+     moves its price under a head whose widest word does not fit beside it
+     (X70). A heading with no words is drawn
      at the size the dial gives it. It is never drawn smaller than a title,
      so it stays a head, and a room that came to nothing could never draw it
      at no size at all; a word too long even at that runs past its line. */

@@ -347,18 +347,28 @@
     gap: var(--space-2);
   }
 
+  /* The head beside its price wherever its widest word fits there, and over
+     it where it does not (03 X70). The head grows from nothing, so the
+     narrowest it can be is its own longest word (a flex item's automatic
+     minimum), at the size the fit draws it in its room, the measure: the row
+     wraps before that word could run into the price. On a row of its own the
+     head has that room, and on a shared row more than its word. The price
+     keeps the row's end, or its start alone.
+     The head stacks its words as a column, not a grid: a grid's narrowest
+     drops any child whose own minimum is 0 (a common cure for a grid
+     blowout), and the row would then keep a word that does not fit. */
   @container (min-width: 60rem) {
     .pricing[data-layout='band'] {
-      grid-template-columns: minmax(0, 1fr) auto;
+      display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      column-gap: var(--lp-gap);
+      justify-content: space-between;
     }
 
-    /* Beside a price drawn at its own width, the heading's room is not known,
-       so it is drawn at the Style's size: neither fitted nor grown by louder
-       (03 X62, X66). */
     .pricing[data-layout='band'] > .pricing__head {
-      --lp-heading-hold: 1;
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 0;
     }
 
     .pricing__band {
@@ -367,7 +377,7 @@
     }
 
     .pricing[data-layout='band'] .pricing__others {
-      grid-column: 1 / -1;
+      flex-basis: 100%;
     }
   }
 </style>
