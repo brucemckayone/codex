@@ -113,10 +113,14 @@
 /* Risen from behind a line just under its own last baseline. The clip's foot
    and the travel move by the same amount (100% + 0.3em between them at
    every frame), so the line stands still while the words rise through it
-   and the first line surfaces first. The overhang is 0.3em of the HEADLINE
+   and the first line surfaces first. The overhang is in the HEADLINE's em
    (its wrapper takes the display size below): at leading under 1 the
    glyphs stand past their line box, and a clip in the body's em would keep
-   the descenders cut after the lift ends. */
+   the descenders cut after the lift ends. The hero keeps its last frame, so
+   its clip stays as long as the page is open: 0.3em under the last line, and
+   a whole em over the first, where a mark over a capital stands (Anton's
+   É, Å and Ö reach 0.38em past the line box at this leading; 03 X74). The
+   top opens only as the words rise, so the first frame still shows nothing. */
 @keyframes lp-bold-lift {
   from {
     translate: 0 calc(100% + 0.6em);
@@ -125,7 +129,7 @@
 
   to {
     translate: 0 0;
-    clip-path: inset(-0.3em -0.15em);
+    clip-path: inset(-1em -0.15em -0.3em);
   }
 }
 
