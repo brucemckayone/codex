@@ -10,10 +10,13 @@
  * below the fold it is ARMED, waiting on its first frame out of sight. An
  * armed element plays when its top clears a line above the floating call to
  * action, or — at the foot of a page that cannot scroll that far — as soon as
- * it is in view. Nothing is staged on a still page (the canvas, thumbnails) or
- * under reduced motion, and without JavaScript nothing is ever armed: the
- * final state is what the server sends.
+ * it is in view. Nothing is staged on a still page (the canvas, thumbnails),
+ * under reduced motion or with the motion dial at `still` (03 X62), and
+ * without JavaScript nothing is ever armed: the final state is what the
+ * server sends.
  */
+
+import { NOTHING_MOVES } from './attributes';
 
 export interface Actor {
   /** Hold the first frame, out of sight. False: it has nothing to play. */
@@ -37,7 +40,7 @@ const stages = new WeakMap<Element, Stage>();
 export function stageFor(el: Element): Stage | null {
   if (
     typeof IntersectionObserver === 'undefined' ||
-    el.closest('[data-lp-still]') ||
+    el.closest(NOTHING_MOVES) ||
     matchMedia('(prefers-reduced-motion: reduce)').matches
   )
     return null;

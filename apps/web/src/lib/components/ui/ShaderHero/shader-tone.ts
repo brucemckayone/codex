@@ -23,6 +23,8 @@ class ShaderToneChannel {
   blur = 0;
   #demand = 0;
   #wake: (() => void) | null = null;
+  #holds = 0;
+  #hold: ((held: boolean) => void) | null = null;
   readonly #listeners = new Set<() => void>();
 
   get wanted(): boolean {
@@ -46,6 +48,26 @@ class ShaderToneChannel {
     };
   }
 
+  /** Some page has asked the shader to stand still (`hold`). */
+  get held(): boolean {
+    return this.#holds > 0;
+  }
+
+  /**
+   * Asks the shader to draw one frame and stop, as for reduced motion, while
+   * any page holds it: a page whose motion dial stops what moves on its own
+   * (landing-builder 03 X62). Returns the release.
+   */
+  hold(): () => void {
+    if (this.#holds++ === 0) this.#hold?.(true);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--this.#holds === 0) this.#hold?.(false);
+    };
+  }
+
   /** Called with nothing each time the grid changes; returns the unsubscribe. */
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener);
@@ -55,6 +77,11 @@ class ShaderToneChannel {
   /** ShaderHero: how to have a frame drawn (and so sampled) now. */
   onDemand(wake: (() => void) | null): void {
     this.#wake = wake;
+  }
+
+  /** ShaderHero: told each time `held` changes. */
+  onHold(apply: ((held: boolean) => void) | null): void {
+    this.#hold = apply;
   }
 
   /** ShaderHero: folds a sampled frame (RGBA, one pixel per cell) in. */

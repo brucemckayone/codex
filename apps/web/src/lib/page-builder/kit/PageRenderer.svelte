@@ -48,6 +48,7 @@
   Nothing is staged while still.
 -->
 <script lang="ts">
+  import { shaderTone } from '$lib/components/ui/ShaderHero/shader-tone';
   import type { BrandTokenOverrides } from '$lib/page-builder';
   import {
     brandOverridesToCssVars,
@@ -57,7 +58,7 @@
   import type { JourneySalesContext } from '../render/types';
   import { priceWithCadence } from './model/copy';
   import { brandFontsHref } from './model/fonts';
-  import { isPageDialStep } from './model/ids';
+  import { readPageDials } from './model/ids';
   import { pricingView } from './model/offer';
   import { readText } from './model/read';
   import {
@@ -129,11 +130,18 @@
   }: Props = $props();
 
   const style = $derived(resolveStyle(page.design));
-  // The corners dial is the one drawn in CSS (`kit.css`, 03 X61); colour and
-  // spacing are resolved per section.
-  const corners = $derived.by(() => {
-    const step = page.design.dials?.corners;
-    return isPageDialStep('corners', step) ? step : undefined;
+  // The dials drawn in CSS name their step on the root, a known one only
+  // (`kit.css`, `motion.css`; 03 X61); colour and spacing are resolved per
+  // section.
+  const dials = $derived(readPageDials(page.design.dials));
+  // Nothing moves on its own at either step of the motion dial, and the org's
+  // moving background behind the page is that too (03 X62). Held only while
+  // the page is shown live: the studio's shader is still already. A boolean,
+  // so a new page object with the same dial never lets go and takes hold
+  // again (a still shader would jump to a later frame).
+  const holdsShader = $derived(!still && !edit && dials?.motion !== undefined);
+  $effect(() => {
+    if (holdsShader) return shaderTone.hold();
   });
   const grounds = $derived(resolveGroundBands(orgGrounds, pageGrounds(brandOverrides)));
   const sections = $derived(resolveSections(page, { orgShader, grounds }));
@@ -218,7 +226,9 @@
 <div
   class="lp"
   data-lp-style={style}
-  data-lp-corners={corners}
+  data-lp-corners={dials?.corners}
+  data-lp-drama={dials?.drama}
+  data-lp-motion={dials?.motion}
   data-lp-theme={theme}
   data-lp-still={still || edit ? '' : undefined}
   data-lp-editing={edit ? '' : undefined}
@@ -229,7 +239,7 @@
   data-ground-light={grounds.light}
   data-ground-dark={grounds.dark}
   style={brandStyle}
-  {@attach entrances(still || !!edit)}
+  {@attach entrances(still || !!edit || dials?.motion === 'still')}
   {@attach atmosphereVeil(!!atmosphere)}
 >
   <div class="lp-page">

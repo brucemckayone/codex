@@ -84,7 +84,7 @@
 
   /* ── lead / monument: set like headings ────────────────────────────────── */
   .voice:is([data-size='lead'], [data-size='monument']) p {
-    --_size: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+    --_size: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
     font-family: var(--lp-font-display);
     font-size: var(--_size);
     font-weight: var(--lp-weight-heading);
@@ -104,7 +104,7 @@
   }
 
   .voice[data-size='monument'][data-length='short'] p {
-    --_size: var(--lp-size-heading);
+    --_size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     max-inline-size: 20ch;
   }
 
@@ -167,7 +167,7 @@
   }
 
   .voice[data-size='wall'][data-featured]:not([data-length='long']) p {
-    font-size: calc((var(--lp-size-heading) + var(--lp-size-title)) / 2);
+    font-size: calc((var(--lp-size-heading) * var(--lp-drama-held, 1) + var(--lp-size-title)) / 2);
     font-weight: var(--lp-weight-heading);
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);

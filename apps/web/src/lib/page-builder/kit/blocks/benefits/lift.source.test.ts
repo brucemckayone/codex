@@ -37,7 +37,18 @@ describe('a benefit’s name at a middle size', () => {
       (r) => r.selector === ".lp-heading[data-size='title']"
     );
     expect(title?.decls.get('font-size')).toBe(
-      'calc( var(--lp-size-title) + (var(--lp-size-heading) - var(--lp-size-title)) * var(--lp-title-lift, 0) )'
+      'calc( var(--lp-size-title) + (var(--_heading) - var(--lp-size-title)) * var(--lp-title-lift, 0) )'
+    );
+  });
+
+  it('lifts toward the heading as the type dial takes it down, never up (03 X62)', () => {
+    // A lifted title sits in a card's column: `louder`'s room is the
+    // heading's, measured against the section's column, not the card's.
+    const title = heading.find(
+      (r) => r.selector === ".lp-heading[data-size='title']"
+    );
+    expect(title?.decls.get('--_heading')).toBe(
+      'calc(var(--lp-size-heading) * var(--lp-drama-held, 1))'
     );
   });
 

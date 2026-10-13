@@ -294,7 +294,7 @@
 
   /* The stop opens rather than snaps, where the browser can animate it. */
   @media (prefers-reduced-motion: no-preference) {
-    :global(.lp:not([data-lp-still])) .map__stop::details-content {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__stop::details-content {
       block-size: 0;
       overflow: clip;
       transition:
@@ -302,11 +302,11 @@
         content-visibility var(--duration-slow) allow-discrete;
     }
 
-    :global(.lp:not([data-lp-still])) .map__stop[open]::details-content {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__stop[open]::details-content {
       block-size: auto;
     }
 
-    :global(.lp:not([data-lp-still])) .map__sign::after {
+    :global(.lp:not([data-lp-still], [data-lp-motion='still'])) .map__sign::after {
       transition: rotate var(--duration-fast) var(--ease-out);
     }
   }

@@ -145,7 +145,7 @@
 
   .offer__amount {
     font-family: var(--lp-font-display);
-    font-size: var(--lp-size-heading);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-display);
     font-synthesis: none;
     font-variant-numeric: lining-nums tabular-nums;

@@ -2060,6 +2060,146 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     cut to a Style's own specificity (`.lp[data-lp-corners='brand']`), where load order, not the
     dial, decides: the Style's corners won on all four tokens.
 
+- **X62 · 2026-10-12 · 3c D1, second half · The type dial and the motion dial, each one step
+  either side of the Style's, or both below it (BUILT, decided without the owner;
+  Codex-61zsk.51).** The last two of 04 §3.3's five dials, on X61's `design.dials`: `drama`
+  (calmer · the Style's · louder) and `motion` (still · gentle · the Style's). X61's rules hold:
+  the Style's is the absent key, a step is a named value at both twins (`ids.ts`, `@codex/validation`)
+  and in `@codex/shared-types`, and the root names a step only when it is a known one
+  (`data-lp-drama`, `data-lp-motion`).
+  - **Type: a factor in every headline size, beside the org's own scale.** `--lp-drama-display`
+    (the opening and the closing ask) and `--lp-drama-heading` (the section headings) are
+    multiplied into the 28 size declarations the kit and the eight Styles make, next to
+    `var(--lp-scale)`: `calc(clamp(…) * var(--lp-scale) * var(--lp-drama-heading, 1))`. So each
+    Style's sizes, steps and curves keep their shape at every step, and no declaration multiplies its
+    own inherited value (X27). Calmer is 0.85 on both; louder is 1.15 on the heading size only,
+    because the opening and the closing ask are already drawn as large as they fit (X34) and have no
+    room to rise. A section heading a layout draws at display size (the problem's statement) goes
+    with them: calmer takes it down and louder leaves it. `kit.css` declares the factors, and `dials.test.ts` fails on any size without its
+    kind's factor, on the wrong kind, or on a factor declared anywhere else (the closing band's
+    hold, below, is the one declaration outside it).
+    - **Louder grows a section heading as far as its widest run fits, and nothing else.**
+      - **The fit.** A fixed 1.15 cut words. Poster's phone heading sits on its clamp's floor
+        (2.1rem), where "Transformation:" just fits, so any step above 1 broke it. So louder draws a
+        section heading at `min(louder, max(own, column ÷ run))`: the Style's step up, less where the
+        heading's widest run would no longer fit its column, and never below the Style's own size.
+        Heading weighs its own text into three properties (`widestRun`, on X60's runs in
+        `long-heading.ts`), and the CSS weighs a run in the page's display face (`faces.css`), or in
+        capitals where a Style draws them (Poster).
+      - **The column is the head's room, and the layout names it.** The section's content column
+        is `--lp-column`, declared on each section because a Style may re-set the gutter or the
+        container there. A head with less room names it as `--lp-heading-column`, beside the rule
+        that makes the room:
+        - the measure: the story, gallery, pricing and "What's inside" heads (the last added on
+          rebasing onto X63), and the story's chapters;
+        - a split's share (5/12 or 7/12 of the column, or half, less its gap): the FAQ and
+          pricing-focus heads, the stats grid, the text and benefits columns, the problem split and
+          Studio's problem list, the guide's split (across the band on Bold and Cinematic),
+          Cinematic's quote, the CTA split, and Clean's heads with their lead beside them;
+        - `0px` where a head shares its row with something drawn at its own width (pricing's band,
+          beside its price). CSS cannot know that room, so the heading holds at the Style's size.
+      - **Everything else drawn at the heading's size follows the dial down, never up.** A lifted
+        title, the bento's lead tile, a quote, a price, a stage or chapter number, and Studio's
+        problem lines all sit in a card's or a column's room, where no fit bound can see their words.
+        At louder, `--lp-drama-held` (1 ÷ the factor) takes the step back out. The closing band
+        draws its heading at the ask's size, which has no step in it, so it declares
+        `--lp-drama-held: 1`. `dials.test.ts` fails on any other use of the heading's size that does
+        not hold.
+      - **The proof is relative: louder never breaks a word the Style keeps whole.** No run the
+        Style draws within its line is drawn wider at louder, in any of the 60 runs below. What the
+        Style itself draws too wide is not louder's to fix. At the Style's own size, 1,268 (heading,
+        text) pairs in 30 of the 60 runs draw a run wider than its line. 722 of them are in
+        Unbounded, the widest face the brand editor offers, and 309 are Poster in its own face.
+        The last full run, after the rebase onto X63 added the "What's inside" heading to the
+        sample page, counts 1,313: 752 in Unbounded, 324 Poster in its own face. The 45 more are
+        all that heading, which the narrowed run counts at 45 on its own. Over half of each of
+        those two is on a phone, in the problem's statement at display size, where Poster
+        hyphenates by design. The rest are long words in split heads at 1024 and 1440. That is filed as Codex-61zsk.60, which
+        reuses this fit at the Style's own size.
+      - **Known limit.** Path's route stop is worked out from the heading's size token, not from the
+        size it is drawn at. Where the fit holds a heading back, the stop sits up to the step's
+        share of half a line low (about 5px at 1440).
+      - Rejected:
+        - a fixed factor, which cut words (above);
+        - a factor per Style: eight numbers to keep tuned against eight curves, and still blind to
+          the word;
+        - gating on the character count, which is blind to the column: a 14-letter word fits a full
+          column at 1440 and breaks in a 5/12 split;
+        - measuring in JS after hydration, which would make the heading jump after first paint;
+        - making each head a size container, which would shrink its own `cqi` sizes with it.
+    - Rejected: a shared ladder of sizes, which would flatten eight hand-set curves into one; and a
+      louder opening, which the poster and the fitted heroes cannot take.
+  - **Motion: still is the page reduced motion sees; gentle keeps what plays once.**
+    - **Still.** Every entrance, every response to a hover or a click, and everything that follows
+      the scroll or moves on its own stops at its final look. The stage arms nothing, so no figure
+      counts up and no entrance waits hidden. The scroll story never follows, and the strip's
+      arrows jump rather than glide. The timing tokens go instant on the root as `tokens/motion.css`
+      makes them for reduced motion (0.01ms, so a `transitionend` still fires). The four
+      `--transition-*` tokens are declared again there, because a custom property takes its `var()`s
+      where it is declared and `:root`'s would keep `:root`'s durations.
+    - **Gentle.** Entrances and the answers to a hover or a click play. A route drawn down the page,
+      parallax, the read-along, the drifts, the marquee and the scroll story stop: nothing follows
+      the scroll and nothing moves on its own.
+    - **The org's moving background stops at either step.** The live page holds the window's shader
+      still through `shaderTone.hold()`, the channel X54 opened between the background and a page,
+      and lets go when it is gone. The studio's shader is still already, so a still page or the
+      canvas never holds it.
+    - **The gates.** Two lists in `motion/attributes.ts`, spelled the same inside `.lp:not(…)` in the
+      CSS: `NOTHING_MOVES` (a still page, or the dial at still) gates the 43 entrance and
+      response sites, and `NOTHING_FOLLOWS` (also any step) gates the 30 scrubbed and looping sites.
+      The 11 sites that are about a still page being looked at (placeholders, plates, the folded
+      clipless bands, the veil) keep the still page's own gate. A list inside one `:not()` takes the
+      specificity of its strongest argument, so no gated rule's specificity moved.
+    - Rejected: reusing `data-lp-still`, which also draws the editor's placeholders and plates and
+      takes the live veil away, so a visitor would see the canvas; chaining `:not()`s, which adds a
+      class's weight to 73 rules and can turn their cascade against ungated Style rules; and leaving
+      the background moving at gentle, the largest moving thing on screen on a step whose one rule
+      is that nothing moves on its own.
+  - **Tests.**
+    - `motion.test.ts` holds every animating declaration in the kit to the right list: an
+      animation behind the still page's own gate runs at the dial's still, and a scroll-driven one
+      or a loop behind `NOTHING_MOVES` runs at gentle. In `motion.css`, everything outside the
+      scrubbed `@supports` stands behind the entrance gate and everything inside behind the follow
+      gate. The marquee and the scroll story leave whole, and the still page's own gate guards
+      nothing that moves.
+    - `dials.test.ts`: the factors and their census, the still rule held to the token file, and
+      every use of the heading's size outside a section heading holding louder's step out.
+    - `long-heading.test.ts`: `widestRun`. `lift.source.test.ts`: a lifted title follows the dial
+      down only.
+    - The stage, the count-up, the scroll story, the channel and ShaderHero, at both steps.
+    - `PageRenderer.svelte.test.ts`: the root names known steps only, gentle stages and still does
+      not, and the background is held at either step on the live page, never on the canvas or a
+      thumbnail.
+    - `e2e/page-kit/page-dials.spec.ts`, in a real cascade on the reference page: every size probed
+      at each step is the Style's times its factor and the page's own heading follows. On Path and
+      Soft, gentle leaves no scroll-driven animation and no loop, and still leaves no animation and
+      no timed transition.
+    - `e2e/page-kit/louder-fit.spec.ts`, opt-in (`LOUDER_FIT=1`, a development route): every
+      section heading of the sample page in all eight Styles at five widths, and in Anton and
+      Unbounded on Bold and Poster, set to 60 texts. Louder draws no run wider than its line where
+      the Style draws it within, never draws below the Style's size, never lifts a title, and still
+      takes some heading the whole step in each Style and face at some width. On a phone a Style
+      may rightly hold every heading, because its own size already fills the column. It passes: 60
+      runs in 13 minutes.
+    - **Calibrated:** each was planted out and failed. CSS: seven gate plants. JS: four. Renderer:
+      four. Type and still CSS: six, and an unheld price. e2e: louder doing nothing, the colour
+      transitions left on `:root`'s durations, the route following the scroll at gentle, and in
+      `louder-fit` the fit turned off (118 faults) and the FAQ's split forgetting its room (7,
+      all in the FAQ). After the rebase onto X63, the "What's inside" head forgetting its room
+      gave 22 faults, all on that heading in Poster at 1024 and 1440 ("Transformation",
+      "Photography" drawn wider than the line); with its room, none. The full run passed again
+      on that base: 60 runs in 15 minutes.
+    - **`louder-fit`'s first runs measured nothing.** On the branch's old base, reduced motion
+      still gave every property a 0.01ms transition, so a size read straight after a heading's text
+      was swapped returned the size before the swap. The fit looked switched off: almost a
+      thousand words read as running over, and the fit-off plant failed exactly as the clean run
+      did. A probe found it: each piece of the fit's expression, set as the heading's own size,
+      read back the same stale number. Codex-1vs02 fixed the base, and the branch was rebased on
+      it. The spec also turns a heading's transitions off while it reads it, so it no longer
+      depends on that fix. A plant that fails the same way the clean run fails proves nothing,
+      which is why both plants are re-run on every change to the instrument.
+  - **Not done:** the editor's controls for all five dials (D4).
+
 - **X63 · 2026-10-12 · 3b · "What's inside": every practice in the course as a picture-led card
   to swipe through, straight after the hero (BUILT, decided BY the owner on 2026-10-12;
   Codex-61zsk.52).** The owner reviewed a working mock-up (`phase3-sources/whats-inside`) and took

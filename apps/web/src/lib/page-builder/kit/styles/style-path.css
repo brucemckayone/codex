@@ -45,10 +45,10 @@
 
 .lp[data-lp-style='path'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 0.9rem + 5.6cqi, 5.9rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.35rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 0.9rem + 5.6cqi, 5.9rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1.05rem + 2.9cqi, 3.35rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1rem + 0.85cqi, 1.6rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4cqi, 4.4rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 4cqi, 4.4rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1.02;
   --lp-leading-heading: 1.08;
@@ -307,16 +307,16 @@
 @media screen and (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
     :root[data-theme]
-      .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+      .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='path']
       .lp-section[data-lp-type]::after,
-    :root[data-theme] .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path'] .story-chapter::after {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='path'] .story-chapter::after {
       animation: var(--lp-route-draw, none);
       animation-timeline: view(block 50%);
       animation-range: cover 0% cover 100%;
     }
 
     :root[data-theme]
-      .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+      .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='path']
       .lp-section[data-lp-type]
       > .lp-inner::after {
       animation: lp-path-tip linear;
@@ -403,10 +403,10 @@
   @supports (animation-timeline: view()) {
     @container (min-width: 48rem) {
       :root[data-theme]
-        .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+        .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='path']
         .map__stage:nth-child(even):last-child::before,
       :root[data-theme]
-        .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='path']
+        .lp:not([data-lp-still], [data-lp-motion]):is(.lp, #lp-style)[data-lp-style='path']
         .map__stage:nth-child(even):last-child::after {
         animation: var(--lp-route-draw, none);
         animation-timeline: view(block 50%);

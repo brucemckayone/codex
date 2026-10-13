@@ -146,10 +146,12 @@
     --lp-strip-gap: var(--_gap);
   }
 
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .inside__head {
     display: grid;
     gap: var(--lp-stack);
     max-inline-size: var(--lp-measure);
+    --lp-heading-column: var(--lp-measure);
   }
 
   /* The heading measures itself in its own `ch`, not the body face's. */

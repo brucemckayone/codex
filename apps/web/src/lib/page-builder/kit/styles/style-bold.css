@@ -47,14 +47,14 @@
 
 .lp[data-lp-style='bold'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(3.25rem, 0.25rem + 10.6cqi, 10rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 5.6cqi, 5.75rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.35rem, 1rem + 1.2cqi, 2rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.25rem, 1.05rem + 0.75cqi, 1.625rem) * var(--lp-scale));
   --lp-size-body: calc(clamp(1.125rem, 1rem + 0.35cqi, 1.3125rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(3.5rem, 1.25rem + 6.8cqi, 7.5rem) * var(--lp-scale));
   /* The close speaks nearly as loud as the promise. */
-  --lp-size-cta: calc(clamp(2.75rem, 0.25rem + 9cqi, 8.5rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.75rem, 0.25rem + 9cqi, 8.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 0.9;
   --lp-leading-heading: 0.94;
@@ -231,7 +231,7 @@
    heading is simply there. */
 @media screen and (prefers-reduced-motion: no-preference) {
   :root[data-theme]
-    .lp:not([data-lp-still]):is(.lp, #lp-style)[data-lp-style='bold']
+    .lp:not([data-lp-still], [data-lp-motion='still']):is(.lp, #lp-style)[data-lp-style='bold']
     .lp-section:not([data-lp-type='hero'])
     .lp-heading:is([data-size='display'], [data-size='heading'])[data-lp-enter]:not(
       [data-lp-build],
@@ -281,6 +281,8 @@
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
     column-gap: var(--lp-gap);
     max-inline-size: none;
+    /* The heading spans the column, past the head's measure (03 X62). */
+    --lp-heading-column: var(--lp-column);
   }
 
   :is(.lp, #lp-style)[data-lp-style='bold']
@@ -331,7 +333,7 @@
       .preview-split__words,
       .video-split__words
     ) {
-    --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 3.9cqi, 4.25rem) * var(--lp-scale));
+    --lp-size-heading: calc(clamp(2.25rem, 0.6rem + 3.9cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   }
 }
 

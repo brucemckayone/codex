@@ -1067,7 +1067,7 @@ describe("upgradePage · the page's dials (03 X61)", () => {
           dials: {
             colour: 'neon',
             corners: 'brand',
-            motion: 'still',
+            texture: 'grain',
             constructor: 'x',
           },
         },

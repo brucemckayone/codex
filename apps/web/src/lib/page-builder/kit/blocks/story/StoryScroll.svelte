@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments';
+  import { NOTHING_FOLLOWS } from '../../motion/attributes';
   import Media from '../../primitives/Media.svelte';
   import type { StoryStep } from './definition';
   import StoryWords from './StoryWords.svelte';
@@ -39,7 +40,7 @@
   function follow(count: number): Attachment<HTMLElement> {
     return (root) => {
       if (count === 0 || typeof IntersectionObserver === 'undefined') return;
-      if (root.closest('[data-lp-still]')) return;
+      if (root.closest(NOTHING_FOLLOWS)) return;
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       const moments = [...root.querySelectorAll('.story-scroll__step')];
       const observer = new IntersectionObserver(
@@ -156,7 +157,7 @@
   /* ── the frame (motion only) ───────────────────────────────────────────── */
   @media (prefers-reduced-motion: no-preference) {
     @container (min-width: 48rem) {
-      :global(.lp:not([data-lp-still])) .story-scroll[data-live] .story-scroll__frame {
+      :global(.lp:not([data-lp-still], [data-lp-motion])) .story-scroll[data-live] .story-scroll__frame {
         position: sticky;
         z-index: 1;
         inset-block-start: max(var(--space-6), calc(50svh - var(--_col) * 3 / 8));
@@ -170,19 +171,19 @@
         border-radius: var(--lp-radius-media);
       }
 
-      :global(.lp:not([data-lp-still])) .story-scroll[data-live] .story-scroll__media {
+      :global(.lp:not([data-lp-still], [data-lp-motion])) .story-scroll[data-live] .story-scroll__media {
         opacity: 0;
       }
 
       /* The moment being read is in full ink; the rest step back a shade. */
-      :global(.lp:not([data-lp-still]))
+      :global(.lp:not([data-lp-still], [data-lp-motion]))
         .story-scroll[data-live]
         .story-scroll__step:not([data-active])
         :global(.lp-heading) {
         color: var(--lp-ink-soft);
       }
 
-      :global(.lp:not([data-lp-still])) .story-scroll[data-live] :global(.lp-heading) {
+      :global(.lp:not([data-lp-still], [data-lp-motion])) .story-scroll[data-live] :global(.lp-heading) {
         transition: color var(--duration-slow) var(--ease-out);
       }
     }

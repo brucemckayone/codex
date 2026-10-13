@@ -26,11 +26,13 @@
 </div>
 
 <style>
+  /* The measure is its heading's room too (louder's fit, 03 X62). */
   .story-words {
     display: grid;
     align-content: start;
     gap: var(--space-3);
     max-inline-size: var(--lp-measure);
+    --lp-heading-column: var(--lp-measure);
   }
 
   .story-words[data-size='heading'] {

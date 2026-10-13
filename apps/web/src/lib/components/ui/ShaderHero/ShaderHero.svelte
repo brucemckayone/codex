@@ -9,7 +9,8 @@
   - 4 presets: suture (RDA), ether (raymarch), warp (FBM), ripple (wave eq)
   - Brand-colored — reads org palette from CSS vars
   - IntersectionObserver pauses when off-screen
-  - prefers-reduced-motion, or `still`: render one static frame, then stop
+  - prefers-reduced-motion, `still`, or a page holding it (`tone`): render one
+    static frame, then stop
   - Mobile DPR capped at 1 for performance
   - Live-preview: brand editor changes take effect immediately
 -->
@@ -44,7 +45,8 @@
      * Report what it draws, cell by cell, to `shaderTone`, while a page asks
      * (the page kit's live veil, landing-builder 03 X54). For the one shader
      * the window shows behind a page: the org layout's fullpage one. Read
-     * once, at mount.
+     * once, at mount. That shader also stands still while a page holds it
+     * (`shaderTone.hold`, its motion dial, 03 X62).
      */
     tone?: boolean;
   }
@@ -129,7 +131,9 @@
     // ── Reduced motion check ───────────────────────────────────
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     isReducedMotion = motionQuery.matches;
-    isFrozen = isReducedMotion || isStill;
+    // A page the window shows asked it to stand still (its motion dial).
+    let isHeld = tone && shaderTone.held;
+    isFrozen = isReducedMotion || isStill || isHeld;
     function setFrozen(next: boolean) {
       if (next === isFrozen) return;
       isFrozen = next;
@@ -146,12 +150,12 @@
     }
     const onMotionChange = (e: MediaQueryListEvent) => {
       isReducedMotion = e.matches;
-      setFrozen(isReducedMotion || isStill);
+      setFrozen(isReducedMotion || isStill || isHeld);
     };
     motionQuery.addEventListener('change', onMotionChange);
     applyStill = (next) => {
       isStill = next;
-      setFrozen(isReducedMotion || isStill);
+      setFrozen(isReducedMotion || isStill || isHeld);
     };
 
     // Renderer factory is imported from ./load-renderer — single source of
@@ -258,6 +262,12 @@
         { still: isFrozen, blur: blurRadius() }
       );
     }
+
+    if (tone)
+      shaderTone.onHold((held) => {
+        isHeld = held;
+        setFrozen(isReducedMotion || isStill || isHeld);
+      });
 
     // A page that starts asking gets a sample at the next frame; a frozen
     // shader has none coming, so it draws its frame again.
@@ -466,6 +476,7 @@
     return () => {
       applyStill = undefined;
       if (tone) {
+        shaderTone.onHold(null);
         shaderTone.onDemand(null);
         shaderTone.clear();
       }

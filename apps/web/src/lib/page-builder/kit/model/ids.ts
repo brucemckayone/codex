@@ -54,11 +54,18 @@ export const DEFAULT_SECTION_SPACING: SectionSpacingId = 'regular';
  *   corners  brand: the org's own corners, unbent by the Style
  *            rounder: Soft's corners, on any Style
  *   spacing  the rhythm a section takes when it picks none of its own
+ *   drama    calmer: every headline a step smaller
+ *            louder: section headings a step larger (the opening and the
+ *            closing ask are drawn as large as they fit already)
+ *   motion   still: nothing moves; gentle: entrances play, nothing follows
+ *            the scroll (the Style's own is all of it)
  */
 export const PAGE_DIALS = {
   colour: ['muted', 'vivid'],
   corners: ['brand', 'rounder'],
   spacing: ['compact', 'spacious'],
+  drama: ['calmer', 'louder'],
+  motion: ['still', 'gentle'],
 } as const satisfies Record<string, readonly [string, string]>;
 export type PageDialId = keyof typeof PAGE_DIALS;
 export type PageDialStep<D extends PageDialId> = (typeof PAGE_DIALS)[D][number];

@@ -278,7 +278,7 @@
 
   /* The hero's one entrance (keyframes named by the Style), as HeroBlock's. */
   @media (prefers-reduced-motion: no-preference) {
-    :global(:root[data-theme] .lp:not([data-lp-still])) .hero-poster__media {
+    :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero-poster__media {
       animation: var(--lp-enter-media);
     }
   }

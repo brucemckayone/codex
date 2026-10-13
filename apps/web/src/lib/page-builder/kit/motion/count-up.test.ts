@@ -232,6 +232,22 @@ describe('counting up', () => {
     expect(FakeObserver.all).toHaveLength(0);
   });
 
+  // 03 X62: a figure counting up is an entrance, so `gentle` keeps it.
+  it('never runs with the motion dial at still, and runs at gentle', () => {
+    const page = document.createElement('div');
+    page.className = 'lp';
+    page.setAttribute('data-lp-motion', 'still');
+    const value = figure('4,000+');
+    page.appendChild(value);
+    document.body.appendChild(page);
+    expect(attach(value)).toBeUndefined();
+    expect(FakeObserver.all).toHaveLength(0);
+
+    page.setAttribute('data-lp-motion', 'gentle');
+    expect(attach(value)).toBeTypeOf('function');
+    expect(FakeObserver.all.length).toBeGreaterThan(0);
+  });
+
   it('never runs under reduced motion', () => {
     install({ reduced: true });
     expect(attach(figure('4,000+'))).toBeUndefined();

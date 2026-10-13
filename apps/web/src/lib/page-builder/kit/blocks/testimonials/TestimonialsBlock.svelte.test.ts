@@ -10,6 +10,7 @@ import type { JourneySalesContext } from '../../../render/types';
 import { SECTION_LAYOUTS } from '../../model/ids';
 import { sampleContext } from '../../model/sample';
 import type { BlockEdit, ResolvedSection } from '../../model/types';
+import { NOTHING_FOLLOWS } from '../../motion/attributes';
 import { TESTIMONIALS_COPY } from './copy';
 import { TESTIMONIALS_EMPTY, testimonialsDefinition } from './definition';
 import { MARQUEE_MIN, marqueeCopies } from './marquee';
@@ -350,7 +351,8 @@ describe('TestimonialsBlock', () => {
 
     const MOVING =
       /^@media screen and \(prefers-reduced-motion: no-preference\)$/;
-    const LIVE = /:root\[data-theme\] \.lp:not\(\[data-lp-still\]\)/;
+    // A loop: it stops at either step of the motion dial too (03 X62).
+    const LIVE = `:root[data-theme] .lp:not(${NOTHING_FOLLOWS})`;
 
     it('stops the strip when paused, and while a pointer rests on it or focus is inside', () => {
       const held = marqueeCss().filter(
@@ -360,7 +362,7 @@ describe('TestimonialsBlock', () => {
       const [rule] = held;
       expect(rule.conditions.some((c) => MOVING.test(c))).toBe(true);
       for (const selector of rule.selectors) {
-        expect(selector).toMatch(LIVE);
+        expect(selector).toContain(LIVE);
         expect(selector).toMatch(
           /\.tm-marquee\[data-moving\]:is\(:hover, :focus-within, \[data-paused\]\) \.tm-marquee__lane$/
         );
@@ -391,7 +393,7 @@ describe('TestimonialsBlock', () => {
       const shown = display('.tm-marquee__controls', 'moving');
       expect(shown.map((d) => d.value)).toEqual(['flex']);
       for (const selector of shown[0].selectors) {
-        expect(selector).toMatch(LIVE);
+        expect(selector).toContain(LIVE);
         expect(selector).toContain('.tm-marquee[data-moving]');
       }
     });

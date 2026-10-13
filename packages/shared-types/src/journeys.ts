@@ -168,6 +168,8 @@ export interface SectionDesign {
     colour?: 'muted' | 'vivid';
     corners?: 'brand' | 'rounder';
     spacing?: 'compact' | 'spacious';
+    drama?: 'calmer' | 'louder';
+    motion?: 'still' | 'gentle';
   };
 }
 

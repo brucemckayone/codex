@@ -257,6 +257,20 @@ describe('StoryBlock — scroll', () => {
     expect(one('.story-scroll')?.hasAttribute('data-live')).toBe(false);
   });
 
+  // 03 X62: the scroll story follows the scroll, so either step stops it.
+  it.each([
+    'still',
+    'gentle',
+  ])('stays still with the motion dial at %s', async (step) => {
+    const page = document.createElement('div');
+    page.className = 'lp';
+    page.setAttribute('data-lp-motion', step);
+    document.body.appendChild(page);
+    await render({ steps: moments(3) }, { layout: 'scroll', target: page });
+    expect(observers).toHaveLength(0);
+    expect(one('.story-scroll')?.hasAttribute('data-live')).toBe(false);
+  });
+
   it('with no pictures at all there is no frame', async () => {
     await render(SAMPLE, { layout: 'scroll' });
     expect(one('.story-scroll__frame')).toBeNull();

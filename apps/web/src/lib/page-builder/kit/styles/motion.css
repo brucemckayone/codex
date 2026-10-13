@@ -237,7 +237,7 @@
 /* ── entrances: armed and played by the stage ────────────────────────────── */
 @media screen and (prefers-reduced-motion: no-preference) {
   /* Held on the first frame until played; played once, in time. */
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter] {
     --_lp-play: paused;
     --_lp-order: 0;
     animation-duration: var(--duration-slowest);
@@ -251,46 +251,46 @@
       var(--_lp-play);
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter='go'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter='go'] {
     --_lp-play: running;
   }
 
   /* Entering together, they step in one after another. */
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-order='1'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-order='1'] {
     --_lp-order: 1;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-order='2'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-order='2'] {
     --_lp-order: 2;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-order='3'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-order='3'] {
     --_lp-order: 3;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-reveal='rise'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-reveal='rise'] {
     animation-name: lp-reveal-rise;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-reveal='fade'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-reveal='fade'] {
     animation-name: lp-reveal-fade;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-reveal='scale'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-reveal='scale'] {
     animation-name: lp-reveal-scale;
   }
 
   :root[data-theme]
-    .lp:not([data-lp-still])
+    .lp:not([data-lp-still], [data-lp-motion='still'])
     [data-lp-enter]:is([data-lp-reveal='wipe'], [data-lp-build='wipe'], [data-lp-draw]:not(svg)) {
     animation-name: lp-wipe;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-build='rise'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-build='rise'] {
     animation-name: lp-build-rise;
   }
 
-  :root[data-theme] .lp:not([data-lp-still]) [data-lp-enter][data-lp-build='track'] {
+  :root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still']) [data-lp-enter][data-lp-build='track'] {
     transform-origin: 0 50%;
     animation-name: lp-build-track;
   }
@@ -298,7 +298,7 @@
   /* The hooks. Headings, by size; a heading a block builds keeps its own. */
   @container style(--lp-build-display: rise) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='display'][data-lp-enter]:not(
         [data-lp-build],
@@ -310,7 +310,7 @@
 
   @container style(--lp-build-display: wipe) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='display'][data-lp-enter]:not(
         [data-lp-build],
@@ -322,7 +322,7 @@
 
   @container style(--lp-build-display: track) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='display'][data-lp-enter]:not(
         [data-lp-build],
@@ -335,7 +335,7 @@
 
   @container style(--lp-build-heading: rise) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='heading'][data-lp-enter]:not(
         [data-lp-build],
@@ -347,7 +347,7 @@
 
   @container style(--lp-build-heading: wipe) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='heading'][data-lp-enter]:not(
         [data-lp-build],
@@ -359,7 +359,7 @@
 
   @container style(--lp-build-heading: track) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='heading'][data-lp-enter]:not(
         [data-lp-build],
@@ -372,7 +372,7 @@
 
   @container style(--lp-build-title: rise) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='title'][data-lp-enter]:not(
         [data-lp-build],
@@ -384,7 +384,7 @@
 
   @container style(--lp-build-title: wipe) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='title'][data-lp-enter]:not(
         [data-lp-build],
@@ -396,7 +396,7 @@
 
   @container style(--lp-build-title: track) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-heading[data-size='title'][data-lp-enter]:not(
         [data-lp-build],
@@ -411,7 +411,7 @@
      assumes it is there, so it never fades. */
   @container style(--lp-media-reveal: rise) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-media[data-lp-enter]:not(
         [data-lp-reveal],
@@ -423,7 +423,7 @@
 
   @container style(--lp-media-reveal: fade) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-media[data-lp-enter]:not(
         [data-lp-reveal],
@@ -435,7 +435,7 @@
 
   @container style(--lp-media-reveal: wipe) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-media[data-lp-enter]:not(
         [data-lp-reveal],
@@ -447,7 +447,7 @@
 
   @container style(--lp-media-reveal: scale) {
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion='still'])
       .lp-section:not([data-lp-type='hero'])
       .lp-media[data-lp-enter]:not(
         [data-lp-reveal],
@@ -461,27 +461,27 @@
 /* ── scrubbed: tied to the scroll ───────────────────────────────────────── */
 @media screen and (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
-    :root[data-theme] .lp:not([data-lp-still]) {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) {
       --lp-route-draw: lp-wipe-down linear both;
     }
 
     /* A route: `view(block 50%)` narrows the viewport to its middle line, so
        progress is the share of the drawing above that line and the tip stays
        on it. Exact for any drawing that only ever runs downward. */
-    :root[data-theme] .lp:not([data-lp-still]) svg[data-lp-draw]:not([data-lp-draw='stroke']) {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) svg[data-lp-draw]:not([data-lp-draw='stroke']) {
       animation: lp-wipe-down linear both;
       animation-timeline: view(block 50%);
       animation-range: cover 0% cover 100%;
     }
 
-    :root[data-theme] .lp:not([data-lp-still]) svg[data-lp-draw='stroke'] {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) svg[data-lp-draw='stroke'] {
       view-timeline: --lp-stroke block;
       view-timeline-inset: 50%;
     }
 
     /* The gap is twice the path, so no second dash can start inside it. */
     :root[data-theme]
-      .lp:not([data-lp-still])
+      .lp:not([data-lp-still], [data-lp-motion])
       svg[data-lp-draw='stroke']
       :is(path, line, polyline, polygon, circle, ellipse, rect) {
       stroke-dasharray: 1 2;
@@ -491,19 +491,19 @@
     }
 
     /* Parallax: against the scroll, over the element's whole pass. */
-    :root[data-theme] .lp:not([data-lp-still]) [data-lp-parallax] {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) [data-lp-parallax] {
       --_lp-drift: var(--space-5);
       animation: lp-parallax linear both;
       animation-timeline: view();
       animation-range: cover 0% cover 100%;
     }
 
-    :root[data-theme] .lp:not([data-lp-still]) [data-lp-parallax='2'] {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) [data-lp-parallax='2'] {
       --_lp-drift: var(--space-10);
     }
 
     /* Read-along: full ink by the time it reaches the middle. */
-    :root[data-theme] .lp:not([data-lp-still]) [data-lp-readalong] {
+    :root[data-theme] .lp:not([data-lp-still], [data-lp-motion]) [data-lp-readalong] {
       animation: lp-readalong linear both;
       animation-timeline: view();
       animation-range: entry 100% cover 50%;
@@ -516,14 +516,14 @@
        drifts, or a background plate, is left alone. */
     @container style(--lp-media-parallax: 1) or style(--lp-media-parallax: 2) {
       :root[data-theme]
-        .lp:not([data-lp-still])
+        .lp:not([data-lp-still], [data-lp-motion])
         .lp-section:not([data-lp-type='hero'])
         .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *) {
         view-timeline: --lp-frame block;
       }
 
       :root[data-theme]
-        .lp:not([data-lp-still])
+        .lp:not([data-lp-still], [data-lp-motion])
         .lp-section:not([data-lp-type='hero'])
         .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *)
         > img {
@@ -538,7 +538,7 @@
 
     @container style(--lp-media-parallax: 2) {
       :root[data-theme]
-        .lp:not([data-lp-still])
+        .lp:not([data-lp-still], [data-lp-motion])
         .lp-section:not([data-lp-type='hero'])
         .lp-media:not(:is([data-lp-parallax], [data-lp-on-media]) *)
         > img {
@@ -551,7 +551,7 @@
        block sets soft inside an ink one — starts and ends where it is. */
     @container style(--lp-text-readalong: on) {
       :root[data-theme]
-        .lp:not([data-lp-still])
+        .lp:not([data-lp-still], [data-lp-motion])
         .lp-section:not([data-lp-type='hero'])
         .lp-text[data-tone='ink']:not(:is([data-lp-reveal], [data-lp-build]) *)
         > p {

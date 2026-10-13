@@ -124,7 +124,7 @@
   /* The lead speaks a size up; single-weight display faces keep their weight. */
   .benefits-bento__tile[data-lead] :global(.lp-heading) {
     max-inline-size: 18ch;
-    font-size: var(--lp-size-heading);
+    font-size: calc(var(--lp-size-heading) * var(--lp-drama-held, 1));
     font-weight: var(--lp-weight-heading);
     line-height: var(--lp-leading-heading);
     letter-spacing: var(--lp-tracking-heading);

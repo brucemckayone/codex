@@ -42,12 +42,12 @@
 
 .lp[data-lp-style='clean'] {
   /* ── type ─────────────────────────────────────────────────────────────── */
-  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.5rem) * var(--lp-scale));
-  --lp-size-heading: calc(clamp(1.9rem, 1.1rem + 2.4cqi, 3.25rem) * var(--lp-scale));
+  --lp-size-display: calc(clamp(2.6rem, 1rem + 5.2cqi, 5.5rem) * var(--lp-scale) * var(--lp-drama-display, 1));
+  --lp-size-heading: calc(clamp(1.9rem, 1.1rem + 2.4cqi, 3.25rem) * var(--lp-scale) * var(--lp-drama-heading, 1));
   --lp-size-title: calc(clamp(1.2rem, 1.05rem + 0.55cqi, 1.5rem) * var(--lp-scale));
   --lp-size-lead: calc(clamp(1.2rem, 1.05rem + 0.4cqi, 1.4rem) * var(--lp-scale));
   --lp-size-price: calc(clamp(2.5rem, 1.5rem + 3.2cqi, 4.25rem) * var(--lp-scale));
-  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.6cqi, 4.25rem) * var(--lp-scale));
+  --lp-size-cta: calc(clamp(2.2rem, 1rem + 3.6cqi, 4.25rem) * var(--lp-scale) * var(--lp-drama-display, 1));
 
   --lp-leading-display: 1;
   --lp-leading-heading: 1.06;
@@ -110,12 +110,12 @@
    frame does not wipe (a picture a block already moves, a background plate)
    the image is left alone. */
 @media screen and (prefers-reduced-motion: no-preference) {
-  :root[data-theme] .lp[data-lp-style='clean']:not([data-lp-still]) .hero__enter-m .lp-media > img {
+  :root[data-theme] .lp[data-lp-style='clean']:not([data-lp-still], [data-lp-motion='still']) .hero__enter-m .lp-media > img {
     animation: lp-clean-settle calc(var(--duration-slowest) * 1.5) var(--ease-smooth) both;
   }
 
   :root[data-theme]
-    .lp[data-lp-style='clean']:not([data-lp-still])
+    .lp[data-lp-style='clean']:not([data-lp-still], [data-lp-motion='still'])
     .lp-section:not([data-lp-type='hero'])
     .lp-media[data-lp-enter]:not(
       [data-lp-reveal],
@@ -147,6 +147,8 @@
     column-gap: var(--lp-gap);
     align-items: end;
     max-inline-size: none;
+    /* The heading's room is its share (louder's fit, 03 X62). */
+    --lp-heading-column: calc((var(--lp-column) - var(--lp-gap)) * 7 / 12);
   }
 
   :is(.lp, #lp-style)[data-lp-style='clean']
@@ -251,14 +253,14 @@
 /* A picture answers the pointer: the photograph leans in a little inside
    its frame. Decoration only — nothing is shown that is not already there. */
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still])
+  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still], [data-lp-motion='still'])
     :is(.gallery-picture, .story-strip__card, .benefits-grid li)
     .lp-media
     > img {
     transition: scale var(--duration-slower) var(--ease-smooth);
   }
 
-  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still])
+  :is(.lp, #lp-style)[data-lp-style='clean']:not([data-lp-still], [data-lp-motion='still'])
     :is(.gallery-picture, .story-strip__card, .benefits-grid li):hover
     .lp-media
     > img {

@@ -171,6 +171,38 @@ describe('ShaderHero still', () => {
     expect(frames).toHaveLength(1);
   });
 
+  // 03 X62: a page's motion dial holds the window's shader still.
+  it('stands still while a page holds it, and moves again when the last lets go', async () => {
+    await start({ tone: true });
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+
+    const release = shaderTone.hold();
+    releases.push(release);
+    step(5);
+    expect(renderer.render).toHaveBeenCalledTimes(4);
+    expect(frames).toHaveLength(0);
+
+    release();
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(7);
+    expect(frames).toHaveLength(1);
+  });
+
+  it('stands still from its first frame for a page that held it first, and only with `tone`', async () => {
+    releases.push(shaderTone.hold());
+    await start({ tone: true });
+    step(5);
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    unmount(app!);
+    app = null;
+
+    renderer.render.mockClear();
+    await start({});
+    step(3);
+    expect(renderer.render).toHaveBeenCalledTimes(3);
+  });
+
   it('draws its frame again after a resize clears the canvas, then stops', async () => {
     await start({ still: true });
     step(3);
