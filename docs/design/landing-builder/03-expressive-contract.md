@@ -2110,9 +2110,12 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
         Style itself draws too wide is not louder's to fix. At the Style's own size, 1,268 (heading,
         text) pairs in 30 of the 60 runs draw a run wider than its line. 722 of them are in
         Unbounded, the widest face the brand editor offers, and 309 are Poster in its own face.
-        Most are on a phone, in the problem's statement at display size, where Poster hyphenates by
-        design. The rest are long words in split heads at 1024 and 1440. That is filed as
-        Codex-61zsk.60, which reuses this fit at the Style's own size.
+        The last full run, after the rebase onto X63 added the "What's inside" heading to the
+        sample page, counts 1,313: 752 in Unbounded, 324 Poster in its own face. The 45 more are
+        all that heading, which the narrowed run counts at 45 on its own. Over half of each of
+        those two is on a phone, in the problem's statement at display size, where Poster
+        hyphenates by design. The rest are long words in split heads at 1024 and 1440. That is filed as Codex-61zsk.60, which
+        reuses this fit at the Style's own size.
       - **Known limit.** Path's route stop is worked out from the heading's size token, not from the
         size it is drawn at. Where the fit holds a heading back, the stop sits up to the step's
         share of half a line low (about 5px at 1440).
