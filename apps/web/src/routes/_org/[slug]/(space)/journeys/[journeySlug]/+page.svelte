@@ -3,9 +3,10 @@
 
   Public journey sales page (SPEC §8.2). The awaited `coursePage` drives the SEO
   head + JSON-LD (rendered synchronously — never gated on streamed data), and
-  `JourneyRenderer` renders the page's sections with per-page brand overrides.
-  The streamed `sellPreview` promise is threaded straight through to the renderer
-  where the intro/reel sections `{#await}` it behind poster skeletons.
+  the kit's `PageRenderer` renders the page's sections with per-page brand
+  overrides, against the context `buildPublicContext` assembles. The streamed
+  `sellPreview` promise is threaded through that context to the blocks that
+  show its films, which wait for it without holding the page.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -169,7 +170,7 @@
   );
 
   // The checkout each path deep-links to — absolute, because JSON-LD is consumed
-  // outside page context. Mirrors `JourneyRenderer`'s own `checkoutUrl`: the PAGE
+  // outside page context. As the pre-kit renderer's `checkoutUrl` was: the PAGE
   // slug, which is the key the checkout route resolves by.
   const checkoutUrl = $derived(
     new URL(

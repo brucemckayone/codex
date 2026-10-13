@@ -161,15 +161,16 @@ export const load: PageServerLoad = async (event) => {
   //
   // IT STAYS AWAITED ANYWAY, because what reads it changed after that claim was
   // written. The offer is no longer consumed only by the below-the-fold `invite`
-  // section: `JourneyRenderer` derives `purchasable` from it
-  // (`render/JourneyRenderer.svelte:118`), and that flag decides whether the
-  // ABOVE-THE-FOLD hero CTA exists at all (`render/sections/HeroSection.svelte`)
-  // and whether the floating pill renders. `+page.svelte` also prices the page's
-  // JSON-LD and `product:price:*` from it, and a head is flushed long before a
-  // streamed promise settles. Streaming would ship first paint — and the SSR HTML
-  // a crawler reads — with the page's primary conversion affordance missing and
-  // its machine-readable price absent. That trades a second of TTFB for a wrong
-  // page, so this is now a DELIBERATE first-paint dependency, not an oversight.
+  // section: `buildPublicContext` derives `purchasable` from it
+  // (`$lib/page-builder/public-context.ts`), and that flag decides what the
+  // ABOVE-THE-FOLD hero CTA offers, a way in or an explicit notice
+  // (`kit/model/cta.ts`), and what the floating bar offers. `+page.svelte` also
+  // prices the page's JSON-LD and `product:price:*` from it, and a head is
+  // flushed long before a streamed promise settles. Streaming would ship first
+  // paint — and the SSR HTML a crawler reads — with the page's primary
+  // conversion affordance missing and its machine-readable price absent. That
+  // trades a second of TTFB for a wrong page, so this is now a DELIBERATE
+  // first-paint dependency, not an oversight.
   //
   // THE REAL FIX, which does not belong in this file: the offer is auth-agnostic
   // apart from its `entitled` flag, changes only through the three studio
