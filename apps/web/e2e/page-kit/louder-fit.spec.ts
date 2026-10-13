@@ -1,25 +1,29 @@
 /**
- * A section heading's own size fits its widest word (Codex-61zsk.60; 03 X66),
- * and the type dial's louder fits every word a Style fits (Codex-61zsk.51;
- * X62), measured in every Style over a sweep of headings.
+ * A heading's own size fits its widest word: a section heading's (Codex-61zsk.60;
+ * 03 X66), and a title's and a display statement's (Codex-61zsk.62; X71); and
+ * the type dial's louder fits every word a Style fits (Codex-61zsk.51; X62),
+ * measured in every Style over a sweep of headings.
  *
  * OPT-IN, LOCAL: `LOUDER_FIT=1 pnpm exec playwright test louder-fit`. It
  * drives the page kit's gallery (`/studio/page-kit`), a development route
  * that a production build (CI's) does not have, and it sets 60 texts in every
- * section heading of the sample page, in 8 Styles at 5 widths, which takes
- * about twenty-five minutes. Run it on any change to a heading's fit, to a
- * heading size, or to a layout that gives a head less room than its section's
- * column (that layout names the room, `--lp-heading-column`).
+ * heading of the sample page, and of every layout with titles in every Style
+ * (`PAGES`), in 8 Styles at 5 widths. Run it on any change
+ * to a heading's fit, to a heading size, or to a layout that gives a head or
+ * a title less room than its section's column (that layout names the room,
+ * `--lp-heading-column` or `--lp-title-column`).
  *
  * Each text, a long word alone or 12 to 60 characters with a long word first
  * or last, is set in every heading but the hero's and weighed as Heading
- * weighs its own (`widestRun`). Held at the Style's size as it was before the
- * own-size fit (`--lp-heading-hold: 1`), at its own size, and at louder it
- * reads:
+ * weighs its own (`widestRun`). Held at its size as it was before the fit
+ * (`--lp-heading-hold: 1`), at its own size, and at louder it reads:
  *
- *   own fits       at its own size, a section heading whose room is known draws
- *                  no run wider than its line, unless the fit has taken it to
- *                  the title floor (logged); a held one is not fitted
+ *   own fits       at its own size, a heading draws no run wider than its line,
+ *                  unless the fit has taken it to its floor (logged): a title's
+ *                  is the body's size, every other's a title's. A held one is
+ *                  not fitted
+ *   rooms exact    where a card names its title's room, it is the title's
+ *                  line, its parent's content box, to half a pixel
  *   nothing over   no run is drawn wider than its heading's line at louder
  *                  that the Style draws within it
  *   never below    louder never draws a heading smaller than the Style does
@@ -36,7 +40,8 @@
  * what is held here; a run wider than its line is, which no reflow can hide.
  * The line is the heading's room, not its box: a grid item's `min-width: auto`
  * stretches its box to its longest word, past its track and over whatever
- * sits beside it, so the box is held to the room while it is read.
+ * sits beside it, so the box is held to the room while it is read. A flex
+ * item's is left as it is, since there that minimum decides what wraps.
  *
  * What the Style's size, unfitted, draws too wide is counted in the log, and
  * with `CENSUS_OUT=<file.json>` every such (heading, text) is written there,
@@ -80,11 +85,32 @@ const LOOKS =
   STYLES.length +
   2 * STYLES.filter((s) => s === 'bold' || s === 'poster').length;
 const WIDTHS = [360, 390, 768, 1024, 1440];
+/**
+ * The sample page draws each section in its Style's own layout, so it reads a
+ * layout only in the Styles that choose it. Three more pages draw every layout
+ * with titles, and the problem's display statement, in every Style: a page
+ * holds a type once, and the course has three (`layout=type:id`, one per type).
+ * `LOUDER_FIT_PAGES=3` reads only the pages at those places here, likewise.
+ */
+const PAGES = [
+  '',
+  'only=benefits,curriculum,faq,pricing,testimonials,text,problem&offer=tiers&layout=benefits:grid,curriculum:timeline,faq:columns,pricing:cards,testimonials:quote,text:statement,problem:statement',
+  'only=benefits,curriculum&layout=benefits:bento,curriculum:cards',
+  'only=curriculum&layout=map',
+].filter(
+  (_, place) =>
+    !process.env.LOUDER_FIT_PAGES ||
+    process.env.LOUDER_FIT_PAGES.split(',').includes(String(place))
+);
 const FACES: { brand: string; face?: string }[] = [
   { brand: '0' },
   { brand: '0', face: 'Anton' },
   { brand: '0', face: 'Unbounded' },
 ];
+/** Each face, on each page. */
+const LOADS = FACES.flatMap((face) =>
+  PAGES.map((extra) => ({ ...face, extra }))
+);
 const SHORT = [
   'find',
   'your',
@@ -152,7 +178,7 @@ function corpus(): { id: string; text: string }[] {
   }));
 }
 
-test('a heading fits its widest word at its own size and at louder, and holds what it cannot see', async ({
+test('a heading fits its widest word at its own size and at louder', async ({
   browser,
 }) => {
   const cookies = await captureSeededCreatorCookies();
@@ -175,10 +201,10 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
     await context.addCookies(cookies);
     const page = await context.newPage();
     for (const style of STYLES)
-      for (const { brand, face } of FACES) {
+      for (const { brand, face, extra } of LOADS) {
         if (face && style !== 'poster' && style !== 'bold') continue;
         await page.goto(
-          `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=light&chrome=0`
+          `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
         );
         await page
           .locator('.lp .lp-section')
@@ -275,16 +301,23 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
             const originals = headings.map((h) => h.innerHTML);
             const styles = headings.map((h) => h.getAttribute('style'));
             // A swapped text carries its own weights, as Heading writes them.
-            // The heading's box is held to its room: a grid item's
-            // `min-width: auto` grows it to its longest word, past its
-            // track, so its own width would never show a run too wide. Its
-            // transitions are off while it is read: a transition of any
-            // length (reduced motion's was 0.01ms) hands a read straight
-            // after the swap the size before it (Codex-1vs02).
+            // A grid item's box is held to its room: its `min-width: auto`
+            // grows it to its longest word, past its track, so its own width
+            // would never show a run too wide. A flex item's is not: there
+            // that minimum is the layout, which wraps whatever sits beside a
+            // heading under it when the heading's longest word needs the line
+            // (the map's count, 03 X71), and zeroing it would read a line the
+            // page never draws. Its transitions are off while it is read: a
+            // transition of any length (reduced motion's was 0.01ms) hands a
+            // read straight after the swap the size before it (Codex-1vs02).
+            const inGrid = headings.map((h) =>
+              /grid/.test(
+                h.parentElement ? getComputedStyle(h.parentElement).display : ''
+              )
+            );
             const weigh = (h: HTMLElement, k: number) => {
               h.style.transition = 'none';
-              h.style.minInlineSize = '0';
-              if (h.dataset.size !== 'heading') return;
+              if (inGrid[headings.indexOf(h)]) h.style.minInlineSize = '0';
               h.style.setProperty(
                 '--lp-heading-run-caps',
                 String(weights[k].caps)
@@ -303,9 +336,9 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
               new Promise((done) =>
                 requestAnimationFrame(() => requestAnimationFrame(done))
               );
-            // raw: each section heading held at the Style's size
-            // (`--lp-heading-hold: 1`), as it was drawn before the own-size
-            // fit (03 X66), to see what the fit takes off and where.
+            // raw: each heading held at its size (`--lp-heading-hold: 1`), as
+            // it was drawn before the fit (03 X66, X71), to see what the fit
+            // takes off and where.
             const measure = async (louder: boolean, raw = false) => {
               if (louder) root.dataset.lpDrama = 'louder';
               else delete root.dataset.lpDrama;
@@ -317,8 +350,7 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
                 for (const h of headings) {
                   h.textContent = text;
                   weigh(h, k);
-                  if (raw && h.dataset.size === 'heading')
-                    h.style.setProperty('--lp-heading-hold', '1');
+                  if (raw) h.style.setProperty('--lp-heading-hold', '1');
                 }
                 headings.forEach((h, i) => {
                   sizes[i].push(
@@ -339,11 +371,46 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
             const own = await measure(false);
             const louder = await measure(true);
             await measure(false);
-            // The title size in px in each heading's own context (a custom
-            // property's computed value is its text, not a length).
-            const titlePx = headings.map((h) => {
+            // Where a card names its title's room (03 X71), the room is the
+            // title's line: its parent's content box, read beside a probe
+            // drawn at that room. Too wide and a word runs past its line;
+            // too narrow and a name that fits is drawn smaller.
+            const rooms = headings.map((h) => {
+              if (
+                h.dataset.size !== 'title' ||
+                !getComputedStyle(h)
+                  .getPropertyValue('--lp-title-column')
+                  .trim()
+              )
+                return null;
+              const probe = document.createElement('div');
+              probe.style.cssText =
+                'position:absolute;visibility:hidden;inline-size:var(--lp-title-column)';
+              h.appendChild(probe);
+              const named = probe.getBoundingClientRect().width;
+              probe.remove();
+              // Its own width, not `clientWidth`, which rounds to a pixel.
+              const parent = h.parentElement as HTMLElement;
+              const cs = getComputedStyle(parent);
+              const line =
+                parent.getBoundingClientRect().width -
+                [
+                  cs.paddingLeft,
+                  cs.paddingRight,
+                  cs.borderLeftWidth,
+                  cs.borderRightWidth,
+                ].reduce((sum, px) => sum + Number.parseFloat(px), 0);
+              return { named, line };
+            });
+            // Each heading's floor in px in its own context (a custom
+            // property's computed value is its text, not a length): a
+            // title's is the body's size, every other's a title's.
+            const floorPx = headings.map((h) => {
               const probe = document.createElement('span');
-              probe.style.fontSize = 'var(--lp-size-title, 0px)';
+              probe.style.fontSize =
+                h.dataset.size === 'title'
+                  ? 'var(--lp-size-body, 0px)'
+                  : 'var(--lp-size-title, 0px)';
               h.appendChild(probe);
               const px = Number.parseFloat(getComputedStyle(probe).fontSize);
               probe.remove();
@@ -363,12 +430,13 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
                 getComputedStyle(h)
                   .getPropertyValue('--lp-heading-hold')
                   .trim() === '1',
-              title: titlePx[i],
+              floor: floorPx[i],
+              room: rooms[i],
             }));
           },
           { list: texts, weights: runs }
         );
-        const at = `${width} ${style}${face ? ` ${face}` : ''}`;
+        const at = `${width} ${style}${face ? ` ${face}` : ''}${extra ? ` (${extra})` : ''}`;
         const look = `${style}${face ? ` ${face}` : ''}`;
         let wholeStep = false;
         for (const h of read)
@@ -393,14 +461,19 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
               wholeStep = true;
           });
         grew.set(look, (grew.get(look) ?? false) || wholeStep);
-        // The own-size fit (03 X66): where a section heading's room is known,
-        // its own size draws no run wider than its line, unless it is on the
-        // title floor; and what it takes off a heading whose words fit.
+        for (const h of read)
+          if (h.room && Math.abs(h.room.named - h.room.line) > 0.5)
+            faults.push(
+              `${at} ${h.where}: its card names a room of ${h.room.named.toFixed(1)}px for a line of ${h.room.line.toFixed(1)}px`
+            );
+        // The own-size fit (03 X66, X71): a heading's own size draws no run
+        // wider than its line, unless it is on its floor; and what it takes
+        // off a heading whose words fit.
         let floored = 0;
         for (const h of read)
           texts.forEach(({ id }, j) => {
-            if (h.size !== 'heading' || h.held) return;
-            const onFloor = h.own[j] <= h.title + 0.5;
+            if (h.held) return;
+            const onFloor = h.own[j] <= h.floor + 0.5;
             if (h.ownOver[j].length && onFloor) floored++;
             else if (h.ownOver[j].length)
               faults.push(
@@ -416,7 +489,7 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
           });
         if (floored)
           console.log(
-            `${at}: ${floored} on the title floor still run past their line`
+            `${at}: ${floored} on their floor still run past their line`
           );
         const rawOver = read.flatMap((h) =>
           texts.flatMap(({ id }, j) =>
@@ -444,7 +517,15 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
           console.log(
             `${at}: the Style's size, unfitted, draws ${rawOver.length} too wide, e.g. ${rawOver.slice(0, 3).join('; ')}`
           );
-        expect(read.length, `${at} has section headings`).toBeGreaterThan(10);
+        // A layout's own page reads its titles, so a gallery that drew
+        // nothing there could not pass.
+        if (extra)
+          expect(
+            read.some((h) => h.size === 'title'),
+            `${at} has titles`
+          ).toBe(true);
+        else
+          expect(read.length, `${at} has section headings`).toBeGreaterThan(10);
         pairs++;
       }
     await context.close();
@@ -460,7 +541,7 @@ test('a heading fits its widest word at its own size and at louder, and holds wh
       `the fit drew ${by.length} headings that fit smaller: median ${(100 * by[Math.floor(by.length / 2)]).toFixed(1)}%, ` +
         `90th ${(100 * by[Math.floor(by.length * 0.9)]).toFixed(1)}%, most ${(100 * by[by.length - 1]).toFixed(1)}%`
     );
-  expect(pairs).toBe(WIDTHS.length * LOOKS);
+  expect(pairs).toBe(WIDTHS.length * LOOKS * PAGES.length);
   for (const [look, any] of grew)
     if (!any) faults.push(`${look}: louder took no heading the whole step`);
   expect(faults).toEqual([]);
