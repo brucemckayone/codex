@@ -2529,3 +2529,48 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     - Two existing kit gates caught real faults during the build: a `heading__title` class the
       org's brand sheet would have painted in its heading colour (the class-name test), and an
       un-namespaced private in Soft's pebbles (the private-property registry).
+- **X65 · 2026-10-13 · 3b follow-up · A cover hero holds its play button's place while the
+  video is on its way, and a sell page's layout shift is measured (BUILT, decided without the
+  owner; Codex-61zsk.40).** #561 made the awaited view say which films can come
+  (`filmsAttached`), so a hero whose only media is a video is framed from the first paint. Its
+  VERIFY step, a layout-shift total of 0 on a real page, had not been measured. It now has, and
+  the cover was the one layout that still moved.
+  - **Why the cover, and only the cover.** Split, centered, statement and poster draw the play
+    button over the picture, inside a box whose place #561 already holds. The cover draws it in
+    the words' column, and drew it only once the clip had landed. That column ends at its foot
+    (`align-content: end`) above a `min-block-size` floor. At 1440 the late row lifted the words
+    inside an unchanged band. At 390, where the words already fill the floor, it made the band
+    38px taller and pushed the page down.
+  - **The decision.** While a hero video the awaited view says is attached is on its way, the
+    cover draws the play button's box, hidden (`visibility: hidden`) and inert. When the clip
+    lands, the same box becomes the button: one element throughout, so nothing remounts and the
+    entrance does not replay. A video that then fails to resolve leaves no box, as every other
+    layout leaves the words alone.
+  - **Rejected: moving the cover's button over the picture**, as the other layouts draw it. It
+    would remove the shift by changing the cover's design, where the button reads with the
+    words it belongs to. **Rejected: a reserved gap without the button in it** (a fixed
+    min-height on the column). The gap would have to track the button's size in every Style
+    and on every phone; holding the button itself is exact by construction.
+  - **Measured.** A Playwright probe loads each public sell page signed out and sums its
+    `layout-shift` entries (none after input) from navigation until the stream settles, at 1440
+    and 390. Each shift is attributed to its section. It only reads pages. On
+    of-blood-and-bones ancestral-threads (statement, hero video only), return-to-the-shoreline
+    (split), tending-the-grief (cover, hero video only), and studio-alpha's bone-deep and
+    tending-the-grief (no film):
+    - **Calibrated:** with #561's hold planted out, ancestral-threads read 0.1669 at 1440 and
+      0.1740 at 390, its hero 489px at the first paint and 1038px once settled.
+    - **With web fonts held constant** (every font file aborted, so the fallback draws
+      throughout and no swap can move a line): the cover 0.0147 to 0 at 1440 and 0.0447 to 0 at
+      390, where the band is now 550px from the first paint instead of growing to it from its
+      512px floor. Every film layout and both no-film pages read 0 after the fix.
+    - **With web fonts loading as usual**, what is left is the fonts, not the films: the cover
+      at 390 is 0.0826, its headline going from 2 lines to 4 when the brand face lands. Every
+      brand face falls back to one Arial tuned for Inter. Filed as Codex-61zsk.61.
+    - With fonts aborted, the split at 390 moves its picture 26px and back as its words re-wrap
+      twice while the fallback resolves. It is the same before and after this fix, absent when
+      fonts load, and text, not the picture.
+  - **Tests** (`HeroBlock.svelte.test.ts`): the held box at the first paint, inert and with the
+    button's label; the same box becoming the button when the clip lands; no box when the video
+    fails or none is attached; and the rule that hides it. Each was calibrated against a
+    planted fault (nothing held, the held box visible, the held box not inert, the box remounted
+    when the clip lands), and each failed on its own assertion.
