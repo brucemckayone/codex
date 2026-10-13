@@ -203,14 +203,25 @@
   /* ── grid ──────────────────────────────────────────────────────────────── */
   /* Each name reads as a promise, not a caption (03 X55): two fifths of the
      way from the Style's title size to its heading's; four across, a fifth,
-     so a name of a few words still sits in its narrower column. */
+     so a name of a few words still sits in its narrower column. The row is
+     `--_n` across, so a card knows its room. */
   .benefits-grid {
     --lp-title-lift: 0.4;
+    --_n: 1;
     display: grid;
+    grid-template-columns: repeat(var(--_n), minmax(0, 1fr));
     gap: var(--space-10) var(--lp-gap);
   }
 
+  /* Its name's room (03 X71): its share of the column, less its inset, the
+     padding and border a Style that boxes it gives it (Soft, below). A lone
+     card's measure is in the body's `ch`, which no title can read, so its
+     room is the column, which is never narrower. */
   .benefits-grid li {
+    --_inset: 0px;
+    --lp-title-column: calc(
+      (var(--lp-column) - (var(--_n) - 1) * var(--lp-gap)) / var(--_n) - 2 * var(--_inset)
+    );
     display: grid;
     align-content: start;
     gap: var(--space-3);
@@ -229,7 +240,7 @@
 
   @container (min-width: 36rem) {
     .benefits-grid:not([data-count='1']) {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
   }
 
@@ -237,12 +248,12 @@
      seven and eight; 3 across for the rest), so no row is left with one. */
   @container (min-width: 60rem) {
     .benefits-grid:is([data-count='3'], [data-count='5'], [data-count='6'], [data-count='9']) {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
 
     .benefits-grid:is([data-count='4'], [data-count='7'], [data-count='8']) {
       --lp-title-lift: 0.2;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      --_n: 4;
     }
   }
 
@@ -356,6 +367,7 @@
   }
 
   :global(.lp[data-lp-style='soft']) .benefits-grid li {
+    --_inset: calc(var(--space-6) + var(--lp-border));
     padding: var(--space-6);
     border: var(--lp-border) var(--border-style) var(--lp-line);
     border-radius: var(--lp-radius-card);
@@ -366,12 +378,12 @@
   @container (min-width: 60rem) {
     :global(.lp[data-lp-style='soft']) .benefits-grid[data-count='4'] {
       --lp-title-lift: 0.4;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      --_n: 2;
     }
 
     :global(.lp[data-lp-style='soft']) .benefits-grid:is([data-count='7'], [data-count='8']) {
       --lp-title-lift: 0.4;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      --_n: 3;
     }
   }
 

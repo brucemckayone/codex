@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
- * A section heading's size (03 X66, X62): the rule `Heading.svelte` writes,
- * evaluated as the browser computes it, from the custom properties a page and
- * its layout give it.
+ * A heading's size at each of its sizes (03 X66, X71, X62): the rules
+ * `Heading.svelte` writes, evaluated as the browser computes them, from the
+ * custom properties a page and its layout give it.
  *
  * The browser sweep that proves the fit on real words (`e2e/page-kit/
  * louder-fit.spec.ts`) is opt-in and local, so CI holds the rule here. Every
@@ -11,7 +11,8 @@
  * dropped fits a head to a room nobody can see, and a `max()` mixing a number
  * with a length is invalid, which leaves the heading at its parent's size.
  * So the rule's own text is read and computed, units and all; and every place
- * a layout holds its head (`--lp-heading-hold`) or names its room is counted.
+ * a layout holds its head (`--lp-heading-hold`), names its room, or names a
+ * card's room for its title (`--lp-title-column`) is counted.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -20,7 +21,12 @@ import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SELECTOR = ".lp-heading[data-size='heading']";
+const SELECTORS = {
+  display: ".lp-heading[data-size='display']",
+  heading: ".lp-heading[data-size='heading']",
+  title: ".lp-heading[data-size='title']",
+} as const;
+type Size = keyof typeof SELECTORS;
 
 type CssNode = {
   type: string;
@@ -72,7 +78,6 @@ function declarations(source: string) {
   return found;
 }
 
-/** Every kit component, by path from the kit. */
 /** Every component's styles and every stylesheet in the kit, a Style's included. */
 function kitComponents(dir = KIT): { file: string; source: string }[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -214,17 +219,26 @@ function evaluate(
 const HEADING = declarations(
   readFileSync(join(KIT, 'primitives', 'Heading.svelte'), 'utf8')
 );
-const RULE = new Map(
-  HEADING.filter((d) => d.at === '' && d.selector === SELECTOR).map((d) => [
-    d.property,
-    d.value,
+/** A size's declarations: the base rule's, then its own, as both apply. */
+const RULES = Object.fromEntries(
+  Object.entries(SELECTORS).map(([which, selector]) => [
+    which,
+    new Map(
+      HEADING.filter(
+        (d) =>
+          d.at === '' &&
+          (d.selector === '.lp-heading' || d.selector === selector)
+      ).map((d) => [d.property, d.value])
+    ),
   ])
-);
+) as Record<Size, Map<string, string>>;
 
 /** The page's own tokens, as the gallery's Clean draws them at 1440. */
 const PAGE = {
+  '--lp-size-display': '72px',
   '--lp-size-heading': '48px',
   '--lp-size-title': '24px',
+  '--lp-size-body': '18px',
   '--lp-column': '600px',
   '--lp-face-text': '0.5',
   '--lp-face-caps': '0.7',
@@ -232,15 +246,17 @@ const PAGE = {
 };
 
 /**
- * The heading's size in px. `run` is its widest run's weight as written,
- * `caps` in capitals, `chars` its letters (`widestRun`); the rest are the
- * properties the page, the type dial and a layout give it.
+ * The heading's size in px, at a section heading's size unless `of` says
+ * otherwise. `run` is its widest run's weight as written, `caps` in capitals,
+ * `chars` its letters (`widestRun`); the rest are the properties the page,
+ * the type dial and a layout give it.
  */
 function size(
   given: { run?: number; caps?: number; chars?: number } & Record<
     string,
     string | number | undefined
-  > = {}
+  > = {},
+  of: Size = 'heading'
 ) {
   const { run, caps, chars, ...props } = given;
   const set: Record<string, string> = { ...PAGE };
@@ -249,12 +265,13 @@ function size(
   if (chars !== undefined) set['--lp-heading-run-chars'] = String(chars);
   for (const [name, value] of Object.entries(props))
     if (value !== undefined) set[name] = String(value);
-  const font = RULE.get('font-size');
-  if (!font) throw new Error(`${SELECTOR} declares no font-size`);
+  const rule = RULES[of];
+  const font = rule.get('font-size');
+  if (!font) throw new Error(`${SELECTORS[of]} declares no font-size`);
   // A custom property the rule declares is the element's own; the rest inherit.
   const value = evaluate(
     parseMath(font),
-    (name) => RULE.get(name) ?? set[name]
+    (name) => rule.get(name) ?? set[name]
   );
   expect(value.length, 'font-size is a length').toBe(1);
   return value.n;
@@ -334,11 +351,97 @@ describe("a section heading's size", () => {
   });
 });
 
-describe('where a layout holds its head, or names its room', () => {
-  const kit = kitComponents().flatMap(({ file, source }) =>
-    declarations(source).map((d) => ({ file, ...d }))
-  );
+describe("a display statement's size (03 X71)", () => {
+  const display = (given: Parameters<typeof size>[0] = {}) =>
+    size(given, 'display');
 
+  it("is the Style's own, at its layout's scale, wherever its widest run fits", () => {
+    // 10 units at 0.5em each: 5em, 360px at 72px, in a 600px column.
+    expect(display({ run: 10 })).toBe(72);
+    expect(display({ run: 10, '--lp-display-scale': 0.5 })).toBe(36);
+  });
+
+  it('is only as much smaller as a long word needs, in the room its layout names', () => {
+    const fitted = display({ run: 20 });
+    expect(fitted).toBeLessThan(72);
+    expect(fitted * 20 * 0.5).toBeCloseTo(600);
+    const named = display({ run: 20, '--lp-heading-column': '300px' });
+    expect(named * 20 * 0.5).toBeCloseTo(300);
+  });
+
+  it('is never smaller than a title', () => {
+    expect(display({ run: 200 })).toBe(24);
+  });
+
+  it('weighs the run in capitals where a Style draws them', () => {
+    const caps = {
+      run: 20,
+      caps: 30,
+      '--lp-heading-run': 'var(--lp-heading-run-caps)',
+      '--lp-heading-face': 'var(--lp-face-caps)',
+    };
+    expect(display(caps) * 30 * 0.7).toBeCloseTo(600);
+  });
+
+  it('is drawn at its size when it has no words, or is held', () => {
+    expect(display()).toBe(72);
+    expect(display({ run: 200, '--lp-heading-hold': 1 })).toBe(72);
+  });
+});
+
+describe("a title's size (03 X71)", () => {
+  const title = (given: Parameters<typeof size>[0] = {}) =>
+    size(given, 'title');
+  /** A title lifted all the way, to the heading's size (the bento's lead). */
+  const lifted = { '--lp-title-lift': 1 };
+
+  it("is the Style's own, lifted as its layout lifts it, wherever its widest run fits", () => {
+    expect(title({ run: 10 })).toBe(24);
+    // Halfway from the title's 24px to the heading's 48px.
+    expect(title({ run: 10, '--lp-title-lift': 0.5 })).toBe(36);
+  });
+
+  it('is fitted to the room its card names', () => {
+    // 20 units, 10em: 240px at 24px, so a 300px card holds it and a 200px
+    // one fits it at 20px.
+    expect(title({ run: 20, '--lp-title-column': '300px' })).toBe(24);
+    const fitted = title({ run: 20, '--lp-title-column': '200px' });
+    expect(fitted * 20 * 0.5).toBeCloseTo(200);
+  });
+
+  it('is fitted to no more than the column, or the room its head names', () => {
+    // 40 units, 20em: a 48px title fits the 600px column at 30px.
+    const wide = title({ run: 40, ...lifted, '--lp-title-column': '900px' });
+    expect(wide * 40 * 0.5).toBeCloseTo(600);
+    const headed = title({
+      run: 40,
+      ...lifted,
+      '--lp-heading-column': '450px',
+    });
+    expect(headed * 40 * 0.5).toBeCloseTo(450);
+  });
+
+  it('is never smaller than the body, so it stays a title', () => {
+    expect(title({ run: 200, '--lp-title-column': '200px' })).toBe(18);
+  });
+
+  it("does not grow at louder: a lifted one lifts toward the heading's own size", () => {
+    expect(title({ run: 10, ...lifted, ...LOUDER })).toBeCloseTo(48);
+    expect(title({ run: 10, ...LOUDER })).toBe(24);
+  });
+
+  it('is drawn at its size when it has no words, or is held', () => {
+    expect(title()).toBe(24);
+    expect(title({ run: 200, '--lp-heading-hold': 1 })).toBe(24);
+  });
+});
+
+/** Every declaration in the kit, with its file. */
+const kit = kitComponents().flatMap(({ file, source }) =>
+  declarations(source).map((d) => ({ file, ...d }))
+);
+
+describe('where a layout holds its head, or names its room', () => {
   // A held head is drawn at the Style's size whatever its words, so a long
   // word runs past its line. The pricing band held its head until X70; a new
   // hold is counted here so it is a decision.
@@ -397,6 +500,210 @@ describe('where a layout holds its head, or names its room', () => {
   // which now fits the heading to the title's size.
   it('never names a room of nothing', () => {
     const rooms = kit.filter((d) => d.property === '--lp-heading-column');
+    expect(rooms.length).toBeGreaterThanOrEqual(5);
+    expect(
+      rooms
+        .filter((d) => /^-?0(px|rem|cqi|%)?$/.test(d.value))
+        .map((d) => `${d.file} ${d.selector}: ${d.value}`)
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The layouts whose titles the sweep found cut at the Style's own size
+ * (Codex-61zsk.62): the rule that names each card's room for its title, and
+ * how its card is found in a selector, its own file's or a Style's.
+ */
+const CARDS = [
+  {
+    file: 'blocks/benefits/BenefitsBlock.svelte',
+    room: '.benefits-grid li',
+    card: /\.benefits-grid li(?![\w-])/,
+  },
+  {
+    file: 'blocks/benefits/BenefitsBento.svelte',
+    room: '.benefits-bento__tile',
+    card: /\.benefits-bento__tile(?![\w-])/,
+  },
+  {
+    file: 'blocks/curriculum/StageCards.svelte',
+    room: '.card',
+    card: /(^|[^\w-])\.card(?![\w-])/,
+  },
+];
+const TIMELINE = 'blocks/curriculum/StageTimeline.svelte';
+const MAP = 'blocks/curriculum/StageMap.svelte';
+
+describe("where a card names its title's room (03 X71)", () => {
+  it('names it in each layout whose titles were cut', () => {
+    for (const { file, room } of CARDS)
+      expect(
+        kit.some(
+          (d) =>
+            d.file === file &&
+            d.at === '' &&
+            d.selector === room &&
+            d.property === '--lp-title-column'
+        ),
+        `${file} ${room}`
+      ).toBe(true);
+    // The timeline's name has the row past its marker, and wide its 5/12.
+    expect(
+      kit
+        .filter(
+          (d) =>
+            d.file === TIMELINE &&
+            d.selector === '.timeline' &&
+            d.property === '--lp-title-column'
+        )
+        .map((d) => d.at)
+    ).toEqual(['', '@container (min-width: 52rem)']);
+  });
+
+  // A card's room is its share of the column less its inset, its padding and
+  // border across. A Style that boxes or opens a card and leaves its inset
+  // as it was misstates the room: too wide, and a word still runs past its
+  // line; too narrow, and a name that fits is drawn smaller. So each Style
+  // that sets a card's inline padding or border states its inset there too.
+  it('states its inset wherever a Style pads, borders or opens a card', () => {
+    const INLINE =
+      /^(padding|padding-inline(-start|-end)?|padding-(left|right)|border|border-inline(-start|-end)?(-width)?|border-(left|right)(-width)?|border-width)$/;
+    const styleOf = (selector: string) =>
+      selector.match(/data-lp-style='(\w+)'/)?.[1] ?? 'every Style';
+    for (const { file, card } of CARDS) {
+      const own = kit.filter(
+        (d) =>
+          (d.file === file || d.file.startsWith('styles/')) &&
+          card.test(d.selector)
+      );
+      const key = (d: (typeof own)[number]) =>
+        `${d.file} ${d.at} (${styleOf(d.selector)})`;
+      const inset = new Set(
+        own.filter((d) => d.property === '--_inset').map(key)
+      );
+      expect(
+        [
+          ...new Set(own.filter((d) => INLINE.test(d.property)).map(key)),
+        ].filter((boxed) => !inset.has(boxed)),
+        `${file}: a card boxed with no inset`
+      ).toEqual([]);
+    }
+  });
+
+  // Path reaches its timeline past the column's start to sit its markers on
+  // the page's route; the names' room counts that reach only when the reach
+  // is the timeline's own `--_reach`, which its margin is drawn from.
+  it('widens the timeline and the map past their column only by their own reach', () => {
+    for (const [file, list] of [
+      [TIMELINE, 'timeline'],
+      [MAP, 'map'],
+    ])
+      expect(
+        kit
+          .filter(
+            (d) =>
+              new RegExp(`\\.${list}$`).test(d.selector) &&
+              /^margin(-inline(-start|-end)?|-left|-right)?$/.test(d.property)
+          )
+          .map((d) => `${d.file} ${d.selector}: ${d.property}: ${d.value}`)
+      ).toEqual([
+        `${file} .${list}: margin: 0`,
+        `${file} .${list}: margin-inline-start: calc(-1 * var(--_reach))`,
+      ]);
+  });
+
+  // The map's name shares its stop's row with the marker and the sign (its
+  // count stands within the name's track, 03 X71). Its room is the stop less
+  // every other track and a gap beside each, so a track added or resized
+  // without its room fails here.
+  it("states the map's room as its stop less the tracks beside the name", () => {
+    const own = (selector: string, property: string) =>
+      kit.find(
+        (d) =>
+          d.file === MAP &&
+          d.at === '' &&
+          d.selector === selector &&
+          d.property === property
+      )?.value;
+    for (const summary of ['.map__summary', 'div.map__summary']) {
+      const tracks = own(summary, 'grid-template-columns')?.split(
+        /\s+(?![^(]*\))/
+      );
+      const room = own(summary, '--lp-title-column');
+      expect(
+        tracks?.filter((t) => t === 'minmax(0, 1fr)'),
+        summary
+      ).toHaveLength(1);
+      const beside = (tracks ?? []).filter((t) => t !== 'minmax(0, 1fr)');
+      const gaps = beside.length === 1 ? '' : `${beside.length} * `;
+      expect(room, summary).toBe(
+        `calc(var(--_stop) - ${beside.join(' - ')} - ${gaps}var(--_beside))`
+      );
+    }
+    expect(own('.map__summary', 'column-gap')).toBe('var(--_beside)');
+  });
+
+  // Where the stops step, each is drawn at a share of the list; the stop its
+  // name's room reads is the same share.
+  it("steps the map's stop by the share its stops are drawn at", () => {
+    const at = '@container (min-width: 48rem)';
+    const drawn = kit.find(
+      (d) =>
+        d.file === MAP &&
+        d.at === at &&
+        d.selector === '.map__stage' &&
+        d.property === 'inline-size'
+    )?.value;
+    const stop = kit.find(
+      (d) =>
+        d.file === MAP &&
+        d.at === at &&
+        d.selector === '.map' &&
+        d.property === '--_stop'
+    )?.value;
+    expect(drawn).toMatch(/^\d+%$/);
+    expect(stop).toBe(
+      `calc((var(--lp-column) + var(--_reach)) * ${Number.parseFloat(drawn ?? '') / 100})`
+    );
+  });
+
+  // The count goes under a name whose longest word needs the whole track only
+  // while the row wraps and the name's narrowest is that word, capped at the
+  // track. Unwrapped, the name keeps its width and the count runs into the
+  // sign, which the sweep's check of a heading against its line cannot see.
+  it("wraps the map's count under a name whose longest word needs its track", () => {
+    const own = kit.filter((d) => d.file === MAP);
+    const rule = (selector: string) =>
+      Object.fromEntries(
+        own
+          .filter((d) => d.at === '' && d.selector === selector)
+          .map((d) => [d.property, d.value])
+      );
+    expect(rule('.map__head')).toMatchObject({
+      display: 'flex',
+      'flex-wrap': 'wrap',
+    });
+    expect(rule('.map__head > :global(.map__name)')).toMatchObject({
+      flex: '1 1 0',
+      'max-inline-size': '100%',
+    });
+    expect(rule('.map__count')).toMatchObject({ flex: 'none' });
+    expect(
+      own
+        .filter(
+          (d) =>
+            /map__(head|name)/.test(d.selector) &&
+            /^(min-inline-size|min-width|overflow(-x|-inline)?|contain|flex-wrap)$/.test(
+              d.property
+            ) &&
+            !(d.selector === '.map__head' && d.property === 'flex-wrap')
+        )
+        .map((d) => `${d.at} ${d.selector}: ${d.property}`)
+    ).toEqual([]);
+  });
+
+  it('never names a room of nothing', () => {
+    const rooms = kit.filter((d) => d.property === '--lp-title-column');
     expect(rooms.length).toBeGreaterThanOrEqual(5);
     expect(
       rooms

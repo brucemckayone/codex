@@ -21,10 +21,9 @@ const heading = componentRules(
   join(import.meta.dirname, '..', '..', 'primitives', 'Heading.svelte')
 );
 
+/** How many a rule sets to a row: the grid draws `--_n` across (03 X71). */
 const across = (rule: { decls: Map<string, string> }) =>
-  Number(
-    rule.decls.get('grid-template-columns')?.match(/^repeat\((\d+),/)?.[1] ?? 0
-  );
+  Number(rule.decls.get('--_n') ?? 0);
 const FOUR_ACROSS = [
   "[data-count='4']",
   "[data-count='7']",
@@ -34,18 +33,22 @@ const FOUR_ACROSS = [
 describe('a benefit’s name at a middle size', () => {
   it('Heading lifts a title toward the heading size, and not at all by default', () => {
     const title = heading.find(
-      (r) => r.selector === ".lp-heading[data-size='title']"
+      (r) =>
+        r.selector === ".lp-heading[data-size='title']" && r.within.length === 0
     );
-    expect(title?.decls.get('font-size')).toBe(
+    expect(title?.decls.get('--_own')).toBe(
       'calc( var(--lp-size-title) + (var(--_heading) - var(--lp-size-title)) * var(--lp-title-lift, 0) )'
     );
+    // Drawn at that size wherever its words fit its card (03 X71).
+    expect(title?.decls.get('font-size')).toMatch(/^min\( var\(--_own\),/);
   });
 
   it('lifts toward the heading as the type dial takes it down, never up (03 X62)', () => {
     // A lifted title sits in a card's column: `louder`'s room is the
     // heading's, measured against the section's column, not the card's.
     const title = heading.find(
-      (r) => r.selector === ".lp-heading[data-size='title']"
+      (r) =>
+        r.selector === ".lp-heading[data-size='title']" && r.within.length === 0
     );
     expect(title?.decls.get('--_heading')).toBe(
       'calc(var(--lp-size-heading) * var(--lp-drama-held, 1))'

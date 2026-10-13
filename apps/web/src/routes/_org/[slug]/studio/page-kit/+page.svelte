@@ -11,7 +11,8 @@
     ?offer=buy|sub|tiers|enrolled|unavailable|unknown    ?media=off
     ?only=<type>&layout=<id>&scheme=<id>&spacing=<id>
       (`only` may list types, `only=hero,transformation`, drawn in that order:
-      a layout or colour applies to each listed section it fits)
+      a layout or colour applies to each listed section it fits; `layout` may
+      name one per type instead, `layout=benefits:grid,curriculum:timeline`)
     ?dials=colour:muted|vivid,corners:brand|rounder,spacing:compact|spacious,
       drama:calmer|louder,motion:still|gentle
       (the page's dials, 03 X61, X62; any subset, any order)
@@ -172,16 +173,27 @@
     const layout = param('layout');
     const scheme = param('scheme');
     const spacing = param('spacing');
+    /** The layout named for a type: its own (`type:id`), or the one for all. */
+    const layoutFor = (type: string) =>
+      layout.includes(':')
+        ? layout
+            .split(',')
+            .find((pair) => pair.startsWith(`${type}:`))
+            ?.slice(type.length + 1)
+        : layout;
     return {
       ...sample,
-      sections: sample.sections.map((section) => ({
-        ...section,
-        variant: isLayoutOf(section.type, layout) ? layout : undefined,
-        design: {
-          scheme: isColourSchemeId(scheme) ? scheme : undefined,
-          spacing: isSectionSpacingId(spacing) ? spacing : undefined,
-        },
-      })),
+      sections: sample.sections.map((section) => {
+        const named = layoutFor(section.type);
+        return {
+          ...section,
+          variant: isLayoutOf(section.type, named) ? named : undefined,
+          design: {
+            scheme: isColourSchemeId(scheme) ? scheme : undefined,
+            spacing: isSectionSpacingId(spacing) ? spacing : undefined,
+          },
+        };
+      }),
     };
   });
 

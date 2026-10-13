@@ -99,11 +99,18 @@
 
 /* ── capitals ────────────────────────────────────────────────────────────── */
 /* Section headings join the display line in capitals; titles, the reading
-   voice of cards and questions, stay in sentence case. The type dial's
-   `louder` weighs a heading's widest run as it is drawn, so here, where the
-   case is set, in capitals (`primitives/Heading.svelte`, 03 X62). */
+   voice of cards and questions, stay in sentence case. A heading is drawn no
+   larger than its widest run fits, weighed as it is drawn, so here, where
+   the case is set, in capitals (`primitives/Heading.svelte`, 03 X62, X66). */
 :is(.lp, #lp-style)[data-lp-style='poster'] .lp-heading[data-size='heading'] {
   text-transform: uppercase;
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
+}
+
+/* The display line is in capitals already (`--lp-case-display`, above), so
+   its run is weighed in them too (03 X71). */
+:is(.lp, #lp-style)[data-lp-style='poster'] .lp-heading[data-size='display'] {
   --lp-heading-face: var(--lp-face-caps);
   --lp-heading-run: var(--lp-heading-run-caps, 0);
 }
@@ -343,9 +350,12 @@
 }
 
 /* ── benefits bento: the lead sheet shouts ──────────────────────────────── */
+/* In capitals, so its run is weighed in them, as a heading's is (above). */
 :is(.lp, #lp-style)[data-lp-style='poster'] .benefits-bento__tile[data-lead] .lp-heading {
   text-transform: uppercase;
   line-height: var(--lp-leading-heading);
+  --lp-heading-face: var(--lp-face-caps);
+  --lp-heading-run: var(--lp-heading-run-caps, 0);
 }
 
 /* ── the strip of praise: short quotes set like headlines ───────────────── */

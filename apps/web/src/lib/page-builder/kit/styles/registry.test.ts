@@ -30,8 +30,12 @@ const KIT_SHEETS = ['kit.css', 'schemes.css', 'surfaces.css', 'motion.css'];
 
 /** A private a Style borrows from a block, or keeps as a local helper. */
 interface Borrowed {
-  /** The kit file that declares it, or `local`: declared by no kit file. */
-  owner: string;
+  /**
+   * The kit file that declares it, or `local`: declared by no kit file. A
+   * name two blocks each declare, and the Style sets in both, lists both, and
+   * every one of them must still declare it.
+   */
+  owner: string | readonly string[];
   reason: string;
 }
 
@@ -54,6 +58,10 @@ const BORROWED: Record<PageStyleId, Record<string, Borrowed>> = {
     '--_cols': {
       owner: 'blocks/stats/StatsBlock.svelte',
       reason: 'two to a row for two or four figures',
+    },
+    '--_inset': {
+      owner: 'blocks/benefits/BenefitsBento.svelte',
+      reason: 'an open tile’s name has the tile’s whole width (03 X71)',
     },
   },
   clean: {
@@ -83,6 +91,14 @@ const BORROWED: Record<PageStyleId, Record<string, Borrowed>> = {
     '--_marker': {
       owner: 'blocks/curriculum/StageTimeline.svelte',
       reason: 'timeline markers sized to sit on the rail',
+    },
+    '--_reach': {
+      owner: [
+        'blocks/curriculum/StageTimeline.svelte',
+        'blocks/curriculum/StageMap.svelte',
+      ],
+      reason:
+        'how far the list reaches onto the rail, which its names’ room counts (03 X71)',
     },
     '--_r': {
       owner: LOCAL,
@@ -229,11 +245,16 @@ function violations(
   const declaredElsewhere = (name: string) =>
     registry.kit.has(name) ||
     [...registry.files.values()].some((set) => set.has(name));
-  // A borrowing holds while its owner has the name (a local one: while no one does).
+  // The owners that no longer declare a borrowed name: none, while it holds.
+  const lost = (entry: Borrowed, name: string) =>
+    [entry.owner]
+      .flat()
+      .filter((owner) => !(registry.files.get(owner)?.has(name) ?? false));
+  // A borrowing holds while its owners have the name (a local one: while no one does).
   const holds = (entry: Borrowed, name: string) =>
     entry.owner === LOCAL
       ? !declaredElsewhere(name)
-      : (registry.files.get(entry.owner)?.has(name) ?? false);
+      : lost(entry, name).length === 0;
 
   for (const [id, { declared, read }] of registry.styles) {
     const entries = borrowed[id] ?? {};
@@ -248,7 +269,7 @@ function violations(
         out.push(
           entry.owner === LOCAL
             ? `${id}'s local ${name} is now declared by the kit too`
-            : `${id} sets ${name}, which ${entry.owner} no longer declares`
+            : `${id} sets ${name}, which ${lost(entry, name).join(' and ')} no longer declares`
         );
     }
     for (const name of read) {
@@ -258,7 +279,7 @@ function violations(
         out.push(`${id} reads ${name}, which nothing it may read declares`);
       else if (!holds(entry, name))
         out.push(
-          `${id} reads ${name}, which ${entry.owner} no longer declares`
+          `${id} reads ${name}, which ${lost(entry, name).join(' and ')} no longer declares`
         );
     }
     for (const name of Object.keys(entries))
@@ -307,6 +328,14 @@ describe('the private-property registry (calibration, on scratch copies)', () =>
     });
     expect(violations(block, BORROWED)).toEqual([
       'path sets --_dot, which blocks/curriculum/StageMap.svelte no longer declares',
+    ]);
+    // A name two blocks share fails when either of them renames it.
+    const shared = scratch({
+      'blocks/curriculum/StageMap.svelte': (svelte) =>
+        svelte.replaceAll('--_reach', '--_far'),
+    });
+    expect(violations(shared, BORROWED)).toEqual([
+      'path sets --_reach, which blocks/curriculum/StageMap.svelte no longer declares',
     ]);
     const read = scratch({
       'styles/schemes.css': (css) =>
