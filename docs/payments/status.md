@@ -51,7 +51,10 @@ add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
 | `Codex-2hxff.28` | P2 | Support issues refunds from an admin screen, not the Stripe Dashboard, within 14 days | [purchases](purchases.md#refunds) |
 | `Codex-2hxff.29` | P2 | Creators' bank payouts are held for the 14-day refund window | [connect-and-payouts](connect-and-payouts.md#payout-timing) |
 | `Codex-2hxff.30` | P2 | A clawback shortfall is recovered from the creator's future earnings | [connect-and-payouts](connect-and-payouts.md#reversals) |
-| `Codex-2hxff.31` | P2 | Customer refund policy and creator payout terms drafted for legal review | [status](#open-questions) |
+| `Codex-2hxff.31` | P2 | Customer refund policy and creator payout terms drafted for legal review | [policy drafts](policy-drafts/README.md) |
+| `Codex-2hxff.32` | P1 | Every one-off content and course price is at least £1.00 (tiers and course plans already are) | [purchases](purchases.md#what-can-be-bought) |
+| `Codex-2hxff.33` | P2 | A fee increase applies 30 days after an email; a decrease at once | [fees-and-splits](fees-and-splits.md#fee-configuration) |
+| `Codex-2hxff.34` | P3 | Creators are reminded monthly about money waiting for them | [connect-and-payouts](connect-and-payouts.md#releasing-pending-money) |
 
 `Codex-2hxff.27` (closed) records the 2026-10-13 repair of production's webhooks.
 
@@ -77,6 +80,7 @@ option chosen. All dated 2026-10-13 unless noted.
 | Price changes (Q4–Q7) | "For 4B, the correct answer is: they move at the next renewal." Email at the change, applied at the first renewal at least 30 days later; increases and decreases alike; "Studio is the only place." |
 | Course plan price changes (P-6) | "Same rule as tiers" |
 | Ownership | "I think there should only be one owner, and the only person who can be the owner is the person who makes the organization. The only person who can transfer ownership should therefore be the owner. The proposed ownership model seems perfect to me." Money is held as pending until a new owner sets up payouts; money earned before a transfer stays with the old owner; "No migration concerns here." |
+| Ownership transfer | Recipient "An admin or creator"; "Yes, they accept"; the previous owner becomes "Admin"; started from "Studio settings"; an offer lasts "7 days"; emails "Both + other admins"; support reassignment "Support API, no screen". Mockup review: "Card on Settings (Recommended)", "Type the org name (Recommended)", no email on expiry "No — show on next visit (Recommended)", and the previous owner's subscription income "Agreements decide (Recommended)" — an agreement they hold keeps paying; one without is warned that it stops (`Codex-2hxff.2`) |
 | One pull request | "Yeah, I think we should put all of these fixes in together as one PR, to be honest." Adding the portal lockdown and environment tagging: "Include both" |
 | Production on the sandbox | "Right now, production is using the dev sandbox endpoints just so that nobody accidentally buys anything, as we are still testing, and production is not live yet, despite the website being there." "Right now, both production and this local should be receiving the same information from endpoints." |
 | Partial refunds (P-1) | "Keep access" |
@@ -84,7 +88,9 @@ option chosen. All dated 2026-10-13 unless noted.
 | Failed renewals (P-3) | "After retries fail" |
 | Subscription refunds (P-4) | "Cancel + end access" |
 | Downgrades (P-5) | "At period end" |
-| Small sales (P-7) | "Minimum platform fee" |
+| Small sales (P-7) | "Minimum platform fee"; the floors: "£1 price, 25p min fee (Recommended)" |
+| Minimum transfer | "Keep it off (Recommended)" — `minTransferCents = 0` |
+| Fee changes | "Rises 30 days, cuts now (Recommended)" |
 | Tier reordering (P-8) | "Warn, then allow" |
 | Agreement term (AGR-01) | "Keeps paying"; then, asked whether either side can end an agreement early: "Yes, any time" |
 | Leaving an organisation (AGR-09) | "End on removal" |
@@ -95,8 +101,10 @@ option chosen. All dated 2026-10-13 unless noted.
 | Who issues refunds | "Platform support" |
 | Refund window | "14 days" |
 | Funding refunds | "Hold for the window" — bank payouts wait out the 14-day refund window |
-| Clawback shortfalls | "From future earnings" |
+| Clawback shortfalls | "From future earnings"; if never recovered, "Write off after 12 months (Recommended)", amended by the owner — "perhaps there should be a limit on the level of absorption we would be willing to take before we invoice the creator" — to "£50 (Recommended)" and "All of it, after 90 days (Recommended)" |
+| Unclaimed money | "Hold and remind (Recommended)" — never forfeited, monthly reminder |
 | Policy text | "Draft both" — customer refund policy and creator payout terms, for legal review |
+| Refund reply time | "No promise" |
 | Billing portal configuration | "Create it now" → `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` |
 | Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (`docs/archive` is kept). Their generator script and the Stripe skill reference: "Yes, add to #585 now" |
 | Refund clawback (earlier, `Codex-13v21`) | Reverse transfers on refund; record a `refund_reviews` debt when the payee's balance is too low |
@@ -112,13 +120,15 @@ recover at checkout.
 
 ## Open questions
 
-Decisions still needed from the owner:
+Still needed:
 
-1. **Legal review** of the customer refund policy and creator payout terms once
-   drafted (`Codex-2hxff.31`) — including how UK consumer law for digital content
-   applies.
-2. **Ownership transfer screen**: an HTML mockup and data design are being
-   prepared for review.
+1. **Legal review** of the [policy drafts](policy-drafts/README.md)
+   (`Codex-2hxff.31`): questions L1–L7 in the refund policy and P1–P7 in the
+   creator terms. The most urgent is L1: checkout collects no consent to
+   immediate access today, so a buyer's statutory 14-day cancellation right for
+   digital content may still apply after they start watching.
+
+Every owner decision the drafts needed was taken on 2026-10-13 (rows above).
 
 The refund-policy questions in `Codex-aqk92` were all answered on 2026-10-13 and
 that bead is closed.

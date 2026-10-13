@@ -14,12 +14,12 @@ A **gap** marker means the code does not behave this way yet; see
 **Content** can be bought when all of these hold:
 
 - it is published and not deleted;
-- it is marked purchasable and has a price above £0;
+- it is marked purchasable and has a price of at least £1.00 — **gap**: `Codex-2hxff.32`;
 - its access rule honours a purchase. Content that is course-only, team-only
   or followers-only is not sold on its own — **gap**: `Codex-2hxff.14`
   (checkout gating).
 
-**A course** can be bought when it is published and has a price above £0.
+**A course** can be bought when it is published and has a price of at least £1.00.
 
 Publishing priced content requires the seller's payouts to be set up (a payable
 Connect account), whether or not it is marked purchasable — **gap**:

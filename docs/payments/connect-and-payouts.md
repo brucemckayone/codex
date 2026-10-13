@@ -98,9 +98,31 @@ Owner decisions, 2026-10-13: "The proposed ownership model seems perfect to me."
 - Money earned **before** a transfer stays with the previous owner, including
   anything still pending for them.
 
-The `organizations.primary_connect_account_user_id` pin is removed. The transfer
-screen is a new feature: an HTML mockup and data design are reviewed by the
-owner before it is built.
+The `organizations.primary_connect_account_user_id` pin is removed.
+
+**Transferring ownership** (owner decisions 2026-10-13, see
+[status.md](status.md#decisions); the mockup and data design were reviewed on
+`Codex-2hxff.2`):
+
+- The owner offers ownership from **Studio → Settings** to an active **admin or
+  creator**, and confirms by typing the organisation's name.
+- One offer is open at a time. It lasts **7 days**, and the owner can withdraw it
+  until it is accepted. The recipient accepts or declines; an offer to someone
+  who stops being an admin or creator is withdrawn automatically.
+- On acceptance the recipient becomes the owner and the previous owner becomes
+  an **admin**. The organisation's money follows whoever owned it **at the time
+  of each sale**: the payment time for a purchase, the invoice's creation time
+  for a subscription, which are the same instants the
+  [agreement resolver](agreements.md#how-a-share-applies) uses.
+- An agreement the previous owner holds keeps paying. Without one, their income
+  from the organisation's subscriptions stops, because the pool goes to the
+  owner. The offer dialog warns them, and the recipient sees every active
+  agreement before accepting.
+- Emails: the offer goes to the recipient. Acceptance goes to the new owner, the
+  previous owner and every other admin. A decline or automatic withdrawal goes to
+  the owner. An expired offer sends nothing; it shows on the Ownership card.
+- Platform support can reassign ownership through admin-api
+  (`auth: 'platform_owner'`). There is no screen yet.
 
 — **gap**: `Codex-2hxff.2`. Today any admin can promote themselves to owner and
 remove the founder, an organisation can have several owners, and the pin is set
@@ -177,6 +199,12 @@ defeats replay safety.
 
 ## Releasing pending money
 
+Pending money is kept for its payee **indefinitely and is never forfeited**.
+While any is waiting for a creator without a payable account, they are emailed a
+reminder once a month with the amount and a link to set up payouts (owner
+decision 2026-10-13, "Hold and remind (Recommended)") — **gap**:
+`Codex-2hxff.34`.
+
 When a payee becomes payable, **all** their pending rows are paid at once —
 from every organisation and from orgless sales.
 
@@ -219,8 +247,18 @@ Refunds and disputes reverse paid slices in proportion and adjust pending ones;
 see [refunds](purchases.md#refunds) and [disputes](purchases.md#disputes). When
 a payee's balance cannot cover a reversal, a `refund_reviews` row records the
 debt, and it is deducted from their next payouts until cleared — they are told,
-and the debt and each deduction show in their earnings — **gap**:
-`Codex-2hxff.30`.
+and the debt and each deduction show in their earnings.
+
+If it is never recovered (owner decisions 2026-10-13: "Write off after 12 months
+(Recommended)", then a cap of "£50 (Recommended)" with "All of it, after 90 days
+(Recommended)"):
+
+| A payee's total open debt | What happens |
+|---|---|
+| **£50 or less** | Written off by the platform once they have earned nothing for 12 months |
+| **More than £50** | Invoiced to them in full if not recovered from earnings within 90 days |
+
+— **gap**: `Codex-2hxff.30`.
 
 ## Earnings screens
 

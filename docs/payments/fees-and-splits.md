@@ -46,6 +46,12 @@ Each value is looked up in this order; the first one set wins, column by column:
 | `minPlatformFeeCents` | [Minimum platform fee](#minimum-platform-fee) | 0 |
 | `minTransferCents` | [Minimum transfer](#minimum-transfer) | 0 |
 
+**Notice.** A fee **increase**, at any level, is emailed to every affected
+creator and organisation owner and applies only to sales made 30 or more days
+later. A **decrease** applies to the next sale (owner decision 2026-10-13,
+"Rises 30 days, cuts now (Recommended)") — **gap**: `Codex-2hxff.33` (today
+every change applies to the next sale and nobody is told).
+
 **Changing fees.** Only the platform owner can, through admin-api
 (`/api/admin/fees/*`, `auth: 'platform_owner'`):
 
@@ -75,11 +81,24 @@ while Stripe's published UK card price is 1.5% + 20p, about 21.5p.
 - The platform fee is the **larger** of its percentage and `minPlatformFeeCents`.
 - The extra is taken from the creator first, then from the organisation; no slice
   goes below zero. If the floor exceeds the whole sale, the platform takes it all.
-- The floor is set so that it covers Stripe's fee on the cheapest sale we allow.
+- The floor is **25p** (`minPlatformFeeCents = 25`), and every price is at least
+  **£1.00**, so the floor always covers Stripe's fee (owner decision 2026-10-13,
+  "£1 price, 25p min fee (Recommended)"). Stripe itself refuses card charges
+  under £0.30.
+- A £1.00 sale with no agreement: the normal split is 10 / 9 / 81; the 15p
+  shortfall comes from the creator, giving **platform 25p, organisation 9p,
+  creator 66p**.
 
-— **gap**: `Codex-2hxff.7` (the floor exists but is never applied to a sale).
+— **gap**: `Codex-2hxff.7` (the floor exists but is never applied to a sale, and
+is `0` today), `Codex-2hxff.32` (prices of 1p–29p pass validation and then fail
+at Stripe Checkout).
 
 ## Minimum transfer
+
+Off: `minTransferCents = 0`, so every slice is transferred as it is earned
+(owner decision 2026-10-13, "Keep it off (Recommended)"). Stripe charges nothing
+per transfer, and bank payouts already wait out the 14-day refund window. If it
+is ever turned on, the creator payout terms must say so.
 
 A creator slice smaller than `minTransferCents` is not transferred on its own.
 It is recorded as a pending row (reason `min_transfer_floor`) and paid together

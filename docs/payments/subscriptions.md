@@ -34,6 +34,7 @@ Tiers are managed through organisation-api (`/api/organizations/:id/tiers*`,
 A course can have one live plan with a monthly and an annual price.
 
 - Each plan has its own Stripe Product and two Prices on the platform account.
+- Prices are at least £1.00, as for tiers.
 - Creating a plan requires the organisation owner's payouts to be set up.
 - Studio routes: `PUT` / `DELETE /studio/courses/:courseId/subscription-plan`.
   Deactivating keeps the row and archives the Product.
