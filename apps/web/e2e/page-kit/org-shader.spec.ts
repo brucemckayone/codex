@@ -9,10 +9,17 @@
  *
  * Measured on the org's own path (no carrier, no DB write): studio-alpha
  * carries the seeded 'glow' preset, of-blood-and-bones none. The words are
- * held to their floors on the veil over the two worst backdrops (pure black
- * and pure white bound every shader frame, 03 §5.1), from the section's live
- * tokens: its ground, the veil's strength and each ink. One shader canvas
- * draws it, the org layout's.
+ * held to their floors on the proven veil (`--_atmos-floor`) over the two
+ * worst backdrops (pure black and pure white bound every shader frame, 03
+ * §5.1), from the section's live tokens: its ground, the veil's strength and
+ * each ink. One shader canvas draws it, the org layout's.
+ *
+ * The veil drawn is not always that one. On a Style with the hazy look the
+ * live veil (03 X54) thins it toward the Style's own end once it has
+ * measured the shader behind each ink, within a quarter of a second of this
+ * spec's read: one dark load in three already read 0.796 where the proven
+ * veil is 0.86 (Codex-61zsk.65). `live-veil.spec.ts` proves that veil over
+ * the pixels drawn; here it is held between its two ends.
  */
 
 import { type Browser, expect, type Page, test } from '@playwright/test';
@@ -93,7 +100,10 @@ function readAtmosphere() {
     return {
       type: s.dataset.lpType ?? '',
       ground: token('--lp-bg'),
+      // The veil drawn, and its two ends: the proven one and the Style's.
       veil: Number(probe(inner, 'opacity: var(--_atmos-s)').opacity),
+      floor: Number(probe(inner, 'opacity: var(--_atmos-floor)').opacity),
+      thin: Number(probe(inner, 'opacity: var(--_atmos-thin)').opacity),
       ink: token('--lp-ink'),
       soft: token('--lp-ink-soft'),
       accent: token('--lp-accent'),
@@ -200,8 +210,12 @@ for (const theme of ['light', 'dark'] as const) {
     for (const a of read.atmosphere) {
       expect(a.veil, `${a.type} ${detail}`).toBeGreaterThan(0.5);
       expect(a.veil, `${a.type} ${detail}`).toBeLessThan(1);
+      // Drawn: the proven veil, or thinner only as far as the Style's end.
+      expect(a.floor, `${a.type} ${detail}`).toBeLessThan(1);
+      expect(a.veil, `${a.type} ${detail}`).toBeLessThanOrEqual(a.floor);
+      expect(a.veil, `${a.type} ${detail}`).toBeGreaterThanOrEqual(a.thin);
       for (const backdrop of [0, 255] as const) {
-        const seen = over(a.ground, a.veil, backdrop);
+        const seen = over(a.ground, a.floor, backdrop);
         const at = `${a.type} over ${backdrop ? 'white' : 'black'} ${JSON.stringify(a)}`;
         expect(ratio(a.ink, seen), at).toBeGreaterThanOrEqual(4.5);
         expect(ratio(a.soft, seen), at).toBeGreaterThanOrEqual(4.5);
@@ -219,7 +233,7 @@ for (const theme of ['light', 'dark'] as const) {
         const floor = h.size === 'title' ? 4.5 : 3;
         for (const backdrop of [0, 255] as const)
           expect(
-            ratio(h.color, over(a.ground, a.veil, backdrop)),
+            ratio(h.color, over(a.ground, a.floor, backdrop)),
             `${at} over ${backdrop ? 'white' : 'black'}`
           ).toBeGreaterThanOrEqual(floor);
       }

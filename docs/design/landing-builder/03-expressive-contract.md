@@ -2574,3 +2574,38 @@ _(append here: `X<n> · <date> · <WP> · what changed · why`)_
     fails or none is attached; and the rule that hides it. Each was calibrated against a
     planted fault (nothing held, the held box visible, the held box not inert, the box remounted
     when the clip lands), and each failed on its own assertion.
+
+- **X68 · 2026-10-13 · 3b follow-up · The black-and-white proof holds the proven veil; the veil
+  drawn is held between its two ends (Codex-61zsk.65; BUILT, decided without the owner;
+  test only).** `org-shader.spec.ts` (B2, X50, X51) held every ink on studio-alpha's hero to its
+  floor over the veil drawn (`--_atmos-s`) on pure black and pure white. Since X54 the live veil
+  may thin that veil below the proven one once it has measured the shader behind each ink, and
+  since X59 studio-alpha's hero has the hazy look, so it does. The spec read at network idle and
+  the live veil writes within a quarter of a second of that, so the spec passed when it read
+  first and failed when it read second. `live-veil.spec.ts` had said so in its docblock: the proof
+  of a thinned veil "cannot be the black-and-white bound `org-shader.spec.ts` holds the proven
+  veil to".
+  - **Measured** on dev's code (741bb12b): studio-alpha / Tending the Grief at 1440, reduced
+    motion, opened as the spec opens it and read every 250ms from its read point. The live veil
+    wrote within 250ms in all 12 loads. The read had already seen it in 2 of 6 loads as built
+    (dark 0.796, light 0.817, against proven veils of 0.86 and 0.82), and in 5 of 6 on the
+    font-fallback branch (X67), which measures sooner. Soft ink `#aaa8a8` over the dark hero at
+    0.796 is 3.67:1 against white. The spec failed 1 of 8 dark runs across the two builds; CI's
+    slower GL had so far always read first.
+  - **The rule.** The black-and-white bound is held to the proven veil (`--_atmos-floor`),
+    which is what §5.1 proves. The veil drawn is held between the Style's end (`--_atmos-thin`)
+    and the proven one, whichever side of the race the read lands on. A thinner veil is proven
+    over the pixels drawn by `live-veil.spec.ts`, which waits until the live veil has measured.
+    Nothing the spec held is dropped: where no Style thins, the veil drawn is the proven one.
+  - **Rejected:** waiting for the live veil in this spec (it would then read only the thinned
+    veil, which black and white cannot prove, and fail by design); reading before the live veil
+    starts (nothing marks that moment, so it stays a race); a retry or a lower floor (the bound
+    is right, on the wrong veil).
+  - **Calibrated** on a bounded local stack, studio-alpha in both themes:
+    - the fixed spec 6 of 6;
+    - with its read forced to wait for the live veil's write, the fixed spec 6 of 6, and dev's
+      spec failed every dark run (0.801 and 0.811, 3.73 and 3.85:1 over white);
+    - a proven veil 0.1 thinner failed both themes on the bound (3.25:1 light over black, 3.55:1
+      dark over white);
+    - a veil drawn 0.05 under the Style's end failed both (0.662, 0.726);
+    - one 0.05 over the proven veil failed both (0.87, 0.91).
