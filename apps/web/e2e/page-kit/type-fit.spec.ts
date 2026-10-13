@@ -349,12 +349,23 @@ test('a borrowed Type holds its base’s hero fit', async ({ browser }) => {
       for (const brand of BRANDS)
         for (const layout of LAYOUTS) {
           const name = `${width} ${base} as ${type} brand ${brand} ${layout}`;
-          await page.goto(
-            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${base}&type=${type}&brand=${brand}&only=hero&layout=${layout}&theme=light&chrome=0${EYEBROW ? `&eyebrow=${encodeURIComponent(EYEBROW)}` : ''}`
-          );
-          await page
-            .locator('.lp-section[data-lp-type="hero"] .hero__headline')
-            .waitFor({ timeout: 60_000 });
+          // A page that does not load is a fault, not the end of the run: the
+          // rest still reads (a worker that dies takes every later case too,
+          // and the log says which were read).
+          try {
+            await page.goto(
+              `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${base}&type=${type}&brand=${brand}&only=hero&layout=${layout}&theme=light&chrome=0${EYEBROW ? `&eyebrow=${encodeURIComponent(EYEBROW)}` : ''}`
+            );
+            await page
+              .locator('.lp-section[data-lp-type="hero"] .hero__headline')
+              .waitFor({ timeout: 60_000 });
+          } catch (error) {
+            faults.push(
+              `${name}: the gallery did not load: ${String(error).split('\n')[0]}`
+            );
+            console.log(`FAULT ${name}: the gallery did not load`);
+            continue;
+          }
           await settle(page);
           const control = await draw(page, list, base, layout, wide);
           const own = misses(control, wide);
