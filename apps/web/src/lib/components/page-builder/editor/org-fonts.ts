@@ -9,6 +9,8 @@
  * so a read while one is open would see the preview, not the organisation.
  */
 
+import { firstFamily } from '$lib/brand-editor/font-fallbacks';
+
 /** What renders when the organisation has not chosen a font. */
 export const PLATFORM_FONT = 'Inter';
 
@@ -17,9 +19,9 @@ export interface FontPair {
   body: string;
 }
 
+/** The face itself: a value may name the face's own fallback after it (`withFallback`). */
 function familyOf(layout: HTMLElement | null, property: string): string {
-  const raw = layout?.style.getPropertyValue(property) ?? '';
-  return raw.trim().replace(/^['"]|['"]$/g, '');
+  return firstFamily(layout?.style.getPropertyValue(property) ?? '');
 }
 
 /** The organisation's two families, each falling back to the platform's. */

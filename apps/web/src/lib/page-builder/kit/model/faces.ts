@@ -29,6 +29,7 @@
  * kerning, which only ever narrows a word), at weights 400 and 700 (the most
  * the org layout loads), the larger kept, and each scale rounded up.
  */
+import { withFallback } from '$lib/brand-editor/font-fallbacks';
 
 /** The words each face's scale was fitted over: long, and wide-lettered. */
 export const FACE_CORPUS: readonly string[] = [
@@ -260,11 +261,11 @@ export function runWeight(run: string): number {
 }
 
 /**
- * What follows the body face in the org's sans stack (`org-brand.css`
- * `--font-sans`), which `--lp-font-display` resolves to when the brand sets
- * no heading face. A style query compares the text as written, spaces and
- * quotes included, so the sheet spells it exactly; `faces.test.ts` holds the
- * two together.
+ * What follows the face in every stack the headings can resolve
+ * (`org-brand.css` `--font-sans` and `--font-heading`, light and dark, and
+ * `typography.css`'s), so `--lp-font-display` always ends with it. A style
+ * query compares the text as written, spaces and quotes included, so the
+ * sheet spells it exactly; `faces.test.ts` holds the stacks to it.
  */
 export const SANS_STACK_TAIL =
   "'Inter-fallback', system-ui, -apple-system, sans-serif";
@@ -279,15 +280,18 @@ export function widestScale(): readonly [number, number] {
 }
 
 /**
- * Every way the page can spell a face: quoted either way (the org layout and
- * the brand editor single-quote it; a page's own fonts double-quote a name
- * with a space and leave a one-word name bare), alone or first in the org
- * sans stack (no heading face, so the body face).
+ * Every way the page can spell a face, as `--lp-font-display` resolves it:
+ * quoted either way (the org layout and the brand editor single-quote it; a
+ * page's own fonts double-quote it, or leave a one-word name bare), as
+ * written or followed by its own fallback (`withFallback`, Codex-61zsk.61),
+ * and then the stack's tail. Each spelling a writer produces is among them.
  */
 export function faceSpellings(face: string): string[] {
   const names = [`'${face}'`, `"${face}"`];
   if (/^[A-Za-z][A-Za-z0-9-]*$/.test(face)) names.push(face);
-  return [...names, ...names.map((name) => `${name}, ${SANS_STACK_TAIL}`)];
+  return [
+    ...new Set(names.flatMap((name) => [name, withFallback(face, name)])),
+  ].map((name) => `${name}, ${SANS_STACK_TAIL}`);
 }
 
 /** `styles/faces.css`, as `write-faces-sheet.ts` writes it. */

@@ -24,6 +24,9 @@
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { NavigationProgress } from '$lib/components/ui/Feedback/NavigationProgress';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
+  // Every brand face's own fallback, so a face on its way draws on its lines (Codex-61zsk.61).
+  import '$lib/styles/tokens/font-fallbacks.css';
+  import { withFallback } from '$lib/brand-editor/font-fallbacks';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -468,8 +471,8 @@
   style:--brand-bg-dark={brandBackgroundDark}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
-  style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}
-  style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}'` : undefined}
+  style:--brand-font-body={brandFontBody ? withFallback(brandFontBody, `'${brandFontBody}'`) : undefined}
+  style:--brand-font-heading={brandFontHeading ? withFallback(brandFontHeading, `'${brandFontHeading}'`) : undefined}
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >

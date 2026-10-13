@@ -1,0 +1,1923 @@
+/* GENERATED from lib/brand-editor/font-fallbacks.ts by
+   apps/web/scripts/write-font-fallbacks-sheet.ts: do not edit. Each brand
+   face's own fallback, sized and set on its lines (Codex-61zsk.61). */
+
+@font-face {
+  font-family: 'DM Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 103.59%;
+  ascent-override: 95.57%;
+  descent-override: 29.93%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'DM Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 105.40%;
+  ascent-override: 93.93%;
+  descent-override: 29.41%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'DM Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 99.91%;
+  ascent-override: 99.09%;
+  descent-override: 31.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'DM Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 101.49%;
+  ascent-override: 97.55%;
+  descent-override: 30.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Sans 3-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 93.49%;
+  ascent-override: 109.10%;
+  descent-override: 42.79%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Sans 3-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 94.90%;
+  ascent-override: 107.48%;
+  descent-override: 42.15%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Sans 3-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 89.34%;
+  ascent-override: 114.17%;
+  descent-override: 44.77%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Sans 3-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 91.82%;
+  ascent-override: 111.09%;
+  descent-override: 43.56%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Poppins-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 111.66%;
+  ascent-override: 94.04%;
+  descent-override: 31.35%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Poppins-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 113.00%;
+  ascent-override: 92.92%;
+  descent-override: 30.97%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Poppins-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 105.66%;
+  ascent-override: 99.38%;
+  descent-override: 33.13%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Poppins-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 106.56%;
+  ascent-override: 98.54%;
+  descent-override: 32.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Nunito-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 101.00%;
+  ascent-override: 100.00%;
+  descent-override: 34.65%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Nunito-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 101.91%;
+  ascent-override: 99.11%;
+  descent-override: 34.34%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Nunito-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 95.42%;
+  ascent-override: 105.85%;
+  descent-override: 36.68%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Nunito-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 97.46%;
+  ascent-override: 103.63%;
+  descent-override: 35.91%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Montserrat-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 112.32%;
+  ascent-override: 86.36%;
+  descent-override: 22.26%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Montserrat-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 114.11%;
+  ascent-override: 85.01%;
+  descent-override: 21.91%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Montserrat-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 107.83%;
+  ascent-override: 89.96%;
+  descent-override: 23.18%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Montserrat-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 109.89%;
+  ascent-override: 88.27%;
+  descent-override: 22.75%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Raleway-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 103.16%;
+  ascent-override: 91.12%;
+  descent-override: 22.30%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Raleway-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 104.52%;
+  ascent-override: 89.93%;
+  descent-override: 22.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Raleway-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 98.10%;
+  ascent-override: 95.82%;
+  descent-override: 23.45%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Raleway-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 99.29%;
+  ascent-override: 94.67%;
+  descent-override: 23.16%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Outfit-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 98.80%;
+  ascent-override: 101.21%;
+  descent-override: 26.32%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Outfit-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 98.95%;
+  ascent-override: 101.06%;
+  descent-override: 26.28%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Outfit-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 93.25%;
+  ascent-override: 107.24%;
+  descent-override: 27.88%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Outfit-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 94.69%;
+  ascent-override: 105.61%;
+  descent-override: 27.46%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Grotesk-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 108.91%;
+  ascent-override: 89.98%;
+  descent-override: 26.63%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Grotesk-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 109.12%;
+  ascent-override: 89.81%;
+  descent-override: 26.58%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Grotesk-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 101.36%;
+  ascent-override: 96.69%;
+  descent-override: 28.61%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Grotesk-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 101.45%;
+  ascent-override: 96.60%;
+  descent-override: 28.59%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Rubik-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 104.37%;
+  ascent-override: 89.11%;
+  descent-override: 23.95%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Rubik-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 107.68%;
+  ascent-override: 86.37%;
+  descent-override: 23.22%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Rubik-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 101.42%;
+  ascent-override: 91.70%;
+  descent-override: 24.65%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Rubik-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 102.99%;
+  ascent-override: 90.30%;
+  descent-override: 24.27%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Manrope-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 101.91%;
+  ascent-override: 104.99%;
+  descent-override: 29.44%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Manrope-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 103.69%;
+  ascent-override: 103.19%;
+  descent-override: 28.93%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Manrope-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 97.89%;
+  ascent-override: 109.31%;
+  descent-override: 30.65%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Manrope-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 99.54%;
+  ascent-override: 107.49%;
+  descent-override: 30.14%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 104.21%;
+  ascent-override: 99.80%;
+  descent-override: 21.11%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 105.58%;
+  ascent-override: 98.50%;
+  descent-override: 20.84%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 99.24%;
+  ascent-override: 104.80%;
+  descent-override: 22.17%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 100.50%;
+  ascent-override: 103.48%;
+  descent-override: 21.89%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Figtree-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 100.52%;
+  ascent-override: 94.51%;
+  descent-override: 24.87%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Figtree-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 101.38%;
+  ascent-override: 93.71%;
+  descent-override: 24.66%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Figtree-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 95.03%;
+  ascent-override: 99.97%;
+  descent-override: 26.31%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Figtree-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 96.16%;
+  ascent-override: 98.79%;
+  descent-override: 26.00%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Sora-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 112.91%;
+  ascent-override: 85.91%;
+  descent-override: 25.68%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Sora-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 113.66%;
+  ascent-override: 85.34%;
+  descent-override: 25.51%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Sora-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 106.18%;
+  ascent-override: 91.35%;
+  descent-override: 27.31%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Sora-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 106.87%;
+  ascent-override: 90.76%;
+  descent-override: 27.14%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Urbanist-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 98.21%;
+  ascent-override: 96.73%;
+  descent-override: 25.46%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Urbanist-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 99.16%;
+  ascent-override: 95.80%;
+  descent-override: 25.21%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Urbanist-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 93.28%;
+  ascent-override: 101.84%;
+  descent-override: 26.80%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Urbanist-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 94.42%;
+  ascent-override: 100.61%;
+  descent-override: 26.48%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Open Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 104.70%;
+  ascent-override: 102.20%;
+  descent-override: 27.70%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Open Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 106.51%;
+  ascent-override: 100.46%;
+  descent-override: 27.23%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Open Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 100.52%;
+  ascent-override: 106.45%;
+  descent-override: 28.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Open Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 103.87%;
+  ascent-override: 103.01%;
+  descent-override: 27.92%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lato-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 96.75%;
+  ascent-override: 102.33%;
+  descent-override: 21.71%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lato-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 96.75%;
+  ascent-override: 102.33%;
+  descent-override: 21.71%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lato-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 91.95%;
+  ascent-override: 107.67%;
+  descent-override: 22.84%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lato-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 91.95%;
+  ascent-override: 107.67%;
+  descent-override: 22.84%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Roboto-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 99.87%;
+  ascent-override: 93.12%;
+  descent-override: 24.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Roboto-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 100.84%;
+  ascent-override: 92.23%;
+  descent-override: 23.80%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Roboto-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 93.96%;
+  ascent-override: 98.98%;
+  descent-override: 25.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Roboto-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 94.34%;
+  ascent-override: 98.58%;
+  descent-override: 25.44%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Playfair Display-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 100.58%;
+  ascent-override: 107.38%;
+  descent-override: 24.86%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Playfair Display-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 101.40%;
+  ascent-override: 106.51%;
+  descent-override: 24.65%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Playfair Display-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 94.85%;
+  ascent-override: 113.86%;
+  descent-override: 26.36%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Playfair Display-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 95.60%;
+  ascent-override: 112.97%;
+  descent-override: 26.15%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Merriweather-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 108.30%;
+  ascent-override: 90.49%;
+  descent-override: 24.93%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Merriweather-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 108.67%;
+  ascent-override: 90.18%;
+  descent-override: 24.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Merriweather-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 101.54%;
+  ascent-override: 96.51%;
+  descent-override: 26.59%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Merriweather-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 103.23%;
+  ascent-override: 94.93%;
+  descent-override: 26.16%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lora-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 104.52%;
+  ascent-override: 96.63%;
+  descent-override: 25.83%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lora-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 105.39%;
+  ascent-override: 95.83%;
+  descent-override: 25.62%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lora-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 98.61%;
+  ascent-override: 102.42%;
+  descent-override: 27.38%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lora-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 99.42%;
+  ascent-override: 101.59%;
+  descent-override: 27.16%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Crimson Text-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 96.98%;
+  ascent-override: 97.96%;
+  descent-override: 36.09%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Crimson Text-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 96.98%;
+  ascent-override: 97.96%;
+  descent-override: 36.09%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Crimson Text-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 95.35%;
+  ascent-override: 99.63%;
+  descent-override: 36.71%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Crimson Text-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 99.81%;
+  ascent-override: 95.18%;
+  descent-override: 35.07%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Libre Baskerville-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 126.16%;
+  ascent-override: 76.89%;
+  descent-override: 21.40%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Libre Baskerville-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 127.55%;
+  ascent-override: 76.05%;
+  descent-override: 21.17%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Libre Baskerville-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 121.45%;
+  ascent-override: 79.87%;
+  descent-override: 22.23%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Libre Baskerville-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 122.37%;
+  ascent-override: 79.27%;
+  descent-override: 22.06%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'EB Garamond-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 94.05%;
+  ascent-override: 107.39%;
+  descent-override: 31.90%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'EB Garamond-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 97.38%;
+  ascent-override: 103.72%;
+  descent-override: 30.81%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'EB Garamond-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 95.04%;
+  ascent-override: 106.27%;
+  descent-override: 31.57%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'EB Garamond-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 97.98%;
+  ascent-override: 103.08%;
+  descent-override: 30.62%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 95.61%;
+  ascent-override: 96.22%;
+  descent-override: 30.33%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 95.96%;
+  ascent-override: 95.87%;
+  descent-override: 30.22%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 91.25%;
+  ascent-override: 100.82%;
+  descent-override: 31.78%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Cormorant Garamond-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 91.62%;
+  ascent-override: 100.41%;
+  descent-override: 31.65%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bitter-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 102.59%;
+  ascent-override: 90.65%;
+  descent-override: 25.34%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bitter-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 103.22%;
+  ascent-override: 90.10%;
+  descent-override: 25.19%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bitter-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 96.42%;
+  ascent-override: 96.45%;
+  descent-override: 26.97%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bitter-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 97.06%;
+  ascent-override: 95.82%;
+  descent-override: 26.79%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Serif 4-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 116.57%;
+  ascent-override: 89.22%;
+  descent-override: 29.17%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Serif 4-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 117.43%;
+  ascent-override: 88.56%;
+  descent-override: 28.95%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Serif 4-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 112.03%;
+  ascent-override: 92.83%;
+  descent-override: 30.35%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Source Serif 4-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 113.91%;
+  ascent-override: 91.30%;
+  descent-override: 29.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Spectral-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 108.82%;
+  ascent-override: 97.41%;
+  descent-override: 42.27%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Spectral-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 109.84%;
+  ascent-override: 96.50%;
+  descent-override: 41.88%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Spectral-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 105.44%;
+  ascent-override: 100.53%;
+  descent-override: 43.63%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Spectral-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 107.13%;
+  ascent-override: 98.95%;
+  descent-override: 42.94%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bebas Neue-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 74.94%;
+  ascent-override: 120.10%;
+  descent-override: 40.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bebas Neue-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 74.94%;
+  ascent-override: 120.10%;
+  descent-override: 40.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bebas Neue-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 74.94%;
+  ascent-override: 120.10%;
+  descent-override: 40.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Bebas Neue-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 74.94%;
+  ascent-override: 120.10%;
+  descent-override: 40.03%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Righteous-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 104.62%;
+  ascent-override: 93.67%;
+  descent-override: 24.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Righteous-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 104.62%;
+  ascent-override: 93.67%;
+  descent-override: 24.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Righteous-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 104.62%;
+  ascent-override: 93.67%;
+  descent-override: 24.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Righteous-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 104.62%;
+  ascent-override: 93.67%;
+  descent-override: 24.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Fredoka-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 100.51%;
+  ascent-override: 96.51%;
+  descent-override: 23.88%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Fredoka-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 100.63%;
+  ascent-override: 96.39%;
+  descent-override: 23.85%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Fredoka-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 93.49%;
+  ascent-override: 103.75%;
+  descent-override: 25.67%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Fredoka-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 93.60%;
+  ascent-override: 103.63%;
+  descent-override: 25.64%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Josefin Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 100.96%;
+  ascent-override: 74.29%;
+  descent-override: 24.76%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Josefin Sans-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 102.19%;
+  ascent-override: 73.39%;
+  descent-override: 24.46%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Josefin Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 95.97%;
+  ascent-override: 78.15%;
+  descent-override: 26.05%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Josefin Sans-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 99.40%;
+  ascent-override: 75.45%;
+  descent-override: 25.15%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Abril Fatface-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 111.36%;
+  ascent-override: 95.19%;
+  descent-override: 26.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Abril Fatface-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 111.36%;
+  ascent-override: 95.19%;
+  descent-override: 26.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Abril Fatface-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 600;
+  size-adjust: 111.36%;
+  ascent-override: 95.19%;
+  descent-override: 26.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Abril Fatface-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 700;
+  size-adjust: 111.36%;
+  ascent-override: 95.19%;
+  descent-override: 26.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Archivo Black-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 123.68%;
+  ascent-override: 71.15%;
+  descent-override: 16.98%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Archivo Black-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 123.68%;
+  ascent-override: 71.15%;
+  descent-override: 16.98%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Archivo Black-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 123.68%;
+  ascent-override: 71.15%;
+  descent-override: 16.98%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Archivo Black-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 123.68%;
+  ascent-override: 71.15%;
+  descent-override: 16.98%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Unbounded-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 143.68%;
+  ascent-override: 68.90%;
+  descent-override: 16.70%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Unbounded-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 147.51%;
+  ascent-override: 67.11%;
+  descent-override: 16.27%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Unbounded-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 141.51%;
+  ascent-override: 69.96%;
+  descent-override: 16.96%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Unbounded-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 143.32%;
+  ascent-override: 69.08%;
+  descent-override: 16.75%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Anton-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 90.66%;
+  ascent-override: 130.16%;
+  descent-override: 36.40%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Anton-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 90.66%;
+  ascent-override: 130.16%;
+  descent-override: 36.40%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Anton-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 90.66%;
+  ascent-override: 130.16%;
+  descent-override: 36.40%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Anton-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 90.66%;
+  ascent-override: 130.16%;
+  descent-override: 36.40%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Oswald-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 80.52%;
+  ascent-override: 147.79%;
+  descent-override: 36.02%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Oswald-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 86.15%;
+  ascent-override: 138.13%;
+  descent-override: 33.66%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Oswald-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 82.69%;
+  ascent-override: 143.91%;
+  descent-override: 35.07%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Oswald-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 84.84%;
+  ascent-override: 140.26%;
+  descent-override: 34.18%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Syne-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 97.48%;
+  ascent-override: 95.40%;
+  descent-override: 27.70%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Syne-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 104.95%;
+  ascent-override: 88.61%;
+  descent-override: 25.73%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Syne-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 104.68%;
+  ascent-override: 88.84%;
+  descent-override: 25.79%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Syne-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 113.00%;
+  ascent-override: 82.30%;
+  descent-override: 23.89%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lilita One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 94.86%;
+  ascent-override: 96.99%;
+  descent-override: 23.19%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lilita One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 94.86%;
+  ascent-override: 96.99%;
+  descent-override: 23.19%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lilita One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 94.86%;
+  ascent-override: 96.99%;
+  descent-override: 23.19%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Lilita One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 94.86%;
+  ascent-override: 96.99%;
+  descent-override: 23.19%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Titan One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 120.78%;
+  ascent-override: 80.31%;
+  descent-override: 14.90%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Titan One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 120.78%;
+  ascent-override: 80.31%;
+  descent-override: 14.90%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Titan One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 120.78%;
+  ascent-override: 80.31%;
+  descent-override: 14.90%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Titan One-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 120.78%;
+  ascent-override: 80.31%;
+  descent-override: 14.90%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Caveat-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 75.27%;
+  ascent-override: 127.54%;
+  descent-override: 39.86%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Caveat-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 75.64%;
+  ascent-override: 126.92%;
+  descent-override: 39.66%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Caveat-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 70.55%;
+  ascent-override: 136.07%;
+  descent-override: 42.52%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Caveat-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 70.90%;
+  ascent-override: 135.40%;
+  descent-override: 42.31%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Kalam-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 106.71%;
+  ascent-override: 99.33%;
+  descent-override: 49.67%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Kalam-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 106.71%;
+  ascent-override: 99.33%;
+  descent-override: 49.67%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Kalam-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 105.92%;
+  ascent-override: 100.08%;
+  descent-override: 50.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Kalam-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 105.92%;
+  ascent-override: 100.08%;
+  descent-override: 50.04%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Patrick Hand-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 88.51%;
+  ascent-override: 117.50%;
+  descent-override: 35.02%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Patrick Hand-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 88.51%;
+  ascent-override: 117.50%;
+  descent-override: 35.02%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Patrick Hand-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 600;
+  size-adjust: 88.51%;
+  ascent-override: 117.50%;
+  descent-override: 35.02%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Patrick Hand-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 700;
+  size-adjust: 88.51%;
+  ascent-override: 117.50%;
+  descent-override: 35.02%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Pacifico-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 92.71%;
+  ascent-override: 140.22%;
+  descent-override: 48.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Pacifico-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 92.71%;
+  ascent-override: 140.22%;
+  descent-override: 48.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Pacifico-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 92.71%;
+  ascent-override: 140.22%;
+  descent-override: 48.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Pacifico-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 92.71%;
+  ascent-override: 140.22%;
+  descent-override: 48.54%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Dancing Script-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 400;
+  size-adjust: 88.27%;
+  ascent-override: 104.23%;
+  descent-override: 31.72%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Dancing Script-fallback';
+  src: local('Times New Roman'), local('TimesNewRomanPSMT'), local('Liberation Serif');
+  font-weight: 500;
+  size-adjust: 89.08%;
+  ascent-override: 103.28%;
+  descent-override: 31.43%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Dancing Script-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 600;
+  size-adjust: 85.12%;
+  ascent-override: 108.08%;
+  descent-override: 32.89%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Dancing Script-fallback';
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  font-weight: 700;
+  size-adjust: 85.91%;
+  ascent-override: 107.09%;
+  descent-override: 32.59%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Satisfy-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 400;
+  size-adjust: 84.80%;
+  ascent-override: 109.67%;
+  descent-override: 57.78%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Satisfy-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 84.80%;
+  ascent-override: 109.67%;
+  descent-override: 57.78%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Satisfy-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 600;
+  size-adjust: 84.80%;
+  ascent-override: 109.67%;
+  descent-override: 57.78%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Satisfy-fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 700;
+  size-adjust: 84.80%;
+  ascent-override: 109.67%;
+  descent-override: 57.78%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 400;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 30.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 500;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 30.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 600;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 30.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 700;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 30.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 400;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 27.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 500;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 27.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 600;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 27.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 700;
+  size-adjust: 99.98%;
+  ascent-override: 102.02%;
+  descent-override: 27.01%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 400;
+  size-adjust: 101.98%;
+  ascent-override: 109.83%;
+  descent-override: 35.30%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Mono-fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono');
+  font-weight: 500;
+  size-adjust: 101.98%;
+  ascent-override: 109.83%;
+  descent-override: 35.30%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 600;
+  size-adjust: 101.98%;
+  ascent-override: 109.83%;
+  descent-override: 35.30%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Space Mono-fallback';
+  src: local('Courier New Bold'), local('CourierNewPS-BoldMT'), local('Liberation Mono Bold');
+  font-weight: 700;
+  size-adjust: 101.98%;
+  ascent-override: 109.83%;
+  descent-override: 35.30%;
+  line-gap-override: 0%;
+}

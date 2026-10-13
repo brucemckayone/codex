@@ -152,7 +152,9 @@ describe('darkTokenOverridesToCssVars', () => {
       'font-body': 'Source Sans 3',
     });
 
-    expect(result['--brand-font-body-dark']).toBe("'Source Sans 3'");
+    expect(result['--brand-font-body-dark']).toBe(
+      "'Source Sans 3', 'Source Sans 3-fallback'"
+    );
   });
 
   it('quotes both dark font override keys', () => {
@@ -161,8 +163,12 @@ describe('darkTokenOverridesToCssVars', () => {
       'font-heading': 'DM Sans',
     });
 
-    expect(result['--brand-font-body-dark']).toBe("'Source Sans 3'");
-    expect(result['--brand-font-heading-dark']).toBe("'DM Sans'");
+    expect(result['--brand-font-body-dark']).toBe(
+      "'Source Sans 3', 'Source Sans 3-fallback'"
+    );
+    expect(result['--brand-font-heading-dark']).toBe(
+      "'DM Sans', 'DM Sans-fallback'"
+    );
   });
 
   it('does NOT quote non-font dark overrides (guard against over-quoting)', () => {
@@ -218,8 +224,12 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     const el = makeOrgLayout();
     injectBrandVars({ ...baseState, fontBody: 'Lora', fontHeading: 'Poppins' });
 
-    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Lora'");
-    expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Poppins'");
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe(
+      "'Lora', 'Lora-fallback'"
+    );
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
+      "'Poppins', 'Poppins-fallback'"
+    );
     expect(el.style.getPropertyValue('--brand-font-body')).not.toContain(
       'var(--font-sans)'
     );
@@ -231,7 +241,7 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
 
     // A numeric token is invalid unquoted; the single-quoted form is required.
     expect(el.style.getPropertyValue('--brand-font-body')).toBe(
-      "'Source Sans 3'"
+      "'Source Sans 3', 'Source Sans 3-fallback'"
     );
   });
 
@@ -240,7 +250,7 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     previewFont('body', 'Playfair Display');
 
     expect(el.style.getPropertyValue('--brand-font-body')).toBe(
-      "'Playfair Display'"
+      "'Playfair Display', 'Playfair Display-fallback'"
     );
     expect(el.style.getPropertyValue('--brand-font-body')).not.toContain(
       'var(--font-sans)'
@@ -252,7 +262,7 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     revertFontPreview('heading', 'Space Grotesk');
 
     expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
-      "'Space Grotesk'"
+      "'Space Grotesk', 'Space Grotesk-fallback'"
     );
     expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
       'var(--font-sans)'

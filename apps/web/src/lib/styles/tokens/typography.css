@@ -59,25 +59,54 @@
   --text-transform-meta: capitalize;
 }
 
-/* Size-Adjusted Fallback Font (CLS Prevention) */
+/* Size-Adjusted Fallback Font (CLS Prevention)
+   Inter's own fallback: Arial (or Liberation Sans, its metric twin on Linux),
+   sized and set on Inter's lines, one face per weight the page draws, so a
+   line breaks where Inter will break it once Inter lands. The values are
+   Inter's row of the brand faces' table (`lib/brand-editor/font-fallbacks.ts`,
+   which says how they were measured, and `font-fallbacks.test.ts` holds this
+   sheet to it); every other brand face's fallback is in `font-fallbacks.css`.
+   Before, 500 borrowed 400's face and 600 borrowed 700's, and both bold faces
+   were set at regular's 107%, about 5% wider than Inter (Codex-61zsk.61). A
+   heading that forbids synthesis (`font-synthesis: none`) needs the bold
+   faces, or it renders the regular face while the webfont loads. */
+
 @font-face {
   font-family: 'Inter-fallback';
-  src: local('Arial');
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
   font-weight: 400;
-  ascent-override: 90%;
-  descent-override: 22%;
+  size-adjust: 107.26%;
+  ascent-override: 90.43%;
+  descent-override: 22.38%;
   line-gap-override: 0%;
-  size-adjust: 107%;
 }
 
-/* Its bold twin: without one, a heading that forbids synthesis
-   (`font-synthesis: none`) renders the regular face while the webfont loads. */
 @font-face {
   font-family: 'Inter-fallback';
-  src: local('Arial Bold'), local('Arial-BoldMT');
-  font-weight: 700;
-  ascent-override: 90%;
-  descent-override: 22%;
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  font-weight: 500;
+  size-adjust: 108.20%;
+  ascent-override: 89.65%;
+  descent-override: 22.18%;
   line-gap-override: 0%;
-  size-adjust: 107%;
+}
+
+@font-face {
+  font-family: 'Inter-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 600;
+  size-adjust: 101.29%;
+  ascent-override: 95.76%;
+  descent-override: 23.69%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: 'Inter-fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  font-weight: 700;
+  size-adjust: 102.16%;
+  ascent-override: 94.95%;
+  descent-override: 23.49%;
+  line-gap-override: 0%;
 }

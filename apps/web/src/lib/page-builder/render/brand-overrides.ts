@@ -25,6 +25,7 @@ import {
   darkTokenOverridesToCssVars,
   tokenOverridesToCssVars,
 } from '$lib/brand-editor';
+import { withFallback } from '$lib/brand-editor/font-fallbacks';
 import type { BrandTokenOverrides } from '$lib/page-builder';
 
 /**
@@ -75,10 +76,15 @@ function isSafeDeclaration([prop, value]: [string, string]): boolean {
  * emitted `--brand-font-*` value composes cleanly into org-brand.css's
  * `var(--brand-font-body, 'Inter'), …` stack. Mirrors the brand editor's
  * `quoteFamily`. Idempotent — an already-quoted value is left untouched.
+ * A face the fallback table knows is quoted and followed by its own fallback
+ * (`font-fallbacks.ts`, Codex-61zsk.61), so the value starts quoted and a
+ * second pass leaves it too.
  */
 function quoteFamily(value: string): string {
   const v = value.trim();
   if (v.startsWith('"') || v.startsWith("'")) return v;
+  const followed = withFallback(v, `"${v}"`);
+  if (followed !== `"${v}"`) return followed;
   return /[\s,]/.test(v) ? `"${v}"` : v;
 }
 
