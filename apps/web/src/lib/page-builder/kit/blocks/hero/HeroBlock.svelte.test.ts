@@ -81,6 +81,47 @@ async function render(
 
 const links = () => [...document.body.querySelectorAll('a')];
 
+/** A component's own style rules, by selector as written (comments and runs
+ *  of space squashed); a selector that recurs (inside a container query) has
+ *  its declarations merged. */
+function cssRules(file: string): Map<string, Map<string, string>> {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), file),
+    'utf8'
+  );
+  const rules = new Map<string, Map<string, string>>();
+  type Node = {
+    type: string;
+    property?: string;
+    value?: string;
+    prelude?: { start: number; end: number };
+    block?: { children: Node[] } | null;
+  };
+  const squash = (s: string) =>
+    s
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const visit = (nodes: Node[]) => {
+    for (const node of nodes) {
+      const children = node.block?.children ?? [];
+      if (node.type === 'Rule' && node.prelude) {
+        const selector = squash(
+          source.slice(node.prelude.start, node.prelude.end)
+        );
+        const own = rules.get(selector) ?? new Map<string, string>();
+        for (const d of children)
+          if (d.type === 'Declaration')
+            own.set(d.property ?? '', squash(d.value ?? ''));
+        rules.set(selector, own);
+      }
+      visit(children);
+    }
+  };
+  visit((parse(source, { modern: true }).css?.children ?? []) as Node[]);
+  return rules;
+}
+
 describe('HeroBlock', () => {
   it.each(
     SECTION_LAYOUTS.hero
@@ -632,6 +673,57 @@ describe('HeroBlock', () => {
       expect(document.body.querySelector('.hero-cover__media')).not.toBeNull();
     });
 
+    // The cover's play button sits in the words' column, which ends at its
+    // foot (`align-content: end`): drawn only once the video landed, it lifted
+    // the words at 1440 and made the band 107px taller at 390 (CLS 0.127).
+    it('a cover holds its play button’s place at first paint, and the button lands in that box', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise) }
+      );
+      const held = document.body.querySelector<HTMLElement>(
+        '.hero-cover__copy > .hero-cover__watch'
+      );
+      expect(held?.hasAttribute('data-held')).toBe(true);
+      // Svelte sets `inert` as the property, which a browser reflects.
+      expect(held?.inert).toBe(true);
+      expect(held?.textContent).toContain(COPY.hero.watch);
+      await land(settle, arrived);
+      const live =
+        document.body.querySelector<HTMLElement>('.hero-cover__watch');
+      expect(live).toBe(held);
+      expect(live?.hasAttribute('data-held')).toBe(false);
+      expect(live?.inert).toBe(false);
+    });
+
+    it('a cover whose video fails to resolve keeps no place for a play button', async () => {
+      const { promise, settle } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise) }
+      );
+      await land(settle, null);
+      expect(document.body.querySelector('.hero-cover__watch')).toBeNull();
+    });
+
+    it('a cover with no hero video attached holds no play button', async () => {
+      const { promise } = deferred();
+      await render(
+        { heading: 'H' },
+        { layout: 'cover', context: attached(promise, false) }
+      );
+      expect(document.body.querySelector('.hero-cover__watch')).toBeNull();
+    });
+
+    it('a held play button is its place only: hidden, not yet the button', () => {
+      expect(
+        cssRules('HeroBlock.svelte')
+          .get('.hero-cover__watch[data-held]')
+          ?.get('visibility')
+      ).toBe('hidden');
+    });
+
     it('a video that fails to resolve leaves the words alone', async () => {
       const { promise, settle } = deferred();
       await render(
@@ -861,41 +953,7 @@ describe('HeroBlock', () => {
       // runs off the band's foot into the next section's ground: untinted, it
       // had no edge. Redeclaring `--lp-panel` from itself on one element
       // would be a cycle, voiding the plate's whole background.
-      const source = readFileSync(
-        join(dirname(fileURLToPath(import.meta.url)), 'HeroPoster.svelte'),
-        'utf8'
-      );
-      const rules = new Map<string, Map<string, string>>();
-      type Node = {
-        type: string;
-        property?: string;
-        value?: string;
-        prelude?: { start: number; end: number };
-        block?: { children: Node[] } | null;
-      };
-      const squash = (s: string) =>
-        s
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      // A selector can recur (inside a container query): merge its rules.
-      const visit = (nodes: Node[]) => {
-        for (const node of nodes) {
-          const children = node.block?.children ?? [];
-          if (node.type === 'Rule' && node.prelude) {
-            const selector = squash(
-              source.slice(node.prelude.start, node.prelude.end)
-            );
-            const own = rules.get(selector) ?? new Map<string, string>();
-            for (const d of children)
-              if (d.type === 'Declaration')
-                own.set(d.property ?? '', squash(d.value ?? ''));
-            rules.set(selector, own);
-          }
-          visit(children);
-        }
-      };
-      visit((parse(source, { modern: true }).css?.children ?? []) as Node[]);
+      const rules = cssRules('HeroPoster.svelte');
       expect(rules.get('.hero-poster__reveal')?.get('--_plate')).toBe(
         'color-mix( in oklab, color-mix(in oklab, var(--lp-panel), var(--lp-brand) var(--lp-tint-panel)), var(--lp-panel-ink) 5% )'
       );
