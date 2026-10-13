@@ -52,8 +52,9 @@
   const LOCAL_CDN = 'http://localhost:4100';
 
   /** What each of the dev-cdn's six sample photographs (`page-kit/img1-6.jpg`,
-   *  copies of `docs/design/mockup-assets`) shows; half carry a caption, so a
-   *  gallery shows both kinds of tile. */
+   *  copies of `docs/design/mockup-assets` that `db:seed` writes:
+   *  `pageKitSamplePhotos` in packages/database/scripts/seed/r2.ts) shows; half
+   *  carry a caption, so a gallery shows both kinds of tile. */
   const PHOTOS: readonly { alt: string; caption?: string }[] = [
     { alt: 'Storm clouds over a dark sea, waves breaking on the shore', caption: 'Weather coming in off the sea' },
     { alt: 'A road through an avenue of trees, fading into fog' },
