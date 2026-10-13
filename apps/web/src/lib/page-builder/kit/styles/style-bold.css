@@ -114,7 +114,7 @@
    and the travel move by the same amount (100% + 0.3em between them at
    every frame), so the line stands still while the words rise through it
    and the first line surfaces first. The overhang is in the HEADLINE's em
-   (its wrapper takes the display size below): at leading under 1 the
+   (its wrapper takes the display size, HeroBlock): at leading under 1 the
    glyphs stand past their line box, and a clip in the body's em would keep
    the descenders cut after the lift ends. The hero keeps its last frame, so
    its clip stays as long as the page is open: 0.3em under the last line, and
@@ -131,10 +131,6 @@
     translate: 0 0;
     clip-path: inset(-1em -0.15em -0.3em);
   }
-}
-
-:is(.lp, #lp-style)[data-lp-style='bold'] .hero__enter-h {
-  font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
 }
 
 /* ── a long promise steps down ───────────────────────────────────────────── */

@@ -54,12 +54,6 @@ const DEVICES: Record<
   string,
   { style: string; selector: RegExp; reason: string }
 > = {
-  H1: {
-    style: 'bold',
-    selector: /\.hero__enter-h$/,
-    reason:
-      'the lift’s clip is measured in the headline’s em: Bold’s Motion, read from the Type’s size',
-  },
   H9: {
     style: 'bold',
     selector: /\.timeline__marker$/,

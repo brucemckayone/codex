@@ -570,6 +570,16 @@
   }
 
   /* ── the one entrance (keyframes named by the Style) ───────────────────── */
+  /* The headline's wrapper is set at the headline's display size, so an
+     entrance that draws it through a clip (Bold's lift, Poster's wipe)
+     overhangs it in the headline's em, not the body's. The hero keeps its
+     entrance's last frame, and a clip in the body's em cut a capital's mark
+     and a comma off for as long as the page was open (03 X74). Nothing in
+     the wrapper reads its size but that; the headline sets its own. */
+  .hero__enter-h {
+    font-size: calc(var(--lp-size-display) * var(--lp-display-scale, 1) * var(--lp-type-fit, 1));
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     :global(:root[data-theme] .lp:not([data-lp-still], [data-lp-motion='still'])) .hero__enter-h {
       animation: var(--lp-enter-headline);
