@@ -140,6 +140,31 @@ describe('ContentAccessService Integration', () => {
     await teardownTestDatabase();
   });
 
+  /**
+   * The test org's owner. An organisation has exactly one active owner
+   * (`uq_org_memberships_one_active_owner`, Codex-2hxff.2), so every test
+   * that needs one shares it: created on first use, reused after.
+   */
+  async function testOrgOwner(): Promise<string> {
+    const existing = await db.query.organizationMemberships.findFirst({
+      where: (m, { and, eq }) =>
+        and(
+          eq(m.organizationId, organizationId),
+          eq(m.role, 'owner'),
+          eq(m.status, 'active')
+        ),
+    });
+    if (existing) return existing.userId;
+    const [ownerUserId] = await seedTestUsers(db, 1);
+    await db.insert(organizationMemberships).values({
+      userId: ownerUserId,
+      organizationId,
+      role: 'owner',
+      status: 'active',
+    });
+    return ownerUserId;
+  }
+
   describe('getStreamingUrl', () => {
     it('should return streaming URL for free content without purchase', async () => {
       // Reset mock before test
@@ -2270,13 +2295,7 @@ describe('ContentAccessService Integration', () => {
 
         const item = await createContentWithAccessType('team', 'team-owner');
 
-        const [ownerUser] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: ownerUser,
-          organizationId,
-          role: 'owner',
-          status: 'active',
-        });
+        const ownerUser = await testOrgOwner();
 
         const result = await accessService.getStreamingUrl(ownerUser, {
           contentId: item.id,
@@ -2529,14 +2548,7 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(content.id, userId);
 
-        // Create owner membership
-        const [ownerUserId] = await seedTestUsers(db, 1);
-        await db.insert(organizationMemberships).values({
-          userId: ownerUserId,
-          organizationId,
-          role: 'owner',
-          status: 'active',
-        });
+        const ownerUserId = await testOrgOwner();
 
         // Owner should bypass paid access check
         const result = await accessService.getStreamingUrl(ownerUserId, {
