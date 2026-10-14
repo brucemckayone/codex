@@ -6,7 +6,11 @@ Organization CRUD, membership management, follower relationships, and public pro
 
 ```typescript
 import { OrganizationService } from '@codex/organization';
-import { OrganizationNotFoundError, ConflictError, LastOwnerError, MemberNotFoundError } from '@codex/organization';
+import {
+  OrganizationNotFoundError, ConflictError, MemberNotFoundError,
+  OwnershipTransferRequiredError, OwnershipOfferNotOpenError,
+  IneligibleOwnershipRecipientError, NotOrganisationOwnerError,
+} from '@codex/organization';
 ```
 
 ## `OrganizationService`
@@ -14,7 +18,10 @@ import { OrganizationNotFoundError, ConflictError, LastOwnerError, MemberNotFoun
 ### Constructor
 
 ```typescript
-const service = new OrganizationService({ db, environment, r2PublicUrlBase });
+const service = new OrganizationService({
+  db, environment, r2PublicUrlBase,
+  ownershipMailer, webAppUrl, waitUntil, // ownership emails; all optional
+});
 ```
 
 `r2PublicUrlBase` (the `R2_PUBLIC_URL_BASE` binding) is the ONLY host accepted
@@ -26,7 +33,7 @@ the gate fails closed: no logo can be set at all.
 
 | Method | Signature | Notes |
 |---|---|---|
-| `create` | `(input: CreateOrganizationInput, userId: string)` | Transaction. Auto-creates `owner` membership for `userId`. Throws `ConflictError` on slug collision. |
+| `create` | `(input: CreateOrganizationInput, userId: string)` | Transaction. Auto-creates `owner` membership AND the creator's ownership period (`source='created'`) for `userId`. Throws `ConflictError` on slug collision. |
 | `get` | `(id: string)` | Returns `Organization \| null`. Not scoped by user — caller must check ownership. |
 | `getBySlug` | `(slug: string)` | Used for subdomain resolution. Normalizes to lowercase. |
 | `update` | `(id: string, input: UpdateOrganizationInput)` | Transaction. Throws `ConflictError` on slug collision. Caller must verify ownership. |
@@ -39,11 +46,28 @@ the gate fails closed: no logo can be set at all.
 | Method | Signature | Notes |
 |---|---|---|
 | `listMembers` | `(organizationId: string, query)` | Paginated. Filters: role, status. Returns name/email/avatarUrl/role/status/joinedAt. |
-| `getMyMembership` | `(organizationId: string, userId: string)` | Returns `{ role, joinedAt }` or nulls if not a member. Never throws. |
+| `getMyMembership` | `(organizationId: string, userId: string)` | Returns `{ role, joinedAt, pendingOwnershipOffer }` (nulls if not a member). |
 | `getUserOrganizations` | `(userId: string)` | All orgs where user has active membership, sorted by name. |
 | `inviteMember` | `(organizationId: string, input: { email, role }, invitedBy: string)` | Transaction. Looks up user by email. Throws `ConflictError` if already a member. |
-| `updateMemberRole` | `(organizationId: string, userId: string, role: string)` | Transaction. Cannot demote last owner (`LastOwnerError`). |
-| `removeMember` | `(organizationId: string, userId: string)` | Sets status: `inactive`. Cannot remove last owner. |
+| `updateMemberRole` | `(organizationId: string, userId: string, role: string)` | Transaction. Never touches the owner, never makes an owner (`OwnershipTransferRequiredError`, 409). A recipient of an open ownership offer who leaves admin/creator has it withdrawn in the same transaction. |
+| `removeMember` | `(organizationId: string, userId: string)` | Sets status: `inactive`. Cannot remove the owner (`OwnershipTransferRequiredError`). Withdraws an open offer to the removed user. |
+
+### Ownership (Codex-2hxff.2)
+
+One owner per organisation — the DB enforces it (`uq_org_memberships_one_active_owner`). Data side: `src/services/ownership-transfer.ts`. Spec: `docs/payments/connect-and-payouts.md → Organisation ownership`.
+
+| Method | Signature | Notes |
+|---|---|---|
+| `getOwnership` | `(organizationId, viewerId)` | Owner/admin/creator only. Owner-only fields omitted for others; the open offer shown to the owner and its recipient. |
+| `offerOwnership` | `(organizationId, ownerUserId, { recipientUserId, confirmName })` | Owner only. Recipient: active admin/creator. `confirmName` matches the org name (trimmed, case-insensitive). One open offer; 7 days. Emails the recipient. |
+| `withdrawOwnershipOffer` | `(organizationId, offerId, ownerUserId)` | Owner only. No email. |
+| `acceptOwnershipOffer` | `(organizationId, offerId, recipientUserId)` | Demote then promote, close/open the period at one instant. Caller must bust BOTH users' membership caches. Emails owner + admins. |
+| `declineOwnershipOffer` | `(organizationId, offerId, recipientUserId)` | Emails the owner. |
+| `reassignOwner` | `(organizationId, newOwnerUserId)` | Platform support (admin-api). Withdraws an open offer (`support_reassigned`). |
+
+- **MUST** write the membership role change and the ownership period in ONE transaction — the period table is who gets PAID (`resolveOrganisationPayee` in `@codex/purchase`), the membership is who may ACT.
+- **MUST** demote the old owner before promoting the new one — the one-owner index is checked per statement.
+- Expiry is lazy: every entry point marks this org's open offers past `expires_at` as `expired` first.
 
 ### Public Profile Queries
 
@@ -74,7 +98,10 @@ the gate fails closed: no logo can be set at all.
 |---|---|
 | `OrganizationNotFoundError` | Org doesn't exist or soft-deleted |
 | `ConflictError` | Slug already taken |
-| `LastOwnerError` | Demoting/removing last org owner |
+| `OwnershipTransferRequiredError` (409) | Changing the owner's role, making anyone owner, or removing the owner via the members routes |
+| `OwnershipOfferNotOpenError` (409) | Offer accepted, declined, withdrawn or expired |
+| `IneligibleOwnershipRecipientError` (422) | Recipient is not an active admin/creator, or is the owner |
+| `NotOrganisationOwnerError` (403) | A non-owner offers or withdraws |
 | `MemberNotFoundError` | Target user not in org |
 
 ## Rules

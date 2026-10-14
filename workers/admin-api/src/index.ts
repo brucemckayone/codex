@@ -19,6 +19,7 @@
  * Uses the procedure() pattern for unified policy, validation, and error handling.
  */
 
+import { invalidateUserLibrary } from '@codex/cache';
 import type { CONTENT_STATUS } from '@codex/constants';
 import {
   combineSubjects,
@@ -43,6 +44,7 @@ import {
   feeAuditLogQuerySchema,
   orgCreatorParamsSchema,
   orgIdParamsSchema,
+  reassignOwnerSchema,
   updateOrgFeesSchema,
   updatePlatformFeesSchema,
   upsertCreatorOverrideSchema,
@@ -50,6 +52,7 @@ import {
 import {
   createKvCheck,
   createWorker,
+  membershipCacheKey,
   PaginatedResult,
   procedure,
   standardDatabaseCheck,
@@ -688,6 +691,59 @@ app.get(
     handler: async (ctx) => {
       const entries = await ctx.services.feeConfig.getAuditLog(ctx.input.query);
       return { entries };
+    },
+  })
+);
+
+// ============================================================================
+// Organisation ownership — support (Codex-2hxff.2) — INTERNAL
+//
+// When a transfer is impossible (the owner is unreachable), platform support
+// assigns a new owner. No screen yet; the desktop admin app (Codex-xyb7v) is
+// the planned consumer. The new owner must be an active admin or creator; any
+// open offer is withdrawn (`support_reassigned`); the previous owner becomes an
+// admin, and the team is emailed as for an accepted transfer.
+// ============================================================================
+
+app.post(
+  '/api/admin/organizations/:orgId/owner',
+  procedure({
+    policy: { auth: 'platform_owner', rateLimit: 'strict' },
+    input: { params: orgIdParamsSchema, body: reassignOwnerSchema },
+    handler: async (ctx) => {
+      const orgId = ctx.input.params.orgId;
+      const change = await ctx.services.organization.reassignOwner(
+        orgId,
+        ctx.input.body.userId
+      );
+      // Free text from support, logged for the audit trail. Never PII.
+      ctx.obs?.info('Organisation owner reassigned by support', {
+        organizationId: orgId,
+        newOwnerUserId: change.ownerUserId,
+        previousOwnerUserId: change.previousOwnerUserId,
+        actorUserId: ctx.user.id,
+        reason: ctx.input.body.reason,
+      });
+
+      // Both users' roles changed. Delete the membership entry the policy
+      // reads (a bare `kv.get` with no version check — a bump would be dead)
+      // and their library caches, as organization-api's role change does.
+      const kv = ctx.env.CACHE_KV;
+      for (const userId of [change.ownerUserId, change.previousOwnerUserId]) {
+        if (!userId) continue;
+        if (kv) {
+          ctx.executionCtx.waitUntil(
+            kv.delete(membershipCacheKey(orgId, userId)).catch(() => {})
+          );
+        }
+        invalidateUserLibrary({
+          kv,
+          waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+          userId,
+          logger: ctx.obs,
+        });
+      }
+      return change;
     },
   })
 );

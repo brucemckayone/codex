@@ -5,9 +5,10 @@
  *
  * Flow B — tri-party (org ↔ creator agreement):
  *   1. Org owner creates an organization and onboards Stripe Connect
- *      (POST /connect/me/onboard — the owner's own account). We also seed the org's
- *      primaryConnectAccountUserId and a chargesEnabled Connect account
- *      so organization_fee rows ARE written.
+ *      (POST /connect/me/onboard — the owner's own account). We also seed a
+ *      chargesEnabled Connect account for the owner — the org's payee, since
+ *      creating the org opened their ownership period — so organization_fee
+ *      rows ARE written.
  *   2. Creator joins the org and the owner proposes a revenue-share
  *      agreement (POST /agreements/propose).
  *   3. Creator accepts the agreement (POST /agreements/:id/accept).
@@ -176,7 +177,8 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     // Step 2: Seed org Connect account with chargesEnabled=true so that
     //         organization_fee rows ARE written (not just pending).
     //         The /connect/me/onboard route may fail Stripe-side without a live key,
-    //         so we seed directly into the DB and wire primaryConnectAccountUserId.
+    //         so we seed directly into the DB. Creating the org opened the owner's
+    //         ownership period, so this account is the org's payee (Codex-2hxff.2).
     // ======================================================================
     const orgStripeAccountId = `acct_test_org_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -190,13 +192,6 @@ describe('Tri-party (in-org agreement) payout flows', () => {
       payoutsEnabled: true,
       onboardingCompletedAt: new Date(),
     });
-
-    // Wire the org's primaryConnectAccountUserId so writePurchasePayouts
-    // can resolve the org's Connect account and write the organization_fee row.
-    await dbHttp
-      .update(schema.organizations)
-      .set({ primaryConnectAccountUserId: owner.id })
-      .where(eq(schema.organizations.id, organization.id));
 
     // ======================================================================
     // Step 3: Register creator + add to org as member

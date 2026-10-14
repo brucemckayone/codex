@@ -26,6 +26,7 @@ import {
   createUniqueSlug,
   type Database,
   seedTestUsers,
+  setTestOrganisationPayee,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -53,8 +54,6 @@ import { PurchaseService } from '../services/purchase-service';
 
 /** The locked Billing Portal configuration (Codex-2hxff.4). */
 const PORTAL_CONFIG_ID = 'bpc_test_locked_portal';
-
-import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 
 describe('PurchaseService Integration', () => {
   let db: Database;
@@ -1004,12 +1003,9 @@ describe('PurchaseService Integration', () => {
 
       await contentService.publish(content.id, userId);
 
-      // Pin the org's canonical Connect account so resolvePrimaryConnect routes
-      // the org slice (Codex-69t7c: org→account via primaryConnectAccountUserId).
-      await db
-        .update(schema.organizations)
-        .set({ primaryConnectAccountUserId: userId })
-        .where(eq(schema.organizations.id, organizationId));
+      // Make the creator the org's payee so the org slice routes to their
+      // account (Codex-2hxff.2: org→account by ownership at the sale time).
+      await setTestOrganisationPayee(db, organizationId, userId);
 
       return {
         content,
@@ -1204,12 +1200,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Connect Disabled Org',
             slug: createUniqueSlug('connect-disabled'),
-            // Pin so resolvePrimaryConnect resolves the org's (offline) account
-            // by userId (Codex-69t7c) — an onboarding org is pinned in production.
-            primaryConnectAccountUserId: otherUserId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, org2.id, otherUserId);
 
       const stripeAccountId = `acct_disabled_${Date.now()}`;
       await db.insert(schema.stripeConnectAccounts).values({
@@ -1395,10 +1389,10 @@ describe('PurchaseService Integration', () => {
 
     // ─── Codex-ed446: org-fee pending row must carry a non-null userId ───
     // When the org owner has NO Connect account at all (distinct from the
-    // offline-account case above), resolvePrimaryConnect returns undefined.
+    // offline-account case above), the payee resolves with no account.
     // The org-fee slice MUST still be recorded as a pending row attributed to
-    // the org owner (resolveOrgOwnerId fallback, mirroring the subscription
-    // path) so it persists and is swept — instead of a null-userId insert
+    // the org owner (mirroring the subscription path) so it persists and is
+    // swept — instead of a null-userId insert
     // that violates check_payouts_user_required (23514) and strands the slice
     // in the platform balance with no ledger row (the bug this locks).
     it('Codex-ed446: org owner with no Connect account still gets a non-null-userId pending org_fee row (no 23514 strand)', async () => {
@@ -1412,8 +1406,8 @@ describe('PurchaseService Integration', () => {
           })
           .returning()
       );
-      // resolveOrgOwnerId reads organizationMemberships(role='owner'), NOT
-      // organizations.ownerId — seed the membership explicitly.
+      // No ownership period: the payee comes from the active owner
+      // membership (the resolver's no-periods fallback) — seed it explicitly.
       await db
         .insert(schema.organizationMemberships)
         .values(
@@ -1793,9 +1787,9 @@ describe('PurchaseService Integration', () => {
     // account, AND the resulting payouts row carries that member's userId
     // — silently mis-attributing org revenue.
     //
-    // The subscription path uses resolvePrimaryConnect(orgId) which honours
-    // organizations.ownerId / primary_connect_account_user_id. Purchase
-    // path was never updated to match.
+    // The subscription path resolved the org's account by owner. Purchase
+    // path was never updated to match. Both now use resolveOrganisationPayee
+    // (Codex-2hxff.2).
     //
     // Failing assertion: org_fee transfer destination matches the OWNER's
     // Connect account, not the member's. To make the test deterministic and
@@ -1811,18 +1805,17 @@ describe('PurchaseService Integration', () => {
         }),
       };
 
-      // New org with `userId` as the canonical Connect owner. The pin
-      // is the production mechanism resolvePrimaryConnect honours.
+      // New org with `userId` as its payee (ownership decides, Codex-2hxff.2).
       const multiOrg = takeFirst(
         await db
           .insert(organizations)
           .values({
             name: 'Multi-creator Org',
             slug: createUniqueSlug('multi-creator'),
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, multiOrg.id, userId);
 
       // Insert MEMBER's Connect row FIRST. Production `.limit(1)` will
       // pick this without an ORDER BY clause.
@@ -2262,12 +2255,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Refund Reversal Org',
             slug: createUniqueSlug('refund-reversal'),
-            // Pin so resolvePrimaryConnect resolves the org's account by userId
-            // (Codex-69t7c) — onboarded orgs are pinned in production.
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, refundOrg.id, userId);
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: refundOrg.id,
@@ -2489,12 +2480,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Partial Refund Org',
             slug: createUniqueSlug('partial-refund'),
-            // Pin so resolvePrimaryConnect resolves the org's account by userId
-            // (Codex-69t7c) — onboarded orgs are pinned in production.
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, partialOrg.id, userId);
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: partialOrg.id,
@@ -2623,10 +2612,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Sentinel Refund Org',
             slug: createUniqueSlug('sentinel-refund'),
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, sentinelOrg.id, userId);
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: sentinelOrg.id,
@@ -2783,12 +2772,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Pending Refund Org',
             slug: createUniqueSlug('pending-refund'),
-            // Pin so resolvePrimaryConnect resolves the org's (not-ready) account
-            // by userId (Codex-69t7c) so the org-fee pending row is written.
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, pendingOrg.id, userId);
       await db.insert(schema.stripeConnectAccounts).values({
         userId,
         organizationId: pendingOrg.id,
@@ -4764,113 +4751,6 @@ describe('PurchaseService Integration', () => {
     });
   });
 
-  // ─── resolvePrimaryConnect — org→account resolution (Codex-69t7c) ───────
-  // Production does not pin organizations.primaryConnectAccountUserId yet, so
-  // org-fee resolution relies on the deterministic org-owner fallback. These
-  // pin that contract so a regression that drops the fallback (stranding the
-  // org-fee slice) can't ship green.
-  describe('resolvePrimaryConnect — org→account resolution (Codex-69t7c)', () => {
-    it('falls back to the org owner account when no primary pin is set', async () => {
-      const [ownerUserId] = await seedTestUsers(db, 1);
-      const org = takeFirst(
-        await db
-          .insert(organizations)
-          .values({
-            name: 'RPC Owner Org',
-            slug: createUniqueSlug('rpc-owner'),
-          })
-          .returning()
-      );
-      await db
-        .insert(schema.organizationMemberships)
-        .values(
-          createTestMembershipInput(org.id, ownerUserId, { role: 'owner' })
-        );
-      const stripeAccountId = `acct_rpc_${createUniqueSlug('a')}`;
-      await db.insert(schema.stripeConnectAccounts).values({
-        userId: ownerUserId,
-        organizationId: org.id,
-        stripeAccountId,
-        status: 'active',
-        chargesEnabled: true,
-        payoutsEnabled: true,
-      });
-
-      const account = await resolvePrimaryConnect(db, org.id);
-      expect(account?.userId).toBe(ownerUserId);
-      expect(account?.stripeAccountId).toBe(stripeAccountId);
-    });
-
-    it('picks the earliest-joined owner deterministically for a multi-owner org (Codex-rjwdm)', async () => {
-      const [olderOwnerId, newerOwnerId] = await seedTestUsers(db, 2);
-      const org = takeFirst(
-        await db
-          .insert(organizations)
-          .values({
-            name: 'RPC Multi-Owner Org',
-            slug: createUniqueSlug('rpc-multi-owner'),
-          })
-          .returning()
-      );
-      // Two owners with distinct join times. Insert the NEWER one FIRST so a
-      // resolver without a deterministic ORDER BY would tend to return it
-      // (insertion order) — the test then proves the `.orderBy(asc(createdAt))`
-      // tiebreak actually picks the earliest-joined owner, so org-fee routing
-      // can't flap between owners on the pin-null path.
-      await db.insert(schema.organizationMemberships).values([
-        {
-          ...createTestMembershipInput(org.id, newerOwnerId, { role: 'owner' }),
-          createdAt: new Date('2026-06-01T00:00:00.000Z'),
-        },
-        {
-          ...createTestMembershipInput(org.id, olderOwnerId, { role: 'owner' }),
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        },
-      ]);
-      // Both owners have their OWN Connect account, so a wrong pick returns the
-      // wrong account (not undefined) — makes the assertion non-vacuous.
-      const olderAcct = `acct_rpc_older_${createUniqueSlug('a')}`;
-      const newerAcct = `acct_rpc_newer_${createUniqueSlug('a')}`;
-      await db.insert(schema.stripeConnectAccounts).values([
-        {
-          userId: olderOwnerId,
-          organizationId: org.id,
-          stripeAccountId: olderAcct,
-          status: 'active',
-          chargesEnabled: true,
-          payoutsEnabled: true,
-        },
-        {
-          userId: newerOwnerId,
-          organizationId: org.id,
-          stripeAccountId: newerAcct,
-          status: 'active',
-          chargesEnabled: true,
-          payoutsEnabled: true,
-        },
-      ]);
-
-      const account = await resolvePrimaryConnect(db, org.id);
-      expect(account?.userId).toBe(olderOwnerId);
-      expect(account?.stripeAccountId).toBe(olderAcct);
-    });
-
-    it('returns undefined when the org has neither a primary pin nor an owner', async () => {
-      const org = takeFirst(
-        await db
-          .insert(organizations)
-          .values({
-            name: 'RPC Empty Org',
-            slug: createUniqueSlug('rpc-empty'),
-          })
-          .returning()
-      );
-
-      const account = await resolvePrimaryConnect(db, org.id);
-      expect(account).toBeUndefined();
-    });
-  });
-
   // ─── Codex-69t7c WP5: orgless (bi-party) purchase pipeline ─────────────────
   //
   // The Phase-1 "content must belong to an organization" gate is removed.
@@ -5591,10 +5471,10 @@ describe('PurchaseService Integration', () => {
           .values({
             name: 'Mixed Flow Org',
             slug: createUniqueSlug('mixed-flow'),
-            primaryConnectAccountUserId: userId,
           })
           .returning()
       );
+      await setTestOrganisationPayee(db, mixedOrg.id, userId);
       await db
         .insert(schema.stripeConnectAccounts)
         .values({

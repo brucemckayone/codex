@@ -680,6 +680,13 @@
       "when": 1790496212097,
       "tag": "0096_breezy_jack_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791933982576,
+      "tag": "0097_next_sunspot",
+      "breakpoints": true
     }
   ]
 }

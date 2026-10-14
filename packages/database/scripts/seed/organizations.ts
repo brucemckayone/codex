@@ -166,6 +166,30 @@ export async function seedOrganizations(db: typeof DbClient) {
     },
   ]);
 
+  // Ownership periods — who is paid as each org's owner, from when
+  // (Codex-2hxff.2). Production writes one with every owner membership; the
+  // seed does too, so local payouts resolve exactly as they do there.
+  await db.insert(schema.organizationOwnershipPeriods).values([
+    {
+      organizationId: ORGS.alpha.id,
+      userId: USERS.creator.id,
+      startedAt: now,
+      source: 'created',
+    },
+    {
+      organizationId: ORGS.beta.id,
+      userId: USERS.admin.id,
+      startedAt: now,
+      source: 'created',
+    },
+    {
+      organizationId: ORGS.bones.id,
+      userId: USERS.luzura.id,
+      startedAt: now,
+      source: 'created',
+    },
+  ]);
+
   // Organization followers (audience relationships — separate from team memberships)
   await db.insert(schema.organizationFollowers).values([
     {

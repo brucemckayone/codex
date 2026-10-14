@@ -3,7 +3,7 @@
 Where the code does not yet meet this specification, the decisions the
 specification rests on, and what is still undecided.
 
-Last reviewed: 2026-10-13.
+Last reviewed: 2026-10-14.
 
 ---
 
@@ -15,14 +15,16 @@ references to today's code — is in
 [docs/audits/payments-2026-10-13/bug-ledger.md](../audits/payments-2026-10-13/bug-ledger.md)
 under the ledger ids listed on each bead.
 
-The first five carry the label `payments-fix-pr-1` and ship together in one pull
-request: the owner asked for the payout-dashboard, ownership and price-change
-fixes together ("put all of these fixes in together as one PR"), then agreed to
-add the portal lockdown (`.4`) and environment tagging (`.5`) ("Include both").
+`Codex-2hxff.1`–`.5` (label `payments-fix-pr-1`) are fixed in one pull request
+and so are not listed below: the owner asked for the payout-dashboard,
+ownership and price-change fixes together ("put all of these fixes in together
+as one PR"), then agreed to add the portal lockdown (`.4`) and environment
+tagging (`.5`) ("Include both"). Their beads close when it merges. Two
+follow-ups came out of them: `Codex-2hxff.35` (production's price-change email
+wording) and `Codex-2hxff.36` (dropping the retired Connect pin column).
 
 | Bead | P | What is not true yet | Spec |
 |---|---|---|---|
-| `Codex-2hxff.2` | P1 | One owner per organisation, transfer-only; organisation money follows the current owner | [connect-and-payouts](connect-and-payouts.md#organisation-ownership) |
 | `Codex-2hxff.6` | P0 | Transient webhook failures return 500 so Stripe retries | [operations](operations.md#webhook-error-policy) |
 | `Codex-2hxff.7` | P1 | Every sale path uses fee configuration, including the minimum platform fee | [fees-and-splits](fees-and-splits.md#fee-configuration) |
 | `Codex-2hxff.8` | P1 | Partial refunds keep access and claw back each increment; failed reversals are retried | [purchases](purchases.md#refunds) |

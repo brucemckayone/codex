@@ -15,7 +15,7 @@
  * - Platform controls fees (controller.fees.payer = 'application')
  * - Stripe handles identity verification and compliance
  * - One account per user (unique constraint, Codex-69t7c) — org-independent;
- *   the org→account link lives on `organizations.primaryConnectAccountUserId`
+ *   an org's account is its owner's (`resolveOrganisationPayee`, Codex-2hxff.2)
  *
  * Onboarding Flow:
  * 1. createAccountForUser() → Stripe account + Account Link
@@ -26,14 +26,10 @@
 
 import { CacheType, type VersionedCache } from '@codex/cache';
 import { stripeEnvMetadata } from '@codex/constants';
-import {
-  organizationMemberships,
-  organizations,
-  stripeConnectAccounts,
-} from '@codex/database/schema';
-import { resolvePrimaryConnect } from '@codex/purchase';
+import { stripeConnectAccounts } from '@codex/database/schema';
+import { resolveOrganisationPayee } from '@codex/purchase';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   ConnectAccountNotFoundError,
@@ -192,10 +188,8 @@ export class ConnectAccountService extends BaseService {
    * Create a Stripe Express Connect account for a user and return the
    * onboarding URL. One account per user (Codex-69t7c) — org-independent.
    *
-   * The org→account link is materialised separately by `handleAccountUpdated`
-   * (on the user's `account.updated` events), which pins
-   * `primaryConnectAccountUserId` for the orgs this user owns. Onboarding
-   * therefore carries NO org context.
+   * An org's account is simply its owner's, resolved at payment time
+   * (`resolveOrganisationPayee`), so onboarding carries NO org context.
    */
   async createAccountForUser(
     userId: string,
@@ -258,9 +252,9 @@ export class ConnectAccountService extends BaseService {
       // writing the row first means any failure after this point (link
       // generation, a transient error) leaves a RECOVERABLE row rather than a
       // Stripe account with no local record (which the null-DB retry path would
-      // then duplicate). `organizationId` is the vestigial WP1 column — the
-      // org→account link now lives on `organizations.primaryConnectAccountUserId`
-      // — so we leave it null; a user account has no single owning org.
+      // then duplicate). `organizationId` is the vestigial WP1 column — an
+      // org's account is its owner's, resolved by ownership — so we leave it
+      // null; a user account has no single owning org.
       //
       // `onConflictDoNothing` on uq_stripe_connect_user absorbs a concurrent
       // request that raced us to the row; we then re-read the winner, whose
@@ -349,11 +343,11 @@ export class ConnectAccountService extends BaseService {
    * Get a Connect account.
    *
    * With `userId`, delegates to `getAccountForUser`. With only `orgId`, resolves
-   * the org's canonical account via `organizations.primaryConnectAccountUserId`
-   * (with owner fallback). Returns null when no matching account exists.
+   * the org's current owner's account. Returns null when no matching account
+   * exists.
    *
    * @deprecated orgId-first shim retained for compile-compat; prefer
-   * `getAccountForUser(userId)` or `resolvePrimaryConnect(db, orgId)`.
+   * `getAccountForUser(userId)` or `resolveOrganisationPayee(db, orgId)`.
    */
   async getAccount(
     orgId: string,
@@ -362,7 +356,7 @@ export class ConnectAccountService extends BaseService {
     if (userId) {
       return this.getAccountForUser(userId);
     }
-    return (await resolvePrimaryConnect(this.db, orgId)) ?? null;
+    return (await resolveOrganisationPayee(this.db, orgId))?.account ?? null;
   }
 
   /**
@@ -430,7 +424,7 @@ export class ConnectAccountService extends BaseService {
   async getOrganizationPayoutStatus(
     orgId: string
   ): Promise<OrganizationPayoutStatus> {
-    const account = await resolvePrimaryConnect(this.db, orgId);
+    const account = (await resolveOrganisationPayee(this.db, orgId))?.account;
     if (!account) {
       return {
         isConnected: false,
@@ -536,13 +530,6 @@ export class ConnectAccountService extends BaseService {
       payoutsEnabled,
     });
 
-    // Materialise the org→account pin for every org this user OWNS that has no
-    // pin yet (Codex-69t7c.2). This is the SOLE production write of
-    // `organizations.primaryConnectAccountUserId`; until it fires,
-    // `resolvePrimaryConnect` falls back to the org owner — so a failure here
-    // degrades to that fallback, never a broken payout (see pinOwnedOrgsToUser).
-    await this.pinOwnedOrgsToUser(updated.userId);
-
     // Connect status changed — invalidate the cached `getStatusForUser`
     // response so the next read is fresh. Keyed on `userId` (always present on
     // the row), NOT the vestigial `organizationId` which was frequently null and
@@ -579,9 +566,8 @@ export class ConnectAccountService extends BaseService {
       userId: updated.userId,
     });
 
-    // The pin is intentionally left in place — resolvePrimaryConnect surfaces
-    // the now-`disabled` account, which correctly blocks payouts until the user
-    // reconnects (Codex-69t7c.2).
+    // The owner's payouts resolve to this now-`disabled` account, which
+    // correctly blocks transfers until they reconnect (Codex-69t7c.2).
     await this.invalidateStatusCache(updated.userId);
   }
 
@@ -647,14 +633,14 @@ export class ConnectAccountService extends BaseService {
   // ─── Private Helpers ─────────────────────────────────────────────────────
 
   /**
-   * Resolve an org to its primary Connect user id (pin → owner fallback).
-   *
-   * Shared by the `@deprecated` orgId-first shims so they all funnel through
-   * the same `resolvePrimaryConnect` semantics. Returns null when neither an
-   * explicit pin nor an owner account exists.
+   * Resolve an org to its current owner's user id, when they have a Connect
+   * account (the `@deprecated` orgId-first shims' semantics). Returns null when
+   * there is no owner or they have not onboarded.
    */
   private async resolveUserIdForOrg(orgId: string): Promise<string | null> {
-    return (await resolvePrimaryConnect(this.db, orgId))?.userId ?? null;
+    return (
+      (await resolveOrganisationPayee(this.db, orgId))?.account?.userId ?? null
+    );
   }
 
   /**
@@ -672,75 +658,6 @@ export class ConnectAccountService extends BaseService {
       await this.cache.invalidate(userId);
     } catch (error) {
       this.obs.warn('Connect status cache invalidation failed', {
-        userId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * Materialise `organizations.primaryConnectAccountUserId` for every org this
-   * user OWNS that has no pin yet, settling the org's revenue slice on the
-   * user's single Connect account (Codex-69t7c.2).
-   *
-   * Runs on EVERY `account.updated` (not only activation): pinning early is
-   * harmless because payability is gated separately at transfer time
-   * (`chargesEnabled`/`payoutsEnabled`), never by the pin's existence.
-   *
-   * Idempotent + safe:
-   * - `role = 'owner'` only, and `WHERE primaryConnectAccountUserId IS NULL` →
-   *   the FIRST owner to onboard wins the pin; it is never overwritten, never
-   *   stolen, and a re-delivered event is a no-op.
-   * - Until the pin is set, `resolvePrimaryConnect` falls back to an org owner;
-   *   the pin (first owner to onboard) then makes the settlement target explicit
-   *   and stable. NB the unpinned fallback's owner selection across multi-owner
-   *   orgs is not yet deterministic — tracked in Codex-rjwdm.
-   *
-   * Best-effort: a failure is logged at WARN and swallowed — resolution still
-   * works via the deterministic owner fallback until a later event sets the
-   * pin, so we never fail the webhook over this materialisation.
-   */
-  private async pinOwnedOrgsToUser(userId: string): Promise<void> {
-    try {
-      const ownedOrgs = await this.db
-        .select({ organizationId: organizationMemberships.organizationId })
-        .from(organizationMemberships)
-        .where(
-          and(
-            eq(organizationMemberships.userId, userId),
-            eq(organizationMemberships.role, 'owner'),
-            // A removed owner keeps role='owner' with status='inactive'. The
-            // pin this method writes is deliberately never overwritten, so
-            // without this predicate a removed founder who onboards Connect
-            // would permanently capture the org's revenue slice.
-            eq(organizationMemberships.status, 'active')
-          )
-        );
-
-      if (ownedOrgs.length === 0) return;
-
-      const orgIds = ownedOrgs.map((o) => o.organizationId);
-      // Bare `.returning()` (no projection) — the `Database | DatabaseWs` union
-      // collapses the projected overload; we only need the affected-row count.
-      const pinned = await this.db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: userId })
-        .where(
-          and(
-            inArray(organizations.id, orgIds),
-            isNull(organizations.primaryConnectAccountUserId)
-          )
-        )
-        .returning();
-
-      if (pinned.length > 0) {
-        this.obs.info('Connect primary pin materialised', {
-          userId,
-          pinnedOrgCount: pinned.length,
-        });
-      }
-    } catch (error) {
-      this.obs.warn('Connect primary pin materialisation failed', {
         userId,
         error: error instanceof Error ? error.message : String(error),
       });

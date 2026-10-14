@@ -30,6 +30,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   seedTestUsers,
+  setTestOrganisationPayee,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -139,7 +140,7 @@ describe('ConnectAccountService', () => {
             transfers: { requested: true },
           },
           // Onboarding is userId-centric (Codex-69t7c.2) — no org metadata;
-          // the org→account link is materialised at activation via the pin.
+          // an org's account is its owner's, resolved at each sale.
           metadata: {
             codex_user_id: creatorId,
             // Production and local dev share one Stripe sandbox (Codex-2hxff.5).
@@ -448,10 +449,7 @@ describe('ConnectAccountService', () => {
       await db
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(getOrg.id, creatorId));
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, getOrg.id));
+      await setTestOrganisationPayee(db, getOrg.id, creatorId);
 
       const account = await service.getAccount(getOrg.id);
       expect(account).not.toBeNull();
@@ -1100,10 +1098,7 @@ describe('ConnectAccountService', () => {
           status: 'active',
         })
       );
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, readyOrg.id));
+      await setTestOrganisationPayee(db, readyOrg.id, creatorId);
 
       const ready = await service.isReady(readyOrg.id);
       expect(ready).toBe(true);
@@ -1606,10 +1601,10 @@ describe('ConnectAccountService', () => {
     });
   });
 
-  // ─── getAccount org → primary-user resolution (Codex-69t7c.2) ─────────
+  // ─── getAccount org → owner resolution (Codex-69t7c.2, Codex-2hxff.2) ──
 
   describe('getAccount org resolution', () => {
-    it('resolves org → owner account via fallback when the pin is unset', async () => {
+    it('resolves org → owner account via the active owner membership', async () => {
       const fbOrg = takeFirst(
         await db
           .insert(organizations)
@@ -1620,7 +1615,8 @@ describe('ConnectAccountService', () => {
           )
           .returning()
       );
-      // Owner membership but NO pin — resolvePrimaryConnect falls back to owner.
+      // Owner membership but no ownership period — the payee falls back to
+      // the active owner.
       await db.insert(organizationMemberships).values({
         organizationId: fbOrg.id,
         userId: creatorId,
@@ -1636,7 +1632,7 @@ describe('ConnectAccountService', () => {
       expect(account?.userId).toBe(creatorId);
     });
 
-    it('returns null when the org has neither a pin nor an owner account', async () => {
+    it('returns null when the org has no owner account', async () => {
       const noneOrg = takeFirst(
         await db
           .insert(organizations)
@@ -1769,250 +1765,87 @@ describe('ConnectAccountService', () => {
     });
   });
 
-  // ─── pin-write: organizations.primaryConnectAccountUserId (Codex-69t7c.2) ─
+  // ─── Connect events never change who is paid (Codex-2hxff.2) ───────────
   //
-  // The load-bearing WP1 finding: the pin is NEVER written in production, so
-  // resolvePrimaryConnect relies entirely on the owner fallback. WP2 materialises
-  // it at account activation — scoped to orgs the user OWNS, only when unset.
-  // These guard that materialisation (the SOLE production write of the pin).
+  // Activation used to write `organizations.primary_connect_account_user_id`
+  // for every org the user owned — once, never overwritten — so a former owner
+  // kept receiving the org's money after a handover. The payee is now resolved
+  // from ownership at the time of each sale; Connect events change only whether
+  // that payee can be paid.
 
-  describe('pin-write on account activation', () => {
-    const readPin = async (id: string) => {
-      const [row] = await db
-        .select({ pin: organizations.primaryConnectAccountUserId })
-        .from(organizations)
-        .where(eq(organizations.id, id));
-      return row?.pin ?? null;
-    };
+  describe('org payee across Connect events', () => {
+    async function makeOwnedOrg(label: string) {
+      const org = takeFirst(
+        await db
+          .insert(organizations)
+          .values(
+            createTestOrganizationInput({ slug: createUniqueSlug(label) })
+          )
+          .returning()
+      );
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await setTestOrganisationPayee(db, org.id, creatorId);
+      return org;
+    }
 
-    const activate = (stripeAccountId: string) =>
-      service.handleAccountUpdated({
-        id: stripeAccountId,
+    it('activation writes no pin', async () => {
+      const org = await makeOwnedOrg('payee-activation');
+      const acct = takeFirst(
+        await db
+          .insert(stripeConnectAccounts)
+          .values(
+            createTestConnectAccountInput(org.id, creatorId, {
+              status: 'onboarding',
+              chargesEnabled: false,
+              payoutsEnabled: false,
+            })
+          )
+          .returning()
+      );
+
+      await service.handleAccountUpdated({
+        id: acct.stripeAccountId,
         charges_enabled: true,
         payouts_enabled: true,
         requirements: { currently_due: [], disabled_reason: null },
       } as unknown as Stripe.Account);
 
-    it('pins owned orgs whose pin is unset to the activating user', async () => {
-      const ownedOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-owned'),
-            })
-          )
-          .returning()
-      );
-      await db.insert(organizationMemberships).values({
-        organizationId: ownedOrg.id,
-        userId: creatorId,
-        role: 'owner',
-        status: 'active',
+      const [row] = await db
+        .select({ pin: organizations.primaryConnectAccountUserId })
+        .from(organizations)
+        .where(eq(organizations.id, org.id));
+      expect(row?.pin).toBeNull();
+      expect(await service.getOrganizationPayoutStatus(org.id)).toMatchObject({
+        isConnected: true,
+        chargesEnabled: true,
+        payoutsEnabled: true,
       });
-      const acct = takeFirst(
-        await db
-          .insert(stripeConnectAccounts)
-          .values(
-            createTestConnectAccountInput(ownedOrg.id, creatorId, {
-              status: 'onboarding',
-              chargesEnabled: false,
-              payoutsEnabled: false,
-            })
-          )
-          .returning()
-      );
-
-      expect(await readPin(ownedOrg.id)).toBeNull();
-      await activate(acct.stripeAccountId);
-      expect(await readPin(ownedOrg.id)).toBe(creatorId);
     });
 
-    it('does NOT overwrite an existing (non-null) pin', async () => {
-      const pinnedOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-existing'),
-            })
-          )
-          .returning()
-      );
-      // creatorId is the owner, but the org is already pinned to a DIFFERENT
-      // user (e.g. a future "designate payout account" feature).
-      await db.insert(organizationMemberships).values({
-        organizationId: pinnedOrg.id,
-        userId: creatorId,
-        role: 'owner',
-        status: 'active',
-      });
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: otherCreatorId })
-        .where(eq(organizations.id, pinnedOrg.id));
+    it('deauthorization leaves the owner as payee, with a disabled account', async () => {
+      // The org slice is not rerouted to anyone else: the owner's disabled
+      // account blocks transfers, and their money accumulates as pending.
+      const org = await makeOwnedOrg('payee-deauth');
       const acct = takeFirst(
         await db
           .insert(stripeConnectAccounts)
-          .values(createTestConnectAccountInput(pinnedOrg.id, creatorId))
-          .returning()
-      );
-
-      await activate(acct.stripeAccountId);
-
-      // Pin untouched — an explicit assignment is never stolen.
-      expect(await readPin(pinnedOrg.id)).toBe(otherCreatorId);
-    });
-
-    it('pins nothing when the activating user owns no orgs', async () => {
-      // Org owned by otherCreatorId; the account belongs to creatorId, who is
-      // NOT an owner — a creator-slice account, not the org's payout owner.
-      const foreignOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-nonowner'),
-            })
-          )
-          .returning()
-      );
-      await db.insert(organizationMemberships).values({
-        organizationId: foreignOrg.id,
-        userId: otherCreatorId,
-        role: 'owner',
-        status: 'active',
-      });
-      const acct = takeFirst(
-        await db
-          .insert(stripeConnectAccounts)
-          .values(createTestConnectAccountInput(foreignOrg.id, creatorId))
-          .returning()
-      );
-
-      await activate(acct.stripeAccountId);
-
-      expect(await readPin(foreignOrg.id)).toBeNull();
-    });
-
-    it('is idempotent across duplicate webhook deliveries', async () => {
-      const idemOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-idem'),
-            })
-          )
-          .returning()
-      );
-      await db.insert(organizationMemberships).values({
-        organizationId: idemOrg.id,
-        userId: creatorId,
-        role: 'owner',
-        status: 'active',
-      });
-      const acct = takeFirst(
-        await db
-          .insert(stripeConnectAccounts)
-          .values(createTestConnectAccountInput(idemOrg.id, creatorId))
-          .returning()
-      );
-
-      await activate(acct.stripeAccountId);
-      await activate(acct.stripeAccountId);
-
-      expect(await readPin(idemOrg.id)).toBe(creatorId);
-    });
-
-    it('pins the org even on a non-active (onboarding) account.updated', async () => {
-      // The pin records the owner regardless of payability — payability is
-      // gated at transfer time, not by pin existence (Codex-69t7c.2).
-      const obPinOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-onboarding'),
-            })
-          )
-          .returning()
-      );
-      await db.insert(organizationMemberships).values({
-        organizationId: obPinOrg.id,
-        userId: creatorId,
-        role: 'owner',
-        status: 'active',
-      });
-      const acct = takeFirst(
-        await db
-          .insert(stripeConnectAccounts)
-          .values(
-            createTestConnectAccountInput(obPinOrg.id, creatorId, {
-              status: 'onboarding',
-              chargesEnabled: false,
-              payoutsEnabled: false,
-            })
-          )
-          .returning()
-      );
-
-      // account.updated arrives still in onboarding (NOT active).
-      await service.handleAccountUpdated({
-        id: acct.stripeAccountId,
-        charges_enabled: false,
-        payouts_enabled: false,
-        requirements: {
-          currently_due: ['external_account'],
-          disabled_reason: null,
-        },
-      } as unknown as Stripe.Account);
-
-      expect(await readPin(obPinOrg.id)).toBe(creatorId);
-    });
-
-    it('retains the pin on deauthorization (account surfaces as disabled)', async () => {
-      // Deliberate: the pin stays so resolvePrimaryConnect surfaces the
-      // now-disabled account, which transfer-time active-checks block — rather
-      // than silently rerouting the org slice to a different owner.
-      const deauthOrg = takeFirst(
-        await db
-          .insert(organizations)
-          .values(
-            createTestOrganizationInput({
-              slug: createUniqueSlug('pin-deauth'),
-            })
-          )
-          .returning()
-      );
-      await db.insert(organizationMemberships).values({
-        organizationId: deauthOrg.id,
-        userId: creatorId,
-        role: 'owner',
-        status: 'active',
-      });
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: creatorId })
-        .where(eq(organizations.id, deauthOrg.id));
-      const acct = takeFirst(
-        await db
-          .insert(stripeConnectAccounts)
-          .values(
-            createTestConnectAccountInput(deauthOrg.id, creatorId, {
-              status: 'active',
-              chargesEnabled: true,
-              payoutsEnabled: true,
-            })
-          )
+          .values(createTestConnectAccountInput(org.id, creatorId))
           .returning()
       );
 
       await service.handleAccountDeauthorized(acct.stripeAccountId);
 
-      expect(await readPin(deauthOrg.id)).toBe(creatorId);
-      const after = await service.getAccountForUser(creatorId);
-      expect(after?.status).toBe('disabled');
+      expect(await service.getOrganizationPayoutStatus(org.id)).toEqual({
+        isConnected: true,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: 'disabled',
+      });
     });
   });
 });

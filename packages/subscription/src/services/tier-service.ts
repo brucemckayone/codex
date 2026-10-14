@@ -30,7 +30,7 @@ import {
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
-import { resolvePrimaryConnect } from '@codex/purchase';
+import { resolveOrganisationPayee } from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -965,13 +965,12 @@ export class TierService extends BaseService {
   /**
    * Validate that the org has an active Stripe Connect account.
    *
-   * Resolves the org's canonical account via the shared `resolvePrimaryConnect`
-   * (org → `primaryConnectAccountUserId` → that user's single account; one
-   * account per user, Codex-69t7c). No pinned account, or one missing the
+   * The org's account is its current owner's (Codex-2hxff.2; one account per
+   * user, Codex-69t7c). An owner with no account, or one missing the
    * charges/payouts capabilities, means the org is not ready.
    */
   private async requireActiveConnect(orgId: string): Promise<void> {
-    const account = await resolvePrimaryConnect(this.db, orgId);
+    const account = (await resolveOrganisationPayee(this.db, orgId))?.account;
     if (!account || !account.chargesEnabled || !account.payoutsEnabled) {
       throw new ConnectAccountNotReadyError(orgId);
     }

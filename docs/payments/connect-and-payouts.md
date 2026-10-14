@@ -101,7 +101,16 @@ Owner decisions, 2026-10-13: "The proposed ownership model seems perfect to me."
 - Money earned **before** a transfer stays with the previous owner, including
   anything still pending for them.
 
-The `organizations.primary_connect_account_user_id` pin is removed.
+The `organizations.primary_connect_account_user_id` pin is no longer read or
+written; the payee is the owner whose ownership period covers the sale's time
+(`resolveOrganisationPayee`). The column itself is dropped by `Codex-2hxff.36`.
+
+**How it is held.** The owner is the single `organization_memberships` row with
+`role='owner'` and `status='active'` (the unique index
+`uq_org_memberships_one_active_owner` allows no second one). Who is *paid* as
+owner, and from when, is `organization_ownership_periods`: one open period per
+organisation, written in the same transaction as every change of owner.
+Creating an organisation opens its creator's period.
 
 **Transferring ownership** (owner decisions 2026-10-13, see
 [status.md](status.md#decisions); the mockup and data design were reviewed on
@@ -126,11 +135,9 @@ The `organizations.primary_connect_account_user_id` pin is removed.
   the owner. An expired offer sends nothing; it shows on the Ownership card.
 - Platform support can reassign ownership through admin-api
   (`auth: 'platform_owner'`). There is no screen yet.
-
-— **gap**: `Codex-2hxff.2`. Today any admin can promote themselves to owner and
-remove the founder, an organisation can have several owners, and the pin is set
-once and never changed, so a former owner keeps receiving the organisation's
-money.
+- The members routes cannot make anyone owner, change the owner's role or
+  remove the owner (`409 OWNERSHIP_TRANSFER_REQUIRED`): ownership moves only by
+  the routes above.
 
 ## What needs payouts set up first
 

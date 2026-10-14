@@ -61,6 +61,13 @@ export {
   type DevDomainServiceConfig,
   OrganizationService,
   type OrganizationServiceConfig,
+  OWNERSHIP_OFFER_TTL_MS,
+  type OwnershipChange,
+  type OwnershipMailer,
+  type OwnershipOfferDto,
+  type OwnershipTemplateName,
+  type OwnershipViewCore,
+  type OwnershipViewerRole,
 } from './services';
 
 // ============================================================================
@@ -91,12 +98,16 @@ export {
   ConflictError,
   ForbiddenError,
   IdentityServiceError,
+  IneligibleOwnershipRecipientError,
   InternalServiceError,
   isIdentityServiceError,
-  LastOwnerError,
   MemberNotFoundError,
   NotFoundError,
+  NotOrganisationOwnerError,
   OrganizationNotFoundError,
+  OwnershipConfirmationMismatchError,
+  OwnershipOfferNotOpenError,
+  OwnershipTransferRequiredError,
   ValidationError,
   wrapError,
 } from './errors';

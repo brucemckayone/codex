@@ -34,7 +34,6 @@ import {
   contentAccess,
   courses,
   entitlements,
-  organizationMemberships,
   payouts,
   purchases,
   refundReviews,
@@ -88,7 +87,7 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
+import { resolveOrganisationPayee } from '../utils/resolve-organisation-payee';
 import { findActiveCreatorAgreementShare } from './agreement-share';
 import {
   writeContentPurchaseEntitlement,
@@ -756,7 +755,7 @@ export class PurchaseService extends BaseService {
             currency: metadata.currency || CURRENCY.GBP,
             stripePaymentIntentId,
             status: PURCHASE_STATUS.COMPLETED,
-            purchasedAt: new Date(),
+            purchasedAt,
             platformFeeCents: revenueSplit.platformFeeCents,
             organizationFeeCents: revenueSplit.organizationFeeCents,
             creatorPayoutCents: revenueSplit.creatorPayoutCents,
@@ -1294,8 +1293,8 @@ export class PurchaseService extends BaseService {
     }
 
     // Look up Connect accounts up front: the creator's single account (by
-    // userId — one account per user, Codex-69t7c) and the org's canonical
-    // account (resolved via primaryConnectAccountUserId below).
+    // userId — one account per user, Codex-69t7c) and the org payee's account
+    // (resolved by ownership at the payment time, below).
     const [creatorConnect] =
       revenueSplit.creatorPayoutCents > 0
         ? await this.db
@@ -1323,13 +1322,19 @@ export class PurchaseService extends BaseService {
       creatorEmail = creatorRow?.email ?? null;
     }
 
-    // Codex-sec7i: org slice routes to the pinned Connect account.
-    // Codex-69t7c WP5: only resolve when there IS an org — orgless purchases
-    // never carve an org slice (organizationFeeCents is forced to 0 upstream),
-    // so this stays undefined and the org-fee branch below is skipped.
-    const orgConnect =
+    // Codex-2hxff.2: the org slice goes to whoever owned the org at the
+    // payment time — the same instant the agreement lookup used. Codex-69t7c
+    // WP5: only resolve when there IS an org — orgless purchases never carve an
+    // org slice (organizationFeeCents is forced to 0 upstream), so this stays
+    // undefined and the org-fee branch below is skipped.
+    const orgPayee =
       organizationId !== null && revenueSplit.organizationFeeCents > 0
-        ? await resolvePrimaryConnect(this.db, organizationId)
+        ? await resolveOrganisationPayee(
+            this.db,
+            organizationId,
+            purchase.purchasedAt ?? purchase.createdAt,
+            this.obs
+          )
         : undefined;
 
     // 2. Creator payout — secondary transfer with source_transaction.
@@ -1356,22 +1361,17 @@ export class PurchaseService extends BaseService {
     // `organizationId` to `string` for the resolvers below.
     if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
       // Codex-ed446: the org-fee payout row's recipient userId MUST be
-      // non-null (check_payouts_user_required). Prefer the resolved Connect
-      // account's user; when the org owner has not onboarded a Connect
-      // account, orgConnect is undefined — fall back to the org owner so a
-      // pending organization_fee row still persists and is swept (mirrors the
-      // subscription path) instead of stranding the slice via a 23514
-      // violation that the per-row catch would silently swallow.
-      const orgRowUserId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(organizationId));
-      if (orgRowUserId) {
+      // non-null (check_payouts_user_required). The payee is returned even
+      // when they have not onboarded Connect, so a pending organization_fee
+      // row still persists in their name and is swept later.
+      if (orgPayee) {
         await this.executePurchaseTransfer({
           purchase,
           organizationId,
           amountCents: revenueSplit.organizationFeeCents,
           payoutType: 'organization_fee',
-          rowUserId: orgRowUserId,
-          connect: orgConnect,
+          rowUserId: orgPayee.userId,
+          connect: orgPayee.account,
           stripeChargeId,
           transferGroup,
           idempotencyKey: `${stripeChargeId}_org_fee`,
@@ -1391,36 +1391,6 @@ export class PurchaseService extends BaseService {
         );
       }
     }
-  }
-
-  /**
-   * Resolve an org's owner userId (Codex-ed446). The org-fee payout row MUST
-   * carry a non-null userId (check_payouts_user_required); when the org owner
-   * has not onboarded a Connect account, `resolvePrimaryConnect` returns
-   * undefined, so we fall back to the owner here rather than writing a
-   * null-userId row that violates 23514 and strands the org slice in the
-   * platform balance. Mirrors `SubscriptionService.resolveOrgOwnerId`. No
-   * ORDER BY — matches that resolver's shape; deterministic-owner ordering
-   * across multi-owner orgs is tracked separately in Codex-rjwdm.
-   */
-  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
-    const [owner] = await this.db
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner'),
-          // A removed owner keeps role='owner' with status='inactive', and the
-          // pending-payout sweep resolves its destination by payouts.userId
-          // alone — so a removed founder who later onboards Connect would
-          // receive the org fee.
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .limit(1);
-
-    return owner?.userId ?? null;
   }
 
   /**

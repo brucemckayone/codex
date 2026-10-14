@@ -358,6 +358,30 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'deepLinkUrl',
     'note',
   ],
+
+  // Ownership transfer (Codex-2hxff.2)
+  'ownership-offered': [
+    'recipientName',
+    'offeredByName',
+    'orgName',
+    'expiresAtDisplay',
+    'deepLinkUrl',
+  ],
+  'ownership-transferred': [
+    'orgName',
+    'newOwnerName',
+    'previousOwnerName',
+    'transferredAtDisplay',
+    'deepLinkUrl',
+  ],
+  'ownership-offer-closed': [
+    'ownerName',
+    'recipientName',
+    'orgName',
+    'outcome',
+    'outcomeSentence',
+    'deepLinkUrl',
+  ],
 };
 
 /**
@@ -398,6 +422,10 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'agreement-declined',
   'agreement-terminated',
   'agreement-expiring-soon',
+  // Ownership transfer (Codex-2hxff.2): who receives the org's money.
+  'ownership-offered',
+  'ownership-transferred',
+  'ownership-offer-closed',
 ]);
 
 /**

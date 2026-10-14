@@ -9,6 +9,7 @@ import type { OrganizationWithRole } from '@codex/shared-types';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Organization by Slug (Authenticated)
@@ -189,23 +190,31 @@ export const inviteMember = command(
 );
 
 /**
- * Update a member's role
+ * Update a member's role.
+ *
+ * `owner` is not a settable role (Codex-2hxff.2): ownership moves only by
+ * transfer, and the worker answers 400 to it. Changing the OWNER's role is a 409
+ * `OWNERSHIP_TRANSFER_REQUIRED`, forwarded with its code so the team page can
+ * say why instead of "An unexpected error occurred".
  */
 export const updateMemberRole = command(
   z.object({
     orgId: z.string().uuid(),
     userId: z.string().min(1),
-    role: z.enum(['owner', 'admin', 'creator', 'member']),
+    role: z.enum(['admin', 'creator', 'member']),
   }),
   async ({ orgId, userId, role }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.org.updateMemberRole(orgId, userId, { role });
+    return forwardClientErrors(() =>
+      api.org.updateMemberRole(orgId, userId, { role })
+    );
   }
 );
 
 /**
- * Remove a member from the organization
+ * Remove a member from the organization. Removing the owner is a 409
+ * `OWNERSHIP_TRANSFER_REQUIRED` (forwarded, as above).
  */
 export const removeMember = command(
   z.object({
@@ -215,7 +224,7 @@ export const removeMember = command(
   async ({ orgId, userId }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.org.removeMember(orgId, userId);
+    return forwardClientErrors(() => api.org.removeMember(orgId, userId));
   }
 );
 
@@ -345,7 +354,8 @@ export const getMyOrganizations = query(async () => {
  * Get user's membership in an organization
  *
  * @param orgId - Organization UUID
- * @returns Membership with role and joinedAt (null if not a member)
+ * @returns Membership with role and joinedAt (null if not a member), plus the
+ *   caller's open ownership offer for this org (`pendingOwnershipOffer`)
  */
 export const getMyMembership = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();

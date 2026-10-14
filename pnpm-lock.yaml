@@ -1277,6 +1277,9 @@ importers:
 
   workers/admin-api:
     dependencies:
+      '@codex/cache':
+        specifier: workspace:*
+        version: link:../../packages/cache
       '@codex/constants':
         specifier: workspace:*
         version: link:../../packages/constants
@@ -1811,6 +1814,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250102.0
         version: 4.20251121.0
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@vitest/runner':
         specifier: ~3.2.4
         version: 3.2.4

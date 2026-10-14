@@ -24,6 +24,7 @@ import {
   mediaItems,
   organizationFollowers,
   organizationMemberships,
+  organizationOwnershipPeriods,
   organizations,
   users,
 } from '@codex/database/schema';
@@ -37,8 +38,10 @@ import type {
   OrganizationPublicStatsResponse,
   PaginatedListResponse,
 } from '@codex/shared-types';
+import { buildOrgUrl } from '@codex/urls';
 import type {
   CreateOrganizationInput,
+  OfferOwnershipInput,
   UpdateOrganizationInput,
 } from '@codex/validation';
 import {
@@ -62,16 +65,30 @@ import {
 } from 'drizzle-orm';
 import {
   ConflictError,
-  LastOwnerError,
   MemberNotFoundError,
   NotFoundError,
   OrganizationNotFoundError,
+  OwnershipTransferRequiredError,
 } from '../errors';
 import type {
   Organization,
   OrganizationFilters,
   PaginationParams,
 } from '../types';
+import {
+  acceptOwnershipOffer,
+  createOwnershipOffer,
+  declineOwnershipOffer,
+  getOwnershipView,
+  getPendingOwnershipOffer,
+  type OwnershipChange,
+  type OwnershipOfferDto,
+  type OwnershipViewCore,
+  reassignOrganisationOwner,
+  toOfferDto,
+  withdrawOfferForIneligibleRecipient,
+  withdrawOwnershipOffer,
+} from './ownership-transfer';
 
 /**
  * Organization Service Class
@@ -94,7 +111,50 @@ import type {
 export interface OrganizationServiceConfig extends ServiceConfig {
   /** Public asset CDN base — the `R2_PUBLIC_URL_BASE` worker binding. */
   r2PublicUrlBase?: string;
+  /**
+   * Ownership-transfer emails (Codex-2hxff.2). Fire-and-forget, like
+   * `AgreementLifecycleMailer`; when absent the transfer still works and only
+   * the email is skipped.
+   */
+  ownershipMailer?: OwnershipMailer;
+  /** Absolute web-app base for the emails' Studio links (`WEB_APP_URL`). */
+  webAppUrl?: string;
+  /** `ExecutionContext.waitUntil`, to send the emails off the request path. */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
+
+export type OwnershipTemplateName =
+  | 'ownership-offered'
+  | 'ownership-transferred'
+  | 'ownership-offer-closed';
+
+/** Matches `sendEmailToWorker`'s params, so the registry wires it directly. */
+export type OwnershipMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: OwnershipTemplateName;
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/** What happened, for the email dispatcher. */
+type OwnershipEvent =
+  | { kind: 'offered'; offer: OwnershipOfferDto }
+  | {
+      kind: 'closed';
+      offer: OwnershipOfferDto;
+      outcome: 'declined' | 'withdrawn';
+    }
+  | { kind: 'transferred'; organizationId: string; change: OwnershipChange };
+
+const emailDate = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
 
 export class OrganizationService extends BaseService {
   /**
@@ -105,9 +165,16 @@ export class OrganizationService extends BaseService {
     typeof createPlatformImageUrlSchema
   >;
 
+  private readonly ownershipMailer: OwnershipMailer | undefined;
+  private readonly webAppUrl: string | undefined;
+  private readonly waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+
   constructor(config: OrganizationServiceConfig) {
     super(config);
     this.logoUrlSchema = createPlatformImageUrlSchema(config.r2PublicUrlBase);
+    this.ownershipMailer = config.ownershipMailer;
+    this.webAppUrl = config.webAppUrl;
+    this.waitUntil = config.waitUntil;
   }
 
   /**
@@ -181,6 +248,16 @@ export class OrganizationService extends BaseService {
           userId,
           role: 'owner',
           status: 'active',
+        });
+
+        // ...and their ownership period, in the same transaction: membership is
+        // who may act as owner, the period is who is PAID as owner at a given
+        // time (Codex-2hxff.2). The two are only ever written together.
+        await tx.insert(organizationOwnershipPeriods).values({
+          organizationId: newOrganization.id,
+          userId,
+          startedAt: newOrganization.createdAt,
+          source: 'created',
         });
 
         return newOrganization;
@@ -782,6 +859,12 @@ export class OrganizationService extends BaseService {
   ): Promise<{
     role: string | null;
     joinedAt: string | null;
+    /** The caller's open ownership offer, for the Studio banner. */
+    pendingOwnershipOffer: {
+      offerId: string;
+      offeredByName: string;
+      expiresAt: string;
+    } | null;
   }> {
     try {
       const membership = await this.db.query.organizationMemberships.findFirst({
@@ -799,6 +882,14 @@ export class OrganizationService extends BaseService {
       return {
         role: membership?.role ?? null,
         joinedAt: toIso(membership?.createdAt),
+        pendingOwnershipOffer: membership
+          ? await getPendingOwnershipOffer(
+              this.db,
+              organizationId,
+              userId,
+              new Date()
+            )
+          : null,
       };
     } catch (error) {
       this.handleError(error, 'getMyMembership');
@@ -954,7 +1045,10 @@ export class OrganizationService extends BaseService {
   /**
    * Update a member's role in an organization
    *
-   * Safety: Cannot demote the last owner.
+   * The owner's role cannot be changed here, and nobody can be made owner here
+   * (Codex-2hxff.2): ownership moves only by transfer. A recipient of an open
+   * ownership offer who stops being an admin or creator has the offer
+   * withdrawn in the same transaction.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to update
@@ -973,16 +1067,18 @@ export class OrganizationService extends BaseService {
     joinedAt: Date;
   }> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         const membership = await this.findMembershipOrThrow(
           tx,
           organizationId,
           userId
         );
 
-        // Safety: If demoting from owner, check there's at least one other active owner
-        if (membership.role === 'owner' && role !== 'owner') {
-          await this.ensureNotLastOwner(tx, organizationId);
+        if (
+          (membership.role === 'owner' && membership.status === 'active') ||
+          role === 'owner'
+        ) {
+          throw new OwnershipTransferRequiredError({ organizationId });
         }
 
         const [updated] = await tx
@@ -1000,20 +1096,36 @@ export class OrganizationService extends BaseService {
           throw new MemberNotFoundError(userId);
         }
 
+        const withdrawn =
+          role === 'admin' || role === 'creator'
+            ? null
+            : await withdrawOfferForIneligibleRecipient(
+                tx,
+                organizationId,
+                userId,
+                new Date()
+              );
+
         return {
-          id: updated.id,
-          userId: updated.userId,
-          role: updated.role,
-          status: updated.status,
-          joinedAt: updated.createdAt,
+          membership: {
+            id: updated.id,
+            userId: updated.userId,
+            role: updated.role,
+            status: updated.status,
+            joinedAt: updated.createdAt,
+          },
+          withdrawn,
         };
       });
+      if (result.withdrawn) {
+        this.notifyOwnership({
+          kind: 'closed',
+          offer: toOfferDto(result.withdrawn),
+          outcome: 'withdrawn',
+        });
+      }
+      return result.membership;
     } catch (error) {
-      if (
-        error instanceof MemberNotFoundError ||
-        error instanceof LastOwnerError
-      )
-        throw error;
       this.handleError(error, 'updateMemberRole');
     }
   }
@@ -1021,23 +1133,24 @@ export class OrganizationService extends BaseService {
   /**
    * Remove a member from an organization
    *
-   * Safety: Cannot remove the last owner.
+   * The owner cannot be removed — they transfer ownership first
+   * (Codex-2hxff.2). Removing the recipient of an open ownership offer
+   * withdraws it in the same transaction.
    *
    * @param organizationId - Organization ID
    * @param userId - User ID to remove
    */
   async removeMember(organizationId: string, userId: string): Promise<void> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const withdrawn = await this.db.transaction(async (tx) => {
         const membership = await this.findMembershipOrThrow(
           tx,
           organizationId,
           userId
         );
 
-        // Safety: Cannot remove the last owner
-        if (membership.role === 'owner') {
-          await this.ensureNotLastOwner(tx, organizationId);
+        if (membership.role === 'owner' && membership.status === 'active') {
+          throw new OwnershipTransferRequiredError({ organizationId });
         }
 
         await tx
@@ -1049,7 +1162,21 @@ export class OrganizationService extends BaseService {
               eq(organizationMemberships.userId, userId)
             )
           );
+
+        return await withdrawOfferForIneligibleRecipient(
+          tx,
+          organizationId,
+          userId,
+          new Date()
+        );
       });
+      if (withdrawn) {
+        this.notifyOwnership({
+          kind: 'closed',
+          offer: toOfferDto(withdrawn),
+          outcome: 'withdrawn',
+        });
+      }
     } catch (error) {
       this.handleError(error, 'removeMember');
     }
@@ -1232,31 +1359,6 @@ export class OrganizationService extends BaseService {
   }
 
   /**
-   * Ensure the org has more than one active owner.
-   * Used before demoting/removing an owner to prevent orphaned orgs.
-   */
-  private async ensureNotLastOwner(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
-    organizationId: string
-  ): Promise<void> {
-    const ownerCount = await tx
-      .select({ total: count() })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.role, 'owner'),
-          eq(organizationMemberships.status, 'active')
-        )
-      );
-
-    const totalOwners = Number(ownerCount[0]?.total ?? 0);
-    if (totalOwners <= 1) {
-      throw new LastOwnerError();
-    }
-  }
-
-  /**
    * Find a non-deleted org by id inside a transaction.
    * Throws OrganizationNotFoundError if the org is missing or soft-deleted.
    */
@@ -1328,6 +1430,279 @@ export class OrganizationService extends BaseService {
     }
 
     return membership;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // OWNERSHIP (Codex-2hxff.2 — one owner; transfer by offer and accept)
+  // ══════════════════════════════════════════════════════════════════════
+  //
+  // The data side lives in `./ownership-transfer.ts`; these methods add error
+  // handling and the emails. Role rules are enforced here, not by policy: no
+  // `procedure()` policy flag means "the owner".
+
+  /** Who owns the organisation, and the offer state the viewer may see. */
+  async getOwnership(
+    organizationId: string,
+    viewerId: string
+  ): Promise<OwnershipViewCore> {
+    try {
+      return await getOwnershipView(
+        this.db,
+        organizationId,
+        viewerId,
+        new Date()
+      );
+    } catch (error) {
+      this.handleError(error, 'getOwnership');
+    }
+  }
+
+  /** The owner offers ownership to an active admin or creator. */
+  async offerOwnership(
+    organizationId: string,
+    ownerUserId: string,
+    input: OfferOwnershipInput
+  ): Promise<OwnershipOfferDto> {
+    try {
+      const offer = toOfferDto(
+        await createOwnershipOffer(
+          this.db,
+          { organizationId, ownerUserId, ...input },
+          new Date()
+        )
+      );
+      this.notifyOwnership({ kind: 'offered', offer });
+      return offer;
+    } catch (error) {
+      this.handleError(error, 'offerOwnership');
+    }
+  }
+
+  /** The owner withdraws their open offer. No email: they did it. */
+  async withdrawOwnershipOffer(
+    organizationId: string,
+    offerId: string,
+    ownerUserId: string
+  ): Promise<OwnershipOfferDto> {
+    try {
+      return toOfferDto(
+        await withdrawOwnershipOffer(
+          this.db,
+          { organizationId, offerId, ownerUserId },
+          new Date()
+        )
+      );
+    } catch (error) {
+      this.handleError(error, 'withdrawOwnershipOffer');
+    }
+  }
+
+  /** The recipient declines; the owner is told. */
+  async declineOwnershipOffer(
+    organizationId: string,
+    offerId: string,
+    recipientUserId: string
+  ): Promise<OwnershipOfferDto> {
+    try {
+      const offer = toOfferDto(
+        await declineOwnershipOffer(
+          this.db,
+          { organizationId, offerId, recipientUserId },
+          new Date()
+        )
+      );
+      this.notifyOwnership({ kind: 'closed', offer, outcome: 'declined' });
+      return offer;
+    } catch (error) {
+      this.handleError(error, 'declineOwnershipOffer');
+    }
+  }
+
+  /**
+   * The recipient accepts: they become the owner and the previous owner an
+   * admin. The caller must invalidate both users' membership caches.
+   */
+  async acceptOwnershipOffer(
+    organizationId: string,
+    offerId: string,
+    recipientUserId: string
+  ): Promise<OwnershipChange & { previousOwnerUserId: string }> {
+    try {
+      const change = await acceptOwnershipOffer(
+        this.db,
+        { organizationId, offerId, recipientUserId },
+        new Date()
+      );
+      const { previousOwnerUserId } = change;
+      if (!previousOwnerUserId) {
+        // An accepted offer always demotes its offerer.
+        throw new InternalServiceError('Accepted offer had no previous owner', {
+          organizationId,
+        });
+      }
+      this.notifyOwnership({ kind: 'transferred', organizationId, change });
+      return { ...change, previousOwnerUserId };
+    } catch (error) {
+      this.handleError(error, 'acceptOwnershipOffer');
+    }
+  }
+
+  /**
+   * Platform support assigns a new owner (admin-api, `platform_owner`). The
+   * caller must invalidate both users' membership caches.
+   */
+  async reassignOwner(
+    organizationId: string,
+    newOwnerUserId: string
+  ): Promise<OwnershipChange> {
+    try {
+      const { change } = await reassignOrganisationOwner(
+        this.db,
+        { organizationId, newOwnerUserId },
+        new Date()
+      );
+      this.notifyOwnership({ kind: 'transferred', organizationId, change });
+      return change;
+    } catch (error) {
+      this.handleError(error, 'reassignOwner');
+    }
+  }
+
+  /**
+   * Send an ownership email after the change has committed — through
+   * `waitUntil` when available, so the lookups never delay the response.
+   * Never throws: the change is the source of truth, the email an
+   * observation of it.
+   */
+  private notifyOwnership(event: OwnershipEvent): void {
+    const mailer = this.ownershipMailer;
+    const webAppUrl = this.webAppUrl;
+    if (!mailer) return;
+    if (!webAppUrl) {
+      this.obs.warn('Ownership email skipped: no web-app URL configured', {
+        kind: event.kind,
+      });
+      return;
+    }
+    const task = this.sendOwnershipEmails(event, mailer, webAppUrl).catch(
+      (error: unknown) => {
+        this.obs.warn('Ownership email dispatch failed', {
+          kind: event.kind,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    );
+    this.waitUntil?.(task);
+  }
+
+  private async sendOwnershipEmails(
+    event: OwnershipEvent,
+    mailer: OwnershipMailer,
+    webAppUrl: string
+  ): Promise<void> {
+    const organizationId =
+      event.kind === 'transferred'
+        ? event.organizationId
+        : event.offer.organizationId;
+    const [org] = await this.db
+      .select({ name: organizations.name, slug: organizations.slug })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .limit(1);
+    if (!org) return;
+    const settingsUrl = buildOrgUrl(
+      new URL(webAppUrl),
+      org.slug,
+      '/studio/settings'
+    );
+
+    if (event.kind === 'transferred') {
+      const { change } = event;
+      // The new owner, the previous owner (an admin now) and every other
+      // active admin: after the change that is exactly owner + admins.
+      const team = await this.db
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(users.id, organizationMemberships.userId))
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.status, 'active'),
+            inArray(organizationMemberships.role, ['owner', 'admin'])
+          )
+        );
+      const names = new Map(team.map((member) => [member.id, member.name]));
+      const data = {
+        orgName: org.name,
+        newOwnerName: names.get(change.ownerUserId) ?? 'The new owner',
+        previousOwnerName:
+          (change.previousOwnerUserId &&
+            names.get(change.previousOwnerUserId)) ||
+          'the previous owner',
+        transferredAtDisplay: emailDate.format(new Date(change.ownerSince)),
+        deepLinkUrl: settingsUrl,
+      };
+      for (const member of team) {
+        mailer({
+          to: member.email,
+          toName: member.name,
+          templateName: 'ownership-transferred',
+          category: 'transactional',
+          userId: member.id,
+          organizationId,
+          data,
+        });
+      }
+      return;
+    }
+
+    const { offer } = event;
+    const people = await this.db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(inArray(users.id, [offer.offeredByUserId, offer.recipientUserId]));
+    const owner = people.find((p) => p.id === offer.offeredByUserId);
+    const recipient = people.find((p) => p.id === offer.recipientUserId);
+    if (!owner || !recipient) return;
+
+    if (event.kind === 'offered') {
+      mailer({
+        to: recipient.email,
+        toName: recipient.name,
+        templateName: 'ownership-offered',
+        category: 'transactional',
+        userId: recipient.id,
+        organizationId,
+        data: {
+          recipientName: recipient.name,
+          offeredByName: owner.name,
+          orgName: org.name,
+          expiresAtDisplay: emailDate.format(new Date(offer.expiresAt)),
+          deepLinkUrl: settingsUrl,
+        },
+      });
+      return;
+    }
+
+    mailer({
+      to: owner.email,
+      toName: owner.name,
+      templateName: 'ownership-offer-closed',
+      category: 'transactional',
+      userId: owner.id,
+      organizationId,
+      data: {
+        ownerName: owner.name,
+        recipientName: recipient.name,
+        orgName: org.name,
+        outcome: event.outcome,
+        outcomeSentence:
+          event.outcome === 'declined'
+            ? `${recipient.name} declined your offer to become the owner of ${org.name}.`
+            : `Your offer to make ${recipient.name} the owner of ${org.name} was withdrawn, because they are no longer an admin or creator.`,
+        deepLinkUrl: settingsUrl,
+      },
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════

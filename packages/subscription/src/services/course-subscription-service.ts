@@ -52,7 +52,7 @@ import {
   type FeeConfigService,
   findActiveCreatorAgreementShare,
   refreshCourseSubscriptionEntitlementExpiry,
-  resolvePrimaryConnect,
+  resolveOrganisationPayee,
   revokeCourseSubscriptionEntitlement,
   withStaleCustomerRecovery,
   writeCourseSubscriptionEntitlement,
@@ -176,10 +176,9 @@ export class CourseSubscriptionService extends BaseService {
 
       // A course sub pays out to the org/creator, so the org Connect account
       // must be ready before a plan can be sold (mirrors TierService).
-      const connect = await resolvePrimaryConnect(
-        this.db,
-        course.organizationId
-      );
+      const connect = (
+        await resolveOrganisationPayee(this.db, course.organizationId)
+      )?.account;
       if (!connect?.chargesEnabled || !connect?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(course.organizationId);
       }
@@ -1035,7 +1034,18 @@ export class CourseSubscriptionService extends BaseService {
       return { userId: row.userId, organizationId: row.organizationId ?? '' };
     }
 
-    await this.writeCoursePayouts(row, stripeInvoice.amount_paid, chargeId);
+    // The invoice's creation time decides the split (Codex-2hxff.2) — the
+    // same guard as the tier path's `invoiceCreatedAt`.
+    const invoiceCreatedAt =
+      typeof stripeInvoice.created === 'number'
+        ? new Date(stripeInvoice.created * 1000)
+        : new Date();
+    await this.writeCoursePayouts(
+      row,
+      stripeInvoice.amount_paid,
+      chargeId,
+      invoiceCreatedAt
+    );
 
     return { userId: row.userId, organizationId: row.organizationId ?? '' };
   }
@@ -1121,11 +1131,16 @@ export class CourseSubscriptionService extends BaseService {
    * secondary transfers, writing `payouts` rows attributed by
    * `courseSubscriptionId` (§H3). ctx='subscription' (recurring), and per
    * HARDENING §H4 the creator's `subscription` revenue-share agreement applies.
+   *
+   * `invoiceCreatedAt` is the one clock for the split (Codex-2hxff.2): the
+   * agreements active then, and the org's owner then, decide it — so a late
+   * webhook retry pays what the sale earned, not what it would earn today.
    */
   private async writeCoursePayouts(
     sub: CourseSubscription,
     amountCents: number,
-    stripeChargeId: string
+    stripeChargeId: string,
+    invoiceCreatedAt: Date
   ): Promise<void> {
     const [course] = await this.db
       .select({
@@ -1190,7 +1205,7 @@ export class CourseSubscriptionService extends BaseService {
         organizationId,
         creatorId,
         revenueType: 'subscription',
-        at: new Date(),
+        at: invoiceCreatedAt,
       }
     );
     const effectiveOrgFeePercent =
@@ -1278,16 +1293,22 @@ export class CourseSubscriptionService extends BaseService {
 
     // 3. Organization fee — secondary transfer to the org's Connect account.
     if (split.organizationFeeCents > 0) {
-      const orgConnect = await resolvePrimaryConnect(this.db, organizationId);
-      const rowUserId = orgConnect?.userId ?? null;
-      if (rowUserId) {
+      // The owner when the invoice was created, with or without a Connect
+      // account — without one the slice is recorded pending in their name.
+      const orgPayee = await resolveOrganisationPayee(
+        this.db,
+        organizationId,
+        invoiceCreatedAt,
+        this.obs
+      );
+      if (orgPayee) {
         await this.executeCourseTransfer({
           sub,
           organizationId,
           amountCents: split.organizationFeeCents,
           payoutType: 'organization_fee',
-          rowUserId,
-          connect: orgConnect,
+          rowUserId: orgPayee.userId,
+          connect: orgPayee.account,
           stripeChargeId,
           transferGroup,
           idempotencyKey: `${stripeChargeId}_org_fee`,
@@ -1295,7 +1316,7 @@ export class CourseSubscriptionService extends BaseService {
         });
       } else {
         this.obs.error(
-          'Cannot record course-sub organization_fee payout: no org Connect/owner',
+          'Cannot record course-sub organization_fee payout: no org owner',
           { courseSubscriptionId: sub.id, organizationId }
         );
       }

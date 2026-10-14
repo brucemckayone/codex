@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type {
+  NewOrganizationOwnershipPeriod,
   NewStripeConnectAccount,
   NewSubscription,
   NewSubscriptionTier,
@@ -86,6 +87,28 @@ export function createTestConnectAccountInput(
     chargesEnabled: true,
     payoutsEnabled: true,
     onboardingCompletedAt: new Date(),
+    ...overrides,
+  };
+}
+
+/**
+ * Create a test ownership period for DB insertion — "this user is paid as the
+ * org's owner from `startedAt`" (Codex-2hxff.2). Money paths resolve the org's
+ * payee from these rows, so a test that routes an org slice to a user inserts
+ * one (the retired `primaryConnectAccountUserId` pin is no longer read).
+ * Defaults to an open period that started long before any test sale.
+ */
+export function createTestOwnershipPeriodInput(
+  orgId: string,
+  userId: string,
+  overrides: Partial<NewOrganizationOwnershipPeriod> = {}
+): NewOrganizationOwnershipPeriod {
+  return {
+    organizationId: orgId,
+    userId,
+    startedAt: new Date('2020-01-01T00:00:00Z'),
+    endedAt: null,
+    source: 'created',
     ...overrides,
   };
 }

@@ -670,6 +670,19 @@ export async function createServiceRegistry(
           // Codex-8so68: the allowed host for `logoUrl`. Fails closed when
           // the binding is absent (see the content getter above).
           r2PublicUrlBase: env.R2_PUBLIC_URL_BASE,
+          // Codex-2hxff.2: ownership-transfer emails, fire-and-forget off the
+          // request path (the agreements wiring below, minus its boot-time
+          // WEB_APP_URL requirement — this getter serves workers that never
+          // send these emails, so a missing URL only skips the email).
+          ownershipMailer: executionCtx
+            ? (params) => {
+                sendEmailToWorker(env, executionCtx, params);
+              }
+            : undefined,
+          webAppUrl: env.WEB_APP_URL,
+          waitUntil: executionCtx
+            ? executionCtx.waitUntil.bind(executionCtx)
+            : undefined,
         });
       }
       return _organization;

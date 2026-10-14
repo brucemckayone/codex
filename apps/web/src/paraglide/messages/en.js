@@ -15456,3 +15456,619 @@ export const studio_page_editor_break_twice = () => `Two pauses in a row add up.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_heading_fallback = () => `A heading reads best right above the section it introduces. Here it joins the section above.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_title = () => `Ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_description = () => `The owner receives the organisation's share of every sale and is the only person who can transfer the organisation.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_owner_you = (params) => `${params.name} (you)`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_owner_since = (params) => `Owner since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_ready = () => `Payouts set up`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_not_ready = () => `Payouts not set up`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_leave_hint = (params) => `To leave ${params.orgName} you first need to transfer ownership to an admin or creator.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_transfer_cta = () => `Transfer ownership…`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_pending = (params) => `Ownership offered to ${params.name} on ${params.date}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_waiting = (params) => `Waiting for ${params.name} to accept. The offer expires on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_cancel = () => `Cancel offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_cancelled = () => `Offer cancelled. Ownership is unchanged.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_sent = (params) => `Offer sent to ${params.name}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_declined = (params) => `${params.name} declined your offer on ${params.date}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_expired = (params) => `Your offer to ${params.name} expired on ${params.date}. You can send a new one.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_outcome_ineligible = (params) => `Your offer was withdrawn because ${params.name} is no longer an admin or creator.`
+
+
+/**
+ * @param {{ role: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_readonly = (params) => `Only the owner can transfer the organisation. Your role is ${params.role}.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_accepted = (params) => `You're now the owner of ${params.orgName}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_title = () => `Set up payouts to receive the organisation's money`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_body = () => `Sales are already being credited to you and are held until your payouts are ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_payouts_prompt_cta = () => `Set up payouts`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_title = (params) => `Transfer ownership of ${params.orgName}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_description = () => `Choose an admin or creator. They'll need to accept.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_legend = () => `Who to offer ownership to`
+
+
+/**
+ * @param {{ role: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_meta = (params) => `${params.role} · joined ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_note = () => `Subscribers and members can't be offered ownership. To offer it to them, make them an admin or creator first on the Team page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_continue = () => `Continue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_empty_title = () => `There's no one to offer it to yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_empty_body = () => `Ownership can only go to an admin or creator. Invite someone or change a member's role on the Team page first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_choose_go_to_team = () => `Go to Team`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_title = (params) => `Offer ownership to ${params.name}?`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_lede = (params) => `${params.name} becomes the owner only when they accept. The offer expires on ${params.date}, and you can cancel it until then.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_money = (params) => `From the moment ${params.name} accepts, the organisation's share of every sale goes to ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_earned = () => `Money already earned before then stays yours — including anything still waiting to be paid out.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_admin = () => `You'll become an admin: you can keep running the organisation, but can't transfer it or receive its money.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_title = () => `Your subscription income will stop.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_body = (params) => `Subscription money isn't split by content: it's shared out by revenue-share agreements, and the rest goes to the owner. You don't have a subscription agreement with ${params.orgName}, so after the transfer you'd receive none of it. One-off sales of your own content still pay you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_subscription_cta = () => `Set up an agreement first`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_payouts_title = (params) => `${params.name} hasn't set up payouts yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_payouts_body = () => `If they accept before setting them up, the organisation's money is held for them until they do.`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_type_label = (params) => `Type ${params.orgName} to confirm`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_email_note = (params) => `${params.name}, you and the organisation's other admins are emailed when ownership changes.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_back = () => `Back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_confirm_send = () => `Send offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_title = () => `Ownership offer`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_lede = (params) => `${params.name} has offered you ownership of ${params.orgName}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_owner = () => `You'll become the owner and receive the organisation's share of every sale from the moment you accept.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_previous = (params) => `${params.name} becomes an admin. Money earned before today stays with ${params.name}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_point_transfer = () => `Only you will be able to transfer the organisation in future, and you'll need to before you can leave it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_title = () => `Revenue-share agreements you'd take on`
+
+
+/**
+ * @param {{ share: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreement_subscription = (params) => `Subscriptions · ${params.share} of the pool · since ${params.date}`
+
+
+/**
+ * @param {{ share: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreement_purchase = (params) => `One-off sales · ${params.share} · since ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_note = () => `These keep paying after you accept. As owner you can end any of them from Agreements.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_agreements_none = () => `None — all subscription income after the platform's fee comes to you.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_payouts_title = () => `Your payouts aren't set up yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_payouts_body = () => `You can accept now — the organisation's money is held for you until you finish setting up payouts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_accept = () => `Accept ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_decline = () => `Decline`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_expires = (params) => `This offer expires on ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_recipient_declined = () => `You declined the ownership offer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_offer_closed = () => `This ownership offer is no longer open.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown>, orgName: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_banner = (params) => `${params.name} has offered you ownership of ${params.orgName}. Respond by ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_banner_cta = () => `Review offer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_load = () => `Ownership details couldn't be loaded.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_generic = () => `That didn't work. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_confirm_name = () => `That doesn't match the organisation's name — check the spelling, or reload if it was just renamed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_validation = () => `That wasn't accepted. Check the details and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_owner = () => `Only the owner can do that. Ownership may have changed — reload to see the latest.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_forbidden = () => `You don't have permission to do that. This offer may have been made to someone else.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_found = () => `This offer no longer exists.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_not_open = () => `This offer is no longer open — it was accepted, declined, cancelled or has expired.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_conflict = () => `There's already an open offer. Cancel it before sending a new one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_transfer_required = () => `The owner can't be removed or have their role changed. Transfer ownership from Settings first.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_ineligible = () => `That person can't be offered ownership. Only active admins and creators can.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ownership_error_rate_limited = () => `Too many attempts. Wait a minute and try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_owner_transfer = () => `Transfer ownership`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const team_owner_view_ownership = () => `Ownership settings`

@@ -38,6 +38,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   seedTestUsers,
+  setTestOrganisationPayee,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -167,12 +168,9 @@ describe('SubscriptionService', () => {
           status: 'active',
         },
       });
-    // Pin the org's canonical Connect account (Codex-69t7c): org→account
-    // resolves via primaryConnectAccountUserId, not the account's org column.
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: ownerUserId })
-      .where(eq(organizations.id, org.id));
+    // Make the owner the org's payee: org→account resolves by ownership
+    // (Codex-2hxff.2), not the account's org column.
+    await setTestOrganisationPayee(db, org.id, ownerUserId);
 
     const tier1 = takeFirst(
       await db
@@ -9937,10 +9935,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       })
     );
 
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: creatorId })
-      .where(eq(organizations.id, org.id));
+    await setTestOrganisationPayee(db, org.id, creatorId);
 
     const tier = takeFirst(
       await db
@@ -10850,10 +10845,7 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
         },
       });
     // Pin the org's canonical Connect account (Codex-69t7c).
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: creatorId })
-      .where(eq(organizations.id, org.id));
+    await setTestOrganisationPayee(db, org.id, creatorId);
 
     const tier1 = takeFirst(
       await db

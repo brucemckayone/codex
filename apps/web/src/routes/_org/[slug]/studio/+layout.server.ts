@@ -119,7 +119,7 @@ export const load: LayoutServerLoad = async ({
           orgId: org.id,
           error: String(err),
         });
-        return { role: null, joinedAt: null };
+        return { role: null, joinedAt: null, pendingOwnershipOffer: null };
       }
     ),
     getMyOrganizations().catch((err: unknown) => {
@@ -133,6 +133,10 @@ export const load: LayoutServerLoad = async ({
   membershipTimer.end({ orgId: org.id });
 
   const { role, joinedAt } = membershipResult;
+  // The caller's open ownership offer (Codex-2hxff.2). It rides on the
+  // membership read above, so the state 5 banner and the settings guard cost
+  // no extra request — studio route loads must not fan out.
+  const pendingOwnershipOffer = membershipResult.pendingOwnershipOffer ?? null;
 
   // Membership gate: must be creator, admin, or owner (members cannot access studio)
   if (!role || role === 'member') {
@@ -181,6 +185,7 @@ export const load: LayoutServerLoad = async ({
     },
     userRole: role,
     userJoinedAt: joinedAt,
+    pendingOwnershipOffer,
     orgs,
     studioUser: {
       name: locals.user.name ?? '',

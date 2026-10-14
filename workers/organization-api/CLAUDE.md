@@ -28,9 +28,21 @@ Organization CRUD, membership management, subscription tiers, follower relations
 |---|---|---|---|---|---|
 | GET | `/api/organizations/:id/members` | `required`, `requireOrgMembership` | query: page/limit/role/status | 200 | |
 | POST | `/api/organizations/:id/members/invite` | `required`, `requireOrgManagement` | body: `inviteMemberSchema` | 201 | Sends invitation email fire-and-forget |
-| PATCH | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | body: `updateMemberRoleSchema` | 200 | |
-| DELETE | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | params | 204 | |
-| GET | `/api/organizations/:id/members/my-membership` | `required` | params: `id` | 200 | No `requireOrgMembership` — non-members can check their status |
+| PATCH | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | body: `updateMemberRoleSchema` | 200 | `role` is admin/creator/member — never owner. 409 `OWNERSHIP_TRANSFER_REQUIRED` for the owner |
+| DELETE | `/api/organizations/:id/members/:userId` | `required`, `requireOrgManagement` | params | 204 | 409 `OWNERSHIP_TRANSFER_REQUIRED` for the owner |
+| GET | `/api/organizations/:id/members/my-membership` | `required` | params: `id` | 200 | No `requireOrgMembership` — non-members can check their status. Includes `pendingOwnershipOffer` (the Studio banner) |
+
+### Ownership Routes (`/api/organizations/:id/ownership/*`) — Codex-2hxff.2
+
+One owner per organisation; it moves only by the owner's offer being accepted. Who may act (the owner, the recipient) is enforced in `OrganizationService`. Spec: `docs/payments/connect-and-payouts.md → Organisation ownership`.
+
+| Method | Path | Auth | Input | Success | Notes |
+|---|---|---|---|---|---|
+| GET | `/api/organizations/:id/ownership` | `required`, `requireOrgMembership` | params | 200 | Owner/admin/creator. Composes `activeAgreements` (+ owner's `ownerHasSubscriptionAgreement`) from `ctx.services.agreements` for the owner and the recipient |
+| POST | `/api/organizations/:id/ownership/offers` | same, `rateLimit: 'strict'` | body: `offerOwnershipSchema` | 201 | Owner only. Emails the recipient |
+| POST | `/api/organizations/:id/ownership/offers/:offerId/withdraw` | same, `strict` | params | 200 | Owner only |
+| POST | `/api/organizations/:id/ownership/offers/:offerId/accept` | same, `strict` | params | 200 | Recipient only. Busts BOTH users' membership caches (`utils/membership-invalidation.ts`) |
+| POST | `/api/organizations/:id/ownership/offers/:offerId/decline` | same, `strict` | params | 200 | Recipient only. Emails the owner |
 
 ### Settings Routes (`/api/organizations/:id/settings/*`)
 

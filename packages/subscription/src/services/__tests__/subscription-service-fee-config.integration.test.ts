@@ -32,6 +32,7 @@ import {
   createTestTierInput,
   createUniqueSlug,
   seedTestUsers,
+  setTestOrganisationPayee,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -130,12 +131,9 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         stripeAccountId,
       })
     );
-    // Pin the org's canonical Connect account (Codex-69t7c): org→account
-    // resolves via primaryConnectAccountUserId to the payout user's account.
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: payoutUserId })
-      .where(eq(organizations.id, org.id));
+    // Make the payout user the org's payee: org→account resolves by
+    // ownership (Codex-2hxff.2) to the payout user's account.
+    await setTestOrganisationPayee(db, org.id, payoutUserId);
 
     const tier = takeFirst(
       await db

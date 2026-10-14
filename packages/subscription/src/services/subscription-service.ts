@@ -54,7 +54,7 @@ import {
   type FeeConfig,
   type FeeConfigService,
   type FeeContext,
-  resolvePrimaryConnect,
+  resolveOrganisationPayee,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -816,11 +816,10 @@ export class SubscriptionService extends BaseService {
         throw new AlreadySubscribedError(userId, orgId);
       }
 
-      // Validate Connect account — resolved through the canonical
-      // organizations.primary_connect_account_user_id so orgs with
-      // multiple Connect accounts (one per user) route to the same
-      // account for every tier op and revenue transfer.
-      const connectAccount = await resolvePrimaryConnect(this.db, orgId);
+      // Validate Connect account — the current owner's, the account every
+      // tier op and revenue transfer for this org routes to (Codex-2hxff.2).
+      const connectAccount = (await resolveOrganisationPayee(this.db, orgId))
+        ?.account;
 
       if (!connectAccount?.chargesEnabled || !connectAccount?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(orgId);
@@ -4161,29 +4160,6 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Resolve the org owner's userId from organization_memberships.
-   * Returns null if no owner membership is found.
-   */
-  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
-    const [owner] = await this.db
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, orgId),
-          eq(organizationMemberships.role, 'owner'),
-          // A removed owner keeps role='owner' with status='inactive', so
-          // without this the org's revenue slice can settle on someone who is
-          // no longer a member.
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .limit(1);
-
-    return owner?.userId ?? null;
-  }
-
-  /**
    * Codex-xz61z (I2): shared owner-fallback for the two zero-creator-payout
    * branches in `executeTransfers`:
    *
@@ -4549,9 +4525,16 @@ export class SubscriptionService extends BaseService {
       }
     }
 
-    // Get org's Connect account via the canonical primary user FK so
-    // transfers route to the same account checkout validated against.
-    const orgConnect = await resolvePrimaryConnect(this.db, orgId);
+    // Codex-2hxff.2: the org slice and the no-agreement creator pool go to
+    // whoever owned the org when the invoice was created — the same instant
+    // the agreement lookup below uses — not the owner at processing time.
+    const orgPayee = await resolveOrganisationPayee(
+      this.db,
+      orgId,
+      invoiceCreatedAt,
+      this.obs
+    );
+    const orgConnect = orgPayee?.account;
 
     // Codex-ez3tl (C1): query agreements BEFORE the org transfer so the
     // org's transfer amount reflects the post-platform residual when
@@ -4758,9 +4741,9 @@ export class SubscriptionService extends BaseService {
         }
       }
     } else if (effectiveOrgFeeCents > 0) {
-      // Accumulate if Connect not ready — resolve the org owner's userId
-      const ownerId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(orgId));
+      // Accumulate if Connect not ready — in the payee's name, so it drains to
+      // them even if ownership changes before they onboard.
+      const ownerId = orgPayee?.userId;
       if (!ownerId) {
         this.obs.error(
           'Cannot record pending payout: no Connect account and no org owner found',

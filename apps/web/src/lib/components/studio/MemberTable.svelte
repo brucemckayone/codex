@@ -14,11 +14,19 @@
   one thing that is genuinely an action. The owner row keeps a plain badge:
   its role is not editable.
 
+  NOR IS THE OWNER REMOVABLE (Codex-2hxff.2). One owner per organisation, and
+  ownership moves only by transfer: the worker answers 409
+  `OWNERSHIP_TRANSFER_REQUIRED` to a role change or removal of the owner. So the
+  owner's Actions cell offers neither, and — when the caller passes
+  `ownerAction` — links to Settings → Ownership instead.
+
   @prop {OrgMemberItem[]} members - Array of members to display
   @prop {(userId: string, role: string) => void} onChangeRole - Callback when role is changed
   @prop {(userId: string) => void} onRemove - Callback when member is removed
   @prop {() => void} [onInvite] - Opens the invite flow from the empty state.
     Omitted → the empty state renders without a call to action.
+  @prop {{ href: string; label: string }} [ownerAction] - The owner row's link
+    to where ownership is managed. Omitted → the owner's Actions cell is empty.
   @prop {boolean} loading - Whether the data is loading
   @prop {string} [class] - Optional class forwarded to the root element of each conditional branch
 -->
@@ -47,6 +55,7 @@
      * callers pass undefined to hide the column entirely.
      */
     revenueShareByUser?: Map<string, { label: string; active: boolean }>;
+    ownerAction?: { href: string; label: string };
   }
 
   const {
@@ -57,6 +66,7 @@
     loading = false,
     class: className = '',
     revenueShareByUser,
+    ownerAction,
   }: Props = $props();
 
   const isEmpty = $derived(members.length === 0);
@@ -270,6 +280,8 @@
                 >
                   {m.team_remove()}
                 </button>
+              {:else if ownerAction}
+                <a class="owner-link" href={ownerAction.href}>{ownerAction.label}</a>
               {/if}
             </Table.Cell>
           </Table.Row>
@@ -362,11 +374,22 @@
     white-space: nowrap;
   }
 
-  .rev-link:hover {
+  .rev-link:hover,
+  .owner-link:hover {
     color: var(--color-text-secondary);
   }
 
-  .rev-link:focus-visible {
+  /* Same treatment as `.rev-link`, for the same contrast reason. */
+  .owner-link {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    text-decoration: underline;
+    white-space: nowrap;
+  }
+
+  .rev-link:focus-visible,
+  .owner-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);

@@ -117,7 +117,7 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
         catch: (j: (e: unknown) => void) => Promise<unknown>;
       } => ({
         limit: vi.fn(() => Promise.resolve(result)),
-        // resolvePrimaryConnect's owner fallback (Codex-rjwdm) chains
+        // resolveOrganisationPayee's period lookups (Codex-2hxff.2) chain
         // `.where().orderBy().limit()`; return the same shape so the deterministic
         // ordering passes through the mock (still resolves to the same array).
         orderBy: vi.fn(() => makeWhereReturn()),

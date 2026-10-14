@@ -52,7 +52,6 @@ import type {
   ContactSettingsResponse,
   CourseOffer,
   FeatureSettingsResponse,
-  MyMembershipResponse,
   OrganizationPublicStatsResponse,
   OrganizationWithRole,
   PaginatedListResponse,
@@ -141,9 +140,13 @@ import type {
   ContentWithRelations,
   CurrentSubscription,
   MediaItemWithRelations,
+  MyMembershipWithOwnership,
   OrganizationData,
   OrganizationPayoutStatusResponse,
   OrgMemberItem,
+  OwnershipAccepted,
+  OwnershipOffer,
+  OwnershipView,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
@@ -1972,7 +1975,9 @@ export function createServerApi(
        * Used for access control and role-based UI rendering.
        *
        * @param id - Organization UUID
-       * @returns Membership data with role, status, and joinedAt timestamp
+       * @returns Membership data with role, status, joinedAt, and the caller's
+       *   open ownership offer for this org (`pendingOwnershipOffer`, null when
+       *   none — Codex-2hxff.2)
        *
        * @example
        * ```typescript
@@ -1983,7 +1988,7 @@ export function createServerApi(
        * ```
        */
       getMyMembership: (id: string) =>
-        request<MyMembershipResponse>(
+        request<MyMembershipWithOwnership>(
           'org',
           `/api/organizations/${id}/members/my-membership`
         ),
@@ -2095,6 +2100,58 @@ export function createServerApi(
         request<{ count: number }>(
           'org',
           `/api/organizations/${id}/followers/count`
+        ),
+    },
+
+    /**
+     * Organisation ownership transfer (organization-api, Codex-2hxff.2).
+     *
+     * One owner per organisation; the owner offers ownership to an active
+     * admin or creator, who accepts or declines. Role rules live in the
+     * service, so every route returns 403/409/422 codes the UI maps to copy.
+     *
+     * The withdraw / accept / decline routes declare NO `input.body`, so they
+     * are sent with no body at all — a body on a route that declares none is
+     * never read, and `procedure()` treats a declared body as mandatory.
+     */
+    ownership: {
+      /** The ownership card's view; fields are omitted per viewer. */
+      get: (orgId: string) =>
+        request<OwnershipView>('org', `/api/organizations/${orgId}/ownership`),
+
+      /** Owner only. `confirmName` must equal the org name (trimmed, any case). */
+      offer: (
+        orgId: string,
+        data: { recipientUserId: string; confirmName: string }
+      ) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers`,
+          { method: 'POST', body: JSON.stringify(data) }
+        ),
+
+      /** Owner only. */
+      withdraw: (orgId: string, offerId: string) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/withdraw`,
+          { method: 'POST' }
+        ),
+
+      /** The offer's recipient only. The caller becomes the owner. */
+      accept: (orgId: string, offerId: string) =>
+        request<OwnershipAccepted>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/accept`,
+          { method: 'POST' }
+        ),
+
+      /** The offer's recipient only. */
+      decline: (orgId: string, offerId: string) =>
+        request<OwnershipOffer>(
+          'org',
+          `/api/organizations/${orgId}/ownership/offers/${offerId}/decline`,
+          { method: 'POST' }
         ),
     },
 

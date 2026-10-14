@@ -464,6 +464,38 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     status: 'active' as const,
     description:
       'Sent to both parties roughly 30 days before agreement expiry. Cron trigger is deferred to a follow-up bead; template lands now so the registry has one source of truth (WP-5).',
+  }, // ============ Ownership transfer (Codex-2hxff.2) ============
+  //
+  // Copy is the owner-reviewed mockup's state 10.
+  {
+    name: 'ownership-offered',
+    scope: 'global' as const,
+    subject: '{{offeredByName}} has offered you ownership of {{orgName}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Ownership offer</h1><p>Hi {{recipientName}},</p><p>{{offeredByName}} would like you to become the owner of <strong>{{orgName}}</strong>. As owner you'd receive the organisation's share of every sale, and you'd be the only person who can transfer it.</p><p>The offer is open until <strong>{{expiresAtDisplay}}</strong>.</p><p style="text-align:center;margin:30px 0;"><a href="{{deepLinkUrl}}" class="button" style="color:white;">Review the offer</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{recipientName}},\n\n{{offeredByName}} would like you to become the owner of {{orgName}}. As owner you'd receive the organisation's share of every sale, and you'd be the only person who can transfer it.\n\nThe offer is open until {{expiresAtDisplay}}.\n\nReview the offer: {{deepLinkUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      "Sent to the recipient when an organisation's owner offers them ownership (Codex-2hxff.2).",
+  },
+  {
+    name: 'ownership-transferred',
+    scope: 'global' as const,
+    subject: '{{newOwnerName}} is now the owner of {{orgName}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>New owner</h1><p>Ownership of <strong>{{orgName}}</strong> moved from {{previousOwnerName}} to {{newOwnerName}} on {{transferredAtDisplay}}.</p><p>From that moment the organisation's share of sales goes to {{newOwnerName}}. Money earned before stays with {{previousOwnerName}}. {{previousOwnerName}} is now an admin.</p><p style="text-align:center;margin:30px 0;"><a href="{{deepLinkUrl}}" class="button" style="color:white;">Open Studio</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Ownership of {{orgName}} moved from {{previousOwnerName}} to {{newOwnerName}} on {{transferredAtDisplay}}.\n\nFrom that moment the organisation's share of sales goes to {{newOwnerName}}. Money earned before stays with {{previousOwnerName}}. {{previousOwnerName}} is now an admin.\n\nOpen Studio: {{deepLinkUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to the new owner, the previous owner and every other active admin when ownership moves, by acceptance or support reassignment (Codex-2hxff.2).',
+  },
+  {
+    name: 'ownership-offer-closed',
+    scope: 'global' as const,
+    subject: 'Your ownership offer to {{recipientName}} was {{outcome}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Ownership offer {{outcome}}</h1><p>Hi {{ownerName}},</p><p>{{outcomeSentence}} Nothing has changed, and you can offer ownership to someone else from Settings.</p><p style="text-align:center;margin:30px 0;"><a href="{{deepLinkUrl}}" class="button" style="color:white;">Open Settings</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{ownerName}},\n\n{{outcomeSentence}} Nothing has changed, and you can offer ownership to someone else from Settings.\n\nOpen Settings: {{deepLinkUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to the owner when their ownership offer is declined, or withdrawn because the recipient is no longer an admin or creator. An expired offer sends no email (Codex-2hxff.2).',
   },
 ];
 

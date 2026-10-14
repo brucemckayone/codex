@@ -24,6 +24,7 @@ import {
   createTestSubscriptionInput,
   createUniqueSlug,
   seedTestUsers,
+  setTestOrganisationPayee,
   setupTestDatabase,
   takeFirst,
   teardownTestDatabase,
@@ -110,12 +111,9 @@ describe('TierService', () => {
           status: 'active',
         },
       });
-    // Pin the org's canonical Connect account (Codex-69t7c): org→account now
-    // resolves via primaryConnectAccountUserId, not the account's org column.
-    await db
-      .update(organizations)
-      .set({ primaryConnectAccountUserId: creatorId })
-      .where(eq(organizations.id, org.id));
+    // Make the creator the org's payee: org→account resolves by ownership
+    // (Codex-2hxff.2), not the account's org column.
+    await setTestOrganisationPayee(db, org.id, creatorId);
     return org;
   }
 
@@ -271,10 +269,7 @@ describe('TierService', () => {
         })
       );
       // Pin primary_connect_account_user_id to the non-ready user.
-      await db
-        .update(organizations)
-        .set({ primaryConnectAccountUserId: primaryUser })
-        .where(eq(organizations.id, org.id));
+      await setTestOrganisationPayee(db, org.id, primaryUser);
 
       await expect(
         service.createTier(org.id, {
