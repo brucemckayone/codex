@@ -260,6 +260,6 @@ configuration, which allows cancelling.
 | `subscription-created` | The subscription is recorded |
 | `subscription-renewed` | A cycle renewal is paid |
 | `payment-failed` | A renewal fails (with the next retry date) |
-| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Production's copy still says "on the next billing cycle" — `Codex-2hxff.35` |
+| `subscription-tier-price-change` | A price changes — sent at least 30 days before the new price applies. Says the subscription "renews at the new price from {{effectiveDate}}"; migration `0098` rewrote the old "on the next billing cycle" sentence on existing rows (`Codex-2hxff.35`) |
 | `subscription-cancelled` | The subscription ends |
 | `trial-ending-soon` | A trial is about to end (no trials are configured today) |
