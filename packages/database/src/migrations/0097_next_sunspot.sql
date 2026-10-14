@@ -38,8 +38,11 @@ CREATE UNIQUE INDEX "uq_ownership_periods_one_open" ON "organization_ownership_p
 CREATE INDEX "idx_ownership_periods_org_started" ON "organization_ownership_periods" USING btree ("organization_id","started_at");--> statement-breakpoint
 -- Codex-2hxff.2 — one owner per organisation.
 -- R1: an organisation with more than one ACTIVE owner keeps its earliest-joined
--- one (today's money resolver tiebreak, so nobody's payouts change) and the
--- rest become admins. Must run before the unique index below can be created.
+-- one (created_at, then id) and the rest become admins. Must run before the
+-- unique index below can be created. Payouts: the old resolver paid the
+-- `primary_connect_account_user_id` pin when set and only otherwise the
+-- earliest-joined owner, so where a pin differs from the owner kept here the
+-- payee CHANGES on deploy (report R3).
 UPDATE "organization_memberships" AS m
 SET "role" = 'admin', "updated_at" = now()
 WHERE m."role" = 'owner'
@@ -66,7 +69,9 @@ WHERE "role" = 'owner'
 CREATE UNIQUE INDEX "uq_org_memberships_one_active_owner" ON "organization_memberships" USING btree ("organization_id") WHERE "organization_memberships"."role" = 'owner' AND "organization_memberships"."status" = 'active';--> statement-breakpoint
 -- Backfill: one open ownership period per organisation that has an active
 -- owner, from the organisation's creation. Organisations with no active owner
--- get none (report R2 — support reassigns them); their money is pending today.
+-- get none (report R2 — support reassigns them). Until then their org slice
+-- has no payee: it is logged, not recorded. One with a pin was paid to the pin
+-- before this deploy, so it is in R3 too.
 INSERT INTO "organization_ownership_periods" ("organization_id", "user_id", "started_at", "source")
 SELECT o."id", m."user_id", o."created_at", 'backfill'
 FROM "organizations" AS o
