@@ -38,6 +38,7 @@ import type {
 import {
   applyDuePendingPriceChange,
   CourseSubscriptionService,
+  PENDING_PRICE_ID_KEY,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -45,6 +46,38 @@ import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+import { isTransientError } from '../utils/error-classification';
+
+/**
+ * Swap a due pending price in (Codex-2hxff.3) without letting a permanent
+ * failure pass as a warning.
+ *
+ * Runs AFTER the DB sync, so the event's own work is already done. A transient
+ * Stripe failure is rethrown: the 500 makes Stripe redeliver, and the sync is
+ * idempotent. A permanent one (an archived or deleted Price) would otherwise
+ * reach the generic "permanent error (acknowledged)" WARN and vanish, leaving a
+ * subscriber who was emailed a date billed the old price. It is logged at
+ * error level, with what is needed to act on it, and the event acknowledged.
+ * The marker stays: every later renewal reports it again until it is resolved.
+ */
+async function applyPendingPriceChangeOrReport(
+  c: Context<StripeWebhookEnv>,
+  stripe: Stripe,
+  subscription: Stripe.Subscription
+): Promise<void> {
+  try {
+    await applyDuePendingPriceChange(stripe, subscription);
+  } catch (error) {
+    if (isTransientError(error)) throw error;
+    c.get('obs')?.error('Pending price change could not be applied', {
+      subscriptionId: subscription.id,
+      pendingPriceId: subscription.metadata?.[PENDING_PRICE_ID_KEY],
+      errorType: (error as { type?: string }).type,
+      errorCode: (error as { code?: string }).code,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Fire-and-forget write of a per-user, per-org KV revocation key after a
@@ -363,7 +396,7 @@ export async function handleSubscriptionWebhook(
               subscription
             );
           invalidateCourseBuyer(courseResult);
-          await applyDuePendingPriceChange(stripe, subscription);
+          await applyPendingPriceChangeOrReport(c, stripe, subscription);
           obs?.info('Course subscription updated', {
             subscriptionId: subscription.id,
           });
@@ -415,7 +448,7 @@ export async function handleSubscriptionWebhook(
         // after the notice, swap it in now (no proration — the next renewal
         // bills it). After the DB sync, so a failed swap never skips it
         // (Codex-2hxff.3).
-        await applyDuePendingPriceChange(stripe, subscription);
+        await applyPendingPriceChangeOrReport(c, stripe, subscription);
 
         obs?.info('Subscription updated', {
           subscriptionId: subscription.id,

@@ -58,6 +58,7 @@ vi.mock('@codex/subscription', () => ({
   })),
   // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // `invalidateForUser` is a named export from `@codex/subscription` that
   // both webhook handlers import. We spy on it to assert the contract.
   invalidateForUser: vi.fn(),

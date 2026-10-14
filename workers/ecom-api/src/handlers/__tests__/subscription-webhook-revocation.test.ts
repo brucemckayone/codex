@@ -50,6 +50,7 @@ vi.mock('@codex/subscription', () => ({
   })),
   // The renewal-time price swap (Codex-2hxff.3) — nothing pending here.
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // invalidateForUser is exercised in the sibling invalidation test; here we
   // only care that it doesn't throw synchronously in revocation scenarios.
   invalidateForUser: vi.fn(),

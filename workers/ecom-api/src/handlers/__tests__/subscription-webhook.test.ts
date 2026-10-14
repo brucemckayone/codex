@@ -37,6 +37,7 @@ vi.mock('@codex/subscription', () => ({
   TierService: vi.fn(),
   // The renewal-time price swap (Codex-2hxff.3).
   applyDuePendingPriceChange: vi.fn().mockResolvedValue(false),
+  PENDING_PRICE_ID_KEY: 'codex_pending_price_id',
   // The handler also imports `invalidateForUser` — stub it so the module
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
@@ -318,6 +319,50 @@ describe('handleSubscriptionWebhook', () => {
       const swapOrder = swap.mock.invocationCallOrder.at(-1) ?? 0;
       expect(syncOrder).toBeGreaterThan(0);
       expect(swapOrder).toBeGreaterThan(syncOrder);
+    });
+
+    // Codex-2hxff.3 review (H3): a swap Stripe refuses for good must not end
+    // as the generic "permanent error (acknowledged)" warning.
+    it('a permanent swap failure is acknowledged but logged at ERROR level with context', async () => {
+      const refused = Object.assign(new Error('No such price: price_gone'), {
+        type: 'StripeInvalidRequestError',
+        code: 'resource_missing',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(refused);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_refused',
+        status: 'active',
+        metadata: { codex_pending_price_id: 'price_gone' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Pending price change could not be applied',
+        expect.objectContaining({
+          subscriptionId: 'sub_swap_refused',
+          pendingPriceId: 'price_gone',
+          errorType: 'StripeInvalidRequestError',
+          errorCode: 'resource_missing',
+        })
+      );
+    });
+
+    it('a transient swap failure is rethrown so Stripe redelivers', async () => {
+      const flaky = Object.assign(new Error('connection reset'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(applyDuePendingPriceChange).mockRejectedValueOnce(flaky);
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_UPDATED, {
+        id: 'sub_swap_flaky',
+        status: 'active',
+      });
+      const { context } = createContext();
+
+      await expect(
+        handleSubscriptionWebhook(event, mockStripe, context)
+      ).rejects.toBe(flaky);
     });
   });
 
