@@ -62,8 +62,8 @@ describe('readPageFacets', () => {
     // type-fit.spec.ts, type-lift.spec.ts and louder-fit.spec.ts's Type axis.
     expect(TYPE_FACET_BASES).toEqual({
       bold: ['poster', 'soft', 'quiet'],
-      clean: ['bold', 'poster', 'soft', 'quiet'],
-      soft: ['bold', 'quiet'],
+      clean: ['bold', 'soft', 'quiet'],
+      soft: ['quiet'],
       cinematic: ['bold', 'poster', 'soft', 'quiet'],
       path: [],
       poster: ['bold', 'soft', 'quiet'],

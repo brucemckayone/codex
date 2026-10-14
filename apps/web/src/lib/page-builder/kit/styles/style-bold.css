@@ -235,48 +235,69 @@
    needs it draws the hero smaller by a factor: the largest at which it ends
    no further past a 1440 × 900 fold, and cuts no word, that the page's own
    Type does, at every length from 20 to 120 in four word families and two
-   faces, with 1% to spare (`type-fit.spec.ts`). A pair that holds at full
-   size has none, and a page's own Type never has one. The page's Style sits
-   inside `:where()`, so each weighs what the Type's own rules weigh. */
+   faces, with the hero's eyebrow and without it, with 1% to spare
+   (`type-fit.spec.ts`). A pair that holds at full size has none, and a page's
+   own Type never has one. The page's Style sits inside `:where()`, so each
+   weighs what the Type's own rules weigh. */
 @container (min-width: 56rem) {
   :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
     .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
-    --lp-type-fit: 0.95;
+    --lp-type-fit: 0.93;
   }
 
   :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
     .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
-    --lp-type-fit: 0.9;
+    --lp-type-fit: 0.88;
   }
 
   :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
-    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
-    --lp-type-fit: 0.96;
-  }
-
-  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='soft'])
-    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
-    --lp-type-fit: 0.87;
-  }
-
-  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='soft'])
-    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
-    --lp-type-fit: 0.89;
-  }
-
-  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='soft'])
-    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    .lp-section[data-lp-type='hero'] .hero-cover__copy:has(> .hero__headline) {
     --lp-type-fit: 0.97;
   }
 
-  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='soft'])
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.91;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='clean'])
     .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
-    --lp-type-fit: 0.9;
+    --lp-type-fit: 0.93;
   }
 
   :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
     .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.94;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
     --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='cinematic'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-statement:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-split__copy:has(> .hero__headline) {
+    --lp-type-fit: 0.97;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-centered:has(> .hero__headline) {
+    --lp-type-fit: 0.95;
+  }
+
+  :is(.lp, #lp-style)[data-lp-type-facet='bold']:where([data-lp-style='poster'])
+    .lp-section[data-lp-type='hero'] .hero-poster:has(> .hero__headline) {
+    --lp-type-fit: 0.98;
   }
 }
 
