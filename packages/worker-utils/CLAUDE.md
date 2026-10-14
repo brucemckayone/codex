@@ -9,7 +9,7 @@ Hono worker factory, `procedure()` handler, and shared middleware stack. This is
 - **`multipartProcedure(config)`** — Extension of `procedure()` for file upload endpoints (FormData + file validation)
 - **`binaryUploadProcedure(config)`** — For raw binary uploads (non-FormData)
 - **`PaginatedResult`** — Marker class; `procedure()` checks `instanceof` to emit list envelope
-- **`createServiceRegistry(env, obs?, orgId?, executionCtx?)`** — Lazy-loaded service factory (called internally by `procedure()`; `executionCtx` wires `waitUntil` so VersionedCache writes survive the response)
+- **`createServiceRegistry(env, obs?, orgId?, executionCtx?, cachePreset?, background?)`** — Lazy-loaded service factory (called internally by `procedure()`; `executionCtx` wires `waitUntil` so VersionedCache writes survive the response; `background` is procedure()'s tracker, and every service hook that defers **DB** work after the response — ownership/agreement emails, tier and course-plan price fan-outs — goes through it so `pool.end()` waits. Plain `waitUntil` is for KV/fetch only.)
 - **`sendEmailToWorker(env, executionCtx, params)`** — Worker-to-worker email trigger helper (fire-and-forget via `executionCtx.waitUntil`)
 - **`createHealthCheckHandler(options)`** — Standard health endpoint (DB/KV/R2 checks)
 - **`sequence(...middleware)`** — Compose middleware in order

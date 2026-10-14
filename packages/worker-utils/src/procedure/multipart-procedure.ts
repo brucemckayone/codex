@@ -247,7 +247,12 @@ export function multipartProcedure<
 
     try {
       // Policy enforcement + service registry (shared scaffold).
-      const orchestration = await runUploadOrchestration(c, policy, obs);
+      const orchestration = await runUploadOrchestration(
+        c,
+        policy,
+        obs,
+        tracker.background
+      );
       cleanup = orchestration.cleanup;
 
       // URL params/query — body is FormData, parsed below.

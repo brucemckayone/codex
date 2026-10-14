@@ -73,6 +73,7 @@ import { TranscodingService } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
 import type { ServiceRegistry } from './types';
+import type { BackgroundTracker } from './upload-shared';
 
 /**
  * Service registry creation result
@@ -244,7 +245,8 @@ export async function createServiceRegistry(
   _obs?: ObservabilityClient,
   organizationId?: string,
   executionCtx?: ExecutionContext,
-  cachePreset?: CachePresetName
+  cachePreset?: CachePresetName,
+  background?: BackgroundTracker['background']
 ): Promise<ServiceRegistryResult> {
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
@@ -303,6 +305,31 @@ export async function createServiceRegistry(
   const cacheWaitUntil = executionCtx
     ? (promise: Promise<unknown>) => executionCtx.waitUntil(promise)
     : undefined;
+
+  /**
+   * The deferral hook for background work that TOUCHES THE DATABASE — emails
+   * that look up their recipients, price fan-outs (Codex-2hxff.2 review).
+   *
+   * `procedure()` tears this registry's pool down once the work it was TOLD
+   * about settles, and plain `executionCtx.waitUntil` tells it nothing: cleanup
+   * wins the race and every later query fails. So DB work goes through
+   * `procedure()`'s tracker (`background`), and only falls back to plain
+   * `waitUntil` for a caller that has no tracker. A rejection is logged here
+   * rather than dropped: these tasks run after the response, so nothing else
+   * would ever see it. KV-only work keeps `cacheWaitUntil` (above).
+   */
+  const dbWaitUntil: ((promise: Promise<unknown>) => void) | undefined =
+    background || executionCtx
+      ? (promise) => {
+          const logged = promise.catch((error: unknown) => {
+            _obs?.error('Background task failed after the response', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+          if (background) void background(logged);
+          else executionCtx?.waitUntil(logged);
+        }
+      : undefined;
 
   /**
    * Every cache this registry builds, so `cleanup()` can emit their stats.
@@ -680,9 +707,8 @@ export async function createServiceRegistry(
               }
             : undefined,
           webAppUrl: env.WEB_APP_URL,
-          waitUntil: executionCtx
-            ? executionCtx.waitUntil.bind(executionCtx)
-            : undefined,
+          // The email task looks its recipients up in the DB first.
+          waitUntil: dbWaitUntil,
         });
       }
       return _organization;
@@ -869,21 +895,17 @@ export async function createServiceRegistry(
         // Codex-0omga (WP-5 polish): thread `executionCtx.waitUntil`
         // through so the lifecycle notification dispatch (3 DB lookups
         // + mailer fire) is offloaded from the API request critical
-        // path. Mirrors the `subscription` waitUntil wiring above.
-        // When `executionCtx` is absent (shouldn't happen inside
-        // `procedure()` but defensive) the service falls back to
-        // inline dispatch — mutation still succeeds, response is just
-        // slightly slower.
-        const waitUntil = executionCtx
-          ? executionCtx.waitUntil.bind(executionCtx)
-          : undefined;
-
+        // path. The lookups touch the DB, so the task goes on `dbWaitUntil`
+        // (the pool stays open until it settles), not plain `waitUntil`.
+        // When neither hook exists (shouldn't happen inside `procedure()`
+        // but defensive) the service falls back to inline dispatch —
+        // mutation still succeeds, response is just slightly slower.
         _agreements = new AgreementService({
           db: getSharedDb(),
           environment: getEnvironment(),
           mailer,
           webAppUrl,
-          waitUntil,
+          waitUntil: dbWaitUntil,
         });
       }
       return _agreements;
@@ -1018,13 +1040,20 @@ export async function createServiceRegistry(
               { organizationId: args.organizationId, interval: args.interval }
             );
           };
-          if (executionCtx) {
-            executionCtx.waitUntil(run());
+          // The fan-out reads subscribers from the DB: `dbWaitUntil` keeps
+          // the pool open until it settles and logs a rejection that
+          // happens before the per-subscriber loop's own logging starts.
+          if (dbWaitUntil) {
+            dbWaitUntil(run());
           } else {
-            // No waitUntil available — best-effort fire-and-forget via
-            // unawaited promise. `.catch` guard prevents unhandled
-            // rejection noise; the inner method already logs failures.
-            run().catch(() => {});
+            // No hook available — best-effort fire-and-forget via
+            // unawaited promise, still logged.
+            run().catch((error: unknown) => {
+              _obs?.error('Tier price propagation failed', {
+                tierId: args.tierId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           }
         };
 
@@ -1072,8 +1101,8 @@ export async function createServiceRegistry(
         // purchases/subscriptions; Stripe client is deferred (read-only course
         // pages never construct it) — same pattern as `subscription`/`tier`.
         // A plan price change emails each moved subscriber and runs its
-        // fan-out after the response (Codex-2hxff.3) — same wiring as the
-        // org-tier mailer above.
+        // fan-out after the response (Codex-2hxff.3). The fan-out reads
+        // subscribers per interval, so it goes on `dbWaitUntil`.
         _courseSubscription = new CourseSubscriptionService(
           {
             db: getSharedDb(),
@@ -1083,9 +1112,7 @@ export async function createServiceRegistry(
               ? (params) => sendEmailToWorker(env, executionCtx, params)
               : undefined,
             webAppUrl: env.WEB_APP_URL,
-            waitUntil: executionCtx
-              ? (promise) => executionCtx.waitUntil(promise)
-              : undefined,
+            waitUntil: dbWaitUntil,
           },
           getLazyStripeClient()
         );
