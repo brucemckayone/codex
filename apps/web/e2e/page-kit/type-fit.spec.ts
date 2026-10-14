@@ -47,7 +47,10 @@ import {
   TYPE_FACET_BASES,
   TYPE_FACETS,
 } from '../../src/lib/page-builder/kit/model/ids';
-import { headingRuns } from '../../src/lib/page-builder/kit/model/long-heading';
+import {
+  headingRuns,
+  widestRun,
+} from '../../src/lib/page-builder/kit/model/long-heading';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(!process.env.TYPE_FIT, 'opt-in: TYPE_FIT=1 (a development route)');
@@ -115,7 +118,7 @@ function headlines() {
   }
   return out.map(({ id, words }) => {
     const text = words.join(' ').replace(/^./, (c) => c.toUpperCase());
-    return { id, text, runs: headingRuns(text) };
+    return { id, text, runs: headingRuns(text), run: widestRun(text) };
   });
 }
 
@@ -123,7 +126,9 @@ type Headline = ReturnType<typeof headlines>[number];
 
 /** What one headline draws: how far past the fold it ends (1440), the runs
  *  it cuts, what lies over the poster's picture, and (390) its glyphs past
- *  the column and whether the page scrolls sideways. */
+ *  the column and whether the page scrolls sideways. A run is cut where its
+ *  letters fall on two lines; on a phone, not in a Type that hyphenates
+ *  there by design (Poster's, a dictionary's break with its hyphen). */
 interface Drawn {
   id: string;
   end: number;
@@ -176,8 +181,13 @@ async function draw(
         return rects;
       };
       const out: Drawn[] = [];
-      for (const { id, text, runs } of list) {
+      for (const { id, text, runs, run } of list) {
         heading.textContent = text;
+        // Its weight, as Heading writes it from the words it draws: on a
+        // phone the headline is fitted to its column by its widest run.
+        heading.style.setProperty('--lp-heading-run-text', String(run.text));
+        heading.style.setProperty('--lp-heading-run-caps', String(run.caps));
+        heading.style.setProperty('--lp-heading-run-chars', String(run.chars));
         words.toggleAttribute(
           'data-medium',
           text.length > 24 && text.length <= 64
@@ -219,6 +229,14 @@ async function draw(
             ) +
             window.scrollY -
             window.innerHeight;
+        } else {
+          drawn.past = ink.filter(
+            (r) => r.right > column.right + 1 || r.left < column.left - 1
+          ).length;
+          drawn.sideways =
+            document.documentElement.scrollWidth > window.innerWidth;
+        }
+        if (wide || getComputedStyle(heading).hyphens !== 'auto') {
           const node = heading.firstChild as Text;
           const range = document.createRange();
           const line = Number.parseFloat(getComputedStyle(heading).lineHeight);
@@ -238,12 +256,6 @@ async function draw(
             }
             start += 1;
           }
-        } else {
-          drawn.past = ink.filter(
-            (r) => r.right > column.right + 1 || r.left < column.left - 1
-          ).length;
-          drawn.sideways =
-            document.documentElement.scrollWidth > window.innerWidth;
         }
         if (reveal) {
           const picture = reveal.getBoundingClientRect();

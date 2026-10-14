@@ -569,6 +569,20 @@
     }
   }
 
+  /* ── the headline's size where it is wide ──────────────────────────────── */
+  /* Wide, each layout sizes the headline for its length (X34), its poster
+     for its words beside the picture (X60) and a borrowed Type for another
+     Style's column (X74), measured at 1440 to cut no word, so it is held at
+     that size. Narrower, it is fitted to its column as every heading is
+     (`Heading.svelte`, X71): at a phone's display floor Bold's and Poster's
+     drew "Transformation" past a 390 column, off the screen in four layouts
+     and split mid-word in the statement (03 X74). */
+  @container (min-width: 56rem) {
+    .hero__headline :global(.lp-heading) {
+      --lp-heading-hold: 1;
+    }
+  }
+
   /* ── the one entrance (keyframes named by the Style) ───────────────────── */
   /* The headline's wrapper is set at the headline's display size, so an
      entrance that draws it through a clip (Bold's lift, Poster's wipe)

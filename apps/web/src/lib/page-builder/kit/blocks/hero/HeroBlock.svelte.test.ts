@@ -12,7 +12,11 @@ import {
 import type { JourneySalesContext, SellPreview } from '../../../render/types';
 import { COPY } from '../../model/copy';
 import { type ColourSchemeId, SECTION_LAYOUTS } from '../../model/ids';
-import { headingRuns, isLongHeading } from '../../model/long-heading';
+import {
+  headingRuns,
+  isLongHeading,
+  widestRun,
+} from '../../model/long-heading';
 import { type SampleOfferState, sampleContext } from '../../model/sample';
 import type { BlockEdit, KitPage, ResolvedSection } from '../../model/types';
 import PageRenderer from '../../PageRenderer.svelte';
@@ -508,6 +512,30 @@ describe('HeroBlock', () => {
           ).toBe(String(value));
         }
         expect(widest.text, heading).toBeGreaterThan(0);
+      }
+    });
+
+    // Narrower than its layouts size it, the headline is fitted to its column
+    // by its widest run, as every heading is: unweighed, Bold's and Poster's
+    // display drew "Transformation" off a phone's screen (03 X74). Where it is
+    // wide, HeroBlock holds it (heading-fit.test.ts counts the hold).
+    it.each(
+      SECTION_LAYOUTS.hero
+    )('%s: weighs its headline’s widest run on the headline itself', async (layout) => {
+      for (const heading of ['Transformation and the calm sea', LONG]) {
+        if (app) unmount(app);
+        await render({ heading }, { layout });
+        const h1 = document.body.querySelector<HTMLElement>('h1.lp-heading');
+        const run = widestRun(heading);
+        expect(
+          [
+            h1?.style.getPropertyValue('--lp-heading-run-text'),
+            h1?.style.getPropertyValue('--lp-heading-run-caps'),
+            h1?.style.getPropertyValue('--lp-heading-run-chars'),
+          ],
+          heading
+        ).toEqual([String(run.text), String(run.caps), String(run.chars)]);
+        expect(run.text, heading).toBeGreaterThan(0);
       }
     });
 

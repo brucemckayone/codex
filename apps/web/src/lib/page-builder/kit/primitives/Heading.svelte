@@ -57,9 +57,11 @@
   const tag = $derived(`h${level}`);
   const attrs = $derived(editAttrs(type, field, edit));
   /* Every heading is weighed, and drawn no larger than its widest run fits
-     its room (below, 03 X66, X71), but the hero's headline: its own layouts
-     size it (X60), and with no weight it is drawn at the size they give it. */
-  const run = $derived(size === 'display' && type === 'hero' ? undefined : widestRun(text));
+     its room (below, 03 X66, X71). The hero's headline too: where it is wide
+     its layouts size it (X34, X60) and HeroBlock holds it there, but on a
+     phone nothing did, and Bold's and Poster's display drew a long word past
+     the column (03 X74). */
+  const run = $derived(widestRun(text));
 </script>
 
 <svelte:element

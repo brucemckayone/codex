@@ -444,12 +444,17 @@ const kit = kitComponents().flatMap(({ file, source }) =>
 describe('where a layout holds its head, or names its room', () => {
   // A held head is drawn at the Style's size whatever its words, so a long
   // word runs past its line. The pricing band held its head until X70; a new
-  // hold is counted here so it is a decision.
-  it('holds no head', () => {
+  // hold is counted here so it is a decision. The hero's headline is held
+  // only where it is wide, where its layouts size it for its words (X34,
+  // X60, X74); on a phone it is fitted, and a long word ran off the screen
+  // before it was (03 X74).
+  it("holds no head but the hero's headline, where it is wide", () => {
     const holds = kit.filter((d) => d.property === '--lp-heading-hold');
     expect(
       holds.map((d) => `${d.file} ${d.at} ${d.selector}: ${d.value}`)
-    ).toEqual([]);
+    ).toEqual([
+      'blocks/hero/HeroBlock.svelte @container (min-width: 56rem) .hero__headline :global(.lp-heading): 1',
+    ]);
   });
 
   // X70: the band's head shares its row with the price only where its widest
